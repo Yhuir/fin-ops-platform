@@ -13,6 +13,7 @@ from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAm
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
+
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
 LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
@@ -74,8 +75,7 @@ class WorkbenchRelationGroupingService:
                 "exception_count": sum(
                     1
                     for group in [*paired_groups, *unpaired_groups]
-                    if self._group_has_danger(group)
-                    or (
+                    if (
                         isinstance(group.get("oa_invoice_anomaly"), dict)
                         and group["oa_invoice_anomaly"].get("state") == "active"
                     )
@@ -87,8 +87,6 @@ class WorkbenchRelationGroupingService:
                         isinstance(group.get("oa_invoice_anomaly"), dict)
                         and group["oa_invoice_anomaly"].get("state") == "ignored"
                     )
-                    or group.get("exception_state") == "processed"
-                    or self._group_has_ignored(group)
                 ),
             },
             "paired": {"groups": paired_groups},
@@ -335,19 +333,6 @@ class WorkbenchRelationGroupingService:
             "bank_rows": by_type["bank"],
             "invoice_rows": by_type["invoice"],
         }
-        processed_summary = next(
-            (
-                deepcopy(row["processed_exception_summary"])
-                for row in rows
-                if isinstance(row.get("processed_exception_summary"), dict)
-            ),
-            None,
-        )
-        if processed_summary:
-            group["processed_exception_summary"] = processed_summary
-            group["exception_state"] = "processed"
-        elif any(bool(row.get("handled_exception")) for row in rows):
-            group["exception_state"] = "active"
         return group
 
     @staticmethod
@@ -450,30 +435,6 @@ class WorkbenchRelationGroupingService:
             collapsed = group["collapsed_rows"]
             return sum(len(list(collapsed.get(row_type) or [])) for row_type in ROW_TYPES)
         return sum(len(list(group.get(f"{row_type}_rows") or [])) for row_type in ROW_TYPES)
-
-    @staticmethod
-    def _group_has_danger(group: dict[str, Any]) -> bool:
-        return any(
-            str(relation.get("tone") or "") == "danger"
-            for row_type in ROW_TYPES
-            for row in list(group.get(f"{row_type}_rows") or [])
-            if isinstance(row, dict)
-            for field in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation")
-            if isinstance((relation := row.get(field)), dict)
-        )
-
-    @staticmethod
-    def _group_has_ignored(group: dict[str, Any]) -> bool:
-        collapsed_rows = group.get("collapsed_rows") if isinstance(group.get("collapsed_rows"), dict) else {}
-        return any(
-            bool(row.get("ignored"))
-            for row_type in ROW_TYPES
-            for row in [
-                *list(group.get(f"{row_type}_rows") or []),
-                *list(collapsed_rows.get(row_type) or []),
-            ]
-            if isinstance(row, dict)
-        )
 
     @staticmethod
     def _row_sort_key(item: tuple[str, dict[str, Any]]) -> tuple[int, str, str]:

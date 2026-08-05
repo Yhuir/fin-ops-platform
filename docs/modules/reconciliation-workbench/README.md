@@ -55,8 +55,8 @@ canonical fact repositories
 ## OA/发票异常合同
 
 - 日常报销按 OA 子付款项与全部显式绑定发票比较；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；子付款项有上传附件但零已解析绑定发票时生成 `OA发票附件缺失`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
-- active/ignored 决定复用既有 exception case repository，但使用独立 `oa_invoice_amount_mismatch` scenario；通用旧异常 loader 必须排除该 scenario，避免两种 schema 互相污染。
-- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常和 legacy active 异常，已忽略展示 ignored OA/发票异常和 legacy processed/ignored。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
+- active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 generation、异常桶、计数、主区可见性或 source freshness。
+- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常，已忽略展示 ignored OA/发票异常。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、legacy WEX/row-ignore 抽屉入口、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
 
 ## 三栏纵向展示合同
 

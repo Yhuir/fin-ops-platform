@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import random
 import unittest
+from copy import deepcopy
 
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
@@ -12,6 +12,7 @@ from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
     evaluate_bank_relation_completion,
 )
+
 from tests.workbench_deterministic_relation_fixtures import (
     YUNNAN_LIFU_CASE_ID,
     omitted_thirteen_invoice_fixture,
@@ -160,6 +161,28 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(row["status"], "unpaired")
         self.assertIsNone(row["case_id"])
         self.assertEqual(row["relation_mode"], "pending_input_invoice")
+
+    def test_legacy_exception_metadata_does_not_change_group_or_exception_counts(self) -> None:
+        payload = self.service.group_payload(
+            "2026-01",
+            rows_by_id={
+                "oa-pay-1977": {
+                    "id": "oa-pay-1977",
+                    "type": "oa",
+                    "object_identity_key": "oa-pay-1977",
+                    "handled_exception": True,
+                    "processed_exception_summary": {"display_tags": ["待找进项发票"]},
+                    "oa_bank_relation": {"code": "danger", "tone": "danger"},
+                }
+            },
+            active_relations=[],
+        )
+
+        group = payload["unpaired"]["groups"][0]
+        self.assertNotIn("exception_state", group)
+        self.assertNotIn("processed_exception_summary", group)
+        self.assertEqual(payload["summary"]["exception_count"], 0)
+        self.assertEqual(payload["summary"]["ignored_exception_count"], 0)
 
     def test_unpaired_etc_summary_preserves_all_collapsed_invoice_details(self) -> None:
         payload = self.service.group_payload(

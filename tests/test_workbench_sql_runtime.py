@@ -1604,7 +1604,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ),
         )
 
-    def test_page_access_source_versions_include_canonical_workbench_write_tables(self) -> None:
+    def test_page_access_source_versions_exclude_legacy_exception_audit_rows(self) -> None:
         class SourceVersionConnection:
             def __init__(self) -> None:
                 self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
@@ -1620,7 +1620,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     {
                         "scope_key": "2026-05",
                         "pair_relations_updated_at": "relations-v2",
-                        "exception_cases_updated_at": "exceptions-v3",
+                        "exception_cases_updated_at": "anomaly-v3",
                         "row_overrides_updated_at": "overrides-v4",
                         "oa_pending_payment_bank_claims_updated_at": "claims-v5",
                         "bank_transactions_updated_at": "bank-v6",
@@ -1645,7 +1645,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope("2026-05")
 
         self.assertEqual(versions["workbench_pair_relations_updated_at"], "relations-v2")
-        self.assertEqual(versions["workbench_exception_cases_updated_at"], "exceptions-v3")
+        self.assertEqual(versions["workbench_exception_cases_updated_at"], "anomaly-v3")
         self.assertEqual(versions["workbench_row_overrides_updated_at"], "overrides-v4")
         self.assertEqual(versions["oa_pending_payment_bank_claims_updated_at"], "claims-v5")
         self.assertEqual(versions["bank_transactions_updated_at"], "bank-v6")
@@ -1664,7 +1664,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         source_sql, source_params = connection.fetch_all_calls[0]
         self.assertIn("app.workbench_pair_relations", source_sql)
         self.assertIn("app.workbench_exception_cases", source_sql)
+        self.assertIn("exception.scenario = %s", source_sql)
+        self.assertEqual(source_params[1], "oa_invoice_amount_mismatch")
         self.assertIn("app.workbench_row_overrides", source_sql)
+        self.assertIn("override.override_payload->'ignored' is distinct from 'true'::jsonb", source_sql)
+        self.assertIn("not (override.override_payload ? 'exception_case_id')", source_sql)
         self.assertIn("from app.bank_transaction_relation_claims", source_sql)
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.bank_transaction_categories", source_sql)
@@ -1679,7 +1683,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("invoice.business_batch_id = business_batch.business_batch_id", source_sql)
         self.assertIn("app.etc_batch_invoice_links", source_sql)
         self.assertIn("active_relation_row_ids", source_sql)
-        self.assertEqual(source_params, (["2026-05-01"],))
+        self.assertEqual(
+            source_params,
+            (["2026-05-01"], "oa_invoice_amount_mismatch"),
+        )
 
     def test_bulk_page_access_source_versions_use_one_set_based_month_query(self) -> None:
         class SourceVersionConnection:
@@ -1698,7 +1705,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     {
                         "scope_key": "2026-05",
                         "pair_relations_updated_at": "relations-v2",
-                        "exception_cases_updated_at": "exceptions-v3",
+                        "exception_cases_updated_at": "anomaly-v3",
                         "row_overrides_updated_at": "overrides-v4",
                         "oa_pending_payment_bank_claims_updated_at": "claims-v5",
                         "bank_transactions_updated_at": "bank-v6",
@@ -1745,7 +1752,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(list(versions), ["2026-05", "2026-06"])
         self.assertEqual(versions["2026-05"]["workbench_pair_relations_updated_at"], "relations-v2")
-        self.assertEqual(versions["2026-05"]["workbench_exception_cases_updated_at"], "exceptions-v3")
+        self.assertEqual(
+            versions["2026-05"]["workbench_exception_cases_updated_at"],
+            "anomaly-v3",
+        )
         self.assertEqual(versions["2026-05"]["workbench_row_overrides_updated_at"], "overrides-v4")
         self.assertEqual(versions["2026-05"]["bank_auto_tag_rules_version"], 9)
         self.assertEqual(versions["2026-06"]["workbench_pair_relations_updated_at"], "relations-v9")
@@ -1754,7 +1764,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("with requested_scopes as", source_sql)
         self.assertIn("app.workbench_pair_relations", source_sql)
         self.assertIn("app.workbench_exception_cases", source_sql)
+        self.assertIn("exception.scenario = %s", source_sql)
+        self.assertEqual(source_params[1], "oa_invoice_amount_mismatch")
         self.assertIn("app.workbench_row_overrides", source_sql)
+        self.assertIn("override.override_payload->'ignored' is distinct from 'true'::jsonb", source_sql)
+        self.assertIn("not (override.override_payload ? 'exception_case_id')", source_sql)
         self.assertIn("app.bank_transaction_relation_claims", source_sql)
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.bank_transaction_categories", source_sql)
@@ -1767,7 +1781,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.etc_invoices", source_sql)
         self.assertIn("app.etc_batch_invoice_links", source_sql)
         self.assertIn("from app.app_settings", source_sql)
-        self.assertEqual(source_params, (["2026-05-01", "2026-06-01"],))
+        self.assertEqual(
+            source_params,
+            (["2026-05-01", "2026-06-01"], "oa_invoice_amount_mismatch"),
+        )
         self.assertEqual(connection.fetch_one_calls, [])
 
     def test_overlapping_canonical_proofs_share_only_the_active_scope_flight(self) -> None:
@@ -1862,10 +1879,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         class SourceVersionConnection:
             def __init__(self) -> None:
                 self.source_sql = ""
+                self.source_params: tuple[object, ...] = ()
 
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
                 normalized = " ".join(sql.lower().split())
                 self.source_sql = normalized
+                self.source_params = params
                 return {"settings_payload": {}}
 
         connection = SourceVersionConnection()
@@ -1891,6 +1910,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from app.etc_business_batches", connection.source_sql)
         self.assertIn("from app.etc_invoices", connection.source_sql)
         self.assertIn("from app.etc_batch_invoice_links", connection.source_sql)
+        self.assertIn("from app.workbench_exception_cases", connection.source_sql)
+        self.assertIn("where scenario = %s", connection.source_sql)
+        self.assertEqual(connection.source_params, ("oa_invoice_amount_mismatch",))
         self.assertNotIn("where status = 'active'", connection.source_sql)
         self.assertNotIn("where status <> 'deleted'", connection.source_sql)
 
@@ -2143,13 +2165,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(connection.calls[0][1], (["2026-06", "2026-07"],))
         self.assertIn("scope_key = any(%s)", connection.calls[0][0])
 
-    def test_workbench_v19_rejects_v17_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v20_rejects_v19_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-08-03-ungrouped-money-search-v17"
-        old_all = "workbench_sql_projection.composed_active_month_shards.ungrouped_money_search.v17"
+        old_month = "2026-08-05-oa-invoice-exception-units-v19"
+        old_all = "workbench_sql_projection.composed_active_month_shards.oa_invoice_exception_units.v19"
 
-        self.assertIn("v19", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v19", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v20", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v20", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -3407,7 +3429,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             canonical_query,
         )
         self.assertIn("ignored_exception_count", canonical_query)
-        self.assertIn("ignored_rows.payload->>'ignored'", canonical_query)
+        self.assertNotIn("ignored_rows.payload->>'ignored'", canonical_query)
+        self.assertNotIn("exception_state", canonical_query)
         self.assertNotIn(
             "partition by active_groups.zone, active_groups.all_scope_group_id",
             canonical_query,
@@ -4121,6 +4144,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 )
                 self.assertIn("ranked_groups.payload", count_sql)
                 self.assertIn(f"g.payload#>>'{{oa_invoice_anomaly,state}}' = '{expected_state}'", count_sql)
+                self.assertNotIn("exception_state", count_sql)
+                self.assertNotIn("workbench_row_overrides", count_sql)
 
     def test_repository_composed_all_scope_prefixes_non_mergeable_group_ids(self) -> None:
         class NonMergeableGroupConnection(WorkbenchSummaryGroupsConnection):
@@ -4736,6 +4761,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "label": "付款申请",
                         "applicant": "陈涛",
                         "application_time": "2026-07-21 09:30",
+                        "completed_at": "2026-07-22 10:45:00",
+                        "amount_value": "202.00",
                     }
                 ],
                 "bank_rows": [
@@ -4762,6 +4789,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         searchable_text = " ".join(str(row["searchable_text"]) for row in rows)
         self.assertIn("2026-07-21 09:30", searchable_text)
+        self.assertIn("2026-07-22 10:45:00", searchable_text)
+        self.assertIn("202.00 202", searchable_text)
         self.assertIn("软件服务费", searchable_text)
         self.assertIn("客户附言", searchable_text)
         self.assertIn("专项服务费", searchable_text)
@@ -8107,16 +8136,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("手续费", paired[0]["display_tags"])
         self.assertNotEqual(summary_row["relation_mode"], "no_oa_bank_batch")
 
-    def test_sql_projection_applies_row_overrides_before_grouping(self) -> None:
+    def test_sql_projection_applies_non_exception_row_overrides_before_grouping(self) -> None:
         recorder = ReadModelSnapshotRecorder()
         connection = WorkbenchProjectionSettingsConnection(
             overrides=[
                 {
                     "row_id": "bank-override",
                     "override_payload": {
-                        "ignored": True,
-                        "case_id": "CASE-OVERRIDE-1",
-                        "relation": {"code": "manual_exception", "label": "人工异常", "tone": "danger"},
+                        "case_id": None,
+                        "relation_mode": "pending_input_invoice",
+                        "auto_close_suppressed": True,
                     },
                 }
             ]
@@ -8135,11 +8164,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = builder._group_payload("2026-05", with_test_object_identities(rows_by_id), [])
 
         row = payload["unpaired"]["groups"][0]["bank_rows"][0]
-        self.assertTrue(row["ignored"])
-        self.assertEqual(row["case_id"], "CASE-OVERRIDE-1")
-        self.assertEqual(row["invoice_relation"]["code"], "manual_exception")
+        self.assertIsNone(row["case_id"])
+        self.assertEqual(row["relation_mode"], "pending_input_invoice")
+        self.assertTrue(row["auto_close_suppressed"])
 
-    def test_sql_projection_applies_active_exception_case_projection(self) -> None:
+    def test_sql_projection_does_not_apply_legacy_exception_case_projection(self) -> None:
         recorder = ReadModelSnapshotRecorder()
         connection = WorkbenchProjectionSettingsConnection(
             exception_cases=[
@@ -8174,9 +8203,75 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = builder._group_payload("2026-05", with_test_object_identities(rows_by_id), [])
 
         row = payload["unpaired"]["groups"][0]["bank_rows"][0]
-        self.assertEqual(row["exception_case_id"], "CASE-EXCEPTION-1")
-        self.assertEqual(row["case_id"], "CASE-EXCEPTION-1")
-        self.assertEqual(row["invoice_relation"]["tone"], "danger")
+        self.assertNotIn("exception_case_id", row)
+        self.assertNotIn("case_id", row)
+        self.assertNotIn("invoice_relation", row)
+
+    def test_sql_projection_drops_legacy_exception_row_overrides(self) -> None:
+        recorder = ReadModelSnapshotRecorder()
+        connection = WorkbenchProjectionSettingsConnection(
+            overrides=[
+                {
+                    "row_id": "bank-exception",
+                    "override_payload": {
+                        "projection_kind": "exception_case",
+                        "handled_exception": False,
+                        "case_id": "CASE-OLD",
+                    },
+                },
+                {
+                    "row_id": "oa-exception",
+                    "override_payload": {
+                        "handled_exception": True,
+                        "case_id": "CASE-NEWER-OLD-PATH",
+                    },
+                },
+                {
+                    "row_id": "bank-ignored",
+                    "override_payload": {
+                        "ignored": True,
+                        "handled_exception": False,
+                        "exception_case_id": "CASE-IGNORED",
+                    },
+                },
+            ]
+        )
+        builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=recorder)
+        rows_by_id = {
+            "bank-exception": {
+                "id": "bank-exception",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "10.00",
+            },
+            "oa-exception": {
+                "id": "oa-exception",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "10.00",
+            },
+            "bank-ignored": {
+                "id": "bank-ignored",
+                "type": "bank",
+                "source_kind": "bank",
+                "debit_amount": "5.00",
+            },
+        }
+
+        payload = builder._group_payload("2026-05", with_test_object_identities(rows_by_id), [])
+
+        rows = [
+            row
+            for group in payload["unpaired"]["groups"]
+            for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+        ]
+        self.assertEqual(
+            {row["id"] for row in rows},
+            {"bank-exception", "oa-exception", "bank-ignored"},
+        )
+        self.assertTrue(all("case_id" not in row for row in rows))
+        self.assertTrue(all("ignored" not in row for row in rows))
+        self.assertEqual(payload["summary"]["exception_count"], 0)
 
     def test_sql_projection_active_row_override_wins_over_exception_projection(self) -> None:
         recorder = ReadModelSnapshotRecorder()

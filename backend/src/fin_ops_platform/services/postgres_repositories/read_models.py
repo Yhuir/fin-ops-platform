@@ -31,6 +31,10 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
+from fin_ops_platform.services.search_query import (
+    canonicalize_money_search_query,
+    normalize_money_search_query,
+)
 from fin_ops_platform.services.workbench_read_model_version import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
@@ -3687,33 +3691,9 @@ class PostgresReadModelRepository:
                 )::bigint as invoice_count,
                 count(distinct canonical_groups.group_id) filter (
                     where canonical_groups.payload #>> '{{oa_invoice_anomaly,state}}' = 'active'
-                       or canonical_groups.payload->>'exception_state' = 'active'
-                       or (
-                        canonical_groups.zone = 'unpaired' and (
-                        coalesce(canonical_groups.payload->>'match_confidence', '') = 'danger'
-                        or jsonb_path_exists(
-                            coalesce(canonical_groups.payload, '{{}}'::jsonb),
-                            '$.** ? (@.tone == "danger")'
-                        )
-                       )
-                      )
                 )::bigint as exception_count,
-                (
-                    count(distinct canonical_groups.group_id) filter (
-                        where canonical_groups.payload #>> '{{oa_invoice_anomaly,state}}' = 'ignored'
-                           or canonical_groups.payload->>'exception_state' = 'processed'
-                    )
-                    + (
-                        select count(distinct ignored_rows.row_id)
-                        from read_model.workbench_rows ignored_rows
-                        join read_model.workbench_generations ignored_generation
-                          on ignored_generation.tenant_id = 'default'
-                         and ignored_generation.scope_key = ignored_rows.scope_key
-                         and ignored_generation.generation_id = ignored_rows.generation_id
-                         and ignored_generation.status = 'active'
-                        where ignored_rows.scope_key <> 'all'
-                          and lower(coalesce(ignored_rows.payload->>'ignored', 'false')) = 'true'
-                    )
+                count(distinct canonical_groups.group_id) filter (
+                    where canonical_groups.payload #>> '{{oa_invoice_anomaly,state}}' = 'ignored'
                 )::bigint as ignored_exception_count,
                 count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
                     where canonical_members.zone = 'paired' and canonical_members.pane = 'oa'
@@ -4477,7 +4457,7 @@ class PostgresReadModelRepository:
         )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
-        normalized_search = (text(search) or "")[:200]
+        normalized_search = canonicalize_money_search_query(search)[:200]
         normalized_exception_bucket = text(exception_bucket)
         if normalized_exception_bucket not in {None, "active", "processed"}:
             raise ValueError("exception_bucket must be active or processed.")
@@ -4524,15 +4504,9 @@ class PostgresReadModelRepository:
                 clauses.append(_workbench_zone_search_exists_sql(group_id_sql=group_row_join_id_sql))
                 params.append(pattern)
         if normalized_exception_bucket == "active":
-            clauses.append(
-                "(g.payload#>>'{oa_invoice_anomaly,state}' = 'active' "
-                "or g.payload->>'exception_state' = 'active')"
-            )
+            clauses.append("g.payload#>>'{oa_invoice_anomaly,state}' = 'active'")
         elif normalized_exception_bucket == "processed":
-            clauses.append(
-                "(g.payload#>>'{oa_invoice_anomaly,state}' = 'ignored' "
-                "or g.payload->>'exception_state' = 'processed')"
-            )
+            clauses.append("g.payload#>>'{oa_invoice_anomaly,state}' = 'ignored'")
         if composed_all_scope:
             row_filter_joins, row_filter_params = _workbench_all_group_row_filter_joins_sql(
                 column_filters=normalized_column_filters,
@@ -7527,37 +7501,14 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
     return summary
 
 
-def _workbench_group_has_danger(group: dict[str, Any]) -> bool:
-    if text(group.get("match_confidence")) == "danger":
-        return True
-    for row in _iter_group_rows(group):
-        relation_codes = [
-            row.get("oa_bank_relation"),
-            row.get("invoice_relation"),
-            row.get("invoice_bank_relation"),
-        ]
-        for relation in relation_codes:
-            if isinstance(relation, dict) and text(relation.get("tone")) == "danger":
-                return True
-    return False
-
-
 def _workbench_group_is_active_exception(group: dict[str, Any], *, zone: str) -> bool:
     oa_invoice_anomaly = group.get("oa_invoice_anomaly")
-    return (
-        (isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "active")
-        or text(group.get("exception_state")) == "active"
-        or (zone == "unpaired" and _workbench_group_has_danger(group))
-    )
+    return isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "active"
 
 
 def _workbench_group_is_ignored_exception(group: dict[str, Any]) -> bool:
     oa_invoice_anomaly = group.get("oa_invoice_anomaly")
-    return (
-        (isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "ignored")
-        or text(group.get("exception_state")) == "processed"
-        or any(bool(row.get("ignored")) for row in _iter_group_rows(group))
-    )
+    return isinstance(oa_invoice_anomaly, dict) and text(oa_invoice_anomaly.get("state")) == "ignored"
 
 
 def _workbench_groups_order_by(sort: str | None) -> str:
@@ -7619,7 +7570,9 @@ def _searchable_row_text(row: dict[str, Any], pane_id: str) -> str:
         text(row.get("counterparty") or row.get("counterparty_name")),
     ]
     values.extend(text(value) for value in _workbench_row_column_values(row, pane_id).values())
-    values.append(text(row.get("amount_value")))
+    amount_value = text(row.get("amount_value"))
+    values.extend((amount_value, canonicalize_money_search_query(amount_value)))
+    values.append(text(row.get("completed_at") or row.get("completedAt")))
     tags = row.get("tags")
     if isinstance(tags, list):
         values.extend(text(tag) for tag in tags)

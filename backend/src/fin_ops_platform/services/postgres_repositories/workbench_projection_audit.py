@@ -510,6 +510,12 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             )
             left join projected on projected.row_id = override.row_id
             where override.status = 'active'
+              and coalesce(override.override_payload->>'projection_kind', '') <> 'exception_case'
+              and override.override_payload->'handled_exception' is distinct from 'true'::jsonb
+              and override.override_payload->'ignored' is distinct from 'true'::jsonb
+              and not (override.override_payload ? 'exception_case_id')
+              and coalesce(override.override_payload#>>'{relation,tone}', '') <> 'danger'
+              and jsonb_typeof(override.override_payload->'processed_exception_summary') is distinct from 'object'
               and not exists (
                   select 1
                   from active_relation_members relation_member
@@ -523,48 +529,15 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               )
               and projected.payload->field.key is distinct from field.value
         ),
-        exception_members as (
-            select exception.case_id, exception.status,
-                   member.row_id
-            from app.workbench_exception_cases exception
-            join lateral unnest(exception.row_ids) member(row_id) on true
-            where exception.status in ('open', 'ignored', 'reopened', 'legacy_confirmed', 'confirmed')
-              and not exists (
-                  select 1
-                  from active_relation_members relation_member
-                  where relation_member.row_id = member.row_id
-              )
-              and not exists (
-                  select 1 from app.workbench_row_overrides override
-                  where override.row_id = member.row_id and override.status = 'active'
-              )
-        ),
-        exception_mismatch as (
-            select member.row_id as subject_id, coalesce(projected.scope_key, 'all') as scope_key,
-                   'exception'::text as mismatch_kind,
-                   'case/status'::text as field_name,
-                   jsonb_build_object('case_id', member.case_id, 'status', member.status) as canonical_value,
-                   projected.payload as projected_value
-            from exception_members member
-            left join projected on projected.row_id = member.row_id
-            where projected.row_id is null
-               or coalesce(projected.payload->>'case_id', '') <> member.case_id
-               or coalesce(projected.payload->>'exception_case_id', '') <> member.case_id
-               or coalesce(projected.payload->>'case_status', '') <> member.status
-               or coalesce(projected.payload->'ignored' = 'true'::jsonb, false) <> (member.status = 'ignored')
-               or coalesce(projected.payload->'handled_exception' = 'true'::jsonb, false)
-                  <> (member.status <> 'ignored')
-        ),
         mismatches as (
             select * from override_mismatch
-            union all select * from exception_mismatch
         )
         select * from mismatches
         order by mismatch_kind, subject_id, field_name
         limit %s
         """,
         "workbench_override_exception_fields_mismatch",
-        "Workbench ignored, handled-exception, or row-override fields do not equal canonical control facts.",
+        "Workbench non-exception row-override fields do not equal canonical control facts.",
     ),
     (
         f"""

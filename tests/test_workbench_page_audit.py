@@ -5,6 +5,9 @@ import unittest
 from fin_ops_platform.services.postgres_repositories.workbench_page_audit import (
     audit_workbench_relation_display,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_projection_audit import (
+    _PROOF_QUERIES,
+)
 
 
 class _Connection:
@@ -26,6 +29,18 @@ class _Connection:
 
 
 class WorkbenchPageAuditTests(unittest.TestCase):
+    def test_projection_audit_ignores_legacy_exception_controls(self) -> None:
+        override_sql = next(
+            sql
+            for sql, code, _message in _PROOF_QUERIES
+            if code == "workbench_override_exception_fields_mismatch"
+        )
+
+        self.assertNotIn("exception_members as", override_sql)
+        self.assertNotIn("exception_mismatch as", override_sql)
+        self.assertIn("override.override_payload->'ignored' is distinct from 'true'::jsonb", override_sql)
+        self.assertIn("not (override.override_payload ? 'exception_case_id')", override_sql)
+
     def test_exact_canonical_etc_summary_contract_is_part_of_integrity_audit(self) -> None:
         connection = _Connection()
 

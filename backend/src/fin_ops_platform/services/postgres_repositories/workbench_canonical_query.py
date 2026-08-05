@@ -1268,7 +1268,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
         ]
         hydrated = self._load_rows(set(row_ids))
         builder = WorkbenchCanonicalRowsBuilder(connection=self._connection)
-        builder._apply_workbench_overrides_and_exceptions(hydrated)
+        builder._apply_workbench_overrides(hydrated)
         return [hydrated[row_id] for row_id in row_ids if row_id in hydrated]
 
     def _summary(self, *, scope_key: str) -> dict[str, Any]:

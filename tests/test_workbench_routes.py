@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 
-from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
     WorkbenchRowDetailApiRoutes,
 )
+from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 
 
@@ -216,6 +216,17 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_groups_normalizes_equivalent_money_search_queries(self) -> None:
+        for query in ("202", "202.0", "202.00", "￥202.00", "¥202.00"):
+            with self.subTest(query=query):
+                facade = FakeWorkbenchQueryFacade()
+                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+                status, _payload = routes.groups("all", zone="unpaired", search=query)
+
+                self.assertEqual(status, HTTPStatus.OK)
+                self.assertEqual(facade.calls[0]["search"], "202")
 
     def test_groups_rejects_search_longer_than_contract_limit(self) -> None:
         facade = FakeWorkbenchQueryFacade()

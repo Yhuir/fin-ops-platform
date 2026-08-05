@@ -1209,66 +1209,6 @@ function largeWorkbenchGroups(zone: WorkbenchZone) {
   return Array.from({ length: total }, (_, index) => buildLargeWorkbenchGroup(index + 1, zone));
 }
 
-function buildProcessedExceptionGroup() {
-  const rows = workbenchRows();
-  const handledRows = {
-    oa: {
-      ...rows.oa,
-      handled_exception: true,
-      oa_bank_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
-      relation_note: "浏览器异常备注",
-      available_actions: ["detail", "cancel_exception"],
-    },
-    bank: {
-      ...rows.bank,
-      handled_exception: true,
-      invoice_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
-      relation_note: "浏览器异常备注",
-      available_actions: ["detail", "cancel_exception"],
-    },
-    invoice: {
-      ...rows.invoice,
-      handled_exception: true,
-      invoice_bank_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
-      relation_note: "浏览器异常备注",
-      available_actions: ["detail", "cancel_exception"],
-    },
-  };
-  return {
-    group_id: "case:CASE-202603-101",
-    group_type: "processed_exception",
-    exception_state: "processed",
-    match_confidence: "medium",
-    reason: "browser_e2e_processed_exception",
-    oa_rows: [handledRows.oa],
-    bank_rows: [handledRows.bank],
-    invoice_rows: [handledRows.invoice],
-    can_withdraw: false,
-    relation_note: "浏览器异常备注",
-    processed_exception_summary: {
-      scenario: {
-        code: "expense_oa_bank_missing_invoice",
-        label: "OA和支出流水一致，缺进项发票",
-      },
-      resolution: {
-        action_code: "wait_input_invoice",
-        action_label: "追进项发票",
-        note: "浏览器异常备注",
-      },
-      detail_note: "浏览器异常备注",
-      display_tags: ["追进项发票"],
-    },
-    amount_check: {
-      status: "mismatch",
-      direction: "payment",
-      bank_amount: "58000.00",
-      oa_amount: "58000.00",
-      amount_delta: "0.00",
-      requires_note: true,
-    },
-  };
-}
-
 function buildUnpairedGroupsWithoutIgnoredInvoice() {
   return buildUnpairedWorkbenchGroups().filter((group) => group.invoice_rows.length === 0);
 }
@@ -1308,9 +1248,6 @@ function workbenchGroups(
       return [buildAmountMismatchWorkbenchGroup(amountMismatchIgnored)];
     }
     return relationConfirmed ? [buildPairedWorkbenchGroup(includeCashSpecialActions)] : [];
-  }
-  if (exceptionApplied) {
-    return [buildProcessedExceptionGroup()];
   }
   if (rowIgnored) {
     return buildUnpairedGroupsWithoutIgnoredInvoice();
@@ -1485,9 +1422,9 @@ function workbenchSummary(
     bank_count: 1,
     invoice_count: 1,
     paired_count: relationConfirmed ? 1 : 0,
-    unpaired_count: relationConfirmed || exceptionApplied ? 0 : 1,
-    exception_count: (exceptionApplied ? 3 : 0) + (amountMismatchScenario && !amountMismatchIgnored ? 1 : 0),
-    ignored_exception_count: (exceptionApplied ? 3 : 0) + (rowIgnored ? 1 : 0) + (amountMismatchIgnored ? 1 : 0),
+    unpaired_count: relationConfirmed ? 0 : 1,
+    exception_count: amountMismatchScenario && !amountMismatchIgnored ? 1 : 0,
+    ignored_exception_count: amountMismatchIgnored ? 1 : 0,
     ignored_count: rowIgnored ? 1 : 0,
   };
 }
@@ -1531,12 +1468,10 @@ function workbenchGroupsPayload(
     : allGroups;
   const groups = searchedGroups.filter((group) => {
     if (exceptionBucket === "active") {
-      return ("exception_state" in group && group.exception_state === "active")
-        || ("oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "active");
+      return "oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "active";
     }
     if (exceptionBucket === "processed") {
-      return ("exception_state" in group && group.exception_state === "processed")
-        || ("oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "ignored");
+      return "oa_invoice_anomaly" in group && group.oa_invoice_anomaly?.state === "ignored";
     }
     return true;
   });

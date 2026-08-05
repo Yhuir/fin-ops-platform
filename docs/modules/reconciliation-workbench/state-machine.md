@@ -96,3 +96,5 @@ ignored --restore--> active
 ```
 
 该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。“进行中的异常”与“已忽略的异常”由同一个右侧抽屉读取；后者可按关系组执行“撤回忽略”。
+
+只有当前 generation 计算出的 `oa_invoice_anomaly` 及其 `oa_invoice_amount_mismatch` 决定进入这套状态机。历史 WEX/row-ignore 记录仅保留审计：不得改变 `paired|unpaired`、成员、主区可见性、异常抽屉、异常计数、搜索结果或 source freshness。

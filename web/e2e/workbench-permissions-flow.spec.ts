@@ -82,11 +82,11 @@ test.describe("workbench read-export permission browser flow", () => {
     expectNoWorkbenchMutationCalls(api);
   });
 
-  test("keeps processed exception and ignored item recovery entries hidden without mutation APIs", async ({ page }) => {
+  test("keeps OA invoice anomalies readable without mutation APIs", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "read_export_only",
-      workbenchInitialExceptionApplied: true,
-      workbenchInitialRowIgnored: true,
+      workbenchAmountMismatchScenario: true,
+      workbenchInitialRelationConfirmed: true,
     });
 
     await page.goto("/");
@@ -97,11 +97,10 @@ test.describe("workbench read-export permission browser flow", () => {
     await unpairedZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
-    await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByText("金额不一致").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", { name: "忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });
@@ -155,9 +154,8 @@ test.describe("workbench App Health write-safety browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       appHealthWriteSafetyBlocked: true,
       sessionMode: "admin",
-      workbenchInitialExceptionApplied: true,
       workbenchInitialRelationConfirmed: true,
-      workbenchInitialRowIgnored: true,
+      workbenchAmountMismatchScenario: true,
     });
 
     await page.goto("/");
@@ -173,11 +171,9 @@ test.describe("workbench App Health write-safety browser flow", () => {
     await unpairedZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("radio", { name: "已忽略的异常" }).click();
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await expect(exceptionDrawer.getByText("追进项发票").first()).toBeVisible();
-    await expect(exceptionDrawer.getByText("智能工厂设备商").first()).toBeVisible();
-    await expect(exceptionDrawer.getByRole("button", { name: "撤回忽略" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByText("金额不一致").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", { name: "忽略" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
   });

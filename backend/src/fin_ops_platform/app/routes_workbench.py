@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import json
+from http import HTTPStatus
 from typing import Any, Callable
 
+from fin_ops_platform.services.search_query import canonicalize_money_search_query
 from fin_ops_platform.services.workbench_groups_page_cache import (
     normalize_workbench_group_detail_level,
     stable_json_value,
 )
-
 
 WORKBENCH_SEARCH_QUERY_MAX_LENGTH = 200
 
@@ -188,7 +188,7 @@ class WorkbenchReadApiRoutes:
 
     @staticmethod
     def _normalize_search_query(value: object, name: str) -> str:
-        normalized = str(value or "").strip()
+        normalized = canonicalize_money_search_query(value)
         if len(normalized) > WORKBENCH_SEARCH_QUERY_MAX_LENGTH:
             raise ValueError(f"{name} must be at most {WORKBENCH_SEARCH_QUERY_MAX_LENGTH} characters.")
         return normalized

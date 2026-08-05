@@ -37,11 +37,12 @@
 | `RECON-WB-E2E-006` | stale/refreshing/read model failed 状态 | P0 | stale/refreshing 时页面提示状态；不能把空 rows 当真实无候选；OA sync dirty/refreshing 禁写，普通 Workbench stale 不全局禁用无关 group。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认/撤回/异常写入口，并且不会发出 mutation API。 |
-| `RECON-WB-E2E-009` | 统一异常抽屉与 OA/发票异常 ignore/restore | P1 | legacy 异常、按 OA 子付款项/支付申请比较的精确金额差异和 `OA发票附件缺失` 都从统一右侧抽屉处理；`290=145+145`、`405=350+55` 同行且无误报，一个比较单元只显示一个 chip。入口显示 `异常 n | 已忽略 m`，抽屉默认折叠三栏计数/总金额、展开完整成员；异常可忽略并撤回，主表 chip 与计数同步；操作后只通过当前关联台正常 GET 更新页面，closed exception relation 必须走 canonical command service，零 downstream job。 |
+| `RECON-WB-E2E-009` | 统一异常抽屉与 OA/发票异常 ignore/restore | P1 | 只有按 OA 子付款项/支付申请比较的精确金额差异和 `OA发票附件缺失` 从统一右侧抽屉处理；`290=145+145`、`405=350+55` 同行且无误报，一个比较单元只显示一个 chip。历史 WEX/row-ignore 记录继续可审计，但 canonical rows 留在 paired/unpaired 主区且不进入抽屉或计数。入口显示 `异常 n | 已忽略 m`，抽屉默认折叠三栏计数/总金额、展开完整成员；异常可忽略并撤回，主表 chip 与计数同步；操作后只通过当前关联台正常 GET 更新页面，零 downstream job。 |
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 两区首屏各保留 50 组且没有手动“加载更多”；滚动接近区底部才自动读取下一页，失败不循环重试；区域搜索可命中尚未加载的全部服务端数据并高亮；详情、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |
 | `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；关联台专属 OA 状态恢复且 active generation fresh/version ready 后自动恢复，不等待较慢的全局 App Health 聚合刷新。 |
 | `RECON-WB-E2E-013` | 已配对现金流水特殊处理 | P1 | full-access 用户可从已配对银行流水更多菜单执行 `确认为过账`、`确认为买票` 和 `取消现金处理`；买票弹窗必须校验买票成本和项目名称；三个 mutation 都必须携带完整 group row ids，成功后只重跑当前页 GET、零 operation barrier，并且不能出现隐藏错误、浏览器异常或 stale UI。 |
+| `RECON-WB-E2E-014` | 关联台金额与 OA 完成时间搜索 | P1 | `202`、`202.0`、`202.00`、`￥202.00`、`¥202.00` 命中同一完整关系组；OA 申请日期和完成时间都可命中。搜索不改变 group membership、异常状态或选择状态。 |
 
 ## 不属于本地 deterministic E2E 的风险
 

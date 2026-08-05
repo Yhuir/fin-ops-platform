@@ -2,16 +2,23 @@
 
 日期：2026-08-05
 
+## 2026-08-05 历史 WEX 运行时退役与搜索合同 v20
+
+- Business core：`tests/test_workbench_relation_grouping.py` 证明历史 `exception_state`、`handled_exception` 和 WEX summary 不再改变分组、异常计数或 canonical row；新 `oa_invoice_anomaly` 仍保持 active/ignored 互斥。
+- Service/read model/API：`tests/test_workbench_sql_runtime.py` 保护 v20 淘汰 v19 generation/cache、projection 丢弃 `exception_case`/`handled_exception`、source freshness 排除历史 exception table、搜索投影包含 OA `completed_at`；`tests/test_search_query.py` 和 `tests/test_workbench_routes.py` 保护金额及人民币符号数值等价与普通文本转义。
+- Frontend：`WorkbenchSelection.test.tsx` 与 `WorkbenchExceptionDrawer.test.tsx` 保护历史 WEX 不隐藏 canonical rows、不进入抽屉且不暴露旧取消/恢复动作；新 OA/发票异常继续可忽略和撤回忽略。
+- E2E / regression：`workbench-exception-flow.spec.ts` 保护旧异常写入后 canonical rows 仍在主区且抽屉无旧记录；权限套件改用真实 `oa_invoice_anomaly` 验证 read-export 零 mutation。没有删除历史审计表、增加表、worker、queue、cache owner、依赖或并行 fallback。
+
 ## 2026-08-05 OA/发票比较单元与附件缺失异常
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、附件数大于零且零绑定发票生成 `OA发票附件缺失`；支付申请继续按关系组总额比较，缺金额不误报。
-- Service/read model/API：`tests/test_workbench_relation_grouping.py` 保护 bundle `oa_invoice_anomaly.items[]`、active/ignored 计数和旧逐发票 `amount_anomaly` 不再发布；`tests/test_workbench_query_service.py` 保护 item `attachment_file_count`；`tests/test_workbench_sql_runtime.py` 保护 v19 淘汰 v18 generation/cache，且异常桶在分页前过滤。
+- Service/read model/API：`tests/test_workbench_relation_grouping.py` 保护 bundle `oa_invoice_anomaly.items[]`、active/ignored 计数和旧逐发票 `amount_anomaly` 不再发布；`tests/test_workbench_query_service.py` 保护 item `attachment_file_count`；`tests/test_workbench_sql_runtime.py` 保护当前 v20 淘汰旧 generation/cache，且异常桶在分页前过滤。
 - Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行、部分筛选不伪造同行、附件缺失生成不可选择 display-only 发票占位；`WorkbenchApi.test.ts` 保护新 DTO 与一个 comparison unit 只装饰一行；`WorkbenchExceptionDrawer.test.tsx` 和 `WorkbenchSelection.test.tsx` 保护 HeroUI chip、`异常 n | 已忽略 m`、折叠/展开、忽略/撤回及只读行为。
 - Regression：没有新增表、migration、read model、worker、queue、cache owner、HTTP 详情链路或依赖；旧逐关系总额、逐发票复制字段和金额决定显式 ownership 的判断已删除。
 
 ## 2026-08-05 紧凑异常抽屉与撤回忽略
 
-- Business core / repository：`tests/test_workbench_relation_grouping.py` 与 `tests/test_workbench_sql_runtime.py` 保护进行中、已忽略关系组和独立 ignored row 的互斥计数，已忽略列表只认 payload 的 durable `ignored=true`，不再读取废弃 status 字段。
+- Business core / repository：`tests/test_workbench_relation_grouping.py` 与 `tests/test_workbench_sql_runtime.py` 保护进行中、已忽略 OA/发票异常组的互斥计数；历史 ignored row/WEX 不进入运行时列表或计数。
 - API / frontend：`WorkbenchApi.test.ts` 保护 additive `ignored_exception_count` 与三栏总金额映射；`WorkbenchExceptionDrawer.test.tsx` 保护 HeroUI 单选状态、默认折叠摘要、单组展开、无重复三栏表头、ignore/撤回忽略和只读权限；`WorkbenchSelection.test.tsx` 保护撤回忽略直接调用 canonical action、刷新主表和抽屉且不再打开旧确认 modal。
 - E2E / regression：`workbench-exception-flow.spec.ts` 与权限 Browser suites 覆盖“进行中的异常/已忽略的异常”、折叠展开、写权限和撤回忽略；旧 `CancelProcessedExceptionModal` 已删除，不保留兼容入口。
 
@@ -139,7 +146,7 @@
 - UoW 失败时 relation、history、idempotency 和 outbox 不得半写入。
 - source payload 即使把无 active relation 的 row 放在旧 paired section，最终也必须降级为 unpaired singleton。
 - E2E mock 不得用共享历史 `case_id` 构造未配对组；每区单一搜索词必须扫描该区三类结构化行，任一行命中后保留完整组上下文，隐藏 pane 与折叠明细也必须可命中。
-- 未配对 canonical row 若携带旧 `candidate:` / `decision:` / `temp:` ownership，输出必须清理与该候选 ownership 绑定的 mode 装饰且仍保持 singleton；control owner 优先级必须是 active formal relation > active override > active exception。正式关系成员不能携带旧 override/exception decoration；未配对 row 的 active override 必须优先于同 row exception，`pending_input_invoice` 等合法 control fields 必须与 canonical override 精确一致。回归测试必须同时覆盖最终 `workbench_rows.payload` 写入形状和 Page Audit SQL 的相同优先级。
+- 未配对 canonical row 若携带旧 `candidate:` / `decision:` / `temp:` ownership，输出必须清理与该候选 ownership 绑定的 mode 装饰且仍保持 singleton；control owner 优先级只允许 active formal relation > 有效非异常 override。正式关系成员不能携带旧 override/WEX decoration；历史 `exception_case`、`handled_exception` 与 row-ignore 必须在 generation 边界被丢弃，`pending_input_invoice` 等合法非异常 override fields 仍与 canonical override 精确一致。回归测试必须同时覆盖最终 `workbench_rows.payload` 写入形状和 Page Audit SQL 的相同优先级。
 - ETC collapsed-summary 必须同时物化 summary row 和全部 invoice detail rows；paired/unpaired 只改变 zone/status，不得丢失、重复或隐藏明细。
 - Workbench groups page cache schema 必须与 projection schema 同步，projection 行为升级后旧 Redis payload 必须自动失效。
 - combined initial 两区首屏必须各为 50 groups、`has_more` 保留真实 total，默认 batch SQL 每区读取最多 51 条用于判定后续页；前端不得显示“已加载 N / total”或手动“加载更多”，仅在 fresh、查询稳定且用户滚动接近区域底部时自动请求下一页；同区请求必须去重，搜索/筛选/version 变化时旧响应不得并入新结果，失败后停止自动重试并提供显式重试。后续 `/groups` 必须绑定同一 `expected_read_model_version`，不得为性能退回 200-group 首屏或全量 payload。

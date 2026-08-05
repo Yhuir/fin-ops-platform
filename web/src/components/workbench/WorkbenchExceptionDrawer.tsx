@@ -7,13 +7,12 @@ import {
   ToggleButtonGroup,
 } from "@heroui/react";
 import type { Key } from "@heroui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import { formatMoney } from "../../features/money";
 import { summarizeWorkbenchRows } from "../../features/workbench/selectionModel";
 import type {
-  WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchRelationGroup,
 } from "../../features/workbench/types";
@@ -23,7 +22,6 @@ type WorkbenchExceptionDrawerProps = {
   open: boolean;
   bucket: "active" | "processed";
   groups: WorkbenchRelationGroup[];
-  ignoredRows: WorkbenchRecord[];
   loading: boolean;
   error: string | null;
   canMutateData: boolean;
@@ -31,8 +29,6 @@ type WorkbenchExceptionDrawerProps = {
   onClose: () => void;
   onIgnoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
   onRestoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
-  onCancelProcessedException: (group: WorkbenchRelationGroup) => Promise<void> | void;
-  onUnignoreRow: (row: WorkbenchRecord) => Promise<void> | void;
 };
 
 const PANE_IDS: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -47,7 +43,6 @@ export default function WorkbenchExceptionDrawer({
   open,
   bucket,
   groups,
-  ignoredRows,
   loading,
   error,
   canMutateData,
@@ -55,15 +50,10 @@ export default function WorkbenchExceptionDrawer({
   onClose,
   onIgnoreOaInvoiceAnomaly,
   onRestoreOaInvoiceAnomaly,
-  onCancelProcessedException,
-  onUnignoreRow,
 }: WorkbenchExceptionDrawerProps) {
   const [expandedKeys, setExpandedKeys] = useState<Set<Key>>(new Set());
   const [pendingGroupId, setPendingGroupId] = useState<string | null>(null);
-  const visibleGroups = useMemo(
-    () => bucket === "processed" ? [...groups, ...ignoredRows.map(ignoredRowGroup)] : groups,
-    [bucket, groups, ignoredRows],
-  );
+  const visibleGroups = groups;
 
   useEffect(() => {
     setExpandedKeys(new Set());
@@ -158,10 +148,8 @@ export default function WorkbenchExceptionDrawer({
                       group={group}
                       pending={pendingGroupId === group.id}
                       onAction={(action) => runGroupAction(group.id, action)}
-                      onCancelProcessedException={onCancelProcessedException}
                       onIgnoreOaInvoiceAnomaly={onIgnoreOaInvoiceAnomaly}
                       onRestoreOaInvoiceAnomaly={onRestoreOaInvoiceAnomaly}
-                      onUnignoreRow={onUnignoreRow}
                     />
                   </div>
                   <Disclosure.Content>
@@ -204,22 +192,17 @@ function ExceptionAction({
   onAction,
   onIgnoreOaInvoiceAnomaly,
   onRestoreOaInvoiceAnomaly,
-  onCancelProcessedException,
-  onUnignoreRow,
 }: Pick<
   WorkbenchExceptionDrawerProps,
   | "canMutateData"
   | "onIgnoreOaInvoiceAnomaly"
   | "onRestoreOaInvoiceAnomaly"
-  | "onCancelProcessedException"
-  | "onUnignoreRow"
 > & {
   group: WorkbenchRelationGroup;
   pending: boolean;
   onAction: (action: () => Promise<void> | void) => void;
 }) {
   const labels = exceptionLabels(group);
-  const firstRow = allGroupRows(group)[0];
   let action: (() => Promise<void> | void) | null = null;
   let actionLabel = "";
 
@@ -228,12 +211,6 @@ function ExceptionAction({
     actionLabel = "忽略";
   } else if (group.oaInvoiceAnomaly?.state === "ignored") {
     action = () => onRestoreOaInvoiceAnomaly(group);
-    actionLabel = "撤回忽略";
-  } else if (firstRow && group.rawGroupType === "ignored_row") {
-    action = () => onUnignoreRow(firstRow);
-    actionLabel = "撤回忽略";
-  } else if (firstRow && group.exceptionState === "processed") {
-    action = () => onCancelProcessedException(group);
     actionLabel = "撤回忽略";
   }
 
@@ -262,28 +239,14 @@ function ExceptionAction({
 }
 
 function exceptionLabels(group: WorkbenchRelationGroup) {
-  if (group.oaInvoiceAnomaly) {
-    return Array.from(new Map(group.oaInvoiceAnomaly.items.map((item) => [item.displayLabel, {
-      text: item.displayLabel,
-      color: group.oaInvoiceAnomaly?.state === "ignored"
-        ? "default" as const
-        : item.code === "oa_invoice_attachment_missing"
-          ? "warning" as const
-          : "danger" as const,
-    }])).values());
-  }
-  if (group.exceptionState === "active") {
-    return [{ text: "进行中", color: "warning" as const }];
-  }
-  if (group.rawGroupType === "ignored_row") {
-    return [{ text: "已忽略", color: "default" as const }];
-  }
-  const detail = group.processedExceptionSummary?.displayTags?.[0]
-    ?? group.processedExceptionSummary?.resolution?.action_label;
-  return [{
-    text: typeof detail === "string" && detail.trim() ? `已忽略：${detail.trim()}` : "已忽略",
-    color: "default" as const,
-  }];
+  return Array.from(new Map((group.oaInvoiceAnomaly?.items ?? []).map((item) => [item.displayLabel, {
+    text: item.displayLabel,
+    color: group.oaInvoiceAnomaly?.state === "ignored"
+      ? "default" as const
+      : item.code === "oa_invoice_attachment_missing"
+        ? "warning" as const
+        : "danger" as const,
+  }])).values());
 }
 
 function groupPaneRows(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {
@@ -322,19 +285,5 @@ function materializeDetailGroup(group: WorkbenchRelationGroup): WorkbenchRelatio
       bank: groupPaneRows(group, "bank"),
       invoice: groupPaneRows(group, "invoice"),
     },
-  };
-}
-
-function ignoredRowGroup(row: WorkbenchRecord): WorkbenchRelationGroup {
-  const rows = { oa: [] as WorkbenchRecord[], bank: [] as WorkbenchRecord[], invoice: [] as WorkbenchRecord[] };
-  rows[row.recordType].push(row);
-  return {
-    id: `ignored:${row.id}`,
-    groupType: "unpaired",
-    rawGroupType: "ignored_row",
-    matchConfidence: "low",
-    reason: "ignored_row",
-    rows,
-    rowCounts: { [row.recordType]: 1 },
   };
 }

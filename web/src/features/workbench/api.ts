@@ -459,9 +459,7 @@ type ApiWorkbenchGroup = {
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   oa_invoice_anomaly?: ApiWorkbenchOaInvoiceAnomaly | null;
-  exception_state?: "active" | "processed" | null;
   special_metadata?: Record<string, unknown> | null;
-  processed_exception_summary?: Record<string, unknown> | null;
   completion?: {
     is_complete?: boolean | null;
     missing_row_types?: unknown[] | null;
@@ -746,12 +744,6 @@ type IgnoreRowPayload = {
   rowId: string;
   expectedReadModelVersion: string;
   comment?: string;
-};
-
-type UnignoreRowPayload = {
-  month: string;
-  rowId: string;
-  expectedReadModelVersion: string;
 };
 
 type CancelExceptionPayload = {
@@ -1063,28 +1055,6 @@ function mapOaInvoiceAnomaly(
     fingerprint,
     state,
     items,
-  };
-}
-
-function mapProcessedExceptionSummary(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const payload = value as Record<string, unknown>;
-  const scenario = payload.scenario && typeof payload.scenario === "object"
-    ? payload.scenario as Record<string, unknown>
-    : undefined;
-  const resolution = payload.resolution && typeof payload.resolution === "object"
-    ? payload.resolution as Record<string, unknown>
-    : undefined;
-  const displayTags = Array.isArray(payload.display_tags)
-    ? payload.display_tags.map((item) => String(item).trim()).filter(Boolean)
-    : undefined;
-  return {
-    scenario,
-    resolution,
-    detailNote: toDisplayValue(payload.detail_note ?? payload.detailNote, "") || undefined,
-    displayTags,
   };
 }
 
@@ -1536,11 +1506,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
     oaInvoiceAnomaly,
-    exceptionState: group.exception_state === "active" || group.exception_state === "processed"
-      ? group.exception_state
-      : undefined,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
-    processedExceptionSummary: mapProcessedExceptionSummary(group.processed_exception_summary),
     completion: group.completion && typeof group.completion === "object"
       ? {
         isComplete: group.completion.is_complete === true,
@@ -2640,7 +2606,7 @@ export async function fetchWorkbenchExceptionGroups(
   bucket: "active" | "processed",
   expectedReadModelVersion: string,
   signal?: AbortSignal,
-): Promise<{ groups: WorkbenchRelationGroup[]; ignoredRows: WorkbenchRecord[] }> {
+): Promise<{ groups: WorkbenchRelationGroup[] }> {
   const loadZone = async (zone: WorkbenchZoneId) => {
     const groups: WorkbenchRelationGroup[] = [];
     let page = 1;
@@ -2661,15 +2627,11 @@ export async function fetchWorkbenchExceptionGroups(
       page += 1;
     }
   };
-  const [paired, unpaired, ignored] = await Promise.all([
+  const [paired, unpaired] = await Promise.all([
     loadZone("paired"),
     loadZone("unpaired"),
-    bucket === "processed" ? fetchIgnoredWorkbenchRows(month, signal) : Promise.resolve(null),
   ]);
-  return {
-    groups: [...paired, ...unpaired],
-    ignoredRows: ignored?.rows ?? [],
-  };
+  return { groups: [...paired, ...unpaired] };
 }
 
 export async function fetchWorkbenchGroupDetail(
@@ -3490,19 +3452,6 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<Wor
       row_id: payload.rowId,
       expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
-    }),
-  });
-  return mapWorkbenchActionResult(result);
-}
-
-export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/unignore-row", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapWorkbenchActionResult(result);

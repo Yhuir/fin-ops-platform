@@ -36,7 +36,6 @@ import {
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
   setWorkbenchOaInvoiceAnomalyIgnored,
-  unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -433,7 +432,6 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"active" | "processed">("active");
   const [exceptionDrawerGroups, setExceptionDrawerGroups] = useState<WorkbenchRelationGroup[]>([]);
   const [ignoredExceptionCount, setIgnoredExceptionCount] = useState(0);
-  const [exceptionDrawerIgnoredRows, setExceptionDrawerIgnoredRows] = useState<WorkbenchRecord[]>([]);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
   const exceptionDrawerRequestRef = useRef<AbortController | null>(null);
@@ -844,7 +842,6 @@ export default function ReconciliationWorkbenchPage() {
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setExceptionDrawerGroups([]);
-        setExceptionDrawerIgnoredRows([]);
         setIgnoredExceptionCount(0);
         setLoadError(normalizedError.message);
         setIsLoading(false);
@@ -1290,7 +1287,7 @@ export default function ReconciliationWorkbenchPage() {
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
   const visibleOpenGroups = useMemo(
-    () => (workbenchData?.unpaired.groups ?? []).filter((group) => !group.exceptionState),
+    () => workbenchData?.unpaired.groups ?? [],
     [workbenchData?.unpaired.groups],
   );
 
@@ -1538,9 +1535,8 @@ export default function ReconciliationWorkbenchPage() {
       );
       if (!controller.signal.aborted) {
         setExceptionDrawerGroups(result.groups);
-        setExceptionDrawerIgnoredRows(result.ignoredRows);
         if (bucket === "processed") {
-          setIgnoredExceptionCount(result.groups.length + result.ignoredRows.length);
+          setIgnoredExceptionCount(result.groups.length);
         }
       }
     } catch (error) {
@@ -2186,26 +2182,6 @@ export default function ReconciliationWorkbenchPage() {
     }
   };
 
-  const handleUnignoreRow = async (row: WorkbenchRecord) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    const succeeded = await runBlockingAction({
-      loadingMessage: "正在撤回忽略...",
-      action: async () => {
-        const result = await unignoreWorkbenchRow({
-          month: WORKBENCH_VIEW_MONTH,
-          rowId: row.id,
-          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-        });
-        return result;
-      },
-    });
-    if (!succeeded) {
-      return;
-    }
-  };
-
   const handleOaInvoiceAnomalyDecision = useCallback(async (
     group: WorkbenchRelationGroup,
     ignored: boolean,
@@ -2498,15 +2474,12 @@ export default function ReconciliationWorkbenchPage() {
         canMutateData={canWriteWorkbench}
         error={exceptionDrawerError}
         groups={exceptionDrawerGroups}
-        ignoredRows={exceptionDrawerIgnoredRows}
         loading={exceptionDrawerLoading}
         open={exceptionDrawerOpen}
         onBucketChange={handleExceptionDrawerBucketChange}
-        onCancelProcessedException={handleCancelProcessedException}
         onClose={handleCloseExceptionDrawer}
         onIgnoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, true)}
         onRestoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, false)}
-        onUnignoreRow={handleUnignoreRow}
       />
       {workbenchExceptionDialog ? (
         <WorkbenchExceptionModal

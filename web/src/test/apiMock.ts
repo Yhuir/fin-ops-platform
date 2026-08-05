@@ -2053,7 +2053,7 @@ function toGroupedWorkbenchPayload(payload: {
   };
   paired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
   unpaired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
-}, oaStatus?: MockApiOptions["workbenchOaStatus"], ignoredRowCount = 0) {
+}, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
   const pairedGroups = buildGroups(payload.paired, "paired");
   const unpairedGroups = buildGroups(payload.unpaired, "unpaired");
 
@@ -2066,10 +2066,12 @@ function toGroupedWorkbenchPayload(payload: {
       invoice_count: payload.summary.invoice_count,
       paired_count: pairedGroups.length,
       unpaired_count: unpairedGroups.length,
-      exception_count: unpairedGroups.filter((group) => groupHasDanger(group)).length,
+      exception_count: [...pairedGroups, ...unpairedGroups].filter(
+        (group) => (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "active",
+      ).length,
       ignored_exception_count: [...pairedGroups, ...unpairedGroups].filter(
-        (group) => group.exception_state === "processed",
-      ).length + ignoredRowCount,
+        (group) => (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "ignored",
+      ).length,
     },
     invoice_inventory: {
       system_total: 9,
@@ -2127,48 +2129,10 @@ function buildGroups(
     }
   }
 
-  return Array.from(groups.values()).map((group) => {
-    const groupRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
-    const processedRow = groupRows.find((row) => row.handled_exception === true);
-    const relation = processedRow
-      ? (
-          processedRow.oa_bank_relation
-          ?? processedRow.invoice_relation
-          ?? processedRow.invoice_bank_relation
-        ) as { code?: string; label?: string } | undefined
-      : undefined;
-    const actionLabel = relation?.label ?? "已忽略异常";
-    return {
-      ...group,
-      can_withdraw: section === "paired" ? true : undefined,
-      exception_state: processedRow ? "processed" : undefined,
-      processed_exception_summary: processedRow
-        ? {
-            resolution: {
-              action_code: relation?.code ?? "processed_exception",
-              action_label: actionLabel,
-              note: processedRow.relation_note ?? "",
-            },
-            detail_note: processedRow.relation_note ?? "",
-            display_tags: [actionLabel],
-          }
-        : undefined,
-    };
-  });
-}
-
-function groupHasDanger(group: {
-  oa_rows: Array<Record<string, unknown>>;
-  bank_rows: Array<Record<string, unknown>>;
-  invoice_rows: Array<Record<string, unknown>>;
-}) {
-  return [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) => {
-    const relation =
-      (row.oa_bank_relation as { tone?: string } | undefined) ??
-      (row.invoice_relation as { tone?: string } | undefined) ??
-      (row.invoice_bank_relation as { tone?: string } | undefined);
-    return relation?.tone === "danger";
-  });
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    can_withdraw: section === "paired" ? true : undefined,
+  }));
 }
 
 type MockWorkbenchGroup = ReturnType<typeof buildGroups>[number];
@@ -4794,7 +4758,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const payload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
         options.workbenchOaStatus,
-        ignoredRowStore.get(month).length,
       );
       const pageForZone = (zone: "paired" | "unpaired") => {
         const query = parseWorkbenchGroupJsonParam(url.searchParams.get(`${zone}_query`));
@@ -4862,9 +4825,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)
           && (
             exceptionBucket === "active"
-              ? group.exception_state === "active"
+              ? (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "active"
               : exceptionBucket === "processed"
-                ? group.exception_state === "processed"
+                ? (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "ignored"
                 : true
           )
         )),

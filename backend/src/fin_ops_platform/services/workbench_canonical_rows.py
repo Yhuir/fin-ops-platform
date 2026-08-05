@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from concurrent.futures import Future
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-import re
 from threading import Lock
 from typing import Any
 
@@ -15,11 +15,12 @@ from fin_ops_platform.services.bank_settings import (
     bank_auto_tag_rules_version_from_settings_payload,
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_best_source_link,
     oa_attachment_parent_oa_id,
 )
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
@@ -27,10 +28,12 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
-from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
-from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
+from fin_ops_platform.services.workbench_override_service import (
+    WorkbenchOverrideService,
+    is_legacy_workbench_exception_override,
+)
 from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
@@ -40,8 +43,6 @@ from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelat
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
-from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
@@ -577,7 +578,7 @@ class WorkbenchCanonicalRowsBuilder:
             for row_id in list(relation.get("row_ids") or [])
             if (normalized_row_id := str(row_id).strip())
         }
-        self._apply_workbench_overrides_and_exceptions(
+        self._apply_workbench_overrides(
             working_rows_by_id,
             formal_relation_row_ids=formal_relation_row_ids,
         )
@@ -709,7 +710,7 @@ class WorkbenchCanonicalRowsBuilder:
                 row["source_oa_id"] = oa_row_id
                 row["source_oa_row_id"] = oa_row_id
 
-    def _apply_workbench_overrides_and_exceptions(
+    def _apply_workbench_overrides(
         self,
         rows_by_id: dict[str, dict[str, Any]],
         *,
@@ -721,36 +722,16 @@ class WorkbenchCanonicalRowsBuilder:
         if not row_ids:
             return
         row_overrides = self._row_overrides_for_rows(row_ids)
-        exception_cases = self._active_exception_cases_for_rows(row_ids)
-        if not row_overrides and not exception_cases:
+        if not row_overrides:
             return
         override_service = WorkbenchOverrideService.from_snapshot(
             {"row_overrides": row_overrides}
         )
-        override_row_ids = set(row_overrides)
         for row_id in row_overrides:
             row = rows_by_id.get(row_id)
             if row is None:
                 continue
             rows_by_id[row_id] = override_service.apply_to_row(row)
-        for case_payload in exception_cases:
-            case_row_ids = [
-                str(row_id).strip()
-                for row_id in list(case_payload.get("row_ids") or [])
-                if str(row_id).strip() in row_ids
-                and str(row_id).strip() not in override_row_ids
-            ]
-            if not case_row_ids:
-                continue
-            projected_rows = override_service.apply_exception_projection(
-                case_payload,
-                [rows_by_id[row_id] for row_id in case_row_ids],
-                candidate_evidence=list(case_payload.get("candidate_evidence") or []),
-            )
-            for projected in projected_rows:
-                row_id = str(projected.get("id") or "").strip()
-                if row_id:
-                    rows_by_id[row_id] = projected
 
     def _row_overrides_for_rows(self, row_ids: set[str]) -> dict[str, dict[str, Any]]:
         if not row_ids:
@@ -769,30 +750,12 @@ class WorkbenchCanonicalRowsBuilder:
         for row in rows:
             row_id = str(row.get("row_id") or "").strip()
             payload = row_payload(row, "override_payload", "raw_payload")
-            if row_id and isinstance(payload, dict):
+            if (
+                row_id
+                and isinstance(payload, dict)
+                and not is_legacy_workbench_exception_override(payload)
+            ):
                 result[row_id] = payload
-        return result
-
-    def _active_exception_cases_for_rows(self, row_ids: set[str]) -> list[dict[str, Any]]:
-        if not row_ids:
-            return []
-        rows = self._connection.fetch_all(
-            """
-            select case_id, raw_payload
-            from app.workbench_exception_cases
-            where status = any(%s)
-              and row_ids && %s::text[]
-            order by updated_at, case_id
-            """,
-            (sorted(ACTIVE_CASE_STATUSES), sorted(row_ids)),
-        )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            payload = row_payload(row, "raw_payload")
-            if isinstance(payload, dict):
-                payload.setdefault("id", row.get("case_id"))
-                payload.setdefault("case_id", row.get("case_id"))
-                result.append(payload)
         return result
 
     @staticmethod

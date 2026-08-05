@@ -35,14 +35,19 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench import (
+    OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+    PostgresWorkbenchRepository,
+)
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
-from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_free_matching_engine import (
     RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
 )
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
-from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_override_service import (
+    WorkbenchOverrideService,
+    is_legacy_workbench_exception_override,
+)
 from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
@@ -287,8 +292,21 @@ class WorkbenchSqlProjectionBuilder:
             """
             select
               coalesce((select max(updated_at)::text from app.workbench_pair_relations), '') as pair_relations_updated_at,
-              coalesce((select max(updated_at)::text from app.workbench_exception_cases), '') as exception_cases_updated_at,
-              coalesce((select max(updated_at)::text from app.workbench_row_overrides), '') as row_overrides_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.workbench_exception_cases
+                where scenario = %s
+              ), '') as exception_cases_updated_at,
+              coalesce((
+                select max(updated_at)::text
+                from app.workbench_row_overrides
+                where coalesce(override_payload->>'projection_kind', '') <> 'exception_case'
+                  and override_payload->'handled_exception' is distinct from 'true'::jsonb
+                  and override_payload->'ignored' is distinct from 'true'::jsonb
+                  and not (override_payload ? 'exception_case_id')
+                  and coalesce(override_payload#>>'{relation,tone}', '') <> 'danger'
+                  and jsonb_typeof(override_payload->'processed_exception_summary') is distinct from 'object'
+              ), '') as row_overrides_updated_at,
               coalesce((
                 select max(updated_at)::text
                 from app.bank_transaction_relation_claims
@@ -336,7 +354,8 @@ class WorkbenchSqlProjectionBuilder:
                 order by updated_at desc
                 limit 1
               ), '{}'::jsonb) as settings_payload
-            """
+            """,
+            (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,),
         )
         payload = row if isinstance(row, dict) else {}
         return {
@@ -346,7 +365,9 @@ class WorkbenchSqlProjectionBuilder:
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
             "workbench_pair_relations_updated_at": str(payload.get("pair_relations_updated_at") or ""),
-            "workbench_exception_cases_updated_at": str(payload.get("exception_cases_updated_at") or ""),
+            "workbench_exception_cases_updated_at": str(
+                payload.get("exception_cases_updated_at") or ""
+            ),
             "workbench_row_overrides_updated_at": str(payload.get("row_overrides_updated_at") or ""),
             "oa_pending_payment_bank_claims_updated_at": str(
                 payload.get("oa_pending_payment_bank_claims_updated_at") or ""
@@ -449,19 +470,18 @@ class WorkbenchSqlProjectionBuilder:
                 from app.workbench_pair_relations relation
                 cross join lateral unnest(relation.row_ids) member(row_id)
             ),
-            exception_members as (
-                select exception.scope_month, exception.updated_at, member.row_id
-                from app.workbench_exception_cases exception
-                cross join lateral unnest(exception.row_ids) member(row_id)
-            ),
             override_members as (
                 select override.scope_month, override.updated_at, override.row_id
                 from app.workbench_row_overrides override
+                where coalesce(override.override_payload->>'projection_kind', '') <> 'exception_case'
+                  and override.override_payload->'handled_exception' is distinct from 'true'::jsonb
+                  and override.override_payload->'ignored' is distinct from 'true'::jsonb
+                  and not (override.override_payload ? 'exception_case_id')
+                  and coalesce(override.override_payload#>>'{relation,tone}', '') <> 'danger'
+                  and jsonb_typeof(override.override_payload->'processed_exception_summary') is distinct from 'object'
             ),
             proof_member_ids as (
                 select row_id from relation_members
-                union
-                select row_id from exception_members
                 union
                 select row_id from override_members
             ),
@@ -578,26 +598,14 @@ class WorkbenchSqlProjectionBuilder:
                 from scoped_relation_members
                 group by scope_month
             ),
-            exception_updates as (
-                select scopes.scope_month, exception.updated_at
+            anomaly_decision_versions as (
+                select scopes.scope_month,
+                       max(exception.updated_at)::text as exception_cases_updated_at
                 from requested_scopes scopes
                 join app.workbench_exception_cases exception
                   on exception.scope_month = scopes.scope_month
-                union all
-                select objects.source_scope_month, exception.updated_at
-                from exception_members exception
-                join resolved_member_objects objects on objects.row_id = exception.row_id
-                join requested_scopes scopes
-                  on scopes.scope_month = objects.source_scope_month
-                union all
-                select ids.scope_month, exception.updated_at
-                from active_relation_row_ids ids
-                join exception_members exception on exception.row_id = ids.row_id
-            ),
-            exception_versions as (
-                select scope_month, max(updated_at)::text as exception_cases_updated_at
-                from exception_updates
-                group by scope_month
+                 and exception.scenario = %s
+                group by scopes.scope_month
             ),
             override_updates as (
                 select scopes.scope_month, override.updated_at
@@ -775,7 +783,7 @@ class WorkbenchSqlProjectionBuilder:
               ) as settings_payload
             from requested_scopes scopes
             left join relation_versions relations using (scope_month)
-            left join exception_versions exceptions using (scope_month)
+            left join anomaly_decision_versions exceptions using (scope_month)
             left join override_versions overrides using (scope_month)
             left join claim_versions claims using (scope_month)
             left join bank_versions bank using (scope_month)
@@ -789,7 +797,7 @@ class WorkbenchSqlProjectionBuilder:
             left join etc_link_versions etc_link using (scope_month)
             order by scopes.scope_month
             """,
-            (scope_months,),
+            (scope_months, OA_INVOICE_AMOUNT_MISMATCH_SCENARIO),
         )
         payload_by_scope = {
             str(row.get("scope_key") or "").strip(): {
@@ -799,7 +807,9 @@ class WorkbenchSqlProjectionBuilder:
                 "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
                 "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                 "workbench_pair_relations_updated_at": str(row.get("pair_relations_updated_at") or ""),
-                "workbench_exception_cases_updated_at": str(row.get("exception_cases_updated_at") or ""),
+                "workbench_exception_cases_updated_at": str(
+                    row.get("exception_cases_updated_at") or ""
+                ),
                 "workbench_row_overrides_updated_at": str(row.get("row_overrides_updated_at") or ""),
                 "oa_pending_payment_bank_claims_updated_at": str(
                     row.get("oa_pending_payment_bank_claims_updated_at") or ""
@@ -1307,7 +1317,7 @@ class WorkbenchSqlProjectionBuilder:
             for row_id in list(relation.get("row_ids") or [])
             if (normalized_row_id := str(row_id).strip())
         }
-        self._apply_workbench_overrides_and_exceptions(
+        self._apply_workbench_overrides(
             working_rows_by_id,
             formal_relation_row_ids=formal_relation_row_ids,
         )
@@ -1456,7 +1466,7 @@ class WorkbenchSqlProjectionBuilder:
         )
         return _int_value(row.get("source_version") if isinstance(row, dict) else None, 0)
 
-    def _apply_workbench_overrides_and_exceptions(
+    def _apply_workbench_overrides(
         self,
         rows_by_id: dict[str, dict[str, Any]],
         *,
@@ -1468,36 +1478,16 @@ class WorkbenchSqlProjectionBuilder:
         if not row_ids:
             return
         row_overrides = self._row_overrides_for_rows(row_ids)
-        exception_cases = self._active_exception_cases_for_rows(row_ids)
-        if not row_overrides and not exception_cases:
+        if not row_overrides:
             return
         override_service = WorkbenchOverrideService.from_snapshot(
             {"row_overrides": row_overrides}
         )
-        override_row_ids = set(row_overrides)
         for row_id in row_overrides:
             row = rows_by_id.get(row_id)
             if row is None:
                 continue
             rows_by_id[row_id] = override_service.apply_to_row(row)
-        for case_payload in exception_cases:
-            case_row_ids = [
-                str(row_id).strip()
-                for row_id in list(case_payload.get("row_ids") or [])
-                if str(row_id).strip() in row_ids
-                and str(row_id).strip() not in override_row_ids
-            ]
-            if not case_row_ids:
-                continue
-            projected_rows = override_service.apply_exception_projection(
-                case_payload,
-                [rows_by_id[row_id] for row_id in case_row_ids],
-                candidate_evidence=list(case_payload.get("candidate_evidence") or []),
-            )
-            for projected in projected_rows:
-                row_id = str(projected.get("id") or "").strip()
-                if row_id:
-                    rows_by_id[row_id] = projected
 
     def _row_overrides_for_rows(self, row_ids: set[str]) -> dict[str, dict[str, Any]]:
         if not row_ids:
@@ -1516,30 +1506,12 @@ class WorkbenchSqlProjectionBuilder:
         for row in rows:
             row_id = str(row.get("row_id") or "").strip()
             payload = row_payload(row, "override_payload", "raw_payload")
-            if row_id and isinstance(payload, dict):
+            if (
+                row_id
+                and isinstance(payload, dict)
+                and not is_legacy_workbench_exception_override(payload)
+            ):
                 result[row_id] = payload
-        return result
-
-    def _active_exception_cases_for_rows(self, row_ids: set[str]) -> list[dict[str, Any]]:
-        if not row_ids:
-            return []
-        rows = self._connection.fetch_all(
-            """
-            select case_id, raw_payload
-            from app.workbench_exception_cases
-            where status = any(%s)
-              and row_ids && %s::text[]
-            order by updated_at, case_id
-            """,
-            (sorted(ACTIVE_CASE_STATUSES), sorted(row_ids)),
-        )
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            payload = row_payload(row, "raw_payload")
-            if isinstance(payload, dict):
-                payload.setdefault("id", row.get("case_id"))
-                payload.setdefault("case_id", row.get("case_id"))
-                result.append(payload)
         return result
 
     @staticmethod

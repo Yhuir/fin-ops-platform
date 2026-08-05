@@ -17,5 +17,6 @@
 | `RECON-WB-E2E-011` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 网络恢复、重试和幂等提交 |
 | `RECON-WB-E2E-012` | covered | `web/e2e/workbench-stale-error-flow.spec.ts`、`workbench-permissions-flow.spec.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchWriteGate.test.ts` | App Health/OA dirty 写安全 gate、选择区禁用原因、专属 OA 状态恢复与只读诊断 |
 | `RECON-WB-E2E-013` | covered | `web/e2e/workbench-cash-special-flow.spec.ts` | paired 现金特殊处理写链路及 barrier |
+| `RECON-WB-E2E-014` | covered | `tests/test_search_query.py`、`tests/test_workbench_routes.py`、`tests/test_workbench_sql_runtime.py` | OA、流水、发票统一搜索支持金额小数精度等价和 OA 完成时间别名 |
 
 剩余生产风险是实际数据量下的 P95/P99、真实外部 OA 延迟和发布后的全量 rehydrate 时长；由生产 SLO/Audit 处理，不通过增加第三种页面状态规避。

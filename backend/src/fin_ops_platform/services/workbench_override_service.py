@@ -10,6 +10,20 @@ from fin_ops_platform.services.workbench_exception_projection import (
 )
 
 
+def is_legacy_workbench_exception_override(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    relation = payload.get("relation")
+    return (
+        payload.get("projection_kind") == "exception_case"
+        or payload.get("handled_exception") is True
+        or payload.get("ignored") is True
+        or "exception_case_id" in payload
+        or isinstance(payload.get("processed_exception_summary"), dict)
+        or (isinstance(relation, dict) and relation.get("tone") == "danger")
+    )
+
+
 class WorkbenchOverrideService:
     def __init__(
         self,
