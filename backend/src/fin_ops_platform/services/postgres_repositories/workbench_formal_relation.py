@@ -26,6 +26,7 @@ from fin_ops_platform.services.workbench_text_normalization import normalize_mat
 
 
 _MATCHABLE_DIRECTIONS = {"expenditure", "income"}
+_CNY_ALIASES = frozenset({"CNY", "RMB", "人民币", "人民币元", "元"})
 _WEAK_SUBJECT_VALUES = frozenset(
     {
         normalize_match_text("云南溯源科技"),
@@ -675,7 +676,7 @@ def _oa_fact(
         canonical_object_identity=_required_identity(row),
         row_id=_required_row_id(row),
         amount_minor=_minor_units(row.get("amount")),
-        currency=text(row.get("currency")) or "CNY",
+        currency=_canonical_currency(row.get("currency")),
         direction=direction,
         fact_date=_date_value(fact_date_value),
         evidence_keys=evidence,
@@ -716,7 +717,7 @@ def _bank_fact(
         canonical_object_identity=_required_identity(row),
         row_id=_required_row_id(row),
         amount_minor=_minor_units(row.get("amount")),
-        currency=text(row.get("currency")) or "CNY",
+        currency=_canonical_currency(row.get("currency")),
         direction=direction,
         fact_date=_date_value(row.get("fact_date")),
         evidence_keys=evidence,
@@ -763,7 +764,7 @@ def _invoice_fact(
         canonical_object_identity=_required_identity(row),
         row_id=_required_row_id(row),
         amount_minor=abs(_minor_units(amount)),
-        currency=text(row.get("currency")) or "CNY",
+        currency=_canonical_currency(row.get("currency")),
         direction=direction,
         fact_date=_date_value(row.get("fact_date")),
         evidence_keys=evidence,
@@ -781,7 +782,7 @@ def _output_invoice_reversal_identity(
         return None, None
     seller_tax_no = _normalized_identifier(row.get("seller_tax_no"))
     buyer_tax_no = _normalized_identifier(row.get("buyer_tax_no"))
-    currency = str(row.get("currency") or "CNY").strip().upper()
+    currency = _canonical_currency(row.get("currency"))
     tax_rate = _decimal_value(row.get("tax_rate"))
     gross = _decimal_value(row.get("total_with_tax"))
     net = _decimal_value(row.get("amount"))
@@ -809,6 +810,11 @@ def _output_invoice_reversal_identity(
 
 def _normalized_identifier(value: Any) -> str:
     return "".join(character for character in str(value or "").upper() if character.isalnum())
+
+
+def _canonical_currency(value: Any) -> str:
+    currency = text(value).upper() or "CNY"
+    return "CNY" if currency in _CNY_ALIASES else currency
 
 
 def _references_from_payload(

@@ -21,7 +21,7 @@
 - `tests/test_workbench_idempotency_contract.py`
 - `tests/test_workbench_relation_sql_projection.py`
 - `tests/test_workbench_relation_read_facade.py`
-- `tests/test_workbench_formal_relation_repository.py`
+- `tests/test_workbench_formal_relation_repository.py`（含 OA/流水/发票人民币币种别名统一进入 `CNY` matching bucket）
 - `tests/test_workbench_matching_orchestrator.py`
 - `tests/test_workbench_relation_grouping.py`
 - `tests/test_workbench_v2_api.py`

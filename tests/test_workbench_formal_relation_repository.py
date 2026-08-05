@@ -7,7 +7,10 @@ import unittest
 from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
     PostgresWorkbenchFormalRelationFactRepository,
 )
-from fin_ops_platform.services.workbench_free_matching_engine import relation_fingerprint
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    WorkbenchFreeMatchingEngine,
+    relation_fingerprint,
+)
 
 
 class FakeConnection:
@@ -544,6 +547,49 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual({fact.direction for fact in result.facts}, {"expenditure"})
         self.assertTrue(all(fact.source_version.startswith("2026-05-") for fact in result.facts))
         self.assertNotIn("secret", repr(facts["invoice"]))
+
+    def test_renminbi_currency_aliases_share_the_canonical_matching_bucket(self) -> None:
+        oa = oa_row()
+        bank = bank_row()
+        invoice = invoice_row()
+        oa["currency"] = "人民币"
+        bank["currency"] = "人民币元"
+        invoice["currency"] = "rmb"
+
+        result = PostgresWorkbenchFormalRelationFactRepository(
+            FakeConnection(oa_rows=[oa], bank_rows=[bank], invoice_rows=[invoice])
+        ).load_batch(["2026-05"])
+
+        self.assertEqual({fact.currency for fact in result.facts}, {"CNY"})
+
+    def test_renminbi_bank_alias_can_complete_existing_daily_reimbursement_relation(self) -> None:
+        oa = oa_row(
+            "oa-exp-2363",
+            applicant="樊祖芳",
+            payload={"apply_type": "日常报销"},
+            approved_at=datetime(2026, 5, 8, tzinfo=timezone.utc),
+        )
+        bank = bank_row("txn_imported_1061", counterparty="樊祖芳")
+        bank["currency"] = "人民币元"
+        connection = FakeConnection(
+            oa_rows=[oa],
+            bank_rows=[bank],
+            invoice_rows=[invoice_row("inv-attachment")],
+            active_rows=[
+                {
+                    "case_id": "CASE-AUTO-0076EC3CA6BA0F837824",
+                    "row_ids": ["oa-exp-2363", "inv-attachment"],
+                    "row_types": ["oa", "invoice"],
+                }
+            ],
+        )
+
+        batch = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+        result = WorkbenchFreeMatchingEngine().plan_relations(batch)
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].target_case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
+        self.assertEqual(result.plans[0].rule_code, "strong_evidence_exact_singleton_extension")
 
     def test_daily_reimbursement_applicant_and_bank_payee_are_strong_employee_evidence(self) -> None:
         connection = FakeConnection(

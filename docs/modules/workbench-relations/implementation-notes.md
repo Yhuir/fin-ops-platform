@@ -4780,3 +4780,9 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 最小修复：active relation 仅缺一个 pane 时，先按 `(row_type, currency, direction, amount_minor)` 索引查找与任一既有 pane 合计相同的单笔，再复用原有强证据与 30/365 天窗口。只有候选和 owner case 均唯一才生成计划；重复同额、跨 case 争用、撤回指纹继续 fail closed。命中后该 case 不再进入组合搜索；未命中则保留原有一对多、多对一和多对多精确合计兜底。
 - 版本与边界：matching rule 升至 `2026-08-05-exact-singleton-first-v11`。没有新增 API、表、worker、queue、依赖、fallback 或第二事实源；全局建图资源受限时仍保留此前已经证明安全的 reversal/唯一单笔计划。
 - 回归：覆盖生产 747.06 OA+三张附件发票+同额流水形状、唯一单笔与同额多笔组合竞争、全局图预算耗尽后计划保留，并继续覆盖重复同额、跨 case 竞争、多笔精确合计与撤回。
+
+## 2026-08-05 - matching 币种事实归一
+
+- 真实原因：生产 747.06 银行流水的 canonical 币种值为 `人民币元`，OA 与附件发票为 `CNY`。旧事实 repository 原样输出币种，导致精确单笔和组合匹配都在金额、员工强证据与日期判断之前被分入不同币种桶；页面显示相同人民币金额，但 matching 零候选。
+- 最小修复：只在 `PostgresWorkbenchFormalRelationFactRepository` 的 OA、流水、发票事实 I/O 边界把已有人民币别名归一为 `CNY`，并复用同一归一值生成销项红蓝冲销 identity。未知币种保持大写原值并继续隔离，不修改 canonical 数据、UI、API、表、worker、queue 或关系写入合同。
+- 版本与回归：matching rule 升至 `2026-08-05-canonical-currency-v12` 触发 completed scope stale-scan；repository 测试覆盖 `人民币` / `人民币元` / `rmb` 同桶，原有不同真实币种 fail-closed、唯一单笔、一对多、多对一、多对多与撤回保护继续保留。
