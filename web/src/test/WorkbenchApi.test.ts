@@ -776,6 +776,8 @@ describe("workbench api bank amount mapping", () => {
                   type: "invoice",
                   seller_name: "供应商A",
                   total_with_tax: "99.00",
+                  derived_from_oa_id: "legacy-oa:item:1",
+                  source_oa_id: "oa-paired",
                   source_expense_item_id: "oa-paired:item:1",
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
@@ -824,6 +826,7 @@ describe("workbench api bank amount mapping", () => {
       categoryLabel: "手续费",
       categoryResolutionStatus: "manual_confirmed",
     });
+    expect(group.rows.invoice[0].sourceOaId).toBe("oa-paired");
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
     expect(group.oaInvoiceAnomaly).toMatchObject({ state: "ignored" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });

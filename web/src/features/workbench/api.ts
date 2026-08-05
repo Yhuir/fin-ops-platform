@@ -1445,14 +1445,14 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
 
 function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
   return firstNonPlaceholderDisplayValue(
-    row.derived_from_oa_id,
     row.source_oa_id,
     row.source_oa_row_id,
     row.oa_row_id,
-    row.detail_fields?.derived_from_oa_id,
+    row.derived_from_oa_id,
     row.detail_fields?.source_oa_id,
     row.detail_fields?.source_oa_row_id,
     row.detail_fields?.oa_row_id,
+    row.detail_fields?.derived_from_oa_id,
   );
 }
 
