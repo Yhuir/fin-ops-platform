@@ -582,7 +582,7 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
                     ),
                 ),
             )
-            for index, amount in enumerate((30_590, 23_166, 20_950))
+            for index, amount in enumerate((30_287, 22_937, 20_743))
         )
         bank = fact(
             "bank",
@@ -608,8 +608,40 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(plan.target_case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
         self.assertEqual(plan.case_id, "CASE-AUTO-0076EC3CA6BA0F837824")
         self.assertEqual(plan.rule_code, "strong_evidence_exact_extension")
-        self.assertEqual(plan.amount_minor, 74_706)
+        self.assertEqual(plan.amount_minor, 0)
         self.assertEqual(set(plan.row_types), {"oa", "bank", "invoice"})
+
+    def test_active_extension_rejects_new_pane_that_matches_no_anchor_total(self) -> None:
+        employee_evidence = (("employee_reimbursement_payee", "樊祖芳"),)
+        oa = fact("oa", "oa-active-mismatch", 74_706, evidence=employee_evidence)
+        invoice = fact(
+            "invoice",
+            "invoice-active-mismatch",
+            73_967,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="attachment_source",
+                    value="oa-active-mismatch:item:0",
+                    target_row_type="oa",
+                    target_identity="oa-active-mismatch",
+                ),
+            ),
+        )
+        bank = fact("bank", "bank-active-mismatch", 74_705, evidence=employee_evidence)
+        fixture = FormalRelationFactBatch(
+            facts=(oa, invoice, bank),
+            active_relations=(
+                ActiveFormalRelationAnchor(
+                    case_id="case:mismatch",
+                    member_keys=(oa.member_key, invoice.member_key),
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(fixture)
+
+        self.assertEqual(result.plans, ())
 
     def test_composite_extension_is_fail_closed_for_ambiguous_or_complete_relations(self) -> None:
         evidence = (("employee_reimbursement_payee", "樊祖芳"),)

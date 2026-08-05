@@ -34,7 +34,7 @@ active case + unique safe new members
  -> history records exact before/after
 ```
 
-不能把一个 active member 同时分配到两个 case。组合证据扩展对候选集合、跨 case 重叠、撤回 fingerprint 或资源预算任一项无法唯一证明时均零写；完整三栏 case 保持不变。
+不能把一个 active member 同时分配到两个 case。组合证据扩展要求新增缺失栏与已有至少一栏金额完全一致；已有其他栏的金额差异继续作为异常展示，不阻断精确配对。候选集合、跨 case 重叠、撤回 fingerprint 或资源预算任一项无法唯一证明时均零写；完整三栏 case 保持不变。
 
 ## 撤回
 

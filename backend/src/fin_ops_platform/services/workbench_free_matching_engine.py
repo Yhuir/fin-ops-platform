@@ -7,7 +7,7 @@ import json
 from typing import Iterable, Literal
 
 
-RULE_VERSION = "2026-08-05-employee-reimbursement-v7"
+RULE_VERSION = "2026-08-05-employee-reimbursement-v8"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -651,9 +651,10 @@ class WorkbenchFreeMatchingEngine:
                 ]
                 if not self._is_connected(full_members, selected_edges):
                     continue
-                if not self._safe_exact_closure(
-                    [facts_by_key[member] for member in full_members],
-                    selected_edges,
+                if not self._safe_active_extension_closure(
+                    anchor_facts=[facts_by_key[member] for member in anchor_members],
+                    new_facts=[facts_by_key[member] for member in new_members],
+                    edges=selected_edges,
                 ):
                     continue
                 candidates[new_members] = {edge.evidence_kind for edge in selected_edges}
@@ -805,6 +806,38 @@ class WorkbenchFreeMatchingEngine:
         for fact in facts:
             totals[fact.row_type] = totals.get(fact.row_type, 0) + fact.amount_minor
         if len(totals) < 2 or len(set(totals.values())) != 1:
+            return False
+        degree = {fact.member_key: 0 for fact in facts}
+        for edge in edges:
+            degree[edge.left] += 1
+            degree[edge.right] += 1
+        return all(value > 0 for value in degree.values())
+
+    @classmethod
+    def _safe_active_extension_closure(
+        cls,
+        *,
+        anchor_facts: list[FormalRelationFact],
+        new_facts: list[FormalRelationFact],
+        edges: list[_Edge],
+    ) -> bool:
+        facts = [*anchor_facts, *new_facts]
+        if cls._safe_exact_closure(facts, edges):
+            return True
+        if (
+            not anchor_facts
+            or not new_facts
+            or len({fact.row_type for fact in new_facts}) != 1
+            or len({fact.currency for fact in facts}) != 1
+            or len({fact.direction for fact in facts}) != 1
+            or any(fact.amount_minor <= 0 for fact in facts)
+        ):
+            return False
+        new_total = sum(fact.amount_minor for fact in new_facts)
+        anchor_totals: dict[str, int] = {}
+        for fact in anchor_facts:
+            anchor_totals[fact.row_type] = anchor_totals.get(fact.row_type, 0) + fact.amount_minor
+        if new_total not in anchor_totals.values():
             return False
         degree = {fact.member_key: 0 for fact in facts}
         for edge in edges:
