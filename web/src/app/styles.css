@@ -2038,50 +2038,37 @@ textarea {
 }
 
 .input-invoice-usage-oa-table {
-  width: 100%;
-  min-width: 760px;
-  border-collapse: collapse;
-  font-size: var(--fp-text-body);
+  --finance-table-row-height: 52px;
 }
 
-.input-invoice-usage-oa-table th,
-.input-invoice-usage-oa-table td {
-  border-bottom: 1px solid var(--fp-border);
-  padding: var(--fp-space-2) var(--fp-space-3);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.input-invoice-usage-oa-table th {
-  background: var(--fp-table-header-bg);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 900;
-}
-
-.input-invoice-usage-oa-table td {
-  color: var(--fp-text-primary);
-}
-
-.input-invoice-usage-oa-table tr:last-child td {
-  border-bottom: 0;
-}
-
-.input-invoice-usage-oa-table__select {
+.input-invoice-usage-oa-table .finance-table__column[data-column-role="selection"],
+.input-invoice-usage-oa-table .finance-table__cell[data-column-role="selection"] {
   width: 52px;
-  text-align: center;
 }
 
-.input-invoice-usage-oa-table__select input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--fp-primary);
+.input-invoice-usage-oa-table .finance-table__column[data-column-role="amount"],
+.input-invoice-usage-oa-table .finance-table__cell[data-column-role="amount"] {
+  width: 132px;
 }
 
+.input-invoice-usage-oa-table .finance-table__column[data-column-role="status"],
+.input-invoice-usage-oa-table .finance-table__cell[data-column-role="status"] {
+  width: 142px;
+}
+
+.input-invoice-usage-oa-table__invoice {
+  max-width: 280px;
+}
+
+.input-invoice-usage-oa-table__invoice .finance-cell-stack__primary,
 .input-invoice-usage-oa-table__amount {
-  text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
+}
+
+.input-invoice-usage-oa-table__date {
+  width: fit-content;
+  font-variant-numeric: tabular-nums;
 }
 
 .input-invoice-usage-oa-filter-header {

@@ -381,6 +381,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["invoiceCount"], 1)
         self.assertEqual(payload["totalWithTax"], "99.72")
+        self.assertEqual(payload["permissions"], {"canCreateDraft": True})
         self.assertTrue(payload["canCreateDraft"])
         self.assertEqual(payload["nextAction"], "create_batch")
         self.assertEqual(payload["invoiceRows"][0]["invoiceId"], "inv-preview")

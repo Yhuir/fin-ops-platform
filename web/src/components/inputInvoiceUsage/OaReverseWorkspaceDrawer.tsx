@@ -1,7 +1,18 @@
+import { Button, Checkbox, Chip } from "@heroui/react";
 import { Filter, Search, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
+import {
+  EmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+  TableCellStack,
+} from "../common/FinanceTable";
 import type {
   CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
   InputInvoiceUsageOaReverseBatch,
@@ -218,16 +229,23 @@ export default function OaReverseWorkspaceDrawer({
     setSelectedCandidateIds(selectableCandidateInvoices.map((invoice) => invoice.invoiceId));
   }, [candidateIdsKey]);
   const selectedCandidateIdSet = useMemo(() => new Set(selectedCandidateIds), [selectedCandidateIds]);
+  const selectedCandidateInvoices = useMemo(
+    () => selectableCandidateInvoices.filter((invoice) => selectedCandidateIdSet.has(invoice.invoiceId)),
+    [selectableCandidateInvoices, selectedCandidateIdSet],
+  );
+  const selectedPayeeResolvable = selectedCandidateInvoices.length === selectedCandidateIds.length
+    && selectedCandidateInvoices.length > 0
+    && selectedCandidateInvoices.every((invoice) => Boolean(invoice.sellerName.trim()))
+    && new Set(selectedCandidateInvoices.map((invoice) => invoice.sellerName.trim())).size === 1;
   const targetApplicants = preview?.targetApplicants ?? [];
   const selectedTargetApplicantCode = targetApplicantCode ?? preview?.targetApplicantCode ?? "";
   const canCreateDraft = Boolean(
     preview
     && createDraftFromSelection
     && preview.previewId
-    && (preview?.canCreateDraft ?? preview.nextAction === "create_oa_draft")
-    && selectedCandidateIds.length > 0
+    && selectedPayeeResolvable
     && !batch?.oaDraftUrl
-    && (preview?.permissions?.canCreateDraft ?? true),
+    && preview.permissions?.canCreateDraft === true,
   );
   const canConfirmSubmission = Boolean(batch && manualStatus && batch.oaDraftUrl && (batch.canConfirmSubmission ?? batch.status === "oa_draft_created"));
   const createDraftDisabled = Boolean(actionLoading) || !canCreateDraft;
@@ -235,10 +253,8 @@ export default function OaReverseWorkspaceDrawer({
     () => oaReverseHeaderNotices({
       error,
       feedback,
-      preview,
-      candidateInvoiceCount: candidateInvoices.length,
     }),
-    [candidateInvoices.length, error, feedback, preview],
+    [error, feedback],
   );
 
   const runBatchAction = (
@@ -289,8 +305,18 @@ export default function OaReverseWorkspaceDrawer({
           setSelectedCandidateIds(refreshedCandidateIds);
           selectedIds.splice(0, selectedIds.length, ...refreshedCandidateIds);
         }
-        if (!draftPreview.previewId || !draftPreview.previewHash || selectedIds.length === 0) {
-          throw new Error(draftPreview.unavailableReason || "当前选择没有可创建 OA 草稿的候选发票。");
+        if (
+          !draftPreview.previewId
+          || !draftPreview.previewHash
+          || selectedIds.length === 0
+          || draftPreview.permissions?.canCreateDraft !== true
+          || draftPreview.canCreateDraft !== true
+        ) {
+          throw new Error(
+            draftPreview.unavailableReason
+              || draftPreview.warnings?.[0]
+              || "当前选择没有可创建 OA 草稿的候选发票。",
+          );
         }
         return createDraftFromSelection({
           previewId: draftPreview.previewId,
@@ -485,25 +511,28 @@ export default function OaReverseWorkspaceDrawer({
                 <Section title="候选发票清单">
                   {candidateInvoices.length > 0 ? (
                     <div className="input-invoice-usage-oa-actions">
-                      <button
-                        className="input-invoice-usage-button"
-                        onClick={() => setSelectedCandidateIds(selectableCandidateInvoices.map((invoice) => invoice.invoiceId))}
-                        type="button"
+                      <Button
+                        onPress={() => setSelectedCandidateIds(selectableCandidateInvoices.map((invoice) => invoice.invoiceId))}
+                        size="sm"
+                        variant="secondary"
                       >
                         全选候选
-                      </button>
-                      <button className="input-invoice-usage-button" onClick={() => setSelectedCandidateIds([])} type="button">
+                      </Button>
+                      <Button onPress={() => setSelectedCandidateIds([])} size="sm" variant="secondary">
                         清空选择
-                      </button>
-                      <span className="input-invoice-usage-rules-tag">已选 {selectedCandidateIds.length} 张</span>
-                      <button
-                        className="input-invoice-usage-button input-invoice-usage-button--primary"
-                        disabled={createDraftDisabled}
-                        onClick={handleCreateDraft}
-                        type="button"
+                      </Button>
+                      <Chip color="default" size="sm" variant="soft">
+                        <Chip.Label>已选 {selectedCandidateIds.length} 张</Chip.Label>
+                      </Chip>
+                      <Button
+                        isDisabled={createDraftDisabled}
+                        isPending={actionLoading === "createDraft"}
+                        onPress={handleCreateDraft}
+                        size="sm"
+                        variant="primary"
                       >
                         {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
-                      </button>
+                      </Button>
                       <label className="input-invoice-usage-rules-field input-invoice-usage-oa-search">
                         <span>搜索</span>
                         <span className="input-invoice-usage-oa-search-control">
@@ -519,16 +548,13 @@ export default function OaReverseWorkspaceDrawer({
                       </label>
                     </div>
                   ) : null}
-                  <div className="input-invoice-usage-rules-table-shell">
-                    <table aria-label="反提 OA 候选发票清单" className="input-invoice-usage-oa-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">选择</th>
-                          <th scope="col">发票号码</th>
-                          <th scope="col">销方</th>
-                          <th scope="col">开票日期</th>
-                          <th scope="col">价税合计</th>
-                          <th scope="col">
+                  <FinanceTable ariaLabel="反提 OA 候选发票清单" className="input-invoice-usage-oa-table" minWidth={680}>
+                    <FinanceTableHeader>
+                      <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="identity" isRowHeader>发票号码</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="account">销方</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="amount">价税合计</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="status">
                             <div className="input-invoice-usage-oa-filter-header">
                               <span>OA 关联</span>
                               <div className="input-invoice-usage-oa-filter-menu">
@@ -567,29 +593,42 @@ export default function OaReverseWorkspaceDrawer({
                                 ) : null}
                               </div>
                             </div>
-                          </th>
-                          <th scope="col">状态</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleCandidateInvoices.map((invoice) => (
-                          <tr key={invoice.invoiceId}>
-                            <td className="input-invoice-usage-oa-table__select">
-                              <input
+                      </FinanceTableColumn>
+                    </FinanceTableHeader>
+                    <FinanceTableBody>
+                      {visibleCandidateInvoices.length === 0 ? (
+                        <FinanceTableRow id="oa-reverse-empty" textValue="当前筛选下暂无发票">
+                          <FinanceTableCell columnRole="selection"><EmptyValue /></FinanceTableCell>
+                          <FinanceTableCell columnRole="identity">当前筛选下暂无发票。</FinanceTableCell>
+                          <FinanceTableCell columnRole="account"><EmptyValue /></FinanceTableCell>
+                          <FinanceTableCell columnRole="amount"><EmptyValue /></FinanceTableCell>
+                          <FinanceTableCell columnRole="status"><EmptyValue /></FinanceTableCell>
+                        </FinanceTableRow>
+                      ) : null}
+                      {visibleCandidateInvoices.map((invoice) => {
+                        const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
+                        return (
+                          <FinanceTableRow
+                            id={invoice.invoiceId}
+                            key={invoice.invoiceId}
+                            textValue={`${invoiceNumber} ${invoice.issueDate} ${invoice.sellerName} ${invoice.totalWithTax} ${oaRelationChipLabel(invoice.oaRelationStatus)}`}
+                          >
+                            <FinanceTableCell columnRole="selection" className="input-invoice-usage-oa-table__select">
+                              <Checkbox
                                 aria-label={
                                   invoice.selectable
-                                    ? `选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}`
-                                    : `${oaRelationDisabledLabel(invoice.oaRelationStatus)} ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId} 不可选择`
+                                    ? `选择候选发票 ${invoiceNumber}`
+                                    : `${oaRelationDisabledLabel(invoice.oaRelationStatus)} ${invoiceNumber} 不可选择`
                                 }
-                                checked={selectedCandidateIdSet.has(invoice.invoiceId)}
-                                disabled={!invoice.selectable}
-                                onChange={(event) => {
+                                isDisabled={!invoice.selectable}
+                                isSelected={selectedCandidateIdSet.has(invoice.invoiceId)}
+                                onChange={(selected) => {
                                   setSelectedCandidateIds((current) => {
                                     if (!invoice.selectable) {
                                       return current;
                                     }
                                     const next = new Set(current);
-                                    if (event.target.checked) {
+                                    if (selected) {
                                       next.add(invoice.invoiceId);
                                     } else {
                                       next.delete(invoice.invoiceId);
@@ -599,29 +638,43 @@ export default function OaReverseWorkspaceDrawer({
                                       .filter((invoiceId) => next.has(invoiceId));
                                   });
                                 }}
-                                type="checkbox"
+                              >
+                                <Checkbox.Control>
+                                  <Checkbox.Indicator />
+                                </Checkbox.Control>
+                              </Checkbox>
+                            </FinanceTableCell>
+                            <FinanceTableCell columnRole="identity" textValue={invoiceNumber}>
+                              <TableCellStack
+                                className="input-invoice-usage-oa-table__invoice"
+                                primary={invoiceNumber}
+                                secondary={invoice.issueDate ? (
+                                  <Chip className="input-invoice-usage-oa-table__date" color="default" size="sm" variant="soft">
+                                    <Chip.Label>{invoice.issueDate}</Chip.Label>
+                                  </Chip>
+                                ) : undefined}
                               />
-                            </td>
-                            <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
-                            <td>{invoice.sellerName || "-"}</td>
-                            <td>{invoice.issueDate || "-"}</td>
-                            <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
-                            <td>
-                              <span className={oaRelationChipClassName(invoice.oaRelationStatus)}>
-                                {oaRelationChipLabel(invoice.oaRelationStatus)}
-                              </span>
-                            </td>
-                            <td>{invoice.rejectedReason || invoice.paymentStatusLabel || "候选"}</td>
-                          </tr>
-                        ))}
-                        {visibleCandidateInvoices.length === 0 ? (
-                          <tr>
-                            <td colSpan={7}>当前筛选下暂无发票。</td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
+                            </FinanceTableCell>
+                            <FinanceTableCell columnRole="account" textValue={invoice.sellerName || "-"}>
+                              {invoice.sellerName || <EmptyValue />}
+                            </FinanceTableCell>
+                            <FinanceTableCell columnRole="amount" className="input-invoice-usage-oa-table__amount" textValue={invoice.totalWithTax}>
+                              {formatMoney(invoice.totalWithTax, "-")}
+                            </FinanceTableCell>
+                            <FinanceTableCell columnRole="status" textValue={oaRelationChipLabel(invoice.oaRelationStatus)}>
+                              <Chip
+                                color={invoice.oaRelationStatus === "linked" ? "warning" : "success"}
+                                size="sm"
+                                variant="soft"
+                              >
+                                <Chip.Label>{oaRelationChipLabel(invoice.oaRelationStatus)}</Chip.Label>
+                              </Chip>
+                            </FinanceTableCell>
+                          </FinanceTableRow>
+                        );
+                      })}
+                    </FinanceTableBody>
+                  </FinanceTable>
                 </Section>
               </>
             ) : null}
@@ -662,13 +715,6 @@ function oaRelationChipLabel(value: OaRelationStatus) {
     return "已关联oa";
   }
   return "未关联oa";
-}
-
-function oaRelationChipClassName(value: OaRelationStatus) {
-  if (value === "linked") {
-    return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning";
-  }
-  return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success";
 }
 
 function oaRelationDisabledLabel(value: OaRelationStatus) {
@@ -712,13 +758,9 @@ type OaReverseHeaderNotice = {
 function oaReverseHeaderNotices({
   error,
   feedback,
-  preview,
-  candidateInvoiceCount,
 }: {
   error: string | null;
   feedback: string | null;
-  preview: OaReversePreviewPayload | null;
-  candidateInvoiceCount: number;
 }) {
   const notices: OaReverseHeaderNotice[] = [];
   if (error) {
@@ -726,12 +768,6 @@ function oaReverseHeaderNotices({
   }
   if (feedback) {
     notices.push({ tone: "success", text: feedback });
-  }
-  for (const warning of preview?.warnings ?? []) {
-    notices.push({ tone: "info", text: warning });
-  }
-  if (preview && !(preview.canCreateDraft ?? preview.nextAction === "create_oa_draft")) {
-    notices.push({ tone: "info", text: previewUnavailableMessage(preview, candidateInvoiceCount) });
   }
   return notices;
 }
@@ -837,16 +873,6 @@ function upsertStagedDraft(
   batch: InputInvoiceUsageOaReverseBatch,
 ) {
   return [batch, ...current.filter((item) => item.batchId !== batch.batchId)];
-}
-
-function previewUnavailableMessage(preview: OaReversePreviewPayload, candidateCount: number) {
-  if (preview.unavailableReason) {
-    return preview.unavailableReason;
-  }
-  if (candidateCount > 0 || preview.nextAction === "create_batch") {
-    return "当前账户或预览状态暂不允许创建 OA 草稿。";
-  }
-  return "当前预览未返回可创建 OA 草稿的候选发票。";
 }
 
 function createIdempotencyKey(prefix: string) {

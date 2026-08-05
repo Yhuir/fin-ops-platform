@@ -198,6 +198,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(preview["groups"][0]["rejectedInvoices"], preview["rejectedInvoices"])
         self.assertTrue(str(preview["previewId"]).startswith("oa_reverse_preview_"))
         self.assertEqual(len(str(preview["previewHash"])), 64)
+        self.assertEqual(preview["permissions"], {"canCreateDraft": True})
         self.assertTrue(preview["canCreateDraft"])
         self.assertEqual(preview["nextAction"], "create_batch")
 
@@ -311,6 +312,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
 
         self.assertFalse(preview["payeeResolvable"])
         self.assertFalse(preview["canCreateDraft"])
+        self.assertEqual(preview["permissions"], {"canCreateDraft": True})
         self.assertEqual(preview["sellerNames"], ["供应商", "另一供应商"])
         self.assertTrue(preview["warnings"])
 

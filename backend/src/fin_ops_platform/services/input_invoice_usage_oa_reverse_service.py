@@ -394,6 +394,7 @@ class InputInvoiceUsageOaReverseService:
             "sellerNames": seller_names,
             "payeeResolvable": payee_resolvable,
             "warnings": warnings,
+            "permissions": {"canCreateDraft": bool(can_create_draft)},
             "canCreateDraft": can_submit,
             "nextAction": "create_batch" if can_submit else "no_valid_candidates",
         }

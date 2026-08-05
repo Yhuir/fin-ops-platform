@@ -411,8 +411,8 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       expect(previewPayload.can_create_draft ?? previewPayload.canCreateDraft).toBe(false);
       const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
       await expect(workflow).toBeVisible();
-      await expect(page.getByLabel("以发票反提 OA 提示").getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
-      await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
+      await expect(page.getByLabel("以发票反提 OA 提示")).toHaveCount(0);
+      await expect(workflow.getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible();
       await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page, [/^全选候选$/, /^清空选择$/]);
       await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();

@@ -3704,7 +3704,7 @@ function inputInvoiceOaReversePreviewPayload(
     ],
     rejected_invoices: rejectedRelationInvoices,
     can_create_draft: canCreateDraft,
-    next_action: canCreateDraft ? "create_oa_draft" : "read_only",
+    next_action: canCreateDraft ? "create_batch" : "no_valid_candidates",
     permissions: { can_create_draft: canCreateDraft, can_manual_status: canCreateDraft },
   };
 }

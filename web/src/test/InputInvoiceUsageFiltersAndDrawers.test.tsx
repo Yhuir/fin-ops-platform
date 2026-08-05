@@ -376,7 +376,8 @@ describe("Input invoice usage workflow drawers", () => {
             reason: "发票已有 active OA 关系",
           }],
           canCreateDraft: true,
-          nextAction: "create_oa_draft",
+          nextAction: "create_batch",
+          permissions: { canCreateDraft: true },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft") {
@@ -476,6 +477,7 @@ describe("Input invoice usage workflow drawers", () => {
       reasonCode: "already_has_active_oa",
     });
     expect(preview.groups[0].rejectedInvoices?.[0].paymentStatusLabel).toBe("已关联 OA");
+    expect(preview.permissions?.canCreateDraft).toBe(true);
     expect(batch.invoiceIds).toEqual(["inv-backend-1"]);
     expect(batch.invoiceRows[0].displayNo).toBe("SD-BACKEND-1");
     expect(batch.previewSummary?.totalWithTax).toBe("88.00");
@@ -535,6 +537,15 @@ describe("Input invoice usage workflow drawers", () => {
     canCreateDraft: false,
     nextAction: "create_batch",
   };
+  const createReadyPreviewPayload: OaReversePreviewPayload = {
+    ...previewPayload,
+    canCreateDraft: true,
+    permissions: { canCreateDraft: true },
+    groups: previewPayload.groups.map((group) => ({
+      ...group,
+      invoiceRows: group.invoiceRows?.map((invoice) => ({ ...invoice, sellerName: "昆明供应商一" })),
+    })),
+  };
 
   test("OA reverse drawer calls loadPreview after opening and hides rejected invoice reasons to keep the workspace compact", async () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
@@ -567,13 +578,16 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getAllByText("陈秀云").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("chen_xiuyun")).not.toBeInTheDocument();
     expect(screen.queryByText("目标 OA 分组")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("以发票反提 OA 提示")).toHaveTextContent("当前账户或预览状态暂不允许创建 OA 草稿。");
+    expect(screen.queryByLabelText("以发票反提 OA 提示")).not.toBeInTheDocument();
     expect(screen.queryByText("不可提交原因")).not.toBeInTheDocument();
     expect(screen.queryByText("缺少目标 OA 账号")).not.toBeInTheDocument();
     expect(screen.queryByText("create_batch")).not.toBeInTheDocument();
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商一")).toBeInTheDocument();
     expect(screen.getByText("2026-05-02")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "开票日期" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "状态" })).not.toBeInTheDocument();
+    expect(within(screen.getByText("SD-INV-002").closest("td") as HTMLElement).getByText("2026-05-02")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
     const candidateSection = screen.getByRole("heading", { name: "候选发票清单" }).closest("section") as HTMLElement;
@@ -618,14 +632,13 @@ describe("Input invoice usage workflow drawers", () => {
     const user = userEvent.setup();
     const initialPreview: OaReversePreviewPayload = {
       ...previewPayload,
-      canCreateDraft: true,
-      nextAction: "create_oa_draft",
       permissions: { canCreateDraft: true },
     };
     const refreshedPreview: OaReversePreviewPayload = {
       ...initialPreview,
       previewId: "oa_reverse_preview_subset_001",
       previewHash: "preview-hash-subset-001",
+      canCreateDraft: true,
       invoiceCount: 1,
       totalWithTax: "49.86",
       groups: [{
@@ -725,7 +738,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse drawer creates draft from current preview when the candidate set is unchanged", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_fast_create",
       version: 2,
@@ -756,8 +769,8 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
 
     await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
-      previewId: previewPayload.previewId,
-      expectedPreviewHash: previewPayload.previewHash,
+      previewId: createReadyPreviewPayload.previewId,
+      expectedPreviewHash: createReadyPreviewPayload.previewHash,
       selectedInvoiceIds: ["inv-001", "inv-002"],
     })));
     expect(loadPreview).toHaveBeenCalledTimes(1);
@@ -765,12 +778,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse draft confirmation stays open across parent rerenders until the user decides", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({
-      ...previewPayload,
-      canCreateDraft: true,
-      nextAction: "create_oa_draft",
-      permissions: { canCreateDraft: true },
-    }));
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_persistent_dialog",
       version: 2,
@@ -831,7 +839,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse staged tab recovers a draft after closing confirmation without exposing draft link", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const stagedBatch = {
       batchId: "oa_reverse_batch_staged",
       version: 2,
@@ -901,15 +909,15 @@ describe("Input invoice usage workflow drawers", () => {
   test("OA reverse drawer marks linked OA invoices as disabled and filters by OA relation status", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve({
-      ...previewPayload,
+      ...createReadyPreviewPayload,
       canCreateDraft: true,
       nextAction: "create_oa_draft",
       permissions: { canCreateDraft: true },
       groups: [{
-        ...previewPayload.groups[0],
+        ...createReadyPreviewPayload.groups[0],
         invoiceCount: 1,
         totalWithTax: "49.86",
-        invoiceRows: previewPayload.groups[0].invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
+        invoiceRows: createReadyPreviewPayload.groups[0].invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
         candidateInvoiceIds: ["inv-001"],
         rejectedInvoices: [{
           invoiceId: "inv-linked-oa",
@@ -945,7 +953,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByRole("checkbox", { name: "已关联 OA 发票 SD-INV-LINKED 不可选择" })).toBeDisabled();
     await waitFor(() => {
       expect(screen.getByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
-      expect(screen.getByText((_content, node) => node?.textContent === "已选 1 张")).toBeInTheDocument();
+      expect(screen.getAllByText((_content, node) => node?.textContent === "已选 1 张").length).toBeGreaterThan(0);
     });
 
     await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
@@ -968,16 +976,14 @@ describe("Input invoice usage workflow drawers", () => {
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn((request) => Promise.resolve({
-      ...previewPayload,
+      ...createReadyPreviewPayload,
       targetApplicantCode: request.targetApplicantCode || "chen_xiuyun",
       targetApplicantName: request.targetApplicantCode === "zhou_jieying" ? "周洁莹" : "陈秀云",
       groups: [{
-        ...previewPayload.groups[0],
+        ...createReadyPreviewPayload.groups[0],
         targetApplicantCode: request.targetApplicantCode || "chen_xiuyun",
         targetApplicantName: request.targetApplicantCode === "zhou_jieying" ? "周洁莹" : "陈秀云",
       }],
-      canCreateDraft: true,
-      permissions: { canCreateDraft: true },
     }));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_target",
@@ -1027,23 +1033,21 @@ describe("Input invoice usage workflow drawers", () => {
       callCount += 1;
       previewSignals.push(request.signal as AbortSignal);
       if (callCount === 1) {
-        return Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } });
+        return Promise.resolve(createReadyPreviewPayload);
       }
       if (callCount === 2) {
         return new Promise<OaReversePreviewPayload>(() => undefined);
       }
       return Promise.resolve({
-        ...previewPayload,
+        ...createReadyPreviewPayload,
         previewHash: "preview-hash-returned-to-chen",
         targetApplicantCode: "chen_xiuyun",
         targetApplicantName: "陈秀云",
         groups: [{
-          ...previewPayload.groups[0],
+          ...createReadyPreviewPayload.groups[0],
           targetApplicantCode: "chen_xiuyun",
           targetApplicantName: "陈秀云",
         }],
-        canCreateDraft: true,
-        permissions: { canCreateDraft: true },
       });
     });
 
@@ -1080,7 +1084,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse not-submitted confirmation returns to create state without visible rollback history", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_not_submitted",
       version: 2,
@@ -1140,7 +1144,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse submitted tab renders compact business history without internal identifiers", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const loadSubmittedHistory = vi.fn(() => Promise.resolve({
       items: [{
         batchId: "batch-hidden",
