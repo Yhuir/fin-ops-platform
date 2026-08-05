@@ -146,7 +146,14 @@ test.describe("batch accounting browser flow", () => {
         height: style.height,
       };
     });
-    expect(await actionButtonStyle(tagRulesButton)).toEqual(await actionButtonStyle(refreshButton));
+    const tagRulesButtonStyle = await actionButtonStyle(tagRulesButton);
+    expect(tagRulesButtonStyle).toEqual(await actionButtonStyle(refreshButton));
+    expect(tagRulesButtonStyle).toMatchObject({
+      backgroundColor: "rgb(255, 255, 255)",
+      borderRadius: "6px",
+      fontSize: "14px",
+      height: "34px",
+    });
 
     const headerBox = await bankHeader.boundingBox();
     const titleBox = await title.boundingBox();

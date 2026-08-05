@@ -4961,6 +4961,18 @@ textarea {
   grid-template-columns: minmax(360px, clamp(360px, 32vw, 520px)) minmax(0, 1fr);
 }
 
+.batch-accounting-page-action {
+  min-height: 34px;
+  border-color: var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-primary-hover);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.2;
+  padding-inline: var(--fp-space-3);
+}
+
 .batch-accounting-button {
   display: inline-flex;
   min-height: 34px;

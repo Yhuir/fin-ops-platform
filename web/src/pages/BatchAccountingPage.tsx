@@ -634,10 +634,11 @@ export default function BatchAccountingPage() {
       titleAccessory={titleAccessory}
       actions={(
         <div className="batch-accounting-page-actions">
-          <Button onPress={handleOpenTagRules} size="sm" variant="outline">
+          <Button className="batch-accounting-page-action" onPress={handleOpenTagRules} size="sm" variant="outline">
             批量账务标签规则
           </Button>
           <Button
+            className="batch-accounting-page-action"
             isDisabled={loading}
             onPress={() => loadData()}
             size="sm"
