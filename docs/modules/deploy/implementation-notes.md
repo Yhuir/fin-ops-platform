@@ -189,3 +189,4 @@
 
 - `finops-deploy-control import-audit-repair` 固定调用 release 内 module，不开放任意 SQL/shell。
 - dry-run 为 repeatable-read read-only snapshot；execute 要求相同 SHA-256 fingerprint，并在 serializable advisory-lock 事务内只写 import rows 与 source-batch 一致的 invoice totals。
+- 2026-08-05：复用同一固定工具增加显式 `--retire-etc-session-id`，只解决已删除 ETC task 遗留严格 session 阻断发布的生命周期冲突；保留全部 session/附件证据，写入前绑定 task deleted、稳定 session、零活动 job/outbox 与 snapshot fingerprint，禁止任意 SQL、扫描式目标或门禁豁免。

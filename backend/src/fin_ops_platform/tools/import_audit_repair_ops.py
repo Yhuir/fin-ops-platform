@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-fingerprint")
     parser.add_argument("--batch-id")
     parser.add_argument("--file-id")
+    parser.add_argument("--retire-etc-session-id", action="append", default=[])
     return parser
 
 
@@ -35,6 +36,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         raise SystemExit("--execute requires --expected-fingerprint from a dry run")
     if bool(args.batch_id) != bool(args.file_id):
         raise SystemExit("--batch-id and --file-id must be provided together")
+    if args.retire_etc_session_id and args.batch_id:
+        raise SystemExit("ETC session retirement cannot be combined with batch/file lifecycle repair")
     connection = PostgresConnection(PostgresSettings.from_env())
     if args.dry_run:
         with connection.transaction() as transaction:
@@ -44,6 +47,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     transaction,
                     lifecycle_batch_id=args.batch_id,
                     lifecycle_file_id=args.file_id,
+                    etc_deleted_task_session_ids=args.retire_etc_session_id,
                 )
             )
         report = public_repair_report(plan, mode="dry_run", written=False)
@@ -56,6 +60,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     transaction,
                     lifecycle_batch_id=args.batch_id,
                     lifecycle_file_id=args.file_id,
+                    etc_deleted_task_session_ids=args.retire_etc_session_id,
                 )
             )
             if plan["source_fingerprint"] != args.expected_fingerprint:

@@ -11,26 +11,47 @@ def load_import_audit_repair_snapshot(
     *,
     lifecycle_batch_id: str | None = None,
     lifecycle_file_id: str | None = None,
+    etc_deleted_task_session_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    requested_session_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in etc_deleted_task_session_ids or []
+            if str(value or "").strip()
+        }
+    )
+    if requested_session_ids:
+        return {
+            "bank_files": [],
+            "bank_transactions": [],
+            "bank_rows": [],
+            "invoice_rows": [],
+            "etc_session_retirement_requested": [
+                {"session_id": session_id} for session_id in requested_session_ids
+            ],
+            "etc_session_retirement_targets": connection.fetch_all(
+                _ETC_SESSION_RETIREMENT_TARGET_SQL,
+                (requested_session_ids,),
+            ),
+        }
     snapshot = {
         "bank_files": connection.fetch_all(_BANK_FILE_SQL),
         "bank_transactions": connection.fetch_all(_BANK_TRANSACTION_SQL),
         "bank_rows": connection.fetch_all(_BANK_ROW_SQL),
         "invoice_rows": connection.fetch_all(_INVOICE_ROW_SQL),
     }
-    if not lifecycle_batch_id or not lifecycle_file_id:
-        return snapshot
-    targets = connection.fetch_all(_LIFECYCLE_TARGET_SQL, (lifecycle_batch_id, lifecycle_file_id))
-    session_id = str(targets[0].get("session_id") or "").strip() if len(targets) == 1 else ""
-    snapshot.update(
-        {
-            "lifecycle_requested": [{"batch_id": lifecycle_batch_id, "file_id": lifecycle_file_id}],
-            "lifecycle_targets": targets,
-            "lifecycle_jobs": connection.fetch_all(_LIFECYCLE_JOB_SQL, (session_id, lifecycle_file_id)),
-            "lifecycle_row_evidence": connection.fetch_all(_LIFECYCLE_ROW_EVIDENCE_SQL, (lifecycle_batch_id,)),
-            "lifecycle_row_links": connection.fetch_all(_LIFECYCLE_ROW_LINK_SQL, (lifecycle_batch_id,)),
-        }
-    )
+    if lifecycle_batch_id and lifecycle_file_id:
+        targets = connection.fetch_all(_LIFECYCLE_TARGET_SQL, (lifecycle_batch_id, lifecycle_file_id))
+        session_id = str(targets[0].get("session_id") or "").strip() if len(targets) == 1 else ""
+        snapshot.update(
+            {
+                "lifecycle_requested": [{"batch_id": lifecycle_batch_id, "file_id": lifecycle_file_id}],
+                "lifecycle_targets": targets,
+                "lifecycle_jobs": connection.fetch_all(_LIFECYCLE_JOB_SQL, (session_id, lifecycle_file_id)),
+                "lifecycle_row_evidence": connection.fetch_all(_LIFECYCLE_ROW_EVIDENCE_SQL, (lifecycle_batch_id,)),
+                "lifecycle_row_links": connection.fetch_all(_LIFECYCLE_ROW_LINK_SQL, (lifecycle_batch_id,)),
+            }
+        )
     return snapshot
 
 
@@ -79,6 +100,18 @@ def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
             raise RuntimeError(f"Import batch {batch_id} lifecycle precondition changed.")
         if connection.execute(_LIFECYCLE_FILE_UPDATE_SQL, (batch_id, file_id, batch_id)) != 1:
             raise RuntimeError(f"Import file {file_id} lifecycle precondition changed.")
+    for repair in list(plan.get("etc_session_retirements") or []):
+        affected = connection.execute(
+            _ETC_SESSION_RETIREMENT_UPDATE_SQL,
+            (
+                repair["after_revision"],
+                repair["session_id"],
+                repair["task_id"],
+                repair["session_status"],
+            ),
+        )
+        if affected != 1:
+            raise RuntimeError(f"ETC import session {repair['session_id']} retirement precondition changed.")
 
 
 _BANK_FILE_SQL = """
@@ -336,4 +369,70 @@ where coalesce(legacy_mongo_id, id::text) = %s
   and nullif(raw_payload->'normalized_payload'->>'batch_id', '') is null
   and raw_payload->'normalized_payload'->>'preview_batch_id' = %s
   and raw_payload->'normalized_payload'->>'session_status' = 'preview_ready'
+"""
+
+_ETC_SESSION_RETIREMENT_TARGET_SQL = """
+select session.session_id,
+       session.audit_contract_revision,
+       session.status as session_status,
+       session.task_id,
+       task.status as task_status,
+       task.raw_payload as task_raw_payload,
+       count(distinct job.id) filter (
+           where job.status in ('pending', 'processing')
+       )::bigint as active_job_count,
+       count(distinct event.id) filter (
+           where event.status in ('pending', 'processing', 'publishing', 'failed', 'dead_lettered')
+       )::bigint as active_outbox_count
+from app.etc_import_sessions session
+join app.etc_reconciliation_tasks task on task.task_id = session.task_id
+left join job.import_jobs job
+  on job.import_type = 'etc_invoice_import.confirm'
+ and job.import_session_id = session.session_id
+left join job.outbox_events event
+  on event.event_type = 'import.process.requested'
+ and event.aggregate_type = 'import_job'
+ and event.aggregate_id = job.id::text
+where session.session_id = any(%s)
+group by session.session_id, session.audit_contract_revision, session.status,
+         session.task_id, task.status, task.raw_payload
+order by session.session_id
+"""
+
+_ETC_SESSION_RETIREMENT_UPDATE_SQL = """
+update app.etc_import_sessions session
+set audit_contract_revision = %s,
+    updated_at = now()
+where session.session_id = %s
+  and session.task_id = %s
+  and session.status = %s
+  and session.audit_contract_revision = 'etc-import-page-audit.v1'
+  and exists (
+      select 1
+      from app.etc_reconciliation_tasks task
+      where task.task_id = session.task_id
+        and task.status = 'deleted'
+        and coalesce(
+            task.raw_payload->'normalized_payload'->>'status',
+            task.raw_payload->>'status'
+        ) = 'deleted'
+  )
+  and not exists (
+      select 1
+      from job.import_jobs job
+      where job.import_type = 'etc_invoice_import.confirm'
+        and job.import_session_id = session.session_id
+        and job.status in ('pending', 'processing')
+  )
+  and not exists (
+      select 1
+      from job.import_jobs job
+      join job.outbox_events event
+        on event.event_type = 'import.process.requested'
+       and event.aggregate_type = 'import_job'
+       and event.aggregate_id = job.id::text
+      where job.import_type = 'etc_invoice_import.confirm'
+        and job.import_session_id = session.session_id
+        and event.status in ('pending', 'processing', 'publishing', 'failed', 'dead_lettered')
+  )
 """

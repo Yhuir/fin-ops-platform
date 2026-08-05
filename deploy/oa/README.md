@@ -543,6 +543,8 @@ sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --d
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --batch-id <batch-id> --file-id <file-id>
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --retire-etc-session-id <session-id> [--retire-etc-session-id <session-id> ...]
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
@@ -560,6 +562,11 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为
 `completed/confirmed`，并按 batch + source identity 一对一恢复被旧 preview 清空的 import row link。
 它不修改 canonical invoice/source-link，不扫描或修改其它生命周期记录，也不重新发布 read model 事件。
+当 ETC 对账任务已正式删除、导入 job/outbox 已完全收敛，但其严格导入 session 仍保留历史证据时，
+可以显式重复传入精确 `--retire-etc-session-id`。工具只把这些 session 的审计 revision 原子标记为
+`etc-import-page-audit.v1.deleted-task-retired`，不删除 session、ZIP 文件关系、对象文件或导入结果；
+task 未处于 canonical/payload 双重 `deleted`、session 非稳定态、存在活动 job/outbox、目标缺失或指纹变化时一律拒绝。
+该模式不得与 batch/file 生命周期修复组合，execute 仍必须复用同一 dry-run fingerprint。
 
 `etc-submitted-batch-member-repair` 只用于已有 submitted ETC 批次的已证明缺失成员。dry-run 必须同时绑定
 business/submission/external 三个 ID、全部精确发票号与车牌、目标/结果金额；execute 还必须传入同一

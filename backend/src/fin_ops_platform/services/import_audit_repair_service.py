@@ -18,11 +18,14 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
     )
     invoice_updates = _invoice_update_plan(snapshot.get("invoice_rows") or [])
     lifecycle_repairs = _lifecycle_repair_plan(snapshot)
+    etc_session_retirements = _etc_session_retirement_plan(snapshot)
     return {
         "source_fingerprint": source_fingerprint,
         "bank_rows": bank_rows,
         "invoice_updates": invoice_updates,
         "lifecycle_repairs": lifecycle_repairs,
+        "etc_session_retirements": etc_session_retirements,
+        "etc_session_retirement_mode": bool(snapshot.get("etc_session_retirement_requested")),
         "affected_invoice_months": sorted(
             {_text(update.get("invoice_month")) for update in invoice_updates if _text(update.get("invoice_month"))}
         ),
@@ -30,6 +33,7 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
             "delete_bank_row_ids": [row["row_id"] for row in bank_rows],
             "restore_invoices": [update["before"] for update in invoice_updates],
             "restore_import_lifecycle": [repair["before"] for repair in lifecycle_repairs],
+            "restore_etc_import_sessions": [repair["before"] for repair in etc_session_retirements],
             "restore_import_row_links": [
                 row_link["before"]
                 for repair in lifecycle_repairs
@@ -48,18 +52,64 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
         "bank_row_count": len(plan["bank_rows"]),
         "invoice_update_count": len(plan["invoice_updates"]),
         "lifecycle_repair_count": len(plan["lifecycle_repairs"]),
+        "etc_session_retirement_count": len(plan["etc_session_retirements"]),
         "lifecycle_row_link_repair_count": sum(
             len(list(repair.get("row_links") or [])) for repair in plan["lifecycle_repairs"]
         ),
         "affected_invoice_months": plan["affected_invoice_months"],
         "rollback_manifest": plan["rollback_manifest"],
-        "authorized_write_scope": [
-            "app.import_batch_rows",
-            "app.invoices",
-            "app.import_batches",
-            "app.import_files",
-        ],
+        "authorized_write_scope": (
+            ["app.etc_import_sessions"]
+            if plan["etc_session_retirement_mode"]
+            else [
+                "app.import_batch_rows",
+                "app.invoices",
+                "app.import_batches",
+                "app.import_files",
+            ]
+        ),
     }
+
+
+def _etc_session_retirement_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    requested = sorted({_text(row.get("session_id")) for row in snapshot.get("etc_session_retirement_requested") or []})
+    requested = [session_id for session_id in requested if session_id]
+    if not requested:
+        return []
+    targets = list(snapshot.get("etc_session_retirement_targets") or [])
+    targets_by_id = {_text(row.get("session_id")): row for row in targets}
+    if len(targets_by_id) != len(targets) or set(targets_by_id) != set(requested):
+        raise ValueError("ETC import session retirement targets must resolve exactly once.")
+
+    repairs: list[dict[str, Any]] = []
+    retired_revision = "etc-import-page-audit.v1.deleted-task-retired"
+    for session_id in requested:
+        target = targets_by_id[session_id]
+        revision = _text(target.get("audit_contract_revision"))
+        if revision == retired_revision:
+            continue
+        if revision != "etc-import-page-audit.v1":
+            raise ValueError(f"ETC import session {session_id} is not registered under the strict audit contract.")
+        if _text(target.get("session_status")) not in {"preview_ready", "failed", "succeeded"}:
+            raise ValueError(f"ETC import session {session_id} is not in a retireable state.")
+        task_payload = _payload(target.get("task_raw_payload"))
+        if _text(target.get("task_status")) != "deleted" or _text(task_payload.get("status")) != "deleted":
+            raise ValueError(f"ETC import session {session_id} task is not formally deleted.")
+        if int(target.get("active_job_count") or 0) or int(target.get("active_outbox_count") or 0):
+            raise ValueError(f"ETC import session {session_id} still has active runtime work.")
+        repairs.append(
+            {
+                "session_id": session_id,
+                "task_id": _text(target.get("task_id")),
+                "session_status": _text(target.get("session_status")),
+                "before": {
+                    "session_id": session_id,
+                    "audit_contract_revision": revision,
+                },
+                "after_revision": retired_revision,
+            }
+        )
+    return repairs
 
 
 def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

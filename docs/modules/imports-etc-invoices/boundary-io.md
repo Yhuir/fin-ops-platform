@@ -106,5 +106,6 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 - 当前 revision session 必须严格证明 ZIP file object/hash、preview requirement edge、fingerprint、task version、job/outbox；缺失一律阻断。
 - revision 为 NULL 的历史 session 只报告 `legacy_session_provenance_unproven`；禁止从当前 ETC invoice 反向生成不存在的 ZIP/session 证据。
 - v20 中 import batch/invoice edge 按历史事件成员与当前 provenance owner 两个不同方向证明；重复导入不会覆盖首个 owner，也不能因此被误报为关系缺失。
-- `preview_ready`/`failed` 历史 session 只有在其精确 `task_id` 当前已进入正式 `imported` 或 `closed` 时，才可作为已被后续正式结果覆盖并降为 warning；未完成 task、活动 job/outbox、缺失 task 或其它关系冲突仍必须阻断。该口径复用 ETC 票据 Audit 的 `COVERED_IMPORT_TASK_STATUSES`，禁止两套覆盖规则漂移。
-- `succeeded` session 的精确 task 可以处于导入完成时的 `imported`，也可以在后续 OA 提交流程合法推进为 `closed`；两者复用同一 `COVERED_IMPORT_TASK_STATUSES`。`partial_success` 仍要求 `ready_for_import`，其它状态与缺失 output edge 继续阻断。
+- `preview_ready`/`failed` 历史 session 只有在其精确 `task_id` 当前已进入正式 `imported`、`closed` 或 `deleted` 时，才可作为已被后续正式结果覆盖并降为 warning；未完成 task、活动 job/outbox、缺失 task 或其它关系冲突仍必须阻断。`deleted` 只属于导入 session 的后续覆盖状态，不加入 ETC 票据页面的 active task 覆盖集合。
+- `succeeded` session 的精确 task 可以处于导入完成时的 `imported`，也可以在后续 OA 提交流程合法推进为 `closed` 或由受控删除流程进入 `deleted`。`partial_success` 仍要求 `ready_for_import`，其它状态与缺失 output edge 继续阻断。
+- 历史上已被合法删除 task 遗留的严格 session 可以通过 `import-audit-repair --retire-etc-session-id` 标记为 `etc-import-page-audit.v1.deleted-task-retired`；新审计仍把该 revision 当作严格合同逐项验证，标记只用于让旧审计在候选激活前识别其为归档历史。工具保留 session、ZIP/file-object 与 output edge，不允许活动 job/outbox 或隐式扫描目标。

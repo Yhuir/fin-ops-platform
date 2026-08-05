@@ -22,6 +22,11 @@ ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 TERMINAL_SESSION_STATUSES = frozenset({"succeeded", "partial_success"})
 KNOWN_SESSION_STATUSES = frozenset({"preview_ready", "queued", "processing", "failed"}) | TERMINAL_SESSION_STATUSES
 ETC_IMPORT_AUDIT_CONTRACT_REVISION = "etc-import-page-audit.v1"
+ETC_IMPORT_DELETED_TASK_RETIREMENT_REVISION = "etc-import-page-audit.v1.deleted-task-retired"
+STRICT_SESSION_AUDIT_REVISIONS = frozenset(
+    {ETC_IMPORT_AUDIT_CONTRACT_REVISION, ETC_IMPORT_DELETED_TASK_RETIREMENT_REVISION}
+)
+SESSION_COVERED_TASK_STATUSES = COVERED_IMPORT_TASK_STATUSES | {"deleted"}
 
 
 def audit_etc_import_page(
@@ -59,7 +64,7 @@ def _audit_etc_import_snapshot(
     strict_sessions = [
         row
         for row in sessions
-        if _text(row.get("audit_contract_revision")) == ETC_IMPORT_AUDIT_CONTRACT_REVISION
+        if _text(row.get("audit_contract_revision")) in STRICT_SESSION_AUDIT_REVISIONS
     ]
     strict_session_ids = {_text(row.get("session_id")) for row in strict_sessions}
     strict_files = [row for row in files if _text(row.get("session_id")) in strict_session_ids]
@@ -72,7 +77,7 @@ def _audit_etc_import_snapshot(
         _text(row.get("session_id"))
         for row in strict_sessions
         if _text(row.get("status")) in {"preview_ready", "failed"}
-        and task_status_by_id.get(_text(row.get("task_id"))) in COVERED_IMPORT_TASK_STATUSES
+        and task_status_by_id.get(_text(row.get("task_id"))) in SESSION_COVERED_TASK_STATUSES
     }
     jobs = [row for row in facts["import_jobs"] if _text(row.get("import_session_id")) in strict_session_ids]
     job_ids = [str(row.get("job_id") or "") for row in jobs if row.get("job_id")]
@@ -453,13 +458,13 @@ def _session_task_edge_issues(
             issues.append(_issue("etc_import_session_processing_task_mismatch", session_id, None))
         if status in TERMINAL_SESSION_STATUSES:
             expected_task_statuses = (
-                COVERED_IMPORT_TASK_STATUSES
+                SESSION_COVERED_TASK_STATUSES
                 if status == "succeeded"
                 else frozenset({"ready_for_import"})
             )
             if _text(task.get("status")) not in expected_task_statuses:
                 expected_task_status = (
-                    "imported|closed"
+                    "imported|closed|deleted"
                     if status == "succeeded"
                     else "ready_for_import"
                 )
@@ -545,7 +550,7 @@ def _session_job_issues(
             )
         if (
             _text(job.get("status")) in {"failed", "dead_lettered"}
-            and _text(job.get("task_status")) not in COVERED_IMPORT_TASK_STATUSES
+            and _text(job.get("task_status")) not in SESSION_COVERED_TASK_STATUSES
         ):
             issues.append(_issue("etc_import_job_terminal_failure", _text(job.get("job_id")), job))
     job_ids = {_text(row.get("job_id")) for row in jobs}

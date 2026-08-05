@@ -141,6 +141,53 @@ class FakeConnection(EtcTicketsFakeConnection):
 
 
 class EtcImportPageAuditTests(unittest.TestCase):
+    def test_deleted_task_is_a_formal_covering_state_for_historical_sessions_and_jobs(self) -> None:
+        facts = {
+            "tasks": [{"task_id": "task-1", "status": "deleted", "raw_payload": {}}],
+            "batches": [
+                {
+                    "business_batch_id": "business-batch-1",
+                    "raw_payload": {"normalized_payload": {"import_attempts": [{"session_id": "session-1"}]}},
+                }
+            ],
+            "import_batches": [
+                {
+                    "batch_id": "import-batch-1",
+                    "raw_payload": {
+                        "normalized_payload": {"source_session_id": "session-1", "invoice_ids": []}
+                    },
+                }
+            ],
+            "invoices": [],
+        }
+
+        session_issues = etc_import_page_audit._session_task_edge_issues(
+            sessions=[{"session_id": "session-1", "task_id": "task-1", "status": "succeeded"}],
+            facts=facts,
+        )
+        job_issues = etc_import_page_audit._session_job_issues(
+            sessions=[{"session_id": "session-1"}],
+            jobs=[
+                {
+                    "job_id": "job-1",
+                    "import_session_id": "session-1",
+                    "status": "failed",
+                    "task_status": "deleted",
+                }
+            ],
+            outbox=[],
+        )
+
+        self.assertNotIn(
+            "etc_import_terminal_task_status_mismatch",
+            {issue.code for issue in session_issues},
+        )
+        self.assertNotIn("etc_import_job_terminal_failure", {issue.code for issue in job_issues})
+        self.assertIn(
+            etc_import_page_audit.ETC_IMPORT_DELETED_TASK_RETIREMENT_REVISION,
+            etc_import_page_audit.STRICT_SESSION_AUDIT_REVISIONS,
+        )
+
     def test_succeeded_session_accepts_later_closed_task_state(self) -> None:
         facts = {
             "tasks": [{"task_id": "task-1", "status": "closed", "raw_payload": {}}],

@@ -8,7 +8,10 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.import_audit_repair_service import build_import_audit_repair_plan
-from fin_ops_platform.services.postgres_repositories.import_audit_repair import apply_import_audit_repair
+from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+    apply_import_audit_repair,
+    load_import_audit_repair_snapshot,
+)
 from fin_ops_platform.tools import import_audit_repair_ops
 
 
@@ -196,7 +199,126 @@ def _lifecycle_snapshot(*, terminal: bool = False) -> dict[str, list[dict[str, o
     }
 
 
+def _etc_session_retirement_snapshot(*, retired: bool = False) -> dict[str, list[dict[str, object]]]:
+    revision = (
+        "etc-import-page-audit.v1.deleted-task-retired"
+        if retired
+        else "etc-import-page-audit.v1"
+    )
+    return {
+        "bank_files": [],
+        "bank_transactions": [],
+        "bank_rows": [],
+        "invoice_rows": [],
+        "etc_session_retirement_requested": [
+            {"session_id": "session-deleted-1"},
+            {"session_id": "session-deleted-2"},
+        ],
+        "etc_session_retirement_targets": [
+            {
+                "session_id": "session-deleted-1",
+                "audit_contract_revision": revision,
+                "session_status": "preview_ready",
+                "task_id": "task-deleted-1",
+                "task_status": "deleted",
+                "task_raw_payload": {"normalized_payload": {"status": "deleted"}},
+                "active_job_count": 0,
+                "active_outbox_count": 0,
+            },
+            {
+                "session_id": "session-deleted-2",
+                "audit_contract_revision": revision,
+                "session_status": "succeeded",
+                "task_id": "task-deleted-2",
+                "task_status": "deleted",
+                "task_raw_payload": {"normalized_payload": {"status": "deleted"}},
+                "active_job_count": 0,
+                "active_outbox_count": 0,
+            },
+        ],
+    }
+
+
 class ImportAuditRepairPlanTests(unittest.TestCase):
+    def test_etc_session_snapshot_does_not_scan_unrelated_import_repair_domains(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                self.calls.append((sql, params))
+                return []
+
+        connection = Connection()
+
+        snapshot = load_import_audit_repair_snapshot(
+            connection,
+            etc_deleted_task_session_ids=["session-deleted-1"],
+        )
+
+        self.assertEqual(len(connection.calls), 1)
+        self.assertIn("from app.etc_import_sessions", connection.calls[0][0])
+        self.assertEqual(snapshot["bank_files"], [])
+
+    def test_plan_retires_only_exact_inactive_sessions_for_formally_deleted_tasks(self) -> None:
+        plan = build_import_audit_repair_plan(_etc_session_retirement_snapshot())
+
+        self.assertEqual(
+            [row["session_id"] for row in plan["etc_session_retirements"]],
+            ["session-deleted-1", "session-deleted-2"],
+        )
+        self.assertEqual(
+            plan["rollback_manifest"]["restore_etc_import_sessions"],
+            [row["before"] for row in plan["etc_session_retirements"]],
+        )
+        self.assertTrue(plan["etc_session_retirement_mode"])
+        self.assertEqual(
+            import_audit_repair_ops.public_repair_report(plan, mode="dry_run", written=False)[
+                "authorized_write_scope"
+            ],
+            ["app.etc_import_sessions"],
+        )
+
+    def test_plan_is_idempotent_after_deleted_task_sessions_are_retired(self) -> None:
+        plan = build_import_audit_repair_plan(_etc_session_retirement_snapshot(retired=True))
+
+        self.assertEqual(plan["etc_session_retirements"], [])
+
+    def test_plan_refuses_etc_session_retirement_with_active_runtime_work(self) -> None:
+        snapshot = _etc_session_retirement_snapshot()
+        snapshot["etc_session_retirement_targets"][0]["active_job_count"] = 1
+
+        with self.assertRaisesRegex(ValueError, "active runtime work"):
+            build_import_audit_repair_plan(snapshot)
+
+    def test_plan_refuses_etc_session_retirement_for_non_deleted_task(self) -> None:
+        snapshot = _etc_session_retirement_snapshot()
+        snapshot["etc_session_retirement_targets"][0]["task_status"] = "closed"
+        snapshot["etc_session_retirement_targets"][0]["task_raw_payload"] = {
+            "normalized_payload": {"status": "closed"}
+        }
+
+        with self.assertRaisesRegex(ValueError, "not formally deleted"):
+            build_import_audit_repair_plan(snapshot)
+
+    def test_repository_retires_etc_session_with_exact_preconditions(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        plan = build_import_audit_repair_plan(_etc_session_retirement_snapshot())
+
+        apply_import_audit_repair(connection, plan)
+
+        self.assertEqual(len(connection.calls), 2)
+        self.assertTrue(all("update app.etc_import_sessions" in sql for sql, _ in connection.calls))
+        self.assertEqual(connection.calls[0][1][1:], ("session-deleted-1", "task-deleted-1", "preview_ready"))
+
     def test_plan_repairs_exact_downgraded_lifecycle_from_succeeded_job_and_canonical_closure(self) -> None:
         plan = build_import_audit_repair_plan(_lifecycle_snapshot())
 
@@ -410,8 +532,49 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             connection,
             lifecycle_batch_id="batch-import-1",
             lifecycle_file_id="file-import-1",
+            etc_deleted_task_session_ids=[],
         )
         self.assertEqual(json.loads(output.getvalue())["lifecycle_repair_count"], 1)
+
+    def test_cli_passes_explicit_etc_session_retirement_targets_to_snapshot_loader(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_import_audit_repair_snapshot",
+                return_value=_etc_session_retirement_snapshot(),
+            ) as load_snapshot,
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--retire-etc-session-id",
+                    "session-deleted-1",
+                    "--retire-etc-session-id",
+                    "session-deleted-2",
+                ],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        load_snapshot.assert_called_once_with(
+            connection,
+            lifecycle_batch_id=None,
+            lifecycle_file_id=None,
+            etc_deleted_task_session_ids=["session-deleted-1", "session-deleted-2"],
+        )
+        self.assertEqual(json.loads(output.getvalue())["etc_session_retirement_count"], 2)
 
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:
