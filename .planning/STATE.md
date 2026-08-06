@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Started 40-01-PLAN.md
-last_updated: "2026-08-06T05:41:56.503Z"
+stopped_at: Completed 40-01-PLAN.md
+last_updated: "2026-08-06T05:53:38.350Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 111
-  completed_plans: 77
+  completed_plans: 78
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 40 (performance-contract-hot-path-closure) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 40
+Plan: 2 of 8
+Status: Ready to execute
 Last activity: 2026-08-06 -- Phase 40 execution started
 
-Progress: [░░░░░░░░░░] 0/8 plans complete
+Progress: [█░░░░░░░░░] 1/8 plans complete
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [░░░░░░░░░░] 0/8 plans complete
 | Phase 13 P13 | 12min | 3 tasks | 10 files |
 | Phase 13 P14 | 40min | 3 tasks | 8 files |
 | Phase 13 P15 | 2h 10m | 4 tasks | 11 files |
+| Phase 40 P01 | 9 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -200,6 +201,9 @@ Progress: [░░░░░░░░░░] 0/8 plans complete
 - [Phase 13]: `cutover_eligible` 只保留为历史诊断事实，不再是 release activation 通行条件；稳态 ACL candidate 必须 `eligible=true`。
 - [Phase 13]: Remove the four retired APP admission env keys atomically inside the approved activation window. — Restore their before-image on any pre-activation failure.
 - [Phase 13]: Bind activation only to candidate main-2298ba8c-settings-acl-20260802, bootstrap SHA c98c1f2b… and preflight SHA b031faea…; never auto-rollback to the unsafe active release. — Old db914/f12 evidence and approvals are prohibited; drift requires fresh facts, while failure remains in maintenance for forward repair.
+- [Phase 40]: HTTP probe concurrency is capped at 8 while the serial default and existing report fields remain compatible.
+- [Phase 40]: Target-scale evidence remains not_measured until an isolated target-size database benchmark exists.
+- [Phase 40]: The existing FinanceTable constant-size token window is reused and protected by large-total keyboard regression coverage.
 
 ### Roadmap Evolution
 
@@ -279,6 +283,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02T12:07:28.694Z
-Stopped at: Completed 13-15-PLAN.md
+Last session: 2026-08-06T05:52:47.157Z
+Stopped at: Completed 40-01-PLAN.md
 Resume file: None
