@@ -1141,12 +1141,7 @@ class PostgresCoreRepository:
             )
         if not params_seq:
             return
-        execute_many_values = getattr(connection, "execute_many_values", None)
-        affected = (
-            int(execute_many_values(insert_sql, params_seq) or 0)
-            if callable(execute_many_values)
-            else sum(int(connection.execute(insert_sql, params) or 0) for params in params_seq)
-        )
+        affected = int(connection.execute_many_values(insert_sql, params_seq) or 0)
         if affected != len(params_seq):
             raise RuntimeError(
                 "One or more import batch rows are already owned by another batch; refusing to re-parent them."

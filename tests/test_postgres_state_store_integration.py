@@ -858,8 +858,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             transaction.execute(
                 """
                 insert into app.import_batches(
-                    legacy_mongo_id, batch_type, source_name, imported_by, status, raw_payload
-                ) values (%s, 'input_invoice', 'input.xlsx', 'tester', 'pending', '{}'::jsonb)
+                    legacy_mongo_id, batch_type, source_name, imported_by, status, imported_at, raw_payload
+                ) values (%s, 'input_invoice', 'input.xlsx', 'tester', 'pending', now(), '{}'::jsonb)
                 """,
                 (batch_id,),
             )
