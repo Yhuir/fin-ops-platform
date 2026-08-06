@@ -423,6 +423,12 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 - `--concurrency` 只控制每个 probe 的有界并发样本数；默认值 `1` 保持串行兼容。最终生产验收至少执行
   concurrency `4`，高峰前再执行 `8`，并同时检查 error count、压缩传输字节、active/peak requests、
   PostgreSQL acquire p95 与 SQL p95，不能只比较总耗时。
+- 并发 worker 硬上限为 `8`。报告必须保留命名环境和证据窗，以及每个 probe 的
+  `request_count/error_count/error_counts`、duration p50/p95/p99 和压缩 `response_bytes` p50/p95/p99；
+  只记录错误分类，不记录响应业务 payload 或认证信息。
+- `sync_slo_baseline.evidence_bands` 必须把 `current_production: measured` 与
+  `target_scale: not_measured` 分开。只有数据库名包含 `test` 的隔离目标规模环境可以写入合成/benchmark
+  数据；生产 gate 只允许认证、有界、只读 GET/health/dashboard/pg_stat 采样，禁止为补性能样本写业务数据。
 
 ## HTTP 运行时与轮询 Smoke
 

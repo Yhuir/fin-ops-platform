@@ -43,6 +43,10 @@ filter options 分开采样；rows 不得重新内嵌高基数 options。银行�
 成本统计和往来款。没有隔离数据源时，发布可以依据当前生产 SLO 决定，但报告必须把目标规模标记为
 `not_measured`，不能写成通过。
 
+`sync_slo_baseline.evidence_bands.current_production` 记录当前生产只读基线；
+`evidence_bands.target_scale` 只有隔离目标规模数据库的独立 benchmark 才能改为 measured。默认报告固定为
+`not_measured` 并列出四类目标行数，禁止用当前生产小样本或一次最快结果补写为通过。
+
 ## 执行入口
 
 ```bash
@@ -57,6 +61,10 @@ scripts/with-production-admin-token.sh \
   --concurrency 4 \
   --target-ms 1000
 ```
+
+`http_slo_probe` 默认串行，worker 硬上限为 `8`。报告记录命名环境、证据窗、
+`request_count/error_count/error_counts` 以及 duration/压缩 response bytes 的 p50/p95/p99；错误分布只保留
+分类字符串，不保存响应业务 payload、认证 header、token 或 cookie。
 
 优化顺序固定为：测量并拆分 HTTP/DB/payload 成本；检查 `EXPLAIN`；改 SQL/算法；有证据才加索引；
 前后 benchmark；最后才评估缓存或异步。任何重大查询修改都必须先通过业务 fixture 等价、API contract、

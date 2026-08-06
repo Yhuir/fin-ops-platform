@@ -92,6 +92,22 @@ def collect_baseline(
         "version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": "read_only" if not analyze_explain else "read_only_with_explain_analyze",
+        "evidence_bands": {
+            "current_production": {
+                "status": "measured",
+                "source": "read_only_postgresql_baseline",
+            },
+            "target_scale": {
+                "status": "not_measured",
+                "requires_isolated_database": True,
+                "required_rows": {
+                    "bank_transactions": 1_000_000,
+                    "invoices": 500_000,
+                    "oa": 1_000_000,
+                    "relations": 500_000,
+                },
+            },
+        },
         "slo_targets": {
             "page_first_response_p95_ms": 1000,
             "page_first_response_p99_ms": 2000,
