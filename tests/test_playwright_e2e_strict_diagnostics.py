@@ -62,7 +62,9 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("reset-submitted", spec.split('test("commit-to-visible same-clock', 1)[-1])
 
     def test_workbench_visibility_slo_manifest_and_production_run_fail_closed(self) -> None:
+        helper = OPERATION_LATENCY_PATH.read_text(encoding="utf-8")
         spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")
+        config = PLAYWRIGHT_CONFIG_PATH.read_text(encoding="utf-8")
 
         for required in (
             "stat(",
@@ -73,10 +75,16 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             "exact_scope",
             "submit",
             "recovery",
-            "redact",
         ):
             self.assertIn(required, spec)
 
+        self.assertIn("redact", helper)
+        for binding in ("sample_id", "batch_id", "business_identity", "exact_scope"):
+            self.assertIn(f"{binding}: redact(binding.{binding})", helper)
+        self.assertIn("binding.transaction_ids.map(redact)", helper)
+        self.assertIn("FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO", config)
+        for artifact in ("trace", "screenshot", "video"):
+            self.assertRegex(config, rf'{artifact}: workbenchVisibilitySloEnabled \? "off"')
         self.assertNotIn("test.skip(!workbenchVisibilitySloEnabled", spec)
 
     def test_every_e2e_spec_uses_strict_browser_diagnostics_fixture(self) -> None:

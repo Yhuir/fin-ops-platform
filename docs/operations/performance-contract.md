@@ -1,6 +1,6 @@
 # 生产性能合同
 
-日期：2026-08-01
+日期：2026-08-06
 
 ## 目标与边界
 
@@ -17,9 +17,9 @@ Redis cache 或搜索 projection 掩盖慢查询。PostgreSQL 继续拥有 canon
 | 合同 | 阈值 | 证据 |
 | --- | --- | --- |
 | 页面首屏与核心读 API | 每个 probe p95 `<= 1000ms`，p99 `<= 2000ms`，错误 `0` | authenticated `http_slo_probe` |
-| 写提交到消费者可见 | p99 `<= 3000ms`，失败 `0` | 已审批的 checkpoint write-operation smoke |
+| 写提交到消费者可见 | browser-inclusive p99 `<= 3000ms`，失败 `0` | isolated prod-equivalent Playwright same-clock `t0..t4`（至少 100 个样本） |
 | PostgreSQL 连接获取 | p95 `<= 50ms`，无 backpressure rejection | `/health`、`/metrics` 与 HTTP probe 同窗样本 |
-| 有界并发 | concurrency `4` 为发布门禁；高峰准备 concurrency `8` | 每个 probe 固定 iterations、错误和 peak requests |
+| 有界并发 | `N_normal=max(4,C_normal)`；`N_peak=max(8,C_peak)` | 命名 14 天容量证据或已批准 capacity contract；每 tier 固定 iterations、错误和 peak requests |
 | 响应体 | 记录压缩传输 bytes p50/p95/p99；增长超过前一 release 25% 必须解释 | HTTP probe `response_bytes` |
 | 导入持久化 | batch rows 按 bounded multi-value chunk 写入，禁止逐行数据库 round-trip | repository test、import integration/audit |
 
@@ -46,6 +46,28 @@ filter options 分开采样；rows 不得重新内嵌高基数 options。银行�
 `sync_slo_baseline.evidence_bands.current_production` 记录当前生产只读基线；
 `evidence_bands.target_scale` 只有隔离目标规模数据库的独立 benchmark 才能改为 measured。默认报告固定为
 `not_measured` 并列出四类目标行数，禁止用当前生产小样本或一次最快结果补写为通过。
+
+## Workbench 容量与可见性证据
+
+`C_normal` 和 `C_peak` 不是固定常量。首选最近 14 个完整自然日、能够区分 authenticated
+visible client/session 的命名 access evidence，以 rolling 60-second unique visible clients 的匿名聚合计算
+`C_normal=p95`、`C_peak=max`。证据必须记录 `source`、`source_version`、`source_proof`、自然日窗口和
+`method=rolling_60s_unique_visible_clients` 和完整 `20,160` 个 minute buckets，不得保留 client/session 原始标识。若 access evidence 不能满足
+该身份口径，只能使用带 `source`、`contract_version`、`approved_by` 的已批准 capacity contract。
+两种证据都不可用时，结论固定为 `NOT_MEASURED`、`release_blocked=true`；`4/8` 只能作为压测下限，
+不得冒充生产并发事实。
+
+两个 tier 都必须覆盖 authenticated `/api/workbench/refresh-status?month=all`，证明 p95 `<=1000ms`、
+error `0`，并在同一窗口检查 HTTP active/peak requests、PostgreSQL pool/acquire/SQL、DB CPU/IO、
+durable queue 和 required worker 无饱和。派生 target 超过当前 probe 的有界 worker 上限 `8` 时不得静默截断，
+必须阻断并由批准的容量执行方案承接。
+
+commit-to-visible 证据由现有 Playwright/Node 单一 `performance.now()` 时钟记录整数微秒：`t0` 紧邻
+bank-flow submit POST 之前，`t1` 为 canonical 2xx receipt 解析完成，`t2` 为 exact scope 首次被
+refresh-status 观察为 stale/refreshing，`t3` 为新 active generation `g1` fresh，`t4` 为同一 `g1`
+combined payload 含 transaction/business identity 且唯一 DOM label 可见。每个样本必须满足相邻四段之和
+严格等于 `t4-t0`。隔离 prod-equivalent run 至少 100 个 test-owned、可逆样本才计算 p99；生产 run
+恰好一个已批准样本，仅作为 smoke 合并进既有报告，不能覆盖隔离样本或重新声称 p99。
 
 ## 执行入口
 

@@ -375,13 +375,56 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   --output /tmp/finops-http-slo-$(date +%Y%m%d%H%M%S).json
 ```
 
+Workbench 1-second visible polling 的容量门禁先提供 evidence JSON，再分别运行 normal/peak tier：
+
+```bash
+scripts/with-production-admin-token.sh \
+  env PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --capacity-evidence /root/finops-evidence/workbench-capacity.json \
+  --capacity-tier normal \
+  --iterations 20 \
+  --warmup 2 \
+  --target-ms 1000 \
+  --output /tmp/finops-workbench-capacity-normal.json
+```
+
+随后只把 `--capacity-tier normal` 改为 `peak` 并使用独立输出文件。access evidence schema 使用
+`mode=access_evidence`、命名 `source/source_version/source_proof`、恰好 14 个完整自然日的
+`window.started_at/window.completed_at`、`method=rolling_60s_unique_visible_clients` 和匿名
+恰好 20,160 项的 `rolling_60s_unique_visible_clients` 数组；approved fallback schema 使用 `mode=capacity_contract`、
+`source/contract_version/approved_by/c_normal/c_peak`。缺字段、窗口不完整、未指定 tier、target 超过有界
+worker 上限或没有证据时均为 `not_measured`/失败，禁止继续发布。
+
+Workbench browser-inclusive 可见性证据是显式 opt-in 的真实后端 Playwright case。fixture manifest 必须
+root-owned、不可 group/world write、`fixture_ownership=test_owned`，隔离 run 至少 100 个唯一、exact-scope、
+可撤回样本；生产 smoke manifest 恰好一个样本。示例：
+
+```bash
+FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO=1 \
+FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_MODE=isolated \
+FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_SAMPLES=100 \
+FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST=/root/finops-evidence/workbench-visibility-fixtures.json \
+npm --prefix web run e2e -- \
+  e2e/bank-flow-rule-batches-flow.spec.ts \
+  --project=chromium \
+  --grep "commit-to-visible same-clock"
+```
+
+报告固定写入 `.planning/phases/40-performance-contract-hot-path-closure/40-workbench-visibility-p99.json`，
+只保留哈希化 batch/transaction/business identity、generation、整数微秒 marks/segments 和分位数。
+报告缺失、完整样本少于 100、segment sum 不等于 total、exact scope/generation/identity 不匹配、
+total p99 `>3000ms` 或 recovery 未回到 inactive，均为 `NOT_MEASURED`/release blocked。生产 smoke 必须通过
+`scripts/with-production-admin-token.sh` 注入 token，`samples=1`，只能补一行 reversible smoke，不可替代隔离 p99。
+
 默认 probe 覆盖：
 
 - `/fin-ops/` 以及主要业务页面 shell：关联台、银行明细、待找发票、进项使用、OA 待付款、销项收款、
   税金抵扣、成本统计、免 OA、批量账务、往来款、ETC、导入、设置和 App Health。只想临时采样单个页面时才显式传
   `--page-path`。
 - `/api/session/me`、`/api/app-health`、`/api/operations/app-health-dashboard`。
-- 工作台 summary/groups/settings、银行明细账户/流水/规则、待找发票 rows/filter-options/rules、进项发票使用
+- 工作台 summary/refresh-status/groups/settings、银行明细账户/流水/规则、待找发票 rows/filter-options/rules、进项发票使用
   rows/filter-options/rules、OA 待付款单一 rows 聚合/ETag 条件读取、销项收款 rows/filter-options/rules、税金抵扣、
   成本统计、免 OA、批量账务、往来款、ETC、导入 facts 和后台任务首屏 API。
 - 工作台 groups probe 必须使用前端首屏同口径的 `detail_level=summary`；不带 `detail_level` 的 full payload 只用于兼容或调试，不作为页面首屏 SLO 证据。
@@ -420,9 +463,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   --output /tmp/finops-public-page-shell-$(date +%Y%m%d%H%M%S).json
 ```
 - 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
-- `--concurrency` 只控制每个 probe 的有界并发样本数；默认值 `1` 保持串行兼容。最终生产验收至少执行
-  concurrency `4`，高峰前再执行 `8`，并同时检查 error count、压缩传输字节、active/peak requests、
-  PostgreSQL acquire p95 与 SQL p95，不能只比较总耗时。
+- `--concurrency` 只控制每个 probe 的有界并发样本数；默认值 `1` 保持串行兼容。最终生产验收使用
+  容量证据派生的 `N_normal=max(4,C_normal)` 与 `N_peak=max(8,C_peak)` 两个 tier，并同时检查 error count、
+  压缩传输字节、active/peak requests、PostgreSQL acquire p95 与 SQL p95，不能只比较总耗时。
 - 并发 worker 硬上限为 `8`。报告必须保留命名环境和证据窗，以及每个 probe 的
   `request_count/error_count/error_counts`、duration p50/p95/p99 和压缩 `response_bytes` p50/p95/p99；
   只记录错误分类，不记录响应业务 payload 或认证信息。

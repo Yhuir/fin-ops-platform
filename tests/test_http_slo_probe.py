@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+from io import StringIO
 import json
 from threading import Lock
 from time import sleep
@@ -21,7 +22,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(probe.expected_statuses, (200,))
 
     def test_capacity_targets_are_derived_from_anonymous_rolling_sixty_second_counts(self) -> None:
-        counts = list(range(1, 101))
+        counts = [1] * 19_152 + [5] * 1_008
 
         result = http_slo_probe.derive_capacity_targets(
             {
@@ -34,18 +35,18 @@ class HttpSloProbeTests(unittest.TestCase):
                     "completed_at": "2026-08-05T00:00:00+08:00",
                 },
                 "method": "rolling_60s_unique_visible_clients",
-                "rolling_60s_unique_clients": counts,
+                "rolling_60s_unique_visible_clients": counts,
             }
         )
 
         self.assertEqual(result["status"], "measured")
-        self.assertEqual(result["c_normal"], 95)
-        self.assertEqual(result["c_peak"], 100)
-        self.assertEqual(result["n_normal"], 95)
-        self.assertEqual(result["n_peak"], 100)
-        self.assertEqual(result["aggregate_sample_count"], 100)
+        self.assertEqual(result["c_normal"], 1)
+        self.assertEqual(result["c_peak"], 5)
+        self.assertEqual(result["n_normal"], 4)
+        self.assertEqual(result["n_peak"], 8)
+        self.assertEqual(result["aggregate_sample_count"], 20_160)
         self.assertFalse(result["raw_client_data_retained"])
-        self.assertNotIn("rolling_60s_unique_clients", result)
+        self.assertNotIn("rolling_60s_unique_visible_clients", result)
 
     def test_capacity_contract_requires_source_version_and_approver(self) -> None:
         measured = http_slo_probe.derive_capacity_targets(
@@ -73,6 +74,31 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(unavailable["status"], "not_measured")
         self.assertTrue(unavailable["release_blocked"])
 
+    def test_capacity_contract_rejects_non_integer_client_counts(self) -> None:
+        result = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "contract_version": "capacity-v1",
+                "approved_by": "FINOPS-CAPACITY-20260806",
+                "c_normal": 3.5,
+                "c_peak": 6,
+            }
+        )
+
+        self.assertEqual(result["status"], "not_measured")
+        self.assertTrue(result["release_blocked"])
+
+    def test_capacity_tier_without_evidence_fails_before_http_sampling(self) -> None:
+        stdout = StringIO()
+
+        exit_code = http_slo_probe.main(["--capacity-tier", "normal"], stdout=stdout)
+        report = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(report["status"], "not_measured")
+        self.assertTrue(report["release_blocked"])
+
     def test_capacity_access_evidence_requires_exact_fourteen_day_window(self) -> None:
         result = http_slo_probe.derive_capacity_targets(
             {
@@ -85,7 +111,47 @@ class HttpSloProbeTests(unittest.TestCase):
                     "completed_at": "2026-08-05T00:00:00+08:00",
                 },
                 "method": "rolling_60s_unique_visible_clients",
-                "rolling_60s_unique_clients": [1, 2, 3],
+                "rolling_60s_unique_visible_clients": [1, 2, 3],
+            }
+        )
+
+        self.assertEqual(result["status"], "not_measured")
+        self.assertTrue(result["release_blocked"])
+
+    def test_capacity_access_evidence_requires_every_rolling_minute_bucket(self) -> None:
+        result = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "access_evidence",
+                "source": "nginx_authenticated_refresh_status_access",
+                "source_version": "access-log-v3",
+                "source_proof": "sha256:aggregate-query",
+                "window": {
+                    "started_at": "2026-07-22T00:00:00+08:00",
+                    "completed_at": "2026-08-05T00:00:00+08:00",
+                },
+                "method": "rolling_60s_unique_visible_clients",
+                "rolling_60s_unique_visible_clients": [1, 2, 3],
+            }
+        )
+
+        self.assertEqual(result["status"], "not_measured")
+        self.assertTrue(result["release_blocked"])
+
+    def test_capacity_access_evidence_rejects_non_integer_bucket_counts(self) -> None:
+        counts = [1] * 20_160
+        counts[-1] = 1.5
+        result = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "access_evidence",
+                "source": "nginx_authenticated_refresh_status_access",
+                "source_version": "access-log-v3",
+                "source_proof": "sha256:aggregate-query",
+                "window": {
+                    "started_at": "2026-07-22T00:00:00+08:00",
+                    "completed_at": "2026-08-05T00:00:00+08:00",
+                },
+                "method": "rolling_60s_unique_visible_clients",
+                "rolling_60s_unique_visible_clients": counts,
             }
         )
 

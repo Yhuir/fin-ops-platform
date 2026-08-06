@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import gzip
 import json
 from math import ceil
@@ -23,6 +23,7 @@ DEFAULT_WARMUP = 1
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_BUSINESS_MONTH = "2026-03"
 MAX_CONCURRENCY = 8
+FOURTEEN_DAY_MINUTE_BUCKETS = 14 * 24 * 60
 
 
 def _current_month() -> str:
@@ -126,6 +127,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
     HttpProbe("workbench_initial_all", "/api/workbench?month=all", expected_statuses=(200, 202)),
+    HttpProbe("workbench_refresh_status_all", "/api/workbench/refresh-status?month=all"),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe(
@@ -203,6 +205,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=int(os.getenv("FIN_OPS_HTTP_SLO_CONCURRENCY", "1")),
         help=f"Maximum concurrent measured requests per probe, capped at {MAX_CONCURRENCY}. Warmup requests remain sequential.",
     )
+    parser.add_argument("--capacity-evidence", type=Path, help="Anonymous 14-day access aggregates or an approved capacity contract.")
+    parser.add_argument("--capacity-tier", choices=("normal", "peak"), help="Use the derived normal or peak target concurrency.")
     parser.add_argument(
         "--environment-name",
         default=os.getenv("FIN_OPS_HTTP_SLO_ENVIRONMENT", "current-production"),
@@ -228,6 +232,33 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
     probes = _configured_probes(args)
+    capacity: dict[str, Any] | None = None
+    if args.capacity_evidence is not None or args.capacity_tier is not None:
+        capacity = _capacity_not_measured("capacity evidence and --capacity-tier are required for a capacity run")
+        if args.capacity_evidence is not None:
+            capacity = derive_capacity_targets(json.loads(args.capacity_evidence.read_text(encoding="utf-8")))
+        if capacity["status"] != "measured" or not args.capacity_tier:
+            print(json.dumps({
+                "version": 1,
+                "status": "not_measured",
+                "release_blocked": True,
+                "capacity": capacity,
+                "error": "capacity evidence and --capacity-tier are required for a capacity run",
+            }, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+            return 1
+        target_concurrency = int(capacity[f"n_{args.capacity_tier}"])
+        if target_concurrency > MAX_CONCURRENCY:
+            print(json.dumps({
+                "version": 1,
+                "status": "fail",
+                "release_blocked": True,
+                "capacity": capacity,
+                "capacity_tier": args.capacity_tier,
+                "target_concurrency": target_concurrency,
+                "error": f"derived concurrency exceeds the bounded probe ceiling ({MAX_CONCURRENCY})",
+            }, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+            return 1
+        args.concurrency = target_concurrency
     headers = _auth_headers(
         bearer_token=args.bearer_token or args.admin_token,
         admin_token="" if args.bearer_token else args.admin_token,
@@ -252,6 +283,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         require_auth=not bool(args.allow_unauthenticated),
         include_samples=bool(args.include_samples),
     )
+    if capacity is not None:
+        report["capacity"] = capacity
+        report["capacity_tier"] = args.capacity_tier
+        report["target_concurrency"] = int(capacity[f"n_{args.capacity_tier}"])
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -260,6 +295,122 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     if report["status"] == "auth_missing":
         return 2
     return 0 if report["status"] == "pass" else 1
+
+
+def derive_capacity_targets(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    mode = str(evidence.get("mode") or "").strip()
+    source = str(evidence.get("source") or "").strip()
+    if mode == "capacity_contract":
+        version = str(evidence.get("contract_version") or "").strip()
+        approved_by = str(evidence.get("approved_by") or "").strip()
+        counts = _capacity_pair(evidence)
+        if not source or not version or not approved_by or counts is None:
+            return _capacity_not_measured("approved capacity contract is incomplete")
+        return _capacity_payload(
+            source=source,
+            source_version=version,
+            source_proof=f"approved_by:{approved_by}",
+            window=None,
+            method="approved_capacity_contract",
+            c_normal=counts[0],
+            c_peak=counts[1],
+            aggregate_sample_count=0,
+        )
+    if mode != "access_evidence":
+        return _capacity_not_measured("named access evidence or an approved capacity contract is required")
+    source_version = str(evidence.get("source_version") or "").strip()
+    source_proof = str(evidence.get("source_proof") or "").strip()
+    method = str(evidence.get("method") or "").strip()
+    window = evidence.get("window")
+    counts = evidence.get("rolling_60s_unique_visible_clients")
+    if (
+        not source
+        or not source_version
+        or not source_proof
+        or method != "rolling_60s_unique_visible_clients"
+        or not isinstance(window, Mapping)
+        or not isinstance(counts, list)
+        or len(counts) != FOURTEEN_DAY_MINUTE_BUCKETS
+    ):
+        return _capacity_not_measured("14-day anonymous rolling-60s access aggregates require 20,160 complete minute buckets")
+    try:
+        started_at = datetime.fromisoformat(str(window.get("started_at") or ""))
+        completed_at = datetime.fromisoformat(str(window.get("completed_at") or ""))
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in counts):
+            raise ValueError("counts must be integers")
+        normalized_counts = list(counts)
+    except (TypeError, ValueError):
+        return _capacity_not_measured("capacity evidence contains invalid timestamps or counts")
+    if (
+        started_at.tzinfo is None
+        or completed_at.tzinfo is None
+        or started_at.timetz().replace(tzinfo=None) != datetime.min.time()
+        or completed_at.timetz().replace(tzinfo=None) != datetime.min.time()
+        or completed_at - started_at != timedelta(days=14)
+        or any(value < 0 for value in normalized_counts)
+    ):
+        return _capacity_not_measured("capacity evidence must cover exactly 14 complete natural days")
+    sorted_counts = sorted(normalized_counts)
+    return _capacity_payload(
+        source=source,
+        source_version=source_version,
+        source_proof=source_proof,
+        window={"started_at": started_at.isoformat(), "completed_at": completed_at.isoformat()},
+        method=method,
+        c_normal=int(_nearest_rank(sorted_counts, 0.95)),
+        c_peak=max(sorted_counts),
+        aggregate_sample_count=len(sorted_counts),
+    )
+
+
+def _capacity_pair(evidence: Mapping[str, Any]) -> tuple[int, int] | None:
+    c_normal = evidence.get("c_normal")
+    c_peak = evidence.get("c_peak")
+    if (
+        not isinstance(c_normal, int)
+        or isinstance(c_normal, bool)
+        or not isinstance(c_peak, int)
+        or isinstance(c_peak, bool)
+    ):
+        return None
+    return (c_normal, c_peak) if 0 <= c_normal <= c_peak else None
+
+
+def _capacity_payload(
+    *,
+    source: str,
+    source_version: str,
+    source_proof: str,
+    window: Mapping[str, str] | None,
+    method: str,
+    c_normal: int,
+    c_peak: int,
+    aggregate_sample_count: int,
+) -> dict[str, Any]:
+    return {
+        "status": "measured",
+        "release_blocked": False,
+        "source": source,
+        "source_version": source_version,
+        "source_proof": source_proof,
+        "window": dict(window) if window is not None else None,
+        "method": method,
+        "c_normal": c_normal,
+        "c_peak": c_peak,
+        "n_normal": max(4, c_normal),
+        "n_peak": max(8, c_peak),
+        "aggregate_sample_count": aggregate_sample_count,
+        "raw_client_data_retained": False,
+    }
+
+
+def _capacity_not_measured(reason: str) -> dict[str, Any]:
+    return {
+        "status": "not_measured",
+        "release_blocked": True,
+        "reason": reason,
+        "raw_client_data_retained": False,
+    }
 
 
 def collect_http_slo(

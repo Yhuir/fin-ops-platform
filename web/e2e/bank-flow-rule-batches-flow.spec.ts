@@ -1,7 +1,14 @@
+import { readFile, stat } from "node:fs/promises";
+
 import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
-import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
+import {
+  createOperationLatencyRecorder,
+  createWorkbenchVisibilitySegmentRecorder,
+  type WorkbenchVisibilityRunMode,
+  type WorkbenchVisibilitySampleBinding,
+} from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 function startStrictBrowserErrorCapture(page: Page, options: { allowedConsoleErrors?: RegExp[] } = {}) {
@@ -106,6 +113,69 @@ const ordinaryBankFlowRuleCheckboxCases = [
     transactionId: "bank-flow-rule-e2e-social_security",
   },
 ];
+
+type WorkbenchVisibilityFixture = WorkbenchVisibilitySampleBinding & {
+  fixture_ownership: "test_owned";
+  submit: { path: string; body: Record<string, unknown> };
+  recovery: { path: string; body: Record<string, unknown> };
+};
+
+function cleanStrings(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item ?? "").trim()).filter(Boolean) : [];
+}
+
+function payloadString(payload: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function workbenchGeneration(payload: Record<string, unknown>) {
+  return payloadString(payload, ["active_generation_id", "read_model_version", "activeGenerationId", "readModelVersion"]);
+}
+
+async function loadWorkbenchVisibilityFixtures(mode: WorkbenchVisibilityRunMode, requestedSampleCount: number) {
+  const manifestPath = String(process.env.FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST ?? "").trim();
+  if (!manifestPath) throw new Error("FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST is required");
+  const metadata = await stat(manifestPath);
+  if (metadata.uid !== 0 || (metadata.mode & 0o022) !== 0) {
+    throw new Error("Workbench visibility fixture manifest must be root-owned and not group/world writable");
+  }
+  const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+    fixture_ownership?: string;
+    samples?: WorkbenchVisibilityFixture[];
+  };
+  const samples = Array.isArray(manifest.samples) ? manifest.samples : [];
+  if (manifest.fixture_ownership !== "test_owned" || samples.some((sample) => sample.fixture_ownership !== "test_owned")) {
+    throw new Error("Workbench visibility fixtures must be test_owned");
+  }
+  if (mode === "production_smoke" && samples.length !== 1) {
+    throw new Error("production_smoke requires exactly one fixture sample");
+  }
+  if (mode === "isolated" && samples.length < requestedSampleCount) {
+    throw new Error("isolated fixture manifest has fewer samples than requested");
+  }
+  const selected = samples.slice(0, requestedSampleCount);
+  const identities = new Set<string>();
+  for (const sample of selected) {
+    const required = [sample.sample_id, sample.batch_id, sample.business_identity, sample.exact_scope];
+    if (required.some((value) => !String(value ?? "").trim()) || sample.exact_scope === "all") {
+      throw new Error("fixture sample identity and exact_scope are required");
+    }
+    if (!Array.isArray(sample.transaction_ids) || sample.transaction_ids.length === 0) {
+      throw new Error("fixture transaction_ids are required");
+    }
+    if (!sample.submit?.path.includes("/api/bank-flow-rule-batches/") || !sample.recovery?.path.endsWith("/withdraw")) {
+      throw new Error("fixture submit and exact withdraw recovery paths are required");
+    }
+    const identity = [sample.sample_id, sample.batch_id, ...sample.transaction_ids, sample.business_identity].join("|");
+    if (identities.has(identity)) throw new Error("fixture sample identities must be unique");
+    identities.add(identity);
+  }
+  return selected;
+}
 
 test.describe("bank flow rule batches browser flow", () => {
   test("recovers list after a transient load failure when refreshed", async ({ page }) => {
@@ -687,5 +757,133 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
+  });
+});
+
+test.describe("workbench visibility SLO", () => {
+  test("commit-to-visible same-clock", async ({ page }) => {
+    const workbenchVisibilitySloEnabled = process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1";
+    if (!workbenchVisibilitySloEnabled) return;
+    const mode = String(process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_MODE ?? "isolated") as WorkbenchVisibilityRunMode;
+    if (mode !== "isolated" && mode !== "production_smoke") throw new Error("invalid Workbench visibility SLO mode");
+    const requestedSampleCount = Number.parseInt(
+      String(process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_SAMPLES ?? (mode === "production_smoke" ? "1" : "100")),
+      10,
+    );
+    if (!Number.isSafeInteger(requestedSampleCount) || requestedSampleCount < 1) throw new Error("invalid Workbench visibility sample count");
+    if (mode === "isolated" && requestedSampleCount < 100) throw new Error("isolated SLO requires at least 100 samples");
+    test.setTimeout(Math.max(60_000, requestedSampleCount * 10_000));
+    const samples = await loadWorkbenchVisibilityFixtures(mode, requestedSampleCount);
+    const recorder = createWorkbenchVisibilitySegmentRecorder(mode, requestedSampleCount);
+    const adminToken = String(process.env.FIN_OPS_E2E_ADMIN_TOKEN ?? "").trim();
+    if (mode === "production_smoke" && !adminToken) throw new Error("production_smoke requires FIN_OPS_E2E_ADMIN_TOKEN");
+    if (adminToken) {
+      await page.context().setExtraHTTPHeaders({
+        "Admin-Token": adminToken,
+        Authorization: `Bearer ${adminToken}`,
+      });
+    }
+
+    for (const sample of samples) {
+      const baselineResponse = page.waitForResponse((response) => (
+        response.request().method() === "GET"
+        && responsePathMatches(response.url(), "/api/workbench")
+        && response.status() === 200
+      ));
+      await page.goto("/");
+      const baselinePayload = await (await baselineResponse).json() as Record<string, unknown>;
+      const g0 = workbenchGeneration(baselinePayload);
+      if (!g0 || payloadString(baselinePayload, ["read_model_status", "readModelStatus"]) !== "fresh") {
+        throw new Error("Workbench baseline must be fresh with an active generation");
+      }
+      let segment: ReturnType<typeof recorder.start>;
+      let t2Marked = false;
+      let t3Marked = false;
+      let t4Marked = false;
+      let g1 = "";
+      let candidatePayload: Record<string, unknown> | null = null;
+      let resolveT2!: () => void;
+      let resolveT3!: () => void;
+      let resolveT4!: () => void;
+      const convergenceRejectors: Array<(reason: unknown) => void> = [];
+      const t2 = new Promise<void>((resolve, reject) => { resolveT2 = resolve; convergenceRejectors.push(reject); });
+      const t3 = new Promise<void>((resolve, reject) => { resolveT3 = resolve; convergenceRejectors.push(reject); });
+      const t4 = new Promise<void>((resolve, reject) => { resolveT4 = resolve; convergenceRejectors.push(reject); });
+      const rejectConvergence = (reason: unknown) => {
+        for (const reject of convergenceRejectors) reject(reason);
+      };
+      const maybeMarkT4 = async () => {
+        if (!candidatePayload || !t3Marked || t4Marked || workbenchGeneration(candidatePayload) !== g1) return;
+        const serialized = JSON.stringify(candidatePayload);
+        if (!sample.transaction_ids.every((id) => serialized.includes(id)) || !serialized.includes(sample.business_identity)) {
+          throw new Error("g1 combined payload does not contain the submitted business identity");
+        }
+        const identity = page.getByText(sample.business_identity, { exact: true });
+        if (await identity.count() !== 1) throw new Error("business_identity must have one unique DOM locator");
+        await expect(identity).toBeVisible();
+        segment.markT4();
+        t4Marked = true;
+        resolveT4();
+      };
+      const onResponse = (response: { request(): { method(): string }; url(): string; status(): number; json(): Promise<unknown> }) => {
+        if (response.request().method() !== "GET" || response.status() !== 200) return;
+        void (async () => {
+          const path = new URL(response.url()).pathname;
+          if (path !== "/api/workbench/refresh-status" && path !== "/api/workbench") return;
+          const payload = await response.json() as Record<string, unknown>;
+          if (path === "/api/workbench/refresh-status") {
+            const status = payloadString(payload, ["read_model_status", "status", "readModelStatus"]);
+            const refreshScopes = cleanStrings(payload.refresh_scope_keys ?? payload.refreshScopeKeys);
+            const dirtyScopes = cleanStrings(payload.dirty_scopes ?? payload.dirtyScopes);
+            if ([...refreshScopes, ...dirtyScopes].includes("all")) throw new Error("refresh-status returned broad all scope");
+            if (!t2Marked && ((status === "stale" && refreshScopes.includes(sample.exact_scope))
+              || (status === "refreshing" && dirtyScopes.includes(sample.exact_scope)))) {
+              segment.markT2();
+              t2Marked = true;
+              resolveT2();
+            }
+            const activeGenerationId = workbenchGeneration(payload);
+            if (t2Marked && !t3Marked && status === "fresh" && activeGenerationId && activeGenerationId !== g0) {
+              g1 = activeGenerationId;
+              segment.markT3(g1);
+              t3Marked = true;
+              resolveT3();
+              await maybeMarkT4();
+            }
+            return;
+          }
+          const activeGenerationId = workbenchGeneration(payload);
+          if (activeGenerationId && activeGenerationId !== g0) {
+            candidatePayload = payload;
+            await maybeMarkT4();
+          }
+        })().catch(rejectConvergence);
+      };
+      page.on("response", onResponse);
+      let submitCommitted = false;
+      try {
+        segment = recorder.start(sample, g0);
+        const submitResponse = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
+        if (!submitResponse.ok()) throw new Error(`bank-flow submit failed with ${submitResponse.status()}`);
+        submitCommitted = true;
+        const receipt = await submitResponse.json() as Record<string, unknown>;
+        if (!JSON.stringify(receipt).includes(sample.batch_id)) throw new Error("submit receipt does not bind the fixture batch_id");
+        segment.markT1();
+        await Promise.all([t2, t3, t4]);
+        segment.complete();
+      } finally {
+        page.off("response", onResponse);
+        if (submitCommitted) {
+          const recoveryResponse = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
+          if (!recoveryResponse.ok()) throw new Error(`withdraw recovery failed with ${recoveryResponse.status()}`);
+          const recovered = await page.context().request.get(`/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`);
+          const recoveredPayload = await recovered.json() as { batch?: { status?: string } };
+          if (!recovered.ok() || recoveredPayload.batch?.status !== "withdrawn") {
+            throw new Error("withdraw recovery did not restore the test-owned fixture to inactive");
+          }
+        }
+      }
+    }
+    await recorder.writeReport();
   });
 });
