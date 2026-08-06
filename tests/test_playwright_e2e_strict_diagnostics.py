@@ -13,9 +13,72 @@ PRODUCTION_ADMIN_APP_HEALTH_SPEC_PATH = E2E_DIR / "production-admin-app-health.s
 PRODUCTION_ROUTE_SHELL_SPEC_PATH = E2E_DIR / "production-route-shell.spec.ts"
 WEB_PACKAGE_JSON_PATH = REPO_ROOT / "web" / "package.json"
 PLAYWRIGHT_CONFIG_PATH = REPO_ROOT / "web" / "playwright.config.ts"
+OPERATION_LATENCY_PATH = E2E_DIR / "fixtures" / "operationLatency.ts"
+BANK_FLOW_RULE_BATCH_SPEC_PATH = E2E_DIR / "bank-flow-rule-batches-flow.spec.ts"
 
 
 class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
+    def test_workbench_visibility_slo_is_explicit_bounded_and_same_clock(self) -> None:
+        helper = OPERATION_LATENCY_PATH.read_text(encoding="utf-8")
+        spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")
+
+        for required in (
+            "createWorkbenchVisibilitySegmentRecorder",
+            "performance.now()",
+            "Math.round",
+            "t0",
+            "t1",
+            "t2",
+            "t3",
+            "t4",
+            "segmentSumMicroseconds",
+            "totalMicroseconds",
+            "isolated",
+            "production_smoke",
+            "40-workbench-visibility-p99.json",
+            "import.meta.url",
+        ):
+            self.assertIn(required, helper)
+
+        for required in (
+            'process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1"',
+            "FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_SAMPLES",
+            "FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST",
+            "fixture_ownership",
+            "test_owned",
+            "context().request.post",
+            "/api/workbench/refresh-status",
+            "active_generation_id",
+            "refresh_scope_keys",
+            "dirty_scopes",
+            "business_identity",
+            "withdraw",
+            "production_smoke",
+            "commit-to-visible same-clock",
+        ):
+            self.assertIn(required, spec)
+
+        self.assertNotIn("Date.now()", helper)
+        self.assertNotIn("reset-submitted", spec.split('test("commit-to-visible same-clock', 1)[-1])
+
+    def test_workbench_visibility_slo_manifest_and_production_run_fail_closed(self) -> None:
+        spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")
+
+        for required in (
+            "stat(",
+            "uid !== 0",
+            "samples.length !== 1",
+            "samples.length < requestedSampleCount",
+            "transaction_ids",
+            "exact_scope",
+            "submit",
+            "recovery",
+            "redact",
+        ):
+            self.assertIn(required, spec)
+
+        self.assertNotIn("test.skip(!workbenchVisibilitySloEnabled", spec)
+
     def test_every_e2e_spec_uses_strict_browser_diagnostics_fixture(self) -> None:
         direct_imports: list[str] = []
         missing_strict_imports: list[str] = []

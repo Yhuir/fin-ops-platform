@@ -10,6 +10,88 @@ from fin_ops_platform.tools import http_slo_probe
 
 
 class HttpSloProbeTests(unittest.TestCase):
+    def test_default_probe_set_includes_lightweight_workbench_refresh_status(self) -> None:
+        probe = next(
+            probe
+            for probe in http_slo_probe.DEFAULT_API_PROBES
+            if probe.name == "workbench_refresh_status_all"
+        )
+
+        self.assertEqual(probe.path, "/api/workbench/refresh-status?month=all")
+        self.assertEqual(probe.expected_statuses, (200,))
+
+    def test_capacity_targets_are_derived_from_anonymous_rolling_sixty_second_counts(self) -> None:
+        counts = list(range(1, 101))
+
+        result = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "access_evidence",
+                "source": "nginx_authenticated_refresh_status_access",
+                "source_version": "access-log-v3",
+                "source_proof": "sha256:aggregate-query",
+                "window": {
+                    "started_at": "2026-07-22T00:00:00+08:00",
+                    "completed_at": "2026-08-05T00:00:00+08:00",
+                },
+                "method": "rolling_60s_unique_visible_clients",
+                "rolling_60s_unique_clients": counts,
+            }
+        )
+
+        self.assertEqual(result["status"], "measured")
+        self.assertEqual(result["c_normal"], 95)
+        self.assertEqual(result["c_peak"], 100)
+        self.assertEqual(result["n_normal"], 95)
+        self.assertEqual(result["n_peak"], 100)
+        self.assertEqual(result["aggregate_sample_count"], 100)
+        self.assertFalse(result["raw_client_data_retained"])
+        self.assertNotIn("rolling_60s_unique_clients", result)
+
+    def test_capacity_contract_requires_source_version_and_approver(self) -> None:
+        measured = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "contract_version": "capacity-v1",
+                "approved_by": "FINOPS-CAPACITY-20260806",
+                "c_normal": 3,
+                "c_peak": 6,
+            }
+        )
+        unavailable = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "c_normal": 3,
+                "c_peak": 6,
+            }
+        )
+
+        self.assertEqual(measured["status"], "measured")
+        self.assertEqual(measured["n_normal"], 4)
+        self.assertEqual(measured["n_peak"], 8)
+        self.assertEqual(unavailable["status"], "not_measured")
+        self.assertTrue(unavailable["release_blocked"])
+
+    def test_capacity_access_evidence_requires_exact_fourteen_day_window(self) -> None:
+        result = http_slo_probe.derive_capacity_targets(
+            {
+                "mode": "access_evidence",
+                "source": "nginx_authenticated_refresh_status_access",
+                "source_version": "access-log-v3",
+                "source_proof": "sha256:aggregate-query",
+                "window": {
+                    "started_at": "2026-07-23T00:00:00+08:00",
+                    "completed_at": "2026-08-05T00:00:00+08:00",
+                },
+                "method": "rolling_60s_unique_visible_clients",
+                "rolling_60s_unique_clients": [1, 2, 3],
+            }
+        )
+
+        self.assertEqual(result["status"], "not_measured")
+        self.assertTrue(result["release_blocked"])
+
     def test_default_probes_cover_page_domains_and_known_slow_endpoints(self) -> None:
         api_probe_names = {probe.name for probe in http_slo_probe.DEFAULT_API_PROBES}
 
