@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-05
+日期：2026-08-06
 
 ## 职责
 
@@ -9,7 +9,7 @@
 - 查询 active generation，并把 canonical facts 精确划分为 `paired` / `unpaired`。
 - 提供分页、搜索、详情、选择、正式配对、撤回和异常处理页面交互。
 - 暴露 freshness/status/source versions，阻止 stale 数据伪装 fresh。
-- relation mutation 成功后，只让当前可见关联台通过正常 GET 重校验其访问 scope；非 fresh 时显示 refreshing，不等待写路径扇出的 operation barrier。
+- 普通 writer 成功后只推进 canonical proof；当前可见关联台通过公开 refresh-status 自行重校验 scope，非 fresh 时显示 refreshing，不等待或接收写路径扇出的 notification/operation barrier。
 
 ### 不负责
 
@@ -36,7 +36,8 @@
 | generation source versions | Workbench normal GET / projection builder | expected 与 published generation 使用同一个 scope vector：所有状态的 relation、有效非异常 override、新 OA/发票异常决定、active pending claim、requested month 与 relation 跨月成员的 OA/银行流水/发票 canonical `updated_at`、银行分类器实际读取的同额时间邻域、银行分类事实 `updated_at`、分类确认事实的 confirm/revoke 时间、ETC submission/business/invoice/link 四类直接投影输入，以及 Workbench 实际消费的银行自动标签规则版本和账户映射 fingerprint。历史 WEX/row-ignore 与无关 settings 字段不进入 proof。relation 撤回、soft delete、跨月成员/分类上下文变化、银行分类确认/撤销和 ETC link/owner 变化必须让每个真实受影响月份 stale；`turnover_manual_closure` 仍属于 Workbench 主 generation canonical proof，但不属于共享 `workbench_relation` distribution。`all` query 使用 active 月分片对应的完整 vector。canonical 变化只让被访问 scope 判 stale 并走现有 gateway，禁止恢复写后 fan-out。 |
 | access refresh coalescing | Workbench normal GET / durable queue | normal GET 发现 stale 后只 ensure 当前 exact scope。当前 freshness view 已证明 exact scope 存在 `pending/processing` outbox event 时直接返回 `refreshing`，后续轮询不得重复执行全月份 canonical proof 或 schema scan；dirty 没有 active event 时必须标记 stale 并返回 exact scope 重新入队。Application 复用同一个 `WorkbenchSqlProjectionBuilder`，仅把时间上重叠的同 scope canonical proof 合并成一次数据库读取；完成后立即移除 flight，后续独立访问必须重新检查事实，失败 flight 也必须允许下一次访问重试。该进程内 flight 不是 freshness cache、durable truth 或第二套去重器。真实 relation/canonical mutation 和显式 repair 不适用 queue ensure 合并。 |
 | page source freshness | `WorkbenchQueryFacade` -> `WorkbenchQueryFreshnessService` -> `WorkbenchSqlProjectionBuilder` + active generation repository | 关联台投影直接读取 canonical facts 与 `app.workbench_pair_relations`，不消费 `workbench_relation` distribution，因此 combined initial 不得阻塞或刷新 `workbench_relation`。月份请求只比较当前 Workbench generation 与该月 canonical source vector；`all` 用一次月份枚举、一次 canonical bulk proof 和一次 active-generation bulk proof 返回真正 mismatch 的 `refresh_scope_keys`，只 enqueue 这些 Workbench 月份。默认、搜索、筛选和排序请求都必须先经过同一 freshness gate；查询是否可使用 Redis 只影响 cache I/O，不得决定是否验证 source freshness。普通 relation 写后访问不得退化成 `workbench:all` 全月份重建，也不得产生 relation projection I/O；已有 exact refresh 进行中且暂时没有新的 exact target 时，`all` 访问必须等待现有任务完成并在下一次轮询重新 proof，禁止把暂时未知目标回退成 `all` fan-out。freshness status 与 combined initial 读取期间发生 generation-set 切换时，返回 version-drift fail-closed payload 并由下一次请求读取新 generation，禁止为这个正常并发切换 enqueue 任何 refresh。只有 active generation 全部缺失或稳定状态下仍无法得到 exact recovery scope 时，既有 `all` fan-out command 才作为冷启动/显式恢复入口。已有 active generation 时，non-fresh initial/groups 继续返回该稳定 generation 的 rows 与版本，同时显式标记 refreshing/stale/failed、禁止写入和 Redis payload 写缓存；前端不得用同 generation 的 non-fresh 响应覆盖刚提交的 operation projection。active generation 缺失时仍 fail closed，不合成 false-empty。后续 `/groups` 继续绑定 initial 返回的 generation version。`server.py` 只注入 Application 已持有的 shared projection builder、repository 和 stale-reason port，不创建 request-local builder，也不拥有 scope 比较或 mismatch 聚合。 |
-| public refresh status | `WorkbenchQueryFacade` -> Workbench read repository | 页面 `/api/workbench/refresh-status` 与 SSE 使用 `get_workbench_groups_freshness_status(scope_key)` 的轻量 active-generation/dirty-scope view，再执行同一 canonical source freshness 与 status normalizer；完整 generation/outbox/worker consistency diagnostic 只属于 App Health/Audit，不得进入页面 150ms 等待热路径。旧 repository 缺少轻量 port 时允许使用既有 diagnostic port 作为显式兼容 fallback，但生产 repository 必须实现轻量 port。 |
+| public refresh status | `WorkbenchQueryFacade` -> Workbench read repository -> `ReadModelRefreshGateway` | 页面 `/api/workbench/refresh-status` 使用 `get_workbench_groups_freshness_status(scope_key)` 的轻量 active-generation/dirty-scope view，再执行同一 canonical source freshness 与 status normalizer；stale 时只 enqueue normalizer 返回的 exact month scopes，禁止退化为 `all`。完整 generation/outbox/worker consistency diagnostic 只属于 App Health/Audit，不得进入页面热路径。生产 repository 必须实现轻量 port。 |
+| visible self-convergence | `ReconciliationWorkbenchPage` | 页面 visible 时进入/focus 立即检查；每次 status settle 后等待 1000ms 再检查，hidden 暂停，所有触发合并为 single-flight。只有 fresh 且 active generation version 改变时进入既有 300ms debounce，并安装一次对应 combined payload；bank-flow 页面自身 POST/transaction/current-page GET、worker topology 与 maintenance/domain jobs 不变。 |
 | exact ETC relation enrichment scopes | `PostgresWorkbenchFormalRelationFactRepository` | candidate 只输出 OA 月份与 ETC batch 月份；已知月份时禁止附加 `all`。`month=all` 查询直接组合 active 月 generation，因此 exact enrichment 只需刷新受影响月份；只有完全无法解析月份的通用 relation 合同才允许 `all` fan-out command |
 
 `/groups` 在 generation/version proof 不是 `fresh` 且已有 active generation 时，允许用 expected generation version 执行一次有界稳定 page SQL，但不得读取或写入 Redis；响应必须保留 non-fresh status，前端只能把它作为刷新诊断，不能覆盖更新的 operation projection。没有 active generation 才返回空 groups 与明确 missing/failed 状态，禁止伪造 fresh 空集合。

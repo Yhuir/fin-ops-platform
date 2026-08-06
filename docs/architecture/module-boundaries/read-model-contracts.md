@@ -1,6 +1,6 @@
 # Read Model 边界合同
 
-扫描日期：2026-08-05。
+扫描日期：2026-08-06。
 
 本文件只记录当前运行时合同。历史 projection 设计和迁移过程不再作为架构依据；可执行事实源是：
 
@@ -26,6 +26,8 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 
 - 关联台页面继续读取 PostgreSQL `read_model.workbench_*` active generations；canonical facts 与 `app.workbench_pair_relations` 只由 projection builder 在 refresh 时读取。
 - 每次查询必须先通过 `WorkbenchQueryFreshnessService` 比较 canonical source proof、durable queue 状态与 active generation source versions；旧 generation 不得伪装 fresh。
+- 普通 canonical writer 只推进被 Workbench source proof 消费的 `updated_at`/version 与业务审计，不投递 Workbench dirty/outbox、freshness target 或 operation barrier。公开 `/api/workbench/refresh-status` 发现 stale 时复用既有 `ReadModelRefreshGateway`，只 enqueue proof 返回的 exact month scopes；既有 PostgreSQL queue、Workbench worker 与 active-generation 原子发布链负责收敛。
+- 关联台页面可见时，首次进入或重新获得 focus 立即执行一次公开 refresh-status；每次 status 完成后等待 1000ms 再调度下一次，document hidden 时暂停且全程 single-flight。只有 fresh 且 generation version 改变时进入既有 300ms combined-payload reload debounce，同一 generation 只安装一次。
 - Workbench 银行分类展示复用银行明细 canonical classifier；月份 source proof 必须包含该月及 active 跨月关系银行成员的分类事实和分类确认/撤销时间，使银行明细确认后的下一次关联台访问走既有 exact-scope freshness/refresh，不恢复写后 fan-out。
 - Redis 只缓存已通过 freshness gate 的 groups payload；stale、refreshing 或 failed 时只允许按当前 active generation 的精确 payload version 只读命中，禁止写入或让 Redis 参与 freshness 判定。Workbench 若已有 active generation，可返回该稳定 generation 并显式标记 non-fresh、阻断写入；缺失 active generation 时仍 fail closed，不得用 false-empty 覆盖页面。恢复请求继续经 gateway enqueue 精确月份 scope。
 - Workbench matching 是独立 canonical domain job；`workbench_relation` 是独立共享 distribution，二者都不能替代页面 active generation。

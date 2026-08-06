@@ -312,6 +312,13 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_workbench_sql_runtime.py` 直接实例化生产 `PostgresReadModelRepository`，保护 exact scope 去重、一次批量 active source-version 查询，以及 bulk 合同缺失时 fail closed、禁止旧 single-scope `all` proof。
 - `tests/test_workbench_query_facade.py` 保护普通 all-scope stale 且已有 active generation 时返回零恢复 scope；只有明确缺少 active generation 的冷启动状态才允许保留 `all` fan-out。
 
+## 2026-08-06 - visible self-convergence 与 writer 零通知
+
+- Backend/API：`tests/test_workbench_query_facade.py`、`tests/test_workbench_routes.py` 与 `tests/test_read_model_refresh_gateway.py` 保护公开 refresh-status 只 enqueue canonical proof 返回的 exact scopes，并复用既有 gateway/queue 去重；`all` 不作为普通 stale fallback。
+- Service/PostgreSQL：`tests/test_workbench_source_proof_contract.py` 覆盖所有 mutable Workbench dependency 的 writer→proof 变化、无关 scope 不变、bank-flow writer 零 dirty/outbox，以及既有 worker 原子发布新 generation 后 status 回到 fresh。
+- Frontend：`web/src/test/WorkbenchSelection.test.tsx` 保护 visible entry/focus immediate、每次 settle+1000ms、hidden pause、single-flight，以及 changed fresh generation 只经既有 300ms debounce reload 一次。
+- Browser：`web/e2e/bank-flow-rule-batches-flow.spec.ts` 保护 bank-flow 写响应零 Workbench target，并由持续可见关联台的 status→generation→业务 identity 链收敛；性能样本使用同一 Node monotonic clock，不能用 mock、混合时钟或最快样本替代 p99。
+
 ## 2026-08-04 - OA 附件发票正式关系扩展回归
 
 - `tests/test_oa_attachment_invoice_promotion_service.py` 保护一个费用项可绑定多张正式发票，promotion 写入时复用现有五个月 matching window，并证明 canonical invoice 与 durable dirty scope 在同一 PostgreSQL transaction 内提交。

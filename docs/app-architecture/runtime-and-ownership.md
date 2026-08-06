@@ -77,8 +77,8 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 2. Application/domain service 校验业务规则，调用 repository 做原子写入。
 3. 普通写只提交 owner canonical facts、可比较 source version、审计/idempotency 与必要领域任务；返回精确 affected scopes 作为信息，不产生页面 dirty/outbox。
 4. API 返回写入结果、受影响月份/对象和版本；普通写的 `freshness_targets`、`operation_barrier_targets` 为空，不等待任何未访问页面重建。
-5. 当前页可以在成功后重新执行自己的普通 GET；其它已打开、未访问或 hidden 页面不执行 I/O。
-6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，direct canonical 页面只执行 normal GET；只有已登记 read-model consumer 的 query owner 比较 expected/actual source versions，并在当前精确 scope missing/stale 时经 `ReadModelRefreshGateway` 入 durable queue。
+5. 当前页可以在成功后重新执行自己的普通 GET；其它 direct-canonical 页面和 hidden 页面不执行 I/O。持续可见的关联台是唯一例外：它只通过公开 refresh-status 自行观察 canonical proof，不接收 writer notification。
+6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，direct canonical 页面只执行 normal GET；只有已登记 read-model consumer 的 query owner 比较 expected/actual source versions，并在当前精确 scope missing/stale 时经 `ReadModelRefreshGateway` 入 durable queue。关联台可见时在进入/focus 立即检查，随后按“status 完成 + 1000ms”单飞调度；hidden 暂停，fresh generation 变化只触发一次既有 300ms combined reload。
 
 authoritative integration snapshot 默认同样只提交 canonical facts/source version；当前 OA sync 不主动入队页面 refresh。只有 data reset、repair/backfill/reapply 和人工 maintenance 可按已登记合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务管理员 settings reset 与历史 ETC repair，不是普通写后的默认分发器。
 
@@ -101,7 +101,7 @@ OA integration 只消费归一后的真实变化：它在一个 OA transaction �
 1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
 2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
 3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。direct canonical 页面直接读取新事实；已登记 read-model consumer 才由 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
-4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。focus、hidden→visible 与 BFCache 恢复不触发业务页面 I/O；route 重新 mount、页面查询变化、浏览器手动刷新或明确重试才重新运行该页 load/freshness contract。
+4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。direct-canonical 页面在 focus、hidden→visible 与 BFCache 恢复时不触发业务 I/O；关联台作为唯一 active-generation 页面，在重新可见/focus 时立即恢复轻量 refresh-status，仍不读取 writer signal 或重复完整 payload。
 5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 
 `/api/operation-barrier/status` 只保留给显式返回非空 targets 的 maintenance/integration 操作；普通 mutation 不再依赖它。权限/session、DB 可写性、canonical version/idempotency/owner 状态仍由 command service 和 UoW 决定。

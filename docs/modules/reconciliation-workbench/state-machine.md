@@ -70,6 +70,20 @@ preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm
 
 只有完成、校验通过并原子激活的 generation 可成为页面事实。
 
+## 可见页面自收敛状态
+
+```text
+hidden                           -> 无 timer、无 status I/O
+visible entry / focus            -> 立即发起一次 refresh-status
+status pending                   -> single-flight；focus/visibility 不并发追加
+status settled, page visible     -> 1000ms 后发起下一次 status
+stale exact scopes               -> query owner 经既有 gateway enqueue exact scopes
+fresh, generation unchanged      -> 不读取 combined payload
+fresh, generation g0 -> g1       -> 既有 300ms debounce -> 一次 combined reload/install
+```
+
+普通 writer 不参与这套页面状态机；它只提交 canonical proof/version/audit。queue、worker 和 generation 原子发布继续由既有 runtime owner 负责，maintenance/repair/rehydrate/domain jobs 的独立合同不变。
+
 ## Row detail 读取状态
 
 ```text
