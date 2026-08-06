@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
@@ -48,6 +48,23 @@ describe("FinanceTable shared primitives", () => {
     expect(screen.getByRole("button", { name: "50000" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("省略的页码")).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /^\d+$/ })).toHaveLength(5);
+  });
+
+  test("keeps first and last pages keyboard reachable in a large exact result set", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+
+    render(<FinanceTablePagination page={25_000} pageSize={20} total={1_000_000} onPageChange={onPageChange} />);
+
+    expect(screen.getByRole("button", { name: "25000" })).toHaveAttribute("aria-current", "page");
+
+    act(() => screen.getByRole("button", { name: "1" }).focus());
+    await user.keyboard("{Enter}");
+    act(() => screen.getByRole("button", { name: "50000" }).focus());
+    await user.keyboard(" ");
+
+    expect(onPageChange).toHaveBeenNthCalledWith(1, 1);
+    expect(onPageChange).toHaveBeenNthCalledWith(2, 50_000);
   });
 
   test("renders compact pagination without numeric links", () => {
