@@ -825,22 +825,30 @@ Plans:
 
 ### Phase 40: 性能合同与核心热路径闭环
 
-**Goal:** Establish target-scale/concurrent/browser performance evidence, repair proven frontend/SQL/application/import hot paths, remove stale legacy paths, and close one production release without adding workers, page read models, cache or a query framework.
+**Goal:** Establish target-scale/concurrent/browser performance evidence, repair proven frontend/SQL/application/import hot paths, and make Workbench access-time freshness fully self-converging after any canonical writer while writers remain zero-notification; remove stale legacy paths and close one production release without adding workers, page read models, cache, event transport or a query framework.
 **Requirements:** User-approved T0-6 performance audit; no new product requirement IDs.
 **Depends on:** Phase 39 verified six-worker/two-read-model production baseline.
-**Canonical refs:** `.planning/phases/40-performance-contract-hot-path-closure/40-01-PLAN.md`, `docs/operations/monitoring.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, affected module `boundary-io.md` files.
+**Canonical refs:** `.planning/phases/40-performance-contract-hot-path-closure/40-CONTEXT.md`, `.planning/phases/40-performance-contract-hot-path-closure/40-RESEARCH.md`, `.planning/phases/40-performance-contract-hot-path-closure/40-01-PLAN.md` through `40-08-PLAN.md`, `docs/operations/monitoring.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, affected module `boundary-io.md` files.
 **Success Criteria** (what must be TRUE):
 
   1. Target-scale, concurrent and browser evidence separates database, application, payload and rendering costs without writing production business data.
   2. FinanceTable pagination and proven pending/invoice/Workbench hot paths are bounded while exact financial and generation contracts remain unchanged.
   3. Only measured application/import hotspots change, using existing repository and batch/COPY capabilities with no new runtime architecture.
-  4. Retired Search/read-model descriptions and unconsumed legacy paths are deleted with no fallback, double-read or consumer regression.
-  5. Full local gates, pushed `main`, exact deployment and authenticated production evidence prove correctness, isolation and p95 performance.
+  4. Every Workbench-affecting canonical writer advances exact source proof but never sends a Workbench notification; existing refresh-status detects stale, enqueues only exact scopes through the current gateway, and the current worker atomically activates one fresh generation.
+  5. A visible Workbench checks immediately on entry/focus and then one second after each completed status request, pauses while hidden, remains strict single-flight and reloads the full payload once per changed fresh generation.
+  6. Target concurrency is derived from a named production evidence window or approved capacity contract; both derived load tiers meet p95/error/resource gates, and same-clock t0..t4 samples prove commit-to-visible p99 `<=3000ms` with every segment summing to the total.
+  7. Retired Search/read-model and Workbench-local target paths are deleted with no fallback, double-read or retained-job regression; full local gates, one pushed `main`, one exact deployment, T+300 and rollback evidence prove correctness, isolation and performance.
 
-**Plans:** 1 plan
-
+**Plans:** 8 plans
 Plans:
 
-- [ ] 40-01-PLAN — Performance contract, bounded hot paths, legacy cleanup, full regression and production closure.
+- [ ] 40-01-PLAN — Wave 1: bounded performance probes/contract and constant-size FinanceTable pagination.
+- [ ] 40-02-PLAN — Wave 1: three proven SQL hot paths with exact-result PostgreSQL regression.
+- [ ] 40-03-PLAN — Wave 1: proven import batch-row multi-value path only; speculative page/DTO hot paths excluded.
+- [ ] 40-04-PLAN — Wave 2 after 40-01/02/03: Search/no-OA fact/guard cleanup, full local gates and exact candidate handoff; no push/deploy.
+- [ ] 40-05-PLAN — Wave 1: backend refresh-status exact self-heal and unchanged API/writer contracts.
+- [ ] 40-06-PLAN — Wave 1: visible completion-driven one-second Workbench poller and interaction contracts.
+- [ ] 40-07-PLAN — Wave 2 after 40-05/06: real writer→proof matrix, zero-fanout worker closure, local target cleanup and deterministic Browser E2E.
+- [ ] 40-08-PLAN — Wave 3 after 40-04/07: affected docs, derived target capacity, Playwright same-clock browser p99, full gates and the only push/deploy/production/rollback closure.
 
 ---
