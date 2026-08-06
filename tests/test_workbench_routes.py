@@ -27,6 +27,10 @@ class FakeWorkbenchQueryFacade:
                 "read_model_status": "fresh",
             },
         )
+        self.refresh_result = WorkbenchQueryResult(
+            HTTPStatus.ACCEPTED,
+            {"month": "all", "read_model_status": "refreshing"},
+        )
 
     def group_detail(
         self,
@@ -52,7 +56,7 @@ class FakeWorkbenchQueryFacade:
 
     def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
         self.calls.append({"endpoint": "refresh_status", "month": month})
-        return WorkbenchQueryResult(HTTPStatus.ACCEPTED, {"month": month, "read_model_status": "refreshing"})
+        return self.refresh_result
 
     def groups(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
         self.calls.append({"endpoint": "groups", "month": month, **kwargs})
@@ -169,12 +173,56 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
     def test_refresh_status_delegates_to_query_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+        facade.refresh_result = WorkbenchQueryResult(
+            HTTPStatus.ACCEPTED,
+            {"month": "2026-05", "read_model_status": "refreshing"},
+        )
 
         status, payload = routes.refresh_status("2026-05")
 
         self.assertEqual(status, HTTPStatus.ACCEPTED)
         self.assertEqual(payload, {"month": "2026-05", "read_model_status": "refreshing"})
         self.assertEqual(facade.calls, [{"endpoint": "refresh_status", "month": "2026-05"}])
+
+    def test_refresh_status_preserves_month_status_error_and_payload_shape(self) -> None:
+        cases = (
+            (
+                "all",
+                HTTPStatus.OK,
+                {
+                    "scope_key": "all",
+                    "read_model_status": "stale",
+                    "refresh_scope_keys": ["2026-03", "2026-04"],
+                },
+            ),
+            (
+                "2026-05",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "query_timeout",
+                    "read_model_status": "unavailable",
+                    "retryable": True,
+                    "scope_key": "2026-05",
+                },
+            ),
+        )
+
+        for month, expected_status, expected_payload in cases:
+            with self.subTest(month=month):
+                facade = FakeWorkbenchQueryFacade()
+                facade.refresh_result = WorkbenchQueryResult(expected_status, expected_payload)
+                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+                status, payload = routes.refresh_status(month)
+
+                self.assertEqual(status, expected_status)
+                self.assertEqual(payload, expected_payload)
+                self.assertEqual(facade.calls, [{"endpoint": "refresh_status", "month": month}])
+
+    def test_refresh_status_remains_protected_by_the_shared_api_auth_gate(self) -> None:
+        app = object.__new__(Application)
+
+        self.assertTrue(app._route_requires_oa_access("/api/workbench/refresh-status"))
 
     def test_groups_normalizes_query_and_delegates_to_query_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()

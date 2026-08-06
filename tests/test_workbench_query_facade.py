@@ -1552,6 +1552,150 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "fresh")
         self.assertEqual(result.payload["active_generation_id"], "generation-fast")
 
+    def test_refresh_status_enqueues_only_exact_non_fresh_scopes_from_one_source_proof(self) -> None:
+        cases = (
+            (
+                "all stale mismatch scopes",
+                "all",
+                {
+                    "read_model_status": "stale",
+                    "active_generation_id": "generation-set-1",
+                    "refresh_scope_keys": ["2026-03", "2026-04", "2026-03"],
+                },
+                ["2026-03", "2026-04"],
+            ),
+            (
+                "month stale",
+                "2026-05",
+                {"read_model_status": "stale", "active_generation_id": "generation-2026-05"},
+                ["2026-05"],
+            ),
+            (
+                "fresh",
+                "all",
+                {"read_model_status": "fresh", "active_generation_id": "generation-set-1"},
+                [],
+            ),
+            (
+                "refreshing",
+                "all",
+                {
+                    "read_model_status": "refreshing",
+                    "active_generation_id": "generation-set-1",
+                    "active_refresh_in_progress": True,
+                    "dirty_scopes": [{"scope_key": "2026-03", "status": "processing"}],
+                },
+                [],
+            ),
+            (
+                "failed exact scope",
+                "all",
+                {
+                    "read_model_status": "failed",
+                    "active_generation_id": "generation-set-1",
+                    "dirty_scopes": [{"scope_key": "2026-06", "status": "failed"}],
+                },
+                ["2026-06"],
+            ),
+            (
+                "ordinary all stale does not fan out",
+                "all",
+                {
+                    "read_model_status": "stale",
+                    "active_generation_id": "generation-set-1",
+                    "read_model_stale_reasons": ["bulk_freshness_contract_unavailable"],
+                },
+                [],
+            ),
+            (
+                "cold start keeps all recovery",
+                "all",
+                {
+                    "read_model_status": "unavailable",
+                    "active_generation_id": None,
+                    "read_model_stale_reasons": ["active_generation_missing"],
+                },
+                ["all"],
+            ),
+        )
+
+        for name, month, source_payload, expected_scope_keys in cases:
+            with self.subTest(name=name):
+                repository_calls: list[str] = []
+                source_proof_calls: list[str] = []
+
+                class Repository:
+                    @staticmethod
+                    def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                        repository_calls.append(scope_key)
+                        return {"scope_key": scope_key, "read_model_status": "fresh"}
+
+                def source_freshness(
+                    payload: dict[str, object],
+                    *,
+                    scope_key: str,
+                ) -> dict[str, object]:
+                    source_proof_calls.append(scope_key)
+                    return {**payload, **source_payload}
+
+                queue = QueueRecorder()
+                facade = WorkbenchQueryFacade(
+                    repository=Repository(),
+                    redis_helper=None,
+                    enqueue_refresh=queue.enqueue,
+                    scope_key_for_month=scope_key_for_month,
+                    stale_reasons=no_stale_reasons,
+                    emit_status_metric=MetricRecorder().emit,
+                    missing_read_model_error=lambda _error: False,
+                    refresh_status_with_source_freshness=source_freshness,
+                )
+
+                result = facade.refresh_status(month)
+
+                self.assertEqual(result.status_code, HTTPStatus.OK)
+                self.assertEqual(result.payload["read_model_status"], source_payload["read_model_status"])
+                self.assertEqual(repository_calls, [month])
+                self.assertEqual(source_proof_calls, [month])
+                self.assertEqual(
+                    queue.refreshes,
+                    [
+                        (scope_key, "api_groups_source_versions_stale")
+                        for scope_key in expected_scope_keys
+                    ],
+                )
+
+    def test_refresh_status_maps_transient_enqueue_failure_to_existing_timeout_contract(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "read_model_status": "fresh"}
+
+        def enqueue_refresh(_scope_key: str, *, reason: str) -> None:
+            self.assertEqual(reason, "api_groups_source_versions_stale")
+            raise RuntimeError("canceling statement due to statement timeout")
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=enqueue_refresh,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            transient_read_model_error=lambda error: "statement timeout" in str(error).lower(),
+            refresh_status_with_source_freshness=lambda payload, **_kwargs: {
+                **payload,
+                "read_model_status": "stale",
+                "refresh_scope_keys": ["2026-05"],
+            },
+        )
+
+        result = facade.refresh_status("all")
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "query_timeout")
+        self.assertEqual(result.payload["scope_key"], "all")
+
     def test_refresh_status_query_timeout_returns_retryable_unavailable(self) -> None:
         class Repository:
             def get_workbench_refresh_status(self, **_kwargs: object) -> dict[str, object]:
