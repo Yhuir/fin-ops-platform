@@ -434,12 +434,12 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("batch-accounting-metadata-cleanup only permits the four fixed modes", script)
         self.assertIn("fin_ops_platform.tools.batch_accounting_metadata_cleanup_ops", script)
 
-    def test_oa_attachment_invoice_promotion_runs_exact_release_with_runtime_env(self) -> None:
+    def test_oa_attachment_invoice_promotion_does_not_require_a_new_root_helper_command(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
-        self.assertIn("oa-attachment-invoice-promotion <release-name> [args]", script)
-        self.assertIn("oa_attachment_invoice_promotion()", script)
-        self.assertIn("fin_ops_platform.tools.oa_attachment_invoice_promotion", script)
+        self.assertNotIn("oa-attachment-invoice-promotion", script)
+        self.assertNotIn("oa_attachment_invoice_promotion()", script)
+        self.assertIn('run_with_runtime_env "$src" "$src/scripts/rehydrate-workbench-read-models.py" "$@"', script)
 
     def test_batch_accounting_read_only_validation_commands_are_fixed(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()

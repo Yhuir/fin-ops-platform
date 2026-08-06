@@ -61,8 +61,6 @@ commands:
                                       auto-select frontend/runtime/ACL gate and activate exact release
   workbench-rehydrate <release-name> [args]
                                       rebuild Workbench SQL read models using runtime env
-  oa-attachment-invoice-promotion <release-name> [args]
-                                      dry-run/apply OA attachment invoice promotion using runtime env
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
   workbench-requirement-repair <release-name> --dry-run
@@ -1377,16 +1375,6 @@ workbench_rehydrate() {
   src="$(release_src "$release")"
   assert_runtime_env_contract
   run_with_runtime_env "$src" "$src/scripts/rehydrate-workbench-read-models.py" "$@"
-}
-
-oa_attachment_invoice_promotion() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "oa-attachment-invoice-promotion requires release name"
-  shift
-  local src
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.oa_attachment_invoice_promotion "$@"
 }
 
 workbench_audit_identity() {
@@ -2790,10 +2778,6 @@ case "$cmd" in
   workbench-rehydrate)
     shift
     workbench_rehydrate "$@"
-    ;;
-  oa-attachment-invoice-promotion)
-    shift
-    oa_attachment_invoice_promotion "$@"
     ;;
   workbench-audit-identity)
     shift

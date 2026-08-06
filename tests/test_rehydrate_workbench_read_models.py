@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_PATH = Path("scripts/rehydrate-workbench-read-models.py")
@@ -56,6 +58,55 @@ class AttachmentIdentityBridgeRepairTests(unittest.TestCase):
         self.assertEqual(result["applied"]["total"], 1)
 
 
+class OAAttachmentInvoicePromotionRoutingTests(unittest.TestCase):
+    def test_promotion_dry_run_uses_the_existing_exact_release_maintenance_entrypoint(self) -> None:
+        connection = _RuntimeConnection()
+        promotion_report = {"candidate_fingerprint": "abc", "summary": {"affected_invoice_count": 1}}
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["rehydrate-workbench-read-models.py", "--promote-oa-attachment-invoices", "--dry-run", "--json"],
+            ),
+            patch.object(MODULE.PostgresSettings, "from_env", return_value=object()),
+            patch.object(MODULE, "PostgresConnection", return_value=connection),
+            patch.object(
+                MODULE,
+                "audit_oa_attachment_invoice_promotion",
+                return_value=promotion_report,
+            ) as audit,
+            patch.object(MODULE, "_print_report", return_value=0) as print_report,
+        ):
+            self.assertEqual(MODULE.main(), 0)
+
+        audit.assert_called_once_with(
+            connection=connection,
+            example_limit=100,
+            apply=False,
+            oa_row_ids=[],
+            expected_fingerprint=None,
+        )
+        self.assertEqual(print_report.call_args.args[0]["oa_attachment_invoice_promotion"], promotion_report)
+
+    def test_promotion_apply_requires_explicit_confirmation(self) -> None:
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "rehydrate-workbench-read-models.py",
+                    "--promote-oa-attachment-invoices",
+                    "--apply-repair",
+                    "--expected-fingerprint",
+                    "abc",
+                ],
+            ),
+            self.assertRaisesRegex(ValueError, "confirm-apply-oa-attachment-invoices"),
+        ):
+            MODULE.main()
+
+
 class _Connection:
     def __init__(self) -> None:
         self.sql: list[str] = []
@@ -78,6 +129,14 @@ class _Connection:
         if "returning source_kind" in normalized:
             return [{"source_kind": "attachment_identity_invoice"}]
         return self.candidate_rows
+
+
+class _RuntimeConnection:
+    def __init__(self) -> None:
+        self.statement_timeout_ms: int | None = None
+
+    def set_statement_timeout_ms(self, value: int) -> None:
+        self.statement_timeout_ms = value
 
 
 if __name__ == "__main__":

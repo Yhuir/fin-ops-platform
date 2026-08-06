@@ -193,6 +193,6 @@
 
 ## 2026-08-07 OA 附件发票受控恢复入口
 
-- 复用既有 `OAAttachmentInvoicePromotionService`，由 `finops-deploy-control oa-attachment-invoice-promotion <release>` 固定调用 exact release module，不新增任意 SQL/shell 入口。
+- 复用既有 `OAAttachmentInvoicePromotionService`，通过生产已批准的 `finops-deploy-control workbench-rehydrate <release> --promote-oa-attachment-invoices` 固定维护入口调用 exact release 代码，不要求 root helper 自更新，也不新增任意 SQL/shell 入口。
 - dry-run 输出候选 SHA-256 fingerprint；apply 必须携带相同 fingerprint 和显式确认参数，候选变化时 fail closed。
 - 身份桥恢复只写缺失或变化的强身份行，重复执行候选与应用数均为 0；保留人工导入来源证据，不覆盖规范发票身份。

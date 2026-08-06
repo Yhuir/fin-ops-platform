@@ -788,12 +788,14 @@ sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name>
   --expected-fingerprint "$bridge_fingerprint" --json
 
 promotion_report="$(sudo -n /usr/local/sbin/finops-deploy-control \
-  oa-attachment-invoice-promotion <release-name> --json)"
+  workbench-rehydrate <release-name> \
+  --promote-oa-attachment-invoices --dry-run --json)"
 promotion_fingerprint="$(printf '%s' "$promotion_report" | python3 -c \
-  'import json,sys; print(json.load(sys.stdin)["candidate_fingerprint"])')"
+  'import json,sys; print(json.load(sys.stdin)["oa_attachment_invoice_promotion"]["candidate_fingerprint"])')"
 
 sudo -n /usr/local/sbin/finops-deploy-control \
-  oa-attachment-invoice-promotion <release-name> --apply \
+  workbench-rehydrate <release-name> \
+  --promote-oa-attachment-invoices --apply-repair \
   --confirm-apply-oa-attachment-invoices \
   --expected-fingerprint "$promotion_fingerprint" --json
 ```

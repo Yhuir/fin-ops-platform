@@ -21,6 +21,10 @@ from fin_ops_platform.services.postgres_repositories import read_models as read_
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository  # noqa: E402
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder  # noqa: E402
+from fin_ops_platform.tools.oa_attachment_invoice_promotion import (  # noqa: E402
+    APPLY_CONFIRMATION_FLAG,
+    audit_oa_attachment_invoice_promotion,
+)
 
 
 def main() -> int:
@@ -43,13 +47,24 @@ def main() -> int:
         help="Delete repairable attachment_identity_* bridge rows. Requires --dry-run or --apply-repair.",
     )
     parser.add_argument(
+        "--promote-oa-attachment-invoices",
+        action="store_true",
+        help="Restore strong-identity OA attachment invoice links. Requires --dry-run or --apply-repair.",
+    )
+    parser.add_argument("--oa-row-id", action="append", default=[], help="Limit promotion to an exact OA row id.")
+    parser.add_argument(
+        APPLY_CONFIRMATION_FLAG,
+        action="store_true",
+        help="Required with --apply-repair --promote-oa-attachment-invoices.",
+    )
+    parser.add_argument(
         "--apply-repair",
         action="store_true",
         help="Apply an explicit repair or rollback action instead of previewing it.",
     )
     parser.add_argument(
         "--expected-fingerprint",
-        help="Required when applying the attachment identity bridge repair; copy it from the dry-run report.",
+        help="Required when applying a fingerprinted repair; copy it from the dry-run report.",
     )
     parser.add_argument(
         "--explain-structured-attachments",
@@ -67,17 +82,32 @@ def main() -> int:
         raise ValueError("--statement-timeout-seconds must be positive.")
     if args.dry_run and args.apply_repair:
         raise ValueError("--dry-run and --apply-repair are mutually exclusive.")
-    repair_mode = bool(args.repair_attachment_identity_bridge or args.rollback_attachment_identity_bridge)
-    if args.repair_attachment_identity_bridge and args.rollback_attachment_identity_bridge:
-        raise ValueError("Choose only one attachment identity bridge repair action.")
+    repair_actions = (
+        args.repair_attachment_identity_bridge,
+        args.rollback_attachment_identity_bridge,
+        args.promote_oa_attachment_invoices,
+    )
+    repair_mode = any(repair_actions)
+    if sum(bool(value) for value in repair_actions) > 1:
+        raise ValueError("Choose only one OA attachment repair action.")
     if args.apply_repair and not repair_mode:
-        raise ValueError("--apply-repair is only valid with an attachment identity bridge repair action.")
-    if args.apply_repair and args.repair_attachment_identity_bridge and not str(args.expected_fingerprint or "").strip():
-        raise ValueError("Attachment identity bridge repair apply requires --expected-fingerprint.")
+        raise ValueError("--apply-repair is only valid with an OA attachment repair action.")
+    if (
+        args.apply_repair
+        and (args.repair_attachment_identity_bridge or args.promote_oa_attachment_invoices)
+        and not str(args.expected_fingerprint or "").strip()
+    ):
+        raise ValueError("Fingerprint-protected OA attachment repair requires --expected-fingerprint.")
+    if (
+        args.apply_repair
+        and args.promote_oa_attachment_invoices
+        and not bool(getattr(args, "confirm_apply_oa_attachment_invoices", False))
+    ):
+        raise ValueError(f"OA attachment invoice promotion apply requires {APPLY_CONFIRMATION_FLAG}.")
     if repair_mode and args.explain_structured_attachments:
-        raise ValueError("Attachment identity bridge repair cannot be combined with --explain-structured-attachments.")
+        raise ValueError("OA attachment repair cannot be combined with --explain-structured-attachments.")
     if repair_mode and not (args.dry_run or args.apply_repair):
-        raise ValueError("Attachment identity bridge repair requires --dry-run or --apply-repair.")
+        raise ValueError("OA attachment repair requires --dry-run or --apply-repair.")
     if args.explain_structured_attachments and not args.scope:
         raise ValueError("--explain-structured-attachments requires at least one --scope to avoid accidental full-table diagnostics.")
 
@@ -89,13 +119,25 @@ def main() -> int:
             "action": (
                 "rollback_attachment_identity_bridge"
                 if args.rollback_attachment_identity_bridge
-                else "repair_attachment_identity_bridge"
+                else (
+                    "promote_oa_attachment_invoices"
+                    if args.promote_oa_attachment_invoices
+                    else "repair_attachment_identity_bridge"
+                )
             ),
             "dry_run": bool(args.dry_run),
             "apply_repair": bool(args.apply_repair),
             "timings": [],
         }
-        if args.rollback_attachment_identity_bridge:
+        if args.promote_oa_attachment_invoices:
+            report["oa_attachment_invoice_promotion"] = audit_oa_attachment_invoice_promotion(
+                connection=connection,
+                example_limit=100,
+                apply=bool(args.apply_repair),
+                oa_row_ids=list(args.oa_row_id or []),
+                expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
+            )
+        elif args.rollback_attachment_identity_bridge:
             report["attachment_identity_bridge"] = _rollback_attachment_identity_bridge(
                 connection,
                 apply_changes=bool(args.apply_repair),
@@ -106,7 +148,7 @@ def main() -> int:
                 apply_changes=bool(args.apply_repair),
                 expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
             )
-        report["timings"].append({"step": "attachment_identity_bridge", "duration_ms": _duration_ms(repair_started_at)})
+        report["timings"].append({"step": report["action"], "duration_ms": _duration_ms(repair_started_at)})
         report["duration_ms"] = _duration_ms(script_started_at)
         return _print_report(report, json_output=args.json)
 

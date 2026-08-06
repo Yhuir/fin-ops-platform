@@ -469,10 +469,10 @@ sudo /usr/local/sbin/finops-deploy-control status
 sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
   --json \
   --limit 20
-sudo /usr/local/sbin/finops-deploy-control oa-attachment-invoice-promotion <release-name> \
-  --json
-sudo /usr/local/sbin/finops-deploy-control oa-attachment-invoice-promotion <release-name> \
-  --apply --confirm-apply-oa-attachment-invoices \
+sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --promote-oa-attachment-invoices --dry-run --json
+sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
+  --promote-oa-attachment-invoices --apply-repair --confirm-apply-oa-attachment-invoices \
   --expected-fingerprint <dry-run-candidate-fingerprint> --json
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --dry-run
