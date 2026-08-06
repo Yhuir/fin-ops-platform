@@ -265,6 +265,62 @@ describe("Workbench row selection and detail drawer", () => {
     ))).toHaveLength(initialRequestCount + 1);
   });
 
+  test.each([
+    ["initial generation first", false],
+    ["refresh generation first", true],
+  ])("reloads when %s exposes a generation race", async (_label, statusFirst) => {
+    vi.useFakeTimers();
+    setDocumentVisibility("visible");
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    const initialRequest = deferredResponse();
+    const refreshRequest = deferredResponse();
+    let initialFetchArgs: [RequestInfo | URL, RequestInit | undefined] | null = null;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isWorkbenchInitialRequest(input) && initialFetchArgs === null) {
+        initialFetchArgs = [input, init];
+        return initialRequest.promise;
+      }
+      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
+        return refreshRequest.promise;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderWorkbenchPage();
+    expect(initialFetchArgs).not.toBeNull();
+    const initialResponse = await defaultFetch!(...initialFetchArgs!);
+    const statusResponse = jsonResponse({
+      scope_key: "all",
+      read_model_status: "fresh",
+      read_model_version: "generation-v2",
+    });
+
+    await act(async () => {
+      if (statusFirst) {
+        refreshRequest.resolve(statusResponse);
+        await Promise.resolve();
+        initialRequest.resolve(initialResponse);
+      } else {
+        initialRequest.resolve(initialResponse);
+        await Promise.resolve();
+        refreshRequest.resolve(statusResponse);
+      }
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+    });
+
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    ))).toHaveLength(2);
+  });
+
   test("shows the unified page Audit control to admins", async () => {
     installMockApiFetch();
     renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });

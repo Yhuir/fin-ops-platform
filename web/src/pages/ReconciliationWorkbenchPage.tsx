@@ -334,7 +334,7 @@ function delayWorkbenchOperationPoll() {
 }
 
 function workbenchRefreshStatusVersionKey(status: WorkbenchRefreshStatus) {
-  const version = status.readModelVersion ?? status.generatedAt;
+  const version = status.readModelVersion;
   return version === null || version === undefined ? "" : String(version);
 }
 
@@ -757,6 +757,14 @@ export default function ReconciliationWorkbenchPage() {
       setCashTicketPurchaseDialog(null);
     }
     activeWorkbenchReadModelVersionRef.current = nextVersion;
+    if (nextStatus === "fresh" && nextVersion) {
+      const observedRefreshVersion = lastWorkbenchRefreshVersionRef.current;
+      if (!observedRefreshVersion) {
+        lastWorkbenchRefreshVersionRef.current = nextVersion;
+      } else if (!previousVersion && observedRefreshVersion !== nextVersion) {
+        scheduleWorkbenchReadModelReload();
+      }
+    }
     setWorkbenchData(workbenchPayload.data);
     setIgnoredExceptionCount(workbenchPayload.data.summary.ignoredExceptionCount);
     setStatistics(nextStatus === "fresh" ? workbenchPayload.statistics ?? null : null);
