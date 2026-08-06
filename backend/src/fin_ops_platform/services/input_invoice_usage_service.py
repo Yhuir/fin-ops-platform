@@ -766,6 +766,7 @@ class InputInvoiceUsageQueryService:
             "oaId": oa_id,
             "applicantName": record.applicant if record is not None else "",
             "applicationType": record.apply_type if record is not None else "",
+            "workflowStatus": str(getattr(record, "workflow_status", "") or "completed") if record is not None else "",
             "projectName": (record.project_name_display or record.project_name) if record is not None else "",
             "amount": _money(record.amount) if record is not None else "",
             "status": record.section if record is not None else "",

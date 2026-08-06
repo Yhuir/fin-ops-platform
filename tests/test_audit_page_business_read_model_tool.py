@@ -685,6 +685,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("/* check: canonical_relation_bank_member_exists */", queried_sql)
         self.assertIn("/* check: canonical_relation_invoice_member_exists */", queried_sql)
         self.assertIn("/* check: oa_pending_payment_relation_visibility */", queried_sql)
+        self.assertIn("consumer.source_kind = expected.source_kind", queried_sql)
         self.assertNotIn("read_model.oa_pending", queried_sql)
         self.assertNotIn("job.read_model_dirty_scopes", queried_sql)
         self.assertNotIn("job.outbox_events", queried_sql)

@@ -615,6 +615,7 @@ class PendingInvoiceQueryService:
                     "application_type": str(item.get("application_type") or item.get("apply_type") or ""),
                     "project_name": str(item.get("project_name") or ""),
                     "status": str(item.get("status") or ""),
+                    "workflow_status": str(item.get("workflow_status") or "completed"),
                     "form_no": str(item.get("form_no") or item.get("workflow_no") or ""),
                     "detail_available": bool(item.get("detail_available", True)),
                     "relation_case_id": str(item.get("relation_case_id") or ""),
@@ -637,6 +638,7 @@ class PendingInvoiceQueryService:
                             "application_type": str(metadata.get("application_type") or metadata.get("apply_type") or ""),
                             "project_name": str(metadata.get("project_name") or metadata.get("project") or ""),
                             "status": str(metadata.get("status") or ""),
+                            "workflow_status": str(metadata.get("workflow_status") or "completed"),
                             "form_no": str(metadata.get("form_no") or ""),
                             "detail_available": False,
                             "relation_case_id": str(group.get("group_id") or ""),
@@ -846,6 +848,11 @@ class PendingInvoiceQueryService:
                         "application_type": record.apply_type if record is not None else self._metadata_text(metadata, "application_type", "apply_type", "form_type"),
                         "project_name": (record.project_name_display or record.project_name) if record is not None else self._metadata_text(metadata, "project_name", "project", "projectName") or "",
                         "status": record.section if record is not None else self._metadata_text(metadata, "status", "flow_status", "section"),
+                        "workflow_status": (
+                            str(getattr(record, "workflow_status", "") or "completed")
+                            if record is not None
+                            else self._metadata_text(metadata, "workflow_status") or "completed"
+                        ),
                         "form_no": record.case_id or self._metadata_text(metadata, "form_no", "form_id", "oa_form_id") or "",
                         "detail_available": record is not None,
                         "relation_case_id": str(relation.get("case_id") or ""),

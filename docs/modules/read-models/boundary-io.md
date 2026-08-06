@@ -61,7 +61,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | --- | --- | --- |
 | Refresh request | Workbench 页面 query owner、relation read owner 或显式 maintenance | 非事务入口经 `ReadModelRefreshGateway` normalize、validate、dedupe；事务内 writer 使用等价 scope contract |
 | Scope key | `ReadModelScopePolicyRegistry` | 两种 scope 均只接受 `YYYY-MM` 或 `all`；空值和其它形状 fail fast |
-| Canonical source proof | 各 projection producer | 必须包含 own schema version 与实际依赖版本；dirty `source_version` 只作发布 CAS 令牌 |
+| Canonical source proof | 各 projection producer | 必须包含 own schema version 与实际依赖版本；Workbench proof 包含 completed OA 与 in-progress admission version，不包含历史 pending bank claim；dirty `source_version` 只作发布 CAS 令牌 |
 | Query request | facade/API | payload I/O 前检查 durable dirty/outbox 与 canonical source proof；cache 不能替代 proof |
 | Workbench OA/invoice anomaly | Workbench grouping / exception decision repository | active generation payload 可携带 additive `oa_invoice_anomaly` comparison units；decision 按 exact month/scenario 读取，bucket 查询只过滤既有 group payload。不得为金额差异或附件缺失新增 manifest、scope、worker、queue、Redis owner 或第二 read model。 |
 | Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向两个 active scope type 写入 `all` fan-out command；该 CLI 不提供 retired Search/no-OA 或 BankFlow draft replay |

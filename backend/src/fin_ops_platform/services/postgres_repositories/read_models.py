@@ -7884,7 +7884,7 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         "workbench_pair_relations_updated_at",
         "workbench_exception_cases_updated_at",
         "workbench_row_overrides_updated_at",
-        "oa_pending_payment_bank_claims_updated_at",
+        "oa_pending_payment_admissions_updated_at",
         "bank_transactions_updated_at",
         "bank_transaction_categories_updated_at",
         "bank_transaction_category_confirmations_updated_at",

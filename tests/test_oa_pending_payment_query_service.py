@@ -162,7 +162,7 @@ class PostgresOaPendingPaymentQueryRepositoryTests(unittest.TestCase):
         self.assertIn("from app.oa_pending_payment_admissions", sql)
         self.assertIn("from app.workbench_pair_relations", sql)
         self.assertIn("relation.status = 'active'", sql)
-        self.assertIn("from app.oa_pending_payment_bank_relations", sql)
+        self.assertNotIn("from app.oa_pending_payment_bank_relations", sql)
         self.assertIn("limit %s offset %s", sql)
         self.assertNotIn("oa_pending_payment_read_model_rows", sql)
         self.assertNotIn("workbench_relation_read_model", sql)
@@ -187,7 +187,7 @@ class PostgresOaPendingPaymentQueryRepositoryTests(unittest.TestCase):
         sql, params = connection.fetch_one_calls[0]
         self.assertIn("from app.bank_transactions", sql)
         self.assertIn("from app.workbench_pair_relations", sql)
-        self.assertIn("from app.oa_pending_payment_bank_relations", sql)
+        self.assertNotIn("from app.oa_pending_payment_bank_relations", sql)
         self.assertIn("relation.status = 'active'", sql)
         self.assertIn("limit %s offset %s", sql)
         self.assertNotIn("read_model.", sql)
@@ -290,8 +290,7 @@ class CanonicalQueryRepository:
         return {
             "completed_records": [_record()],
             "in_progress_records": [],
-            "canonical_relations": [],
-            "pending_relations": [],
+            "relations": [],
             "bank_transactions": [],
             "invoices": [],
             "payment_statuses": {},

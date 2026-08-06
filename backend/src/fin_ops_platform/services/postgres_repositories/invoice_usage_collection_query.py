@@ -12,7 +12,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
-    PostgresOAProjectionRepository,
+    PostgresOAWorkflowRepository,
 )
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -156,7 +156,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                 month=normalized_month,
                 status_case=status_case,
             )
-            base_params: list[Any] = [*status_params]
+            base_params: list[Any] = [tenant_id, *status_params]
             where_sql, where_params = _where_sql(
                 keyword=keyword,
                 invoice_date_from=invoice_date_from,
@@ -290,6 +290,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                 group_rows=group_rows,
                 supporting_group_rows=[],
                 invoice_type="input",
+                tenant_id=tenant_id,
             )
             reverse_row = transaction.fetch_one(
                 """
@@ -763,6 +764,34 @@ def _fact_cte(
     oa_ctes_sql = (
         """
         ,
+        workflow_oa as materialized (
+            select
+                row_id,
+                applicant,
+                normalized_payload,
+                form_type,
+                project_name,
+                amount,
+                application_date,
+                'completed'::text as workflow_status
+            from app.oa_applications
+            where workflow_status is null
+               or workflow_status = ''
+               or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
+            union all
+            select
+                admission.oa_id,
+                admission.applicant,
+                admission.source_payload,
+                coalesce(admission.source_payload->>'apply_type', admission.source_payload->>'form_type', ''),
+                coalesce(admission.project_name_display, admission.project_name, ''),
+                admission.amount,
+                (admission.scope_key || '-01')::date,
+                'in_progress'::text
+            from app.oa_pending_payment_admissions admission
+            where admission.tenant_id = %s
+              and admission.workflow_status = 'in_progress'
+        ),
         group_oa_rows as (
             select
                 relation.group_key,
@@ -790,7 +819,7 @@ def _fact_cte(
                 ) as amount_matched
             from group_relation_ids relation
             join relation_members member on member.relation_id = relation.relation_id
-            join app.oa_applications oa on oa.row_id = member.row_id
+            join workflow_oa oa on oa.row_id = member.row_id
             where member.row_type = 'oa'
             group by
                 relation.group_key,
@@ -1410,6 +1439,7 @@ def _load_facts(
     group_rows: list[dict[str, Any]],
     supporting_group_rows: list[dict[str, Any]],
     invoice_type: str,
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     all_group_rows = [*group_rows, *supporting_group_rows]
     invoice_ids = _texts(
@@ -1490,7 +1520,10 @@ def _load_facts(
     )
     transactions = core.list_bank_transactions_by_ids(bank_ids)
     oa_records = (
-        PostgresOAProjectionRepository(transaction).list_application_records_by_row_ids(
+        PostgresOAWorkflowRepository(
+            transaction,
+            tenant_id=tenant_id,
+        ).list_application_records_by_row_ids(
             oa_ids
         )
         if invoice_type == "input" and oa_ids

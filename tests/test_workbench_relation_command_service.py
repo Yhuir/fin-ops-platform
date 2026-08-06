@@ -171,6 +171,62 @@ class FakeEtcBatchLinkRepository:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_remove_unavailable_oa_member_preserves_remaining_case_and_history(self) -> None:
+        relation = {
+            "case_id": "case-oa-terminal",
+            "row_ids": ["oa-terminal", "bank-1", "invoice-1"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-01T10:00:00+00:00",
+            "special_metadata": {"requires_oa": False, "requires_invoice": True},
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-oa-terminal": relation}})
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            require_fresh_relations=False,
+        )
+
+        result = service.remove_rows_from_active_relations(
+            row_ids=["oa-terminal"],
+            actor_id="system:oa_sync",
+            reason="OA terminated",
+        )
+
+        saved = repository.snapshot["pair_relations"]["case-oa-terminal"]
+        self.assertEqual(saved["row_ids"], ["bank-1", "invoice-1"])
+        self.assertEqual(saved["row_types"], ["bank", "invoice"])
+        self.assertEqual(result["changed_case_ids"], ["case-oa-terminal"])
+        history = repository.save_calls[0]["snapshot"]["pair_relation_history"][0]
+        self.assertEqual(history["operation_type"], "remove_unavailable_oa_fact")
+
+    def test_remove_unavailable_oa_cancels_case_when_only_bank_remains(self) -> None:
+        relation = {
+            "case_id": "case-oa-bank",
+            "row_ids": ["oa-terminal", "bank-1"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-oa-bank": relation}})
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            require_fresh_relations=False,
+        )
+
+        service.remove_rows_from_active_relations(
+            row_ids=["oa-terminal"],
+            actor_id="system:oa_sync",
+            reason="OA terminated",
+        )
+
+        self.assertEqual(repository.snapshot["pair_relations"]["case-oa-bank"]["status"], "cancelled")
+        history = repository.save_calls[0]["snapshot"]["pair_relation_history"][0]
+        self.assertEqual(history["operation_type"], "cancel_relation_for_unavailable_oa_fact")
+
     def test_active_relation_read_uses_active_only_repository_loader(self) -> None:
         class ActiveOnlyRepository:
             def load_workbench_pair_relations_for_row_ids(

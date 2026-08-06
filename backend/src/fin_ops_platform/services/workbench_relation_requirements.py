@@ -53,24 +53,43 @@ def evaluate_bank_relation_completion(
     special_metadata: dict[str, Any] | None,
     relation_mode: str = "",
     amount_check: dict[str, Any] | None = None,
+    oa_workflow_statuses: Iterable[str] | None = None,
 ) -> dict[str, object]:
     normalized_types = tuple(str(value or "").strip().lower() for value in row_types)
     metadata = special_metadata if isinstance(special_metadata, dict) else {}
-    if str(metadata.get("source") or "").strip() == "batch_accounting":
-        return {"is_complete": True, "missing_row_types": []}
     present = set(normalized_types)
-    if "oa" in present and "bank" not in present:
-        return {"is_complete": False, "missing_row_types": ["bank"]}
-    if "bank" not in present:
-        return {"is_complete": True, "missing_row_types": []}
-    requires_oa = _requirement(metadata, "requires_oa", "paired_requires_oa")
-    requires_invoice = _requirement(metadata, "requires_invoice", "paired_requires_invoice")
     missing: list[str] = []
-    if requires_oa and "oa" not in present:
-        missing.append("oa")
-    if requires_invoice and "invoice" not in present:
-        missing.append("invoice")
-    return {"is_complete": not missing, "missing_row_types": missing}
+    if str(metadata.get("source") or "").strip() != "batch_accounting":
+        if "oa" in present and "bank" not in present:
+            missing.append("bank")
+        elif "bank" in present:
+            if _requirement(metadata, "requires_oa", "paired_requires_oa") and "oa" not in present:
+                missing.append("oa")
+            if _requirement(metadata, "requires_invoice", "paired_requires_invoice") and "invoice" not in present:
+                missing.append("invoice")
+
+    blocking_reasons: list[str] = []
+    if "oa" in present:
+        statuses = (
+            ["completed"] * normalized_types.count("oa")
+            if oa_workflow_statuses is None
+            else [str(value or "").strip().lower() for value in oa_workflow_statuses]
+        )
+        if "in_progress" in statuses:
+            blocking_reasons.append("oa_in_progress")
+        if len(statuses) != normalized_types.count("oa") or any(
+            status not in {"completed", "in_progress"} for status in statuses
+        ):
+            blocking_reasons.append("oa_workflow_status_unknown")
+    material_complete = not missing
+    workflow_complete = not blocking_reasons
+    result: dict[str, object] = {
+        "is_complete": material_complete and workflow_complete,
+        "missing_row_types": missing,
+    }
+    if blocking_reasons:
+        result["blocking_reasons"] = blocking_reasons
+    return result
 
 
 def _requirement(metadata: dict[str, Any], primary: str, legacy: str) -> bool:

@@ -18,6 +18,8 @@ import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { splitBankAccountLabel } from "../BankAccountValue";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
+import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
+import { FinanceStatusTag } from "../common/FinanceTable";
 
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "unpaired";
@@ -221,6 +223,7 @@ function renderCellValue(
       value,
       row.tableValues.applicationTime ?? "",
       row.tableValues.applicationType ?? "",
+      row.tableValues.workflowStatus ?? "completed",
       showInlineDetail,
       onOpenDetail,
       searchQuery,
@@ -313,6 +316,7 @@ function renderOaApplicantValue(
   value: string,
   applicationTime: string,
   applicationType: string,
+  workflowStatus: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery: string,
@@ -339,12 +343,11 @@ function renderOaApplicantValue(
           </button>
         ) : null}
       </span>
-      {hasApplicationTime || hasApplicationType ? (
-        <span className="compound-cell-secondary">
-          {hasApplicationType ? <span className="inline-meta-tag">{highlightSearchText(applicationType, searchQuery)}</span> : null}
-          {hasApplicationTime ? renderInlineDateTimeTag(applicationTime, searchQuery) : null}
-        </span>
-      ) : null}
+      <span className="compound-cell-secondary">
+        {hasApplicationType ? <FinanceStatusTag>{highlightSearchText(applicationType, searchQuery)}</FinanceStatusTag> : null}
+        <OaWorkflowStatusChip status={workflowStatus} />
+        {hasApplicationTime ? renderInlineDateTimeTag(applicationTime, searchQuery) : null}
+      </span>
     </span>
   );
 }

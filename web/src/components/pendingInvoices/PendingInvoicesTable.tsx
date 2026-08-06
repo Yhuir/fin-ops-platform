@@ -11,6 +11,7 @@ import {
   type FinanceTone,
 } from "../common/FinanceTable";
 import { formatMoney } from "../../features/money";
+import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import type {
   PendingInvoiceDirection,
   PendingInvoiceColumnFilter,
@@ -731,8 +732,8 @@ function PendingInvoiceTableRow({
             primary={primaryOa.applicant || <EmptyValue />}
             secondary={(
               <span className="pending-invoices-inline-row">
-                <span>{primaryOa.applicationType || <EmptyValue />}</span>
-                <RelationStatusChip status={primaryOa.relationStatus} />
+                <FinanceStatusTag>{primaryOa.applicationType || "类型为空"}</FinanceStatusTag>
+                <OaWorkflowStatusChip status={primaryOa.workflowStatus} />
               </span>
             )}
             title={primaryOa.applicant}

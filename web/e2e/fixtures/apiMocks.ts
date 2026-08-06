@@ -8795,7 +8795,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         bankTransactionIds: ["bank-link-e2e-001"],
         relation: {
           status: "confirmed",
-          origin: "oa_pending_payment_in_progress",
+          origin: "oa_pending_payment",
         },
         autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
         oaPaymentWritebacks: [

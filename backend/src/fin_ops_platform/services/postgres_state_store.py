@@ -19,7 +19,6 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresBankTransactionCategoryRepository,
     PostgresCoreRepository,
     PostgresEtcImportSessionRepository,
-    PostgresOaPendingPaymentRelationRepository,
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
@@ -163,7 +162,6 @@ class PostgresStateStore:
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
-        self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
         if self._object_storage_repository is None:
             self._file_root.mkdir(parents=True, exist_ok=True)
@@ -993,10 +991,6 @@ class PostgresStateStore:
     @property
     def bank_transaction_category_repository(self) -> PostgresBankTransactionCategoryRepository:
         return self._bank_transaction_category_repository
-
-    @property
-    def oa_pending_payment_relation_repository(self) -> PostgresOaPendingPaymentRelationRepository:
-        return self._oa_pending_payment_relation_repository
 
     @property
     def workbench_sql_read_repository(self) -> PostgresReadModelRepository:

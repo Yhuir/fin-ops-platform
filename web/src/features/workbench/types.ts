@@ -244,6 +244,7 @@ export type WorkbenchRelationGroup = {
   completion?: {
     isComplete: boolean;
     missingRecordTypes: WorkbenchRecordType[];
+    blockingReasons: string[];
   };
 };
 

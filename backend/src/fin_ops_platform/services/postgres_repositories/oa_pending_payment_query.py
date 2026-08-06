@@ -11,9 +11,6 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
     PostgresOaPendingPaymentAdmissionRepository,
 )
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    PostgresOaPendingPaymentRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
@@ -386,20 +383,7 @@ class PostgresOaPendingPaymentQueryRepository:
                 where relation.status = 'active'
                   and lower(bank_member.row_type) in ('bank', 'bank_transaction')
             ),
-            pending_relations as materialized (
-                select
-                    bank_id,
-                    relation.relation_id as relation_case_id,
-                    relation.oa_row_ids,
-                    'linked_in_progress'::text as relation_status,
-                    0 as priority
-                from app.oa_pending_payment_bank_relations relation
-                cross join lateral unnest(relation.bank_transaction_ids) as bank_id
-                where relation.status = 'active'
-            ),
             relation_candidates as materialized (
-                select * from pending_relations
-                union all
                 select * from formal_relations
             ),
             relation_by_bank as materialized (
@@ -585,18 +569,14 @@ class PostgresOaPendingPaymentQueryRepository:
         in_progress_records = PostgresOaPendingPaymentAdmissionRepository(
             self._connection
         ).list_application_records_by_row_ids(in_progress_ids, tenant_id=tenant_id)
-        canonical_snapshot = PostgresWorkbenchRelationRepository(
+        relation_snapshot = PostgresWorkbenchRelationRepository(
             self._connection
-        ).load_active_workbench_pair_relations_for_row_ids(completed_ids)
-        canonical_relations = [
+        ).load_active_workbench_pair_relations_for_row_ids([*completed_ids, *in_progress_ids])
+        relations = [
             dict(relation)
-            for relation in dict(canonical_snapshot.get("pair_relations") or {}).values()
+            for relation in dict(relation_snapshot.get("pair_relations") or {}).values()
             if isinstance(relation, dict)
         ]
-        pending_relations = PostgresOaPendingPaymentRelationRepository(
-            self._connection
-        ).active_relations_for_row_ids(in_progress_ids)
-        relations = [*canonical_relations, *pending_relations]
         core = PostgresCoreRepository(self._connection)
         bank_transactions = core.list_bank_transactions_by_ids(
             relation_member_ids(relations, row_types={"bank", "bank_transaction"})
@@ -615,8 +595,7 @@ class PostgresOaPendingPaymentQueryRepository:
         return {
             "completed_records": completed_records,
             "in_progress_records": in_progress_records,
-            "canonical_relations": canonical_relations,
-            "pending_relations": pending_relations,
+            "relations": relations,
             "bank_transactions": bank_transactions,
             "invoices": invoices,
             "payment_statuses": statuses,
@@ -758,9 +737,9 @@ canonical_oa as materialized (
     where admission.tenant_id = requested.tenant_id
       and admission.workflow_status = 'in_progress'
 ),
-completed_relation_groups as materialized (
+workflow_relation_groups as materialized (
     select
-        'completed'::text as source_kind,
+        oa.source_kind,
         oa.scope_key,
         relation.case_id as relation_id,
         array_agg(oa.oa_id order by member.ordinality) as oa_ids,
@@ -768,37 +747,12 @@ completed_relation_groups as materialized (
         relation.row_types
     from app.workbench_pair_relations relation
     cross join lateral unnest(relation.row_ids) with ordinality as member(row_id, ordinality)
-    join canonical_oa oa
-      on oa.source_kind = 'completed'
-     and oa.oa_id = member.row_id
+    join canonical_oa oa on oa.oa_id = member.row_id
     where relation.status = 'active'
-    group by oa.scope_key, relation.case_id, relation.row_ids, relation.row_types
-),
-pending_relation_groups as materialized (
-    select
-        'in_progress'::text as source_kind,
-        oa.scope_key,
-        relation.relation_id,
-        array_agg(oa.oa_id order by member.ordinality) as oa_ids,
-        relation.oa_row_ids || relation.bank_transaction_ids as row_ids,
-        array_fill('oa'::text, array[cardinality(relation.oa_row_ids)])
-            || array_fill('bank'::text, array[cardinality(relation.bank_transaction_ids)]) as row_types
-    from app.oa_pending_payment_bank_relations relation
-    cross join lateral unnest(relation.oa_row_ids) with ordinality as member(row_id, ordinality)
-    join canonical_oa oa
-      on oa.source_kind = 'in_progress'
-     and oa.oa_id = member.row_id
-    where relation.status = 'active'
-    group by
-        oa.scope_key,
-        relation.relation_id,
-        relation.oa_row_ids,
-        relation.bank_transaction_ids
+    group by oa.source_kind, oa.scope_key, relation.case_id, relation.row_ids, relation.row_types
 ),
 relation_groups as materialized (
-    select * from completed_relation_groups
-    union all
-    select * from pending_relation_groups
+    select * from workflow_relation_groups
 ),
 standalone_groups as materialized (
     select
@@ -1073,13 +1027,12 @@ def list_oa_pending_payment_relation_visibility_gaps(
         expected_relations as materialized (
             select distinct
                 relation.case_id as relation_id,
-                oa.scope_key
+                oa.scope_key,
+                oa.source_kind
             from app.workbench_pair_relations relation
             cross join lateral unnest(relation.row_ids) with ordinality
                 as oa_member(row_id, ordinality)
-            join canonical_oa oa
-              on oa.source_kind = 'completed'
-             and oa.oa_id = oa_member.row_id
+            join canonical_oa oa on oa.oa_id = oa_member.row_id
             where relation.status = 'active'
               and relation.row_types[oa_member.ordinality] = 'oa'
               and exists (
@@ -1101,7 +1054,7 @@ def list_oa_pending_payment_relation_visibility_gaps(
             consumer.payment_status
         from expected_relations expected
         left join canonical_rows consumer
-          on consumer.source_kind = 'completed'
+          on consumer.source_kind = expected.source_kind
          and consumer.relation_id = expected.relation_id
          and consumer.scope_key = expected.scope_key
         where consumer.relation_id is null

@@ -232,6 +232,7 @@ describe("Workbench columns and inline actions", () => {
           tableValues: {
             applicant: "刘树刚",
             applicationTime: "2026-01-14 14:04:00",
+            workflowStatus: "in_progress",
           },
         }}
         rowState="idle"
@@ -249,6 +250,7 @@ describe("Workbench columns and inline actions", () => {
     expect(dateChip).toHaveClass("inline-meta-tag-muted");
     expect(dateChip?.closest(".compound-cell-secondary")).not.toBeNull();
     expect(screen.getByText("14:04:00").closest(".inline-meta-tag")).toBe(dateChip);
+    expect(screen.getByLabelText("OA流程状态：进行中")).toBeInTheDocument();
   });
 
   test("moves the OA type to the applicant cell and keeps the project cell free of workflow chips", async () => {
@@ -271,7 +273,7 @@ describe("Workbench columns and inline actions", () => {
     expect(projectName).toHaveClass("cell-text-value-full");
     expect(applicant).toHaveClass("cell-text-value-full");
     expect(projectName).not.toHaveClass("cell-text-value-project");
-    expect(applicationType).toHaveClass("inline-meta-tag");
+    expect(applicationType.closest(".finance-status-tag")).not.toBeNull();
     expect(metadataRow?.closest(".record-card-cell")).toContainElement(applicant);
     expect(within(oaRow as HTMLElement).queryByText("完全关联")).not.toBeInTheDocument();
   });
@@ -363,7 +365,7 @@ describe("Workbench columns and inline actions", () => {
 
     const applicationType = screen.getByText("日常报销");
 
-    expect(applicationType).toHaveClass("inline-meta-tag");
+    expect(applicationType.closest(".finance-status-tag")).not.toBeNull();
     expect(screen.queryByText("冲")).not.toBeInTheDocument();
     expect(screen.queryByText("待找流水与发票")).not.toBeInTheDocument();
   });

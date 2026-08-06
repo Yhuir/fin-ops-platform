@@ -127,7 +127,7 @@ def with_test_object_identities(rows_by_id: dict[str, dict[str, object]]) -> dic
 
 
 class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
-    def test_oa_pending_in_progress_relation_uses_dedicated_bank_chip(self) -> None:
+    def test_active_relation_payload_ignores_retired_in_progress_origin_metadata(self) -> None:
         payload = WorkbenchSqlProjectionBuilder._active_relation_payload(
             {
                 "relation_mode": "manual_confirmed",
@@ -136,7 +136,7 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
             completion={"is_complete": True, "missing_row_types": []},
         )
 
-        self.assertEqual(payload, {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"})
+        self.assertEqual(payload, {"code": "fully_linked", "label": "完全关联", "tone": "success"})
 
     def test_sql_oa_row_promotes_application_time_when_completed_time_is_placeholder(self) -> None:
         row = WorkbenchSqlProjectionBuilder._oa_row_from_sql(
@@ -1322,45 +1322,6 @@ class InvoiceRowsProjectionConnection(WorkbenchProjectionSettingsConnection):
         return [row]
 
 
-class PendingClaimedBankProjectionConnection(WorkbenchProjectionSettingsConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        if "from app.bank_transaction_relation_claims" in normalized:
-            return [{"bank_transaction_id": "bank-claimed-by-progress-oa"}]
-        if "from app.bank_transactions" in normalized:
-            return [
-                {
-                    "row_id": "bank-claimed-by-progress-oa",
-                    "account_no": "622200001234",
-                    "account_name": "交行 1234",
-                    "txn_direction": "outflow",
-                    "counterparty_name_raw": "进行中OA供应商",
-                    "amount": "7000.00",
-                    "txn_date": "2026-05-21",
-                    "trade_time": "2026-05-21 10:00:00",
-                    "summary": "货款",
-                    "remark": "",
-                    "project_id": None,
-                    "raw_payload": {},
-                },
-                {
-                    "row_id": "bank-unclaimed",
-                    "account_no": "622200001234",
-                    "account_name": "交行 1234",
-                    "txn_direction": "outflow",
-                    "counterparty_name_raw": "普通供应商",
-                    "amount": "5000.00",
-                    "txn_date": "2026-05-22",
-                    "trade_time": "2026-05-22 10:00:00",
-                    "summary": "货款",
-                    "remark": "",
-                    "project_id": None,
-                    "raw_payload": {},
-                },
-            ]
-        return super().fetch_all(sql, params)
-
-
 class CrossMonthActiveRelationProjectionConnection(WorkbenchProjectionSettingsConnection):
     def __init__(self) -> None:
         super().__init__()
@@ -1622,7 +1583,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "pair_relations_updated_at": "relations-v2",
                         "exception_cases_updated_at": "anomaly-v3",
                         "row_overrides_updated_at": "overrides-v4",
-                        "oa_pending_payment_bank_claims_updated_at": "claims-v5",
+                        "oa_pending_payment_admissions_updated_at": "admissions-v5",
                         "bank_transactions_updated_at": "bank-v6",
                         "bank_transaction_categories_updated_at": "categories-v6",
                         "bank_transaction_category_confirmations_updated_at": "confirmations-v6",
@@ -1647,7 +1608,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["workbench_pair_relations_updated_at"], "relations-v2")
         self.assertEqual(versions["workbench_exception_cases_updated_at"], "anomaly-v3")
         self.assertEqual(versions["workbench_row_overrides_updated_at"], "overrides-v4")
-        self.assertEqual(versions["oa_pending_payment_bank_claims_updated_at"], "claims-v5")
+        self.assertEqual(versions["oa_pending_payment_admissions_updated_at"], "admissions-v5")
         self.assertEqual(versions["bank_transactions_updated_at"], "bank-v6")
         self.assertEqual(versions["bank_transaction_categories_updated_at"], "categories-v6")
         self.assertEqual(
@@ -1669,7 +1630,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.workbench_row_overrides", source_sql)
         self.assertIn("override.override_payload->'ignored' is distinct from 'true'::jsonb", source_sql)
         self.assertIn("not (override.override_payload ? 'exception_case_id')", source_sql)
-        self.assertIn("from app.bank_transaction_relation_claims", source_sql)
+        self.assertIn("app.oa_pending_payment_admissions", source_sql)
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.bank_transaction_categories", source_sql)
         self.assertIn("app.bank_transaction_category_confirmations", source_sql)
@@ -1707,7 +1668,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "pair_relations_updated_at": "relations-v2",
                         "exception_cases_updated_at": "anomaly-v3",
                         "row_overrides_updated_at": "overrides-v4",
-                        "oa_pending_payment_bank_claims_updated_at": "claims-v5",
+                        "oa_pending_payment_admissions_updated_at": "admissions-v5",
                         "bank_transactions_updated_at": "bank-v6",
                         "bank_transaction_categories_updated_at": "categories-v6",
                         "bank_transaction_category_confirmations_updated_at": "confirmations-v6",
@@ -1769,7 +1730,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("app.workbench_row_overrides", source_sql)
         self.assertIn("override.override_payload->'ignored' is distinct from 'true'::jsonb", source_sql)
         self.assertIn("not (override.override_payload ? 'exception_case_id')", source_sql)
-        self.assertIn("app.bank_transaction_relation_claims", source_sql)
+        self.assertIn("app.oa_pending_payment_admissions", source_sql)
         self.assertIn("app.bank_transactions", source_sql)
         self.assertIn("app.bank_transaction_categories", source_sql)
         self.assertIn("app.bank_transaction_category_confirmations", source_sql)
@@ -1900,7 +1861,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["etc_invoices_updated_at"], "")
         self.assertEqual(versions["etc_batch_invoice_links_updated_at"], "")
         self.assertEqual(len(str(versions["bank_account_mappings_fingerprint"])), 16)
-        self.assertIn("from app.bank_transaction_relation_claims", connection.source_sql)
+        self.assertIn("from app.oa_pending_payment_admissions", connection.source_sql)
         self.assertIn("from app.bank_transactions", connection.source_sql)
         self.assertIn("from app.bank_transaction_categories", connection.source_sql)
         self.assertIn("from app.bank_transaction_category_confirmations", connection.source_sql)
@@ -1927,7 +1888,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "bank_transaction_category_confirmations_updated_at": "2026-07-20 10:02:00+08",
                         "invoices_updated_at": "2026-07-20 11:00:00+08",
                         "oa_projection_updated_at": "2026-07-20 12:00:00+08",
-                        "oa_pending_payment_bank_claims_updated_at": "2026-07-20 13:00:00+08",
+                        "oa_pending_payment_admissions_updated_at": "2026-07-20 13:00:00+08",
                         "bank_account_mappings_fingerprint": "accounts-v1",
                         "etc_submission_batches_updated_at": "2026-07-20 14:00:00+08",
                         "etc_business_batches_updated_at": "2026-07-20 15:00:00+08",
@@ -1943,7 +1904,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "bank_transaction_category_confirmations_updated_at": "2026-07-21 10:02:00+08",
                         "invoices_updated_at": "2026-07-21 11:00:00+08",
                         "oa_projection_updated_at": "2026-07-21 12:00:00+08",
-                        "oa_pending_payment_bank_claims_updated_at": "2026-07-21 13:00:00+08",
+                        "oa_pending_payment_admissions_updated_at": "2026-07-21 13:00:00+08",
                         "bank_account_mappings_fingerprint": "accounts-v1",
                         "etc_submission_batches_updated_at": "2026-07-21 14:00:00+08",
                         "etc_business_batches_updated_at": "2026-07-21 15:00:00+08",
@@ -1967,7 +1928,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["invoices_updated_at"], "2026-07-21 11:00:00+08")
         self.assertEqual(versions["oa_projection_updated_at"], "2026-07-21 12:00:00+08")
         self.assertEqual(
-            versions["oa_pending_payment_bank_claims_updated_at"],
+            versions["oa_pending_payment_admissions_updated_at"],
             "2026-07-21 13:00:00+08",
         )
         self.assertEqual(versions["bank_account_mappings_fingerprint"], "accounts-v1")
@@ -2165,13 +2126,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(connection.calls[0][1], (["2026-06", "2026-07"],))
         self.assertIn("scope_key = any(%s)", connection.calls[0][0])
 
-    def test_workbench_v20_rejects_v19_month_all_and_cache_versions(self) -> None:
+    def test_workbench_v21_rejects_v20_month_all_and_cache_versions(self) -> None:
         app = object.__new__(Application)
-        old_month = "2026-08-05-oa-invoice-exception-units-v19"
-        old_all = "workbench_sql_projection.composed_active_month_shards.oa_invoice_exception_units.v19"
+        old_month = "2026-08-05-anomaly-source-search-v20"
+        old_all = "workbench_sql_projection.composed_active_month_shards.anomaly_source_search.v20"
 
-        self.assertIn("v20", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
-        self.assertIn("v20", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn("v21", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v21", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
         self.assertIn(
@@ -2249,15 +2210,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["tax_amount"], "22.64")
         self.assertEqual(rows[0]["summary_fields"]["税率"], "6%")
         self.assertEqual(rows[0]["summary_fields"]["税额"], "22.64")
-
-    def test_sql_projection_excludes_bank_rows_claimed_by_in_progress_oa_relation(self) -> None:
-        connection = PendingClaimedBankProjectionConnection()
-        builder = WorkbenchSqlProjectionBuilder(connection=connection)
-
-        claimed = set(builder._pending_claimed_bank_transaction_ids_for_month("2026-05"))
-        rows = builder._bank_rows("2026-05", excluded_bank_transaction_ids=claimed)
-
-        self.assertEqual([row["id"] for row in rows], ["bank-unclaimed"])
 
     def test_sql_projection_enriches_bank_rows_from_one_canonical_category_batch(self) -> None:
         calls: list[tuple[list[str], dict[str, object]]] = []

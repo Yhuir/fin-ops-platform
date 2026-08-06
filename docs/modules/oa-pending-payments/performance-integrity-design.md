@@ -19,7 +19,7 @@ auth + parameter validation
        current-page descriptors
   -> fixed-count batch hydrate
        completed/in-progress OA
-       active formal/pending relations
+       active formal relations
        bank/input invoices
        payment statuses
   -> pure row composition
@@ -33,10 +33,9 @@ selector 和 hydrate 共享同一 snapshot；不得先查 total/summary，再在
 - canonical completed OA：`app.oa_applications`。
 - canonical in-progress OA：tenant-scoped `app.oa_pending_payment_admissions`。
 - formal relation：`app.workbench_pair_relations where status='active'`，不按 relation mode 排除；只把可解析 outflow bank member 计入支付展示和金额。
-- pending relation：active `app.oa_pending_payment_bank_relations`。
 - bank/input invoice：只按 relation member IDs 批量 hydrate。
 - selector 用 CTE 形成 typed columns，SQL 内完成 keyword/filter/sort/page/summary/facets。
-- bank candidates 用独立单条 SQL 在同类 RR/RO snapshot 内完成 active formal/pending relation 分类、keyword/status filter、total 和分页。
+- bank candidates 用独立单条 SQL 在同类 RR/RO snapshot 内完成 active formal relation 分类、keyword/status filter、total 和分页。
 - 最大 page size 200；不得先加载全量 rows 再由 Python/浏览器处理。
 - row/detail builder 复用既有纯函数，避免复制金额、relation 和 writeback 业务规则。
 
@@ -49,7 +48,6 @@ selector 和 hydrate 共享同一 snapshot；不得先查 total/summary，再在
 | completed OA | 0/1 batch read | 否 |
 | in-progress admission | 0/1 batch read | 否 |
 | active formal relation | 0/1 batch read | 否 |
-| active pending relation | 0/1 batch read | 否 |
 | bank/invoice facts | 各 0/1 batch read | 否 |
 | payment status | 0/1 batch read | 否 |
 | bank candidate list | 1 set-based read | 否 |
@@ -110,7 +108,7 @@ EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS)
 
 ### 写后可见性
 
-分别验证 active confirm、withdraw、pending link、promotion 和 paid writeback：
+分别验证 active confirm、withdraw、in-progress formal link/extend 和 paid writeback：
 
 1. 记录 canonical commit 完成时间。
 2. 立即执行本页 normal GET。

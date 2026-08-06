@@ -170,6 +170,7 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
   const id = stringValue(raw.id ?? camelOrSnake(raw, "oaId", "oa_id") ?? camelOrSnake(raw, "primaryOaId", "primary_oa_id"));
   const applicant = stringValue(raw.applicant ?? camelOrSnake(raw, "applicantName", "applicant_name"));
   const applicationType = stringValue(camelOrSnake(raw, "applicationType", "application_type"));
+  const workflowStatus = stringValue(camelOrSnake(raw, "workflowStatus", "workflow_status")) || "unknown";
   const projectName = stringValue(camelOrSnake(raw, "projectName", "project_name"));
   const amount = stringValue(raw.amount);
   if (!id && !applicant && !applicationType && !projectName && !amount) {
@@ -179,6 +180,7 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
     id,
     applicant,
     applicationType,
+    workflowStatus,
     projectName,
     amount,
     detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")),

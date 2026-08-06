@@ -131,6 +131,7 @@ const rowsPayload = {
           id: "oa-001",
           applicant: "樊祖芳",
           applicationType: "支付申请",
+          workflowStatus: "completed",
           projectName: "云南省内项目名称很长很长需要换行显示并可展开",
           detailAvailable: true,
         },
@@ -656,6 +657,7 @@ describe("Input invoice usage page", () => {
     expect(within(invoiceCell as HTMLElement).queryByText("详情")).not.toBeInTheDocument();
     const oaCell = firstRowCells[5] as HTMLElement;
     expect(within(oaCell).getByText("樊祖芳")).toBeInTheDocument();
+    expect(within(oaCell).getByLabelText("OA流程状态：已完成")).toBeInTheDocument();
     expect(within(oaCell).getByRole("button", { name: "查看OA 樊祖芳 详情" })).toBeInTheDocument();
     expect(within(oaCell).queryByText("详情")).not.toBeInTheDocument();
     expect(within(page).queryByText("规则不能自动闭环，需要财务复核后处理")).not.toBeInTheDocument();

@@ -919,6 +919,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项。`/rows` 不执行高基数 option 聚合；页面渲染 rows 后调用 `/filter-options`，每字段最多 50 项。表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
 - rows 中 `bank_transactions`、`input_invoices` 和 `oa` 都可以携带 `primary`、`relation_count`、`linked_relation_count`、`has_multiple`、`detail_mode` 和 `summaries`；单成员事实放在 `primary`，`summaries` 只在多成员时承载列表。旧重复字段 `bank_transaction`、`invoices`、`oa_applicant` 不再返回。同一 linked relation 下多笔银行流水、多张进项/销项发票或多张 OA 必须来自 active canonical relation distribution 并聚合为一条待找发票行；多笔银行流水时前端用 `bank_transactions.summaries` 展示真实对方户名列表，详情入口继续按 `kind=bank` 展开，不用 `+N` 替代户名，也不在户名下显示交易时间。多张发票或多张 OA 时前端仍用 `+N` 表达该类型全部成员，不再同时展示任一成员作为 primary，且同一多流水 relation 的其它成员不得再作为 standalone 行重复出现。
+- OA primary/summary 必须返回 canonical `workflow_status=completed|in_progress`。OA 栏显示真实申请类型和“已完成/进行中” HeroUI chip，不再显示 OA “已配对” chip；relation 状态仍用于领域判断和详情，不得冒充 workflow status。
 - `bank_transactions.payment_summary.paid_total` 表示 relation 下 linked 流水合计；`input_invoices.payment_summary` 继续表达发票合计、已付合计、待付金额和差额。未被正式化为 active relation 的自动匹配 decision 不进入下游 relation distribution，也不能作为开票、付款或已关联状态证据。
 - 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。`GET /api/pending-invoices/rows/{transaction_id}/relation-detail` 可接收 `kind=all|bank|invoice|oa`，默认 `all` 保持全量兼容；`bank`、`invoice`、`oa` 只返回对应类型列表，供 `+N` 分栏展开。
 - `requires_invoice` 在列表、filter-options 和导出中是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 的 SQL/规则分组条件。支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只用于解释规则命中和表头规则列筛选。
@@ -947,6 +948,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
 - rows summary 中的 `invoiceCount` 按唯一进项发票 ID 统计，用于页面表头展示“进项票 N”。`pagination.total` 是表格行数/配对组行数；同一 linked relation 下多张进项发票折叠到一行时，`invoiceCount` 必须计入所有 `invoiceRelations.summaries` 成员。
 - rows 中 `oa`、`bankTransactions` 和 `invoiceRelations` 都可以携带 `relationCount`、`hasMultiple`、`detailMode`、`relationStatus` 和 `summaries`。同一 linked relation 下多条 OA、银行流水或进项发票必须聚合为一条发票使用情况行，金额字段返回各自合计；前端用 `detailMode=list` 显示 `+N` 并通过 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。
+- rows 的每条 OA summary 必须返回 canonical `workflowStatus=completed|in_progress`；OA 申请人列使用 HeroUI chip 显示真实申请类型和“已完成/进行中”，不得从 relation status 推断流程状态。
 - `relationStatus="linked"` 是唯一已关联关系状态；没有 active relation 的行按未关联处理。历史 `relationStatus="candidate"` 只作为旧 payload 兼容值，调用方必须归入未关联/非证明口径，不得展示独立“候选 OA”筛选，也不得参与支付状态、已支付判断或 confirmed relation 判断。
 - `/rows/{row_id}/relation-details` 按 `row_id` 在 canonical snapshot 中定向读取并展开 summaries；不存在返回 404。不得回退页面 read model、全量 live rebuild 或返回 202 refreshing。
 - 反提 OA 工作流按 `preview -> one-step create OA draft -> staged draft -> user submission confirmation -> submitted history / local rollback` 推进。前端只暴露 `创建 OA 草稿` 一个创建动作；后端可以继续保存内部 batch，但不得把 `创建本地批次` 作为用户概念暴露。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，该状态在 UI 中展示为 `暂存`，不得直接等同于已提交 OA 流程。
@@ -992,7 +994,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 后端必须用写权限校验 actor，不接受前端仅隐藏按钮作为权限事实。
 - `oa_row_ids` 必填，至少一条；前端只对 `paymentStatus=paid` 且 `oaPaymentWriteback.code != written` 的行展示按钮，但后端必须重新校验。
 - 该接口不做自动匹配，不创建 OA-bank relation，不读取候选流水池；它只处理已经存在有效 relation 的 OA。
-- completed 行必须存在 Workbench active 支出流水 relation；in-progress 行必须存在 OA 待付款 active pending relation。候选流水、自动 decision、未确认 relation 或收入流水都不能触发写回。
+- completed 与 in-progress 行都必须存在包含目标 OA 的 Workbench active 支出流水 relation。候选流水、自动 decision、历史 pending relation/claim、未确认 relation 或收入流水都不能触发写回。
 - 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
 - MySQL成功后，命令必须调用PG snapshot writer幂等更新payment-status snapshot、月份source watermark和精确月份dirty/outbox；即使MySQL此前已paid也不能跳过PG修复。PG三项写入同事务。
 - 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks`、`readModelRefresh`和operation barrier targets；OA普通刷新只覆盖精确月份，目标commit-to-visible窗口为1秒。
@@ -1013,7 +1015,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 `POST /api/oa-pending-payments/link-bank-transactions`
 
-该接口是进行中 OA 显式关联支出流水入口。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`，后端只允许未配对支出流水创建 OA 待付款独立 active pending relation，并写入 `app.bank_transaction_relation_claims` 独占该支出流水；不得写 `app.workbench_pair_relations` 或普通 Workbench active relation。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
+该接口是进行中 OA 显式关联支出流水入口。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`；`case_id` 是服务端关系所有权标识，不属于本接口的客户端输入，服务端不得信任或采用请求中伪造的 `case_id` / `caseId`。后端必须通过 `WorkbenchRelationCommandService` 创建正式 active relation，或在目标成员只命中一个 active case 时原地扩展该 case并保留已有发票成员；多个 active owner、成员冲突或非法方向必须 fail closed。不得写历史 `app.oa_pending_payment_bank_relations` 或 `app.bank_transaction_relation_claims`，也不存在后续 promotion。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
 
 ### 工作台 row detail
 

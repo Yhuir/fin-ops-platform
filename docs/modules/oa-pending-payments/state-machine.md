@@ -1,6 +1,6 @@
 # OA 待付款核对状态机
 
-日期：2026-07-28
+日期：2026-08-06
 
 ## 业务状态
 
@@ -17,11 +17,9 @@
 
 | 状态 | 页面语义 |
 | --- | --- |
-| completed + `app.workbench_pair_relations.status='active'` | 正式 relation evidence |
-| completed + withdrawn/inactive | 未关联；不得由 raw payload 的旧 active 值复活 |
-| in-progress + active pending relation | pending relation evidence |
-| pending relation promoted | 由 promotion owner 写正式 Workbench relation；不得双重展示 |
-| candidate/claim only | 不等于正式支付，不直接驱动 paid 或 writeback |
+| completed/in-progress + `app.workbench_pair_relations.status='active'` | 统一正式 relation evidence |
+| completed/in-progress + withdrawn/inactive | 未关联；不得由 raw payload 的旧 active 值复活 |
+| candidate/历史 claim only | 不等于正式支付，不直接驱动 paid 或 writeback |
 
 所有 active 正式关系都进入本页关系消费。`turnover_manual_closure` 等混合收支关系中，只有可解析的 outflow bank member 是支付证据；inflow 不进入流水展示、已付金额或写回金额。只有 inflow、没有 outflow 时仍为未支付。
 
@@ -118,15 +116,14 @@ validate actor/tenant/payload
 
 ```text
 validate actor/tenant/payload/idempotency
-  -> validate unclaimed outflow bank rows
-  -> create/update active pending relation + claim + audit
-  -> amount matched ? run paid writeback : keep pending
-  -> optional promotion under existing CAS/conflict rules
+  -> validate outflow bank rows and active owner overlap
+  -> create formal relation or extend the unique active case + audit
+  -> amount matched ? run paid writeback : keep formal relation
   -> result
   -> frontend normal rows GET
 ```
 
-重复提交必须幂等；claim 冲突、版本冲突或正式关系冲突不得半写。
+重复提交必须幂等；多个 active owner、版本冲突或正式关系冲突不得半写。历史 pending relation/claim 不参与运行时。
 
 ## Audit 状态
 
@@ -158,6 +155,6 @@ Audit 不调用 operation barrier、不轮询，也不作为 rows 正确性的 g
 | 日期 | 决策 | 验证责任 |
 | --- | --- | --- |
 | 2026-07-27 | rows/details 迁移为 PostgreSQL canonical direct read；删除页面 freshness/version/cache/polling 合同 | repository/service/API/frontend/integration |
-| 2026-07-27 | 正式关系只读 active `app.workbench_pair_relations`；pending relation 保留独立 owner | canonical relation consistency |
+| 2026-08-06 | completed/in-progress 统一读写 active `app.workbench_pair_relations`；旧 pending relation/claim/promotion 退役 | canonical relation consistency / migration / Workbench workflow gate |
 | 2026-07-27 | 写命令不再返回 `readModelRefresh`，成功后 normal GET | command/API/frontend |
 | 2026-07-28 | 所有 active relation mode 均进入页面；混合收支关系只把 outflow 作为展示、已付金额和写回证据；Audit 对照期望关系集与 consumer | query/canonical rows/command/Audit/integration |

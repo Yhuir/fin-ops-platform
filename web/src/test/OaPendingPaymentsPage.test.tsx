@@ -739,7 +739,7 @@ describe("OA pending payments page", () => {
     });
     const forbiddenLegacySurfaces = oaPendingPaymentsSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /TablePagination|TextField|Skeleton|Chip|IconButton|TableCell|TableRow|TableHead|TableBody/.test(source) ? [path] : [];
+      return /TablePagination|TextField|Skeleton|IconButton|TableCell|TableRow|TableHead|TableBody/.test(source) ? [path] : [];
     });
     const missingPrimitiveTargets = [
       sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("PageScaffold") ? null : "OaPendingPaymentsPage.tsx should keep PageScaffold",
@@ -939,7 +939,7 @@ describe("OA pending payments page", () => {
     expect(Array.from((within(page).getByLabelText("每页") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
     expect(await within(page).findByText("张三")).toBeInTheDocument();
     expect(within(page).getByText("报销")).toBeInTheDocument();
-    expect(within(page).getAllByText("流程状态：已完成").length).toBeGreaterThan(0);
+    expect(within(page).getAllByLabelText("OA流程状态：已完成").length).toBeGreaterThan(0);
     expect(within(page).getAllByText("已支付").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
     expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
     expect(within(page).getByText("2026-01-08")).toBeInTheDocument();
@@ -953,7 +953,7 @@ describe("OA pending payments page", () => {
     const bankGrid = paidCells[2]?.querySelector(".oa-pending-payments-bank-grid") as HTMLElement;
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__applicant")).toHaveTextContent("张三");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__applicant")).toHaveTextContent("报销");
-    expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__applicant")).toHaveTextContent("流程状态：已完成");
+    expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__applicant")).toHaveTextContent("已完成");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("红河卷烟厂能源管理系统运维服务");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("2026-01-03");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__reason")).toHaveTextContent("红河卷烟厂运维服务保证金");
@@ -1111,7 +1111,7 @@ describe("OA pending payments page", () => {
     });
 
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
-    expect(within(candidateRow).getByText("流程状态：进行中")).toBeInTheDocument();
+    expect(within(candidateRow).getByLabelText("OA流程状态：进行中")).toBeInTheDocument();
     expect(within(page).getAllByRole("columnheader", { name: "发票" }).length).toBeGreaterThan(0);
     expect(within(page).getByRole("button", { name: "筛选 发票方" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "开票日期 排序" })).toBeInTheDocument();

@@ -118,32 +118,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertFalse(hasattr(service, "_search_read_model_refresh_producer"))
 
-    def test_oa_sync_promotes_completed_pending_payment_relations_and_marks_affected_scopes_dirty(self) -> None:
-        records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
-        source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
-        projection_repository = FakeProjectionRepository()
-        promoter = FakePendingPaymentRelationPromoter(
-            {
-                "promoted_count": 1,
-                "skipped_count": 0,
-                "error_count": 0,
-                "errors": [],
-                "affected_months": ["2026-02"],
-            }
-        )
-        service = OAProjectionSyncService(
-            source_adapter=source_adapter,
-            projection_repository=projection_repository,
-            pending_payment_relation_promoter=promoter,
-        )
-
-        result = service.handle_runtime_event(_event("2026-06"))
-
-        self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
-        self.assertEqual(result["promoted_pending_payment_relation_count"], 1)
-        self.assertEqual(result["pending_payment_relation_promotion_error_count"], 0)
-        self.assertFalse(hasattr(service, "_queue_repository"))
-
     def test_oa_sync_promotes_attachment_invoices_from_completed_records(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
@@ -465,17 +439,6 @@ class FakeProjectionRepository:
 
     def record_sync_run(self, payload: dict[str, object]) -> None:
         self.sync_runs.append(dict(payload))
-
-
-class FakePendingPaymentRelationPromoter:
-    def __init__(self, result: dict[str, object]) -> None:
-        self.result = dict(result)
-        self.completed_records: list[OAApplicationRecord] = []
-
-    def promote_completed_records(self, records: list[OAApplicationRecord], *, actor_id: str) -> dict[str, object]:
-        self.completed_records = list(records)
-        self.actor_id = actor_id
-        return dict(self.result)
 
 
 class FakeAttachmentInvoicePromoter:

@@ -1095,6 +1095,8 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByRole("button", { name: /打开规则设置/ })).not.toBeInTheDocument();
     const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
     expect(within(pendingRow).getByText("1200.00")).toBeInTheDocument();
+    expect(within(pendingRow).getByLabelText("OA流程状态：进行中")).toBeInTheDocument();
+    expect(within(pendingRow).queryByText("已配对")).not.toBeInTheDocument();
     expect(within(pendingRow).queryByText("0.00")).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();

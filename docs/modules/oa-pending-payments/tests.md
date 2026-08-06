@@ -1,6 +1,13 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-28
+日期：2026-08-06
+
+## 2026-08-06 formal relation 统一回归
+
+- `tests/test_oa_pending_payment_command_service.py` 保护进行中 OA 创建 formal relation、扩展唯一 bank+invoice case且保留 case/发票成员、冲突 fail closed和自动写回。
+- `tests/test_oa_pending_payment_source_snapshot_repository.py` 与 `tests/test_workbench_relation_command_service.py` 保护 OA terminal cleanup 保留有效剩余 case或取消不足成员 case，并追加 history。
+- `tests/test_workbench_relation_grouping.py` 保护进行中 OA 整组 unpaired、`oa_in_progress` 阻断、多 OA 任一进行中阻断，以及完成后同 case进入 paired。
+- `tests/test_platform_runtime_boundary_guards.py` 与 migration tests 保护旧 pending repository/promotion/claim runtime保持删除，旧表只读审计。
 
 ## 2026-08-06 列筛选浮层视口回归
 
@@ -16,7 +23,7 @@
 
 ## 风险模型
 
-本模块跨 OA integration canonical snapshots、Workbench/pending relations、银行/发票 facts、外部写回、PostgreSQL direct query、权限和前端交互。测试必须证明：
+本模块跨 OA integration canonical snapshots、Workbench formal relations、银行/发票 facts、外部写回、PostgreSQL direct query、权限和前端交互。测试必须证明：
 
 - rows、summary、statistics、facets 和当前页 hydrate 来自同一显式只读 repeatable-read snapshot。
 - 正式关系只读取 active canonical Workbench facts；withdrawn/inactive 不可由旧 projection/raw payload 复活。
@@ -24,7 +31,7 @@
 - Audit 必须发现 active OA+outflow 关系存在但 canonical page consumer 遗漏的情况。
 - 页面请求不访问 OA Mongo/MySQL、Redis、queue、worker 或 read-model projection。
 - SQL 服务端过滤/排序/分页，查询次数不随 page size 增长。
-- 写回/claim/promotion 的权限、审计、幂等、冲突和写后重新 GET 不回归。
+- formal relation create/extend、写回的权限、审计、幂等、冲突和写后重新 GET 不回归。
 - `read_model_status`、source versions、refresh enqueue、`202/304/ETag` 和 frontend polling 不再出现。
 
 ## 七类测试
@@ -37,7 +44,7 @@
 - 混合收支关系只展示/合计 outflow；inflow-only、missing bank fact fail closed。
 - completed/in-progress identity、flow id、duplicate/empty/invalid input。
 - grouped OA/bank/invoice row 组装、跨月隔离和 relation row identity。
-- writeback already-paid、重复提交、claim/CAS/冲突和部分失败。
+- writeback already-paid、重复提交、formal relation CAS/冲突和部分失败。
 - filters/sort/paging/view mode 参数合同。
 
 入口：
@@ -54,7 +61,7 @@
 - query service 在一个 repository snapshot 中执行 selector + 当前页 hydrate。
 - 空页不 hydrate；missing detail 为 `404`。
 - repository 显式执行 `REPEATABLE READ READ ONLY`。
-- selector SQL 使用 canonical OA/admission/payment status、pending relation、active Workbench relation、bank/invoice tables。
+- selector SQL 使用 canonical OA/admission/payment status、active Workbench relation、bank/invoice tables，且不读取历史 pending relation/claim。
 - active OA+outflow relation 与 canonical consumer visibility 的 Audit 对照。
 - 当前页 1 与 200 descriptors 的 hydrate 查询次数相同，无 N+1。
 - OA authoritative snapshot 幂等 commit、writeback 后 PG reconcile、失败回滚。
@@ -64,7 +71,6 @@
 - `tests/test_oa_pending_payment_query_service.py`
 - `tests/test_oa_pending_payment_postgres_integration.py`
 - `tests/test_oa_pending_payment_source_snapshot_repository.py`
-- `tests/test_oa_pending_payment_relation_repository.py`
 - `tests/test_oa_pending_payment_command_service.py`
 
 ### 3. API contract：适用

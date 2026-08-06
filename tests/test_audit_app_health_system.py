@@ -20,12 +20,13 @@ from fin_ops_platform.services.postgres_repositories.external_control_evidence i
     PostgresExternalControlEvidenceRepository,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import PostgresOaPendingPaymentRelationRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from tests.external_evidence_test_support import manifest_payload
 
@@ -414,7 +415,10 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
 
         PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            pending_relation_repository=PostgresOaPendingPaymentRelationRepository(self.connection),
+            relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+            ),
         ).commit_authoritative_snapshot(
             scope_key="2026-01",
             tenant_id="default",

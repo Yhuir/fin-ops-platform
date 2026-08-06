@@ -17,6 +17,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note |
+| in-progress OA bank link | OA pending payment command | canonical OA/bank ids、workflow snapshot、actor、scope；只允许创建新 formal case 或扩展唯一 active case并保留其发票成员，多个 owner/冲突 fail closed |
 | formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash；OA 显式 source reference 必须先经父 OA 自身字段及其 FK-owned 付款明细/附件的 alias map 归一为 canonical typed identity，计划携带由 `attachment_source` 直接证明的 exact `(parent OA row id, invoice row id)` binding |
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
 | active case validation | relation repository | 只按 canonical case id 读取一条 active relation，不加载 history；只供进入事务前的 scope/owner 校验，真正 mutation 仍在事务内加锁并加载相关 history |
@@ -33,7 +34,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
-| frozen completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case 但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过冻结要求或实际成员类型。规则保存不得追溯改写；下游 linked ownership 仍只由 active status 决定。 |
+| frozen completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case 但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过冻结要求或实际成员类型。规则保存不得追溯改写；下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
 | command result | caller | relation/version/affected rows/months/idempotent replay；普通关系操作的 `freshness_targets` / `operation_barrier_targets` 为空，月份/scope 只作读侧重校验提示 |
 | ETC relation enrichment | Workbench projection/Audit | 人工确认折叠 ETC summary 时，relation UoW 在同一事务重读 canonical selected rows，并把唯一 `external_etc_batch_id` 写入 `special_metadata`；自动补全继续由 `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额。一个 external batch 只能有一个 active relation owner，Audit 只认可 batch identity 与确定性 `etc-summary-<batch>` row id 同时匹配。 |
@@ -55,6 +56,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 在线 command 持久化必须走显式 changed-case delta I/O：relation upsert/delete 与本次新 history event 在同一事务写入，history 只能 append/idempotent upsert，不得先删除再重写该 case 的完整历史。全量 relation/history replacement 只用于 migration、restore 或 repair，不得重新进入 confirm/cancel/withdraw 热链。
 - confirm/withdraw preview 的 derived active-generation selection 不是 relation fact source。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃该 DTO，并保留服务端 actor/tenant、preview identity、expected relation versions、canonical repository 与 UoW 原子写合同。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
+- OA source snapshot 发现某 OA 已不在 completed 或 admitted 集合时，通过 `remove_rows_from_active_relations` 从 relation 中移除该成员；剩余至少两个成员且无 immutable attachment parent binding 时保留同 case并追加 history，否则取消 relation。该清理不得直接 SQL、不得创建新 case。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；显式引用保持既有扩展口径。组合证据只允许补全缺少至少一个 pane 的 active relation，候选搜索只接纳该关系当前缺失 pane 的新事实，避免同一强证据下其它已存在 pane 的未配对事实扩大或污染搜索空间；缺失 pane 内仍允许有界一对多/多对一/多对多精确合计。扩展后所有已出现 pane 必须按分合计完全相等、currency/direction 一致、证据图连通、候选唯一且不占用其他 active case；三栏已完整的 active relation 不再自动追加成员。不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
@@ -88,6 +90,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 禁止 route/service/worker 直接 SQL 写 relation/history。
 - 禁止 `Application` snapshot、`app_settings state:*`、Redis、RabbitMQ、read model 或前端 event 成为 relation 事实源。
 - 禁止 candidate/decision service/store/table/API、隐藏 fallback 或双写重新进入调用图。
+- 禁止历史 `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、promotion service 或 pending claim 排除重新成为运行时 relation owner；migration `0136` 后它们只读审计。
 - 旧 generic `MatchingEngineService` 仅可服务其独立 legacy reconciliation/内部转账备注上下文；它的 result 不得决定 Workbench membership、zone、linked status 或正式关系写入。该隔离由 boundary guards 和 grouping tests 保护。
 - migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。
 - 已删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService` 及其 CLI；禁止恢复这两条 operator-only 平行写链。历史数据补全由同一 matching worker + formal relation UoW 收敛。

@@ -34,6 +34,7 @@
 | direction/filter/date/keyword/field filters/sort/page/include_statistics | `PendingInvoicesPage.tsx`、`features/pendingInvoices/api.ts` | route 只传递解析后的 query；service 验证方向、筛选、日期、排序、过滤器、分页和统计开关；repository 负责 SQL。纯金额 keyword 使用无千分位文本并查询 canonical 流水、发票、已付和待付金额字段。 |
 | 页面 canonical facts | PostgreSQL `app.*` | 银行流水、分类/确认、settings、pending income overrides、invoice/OA snapshots；禁止读取 `read_model.pending_invoice_*`、`read_model.bank_detail_*`、`read_model.workbench_relation_*`、`read_model.search_*` |
 | 正式配对关系 | `app.workbench_pair_relations` | 只读取 `status='active'`；排除 `turnover_manual_closure`；跨月 relation 不按当前月份截断 |
+| OA workflow facts | `app.oa_applications` + `app.oa_pending_payment_admissions` | 同一 canonical OA projection 合并 completed/in-progress；OA DTO 输出 `workflow_status`，重复 OA identity fail closed |
 | 候选与详情 | 页面专属 API | 候选采用 canonical input invoices + selected canonical expense banks + active relation facts；object detail 按 canonical id 有界读取 |
 | 规则/关联/收入状态写入 | existing application/rules services | 保留权限、audit、idempotency、CAS/占用冲突、command 状态；写成功后页面重新 GET canonical facts |
 
@@ -45,6 +46,7 @@
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；`kind=bank|invoice|oa` 只控制响应分区 |
+| OA 栏状态 | 前端 | 使用 HeroUI 原生 chip 显示申请类型与“已完成/进行中”；移除 OA “已配对” chip，relation status 不替代 workflow status |
 | invoice candidates | 前端选择已有发票抽屉 | 服务端过滤、排序、分页；固定两次 SELECT；返回 candidate/bank relation status 与关联流水数 |
 | loading/empty/error | 前端可观察状态 | loading、合法空集、错误可区分；没有 refreshing/stale UI 或轮询 |
 

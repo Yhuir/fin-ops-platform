@@ -32,7 +32,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_SQL,
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
-    PostgresOAProjectionRepository,
+    PostgresOAWorkflowRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import (
@@ -110,7 +110,7 @@ class WorkbenchSqlProjectionBuilder:
         if oa_query_service is not None:
             self._oa_query_service = oa_query_service
         else:
-            oa_repository = PostgresOAProjectionRepository(connection)
+            oa_repository = PostgresOAWorkflowRepository(connection)
             self._oa_query_service = WorkbenchQueryService(
                 oa_adapter=PostgresOAProjectionAdapter(oa_repository),
                 seed_demo_rows=False,
@@ -128,6 +128,11 @@ class WorkbenchSqlProjectionBuilder:
                 from app.oa_applications
                 where scope_month is not null
                   and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                union
+                select distinct scope_key
+                from app.oa_pending_payment_admissions
+                where tenant_id = 'default'
+                  and workflow_status = 'in_progress'
                 union
                 select distinct to_char(txn_month, 'YYYY-MM') as scope_key
                 from app.bank_transactions
@@ -210,11 +215,7 @@ class WorkbenchSqlProjectionBuilder:
         resolved_source_version = _int_or_none(source_version)
         if resolved_source_version is None:
             resolved_source_version = self._current_dirty_scope_source_version(normalized_scope)
-        pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
-        rows_by_id = self._workbench_rows_for_month(
-            normalized_scope,
-            excluded_bank_transaction_ids=pending_claimed_bank_ids,
-        )
+        rows_by_id = self._workbench_rows_for_month(normalized_scope)
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
         self._supplement_missing_relation_rows(rows_by_id, relations)
         self._enrich_bank_category_projection(rows_by_id)
@@ -309,8 +310,8 @@ class WorkbenchSqlProjectionBuilder:
               ), '') as row_overrides_updated_at,
               coalesce((
                 select max(updated_at)::text
-                from app.bank_transaction_relation_claims
-              ), '') as oa_pending_payment_bank_claims_updated_at,
+                from app.oa_pending_payment_admissions
+              ), '') as oa_pending_payment_admissions_updated_at,
               coalesce((
                 select max(updated_at)::text
                 from app.bank_transactions
@@ -369,8 +370,8 @@ class WorkbenchSqlProjectionBuilder:
                 payload.get("exception_cases_updated_at") or ""
             ),
             "workbench_row_overrides_updated_at": str(payload.get("row_overrides_updated_at") or ""),
-            "oa_pending_payment_bank_claims_updated_at": str(
-                payload.get("oa_pending_payment_bank_claims_updated_at") or ""
+            "oa_pending_payment_admissions_updated_at": str(
+                payload.get("oa_pending_payment_admissions_updated_at") or ""
             ),
             "bank_transactions_updated_at": str(payload.get("bank_transactions_updated_at") or ""),
             "bank_transaction_categories_updated_at": str(
@@ -512,6 +513,17 @@ class WorkbenchSqlProjectionBuilder:
                 from proof_member_ids ids
                 join app.oa_applications oa on oa.row_id = ids.row_id
                 where oa.application_date is not null
+                union all
+                select
+                  ids.row_id,
+                  'oa'::text as object_kind,
+                  (admission.scope_key || '-01')::date as source_scope_month,
+                  admission.updated_at
+                from proof_member_ids ids
+                join app.oa_pending_payment_admissions admission
+                  on admission.oa_id = ids.row_id
+                 and admission.tenant_id = 'default'
+                 and admission.workflow_status = 'in_progress'
             ),
             scoped_relation_ids as (
                 select
@@ -628,11 +640,15 @@ class WorkbenchSqlProjectionBuilder:
                 from override_updates
                 group by scope_month
             ),
-            claim_versions as (
-                select claims.scope_month, max(claims.updated_at)::text as oa_pending_payment_bank_claims_updated_at
-                from app.bank_transaction_relation_claims claims
-                join requested_scopes scopes on scopes.scope_month = claims.scope_month
-                group by claims.scope_month
+            admission_versions as (
+                select scopes.scope_month,
+                       max(admission.updated_at)::text as oa_pending_payment_admissions_updated_at
+                from requested_scopes scopes
+                join app.oa_pending_payment_admissions admission
+                  on (admission.scope_key || '-01')::date = scopes.scope_month
+                 and admission.tenant_id = 'default'
+                 and admission.workflow_status = 'in_progress'
+                group by scopes.scope_month
             ),
             bank_updates as (
                 select scopes.scope_month, bank.updated_at
@@ -767,7 +783,7 @@ class WorkbenchSqlProjectionBuilder:
               relations.pair_relations_updated_at,
               exceptions.exception_cases_updated_at,
               overrides.row_overrides_updated_at,
-              claims.oa_pending_payment_bank_claims_updated_at,
+              admissions.oa_pending_payment_admissions_updated_at,
               bank.bank_transactions_updated_at,
               bank_category.bank_transaction_categories_updated_at,
               bank_confirmation.bank_transaction_category_confirmations_updated_at,
@@ -785,7 +801,7 @@ class WorkbenchSqlProjectionBuilder:
             left join relation_versions relations using (scope_month)
             left join anomaly_decision_versions exceptions using (scope_month)
             left join override_versions overrides using (scope_month)
-            left join claim_versions claims using (scope_month)
+            left join admission_versions admissions using (scope_month)
             left join bank_versions bank using (scope_month)
             left join bank_category_versions bank_category using (scope_month)
             left join bank_confirmation_versions bank_confirmation using (scope_month)
@@ -811,8 +827,8 @@ class WorkbenchSqlProjectionBuilder:
                     row.get("exception_cases_updated_at") or ""
                 ),
                 "workbench_row_overrides_updated_at": str(row.get("row_overrides_updated_at") or ""),
-                "oa_pending_payment_bank_claims_updated_at": str(
-                    row.get("oa_pending_payment_bank_claims_updated_at") or ""
+                "oa_pending_payment_admissions_updated_at": str(
+                    row.get("oa_pending_payment_admissions_updated_at") or ""
                 ),
                 "bank_transactions_updated_at": str(row.get("bank_transactions_updated_at") or ""),
                 "bank_transaction_categories_updated_at": str(
@@ -845,16 +861,11 @@ class WorkbenchSqlProjectionBuilder:
             if scope_key in payload_by_scope
         }
 
-    def _workbench_rows_for_month(
-        self,
-        month: str,
-        *,
-        excluded_bank_transaction_ids: set[str] | None = None,
-    ) -> dict[str, dict[str, Any]]:
+    def _workbench_rows_for_month(self, month: str) -> dict[str, dict[str, Any]]:
         rows: dict[str, dict[str, Any]] = {}
         for row in self._oa_projection_rows(month):
             rows[str(row["id"])] = row
-        for row in self._bank_rows(month, excluded_bank_transaction_ids=excluded_bank_transaction_ids):
+        for row in self._bank_rows(month):
             rows[str(row["id"])] = row
         invoice_rows = self._invoice_rows(month)
         self._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
@@ -958,17 +969,7 @@ class WorkbenchSqlProjectionBuilder:
             "detail_fields": detail_fields,
         }
 
-    def _bank_rows(
-        self,
-        month: str,
-        *,
-        excluded_bank_transaction_ids: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        excluded_bank_ids = {
-            str(row_id).strip()
-            for row_id in (excluded_bank_transaction_ids or set())
-            if str(row_id).strip()
-        }
+    def _bank_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
@@ -977,15 +978,12 @@ class WorkbenchSqlProjectionBuilder:
             from app.bank_transactions
             where txn_month = %s::date
               and status <> 'deleted'
-              and not (coalesce(legacy_mongo_id, id::text) = any(%s::text[]))
             order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
             """,
-            (month_start(month), sorted(excluded_bank_ids)),
+            (month_start(month),),
         )
         result: list[dict[str, Any]] = []
         for row in rows:
-            if str(row.get("row_id") or "").strip() in excluded_bank_ids:
-                continue
             if row_payload_dict := self._bank_row_from_sql(row):
                 result.append(row_payload_dict)
         return result
@@ -1267,20 +1265,6 @@ class WorkbenchSqlProjectionBuilder:
             )
         return result
 
-    def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
-        rows = self._connection.fetch_all(
-            """
-            select bank_transaction_id
-            from app.bank_transaction_relation_claims
-            where status = 'active'
-              and owner_type = 'oa_pending_payment_relation'
-              and scope_month = %s::date
-            order by bank_transaction_id
-            """,
-            (month_start(month),),
-        )
-        return _dedupe_text(row.get("bank_transaction_id") for row in rows)
-
     def _supplement_missing_relation_rows(
         self,
         rows_by_id: dict[str, dict[str, Any]],
@@ -1329,6 +1313,15 @@ class WorkbenchSqlProjectionBuilder:
             case_id = str(relation.get("case_id") or "")
             completion = evaluate_bank_relation_completion(
                 row_types=list(relation.get("row_types") or []),
+                oa_workflow_statuses=[
+                    str(working_rows_by_id[row_id].get("workflow_status") or "completed")
+                    for row_id, row_type in zip(
+                        list(relation.get("row_ids") or []),
+                        list(relation.get("row_types") or []),
+                        strict=False,
+                    )
+                    if str(row_type) == "oa" and row_id in working_rows_by_id
+                ],
                 special_metadata=(
                     relation.get("special_metadata")
                     if isinstance(relation.get("special_metadata"), dict)
@@ -1529,11 +1522,6 @@ class WorkbenchSqlProjectionBuilder:
                 "label": f"待补{missing_label}",
                 "tone": "warning",
             }
-        special_metadata = relation.get("special_metadata")
-        if not isinstance(special_metadata, dict):
-            special_metadata = {}
-        if str(special_metadata.get("origin") or "").strip() == "oa_pending_payment_in_progress":
-            return {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"}
         relation_mode = str(relation.get("relation_mode") or "").strip()
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             return {"code": NO_OA_BANK_BATCH_RELATION_MODE, "label": "免OA批量处理", "tone": "success"}

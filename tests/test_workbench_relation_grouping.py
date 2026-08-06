@@ -346,6 +346,51 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(identities(payload["paired"]["groups"]), set())
         self.assertEqual(identities([group]), {("bank", "bank-in"), ("bank", "bank-out")})
 
+    def test_in_progress_oa_keeps_materially_complete_case_unpaired_until_same_oa_completes(self) -> None:
+        rows = {
+            "oa-progress": {
+                "id": "oa-progress",
+                "type": "oa",
+                "object_identity_key": "oa-progress",
+                "workflow_status": "in_progress",
+            },
+            "bank-1": {"id": "bank-1", "type": "bank", "object_identity_key": "bank-1"},
+            "invoice-1": {"id": "invoice-1", "type": "invoice", "object_identity_key": "invoice-1"},
+        }
+        relation = {
+            "case_id": "case:stable",
+            "row_ids": ["oa-progress", "bank-1", "invoice-1"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "special_metadata": {"requires_oa": True, "requires_invoice": True},
+        }
+
+        in_progress = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        self.assertEqual(in_progress["summary"]["paired_count"], 0)
+        group = in_progress["unpaired"]["groups"][0]
+        self.assertEqual(group["case_id"], "case:stable")
+        self.assertEqual(group["completion"]["missing_row_types"], [])
+        self.assertEqual(group["completion"]["blocking_reasons"], ["oa_in_progress"])
+
+        rows["oa-progress"]["workflow_status"] = "completed"
+        completed = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        self.assertEqual(completed["summary"]["paired_count"], 1)
+        self.assertEqual(completed["paired"]["groups"][0]["case_id"], "case:stable")
+
+    def test_any_in_progress_oa_blocks_multi_oa_case(self) -> None:
+        completion = evaluate_bank_relation_completion(
+            row_types=["oa", "oa", "bank"],
+            oa_workflow_statuses=["completed", "in_progress"],
+            special_metadata={"requires_oa": True, "requires_invoice": False},
+        )
+
+        self.assertEqual(completion["missing_row_types"], [])
+        self.assertEqual(completion["blocking_reasons"], ["oa_in_progress"])
+        self.assertFalse(completion["is_complete"])
+
     def test_bank_policy_requirement_matrix_and_required_type_completion(self) -> None:
         cases = [
             (True, False, ["oa"]),

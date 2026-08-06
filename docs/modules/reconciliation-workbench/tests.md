@@ -1,6 +1,13 @@
 # 关联台测试与验证
 
-日期：2026-08-05
+日期：2026-08-06
+
+## 2026-08-06 进行中 OA workflow gate v21
+
+- Business core：`tests/test_workbench_relation_grouping.py` 覆盖材料完整但进行中的关系仍为 unpaired、`oa_in_progress` 阻断、多 OA 任一进行中阻断和完成后同 case paired。
+- Service/read model：`tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_sql_runtime.py` 保护 admission canonical rows/source proof、删除 pending claim exclusion、v21 淘汰 v20 generation/cache。
+- Frontend：`OaWorkflowStatusChip.test.tsx` 与 `WorkbenchColumns.test.tsx` 保护 HeroUI 申请类型及“已完成/进行中/状态未知”chip；API mapper传播 `blockingReasons`。
+- Regression：1 秒 refresh-status、active-generation原子发布和其它 relation mode不变；没有新增 read model、worker、queue、缓存或第三个 zone。
 
 ## 2026-08-05 历史 WEX 运行时退役与搜索合同 v20
 

@@ -141,7 +141,7 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 
 ### OA 待付款 direct canonical read boundary
 
-OA 待付款 rows、summary、statistics、facets 和当前页 hydrate 由页面专属 query service/repository 在一个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 中完成。completed OA 读取 `app.oa_applications`，in-progress 读取 tenant-scoped admission，支付状态读取 PostgreSQL snapshot；正式关系只读取 `app.workbench_pair_relations.status='active'`，pending relation读取本模块 canonical owner。
+OA 待付款 rows、summary、statistics、facets 和当前页 hydrate 由页面专属 query service/repository 在一个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 中完成。completed OA 读取 `app.oa_applications`，in-progress 读取 tenant-scoped admission，支付状态读取 PostgreSQL snapshot；completed/in-progress 关系统一只读取 `app.workbench_pair_relations.status='active'`。历史 pending relation/claim 只读审计，不参与页面、候选占用或 promotion。
 
 页面访问不经过 OA read-model freshness/version/dirty/outbox/Redis/worker，也不读取 Workbench page payload或 `workbench_relation` projection。前端没有 `202/304/ETag` 或 polling；route进入、query变化、手工刷新和本页写成功后各执行 normal GET。外部 OA MySQL写回继续走 command/adapter，并在 PostgreSQL payment snapshot 中幂等收敛；页面 GET 不访问外部源。
 

@@ -53,8 +53,8 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
     });
     await page.getByRole("button", { name: /进行中 OA/ }).click();
     await mark("apiLatencyMs", inProgressRequest);
-    await mark("firstVisibleResponseLatencyMs", expect(page.getByText("流程状态：进行中").first()).toBeVisible());
-    await mark("finalSettledLatencyMs", expect(page.getByText("流程状态：进行中").first()).toBeVisible());
+    await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
+    await mark("finalSettledLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
   });
   if (!recordLatency) {
     const inProgressRequest = page.waitForRequest((request) => {
@@ -81,7 +81,7 @@ test.describe("OA pending payments in-progress paid writeback browser flow", () 
 
     const row = page.getByRole("row", { name: /进行中付款申请人/ });
     await expect(row).toBeVisible();
-    await expect(row).toContainText("流程状态：进行中");
+    await expect(row.getByLabel("OA流程状态：进行中")).toBeVisible();
     await expect(row).toContainText("已支付");
     await expect(row).toContainText("进行中写回供应商");
     await expect(row).toContainText("9800.00");

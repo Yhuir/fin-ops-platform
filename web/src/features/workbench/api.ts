@@ -115,6 +115,7 @@ type ApiWorkbenchRow = {
     attachment_file_count?: string | number | null;
   }> | null;
   apply_type?: string | null;
+  workflow_status?: string | null;
   amount?: string | null;
   counterparty_name?: string | null;
   reason?: string | null;
@@ -463,6 +464,7 @@ type ApiWorkbenchGroup = {
   completion?: {
     is_complete?: boolean | null;
     missing_row_types?: unknown[] | null;
+    blocking_reasons?: unknown[] | null;
   } | null;
 };
 
@@ -1246,6 +1248,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       ),
       projectName: toDisplayValue(row.project_name_display ?? row.project_name),
       applicationType: toDisplayValue(row.apply_type),
+      workflowStatus: toDisplayValue(row.workflow_status, "unknown"),
       amount: toWorkbenchAmountDisplayValue(row.amount),
       counterparty: toDisplayValue(row.counterparty_name),
       reason: toDisplayValue(row.reason),
@@ -1500,6 +1503,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
           .filter((rowType): rowType is WorkbenchRecordType => (
             rowType === "oa" || rowType === "bank" || rowType === "invoice"
           )),
+        blockingReasons: Array.isArray(group.completion.blocking_reasons)
+          ? group.completion.blocking_reasons.map((reason) => String(reason).trim()).filter(Boolean)
+          : [],
       }
       : undefined,
     canWithdraw: Boolean(

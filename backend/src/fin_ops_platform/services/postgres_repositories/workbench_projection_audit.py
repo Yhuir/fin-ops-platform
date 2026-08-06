@@ -95,12 +95,6 @@ active_relation_members as (
     join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
     where relation.status = 'active'
 ),
-claimed_bank as (
-    select bank_transaction_id as row_id
-    from app.bank_transaction_relation_claims
-    where status = 'active'
-      and owner_type = 'oa_pending_payment_relation'
-),
 submitted_etc_invoice_ids as (
     select invoice_id
     from app.etc_batch_invoice_links
@@ -124,6 +118,16 @@ canonical_oa as (
          )
       )
       and coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date) is not null
+    union all
+    select admission.oa_id,
+           admission.scope_key,
+           'oa'::text,
+           admission.amount::numeric,
+           coalesce(admission.applicant, ''),
+           coalesce(admission.project_name_display, admission.project_name, '')
+    from app.oa_pending_payment_admissions admission
+    where admission.tenant_id = 'default'
+      and admission.workflow_status = 'in_progress'
 ),
 canonical_bank as (
     select coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
@@ -135,16 +139,6 @@ canonical_bank as (
     from app.bank_transactions bank
     where bank.status <> 'deleted'
       and bank.txn_month is not null
-      and (
-            not exists (
-                select 1 from claimed_bank claim
-                where claim.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-            )
-         or exists (
-                select 1 from active_relation_members member
-                where member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-            )
-      )
 ),
 canonical_invoice as (
     select coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,

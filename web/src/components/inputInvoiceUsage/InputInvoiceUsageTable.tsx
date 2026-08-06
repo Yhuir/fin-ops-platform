@@ -14,6 +14,8 @@ import { formatMoney } from "../../features/money";
 import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
+import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
+import { FinanceStatusTag } from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
   rows: InputInvoiceUsageRow[];
@@ -578,7 +580,8 @@ export default function InputInvoiceUsageTable({
                           ) : null}
                         </div>
                         <div className="input-invoice-usage-tag-row">
-                          <Tag>{oa.applicationType || "类型为空"}</Tag>
+                          <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
+                          <OaWorkflowStatusChip status={oa.workflowStatus} />
                           {row.oa.hasMultiple && oa.amount ? (
                             <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
                           ) : null}

@@ -1069,6 +1069,92 @@ class WorkbenchRelationCommandService:
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
 
+    def remove_rows_from_active_relations(
+        self,
+        *,
+        row_ids: list[str],
+        actor_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Remove unavailable canonical facts without leaving a half-valid active relation."""
+
+        removed_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        if not removed_row_ids:
+            return {"changed_case_ids": [], "affected_months": []}
+        self._acquire_relation_member_locks(sorted(removed_row_ids))
+        pair_service = self._pair_service_for_row_ids(sorted(removed_row_ids))
+        before_relations = pair_service.active_relations_for_row_ids(sorted(removed_row_ids))
+        histories: list[dict[str, Any]] = []
+        changed_case_ids: list[str] = []
+        for before in before_relations:
+            case_id = str(before.get("case_id") or "").strip()
+            metadata = before.get("special_metadata")
+            binding_parents = {
+                str(binding.get("parent_oa_row_id") or "").strip()
+                for binding in list((metadata or {}).get("oa_attachment_bindings") or [])
+                if isinstance(binding, dict)
+            }
+            members = [
+                (str(row_id).strip(), str(row_type).strip())
+                for row_id, row_type in zip(
+                    list(before.get("row_ids") or []),
+                    list(before.get("row_types") or []),
+                    strict=False,
+                )
+                if str(row_id).strip() and str(row_id).strip() not in removed_row_ids
+            ]
+            if len(members) >= 2 and not binding_parents.intersection(removed_row_ids):
+                _, history = pair_service.replace_with_confirmed_relation(
+                    case_id=case_id,
+                    row_ids=[row_id for row_id, _ in members],
+                    row_types=[row_type for _, row_type in members],
+                    relation_mode=str(before.get("relation_mode") or "manual_confirmed"),
+                    created_by=str(before.get("created_by") or actor_id),
+                    month_scope=str(before.get("month_scope") or "all"),
+                    note=str(before.get("note") or "") or None,
+                    amount_check=(
+                        dict(before.get("amount_check") or {})
+                        if isinstance(before.get("amount_check"), dict)
+                        else None
+                    ),
+                    special_metadata=(dict(metadata) if isinstance(metadata, dict) else None),
+                    before_relations=[before],
+                    operation_type="remove_unavailable_oa_fact",
+                    history_created_by=actor_id,
+                    history_note=reason,
+                )
+            else:
+                pair_service.cancel_relation(case_id)
+                history = pair_service.record_history(
+                    operation_type="cancel_relation_for_unavailable_oa_fact",
+                    before_relations=[before],
+                    after_relations=[],
+                    affected_row_ids=list(before.get("row_ids") or []),
+                    created_by=actor_id,
+                    note=reason,
+                    amount_check=(
+                        dict(before.get("amount_check") or {})
+                        if isinstance(before.get("amount_check"), dict)
+                        else None
+                    ),
+                )
+            histories.append(history)
+            changed_case_ids.append(case_id)
+        if changed_case_ids:
+            self._save_changed_cases(
+                pair_service,
+                changed_case_ids,
+                history_events=histories,
+            )
+        return {
+            "changed_case_ids": changed_case_ids,
+            "affected_months": self._affected_months_for_relations(before_relations),
+        }
+
     def cancel_relations_by_case_ids(
         self,
         *,

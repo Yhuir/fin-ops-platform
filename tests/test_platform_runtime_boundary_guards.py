@@ -2971,7 +2971,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         command_service_path = SERVICES_ROOT / "oa_pending_payment_command_service.py"
         read_model_service_path = SERVICES_ROOT / "oa_pending_payment_read_model_service.py"
         query_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_query.py"
-        relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
+        retired_relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
+        retired_promotion_service_path = SERVICES_ROOT / "oa_pending_payment_relation_promotion_service.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         route_source = route_path.read_text(encoding="utf-8")
@@ -2980,12 +2981,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         command_service_source = command_service_path.read_text(encoding="utf-8")
         query_service_source = query_service_path.read_text(encoding="utf-8")
         query_repository_source = query_repository_path.read_text(encoding="utf-8")
-        relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
         violations: list[str] = []
         if retired_query_service_path.exists():
             violations.append("retired OA live query service still exists")
         if read_model_service_path.exists():
             violations.append("retired OA pending-payment read model service still exists")
+        if retired_relation_repository_path.exists():
+            violations.append("retired OA pending-payment relation repository still exists")
+        if retired_promotion_service_path.exists():
+            violations.append("retired OA pending-payment promotion service still exists")
 
         for required in (
             "def route(",
@@ -3030,7 +3034,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "set transaction isolation level repeatable read read only",
             "app.oa_applications",
             "app.oa_pending_payment_admissions",
-            "app.oa_pending_payment_bank_relations",
             "app.workbench_pair_relations",
             "relation.status = 'active'",
         ):
@@ -3046,14 +3049,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in query_service_source + query_repository_source:
                 violations.append(f"OA canonical page query still depends on {forbidden}")
-        if "SnapshotOaPendingPaymentRelationRepository" in relation_repository_source:
-            violations.append("OA pending payment relation repository still exposes the snapshot fallback")
         source_projection = _function_source(server_tree, server_source, "_oa_pending_payment_source_projection")
         if "_oa_adapter" in source_projection:
             violations.append("OA pending payment source projection still falls back to Workbench's private OA adapter")
-        relation_repository = _function_source(server_tree, server_source, "_oa_pending_payment_relation_repository")
-        if "load_oa_pending_payment_bank_relations" in relation_repository or "save_oa_pending_payment_bank_relations" in relation_repository:
-            violations.append("OA pending payment relation composition still falls back to local snapshot persistence")
+        for retired_symbol in (
+            "PostgresOaPendingPaymentRelationRepository",
+            "OaPendingPaymentRelationPromotionService",
+            "_oa_pending_payment_relation_repository",
+        ):
+            if retired_symbol in server_source + command_service_source + query_repository_source:
+                violations.append(f"OA pending payment runtime still references {retired_symbol}")
         command_composition = _function_source(server_tree, server_source, "_oa_pending_payment_command_service")
         if "payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository()" not in command_composition:
             violations.append("OA payment command does not compose the canonical PostgreSQL status snapshot writer")

@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-06 - 进行中 OA 入台与完成门禁
+
+- Workbench OA facts 统一读取 completed projection 与 in-progress admission，关系仍只读取 formal `app.workbench_pair_relations`。
+- 冻结材料要求满足后，只有关系内全部 OA 已完成才进入 `paired`；任一进行中 OA 保持原 case 在 `unpaired`，返回 `blocking_reasons=['oa_in_progress']`。同一 OA 完成后原 case 不重建，下一次 1 秒 refresh-status 检查发布新 generation 后进入 `paired`。
+- 删除历史 pending bank claim 排除与 source version；admission version 进入 canonical proof。未新增 read model、worker、队列、轮询或第三个页面区域。
+
 ## 2026-08-01 - all-scope 筛选分页无界 ID 数组删除
 
 - 根因：带搜索/列筛选的 `month=all` 查询把全部匹配 group ids 通过 `array_agg` 返回 Python，再以 `ANY(array)` 取当前页；匹配集合增长会同步放大数据库聚合、网络和应用内存。

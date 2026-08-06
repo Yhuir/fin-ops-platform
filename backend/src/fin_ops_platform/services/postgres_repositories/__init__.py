@@ -13,9 +13,6 @@ from fin_ops_platform.services.postgres_repositories.external_control_evidence_a
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter, PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    PostgresOaPendingPaymentRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
     PostgresSettingsDataResetRepository,
@@ -33,7 +30,6 @@ __all__ = [
     "PostgresExternalControlEvidenceRepository",
     "audit_external_control_evidence",
     "PostgresOpsTaxEtcRepository",
-    "PostgresOaPendingPaymentRelationRepository",
     "PostgresReadModelRepository",
     "PostgresSettingsDataResetRepository",
     "PostgresWorkbenchRepository",

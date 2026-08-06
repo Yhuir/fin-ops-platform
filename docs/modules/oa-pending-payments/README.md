@@ -23,8 +23,8 @@
 - 页面 query service：`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`
 - 页面 PostgreSQL repository：`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
 - 查询合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
-- 命令：`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`
-- Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py`
+- 命令：`oa_pending_payment_command_service.py`、`workbench_relation_command_service.py`
+- Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py`
 - Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
 
 ## 当前有效读链路
@@ -37,7 +37,6 @@ browser
   -> PostgresOaPendingPaymentQueryRepository
   -> REPEATABLE READ / READ ONLY snapshot
      -> completed OA + in-progress admission + payment-status snapshots
-     -> active pending relations
      -> app.workbench_pair_relations(status=active)
      -> canonical bank/input-invoice facts
      -> SQL filters/sort/paging/summary/facets + 当前页批量 hydrate
@@ -55,7 +54,7 @@ browser
 - 不返回 `readModelStatus`、`read_model_status`、source versions、refresh target、job、cache/version metadata。
 - 筛选、排序、分页、summary、facets 均由 SQL set-based 执行；最大 `page_size=200`，禁止浏览器或 Python 全量分页。
 - OA、银行、发票和 relation detail 继续惰性读取；未找到返回结构化 `404`，非法查询返回 `400`。
-- `bank-transaction-candidates` 直接从 PostgreSQL bank facts 与 active formal/pending relations 做状态筛选、排序和分页；不再经 command service 全量加载。
+- `bank-transaction-candidates` 直接从 PostgreSQL bank facts 与 active formal relations 做状态筛选、排序和分页；不再经 command service 全量加载。
 - `paymentStatus` 仍由既有纯业务组装和 lifecycle policy 计算，前端不得自行推断。
 
 ## Completed 与 in-progress
@@ -64,18 +63,20 @@ browser
 - `in_progress` 主行来自 `app.oa_pending_payment_admissions`。
 - completed 正式关系读取 `app.workbench_pair_relations` 中全部 `status='active'` 的事实。
 - `turnover_manual_closure` 等混合收支关系中，只有成功解析的 outflow bank member 是本页支付证据；inflow 只保留为周转上下文，不进入页面流水、已付金额或写回金额。
-- in-progress 关系读取本模块 active pending relation；promotion 前不冒充 Workbench active relation。
+- completed 与 in-progress 关系统一读取 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 paired/unpaired gate，不产生 pending owner 或 promotion。
 - 银行流水和发票只是 relation evidence，不替代 OA 主行。
 
 ## 写回一致性
 
-`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、claim、active relation、outflow、金额、CAS/冲突、审计和幂等语义。已有混合收支关系的写回只合计 outflow；inflow 不参与金额校验。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
+`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、active formal relation、outflow、金额、CAS/冲突、审计和幂等语义。link-bank 只通过正式 relation command 创建或扩展唯一 active case；已有混合收支关系的写回只合计 outflow，inflow 不参与金额校验。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
 
 Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 PostgreSQL canonical commit 失败，命令必须返回可安全重试错误；重试或后续 OA sync 收敛，不允许页面请求回退读取外部系统。
 
 ## 旧链清理结果
 
 `oa_pending_payment` 旧 read model、projector、worker、manifest、App Status registry、deploy env 和 invoice-lifecycle 间接依赖已删除。invoice lifecycle 页面也已切换为 canonical direct read。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
+
+旧 pending relation repository、bank claim、promotion service 及关联台 claim 排除链已删除；migration `0136` 后旧关系表只读审计，不参与页面或写命令。
 
 ## 明确不做
 

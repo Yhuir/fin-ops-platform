@@ -1086,6 +1086,143 @@ class PostgresOAProjectionRepository:
         }
 
 
+class PostgresOAWorkflowRepository:
+    """Read completed and admitted in-progress OA through one canonical port."""
+
+    def __init__(self, connection: Any, *, tenant_id: str = "default") -> None:
+        self._connection = connection
+        self._tenant_id = text(tenant_id) or "default"
+
+    def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+        normalized_month = text(month)
+        if normalized_month == "all":
+            return self.list_all_application_records()
+        return self._records(
+            """
+            with workflow_facts as (
+                select row_id, 'completed'::text as workflow_status,
+                       normalized_payload, raw_payload, 0 as source_priority
+                from app.oa_applications
+                where scope_month = %s::date
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                union all
+                select admission.oa_id as row_id, 'in_progress'::text as workflow_status,
+                       admission.source_payload as normalized_payload,
+                       admission.raw_payload, 1 as source_priority
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = %s
+                  and admission.scope_key = %s
+                  and admission.workflow_status = 'in_progress'
+            )
+            select row_id, workflow_status, normalized_payload, raw_payload, source_priority
+            from workflow_facts
+            order by row_id, source_priority
+            """,
+            (month_start(normalized_month), self._tenant_id, normalized_month),
+        )
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        return self._records(
+            """
+            with workflow_facts as (
+                select row_id, 'completed'::text as workflow_status,
+                       normalized_payload, raw_payload, 0 as source_priority
+                from app.oa_applications
+                where """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                union all
+                select admission.oa_id as row_id, 'in_progress'::text as workflow_status,
+                       admission.source_payload as normalized_payload,
+                       admission.raw_payload, 1 as source_priority
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = %s
+                  and admission.workflow_status = 'in_progress'
+            )
+            select row_id, workflow_status, normalized_payload, raw_payload, source_priority
+            from workflow_facts
+            order by row_id, source_priority
+            """,
+            (self._tenant_id,),
+        )
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized_row_ids = list(dict.fromkeys(row_id for value in row_ids if (row_id := text(value))))
+        if not normalized_row_ids:
+            return []
+        records = self._records(
+            """
+            with workflow_facts as (
+                select row_id, 'completed'::text as workflow_status,
+                       normalized_payload, raw_payload, 0 as source_priority
+                from app.oa_applications
+                where row_id = any(%s::text[])
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                union all
+                select admission.oa_id as row_id, 'in_progress'::text as workflow_status,
+                       admission.source_payload as normalized_payload,
+                       admission.raw_payload, 1 as source_priority
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = %s
+                  and admission.oa_id = any(%s::text[])
+                  and admission.workflow_status = 'in_progress'
+            )
+            select row_id, workflow_status, normalized_payload, raw_payload, source_priority
+            from workflow_facts
+            order by row_id, source_priority
+            """,
+            (normalized_row_ids, self._tenant_id, normalized_row_ids),
+        )
+        records_by_id = {record.id: record for record in records}
+        return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+
+    def list_available_months(self) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select scope_key
+            from (
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from app.oa_applications
+                where scope_month is not null
+                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                union
+                select distinct scope_key
+                from app.oa_pending_payment_admissions
+                where tenant_id = %s
+                  and workflow_status = 'in_progress'
+            ) workflow_scopes
+            order by scope_key
+            """,
+            (self._tenant_id,),
+        )
+        return [scope for row in rows if (scope := text(row.get("scope_key")))]
+
+    @staticmethod
+    def get_read_status() -> OAReadStatus:
+        return OAReadStatus(code="ready", message="PostgreSQL OA workflow facts ready")
+
+    def _records(self, sql: str, params: tuple[Any, ...] = ()) -> list[OAApplicationRecord]:
+        rows = list(self._connection.fetch_all(sql, params) or [])
+        counts: dict[str, int] = {}
+        for row in rows:
+            row_id = text(row.get("row_id"))
+            if row_id:
+                counts[row_id] = counts.get(row_id, 0) + 1
+        duplicate_ids = sorted(row_id for row_id, count in counts.items() if count > 1)
+        if duplicate_ids:
+            raise ValueError(
+                "OA workflow facts contain completed/in-progress duplicate ids: "
+                + ",".join(duplicate_ids)
+            )
+        statuses_by_id = {
+            text(row.get("row_id")): text(row.get("workflow_status"))
+            for row in rows
+            if text(row.get("row_id"))
+        }
+        records = PostgresOAProjectionRepository._records_from_rows(rows)
+        for record in records:
+            record.workflow_status = statuses_by_id.get(record.id, "")
+        return records
+
+
 class PostgresOAProjectionAdapter:
     name = "postgres_oa_projection"
 

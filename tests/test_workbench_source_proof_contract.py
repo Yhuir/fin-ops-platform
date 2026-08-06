@@ -24,6 +24,7 @@ from fin_ops_platform.services.bank_transaction_category_mutation_writer import 
     BankTransactionCategoryMutationWriter,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
@@ -32,8 +33,8 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
     BankFlowRuleBatchCanonicalQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    PostgresOaPendingPaymentRelationRepository,
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    PostgresOaPendingPaymentSourceSnapshotRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
@@ -46,6 +47,9 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.read_model_freshness import (
@@ -63,6 +67,7 @@ from fin_ops_platform.services.workbench_read_model_refresh import (
     WorkbenchReadModelRefreshService,
 )
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -128,10 +133,10 @@ WORKBENCH_MUTABLE_WRITER_PROOF_CONTRACTS = (
         "override month and active member month",
     ),
     WriterProofContract(
-        "OA pending-payment bank claim",
-        "PostgresOaPendingPaymentRelationRepository.create_active_relation",
-        ("oa_pending_payment_bank_claims_updated_at",),
-        "claim month",
+        "OA in-progress admission",
+        "PostgresOaPendingPaymentSourceSnapshotRepository.replace_authoritative_snapshot",
+        ("oa_pending_payment_admissions_updated_at",),
+        "admission month",
     ),
     WriterProofContract(
         "ETC submission, business, and invoice state",
@@ -434,18 +439,31 @@ class WorkbenchSourceProofContractTests(unittest.TestCase):
         )
 
         before = after
-        PostgresOaPendingPaymentRelationRepository(self.connection).create_active_relation(
-            oa_row_ids=["oa-claim-may"],
-            bank_transaction_ids=["bank-confirm"],
-            actor_id="source-proof",
-            month_scope=self.MAY,
-            relation_id="claim-may",
+        admission = self._oa("oa-admission-may", self.MAY)
+        admission.workflow_status = "in_progress"
+        admission.detail_fields["Mongo文档ID"] = "flow-admission-may"
+        PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+            ),
+        ).replace_authoritative_snapshot(
+            scope_key=self.MAY,
+            completed_projection_records=[],
+            admission_records=[admission],
+            payment_statuses={
+                "flow-admission-may": OAPaymentStatusRecord(
+                    flow_id="flow-admission-may",
+                    pay_status=0,
+                )
+            },
         )
         after = self._proof()
         self._assert_scoped_change(
             before,
             after,
-            keys=("oa_pending_payment_bank_claims_updated_at",),
+            keys=("oa_pending_payment_admissions_updated_at",),
             affected=(self.MAY,),
             unrelated=(self.JUNE, self.JULY),
         )

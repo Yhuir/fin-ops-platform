@@ -43,7 +43,7 @@ durable dirty scope
 unpaired singleton selection
   -> preview locks canonical row set + expected versions
   -> command/UoW creates active relation only
-  -> current page normal GET compares relation/rule versions and scoped OA/bank/invoice/pending-claim canonical versions
+  -> current page normal GET compares relation/rule versions and scoped completed/in-progress OA, bank and invoice canonical versions
   -> exact Workbench scope converges on access
   -> paired group
 

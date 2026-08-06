@@ -508,6 +508,7 @@ class WorkbenchQueryService:
         return {
             "id": record.id,
             "type": "oa",
+            "workflow_status": str(getattr(record, "workflow_status", "") or "completed"),
             "case_id": case_id,
             "applicant": record.applicant,
             "project_name": project_name,

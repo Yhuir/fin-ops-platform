@@ -223,6 +223,7 @@ export type PendingInvoiceOaSummary = {
   applicationType: string;
   projectName: string;
   status: string;
+  workflowStatus: string;
   formNo: string;
   detailAvailable: boolean;
   relationCaseId: string;

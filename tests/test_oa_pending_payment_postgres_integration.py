@@ -7,16 +7,16 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    PostgresOaPendingPaymentRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     PostgresOaPendingPaymentQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -32,14 +32,18 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.connection = PostgresConnection(
             PostgresSettings(database_url=self.database_url, pool_enabled=False)
         )
-        self.queue = RuntimeQueueRepository(self.connection)
-        self.pending_relations = PostgresOaPendingPaymentRelationRepository(self.connection)
+
+    def _source_snapshot(self) -> PostgresOaPendingPaymentSourceSnapshotRepository:
+        return PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+            ),
+        )
 
     def test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
+        source_snapshot = self._source_snapshot()
         source_snapshot.commit_authoritative_snapshot(
             scope_key="2026-05",
             tenant_id="default",
@@ -182,10 +186,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in withdrawn_candidates["rows"]], ["bank-direct-query"])
 
     def test_identical_canonical_commit_keeps_projection_and_status_rows_unchanged(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
+        source_snapshot = self._source_snapshot()
         payment_statuses = {
             "flow-integration-1": OAPaymentStatusRecord(
                 flow_id="flow-integration-1",
@@ -244,10 +245,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(after, before)
 
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
+        source_snapshot = self._source_snapshot()
         completed_record = _record()
         record = replace(_in_progress_record(), amount="", applicant="", reason="")
         payment_statuses = {
@@ -383,10 +381,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         )
 
     def test_in_progress_to_completed_removes_admission_and_reports_shared_fact_change(self) -> None:
-        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
-            self.connection,
-            pending_relation_repository=self.pending_relations,
-        )
+        source_snapshot = self._source_snapshot()
         in_progress = _in_progress_record()
         completed = replace(in_progress, workflow_status="completed")
         payment_statuses = {

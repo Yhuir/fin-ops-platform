@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-08-05-anomaly-source-search-v20"
+WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-08-06-oa-workflow-gate-v21"
 WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = (
-    "workbench_sql_projection.composed_active_month_shards.anomaly_source_search.v20"
+    "workbench_sql_projection.composed_active_month_shards.oa_workflow_gate.v21"
 )
 WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS = 20
 WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS = 100

@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
@@ -18,8 +18,11 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import (
     OaPendingPaymentError,
     VIEW_MODE_IN_PROGRESS,
 )
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    OaPendingPaymentRelationRepositoryError,
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandError,
+)
+from fin_ops_platform.services.workbench_relation_requirements import (
+    build_bank_relation_requirement_metadata,
 )
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -32,17 +35,17 @@ class OaPendingPaymentCommandService:
         oa_projection: Any,
         relation_command_service: Any | None,
         payment_status_repository: OAPaymentStatusRepository | None,
-        pending_relation_service: Any | None = None,
-        completed_oa_projection: Any | None = None,
         payment_status_snapshot_writer: Any | None = None,
+        bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
+        bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._import_service = import_service
         self._oa_projection = oa_projection
-        self._completed_oa_projection = completed_oa_projection
         self._relation_command_service = relation_command_service
-        self._pending_relation_service = pending_relation_service
         self._payment_status_repository = payment_status_repository
         self._payment_status_snapshot_writer = payment_status_snapshot_writer
+        self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
+        self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         oa_row_ids = _payload_list(payload, "oa_row_ids", "oaRowIds")
@@ -78,17 +81,15 @@ class OaPendingPaymentCommandService:
             )
         amount_check = self._relation_amount_check(records, bank_transactions)
         flow_ids = self._resolve_oa_flow_ids(records) if amount_check.get("matched") is True else []
-        relation_result = self._confirm_pending_relation(
+        relation_result = self._confirm_formal_relation(
             records,
             bank_transactions,
             actor_id=clean_string(actor_id) or "system",
             note=_payload_text(payload, "note"),
             amount_check=amount_check,
             idempotency_key=_payload_text(payload, "idempotency_key", "idempotencyKey") or None,
-            case_id=_payload_text(payload, "case_id", "caseId") or None,
             history_operation_type="oa_pending_payment_link_bank",
             history_note=_payload_text(payload, "note") or "OA 待付款关联支出流水",
-            source_action="link_bank_transactions",
         )
         writebacks = self._mark_oa_flow_ids_paid(flow_ids)
         if flow_ids:
@@ -178,12 +179,11 @@ class OaPendingPaymentCommandService:
                 wanted.append(normalized)
         records: list[OAApplicationRecord] = []
         seen: set[str] = set()
-        for projection in (self._oa_projection, self._completed_oa_projection):
-            for record in self._records_from_projection(projection, wanted):
-                if record.id in seen:
-                    continue
-                seen.add(record.id)
-                records.append(record)
+        for record in self._records_from_projection(self._oa_projection, wanted):
+            if record.id in seen:
+                continue
+            seen.add(record.id)
+            records.append(record)
         record_by_id = {record.id: record for record in records}
         return [record_by_id[row_id] for row_id in wanted if row_id in record_by_id]
 
@@ -238,17 +238,14 @@ class OaPendingPaymentCommandService:
             ) from exc
 
     def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
-        relations: list[dict[str, Any]] = []
-        for relation_source in (self._relation_command_service, self._pending_relation_service):
-            active_relations_for_row_ids = getattr(relation_source, "active_relations_for_row_ids", None)
-            if not callable(active_relations_for_row_ids):
-                continue
-            relations.extend(
-                relation
-                for relation in list(active_relations_for_row_ids(row_ids) or [])
-                if isinstance(relation, dict)
-            )
-        return _dedupe_relations(relations)
+        active_relations_for_row_ids = getattr(
+            self._relation_command_service,
+            "active_relations_for_row_ids",
+            None,
+        )
+        if not callable(active_relations_for_row_ids):
+            return []
+        return _dedupe_relations(active_relations_for_row_ids(row_ids) or [])
 
     def _bank_transactions_from_relation(self, relation: dict[str, Any]) -> list[BankTransaction]:
         bank_ids = _relation_bank_ids(relation)
@@ -290,7 +287,7 @@ class OaPendingPaymentCommandService:
             "source": "oa_pending_payment_link_bank_transactions",
         }
 
-    def _confirm_pending_relation(
+    def _confirm_formal_relation(
         self,
         records: list[OAApplicationRecord],
         bank_transactions: list[BankTransaction],
@@ -299,41 +296,106 @@ class OaPendingPaymentCommandService:
         note: str,
         amount_check: dict[str, Any],
         idempotency_key: str | None,
-        case_id: str | None,
         history_operation_type: str,
         history_note: str,
-        source_action: str,
     ) -> dict[str, Any]:
-        create_relation = getattr(self._pending_relation_service, "create_active_relation", None)
-        if not callable(create_relation):
+        confirm_relation = getattr(self._relation_command_service, "confirm_relation", None)
+        if not callable(confirm_relation):
             raise OaPendingPaymentError(
-                "oa_pending_payment_relation_repository_unavailable",
-                "OA pending payment relation repository is not configured.",
+                "workbench_relation_command_service_unavailable",
+                "Workbench relation command service is not configured.",
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             )
         if not records:
             raise OaPendingPaymentError("oa_row_ids_required", "At least one OA row is required.")
         bank_ids = [transaction.id for transaction in bank_transactions]
         oa_ids = [record.id for record in records]
+        active_relations = self._active_relations_for_row_ids([*oa_ids, *bank_ids])
+        if len(active_relations) > 1:
+            raise OaPendingPaymentError(
+                "workbench_relation_active_row_conflict",
+                "Selected OA and bank rows belong to different active Workbench relations.",
+                status_code=HTTPStatus.CONFLICT,
+                details={
+                    "conflicting_case_ids": sorted(
+                        clean_string(relation.get("case_id") or "")
+                        for relation in active_relations
+                        if clean_string(relation.get("case_id") or "")
+                    )
+                },
+            )
+        before_relation = active_relations[0] if active_relations else None
+        member_types = {
+            row_id: row_type
+            for row_id, row_type in zip(
+                _relation_text_list(before_relation or {}, "row_ids", "rowIds"),
+                _relation_text_sequence(before_relation or {}, "row_types", "rowTypes"),
+                strict=False,
+            )
+        }
+        for oa_id in oa_ids:
+            member_types[oa_id] = "oa"
+        for bank_id in bank_ids:
+            member_types[bank_id] = "bank"
+        row_ids = list(member_types)
+        row_types = [member_types[row_id] for row_id in row_ids]
+        all_bank_ids = [row_id for row_id, row_type in member_types.items() if row_type == "bank"]
+        category_codes = (
+            self._bank_transaction_category_codes_for_row_ids(all_bank_ids)
+            if self._bank_transaction_category_codes_for_row_ids
+            else {}
+        )
+        requirements = build_bank_relation_requirement_metadata(
+            tag_codes=[category_codes.get(bank_id, "") for bank_id in all_bank_ids],
+            rules_payload=(
+                self._bank_flow_rule_tag_rules_payload()
+                if self._bank_flow_rule_tag_rules_payload
+                else {}
+            ),
+        )
+        existing_metadata = (
+            dict(before_relation.get("special_metadata") or {})
+            if isinstance(before_relation, dict)
+            and isinstance(before_relation.get("special_metadata"), dict)
+            else {}
+        )
+        special_metadata = {
+            **existing_metadata,
+            **requirements,
+            "origin": "oa_pending_payment",
+        }
         try:
             return dict(
-                create_relation(
-                    relation_id=case_id or _pending_payment_relation_id(oa_ids, bank_ids),
-                    oa_row_ids=oa_ids,
-                    bank_transaction_ids=bank_ids,
+                confirm_relation(
+                    case_id=(
+                        clean_string(before_relation.get("case_id") or "")
+                        if isinstance(before_relation, dict)
+                        else _pending_payment_relation_id(oa_ids, bank_ids)
+                    ),
+                    row_ids=row_ids,
+                    row_types=row_types,
+                    relation_mode=(
+                        clean_string(before_relation.get("relation_mode") or "")
+                        if isinstance(before_relation, dict)
+                        else "manual_confirmed"
+                    ) or "manual_confirmed",
                     actor_id=actor_id,
-                    month_scope=_relation_month_scope(records),
+                    month_scope=(
+                        clean_string(before_relation.get("month_scope") or "")
+                        if isinstance(before_relation, dict)
+                        else _relation_month_scope(records)
+                    ) or _relation_month_scope(records),
                     note=note or None,
                     amount_check=amount_check,
+                    special_metadata=special_metadata,
                     idempotency_key=idempotency_key,
-                    source_action=source_action,
-                    raw_payload={
-                        "history_operation_type": history_operation_type,
-                        "history_note": history_note,
-                    },
+                    before_relations=active_relations,
+                    replace_existing=bool(active_relations),
+                    history_operation_type=history_operation_type,
+                    history_note=history_note,
                 )
             )
-        except OaPendingPaymentRelationRepositoryError as exc:
+        except WorkbenchRelationCommandError as exc:
             raise OaPendingPaymentError(
                 exc.error_code,
                 exc.message,
@@ -592,7 +654,9 @@ def _public_writeback(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:
-    digest = sha1("|".join([*oa_row_ids, *bank_transaction_ids]).encode("utf-8")).hexdigest()[:16]
+    digest = sha1(
+        "|".join([*sorted(set(oa_row_ids)), *sorted(set(bank_transaction_ids))]).encode("utf-8")
+    ).hexdigest()[:16]
     return f"OA-PAY-{digest}"
 
 

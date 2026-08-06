@@ -13,10 +13,10 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
     def test_complete_snapshot_replaces_status_and_admission_in_one_canonical_transaction(self) -> None:
         connection = FakeConnection()
-        pending_relations = FakePendingRelationRepository()
+        relation_commands = FakeRelationCommandService()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=pending_relations,
+            relation_command_service_for_transaction=lambda _transaction: relation_commands,
         )
 
         result = repository.replace_authoritative_snapshot(
@@ -32,11 +32,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.admission_count, 1)
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
-        self.assertEqual(pending_relations.calls[0]["admitted_oa_row_ids"], ["oa-pay-row-1"])
-        self.assertIs(pending_relations.calls[0]["transaction"], connection.transaction_handle)
-        self.assertEqual(len(pending_relations.ensure_calls), 1)
-        self.assertEqual(pending_relations.ensure_calls[0]["scope_key"], "2026-06")
-        self.assertIs(pending_relations.ensure_calls[0]["transaction"], connection.transaction_handle)
+        self.assertEqual(relation_commands.calls, [])
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
         self.assertIn("delete from app.oa_pending_payment_status_snapshots", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_status_snapshots", executed_sql)
@@ -69,7 +65,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.replace_authoritative_snapshot(
@@ -88,7 +84,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         connection = FakeConnection()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
         completed = _oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")
 
@@ -102,6 +98,26 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.completed_projection_changed_scopes, ("2026-06",))
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
         self.assertFalse(hasattr(repository, "_queue_repository"))
+
+    def test_commit_removes_relation_member_when_completed_oa_disappears_from_both_sources(self) -> None:
+        connection = FakeConnection(
+            application_delete_results=[[{"row_id": "oa-completed-gone"}], []]
+        )
+        relation_commands = FakeRelationCommandService()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: relation_commands,
+        )
+
+        result = repository.commit_authoritative_snapshot(
+            scope_key="2026-06",
+            projection_records=[],
+            admission_records=[],
+            payment_statuses={},
+        )
+
+        self.assertEqual(result.removed_stale_completed_count, 1)
+        self.assertEqual(relation_commands.calls[0]["row_ids"], ["oa-completed-gone"])
 
     def test_payment_status_only_change_does_not_report_completed_projection_change(self) -> None:
         connection = FakeConnection(
@@ -117,7 +133,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.replace_authoritative_snapshot(
@@ -134,7 +150,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         connection = FakeConnection(watermark_rows=[_watermark("2026-05")])
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.replace_authoritative_snapshot(
@@ -161,7 +177,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.record_paid_statuses(
@@ -189,7 +205,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.record_paid_statuses(
@@ -214,7 +230,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         result = repository.record_paid_statuses(
@@ -239,7 +255,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         with self.assertRaisesRegex(RuntimeError, "not initialized for scopes: 2026-06"):
@@ -255,7 +271,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         connection = FakeConnection()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=FakePendingRelationRepository(),
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
         with self.assertRaisesRegex(ValueError, "invalid pay_status"):
@@ -276,10 +292,12 @@ class FakeTransaction:
         status_rows: list[dict[str, object]],
         admission_rows: list[dict[str, object]],
         watermark_rows: list[dict[str, object]],
+        application_delete_results: list[list[dict[str, object]]],
     ) -> None:
         self.status_rows = list(status_rows)
         self.admission_rows = list(admission_rows)
         self.watermark_rows = list(watermark_rows)
+        self.application_delete_results = [list(rows) for rows in application_delete_results]
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, _params: tuple[object, ...]) -> dict[str, object] | None:
@@ -295,6 +313,8 @@ class FakeTransaction:
             return list(self.admission_rows)
         if "from app.oa_sync_watermarks" in sql:
             return list(self.watermark_rows)
+        if "delete from app.oa_applications" in sql:
+            return self.application_delete_results.pop(0) if self.application_delete_results else []
         if "app.oa_applications" in sql:
             return []
         raise AssertionError(f"Unexpected query: {sql}")
@@ -325,11 +345,13 @@ class FakeConnection:
         status_rows: list[dict[str, object]] | None = None,
         admission_rows: list[dict[str, object]] | None = None,
         watermark_rows: list[dict[str, object]] | None = None,
+        application_delete_results: list[list[dict[str, object]]] | None = None,
     ) -> None:
         self.transaction_handle = FakeTransaction(
             status_rows=list(status_rows or []),
             admission_rows=list(admission_rows or []),
             watermark_rows=list(watermark_rows or []),
+            application_delete_results=list(application_delete_results or []),
         )
         self.transaction_count = 0
         self.committed = False
@@ -340,17 +362,13 @@ class FakeConnection:
         return FakeTransactionContext(self)
 
 
-class FakePendingRelationRepository:
+class FakeRelationCommandService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
-        self.ensure_calls: list[dict[str, object]] = []
 
-    def cancel_active_relations_missing_oa_admission(self, **kwargs: object) -> dict[str, object]:
+    def remove_rows_from_active_relations(self, **kwargs: object) -> dict[str, object]:
         self.calls.append(dict(kwargs))
-        return {"changed_relation_ids": [], "affected_months": []}
-
-    def ensure_scope_source_version(self, **kwargs: object) -> None:
-        self.ensure_calls.append(dict(kwargs))
+        return {"changed_case_ids": [], "affected_months": []}
 
 
 def _oa(row_id: str, month: str, *, workflow_status: str, flow_id: str) -> OAApplicationRecord:

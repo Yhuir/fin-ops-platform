@@ -149,6 +149,7 @@ EXPECTED_MIGRATIONS = [
     "0133_settings_access_control_canonical_order.sql",
     "0134_restore_invoice_import_provenance.sql",
     "0135_batch_accounting_tag_selection.sql",
+    "0136_unify_in_progress_oa_workbench_relations.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -304,7 +305,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 136)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 137)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1306,6 +1307,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
 
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
+        relation_unification_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR / "0136_unify_in_progress_oa_workbench_relations.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(relation_unification_sql, sql)
+        sql = sql.replace(
+            relation_unification_sql,
+            "approved_oa_pending_relation_unification;",
+        )
         sql = re.sub(r"\binsert\s+into\s+app\.oa_attachment_invoice_cache_sources\b", "insert into allowed_lookup_backfill", sql)
         for table_name in (
             "oa_pending_payment_bank_relations",
@@ -1924,6 +1935,27 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("target.next_payload", normalized_sql)
         self.assertNotIn("delete ", normalized_sql)
         self.assertNotIn("drop ", normalized_sql)
+
+    def test_in_progress_oa_relations_migrate_to_formal_owner_and_retire_legacy_writes(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR / "0136_unify_in_progress_oa_workbench_relations.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("spanning multiple active workbench cases", normalized_sql)
+        self.assertIn("overlapping active oa pending relations", normalized_sql)
+        self.assertIn("insert into app.workbench_pair_relations", normalized_sql)
+        self.assertIn("on conflict (case_id) do update", normalized_sql)
+        self.assertIn("migrate_oa_pending_relation_to_formal", normalized_sql)
+        self.assertIn("status = 'promoted'", normalized_sql)
+        self.assertIn("formal workbench relation is now the sole active owner", normalized_sql)
+        self.assertIn("revoke insert, update, delete on app.oa_pending_payment_bank_relations", normalized_sql)
+        self.assertIn("grant select on app.oa_pending_payment_bank_relations", normalized_sql)
+        self.assertNotIn("update app.oa_pending_payment_admissions", normalized_sql)
+        self.assertNotIn("job.outbox_events", normalized_sql)
+        self.assertNotIn("read_model.", normalized_sql)
 
 
 

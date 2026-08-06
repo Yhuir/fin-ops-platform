@@ -189,6 +189,11 @@ class WorkbenchRelationGroupingService:
         special_metadata = relation.get("special_metadata")
         completion = evaluate_bank_relation_completion(
             row_types=[str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]],
+            oa_workflow_statuses=[
+                str(rows_by_id[row_id].get("workflow_status") or "completed")
+                for row_id in relation["row_ids"]
+                if str(rows_by_id[row_id]["type"]) == "oa"
+            ],
             special_metadata=special_metadata if isinstance(special_metadata, dict) else None,
             relation_mode=str(relation.get("relation_mode") or ""),
             amount_check=(
@@ -517,9 +522,15 @@ class WorkbenchRelationPreviewGroupingService:
         grouped_row_ids: set[str] = set()
         for relation in relations:
             case_id = str(relation.get("case_id") or "")
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
             row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
             completion = evaluate_bank_relation_completion(
                 row_types=row_types,
+                oa_workflow_statuses=[
+                    str(rows_by_id[row_id].get("workflow_status") or "completed")
+                    for row_id, row_type in zip(row_ids, row_types, strict=False)
+                    if row_type == "oa" and row_id in rows_by_id
+                ],
                 special_metadata=(
                     relation.get("special_metadata")
                     if isinstance(relation.get("special_metadata"), dict)
@@ -547,7 +558,6 @@ class WorkbenchRelationPreviewGroupingService:
                 "bank_rows": [],
                 "invoice_rows": [],
             }
-            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
             relation_row_ids: set[str] = set()
             for index, row_id in enumerate(row_ids):
                 if not row_id or row_id in relation_row_ids:

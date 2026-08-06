@@ -21,7 +21,7 @@
 | `OA-PENDING-E2E-004` | 页面保持打开 | 经过 550ms 仍只有首屏 rows 请求；无后台 polling |
 | `OA-PENDING-E2E-005` | empty/error/manual refresh | empty 是真实空集；错误不伪装空集；手工刷新只新增一个 normal GET |
 | `OA-PENDING-E2E-006` | writeback-paid | 合法行单次命令；成功后 normal GET，409/503 明确且不伪成功；响应无 refresh metadata |
-| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许未占用 outflow；pending relation/claim/自动写回保持幂等与冲突语义；成功后 normal GET |
+| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许无冲突 outflow；formal relation 创建/唯一 case 扩展/自动写回保持幂等与冲突语义；成功后 normal GET |
 | `OA-PENDING-E2E-008` | active relation withdraw | canonical relation 改为 withdrawn 后下一次 GET 不展示银行/发票 relation；无需 worker |
 | `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/unavailable 文案正确；单次请求且无 page barrier |
 | `OA-PENDING-E2E-010` | 列筛选浮层 | HeroUI Popover 在窄高视口自动避让；内容可滚动、操作区始终可见；Escape 关闭并归还焦点；零业务写请求 |

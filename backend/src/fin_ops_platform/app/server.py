@@ -292,6 +292,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
     PostgresOAProjectionAdapter,
+    PostgresOAWorkflowRepository,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
@@ -814,6 +815,13 @@ class Application:
             if oa_projection_repository is not None
             else None
         )
+        oa_workflow_adapter = (
+            PostgresOAProjectionAdapter(
+                PostgresOAWorkflowRepository(getattr(self._state_store, "_connection"))
+            )
+            if getattr(self._state_store, "_connection", None) is not None
+            else oa_adapter
+        )
         self._audit_service = AuditTrailService()
         self._reconciliation_service = ManualReconciliationService(
             self._import_service,
@@ -853,7 +861,7 @@ class Application:
         )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._workbench_query_service = WorkbenchQueryService(
-            oa_adapter=oa_adapter,
+            oa_adapter=oa_workflow_adapter,
             seed_demo_rows=not self._requires_sql_read_model_runtime(),
         )
         self._oa_manual_import_service = (
@@ -906,7 +914,7 @@ class Application:
             category_service=self._bank_transaction_category_service,
             app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
             effective_category_provider=self._bank_transaction_tag_reader(),
-            oa_projection=oa_adapter,
+            oa_projection=oa_workflow_adapter,
             income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
             relation_facade=self._workbench_relation_read_facade(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
@@ -914,7 +922,7 @@ class Application:
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
-            oa_projection=oa_adapter,
+            oa_projection=oa_workflow_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
@@ -1220,12 +1228,9 @@ class Application:
         rows: list[object] = []
         for row_id in row_ids:
             try:
-                rows.append(
-                    self._workbench_query_service.get_row_record(
-                        row_id,
-                        month_hint="all",
-                    )
-                )
+                row = self._workbench_query_service.get_row_record(row_id, month_hint="all")
+                if str(row.get("workflow_status") or "completed") == "completed":
+                    rows.append(row)
             except KeyError:
                 continue
         return rows
@@ -5487,31 +5492,21 @@ class Application:
         service = OaPendingPaymentCommandService(
             import_service=self._import_service,
             oa_projection=self._oa_pending_payment_command_oa_projection(),
-            completed_oa_projection=self._oa_pending_payment_source_projection(),
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
-            pending_relation_service=self._oa_pending_payment_relation_repository(),
             payment_status_repository=self._oa_payment_status_repository(),
             payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository(),
+            bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
+            bank_flow_rule_tag_rules_payload=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
         )
         self._oa_pending_payment_command_service_instance = service
         return service
 
     def _oa_pending_payment_command_oa_projection(self) -> object | None:
-        return self._oa_pending_payment_projection()
-
-    def _oa_pending_payment_relation_repository(self) -> object | None:
-        override = getattr(self, "_oa_pending_payment_relation_repository_override", None)
-        if override is not None:
-            return override
-        repository = getattr(self, "_oa_pending_payment_relation_repository_instance", None)
-        if repository is not None:
-            return repository
         state_store = getattr(self, "_state_store", None)
-        postgres_repository = getattr(state_store, "oa_pending_payment_relation_repository", None)
-        if postgres_repository is not None:
-            self._oa_pending_payment_relation_repository_instance = postgres_repository
-            return postgres_repository
-        return None
+        connection = getattr(state_store, "_connection", None)
+        if connection is not None:
+            return PostgresOAProjectionAdapter(PostgresOAWorkflowRepository(connection))
+        return self._oa_pending_payment_projection()
 
     def _oa_pending_payment_source_snapshot_repository(self) -> object | None:
         override = getattr(self, "_oa_pending_payment_source_snapshot_repository_override", None)
@@ -5522,14 +5517,16 @@ class Application:
             return repository
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
-        pending_relation_repository = self._oa_pending_payment_relation_repository()
-        if connection is None or pending_relation_repository is None:
+        if connection is None:
             if self._requires_sql_read_model_runtime():
                 raise RuntimeError("OA pending payment source snapshot writer requires PostgreSQL runtime repositories.")
             return None
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            pending_relation_repository=pending_relation_repository,
+            relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+            ),
         )
         self._oa_pending_payment_source_snapshot_repository_instance = repository
         return repository

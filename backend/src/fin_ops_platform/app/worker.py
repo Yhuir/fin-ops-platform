@@ -20,9 +20,6 @@ from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentSt
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
-from fin_ops_platform.services.oa_pending_payment_relation_promotion_service import (
-    OaPendingPaymentRelationPromotionService,
-)
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.oa_sync_source_adapter import build_oa_sync_source_adapter
 from fin_ops_platform.services.postgres_connection import (
@@ -30,11 +27,14 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
-    PostgresOaPendingPaymentRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandService,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
@@ -45,7 +45,6 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice impor
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
@@ -72,7 +71,6 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_registrations,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
-from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
     WorkbenchRelationReadModelRefreshService,
@@ -208,19 +206,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         oa_runtime_settings = _load_oa_runtime_settings(connection)
         source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
-        pending_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
-        relation_command_service = WorkbenchRelationCommandService(
-            relation_repository=PostgresWorkbenchRelationRepository(connection),
-        )
-        pending_relation_promoter = OaPendingPaymentRelationPromotionService(
-            pending_relation_service=pending_relation_repository,
-            relation_command_service=relation_command_service,
-        )
         payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
         pending_payment_source_snapshot_repository = (
             PostgresOaPendingPaymentSourceSnapshotRepository(
                 connection,
-                pending_relation_repository=pending_relation_repository,
+                relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                    relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                    require_fresh_relations=False,
+                ),
             )
             if payment_status_repository is not None
             else None
@@ -229,7 +222,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_adapter=source_adapter,
             projection_repository=projection_repository,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
-            pending_payment_relation_promoter=pending_relation_promoter,
             attachment_invoice_promoter=OAAttachmentInvoicePromotionService(
                 invoice_repository=PostgresOAAttachmentInvoiceRepository(connection),
                 promotion_mode_provider=lambda: str(

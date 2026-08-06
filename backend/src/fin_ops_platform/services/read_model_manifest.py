@@ -41,8 +41,8 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         scoped_incremental_target="workbench active generation rows, groups, summaries and details for affected month scopes",
         full_rebuild_fallback="gateway force refresh rebuilds requested active month generation or all aggregate from canonical facts",
         freshness_proof_contract=(
-            "active generation metadata, expected relation/rule and scoped canonical object source_versions, "
-            "active pending claim version, and current-effective dirty/outbox state"
+            "active generation metadata, expected relation/rule, scoped completed/in-progress OA admission "
+            "plus bank/invoice canonical source_versions, and current-effective dirty/outbox state"
         ),
         force_refresh_contract="gateway_force_refresh_active_generation_scope",
         operation_barrier_contract="app_status_registry_target",

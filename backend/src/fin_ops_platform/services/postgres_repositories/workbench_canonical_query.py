@@ -327,6 +327,7 @@ canonical_rows as materialized (
                 oa.normalized_payload#>>'{{detail_fields,往来单位}}'
             ),
             'reconciliationStatus', '待关联',
+            'workflowStatus', 'completed',
             'amount', oa.amount::text,
             'reason', oa.normalized_payload->>'reason'
         )) as column_values,
@@ -334,6 +335,41 @@ canonical_rows as materialized (
     from app.oa_applications oa
     where oa.status <> 'deleted'
       and {_COMPLETED_OA_SQL}
+    union all
+    select
+        admission.oa_id,
+        'oa'::text,
+        'oa'::text,
+        (admission.scope_key || '-01')::date,
+        (admission.scope_key || '-01')::date,
+        admission.updated_at,
+        concat_ws(
+            ' ', admission.oa_id, admission.applicant,
+            admission.project_name_display, admission.project_name,
+            admission.amount::text, admission.source_payload::text
+        ),
+        jsonb_strip_nulls(jsonb_build_object(
+            'applicant', admission.applicant,
+            'applicationTime', coalesce(
+                admission.source_payload->>'application_time',
+                admission.source_payload->>'application_date'
+            ),
+            'projectName', coalesce(admission.project_name_display, admission.project_name),
+            'applicationType', coalesce(
+                admission.source_payload->>'apply_type',
+                admission.source_payload->>'application_type',
+                admission.source_payload->>'form_type'
+            ),
+            'counterparty', admission.source_payload->>'counterparty_name',
+            'reconciliationStatus', '待关联',
+            'workflowStatus', 'in_progress',
+            'amount', admission.amount::text,
+            'reason', admission.source_payload->>'reason'
+        )),
+        null::text
+    from app.oa_pending_payment_admissions admission
+    where admission.tenant_id = 'default'
+      and admission.workflow_status = 'in_progress'
     union all
     select
         coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
@@ -405,13 +441,6 @@ canonical_rows as materialized (
         null::text as external_batch_id
     from app.bank_transactions bank
     where bank.status <> 'deleted'
-      and not exists (
-          select 1
-          from app.bank_transaction_relation_claims claim
-          where claim.status = 'active'
-            and claim.owner_type = 'oa_pending_payment_relation'
-            and claim.bank_transaction_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-      )
     union all
     select
         invoice.row_id,
@@ -684,6 +713,11 @@ class PostgresWorkbenchCanonicalQueryRepository:
                 where oa.status <> 'deleted'
                   and {_COMPLETED_OA_SQL}
                 union
+                select (admission.scope_key || '-01')::date
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = 'default'
+                  and admission.workflow_status = 'in_progress'
+                union
                 select bank.txn_month
                 from app.bank_transactions bank
                 where bank.status <> 'deleted'
@@ -723,13 +757,22 @@ class PostgresWorkbenchCanonicalQueryRepository:
                         ),
                         '|' order by oa.row_id
                     ), ''))
-                    from app.oa_applications oa
-                    where oa.status <> 'deleted'
-                      and {_COMPLETED_OA_SQL}
-                      and coalesce(
-                          oa.scope_month,
-                          date_trunc('month', oa.application_date)::date
-                      ) = %s::date
+                    from (
+                        select oa.row_id, oa.updated_at
+                        from app.oa_applications oa
+                        where oa.status <> 'deleted'
+                          and {_COMPLETED_OA_SQL}
+                          and coalesce(
+                              oa.scope_month,
+                              date_trunc('month', oa.application_date)::date
+                          ) = %s::date
+                        union all
+                        select admission.oa_id, admission.updated_at
+                        from app.oa_pending_payment_admissions admission
+                        where admission.tenant_id = 'default'
+                          and admission.workflow_status = 'in_progress'
+                          and admission.scope_key = to_char(%s::date, 'YYYY-MM')
+                    ) oa
                 ) as oa_membership_version,
                 (
                     select md5(coalesce(string_agg(
@@ -816,6 +859,7 @@ class PostgresWorkbenchCanonicalQueryRepository:
                 ) as override_membership_version
             """,
             (
+                scope_month,
                 scope_month,
                 scope_month,
                 scope_month,

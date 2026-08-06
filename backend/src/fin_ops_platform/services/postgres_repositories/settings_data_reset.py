@@ -22,12 +22,6 @@ class PostgresSettingsDataResetRepository:
         )
         deleted_counts = {
             **relation_counts,
-            "bank_transaction_relation_claims": self._connection.execute(
-                "delete from app.bank_transaction_relation_claims"
-            ),
-            "oa_pending_payment_bank_relations": self._connection.execute(
-                "delete from app.oa_pending_payment_bank_relations"
-            ),
             "no_oa_bank_batch_events": self._connection.execute(
                 "delete from app.no_oa_bank_batch_events"
             ),

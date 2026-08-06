@@ -244,8 +244,7 @@ class OaPendingPaymentQueryService:
         facts = repository.load_facts(descriptors, tenant_id=tenant_id)
         completed_records = list(facts.get("completed_records") or [])
         in_progress_records = list(facts.get("in_progress_records") or [])
-        canonical_relations = list(facts.get("canonical_relations") or [])
-        pending_relations = list(facts.get("pending_relations") or [])
+        relations = list(facts.get("relations") or [])
         bank_transactions = list(facts.get("bank_transactions") or [])
         invoices = list(facts.get("invoices") or [])
         payment_statuses = dict(facts.get("payment_statuses") or {})
@@ -261,7 +260,7 @@ class OaPendingPaymentQueryService:
                 continue
             rows = build_oa_pending_payment_rows(
                 records=completed_records if source_kind == "completed" else in_progress_records,
-                relations=canonical_relations if source_kind == "completed" else pending_relations,
+                relations=relations,
                 bank_transactions=bank_transactions,
                 invoices=invoices,
                 payment_statuses_by_flow_id=payment_statuses,

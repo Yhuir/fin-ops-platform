@@ -347,6 +347,33 @@ case_oa_members as materialized (
     from bank_cases owner
     join relation_members member on member.case_id = owner.case_id and member.row_type = 'oa'
 ),
+workflow_oa as materialized (
+    select
+        row_id, applicant, form_type, project_name, status, workflow_no, form_id,
+        amount, application_date, 'completed'::text as workflow_status,
+        normalized_payload, raw_payload
+    from app.oa_applications
+    where workflow_status is null
+       or workflow_status = ''
+       or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
+    union all
+    select
+        admission.oa_id,
+        admission.applicant,
+        coalesce(admission.source_payload->>'apply_type', admission.source_payload->>'form_type', ''),
+        coalesce(admission.project_name_display, admission.project_name, ''),
+        'in_progress'::text,
+        coalesce(admission.source_payload->>'workflow_no', admission.source_payload->>'form_no', ''),
+        coalesce(admission.source_payload->>'form_id', ''),
+        admission.amount,
+        (admission.scope_key || '-01')::date,
+        'in_progress'::text,
+        admission.source_payload,
+        admission.raw_payload
+    from app.oa_pending_payment_admissions admission
+    where admission.tenant_id = 'default'
+      and admission.workflow_status = 'in_progress'
+),
 relation_oa_facts as materialized (
     select
         member.bank_id,
@@ -359,6 +386,7 @@ relation_oa_facts as materialized (
                     'application_type', coalesce(oa.form_type, ''),
                     'project_name', coalesce(oa.project_name, ''),
                     'status', coalesce(oa.status, ''),
+                    'workflow_status', oa.workflow_status,
                     'form_no', coalesce(oa.workflow_no, oa.form_id, ''),
                     'amount', coalesce(oa.amount, 0)::text,
                     'detail_available', true,
@@ -370,7 +398,7 @@ relation_oa_facts as materialized (
             '[]'::jsonb
         ) as oa_summaries
     from case_oa_members member
-    join app.oa_applications oa on oa.row_id = member.oa_id
+    join workflow_oa oa on oa.row_id = member.oa_id
     group by member.bank_id
 ),
 relation_case_facts as materialized (
@@ -1242,6 +1270,31 @@ limit 1
 """
 
 OA_DETAIL_SQL = """
+with workflow_oa as (
+    select
+        row_id, applicant, form_type, project_name, workflow_no, workflow_status,
+        status, amount, scope_month, normalized_payload, raw_payload
+    from app.oa_applications
+    where workflow_status is null
+       or workflow_status = ''
+       or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
+    union all
+    select
+        admission.oa_id,
+        admission.applicant,
+        coalesce(admission.source_payload->>'apply_type', admission.source_payload->>'form_type', ''),
+        coalesce(admission.project_name_display, admission.project_name, ''),
+        coalesce(admission.source_payload->>'workflow_no', admission.source_payload->>'form_no', ''),
+        'in_progress'::text,
+        'in_progress'::text,
+        admission.amount,
+        (admission.scope_key || '-01')::date,
+        admission.source_payload,
+        admission.raw_payload
+    from app.oa_pending_payment_admissions admission
+    where admission.tenant_id = 'default'
+      and admission.workflow_status = 'in_progress'
+)
 select
     oa.row_id as oa_id,
     coalesce(oa.applicant, '') as applicant,
@@ -1273,9 +1326,8 @@ select
         ),
         ''
     ) as relation_case_id
-from app.oa_applications oa
-where oa.status <> 'deleted'
-  and oa.row_id = %s
+from workflow_oa oa
+where oa.row_id = %s
 limit 1
 """
 

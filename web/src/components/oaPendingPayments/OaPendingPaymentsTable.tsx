@@ -24,6 +24,7 @@ import type {
   OaPendingPaymentSortDirection,
 } from "../../features/oaPendingPayments/types";
 import { formatMoney } from "../../features/money";
+import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
@@ -251,8 +252,8 @@ export default function OaPendingPaymentsTable({
                           />
                         </span>
                         <span className="oa-pending-payments-tag-row">
-                          <TableTag>{row.oa.applicationType || "类型为空"}</TableTag>
-                          <TableTag>{workflowStatusTagLabel(row)}</TableTag>
+                          <FinanceStatusTag>{row.oa.applicationType || "类型为空"}</FinanceStatusTag>
+                          <OaWorkflowStatusChip status={row.oa.workflowStatus} />
                         </span>
                       </div>
                       <div className="oa-pending-payments-oa-grid__project">
@@ -919,10 +920,6 @@ function workflowStatusLabel(row: OaPendingPaymentRow): string {
     return "已完成";
   }
   return status;
-}
-
-function workflowStatusTagLabel(row: OaPendingPaymentRow): string {
-  return `流程状态：${workflowStatusLabel(row)}`;
 }
 
 function counterpartyDisplay(row: OaPendingPaymentRow): string {

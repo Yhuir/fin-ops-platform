@@ -1,5 +1,12 @@
 # OA待付款核对 实施记录
 
+## 2026-08-06 - 进行中 OA 统一为正式 Workbench relation
+
+- completed/in-progress OA 统一通过 `app.workbench_pair_relations` 持有关系；OA 待付款命令只调用正式 relation command，唯一已有 case 原地扩展并保留发票成员。
+- 旧 pending relation repository、bank claim、promotion service、Workbench claim exclusion 与 source proof 已删除。migration `0136` 把 active legacy 关系迁入 formal case、释放 claim，并把旧表收敛为只读审计。
+- 本记录中 2026-07-27 及更早关于“active pending relation / claim / promotion”的描述均为历史设计，已由本节与 `boundary-io.md` 取代，不再是当前合同。
+- UI 共用 HeroUI workflow chip 显示真实“已完成/进行中”；页面继续 direct canonical read，写后只重新 GET。
+
 ## 2026-07-31 - 关联支出流水抽屉迁移到共享壳
 
 - 只把 `OaBankLinkDrawer` 的自定义 backdrop/aside/header/close 展示壳替换为共享 `AppDrawer`，保留 560px、搜索、筛选、分页、选择、提交、AbortController、权限、loading/error 和写入时机。

@@ -33,7 +33,7 @@
 | rows 查询 | `InputInvoiceUsagePage.tsx` | `page`、`page_size`、keyword、日期/月、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、未税金额、税额和关联流水金额。 |
 | canonical invoices | `app.invoices` | 只取非删除 input invoices；金额和日期保持 canonical 口径 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；按 relation component 聚合 |
-| bank/OA facts | `app.bank_transactions`、`app.oa_applications` | 只读取已同步 PostgreSQL snapshot |
+| bank/OA facts | `app.bank_transactions`、`app.oa_applications`、`app.oa_pending_payment_admissions` | 只读取已同步 PostgreSQL snapshot；OA summary 输出 canonical `workflowStatus=completed|in_progress`，重复 identity fail closed |
 | payment rules | `app.app_settings` | 使用现有 input invoice payment rule contract |
 | OA reverse facts | `app.input_invoice_usage_oa_reverse_batches` | statistics、preview 和命令状态 |
 | lifecycle command | 页面专属写 API | 保持原权限、审计、CAS/idempotency；成功后 GET |
@@ -45,6 +45,7 @@
 | --- | --- | --- |
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
 | relation/details | drawer | 按 row/invoice/bank/OA id 定向读取；不存在返回 404 |
+| OA 申请人列 | frontend | 使用 HeroUI 原生 chip 显示真实申请类型与“已完成/进行中”；不得从 linked/unlinked 关系状态推断流程状态 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
 | OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot，并分别返回 `permissions.canCreateDraft` 写能力与当前整组 `canCreateDraft` 业务可创建状态；前端对当前勾选集合只做同一非空销方的轻量可用性判断，提交前必须按精确发票集合重新 preview，并以新 preview 的权限、业务状态和 hash 为准。命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
 | write result | 页面 | 不含 refresh target/barrier；页面成功后重跑当前 GET |

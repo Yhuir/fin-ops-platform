@@ -62,6 +62,7 @@ export type InputInvoiceUsageOaSummary = {
   id: string;
   applicant: string;
   applicationType: string;
+  workflowStatus: string;
   projectName: string;
   amount: string;
   detailAvailable: boolean;

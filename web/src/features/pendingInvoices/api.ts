@@ -84,6 +84,7 @@ type ApiOaSummary = Partial<{
   application_type: string | null;
   project_name: string | null;
   status: string | null;
+  workflow_status: string | null;
   form_no: string | null;
   detail_available: boolean | null;
   relation_case_id: string | null;
@@ -566,6 +567,7 @@ function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary 
     applicationType: stringValue(value?.application_type),
     projectName: stringValue(value?.project_name),
     status: stringValue(value?.status),
+    workflowStatus: stringValue(value?.workflow_status, stringValue(value?.status, "unknown")),
     formNo: stringValue(value?.form_no),
     detailAvailable: value?.detail_available !== false,
     relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
@@ -625,7 +627,7 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   }
   const matchedRule = row.invoice_acquisition_status?.matched_rule;
   const oaPrimary = row.oa?.primary ? mapOa(row.oa.primary) : (
-    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "", formNo: "", detailAvailable: false, relationCaseId: "", relationStatus: "", relationSource: "" } : null
+    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "", workflowStatus: "unknown", formNo: "", detailAvailable: false, relationCaseId: "", relationStatus: "", relationSource: "" } : null
   );
   const oaSummaries = (row.oa?.summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant);
   const oaDetailAvailable = row.oa?.detail_available !== false && Boolean(oaPrimary?.detailAvailable) && isRealOaDetailId(oaPrimary?.id ?? "");

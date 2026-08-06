@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import (
@@ -16,8 +16,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
     is_completed_workflow_status,
 )
-
-
 OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
 
 
@@ -53,7 +51,7 @@ class OaPendingPaymentSourceSnapshotResult:
     payment_status_count: int
     admission_count: int
     source_signatures: dict[str, str]
-    pending_relation_cleanup: tuple[dict[str, object], ...] = ()
+    relation_cleanup: tuple[dict[str, object], ...] = ()
     upserted_completed_count: int = 0
     removed_stale_completed_count: int = 0
     removed_non_completed_count: int = 0
@@ -63,9 +61,14 @@ class OaPendingPaymentSourceSnapshotResult:
 class PostgresOaPendingPaymentSourceSnapshotRepository:
     """Own the integration-side, PostgreSQL-only inputs for the OA pending projection."""
 
-    def __init__(self, connection: Any, *, pending_relation_repository: Any) -> None:
+    def __init__(
+        self,
+        connection: Any,
+        *,
+        relation_command_service_for_transaction: Callable[[Any], Any],
+    ) -> None:
         self._connection = connection
-        self._pending_relation_repository = pending_relation_repository
+        self._relation_command_service_for_transaction = relation_command_service_for_transaction
 
     def payment_status_reader(
         self,
@@ -93,6 +96,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         completed_projection_records: list[OAApplicationRecord],
         admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord],
+        removed_projection_oa_row_ids: list[str] | None = None,
         tenant_id: str = "default",
         transaction: Any | None = None,
     ) -> OaPendingPaymentSourceSnapshotResult:
@@ -107,6 +111,11 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             record for record in list(admission_records or []) if isinstance(record, OAApplicationRecord)
         ]
         normalized_statuses = _normalized_statuses(payment_statuses)
+        normalized_removed_projection_oa_row_ids = {
+            row_id
+            for value in list(removed_projection_oa_row_ids or [])
+            if (row_id := text(value))
+        }
 
         def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
             old_status_rows = list(
@@ -259,52 +268,39 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 admissions=new_admissions,
             )
 
-            cleanup = getattr(
-                self._pending_relation_repository,
-                "cancel_active_relations_missing_oa_admission",
-                None,
-            )
-            if not callable(cleanup):
-                raise RuntimeError(
-                    "pending_relation_repository must expose cancel_active_relations_missing_oa_admission()."
+            current_oa_row_ids = {
+                oa_id for admission_scope, oa_id in new_admissions if admission_scope in replaced_scopes
+            }
+            current_oa_row_ids.update(record.id for record in normalized_completed_records)
+            unavailable_oa_row_ids = sorted(
+                (
+                    {
+                        oa_id
+                        for admission_scope, oa_id in old_admissions
+                        if admission_scope in replaced_scopes
+                    }
+                    | normalized_removed_projection_oa_row_ids
                 )
+                - current_oa_row_ids
+            )
             cleanup_results: list[dict[str, object]] = []
-            ensure_relation_scope_version = getattr(
-                self._pending_relation_repository,
-                "ensure_scope_source_version",
-                None,
-            )
-            if not callable(ensure_relation_scope_version):
-                raise RuntimeError(
-                    "pending_relation_repository must expose ensure_scope_source_version()."
-                )
-            for replaced_scope in sorted(replaced_scopes):
-                admitted_oa_row_ids = sorted(
-                    oa_id
-                    for (admission_scope, oa_id) in new_admissions
-                    if admission_scope == replaced_scope
-                )
-                cleanup_result = cleanup(
-                    month_scope=replaced_scope,
-                    admitted_oa_row_ids=admitted_oa_row_ids,
+            if unavailable_oa_row_ids:
+                relation_command_service = self._relation_command_service_for_transaction(transaction)
+                cleanup_result = relation_command_service.remove_rows_from_active_relations(
+                    row_ids=unavailable_oa_row_ids,
                     actor_id="system:oa_pending_payment_source_sync",
-                    transaction=transaction,
+                    reason="OA 已不在已完成或进行中事实集中，移除失效关系成员。",
                 )
-                normalized_cleanup_result = dict(cleanup_result) if isinstance(cleanup_result, dict) else {}
+                normalized_cleanup_result = dict(cleanup_result)
                 cleanup_results.append(normalized_cleanup_result)
                 cleanup_affected_scopes = {
                     scope
                     for value in list(normalized_cleanup_result.get("affected_months") or [])
                     if (scope := _month(value))
                 }
-                if list(normalized_cleanup_result.get("changed_relation_ids") or []):
-                    cleanup_affected_scopes.add(replaced_scope)
+                if list(normalized_cleanup_result.get("changed_case_ids") or []) and not cleanup_affected_scopes:
+                    cleanup_affected_scopes.update(replaced_scopes)
                 oa_pending_payment_changed_scopes.update(cleanup_affected_scopes)
-                ensure_relation_scope_version(
-                    scope_key=replaced_scope,
-                    tenant_id=normalized_tenant_id,
-                    transaction=transaction,
-                )
 
             source_signatures: dict[str, str] = {}
             for scope in sorted(
@@ -341,7 +337,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 payment_status_count=len(new_statuses),
                 admission_count=len(new_admissions),
                 source_signatures=source_signatures,
-                pending_relation_cleanup=tuple(cleanup_results),
+                relation_cleanup=tuple(cleanup_results),
             )
 
         if transaction is not None:
@@ -375,7 +371,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
             projection_repository = PostgresOAProjectionRepository(transaction)
             upserted_count = projection_repository.upsert_application_records(completed_records, scope_key=scope_key)
-            removed_stale_count = len(
+            removed_stale_row_ids = (
                 projection_repository.delete_stale_completed_application_records(
                     scope_key=scope_key,
                     records=completed_records,
@@ -383,7 +379,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 )
                 or []
             )
-            removed_non_completed_count = len(
+            removed_non_completed_row_ids = (
                 projection_repository.delete_non_completed_application_records(
                     scope_key=scope_key,
                     records=normalized_admission_records,
@@ -400,6 +396,10 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 completed_projection_records=completed_records,
                 admission_records=normalized_admission_records,
                 payment_statuses=payment_statuses,
+                removed_projection_oa_row_ids=[
+                    *removed_stale_row_ids,
+                    *removed_non_completed_row_ids,
+                ],
                 tenant_id=tenant_id,
                 transaction=transaction,
             )
@@ -409,10 +409,10 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 payment_status_count=snapshot.payment_status_count,
                 admission_count=snapshot.admission_count,
                 source_signatures=snapshot.source_signatures,
-                pending_relation_cleanup=snapshot.pending_relation_cleanup,
+                relation_cleanup=snapshot.relation_cleanup,
                 upserted_completed_count=upserted_count,
-                removed_stale_completed_count=removed_stale_count,
-                removed_non_completed_count=removed_non_completed_count,
+                removed_stale_completed_count=len(removed_stale_row_ids),
+                removed_non_completed_count=len(removed_non_completed_row_ids),
                 pruned_scope_keys=tuple(sorted(set(pruned_scope_keys or []))),
             )
 

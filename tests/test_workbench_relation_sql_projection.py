@@ -209,9 +209,6 @@ class WorkbenchRelationProjectionConnection:
 class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.lower().split())
-        if "from app.bank_transaction_relation_claims" in normalized:
-            self.sql_statements.append(sql)
-            return []
         if "from app.bank_transactions" in normalized:
             self.sql_statements.append(sql)
             explicit_ids = set(params[0]) if params and isinstance(params[0], list) else set()
@@ -332,7 +329,7 @@ class ScopedSourceVersionsRelationProjectionConnection(WorkbenchRelationProjecti
         return {
             "pair_relations_updated_at": "2026-04-30T00:00:00+08:00",
             "reconciliation_decisions_updated_at": "2026-04-29T00:00:00+08:00",
-            "oa_pending_payment_bank_claims_updated_at": "2026-04-28T00:00:00+08:00",
+            "oa_pending_payment_admissions_updated_at": "2026-04-28T00:00:00+08:00",
             "bank_transactions_updated_at": "2026-04-27T00:00:00+08:00",
             "invoices_updated_at": "2026-05-20T00:00:00+08:00",
             "oa_projection_updated_at": "2026-04-26T00:00:00+08:00",
@@ -351,7 +348,7 @@ class BulkScopedSourceVersionsRelationProjectionConnection(WorkbenchRelationProj
             {
                 "scope_key": str(scope_month)[:7],
                 "pair_relations_updated_at": f"{str(scope_month)[:7]}-28T00:00:00+08:00",
-                "oa_pending_payment_bank_claims_updated_at": f"{str(scope_month)[:7]}-27T00:00:00+08:00",
+                "oa_pending_payment_admissions_updated_at": f"{str(scope_month)[:7]}-27T00:00:00+08:00",
                 "bank_transactions_updated_at": f"{str(scope_month)[:7]}-26T00:00:00+08:00",
                 "invoices_updated_at": f"{str(scope_month)[:7]}-25T00:00:00+08:00",
                 "oa_projection_updated_at": f"{str(scope_month)[:7]}-24T00:00:00+08:00",
@@ -410,17 +407,6 @@ class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProj
                     "raw_payload": {},
                 }
             ]
-        return super().fetch_all(sql, params)
-
-
-
-
-class PendingClaimedBankRelationProjectionConnection(WorkbenchRelationProjectionConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-        normalized = " ".join(sql.lower().split())
-        if "from app.bank_transaction_relation_claims" in normalized:
-            self.sql_statements.append(sql)
-            return [{"bank_transaction_id": "txn-unlinked"}]
         return super().fetch_all(sql, params)
 
 
@@ -556,9 +542,9 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "unlinked")
         self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], [])
 
-    def test_rebuild_excludes_unlinked_bank_rows_claimed_by_in_progress_oa(self) -> None:
+    def test_rebuild_keeps_unlinked_bank_rows_without_legacy_claim_filter(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
-        connection = PendingClaimedBankRelationProjectionConnection()
+        connection = WorkbenchRelationProjectionConnection()
         builder = WorkbenchRelationSqlProjectionBuilder(
             connection=connection,
             read_model_repository=repository,
@@ -568,8 +554,8 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
         self.assertIn("txn-tian-196", rows_by_id)
-        self.assertNotIn("txn-unlinked", rows_by_id)
-        self.assertTrue(any("from app.bank_transaction_relation_claims" in sql for sql in connection.sql_statements))
+        self.assertIn("txn-unlinked", rows_by_id)
+        self.assertFalse(any("bank_transaction_relation_claims" in sql for sql in connection.sql_statements))
 
     def test_rebuild_deduplicates_formal_and_oa_attachment_invoice_with_same_identity(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -698,13 +684,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertEqual(len(relation_queries), 1)
         self.assertIn("row_ids && %s::text[]", relation_queries[0])
         self.assertNotIn("month_scope =", relation_queries[0])
-        claim_queries = [
-            " ".join(sql.lower().split())
-            for sql in connection.sql_statements
-            if "from app.bank_transaction_relation_claims" in " ".join(sql.lower().split())
-        ]
-        self.assertEqual(len(claim_queries), 1)
-        self.assertIn("bank_transaction_id = any(%s::text[])", claim_queries[0])
+        self.assertFalse(any("bank_transaction_relation_claims" in sql for sql in connection.sql_statements))
 
     def test_relation_delta_does_not_depend_on_cached_scope_proof(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -828,7 +808,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-26-exact-membership-proof-v1",
+            "2026-08-06-oa-workflow-facts-v2",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
@@ -848,7 +828,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-26-exact-membership-proof-v1",
+            "2026-08-06-oa-workflow-facts-v2",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -864,7 +844,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-26-exact-membership-proof-v1",
+            "2026-08-06-oa-workflow-facts-v2",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(
@@ -917,7 +897,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         )
         self.assertEqual(
             source_versions_by_scope["2026-05"]["workbench_relation_schema_version"],
-            "2026-07-26-exact-membership-proof-v1",
+            "2026-08-06-oa-workflow-facts-v2",
         )
 
     def test_bulk_source_versions_reject_non_month_scope(self) -> None:

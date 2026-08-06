@@ -799,6 +799,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.completion).toEqual({
       isComplete: false,
       missingRecordTypes: ["oa", "invoice"],
+      blockingReasons: [],
     });
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
     expect(group.rows.oa[0].expenseItems).toEqual([

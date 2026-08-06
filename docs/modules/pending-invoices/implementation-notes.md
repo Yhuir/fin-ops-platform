@@ -1,5 +1,10 @@
 # 待找发票 实施记录
 
+## 2026-08-06 - OA workflow 状态展示
+
+- OA canonical query 合并 completed projection 与 in-progress admission，并输出 `workflow_status`。
+- OA 栏使用 HeroUI 原生 chip 显示真实申请类型和“已完成/进行中”，移除 OA “已配对” chip；relation 事实和页面其余业务口径不变。
+
 ## 2026-08-01 - 删除重复规则解释器并复用 canonical 分类 SQL
 
 - 最新生产并发 4 基线中首屏 p95 为 `1631.917ms`，App Health 证明连接获取不足 `1ms`，主要耗时仍在页面 SQL。待找发票保留了一套 JSON 动态规则解释器，与银行明细 canonical 分类规则重复，且每个请求对流水 × 规则展开 JSON/数组判断。

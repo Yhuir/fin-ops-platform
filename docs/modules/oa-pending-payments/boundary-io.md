@@ -16,7 +16,7 @@
 - OA 待付款 rows、summary、statistics、facets、筛选、排序、分页和惰性详情。
 - `/api/oa-pending-payments` owned endpoints 的单次鉴权、tenant 隔离和结构化 HTTP 错误。
 - 页面 query service 的业务组合，以及 page-specific repository 的 canonical SQL。
-- in-progress admission、pending relation、bank claim/promotion、OA paid writeback 编排。
+- in-progress admission、正式 Workbench relation 和 OA paid writeback 编排。
 - 写后重新 GET 和前端 loading/empty/error 状态。
 
 ### 本模块不负责
@@ -37,7 +37,7 @@
 | in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |
 | payment status | OA integration/command | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
 | completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中全部 `status='active'`；混合收支关系只把可解析 outflow 作为支付证据，不读 Workbench page payload 或 `workbench_relation` projection |
-| in-progress relation/claim | OA pending relation owner | active pending relation、claim、promotion facts |
+| in-progress relation | Workbench relation owner | 与 completed OA 共用 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 zone，不产生第二套 relation owner |
 | bank facts | core/bank owner | `app.bank_transactions`，只批量读取当前页 relation members |
 | input invoice facts | invoice owner | `app.invoices`，只批量读取当前页 relation members |
 | write command | frontend | 保留 active relation、outflow、金额、flow id、幂等、CAS/冲突和 audit 校验 |
@@ -48,10 +48,10 @@
 | --- | --- | --- |
 | rows response | frontend | 固定 `200` canonical JSON：rows/pagination/summary/statistics/filterConfig/filterOptions/appliedFilters/sort/viewMode |
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
-| bank candidates | frontend drawer | canonical bank facts + active formal/pending relations；返回 relation status 与服务端 pagination |
+| bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
 | canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot；混合关系写回金额只合计 outflow |
-| pending relation/claim/promotion | PostgreSQL | 继续走现有 command/repository/UoW 与审计边界 |
+| formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
 
 ## Snapshot 与查询责任
@@ -70,8 +70,8 @@
 - completed OA：`app.oa_applications`，OA sync owner。
 - in-progress admission：`app.oa_pending_payment_admissions`，OA sync owner。
 - payment status：`app.oa_pending_payment_status_snapshots`，OA sync/paid reconcile owner。
-- pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
-- formal relation：`app.workbench_pair_relations`，Workbench relation owner。
+- formal relation：`app.workbench_pair_relations`，Workbench relation owner；completed 与 in-progress 共用同一事实源。
+- 历史 pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表只读审计；migration `0136` 已迁移 active 关系并撤销运行时写权限。
 - bank/input invoice：`app.bank_transactions`、`app.invoices`，对应 canonical owner。
 - 旧 `read_model.oa_pending_payment_*` runtime 已删除；历史 migration/表只供上一版本回滚。
 
@@ -81,7 +81,8 @@
 | --- | --- | --- |
 | external OA/admission/payment status | OA integration authoritative snapshot | PostgreSQL commit 后下一次页面 GET 可见；请求热路径不访问外部源 |
 | Workbench confirm/withdraw | Workbench UoW | active canonical relation commit 后下一次页面 GET 可见 |
-| pending relation create/cancel/promote | OA pending command/repository | owner transaction commit 后下一次页面 GET 可见 |
+| in-progress OA relation create/extend | OA pending command -> Workbench relation UoW | formal owner transaction commit 后下一次页面 GET 可见；无 promotion 阶段 |
+| admission terminal cleanup | OA source snapshot -> Workbench relation command | OA 不再属于 completed 或 admitted 时，从 active case 移除该 OA；剩余成员仍构成有效组则保留原 case，否则取消 relation |
 | bank/invoice import or correction | canonical import owners | commit 后下一次页面 GET 可见 |
 | MySQL paid writeback | OA command adapter + PG snapshot reconcile | command 成功后前端重新 GET；PG 失败返回可重试错误 |
 
@@ -109,8 +110,8 @@ frontend -> page API only
 | Route/service | `routes_oa_pending_payments.py`、`oa_pending_payment_query_service.py`、`oa_pending_payment_query_contract.py` |
 | Query repository | `postgres_repositories/oa_pending_payment_query.py` |
 | Pure row/detail composition | `oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py` |
-| Command | `oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py` |
-| Canonical snapshots | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py` |
+| Command | `oa_pending_payment_command_service.py`、`workbench_relation_command_service.py` |
+| Canonical snapshots | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py` |
 | Tests/docs | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPayment*`、本目录 |
 
 ## 已从页面运行时删除
@@ -123,6 +124,8 @@ frontend -> page API only
 - command response 的 `readModelRefresh` envelope。
 
 旧 service/projector/worker、manifest/scope/registry、App Status、deploy/RabbitMQ registration、Redis cache schema 和 invoice-lifecycle 间接依赖已在跨页面清理中删除。`read_model.oa_pending_payment_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
+
+旧 `oa_pending_payment_relation_promotion_service.py`、`postgres_repositories/oa_pending_payment_relation.py`、pending bank claim 排除和 promotion runtime 已删除。旧关系表不再参与页面查询、候选占用、关联台 source proof、OA sync 或数据重置。
 
 ## 禁止回流
 

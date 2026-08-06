@@ -1,5 +1,9 @@
 # 进项发票使用情况 实施记录
 
+## 2026-08-06 - OA 申请人列 workflow 状态
+
+- OA canonical query 合并 completed projection 与 in-progress admission，OA summary 输出 `workflowStatus`。
+- OA 申请人列使用 HeroUI 原生 chip 显示真实申请类型和“已完成/进行中”；不新增 read model、worker、polling 或 relation 状态。
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
