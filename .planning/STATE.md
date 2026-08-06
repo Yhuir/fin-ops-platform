@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 40-06-PLAN.md out of order; 40-04 remains incomplete
-last_updated: "2026-08-06T06:45:46.818Z"
+stopped_at: Completed 40-04-PLAN.md; 40-07 and 40-08 remain
+last_updated: "2026-08-06T07:34:07.194Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 111
-  completed_plans: 82
-  percent: 29
+  completed_plans: 83
+  percent: 75
 ---
 
 # Project State
@@ -26,20 +26,20 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 40 (performance-contract-hot-path-closure) — EXECUTING
-Plan: 4 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 -- Phase 40 execution started
 
-Progress: [██████░░░░] 5/8 plans complete
+Progress: [████████░░] 6/8 plans complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 41
+- Total plans completed: 42
 - Baseline planning docs completed: 1
 - Average duration: N/A
-- Total execution time: 1 hour 40 minutes
+- Total execution time: 2 hours 21 minutes
 
 **By Phase:**
 
@@ -69,6 +69,7 @@ Progress: [██████░░░░] 5/8 plans complete
 | Phase 40 P03 | 8 min | 1 tasks | 3 files |
 | Phase 40 P05 | 7 min | 1 tasks | 3 files |
 | Phase 40 P06 | 10 min | 1 tasks | 3 files |
+| Phase 40 P04 | 41 min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -214,6 +215,8 @@ Progress: [██████░░░░] 5/8 plans complete
 - [Phase 40]: Keep the existing import-row owner-guard predicate and affected-count rollback contract; optimize only the measured hotspot.
 - [Phase 40]: Workbench refresh status uses one page-local visible completion-plus-one-second single-flight loop; hidden pages schedule no timer or new request. — This bounds client request rate and deletes interval-driven abort overlap without adding a scheduler abstraction.
 - [Phase 40]: Only a changed fresh Workbench generation enters the existing 300ms combined reload debounce; all non-fresh and failure outcomes remain status-only. — The existing version ref and reload owner already provide the required one-generation reload contract.
+- [Phase 40]: Current runtime facts are exactly six required workers and two retained read models; Search/no-OA derived runtime stays retired while canonical no-OA consumers remain.
+- [Phase 40]: Application candidate c5557274bdc901c8137d6e2aeaae9036786ff216 remains local-only and is not full-green until three unrelated deferred gates and 40-08 target-scale evidence close.
 
 ### Roadmap Evolution
 
@@ -293,6 +296,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T06:45:46.802Z
-Stopped at: Completed 40-06-PLAN.md out of order; 40-04 remains incomplete
+Last session: 2026-08-06T07:33:57.651Z
+Stopped at: Completed 40-04-PLAN.md; 40-07 and 40-08 remain
 Resume file: None
