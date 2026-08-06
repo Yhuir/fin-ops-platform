@@ -32,6 +32,7 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        self.connection.close()
         truncate_test_database(self.database_url)
 
     def test_page_reuses_compiled_bank_category_rules(self) -> None:
@@ -96,6 +97,22 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(
+            payload["summary"],
+            {
+                "total_rows": 1,
+                "missing_invoice_rows": 1,
+                "create_invoice_available_rows": 1,
+                "source_summary": {
+                    "bank_transaction_rows": 1,
+                    "expense_rows": 1,
+                    "income_rows": 0,
+                    "current_direction_rows": 1,
+                    "excluded_direction_rows": 0,
+                },
+            },
+        )
+        self.assertIsNone(payload["statistics"])
         [row] = payload["rows"]
         self.assertEqual(row["id"], "pending-compiled-1")
         self.assertEqual(

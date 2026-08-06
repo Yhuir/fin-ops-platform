@@ -223,6 +223,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("filtered_rows as materialized", sql)
         self.assertIn("page_supporting_keys as", sql)
         self.assertIn("supporting_group_rows as", sql)
+        self.assertEqual(sql.count("with recursive"), 1)
+        self.assertNotIn("where group_key = any(%s::text[])", sql)
         self.assertIn("jsonb_agg(", sql)
         self.assertNotIn("read_model.output_invoice_collection", sql)
         self.assertNotIn("read_model.workbench_relation", sql)

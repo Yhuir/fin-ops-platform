@@ -120,6 +120,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             {"time_filters": {"bank": {"mode": "month", "month": "2026-07"}}},
         )
 
+        read_model_version = None
         for query in queries:
             with self.subTest(query=query):
                 page = self.repository.get_workbench_groups_page(
@@ -138,6 +139,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                     [group["group_id"] for group in page["groups"]],
                     ["unpaired:bank:query-integration"],
                 )
+                read_model_version = read_model_version or page["read_model_version"]
+                self.assertEqual(page["read_model_version"], read_model_version)
 
         empty_page = self.repository.get_workbench_groups_page(
             scope_key="all",

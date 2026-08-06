@@ -15,6 +15,7 @@ from fin_ops_platform.services.postgres_connection import (
 )
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
+    PostgresOutputInvoiceCollectionQueryRepository,
 )
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -52,6 +53,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        self.connection.close()
         truncate_test_database(self.database_url)
 
     def test_rows_reuse_snapshot_payment_rules_without_row_level_settings_reads(
@@ -85,6 +87,86 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["invoiceId"], "input-snapshot-rule-1")
         self.assertEqual(row["paymentStatus"]["code"], "pending")
         self.assertEqual(legacy_provider.evaluate_count, 0)
+
+    def test_output_reversal_page_keeps_exact_summary_order_and_supporting_group(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                seller_name, buyer_name, amount, signed_amount, tax_amount,
+                total_with_tax, status
+            ) values
+                (
+                    'output-blue-1', 'output', 'OUT-BLUE-001', '2026-07-10',
+                    '2026-07-01', '销售方', '购买方', 100, 100, 18, 118, 'pending'
+                ),
+                (
+                    'output-red-1', 'output', 'OUT-RED-001', '2026-07-11',
+                    '2026-07-01', '销售方', '购买方', -100, -100, -18, -118, 'pending'
+                )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'output-reversal-1', 'output_invoice_reversal', 'active', 1,
+                '2026-07-01', array['output-blue-1', 'output-red-1'],
+                array['output_invoice', 'output_invoice'], '{}'::jsonb,
+                '{}'::jsonb, '{}'::jsonb
+            )
+            """
+        )
+
+        snapshot = PostgresOutputInvoiceCollectionQueryRepository(
+            self.connection
+        ).load_page(
+            page=1,
+            page_size=1,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            month="2026-07",
+            filters=[],
+            sort_field="total_with_tax",
+            sort_direction="desc",
+        )
+
+        self.assertEqual(snapshot.pagination, {"page": 1, "pageSize": 1, "total": 2})
+        self.assertEqual(
+            snapshot.summary,
+            {
+                "invoiceCount": 2,
+                "totalWithTax": "0.00",
+                "collectedAmount": "0.00",
+                "pendingAmount": "0.00",
+                "pendingCollectionCount": 0,
+                "partialCollectionCount": 0,
+            },
+        )
+        self.assertEqual(
+            snapshot.statistics,
+            {
+                "invoiceCount": 2,
+                "linkedIncomeBankInvoiceCount": 0,
+                "collectedInvoiceCount": 0,
+                "unlinkedBankInvoiceCount": 2,
+                "uncollectedInvoiceCount": 2,
+                "redInvoiceCount": 1,
+            },
+        )
+        self.assertEqual(
+            [group["primary"].id for group in snapshot.groups],
+            ["output-blue-1"],
+        )
+        self.assertEqual(snapshot.groups[0]["status_code"], "reversed_by_red")
+        self.assertEqual(
+            [group["primary"].id for group in snapshot.supporting_groups],
+            ["output-red-1"],
+        )
+        self.assertEqual(snapshot.supporting_groups[0]["status_code"], "reverses_blue")
 
 
 if __name__ == "__main__":

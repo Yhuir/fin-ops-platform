@@ -3210,6 +3210,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(
             any("matching_group_ids" in sql for sql, _params in connection.fetch_one_calls)
         )
+        self.assertFalse(
+            any(
+                "array_agg(distinct g.group_id)" in sql
+                for sql, _params in connection.fetch_one_calls
+            )
+        )
         self.assertEqual(paired_params[-2:], (51, 0))
         self.assertEqual(unpaired_params[-2:], (51, 0))
 
