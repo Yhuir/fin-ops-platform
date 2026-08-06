@@ -1976,7 +1976,6 @@ describe("Workbench candidate grouping layout", () => {
     render(
       <div>
         <RelationGroupCell
-          actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
@@ -1992,7 +1991,6 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <RelationGroupCell
-          actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
@@ -2034,7 +2032,6 @@ describe("Workbench candidate grouping layout", () => {
     render(
       <div>
         <WorkbenchRecordCard
-          actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
@@ -2049,7 +2046,6 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <WorkbenchRecordCard
-          actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
@@ -2064,7 +2060,6 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <WorkbenchRecordCard
-          actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}

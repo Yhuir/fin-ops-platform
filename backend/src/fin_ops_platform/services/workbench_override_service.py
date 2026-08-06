@@ -93,6 +93,8 @@ class WorkbenchOverrideService:
 
     def apply_to_row(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = deepcopy(row)
+        if payload.get("type") == "oa":
+            payload["available_actions"] = ["detail"]
         override = self._row_overrides.get(str(payload.get("id")))
         if not isinstance(override, dict):
             return payload
@@ -112,7 +114,7 @@ class WorkbenchOverrideService:
             payload[relation_field] = deepcopy(relation)
             self._sync_summary_relation(payload, str(relation.get("label", "")))
 
-        if "available_actions" in override:
+        if "available_actions" in override and payload.get("type") != "oa":
             payload["available_actions"] = list(override.get("available_actions") or [])
 
         if "handled_exception" in override:
@@ -383,12 +385,12 @@ class WorkbenchOverrideService:
 
     @staticmethod
     def available_actions(row_type: str, section: str) -> list[str]:
+        if row_type == "oa":
+            return ["detail"]
         if row_type == "bank":
             return ["detail", "view_relation", "cancel_link", "handle_exception"]
         if row_type == "invoice" and section == "unpaired":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
-        if section == "unpaired":
-            return ["detail", "confirm_link", "mark_exception"]
         return ["detail", "cancel_link"]
 
     def _next_case_id(self) -> str:

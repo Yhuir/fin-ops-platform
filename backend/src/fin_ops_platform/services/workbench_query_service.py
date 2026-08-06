@@ -166,6 +166,8 @@ class WorkbenchQueryService:
 
     def serialize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         payload = {key: deepcopy(value) for key, value in row.items() if not key.startswith("_")}
+        if payload.get("type") == "oa":
+            payload["available_actions"] = ["detail"]
         summary_fields = row.get("_summary_fields")
         if isinstance(summary_fields, dict):
             payload["summary_fields"] = deepcopy(summary_fields)
@@ -196,12 +198,12 @@ class WorkbenchQueryService:
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
 
     def available_actions(self, row_type: str, section: str) -> list[str]:
+        if row_type == "oa":
+            return ["detail"]
         if row_type == "bank":
             return ["detail", "view_relation", "cancel_link", "handle_exception"]
         if row_type == "invoice" and section == "unpaired":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
-        if section == "unpaired":
-            return ["detail", "confirm_link", "mark_exception"]
         return ["detail", "cancel_link"]
 
     def replace_row(self, row_id: str, row: dict[str, Any]) -> None:

@@ -164,8 +164,7 @@ export function getWorkbenchColumns(
   return ordered;
 }
 
-const ACTION_COLUMN_WIDTHS: Record<WorkbenchRecordType, { track: string; minWidth: number }> = {
-  oa: { track: "minmax(168px, 168fr)", minWidth: 168 },
+const ACTION_COLUMN_WIDTHS: Record<Exclude<WorkbenchRecordType, "oa">, { track: string; minWidth: number }> = {
   bank: { track: "minmax(168px, 168fr)", minWidth: 168 },
   invoice: { track: "minmax(0px, 0fr)", minWidth: 0 },
 };
@@ -179,7 +178,7 @@ export function getWorkbenchPaneGridStyle(
   const tracks = columns.map((column) => column.track);
   let minWidth = columns.reduce((sum, column) => sum + column.minWidth, 0);
 
-  if (includeActionColumn) {
+  if (includeActionColumn && paneId !== "oa") {
     tracks.push(ACTION_COLUMN_WIDTHS[paneId].track);
     minWidth += ACTION_COLUMN_WIDTHS[paneId].minWidth;
   }

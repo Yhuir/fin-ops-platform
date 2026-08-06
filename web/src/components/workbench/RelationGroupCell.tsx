@@ -17,7 +17,6 @@ type RelationGroupCellProps = {
   records: WorkbenchRecord[];
   scrollPaneId: WorkbenchRecordType;
   scrollTestId: string;
-  actionMode?: "default" | "cancel-exception-only";
   showActionColumn?: boolean;
   highlightedRowId?: string | null;
   searchQuery?: string;
@@ -39,7 +38,6 @@ function RelationGroupCell({
   records,
   scrollPaneId,
   scrollTestId,
-  actionMode = "default",
   showActionColumn = false,
   highlightedRowId,
   searchQuery = "",
@@ -78,7 +76,6 @@ function RelationGroupCell({
       >
         {records.map((row, index) => (
           <WorkbenchRecordCard
-            actionMode={actionMode}
             columnGridStyle={columnGridStyle}
             columns={columns}
             highlighted={highlightedRowId === row.id}

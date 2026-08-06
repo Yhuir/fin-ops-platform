@@ -326,6 +326,13 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - Frontend：`web/src/test/WorkbenchSelection.test.tsx` 保护 visible entry/focus immediate、每次 settle+1000ms、hidden pause、single-flight，以及 changed fresh generation 只经既有 300ms debounce reload 一次。
 - Browser：`web/e2e/bank-flow-rule-batches-flow.spec.ts` 保护 bank-flow 写响应零 Workbench target，并由持续可见关联台的 status→generation→业务 identity 链收敛；性能样本使用同一 Node monotonic clock，不能用 mock、混合时钟或最快样本替代 p99。
 
+## 2026-08-07 - OA 行操作入口收口
+
+- Backend：`tests/test_workbench_query_service.py` 与 `tests/test_workbench_exception_projection.py` 保护 paired/unpaired OA row 都只生成 `available_actions=['detail']`；银行流水和发票动作合同保持原测试覆盖。
+- API mapping：`web/src/test/WorkbenchApi.test.ts` 向 paired/unpaired OA 注入旧 generation 的 `confirm_link`、`mark_exception`、`cancel_link`，验证映射后统一为 detail-only，避免发布必须等待 read model 全量重建。
+- Component：`web/src/test/WorkbenchColumns.test.tsx` 保护 OA 栏无“操作”表头、无逐行“确认关联/异常处理”；同一用例继续保护银行流水和发票现有操作列。
+- 性能/隔离：归一化是每行常数级数组替换，OA 栏减少一个固定列和逐行按钮 DOM；不新增 HTTP、数据库查询、read model、worker、queue、cache、轮询或跨页面 I/O。
+
 ## 2026-08-04 - OA 附件发票正式关系扩展回归
 
 - `tests/test_oa_attachment_invoice_promotion_service.py` 保护一个费用项可绑定多张正式发票，promotion 写入时复用现有五个月 matching window，并证明 canonical invoice 与 durable dirty scope 在同一 PostgreSQL transaction 内提交。

@@ -112,6 +112,13 @@ class WorkbenchExceptionProjectionServiceTests(unittest.TestCase):
 
 
 class WorkbenchOverrideProjectionTests(unittest.TestCase):
+    def test_oa_rows_only_expose_detail_in_both_zones(self) -> None:
+        service = WorkbenchOverrideService()
+
+        self.assertEqual(service.available_actions("oa", "paired"), ["detail"])
+        self.assertEqual(service.available_actions("oa", "unpaired"), ["detail"])
+        self.assertEqual(service.apply_to_row(oa_row())["available_actions"], ["detail"])
+
     def test_apply_exception_projection_and_clear_restores_base_row_display(self) -> None:
         service = WorkbenchOverrideService()
         row = oa_row()
@@ -130,6 +137,7 @@ class WorkbenchOverrideProjectionTests(unittest.TestCase):
         self.assertEqual(service.projection_version, EXCEPTION_PROJECTION_VERSION)
         self.assertEqual(updated_rows[0]["case_id"], "WEX-000003")
         self.assertEqual(updated_rows[0]["oa_bank_relation"]["code"], "wait_bank_payment")
+        self.assertEqual(updated_rows[0]["available_actions"], ["detail"])
         self.assertEqual(updated_rows[0]["detail_fields"]["备注"], "等待付款")
         self.assertEqual(updated_rows[0]["summary_fields"]["备注"], "等待付款")
 
@@ -139,7 +147,7 @@ class WorkbenchOverrideProjectionTests(unittest.TestCase):
         self.assertEqual(cleared_row_ids, ["oa-001"])
         self.assertNotIn("case_id", restored)
         self.assertEqual(restored["oa_bank_relation"]["code"], "pending_match")
-        self.assertEqual(restored["available_actions"], ["detail", "confirm_link", "mark_exception"])
+        self.assertEqual(restored["available_actions"], ["detail"])
 
     def test_legacy_override_survives_projection_clear(self) -> None:
         service = WorkbenchOverrideService()

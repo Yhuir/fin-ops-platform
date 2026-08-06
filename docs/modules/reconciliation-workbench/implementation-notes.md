@@ -148,6 +148,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-07 - OA 逐行操作与操作列退役
+
+- 目标：已配对和未配对 OA 栏都移除逐行“确认关联/异常处理”与操作列，关系操作统一由区域选择和表头动作完成。
+- 边界：`WorkbenchQueryService` / `WorkbenchOverrideService` 生成 OA detail-only 能力；前端 API mapper 对旧 generation 做同一收敛，`RelationGroupGrid` 固定 OA 无操作列。银行流水、发票、区域表头、统一异常抽屉、权限和 relation 写链不变。
+- 旧链清理：删除未被运行时调用的 `cancel-exception-only` 组件模式、`cancel-exception` inline action、页面 handler 和前端 API client；后端兼容/审计 route 不属于本次 UI 边界，继续由既有 API 合同维护。
+- 性能：没有新增任何 I/O 或状态层；OA 每行少渲染动作容器和按钮，栏宽减少 168px。最终生产 release、真实页面与认证 API 性能证据以本轮发布后验证为准。
+
 ## 2026-08-03 - 流水分类展示与多记录高度闭环
 
 - 根因：Workbench generation 未消费银行 canonical 分类/确认事实，分类写入也不在 source proof；前端同时把 relation status 当作流水标签。多记录栏使用可收缩 flex item，cell 又固定 `height: 100%`，内容高于分配高度时 chip 被裁切。

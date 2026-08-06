@@ -10,12 +10,9 @@ export type WorkbenchInlineAction =
   | "confirm-match"
   | "flag-exception"
   | "ignore-row"
-  | "cancel-exception"
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special";
-
-type RowActionsMode = "default" | "cancel-exception-only";
 
 type RowActionsProps = {
   recordType: WorkbenchRecordType;
@@ -23,7 +20,6 @@ type RowActionsProps = {
   showWorkflowActions: boolean;
   canMutateData: boolean;
   availableActions: string[];
-  mode?: RowActionsMode;
   showDetailAction?: boolean;
   onOpenDetail: (event: MouseEvent<HTMLButtonElement>) => void;
   onAction: (action: WorkbenchInlineAction, event: MouseEvent<HTMLButtonElement>) => void;
@@ -35,7 +31,6 @@ export default function RowActions({
   showWorkflowActions,
   canMutateData,
   availableActions = [],
-  mode = "default",
   showDetailAction = true,
   onOpenDetail,
   onAction,
@@ -108,18 +103,6 @@ export default function RowActions({
     setMenuOpen(false);
     onAction(action, event);
   };
-
-  if (mode === "cancel-exception-only") {
-    return (
-      <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-        {canMutateData ? (
-          <button className="row-action-btn warning" type="button" onClick={handleAction("cancel-exception")}>
-            取消异常处理
-          </button>
-        ) : null}
-      </div>
-    );
-  }
 
   return (
     <div className="row-actions" onClick={(event) => event.stopPropagation()}>

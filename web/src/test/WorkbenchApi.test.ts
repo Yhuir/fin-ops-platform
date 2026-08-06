@@ -574,7 +574,7 @@ describe("workbench api bank amount mapping", () => {
                     group_type: "unpaired",
                     match_confidence: "medium",
                     reason: "候选",
-                    oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail"] }],
+                    oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link", "mark_exception"] }],
                     bank_rows: [],
                     invoice_rows: [],
                   },
@@ -630,7 +630,7 @@ describe("workbench api bank amount mapping", () => {
                   group_type: "unpaired",
                   match_confidence: "medium",
                   reason: "候选",
-                  oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail"] }],
+                  oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link", "mark_exception"] }],
                   bank_rows: [],
                   invoice_rows: [],
                 },
@@ -660,6 +660,10 @@ describe("workbench api bank amount mapping", () => {
     expect(result.pages.paired.rowCounts.bank).toBe(7);
     expect(result.data.paired.groups[0].id).toBe("case:paired");
     expect(result.data.unpaired.groups[0].id).toBe("row:oa-unpaired");
+    expect(result.data.unpaired.groups[0].rows.oa[0]).toMatchObject({
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    });
     expect(result.data.invoiceInventory.systemTotal).toBe(9);
     expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
     expect(result.data.oaStatus.message).toBe("OA 已同步");
@@ -756,7 +760,7 @@ describe("workbench api bank amount mapping", () => {
                       attachment_file_count: 1,
                     },
                   ],
-                  available_actions: ["detail"],
+                  available_actions: ["detail", "cancel_link", "mark_exception"],
                 },
               ],
               bank_rows: [
@@ -802,6 +806,10 @@ describe("workbench api bank amount mapping", () => {
       blockingReasons: [],
     });
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
+    expect(group.rows.oa[0]).toMatchObject({
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    });
     expect(group.rows.oa[0].expenseItems).toEqual([
       {
         id: "oa-paired:item:0",

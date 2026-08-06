@@ -13207,18 +13207,6 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   min-width: 608px;
 }
 
-.candidate-pane-columnheaders-oa.pane-layout-with-action,
-.record-card-oa.record-card-has-action {
-  grid-template-columns:
-    88px
-    minmax(192px, 1.32fr)
-    92px
-    minmax(160px, 1.08fr)
-    minmax(168px, 1.08fr)
-    168px;
-  min-width: 776px;
-}
-
 .candidate-pane-columnheaders-bank.pane-layout-no-action,
 .record-card-bank.record-card-no-action {
   grid-template-columns:

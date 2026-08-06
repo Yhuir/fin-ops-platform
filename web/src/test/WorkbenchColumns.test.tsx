@@ -13,7 +13,6 @@ describe("Workbench columns and inline actions", () => {
 
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[
           { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
@@ -73,7 +72,6 @@ describe("Workbench columns and inline actions", () => {
 
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[{ key: "issueDate", label: "发票号码" }]}
         onOpenDetail={onOpenDetail}
@@ -119,7 +117,8 @@ describe("Workbench columns and inline actions", () => {
     renderWorkbenchPage();
     await screen.findByText("赵华");
 
-    const oaPane = screen.getAllByTestId("pane-oa")[0];
+    const oaPanes = screen.getAllByTestId("pane-oa");
+    const oaPane = oaPanes[0];
     const bankPane = screen.getAllByTestId("pane-bank")[0];
     const invoicePane = screen.getAllByTestId("pane-invoice")[0];
 
@@ -130,7 +129,11 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaPane).getByRole("columnheader", { name: "申请事由" })).toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "申请类型" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "OA和流水关联情况" })).not.toBeInTheDocument();
-    expect(within(oaPane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
+    oaPanes.forEach((pane) => {
+      expect(within(pane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+      expect(within(pane).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
+      expect(within(pane).queryByRole("button", { name: "异常处理" })).not.toBeInTheDocument();
+    });
     expect(within(oaPane).queryByRole("button", { name: "筛选 金额" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("button", { name: "筛选 申请事由" })).not.toBeInTheDocument();
 
@@ -209,7 +212,6 @@ describe("Workbench columns and inline actions", () => {
   test("keeps OA applicant name on the first line and renders only a date chip on the second line", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[{ key: "applicant", label: "申请人", track: "minmax(112px, 112fr)", minWidth: 112 }]}
         onOpenDetail={() => {}}
@@ -281,7 +283,6 @@ describe("Workbench columns and inline actions", () => {
   test("does not render process or evidence tags in the OA project cell", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[{ key: "projectName", label: "项目名称", track: "minmax(192px, 192fr)", minWidth: 192 }]}
         onOpenDetail={() => {}}
@@ -325,7 +326,6 @@ describe("Workbench columns and inline actions", () => {
   test("keeps OA evidence and relation tags out of the project cell", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         onOpenDetail={() => {}}
         onRowAction={() => {}}
@@ -421,7 +421,6 @@ describe("Workbench columns and inline actions", () => {
   test("removes internal transfer relation status from bank counterparty metadata while keeping inline detail available", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         onOpenDetail={() => {}}
         onRowAction={() => {}}
@@ -466,7 +465,6 @@ describe("Workbench columns and inline actions", () => {
   test("removes salary relation status while retaining bank transaction time", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         onOpenDetail={() => {}}
         onRowAction={() => {}}
@@ -577,7 +575,6 @@ describe("Workbench columns and inline actions", () => {
   test("renders the bank detail category tag on a dedicated third line under the amount", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[
           { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
@@ -640,7 +637,6 @@ describe("Workbench columns and inline actions", () => {
   ] as const)("renders %s bank category resolution as %s", (categoryResolutionStatus, label) => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[{ key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 }]}
         onOpenDetail={() => {}}
@@ -683,7 +679,6 @@ describe("Workbench columns and inline actions", () => {
   test("renders short bank names in bank row amount account tags", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[
           { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
@@ -768,7 +763,6 @@ describe("Workbench columns and inline actions", () => {
     render(
       <div>
         <WorkbenchRecordCard
-          actionMode="default"
           canMutateData
           columns={[{ key: "sellerName", label: "销方名称/识别号" }]}
           onOpenDetail={() => {}}
@@ -781,7 +775,6 @@ describe("Workbench columns and inline actions", () => {
           zoneId="unpaired"
         />
         <WorkbenchRecordCard
-          actionMode="default"
           canMutateData
           columns={[{ key: "sellerName", label: "销方名称/识别号" }]}
           onOpenDetail={() => {}}
@@ -860,7 +853,6 @@ describe("Workbench columns and inline actions", () => {
   test("renders invoice gross amount column with net amount and tax meta on the second line", () => {
     render(
       <WorkbenchRecordCard
-        actionMode="default"
         canMutateData
         columns={[{ key: "grossAmount", label: "价税合计" }]}
         onOpenDetail={() => {}}

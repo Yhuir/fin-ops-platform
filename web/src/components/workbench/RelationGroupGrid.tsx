@@ -50,7 +50,6 @@ type RelationGroupGridProps = {
     className?: string;
     renderGroup: (group: WorkbenchRelationGroup) => ReactNode;
   }>;
-  actionMode?: "default" | "cancel-exception-only";
   highlightedRowId?: string | null;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
@@ -139,7 +138,6 @@ function RelationGroupGrid({
   columnLayouts,
   rowTemplateColumns,
   trailingColumns = [],
-  actionMode = "default",
   highlightedRowId,
   getRowState,
   onSelectRow,
@@ -260,14 +258,11 @@ function RelationGroupGrid({
   };
 
   const paneHasActionColumn = useCallback((paneId: WorkbenchRecordType) => {
-    if (actionMode === "cancel-exception-only") {
-      return paneId !== "invoice";
-    }
-    if (actionMode !== "default") {
+    if (paneId === "oa") {
       return false;
     }
     return groups.some((group) => group.rows[paneId].some(hasDefaultRowActions));
-  }, [actionMode, groups]);
+  }, [groups]);
   const paneLayoutClass = (paneId: WorkbenchRecordType) =>
     paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
   const hasTrailingColumns = trailingColumns.length > 0;
@@ -557,7 +552,6 @@ function RelationGroupGrid({
                         }}
                       >
                         <RelationGroupCell
-                          actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
                           columns={columnsByPane[paneId]}
                           getRowState={getRowState}
@@ -597,7 +591,6 @@ function RelationGroupGrid({
                     }}
                   >
                     <RelationGroupCell
-                      actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
@@ -681,7 +674,6 @@ function RelationGroupGrid({
                       </span>
                     ) : null}
                     <RelationGroupCell
-                      actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
@@ -736,7 +728,6 @@ function RelationGroupGrid({
       <div ref={nextPageSentinelRef} aria-hidden="true" className="candidate-grid-end-sentinel" />
     </div>
   ), [
-    actionMode,
     canMutateData,
     columnsByPane,
     displayState,

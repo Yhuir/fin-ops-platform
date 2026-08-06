@@ -732,13 +732,6 @@ type IgnoreRowPayload = {
   comment?: string;
 };
 
-type CancelExceptionPayload = {
-  month: string;
-  rowIds: string[];
-  expectedReadModelVersion: string;
-  comment?: string;
-};
-
 type OaInvoiceAnomalyDecisionPayload = {
   month: string;
   zone: WorkbenchZoneId;
@@ -1099,6 +1092,9 @@ function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
 }
 
 function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
+  if (row.type === "oa") {
+    return ["detail"];
+  }
   const actions = row.available_actions ?? [];
   if (!isNoOaBatchRow(row) && !isBankFlowRuleBatchRow(row)) {
     return actions;
@@ -1134,7 +1130,7 @@ function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): Wor
     }
     return "bank-review";
   }
-  if (row.available_actions?.includes("confirm_link") || row.available_actions?.includes("mark_exception")) {
+  if (availableActions.includes("confirm_link") || availableActions.includes("mark_exception")) {
     return "confirm-exception";
   }
   return "detail-only";
@@ -3463,20 +3459,6 @@ export async function setWorkbenchOaInvoiceAnomalyIgnored(
       }),
     },
   );
-  return mapWorkbenchActionResult(result);
-}
-
-export async function cancelWorkbenchException(payload: CancelExceptionPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-exception", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
-      comment: payload.comment,
-    }),
-  });
   return mapWorkbenchActionResult(result);
 }
 

@@ -18,7 +18,6 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
-  cancelWorkbenchException,
   cancelWorkbenchCashSpecial,
   confirmWorkbenchCashPassThrough,
   confirmWorkbenchCashTicketPurchase,
@@ -1797,35 +1796,6 @@ export default function ReconciliationWorkbenchPage() {
     setLastActionMessage(result.message ?? "已提交统一异常处理。");
   }, [clearOpenSelection, waitForWorkbenchFreshAfterOperation]);
 
-  const handleCancelProcessedException = useCallback(async (target: WorkbenchRelationGroup | WorkbenchRecord) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    const rowIds = ("rows" in target ? flattenExceptionGroupRows(target) : [target]).map(
-      (candidateRow) => candidateRow.id,
-    );
-    if (rowIds.length === 0) {
-      openActionResultDialog("异常分组没有可撤回的记录。");
-      return;
-    }
-    const succeeded = await runBlockingAction({
-      loadingMessage: "正在撤回忽略...",
-      action: () => cancelWorkbenchException({
-        month: WORKBENCH_VIEW_MONTH,
-        rowIds,
-        expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-        comment: "由已忽略异常抽屉撤回忽略",
-      }),
-    });
-    if (!succeeded) {
-      return;
-    }
-  }, [
-    ensureCanWriteWorkbench,
-    openActionResultDialog,
-    runBlockingAction,
-  ]);
-
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
@@ -1933,16 +1903,11 @@ export default function ReconciliationWorkbenchPage() {
       openWorkbenchExceptionDialog([row]);
       return;
     }
-
-    if (action === "cancel-exception") {
-      await handleCancelProcessedException(row);
-    }
   }, [
     clearOpenSelection,
     collectCaseRowIds,
     ensureCanWriteWorkbench,
     openActionResultDialog,
-    handleCancelProcessedException,
     openWorkbenchExceptionDialog,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
@@ -2854,12 +2819,6 @@ function RelationPreviewDialog({
 
 function flattenGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]);
-}
-
-function flattenExceptionGroupRows(group: WorkbenchRelationGroup) {
-  return (["oa", "bank", "invoice"] as const).flatMap(
-    (paneId) => group.collapsedRows?.[paneId] ?? group.rows[paneId],
-  );
 }
 
 function mergeWorkbenchGroupsByIdReplacingExisting(

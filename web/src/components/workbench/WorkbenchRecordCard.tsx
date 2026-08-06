@@ -31,7 +31,6 @@ type WorkbenchRecordCardProps = {
   };
   row: WorkbenchRecord;
   rowState: WorkbenchRowState;
-  actionMode?: "default" | "cancel-exception-only";
   showActionColumn?: boolean;
   highlighted?: boolean;
   searchQuery?: string;
@@ -52,7 +51,6 @@ function WorkbenchRecordCard({
   columnGridStyle,
   row,
   rowState,
-  actionMode = "default",
   showActionColumn = false,
   highlighted = false,
   searchQuery = "",
@@ -68,7 +66,7 @@ function WorkbenchRecordCard({
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = !readOnly && showActionColumn;
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
-  const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
+  const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
       ? " record-card-sheet-selected"
@@ -109,9 +107,8 @@ function WorkbenchRecordCard({
           <RowActions
             availableActions={row.availableActions}
             canMutateData={canMutateData}
-            mode={actionMode}
             recordType={row.recordType}
-            showDetailAction={!isSummaryRow && (actionMode !== "default" || !showInlineDetail)}
+            showDetailAction={!isSummaryRow && !showInlineDetail}
             showWorkflowActions={showWorkflowActions}
             variant={row.actionVariant}
             onAction={(action, event) => {
@@ -136,7 +133,6 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.columnGridStyle === nextProps.columnGridStyle
   && previousProps.row === nextProps.row
   && previousProps.rowState === nextProps.rowState
-  && previousProps.actionMode === nextProps.actionMode
   && previousProps.showActionColumn === nextProps.showActionColumn
   && previousProps.highlighted === nextProps.highlighted
   && previousProps.searchQuery === nextProps.searchQuery

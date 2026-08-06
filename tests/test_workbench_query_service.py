@@ -521,6 +521,18 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         self.assertIn("ignore", invoice_row["available_actions"])
 
+    def test_oa_rows_only_expose_detail_in_both_zones(self) -> None:
+        service = WorkbenchQueryService()
+
+        self.assertEqual(service.available_actions("oa", "paired"), ["detail"])
+        self.assertEqual(service.available_actions("oa", "unpaired"), ["detail"])
+        self.assertEqual(
+            service.serialize_row(
+                {"id": "oa-legacy-actions", "type": "oa", "available_actions": ["detail", "confirm_link"]}
+            )["available_actions"],
+            ["detail"],
+        )
+
     def test_get_oa_row_record_uses_row_id_lookup_without_full_sync_for_all_hint(self) -> None:
         adapter = RowIdLookupOAAdapter(
             [
