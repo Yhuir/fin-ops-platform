@@ -19,6 +19,11 @@ READ_MODEL_WRITE_TARGET_INVENTORY = (
 READ_MODEL_PRODUCTION_EVIDENCE_RUNBOOK = (
     REPO_ROOT / "docs" / "operations" / "read-model-production-evidence-runbook.md"
 )
+CURRENT_RUNTIME_FACT_DOCS = {
+    "imports-invoices": REPO_ROOT / "docs" / "modules" / "imports-invoices" / "boundary-io.md",
+    "monitoring": REPO_ROOT / "docs" / "operations" / "monitoring.md",
+    "runtime-workers": REPO_ROOT / "docs" / "modules" / "runtime-workers" / "boundary-io.md",
+}
 
 DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     (
@@ -102,6 +107,40 @@ REQUIRED_WRITE_TARGET_INVENTORY_MODULES = {
 
 
 class ReadModelArchitectureGuardTests(unittest.TestCase):
+    def test_current_runtime_fact_docs_do_not_restore_search_or_no_oa_derived_runtime(self) -> None:
+        forbidden_current_claims = {
+            "imports-invoices": (
+                "- 逻辑影响 read model：",
+                "Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、",
+            ),
+            "monitoring": (
+                "`workbench`、`workbench_relation` 与 `search` scope",
+                "| 搜索 | `access_convergence_evidence` |",
+            ),
+            "runtime-workers": ("no-OA legacy worker 的独立 I/O 不变",),
+        }
+
+        offenders: list[str] = []
+        for doc_key, forbidden_markers in forbidden_current_claims.items():
+            text = CURRENT_RUNTIME_FACT_DOCS[doc_key].read_text(encoding="utf-8")
+            offenders.extend(
+                f"{doc_key} keeps {marker}"
+                for marker in forbidden_markers
+                if marker in text
+            )
+
+        self.assertEqual(offenders, [])
+
+    def test_canonical_no_oa_routes_and_workbench_command_consumer_remain(self) -> None:
+        route_source = (SOURCE_ROOT / "app" / "routes_no_oa_bank_batches.py").read_text(encoding="utf-8")
+        server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
+        workbench_source = (SOURCE_ROOT / "services" / "workbench_write_facade.py").read_text(encoding="utf-8")
+
+        self.assertIn('route_path == "/api/no-oa-bank-batches"', route_source)
+        self.assertIn("NoOaBankBatchApiRoutes(", server_source)
+        self.assertIn("submit_internal_transfer_rows_from_workbench", server_source)
+        self.assertIn("_submit_internal_transfer_rows_from_workbench", workbench_source)
+
     def test_input_invoice_usage_app_level_projection_helpers_do_not_return(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
         forbidden_helpers = {

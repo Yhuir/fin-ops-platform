@@ -229,6 +229,14 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
         payload = self._list_batches(app)
 
+        for retired_field in (
+            "read_model_status",
+            "read_model_stale_reasons",
+            "read_model_scope_keys",
+            "refresh_enqueued",
+            "operation_barrier_targets",
+        ):
+            self.assertNotIn(retired_field, payload)
         self.assertEqual(payload["summary"]["total"], 1)
         self.assertEqual(payload["summary"]["draft"], 1)
         self.assertEqual(payload["batches"][0]["row_count"], 2)
@@ -544,7 +552,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(withdrawn_payload["summary"]["withdrawn_count"], 0)
         self.assertEqual(withdrawn_payload["summary"]["draft_count"], 1)
 
-    def test_submit_persists_batch_and_pair_relation_and_invalidates_workbench(self) -> None:
+    def test_submit_persists_batch_and_pair_relation_without_page_refresh_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
             app._state_store = build_application(data_dir=Path(temp_dir))._state_store

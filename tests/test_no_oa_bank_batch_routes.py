@@ -139,7 +139,7 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
         selection_status, selection_payload = routes.tag_selection()
 
         self.assertEqual(list_status, HTTPStatus.OK)
-        self.assertEqual(list_payload["read_model_status"], "fresh")
+        self.assertNotIn("read_model_status", list_payload)
         self.assertEqual(selection_status, HTTPStatus.OK)
         self.assertEqual(selection_payload["version"], 1)
         self.assertEqual(

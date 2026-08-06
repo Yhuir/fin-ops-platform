@@ -22,6 +22,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_command_args,
     worker_registrations,
 )
+from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,21 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 
 
 class RuntimeWorkerRegistryTests(unittest.TestCase):
+    def test_current_runtime_inventory_is_exactly_six_workers_and_two_read_models(self) -> None:
+        self.assertEqual(
+            required_worker_instance_names(),
+            (
+                "oa-sync",
+                "workbench-matching",
+                "workbench",
+                "workbench-relation",
+                "import",
+                "settings-maintenance",
+            ),
+        )
+        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench", "workbench_relation"))
+        self.assertEqual(tuple(APP_STATUS_READ_MODEL_REGISTRY), tuple(READ_MODEL_MANIFEST))
+
     def test_direct_canonical_page_workers_are_retired_but_workbench_remains(self) -> None:
         registrations = registration_by_instance_name()
 
