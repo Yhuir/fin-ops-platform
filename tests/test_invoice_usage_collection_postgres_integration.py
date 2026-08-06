@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
 
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -189,7 +188,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
                 amount, signed_amount, txn_date, txn_month, status
             ) values (
                 'output-over-collected-bank-1', '62220001', 'inflow', '购买方',
-                120, 120, '2026-07-12', '2026-07-01', 'active'
+                120, 120, '2026-07-12', '2026-07-01', 'pending'
             )
             """
         )
@@ -224,7 +223,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
 
         self.assertEqual(snapshot.pagination, {"page": 1, "pageSize": 20, "total": 1})
         self.assertEqual(snapshot.groups[0]["status_code"], "collected")
-        self.assertEqual(snapshot.groups[0]["pending_amount"], Decimal("0"))
+        self.assertEqual(snapshot.groups[0]["pending_amount"], "0.00")
         self.assertEqual(
             snapshot.summary,
             {
