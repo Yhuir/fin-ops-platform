@@ -1764,7 +1764,11 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(invoiceOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(refreshStatusCallsAfterWrite).toBe(3);
+    // The operation poller must reach the third (fresh) response. The visible-page
+    // status poller may overlap it once under full-suite load, so endpoint call
+    // count is intentionally not an exact operation-poller count.
+    expect(refreshStatusCallsAfterWrite).toBeGreaterThanOrEqual(3);
+    expect(refreshStatusCallsAfterWrite).toBeLessThanOrEqual(4);
     expect(initialPageCallsAfterWrite).toBe(2);
   });
 
