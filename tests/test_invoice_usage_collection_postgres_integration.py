@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 import unittest
 
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -167,6 +168,85 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             ["output-red-1"],
         )
         self.assertEqual(snapshot.supporting_groups[0]["status_code"], "reverses_blue")
+
+    def test_output_over_collection_is_collected_with_zero_pending_amount(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                seller_name, buyer_name, amount, signed_amount, tax_amount,
+                total_with_tax, status
+            ) values (
+                'output-over-collected-1', 'output', 'OUT-OVER-001', '2026-07-10',
+                '2026-07-01', '销售方', '购买方', 100, 100, 0, 100, 'pending'
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status
+            ) values (
+                'output-over-collected-bank-1', '62220001', 'inflow', '购买方',
+                120, 120, '2026-07-12', '2026-07-01', 'active'
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'output-over-collected-relation-1', 'manual', 'active', 1,
+                '2026-07-01',
+                array['output-over-collected-1', 'output-over-collected-bank-1'],
+                array['output_invoice', 'bank_transaction'], '{}'::jsonb,
+                '{}'::jsonb, '{}'::jsonb
+            )
+            """
+        )
+
+        snapshot = PostgresOutputInvoiceCollectionQueryRepository(
+            self.connection
+        ).load_page(
+            page=1,
+            page_size=20,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            month="2026-07",
+            filters=[],
+            sort_field="total_with_tax",
+            sort_direction="desc",
+        )
+
+        self.assertEqual(snapshot.pagination, {"page": 1, "pageSize": 20, "total": 1})
+        self.assertEqual(snapshot.groups[0]["status_code"], "collected")
+        self.assertEqual(snapshot.groups[0]["pending_amount"], Decimal("0"))
+        self.assertEqual(
+            snapshot.summary,
+            {
+                "invoiceCount": 1,
+                "totalWithTax": "100.00",
+                "collectedAmount": "120.00",
+                "pendingAmount": "0.00",
+                "pendingCollectionCount": 0,
+                "partialCollectionCount": 0,
+            },
+        )
+        self.assertEqual(
+            snapshot.statistics,
+            {
+                "invoiceCount": 1,
+                "linkedIncomeBankInvoiceCount": 1,
+                "collectedInvoiceCount": 1,
+                "unlinkedBankInvoiceCount": 0,
+                "uncollectedInvoiceCount": 0,
+                "redInvoiceCount": 0,
+            },
+        )
 
 
 if __name__ == "__main__":

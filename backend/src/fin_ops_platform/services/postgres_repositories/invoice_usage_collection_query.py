@@ -735,7 +735,7 @@ def _fact_cte(
                     when cardinality(facts.red_related_group_keys) > 0
                      and facts.total_with_tax < 0 then 'reverses_blue'
                     when facts.total_with_tax < 0 then 'unmatched_red'
-                    when abs(facts.bank_inflow_total - abs(facts.total_with_tax)) <= 0.01
+                    when facts.bank_inflow_total + 0.01 >= abs(facts.total_with_tax)
                      and abs(facts.total_with_tax) > 0 then 'collected'
                     when facts.bank_inflow_total > 0
                      and facts.bank_inflow_total < abs(facts.total_with_tax)
@@ -747,7 +747,7 @@ def _fact_cte(
                     when cardinality(facts.red_related_group_keys) > 0
                       or facts.total_with_tax < 0
                       or (
-                          abs(facts.bank_inflow_total - abs(facts.total_with_tax)) <= 0.01
+                          facts.bank_inflow_total + 0.01 >= abs(facts.total_with_tax)
                           and abs(facts.total_with_tax) > 0
                       )
                         then 0
