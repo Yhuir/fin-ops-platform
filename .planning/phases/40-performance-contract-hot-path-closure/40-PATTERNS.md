@@ -1,8 +1,8 @@
 # Phase 40: 关联台自收敛补充 - Pattern Map
 
-**Mapped:** 2026-08-06  
-**Scope:** `40-01` probe/FinanceTable、`40-02` proven SQL、`40-03` import batch rows、`40-04` legacy/local handoff，以及 `40-05..40-08` Workbench self-convergence/Browser SLO/唯一发布  
-**Files classified:** 15（8 个生产/合同/Browser harness 文件，7 个测试文件）  
+**Mapped:** 2026-08-06
+**Scope:** `40-01` probe/FinanceTable、`40-02` proven SQL、`40-03` import batch rows、`40-04` legacy/local handoff，以及 `40-05..40-08` Workbench self-convergence/Browser SLO/唯一发布
+**Files classified:** 15（8 个生产/合同/Browser harness 文件，7 个测试文件）
 **Runtime architecture added:** 0
 
 ## File Classification
@@ -251,6 +251,6 @@ No producer imports the Workbench gateway. No frontend constructs refresh scopes
 
 ## Metadata
 
-**Analogs inspected:** 11 files  
-**Primary search scope:** Workbench services/page/tests, refresh gateway, PostgreSQL integration tests, legacy target DTO owners  
+**Analogs inspected:** 11 files
+**Primary search scope:** Workbench services/page/tests, refresh gateway, PostgreSQL integration tests, legacy target DTO owners
 **Pattern extraction date:** 2026-08-06

@@ -1,7 +1,7 @@
 # Phase 40: 关联台自收敛补充范围 - Research
 
-**Researched:** 2026-08-06  
-**Domain:** Bank-flow canonical mutation、Workbench freshness/status、durable refresh queue、active generation、浏览器轮询  
+**Researched:** 2026-08-06
+**Domain:** Bank-flow canonical mutation、Workbench freshness/status、durable refresh queue、active generation、浏览器轮询
 **Confidence:** HIGH（代码、长期架构文档、现有测试与生产记录交叉核对）
 
 <user_constraints>
@@ -297,40 +297,40 @@ Writer只负责canonical fact/version/audit；Workbench通过source proof识别�
 
 ### Pitfall 1: status 报 stale 但没有推进者
 
-**What goes wrong:** 页面一直显示旧 generation，等待其它 GET 偶然触发。  
-**Why:** `refresh_status()` 与 groups helper重复 proof 流程，漏 enqueue。  
+**What goes wrong:** 页面一直显示旧 generation，等待其它 GET 偶然触发。
+**Why:** `refresh_status()` 与 groups helper重复 proof 流程，漏 enqueue。
 **Avoid:** facade复用同一 helper，并测试 stale exact enqueue。[VERIFIED: confirmed root gap]
 
 ### Pitfall 2: 1秒 setInterval 反而永不完成
 
-**What goes wrong:** proof超过tick时被下一次poll abort。  
-**Why:** 当前实现每个tick先 abort上一 controller。  
+**What goes wrong:** proof超过tick时被下一次poll abort。
+**Why:** 当前实现每个tick先 abort上一 controller。
 **Avoid:** 请求完成后 self-schedule；同一时刻最多一个 status GET。[VERIFIED: current effect]
 
 ### Pitfall 3: hidden/focus 事件造成双请求
 
-**What goes wrong:** visibilitychange与focus紧邻触发两次。  
+**What goes wrong:** visibilitychange与focus紧邻触发两次。
 **Avoid:** 两个事件都调用同一 `pollNow`，由in-flight guard合并；隐藏时清 timer/abort。[VERIFIED: recommendation]
 
 ### Pitfall 4: enqueue 后仍返回 stale 被误认为失败
 
-**What goes wrong:** 第一次 stale响应在 enqueue 后仍可能是 stale；前端若要求立即 refreshing会误报。  
+**What goes wrong:** 第一次 stale响应在 enqueue 后仍可能是 stale；前端若要求立即 refreshing会误报。
 **Avoid:** 第一次 stale 响应允许保持 stale；所有状态仍按完成后 1 秒轮询，下一次 durable status 才可能显示 refreshing。[VERIFIED: inference from helper order and updated D-12]
 
 ### Pitfall 5: failed/unavailable 状态形成容量风暴
 
-**What goes wrong:** 可见客户端仍按锁定合同每秒检查；若 status/proof 失败路径昂贵，目标并发会持续放大 API/DB 压力。  
+**What goes wrong:** 可见客户端仍按锁定合同每秒检查；若 status/proof 失败路径昂贵，目标并发会持续放大 API/DB 压力。
 **Avoid:** 保持 completion-driven single-flight 和 gateway active coalescing/orphan recovery；失败状态不得绕过 1 秒合同改打 full payload，也不得重复 enqueue。以目标并发验证失败路径容量，并保留 retryable/运维 repair 合同。[VERIFIED: updated D-12/D-13; gateway/tests/status normalizer]
 
 ### Pitfall 6: canonical writer漏出source proof
 
-**What goes wrong:** writer成功提交且关联台每秒检查，但canonical proof与active generation proof仍相同，页面永久错误显示fresh。  
-**Why:** projection读取了新表/字段，或writer没有推进proof读取的`updated_at`/version；旧写侧通知曾掩盖该缺口。  
+**What goes wrong:** writer成功提交且关联台每秒检查，但canonical proof与active generation proof仍相同，页面永久错误显示fresh。
+**Why:** projection读取了新表/字段，或writer没有推进proof读取的`updated_at`/version；旧写侧通知曾掩盖该缺口。
 **Avoid:** writer→proof覆盖矩阵 + 每类真实mutation测试；断言affected scope变stale、unaffected scope不变、writer零Workbench fan-out。漏项只修canonical version/proof。[VERIFIED: decoupling invariant]
 
 ### Pitfall 7: D-15 或容量被错误“证明”
 
-**What goes wrong:** 用最后一次快速 GET、单个最佳样本、单客户端结果或从 focus 后才计时，宣称 commit-to-visible p99 和容量均达标。  
+**What goes wrong:** 用最后一次快速 GET、单个最佳样本、单客户端结果或从 focus 后才计时，宣称 commit-to-visible p99 和容量均达标。
 **Avoid:** 报告四段时延、样本量、commit 起止点，并在目标可见客户端并发下测 API/DB/连接池；证据不足保持 `NOT YET MEASURED`，不发布。[VERIFIED: D-13/D-15]
 
 ## Performance Acceptance Evidence
@@ -399,11 +399,11 @@ Writer只负责canonical fact/version/audit；Workbench通过source proof识别�
 
 ### Recommended execution waves for planner
 
-1. **Wave 1 / Plans 40-01..03 — Independent proven hotspots:** probe/FinanceTable、三个 proven SQL owners、import batch-row only.  
-2. **Wave 2 / Plan 40-04 — Legacy facts + local candidate:** Search/no-OA guard/docs and full local handoff; no push/deploy.  
-3. **Wave 1 / Plans 40-05..06 — Workbench backend/frontend roots:** existing facade helper and local completion-driven poller.  
-4. **Wave 2 / Plan 40-07 — Writer→proof + local legacy + correctness E2E:** real PostgreSQL matrix and deterministic Browser flow.  
-5. **Wave 3 / Plan 40-08 — Docs/capacity/browser p99/one release:** Playwright Node monotonic t0..t4, derived capacity, official deploy and rollback evidence.  
+1. **Wave 1 / Plans 40-01..03 — Independent proven hotspots:** probe/FinanceTable、三个 proven SQL owners、import batch-row only.
+2. **Wave 2 / Plan 40-04 — Legacy facts + local candidate:** Search/no-OA guard/docs and full local handoff; no push/deploy.
+3. **Wave 1 / Plans 40-05..06 — Workbench backend/frontend roots:** existing facade helper and local completion-driven poller.
+4. **Wave 2 / Plan 40-07 — Writer→proof + local legacy + correctness E2E:** real PostgreSQL matrix and deterministic Browser flow.
+5. **Wave 3 / Plan 40-08 — Docs/capacity/browser p99/one release:** Playwright Node monotonic t0..t4, derived capacity, official deploy and rollback evidence.
 
 [VERIFIED: recommendation based on dependencies; Wave 2 depends only on response contract, Wave 3/4 validate whole loop]
 
@@ -500,16 +500,16 @@ No `[ASSUMED]` claims. Code behavior、contracts、tests、runtime topology and 
 
 ## Open Questions
 
-1. **(RESOLVED) 是否在本计划删除全局无生产caller的frontend operationBarrier helper？**  
-   - Known: runtime production imports为0，但backend endpoint和ops contract仍有潜在external consumers。[VERIFIED: scan]  
+1. **(RESOLVED) 是否在本计划删除全局无生产caller的frontend operationBarrier helper？**
+   - Known: runtime production imports为0，但backend endpoint和ops contract仍有潜在external consumers。[VERIFIED: scan]
    - Resolution: Phase 40 只删除 Workbench-local dead target DTO fallback；global helper与backend operator endpoint均不在本次删除范围，避免把D-14扩大为跨模块清理。[VERIFIED: 40-07 locked scope]
 
-2. **(RESOLVED) 生产p99如何取得足量样本而不重复写真实财务关系？**  
-   - Known: production write smoke必须bounded/test-owned/reversible；单样本不是p99。[VERIFIED: D-07/D-15 and operations docs]  
+2. **(RESOLVED) 生产p99如何取得足量样本而不重复写真实财务关系？**
+   - Known: production write smoke必须bounded/test-owned/reversible；单样本不是p99。[VERIFIED: D-07/D-15 and operations docs]
    - Resolution: 隔离prod-equivalent PostgreSQL通过现有 Playwright harness 执行至少100个test-owned/reversible样本并计算p99；production只做一次批准的bounded reversible smoke和被动/只读佐证。不足100个同钟完整样本即`NOT_MEASURED`并阻断发布。[VERIFIED: 40-08 measurement gate]
 
-3. **(RESOLVED) 目标“可见关联台客户端并发数”取什么容量档位？**  
-   - Known: 每个持续可见客户端至多约1 QPS；总请求上限随可见客户端数近似线性增长。[VERIFIED: completion-driven scheduling math]  
+3. **(RESOLVED) 目标“可见关联台客户端并发数”取什么容量档位？**
+   - Known: 每个持续可见客户端至多约1 QPS；总请求上限随可见客户端数近似线性增长。[VERIFIED: completion-driven scheduling math]
    - Resolution: 候选冻结前最近14个完整自然日的production authenticated refresh-status session/access evidence为首选来源；以rolling 60-second bucket匿名unique clients计算`C_normal=p95`、`C_peak=max`，并测试`N_normal=max(4,C_normal)`、`N_peak=max(8,C_peak)`。若日志不能区分client/session，只允许改用有来源/版本/批准人的capacity contract；两者都没有则`NOT_MEASURED`并阻断发布。4/8仅是压测下限，不是生产实际计数。[VERIFIED: 40-08 blocking derivation]
 
 ## Environment Availability
@@ -553,5 +553,5 @@ None. No framework/library behavior or package choice changed, so external docum
 - Minimal architecture: HIGH — all required components already exist and are tested.[VERIFIED: code and tests]
 - Performance result: NOT YET MEASURED — updated all-status completion-driven 1s polling removes the former deterministic 5s detection conflict, but target-concurrency API/DB capacity and four-segment commit-to-visible p99 remain release-blocking measurements.[VERIFIED: updated D-12/D-13/D-15]
 
-**Research date:** 2026-08-06  
+**Research date:** 2026-08-06
 **Valid until:** code changes to the cited Workbench/bank-flow boundaries or 30 days, whichever occurs first.
