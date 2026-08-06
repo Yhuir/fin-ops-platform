@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "generated_at": "2026-08-06T09:15:01.488Z",
+  "generated_at": "2026-08-06T12:03:11.465Z",
   "isolated": {
     "evidence_environment": "isolated_prod_equivalent_browser_poller",
     "production_p99_claim": false,
     "sample_count": 100,
     "samples": [
       {
-        "sample_id": "sha256:c43f3e80533c5c2493c87adcf1c6473a710a79b7e0ee81d38d66fcdda5ba2a2f",
+        "sample_id": "sha256:90fc20865b1a49d40f91ffad2f15aa8592d06935b8e144b18c185268d97e00e5",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -17,673 +17,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 2489926,
-          "t1": 2613184,
-          "t2": 2699043,
-          "t3": 3716798,
-          "t4": 4163391
+          "t0": 2199736,
+          "t1": 2297691,
+          "t2": 2398000,
+          "t3": 3394229,
+          "t4": 3804777
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 123258,
-          "statusProofEnqueue": 85859,
-          "workerPublish": 1017755,
-          "browserReloadRender": 446593
-        },
-        "segmentSumMicroseconds": 1673465,
-        "totalMicroseconds": 1673465
-      },
-      {
-        "sample_id": "sha256:dbd55ec907444daebe2094ceb2b3e98ac1752ef5b917d7d87715ca415cc4c927",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 4872203,
-          "t1": 4969018,
-          "t2": 4999712,
-          "t3": 6038850,
-          "t4": 6441777
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 96815,
-          "statusProofEnqueue": 30694,
-          "workerPublish": 1039138,
-          "browserReloadRender": 402927
-        },
-        "segmentSumMicroseconds": 1569574,
-        "totalMicroseconds": 1569574
-      },
-      {
-        "sample_id": "sha256:da3333046de60607723d458630c2ae6b4a829695a1a2e0db005e1edcc9f86424",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 7101356,
-          "t1": 7225595,
-          "t2": 7229065,
-          "t3": 8272588,
-          "t4": 8674933
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 124239,
-          "statusProofEnqueue": 3470,
-          "workerPublish": 1043523,
-          "browserReloadRender": 402345
-        },
-        "segmentSumMicroseconds": 1573577,
-        "totalMicroseconds": 1573577
-      },
-      {
-        "sample_id": "sha256:58a4269654aad8a3b9644c0a5f3837634d86e1fbca175dd2230a2c5aadf24894",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 9326670,
-          "t1": 9434195,
-          "t2": 9459304,
-          "t3": 10497108,
-          "t4": 10912966
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 107525,
-          "statusProofEnqueue": 25109,
-          "workerPublish": 1037804,
-          "browserReloadRender": 415858
-        },
-        "segmentSumMicroseconds": 1586296,
-        "totalMicroseconds": 1586296
-      },
-      {
-        "sample_id": "sha256:ab478c06d32317d188d2e2bcc0cabca33f7814eddf850eaa759915896c223733",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 11584145,
-          "t1": 11682523,
-          "t2": 11710346,
-          "t3": 12750874,
-          "t4": 13165909
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 98378,
-          "statusProofEnqueue": 27823,
-          "workerPublish": 1040528,
-          "browserReloadRender": 415035
-        },
-        "segmentSumMicroseconds": 1581764,
-        "totalMicroseconds": 1581764
-      },
-      {
-        "sample_id": "sha256:39f68bcdb1001a936bcece3b2443752279c0b7ff73e28bb94a05e61ac1ee6e37",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 13859892,
-          "t1": 13971915,
-          "t2": 13995785,
-          "t3": 15044501,
-          "t4": 15461101
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 112023,
-          "statusProofEnqueue": 23870,
-          "workerPublish": 1048716,
-          "browserReloadRender": 416600
-        },
-        "segmentSumMicroseconds": 1601209,
-        "totalMicroseconds": 1601209
-      },
-      {
-        "sample_id": "sha256:12ea8f6c0b9754dbf3a780cb85d5d3c958f49e1dcc522c692b0698ceba5192be",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 16127816,
-          "t1": 16228682,
-          "t2": 16256238,
-          "t3": 17293286,
-          "t4": 17695799
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 100866,
-          "statusProofEnqueue": 27556,
-          "workerPublish": 1037048,
-          "browserReloadRender": 402513
-        },
-        "segmentSumMicroseconds": 1567983,
-        "totalMicroseconds": 1567983
-      },
-      {
-        "sample_id": "sha256:72d3a7f7c705fc3f5ee8a871eec1e84e4476aac12d4217634281806c759d228d",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 18353594,
-          "t1": 18453833,
-          "t2": 18481504,
-          "t3": 19521992,
-          "t4": 19925263
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 100239,
-          "statusProofEnqueue": 27671,
-          "workerPublish": 1040488,
-          "browserReloadRender": 403271
-        },
-        "segmentSumMicroseconds": 1571669,
-        "totalMicroseconds": 1571669
-      },
-      {
-        "sample_id": "sha256:6b3bd8faaac4205584521c4f390e47e7b82a4ebadf8a7b6e9d7b9c06ebe9b8ed",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 20601379,
-          "t1": 20638637,
-          "t2": 20738783,
-          "t3": 21781899,
-          "t4": 22189535
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 37258,
-          "statusProofEnqueue": 100146,
-          "workerPublish": 1043116,
-          "browserReloadRender": 407636
-        },
-        "segmentSumMicroseconds": 1588156,
-        "totalMicroseconds": 1588156
-      },
-      {
-        "sample_id": "sha256:68c55da191ea42d49a7bf69b64385aa8480d8fcfeb78d26f0fdce36f869977c3",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 22851211,
-          "t1": 22954902,
-          "t2": 22977503,
-          "t3": 24027339,
-          "t4": 24460748
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 103691,
-          "statusProofEnqueue": 22601,
-          "workerPublish": 1049836,
-          "browserReloadRender": 433409
-        },
-        "segmentSumMicroseconds": 1609537,
-        "totalMicroseconds": 1609537
-      },
-      {
-        "sample_id": "sha256:83c2efe8b87618dd44d273d269635a2aa2a9d7eb8a359b0557af3fba1047525a",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 25159341,
-          "t1": 25272656,
-          "t2": 25298273,
-          "t3": 26348249,
-          "t4": 26771422
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 113315,
-          "statusProofEnqueue": 25617,
-          "workerPublish": 1049976,
-          "browserReloadRender": 423173
-        },
-        "segmentSumMicroseconds": 1612081,
-        "totalMicroseconds": 1612081
-      },
-      {
-        "sample_id": "sha256:b1d60a85c31f1dff12ac6548ddc82abdaf81db38e200e1c9ffb92880291db3fe",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 27484271,
-          "t1": 27525304,
-          "t2": 27634618,
-          "t3": 28677813,
-          "t4": 29085531
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 41033,
-          "statusProofEnqueue": 109314,
-          "workerPublish": 1043195,
-          "browserReloadRender": 407718
-        },
-        "segmentSumMicroseconds": 1601260,
-        "totalMicroseconds": 1601260
-      },
-      {
-        "sample_id": "sha256:07b42b6eee4ceaa129033d8ba4717b89b46292d1101e349c883782f263311eef",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 29767843,
-          "t1": 29876852,
-          "t2": 29901348,
-          "t3": 30947159,
-          "t4": 31362591
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 109009,
-          "statusProofEnqueue": 24496,
-          "workerPublish": 1045811,
-          "browserReloadRender": 415432
-        },
-        "segmentSumMicroseconds": 1594748,
-        "totalMicroseconds": 1594748
-      },
-      {
-        "sample_id": "sha256:c234011c2283c7829e639756f22e6bd1301ba702b6eb3e0798c077c528ca4dc6",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 32048743,
-          "t1": 32161244,
-          "t2": 32184868,
-          "t3": 33225934,
-          "t4": 33636788
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 112501,
-          "statusProofEnqueue": 23624,
-          "workerPublish": 1041066,
-          "browserReloadRender": 410854
-        },
-        "segmentSumMicroseconds": 1588045,
-        "totalMicroseconds": 1588045
-      },
-      {
-        "sample_id": "sha256:4515a638eddb28ab7c9dcf2f27df8b9bcd9ddd88b44010077c455136055965d0",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 34326373,
-          "t1": 34446509,
-          "t2": 34472833,
-          "t3": 35517853,
-          "t4": 35946853
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 120136,
-          "statusProofEnqueue": 26324,
-          "workerPublish": 1045020,
-          "browserReloadRender": 429000
-        },
-        "segmentSumMicroseconds": 1620480,
-        "totalMicroseconds": 1620480
-      },
-      {
-        "sample_id": "sha256:0cc3d93fb01be3e9f68e4617a5874225e42287025743a5af7451f8cb4cd2516e",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 36649395,
-          "t1": 36686720,
-          "t2": 36792429,
-          "t3": 37841431,
-          "t4": 38267736
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 37325,
-          "statusProofEnqueue": 105709,
-          "workerPublish": 1049002,
-          "browserReloadRender": 426305
-        },
-        "segmentSumMicroseconds": 1618341,
-        "totalMicroseconds": 1618341
-      },
-      {
-        "sample_id": "sha256:7b7b5a4f26e4348c7956037ea81200023144a36a88de4f348e1d337c691c02c4",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 38984989,
-          "t1": 39021909,
-          "t2": 39130212,
-          "t3": 40168500,
-          "t4": 40587423
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 36920,
-          "statusProofEnqueue": 108303,
-          "workerPublish": 1038288,
-          "browserReloadRender": 418923
-        },
-        "segmentSumMicroseconds": 1602434,
-        "totalMicroseconds": 1602434
-      },
-      {
-        "sample_id": "sha256:167063b71406c8fd6c3a370e338d3c99b9208454361cdab4e9cec3163fba0843",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 41279379,
-          "t1": 41394098,
-          "t2": 41420227,
-          "t3": 42458860,
-          "t4": 42864380
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 114719,
-          "statusProofEnqueue": 26129,
-          "workerPublish": 1038633,
-          "browserReloadRender": 405520
-        },
-        "segmentSumMicroseconds": 1585001,
-        "totalMicroseconds": 1585001
-      },
-      {
-        "sample_id": "sha256:41cb39f0c8378431f8794c417fdf0000e204404225e0688841e99066aac51a23",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 43547502,
-          "t1": 43658150,
-          "t2": 43679519,
-          "t3": 44729843,
-          "t4": 45145150
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 110648,
-          "statusProofEnqueue": 21369,
-          "workerPublish": 1050324,
-          "browserReloadRender": 415307
-        },
-        "segmentSumMicroseconds": 1597648,
-        "totalMicroseconds": 1597648
-      },
-      {
-        "sample_id": "sha256:52c60c2b997ed068c476d3bc875dcb860487a22820ac37f32810e9c0cfe27eb1",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 45841038,
-          "t1": 45961003,
-          "t2": 45984070,
-          "t3": 47031746,
-          "t4": 47455082
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 119965,
-          "statusProofEnqueue": 23067,
-          "workerPublish": 1047676,
-          "browserReloadRender": 423336
-        },
-        "segmentSumMicroseconds": 1614044,
-        "totalMicroseconds": 1614044
-      },
-      {
-        "sample_id": "sha256:5c271a4b9d9a09a5e69657d99e9fa7b241ec83a6699197b5d901e4dae9738200",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 48150800,
-          "t1": 48188394,
-          "t2": 48293961,
-          "t3": 49339896,
-          "t4": 49741057
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 37594,
-          "statusProofEnqueue": 105567,
-          "workerPublish": 1045935,
-          "browserReloadRender": 401161
-        },
-        "segmentSumMicroseconds": 1590257,
-        "totalMicroseconds": 1590257
-      },
-      {
-        "sample_id": "sha256:6294293db10758bd030ce029be7adf2c978e6714c4a38d09c61fea1c6f88ce20",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 50403852,
-          "t1": 50511349,
-          "t2": 50536212,
-          "t3": 51576271,
-          "t4": 51976445
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 107497,
-          "statusProofEnqueue": 24863,
-          "workerPublish": 1040059,
-          "browserReloadRender": 400174
-        },
-        "segmentSumMicroseconds": 1572593,
-        "totalMicroseconds": 1572593
-      },
-      {
-        "sample_id": "sha256:4f067644caf00272d5cbe01f1d035a643d88de57fe814a85a67900c92a756a21",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 52627413,
-          "t1": 52726388,
-          "t2": 52754080,
-          "t3": 53793834,
-          "t4": 54201711
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 98975,
-          "statusProofEnqueue": 27692,
-          "workerPublish": 1039754,
-          "browserReloadRender": 407877
-        },
-        "segmentSumMicroseconds": 1574298,
-        "totalMicroseconds": 1574298
-      },
-      {
-        "sample_id": "sha256:3899849c1dc56b80e76e5e45e255ab307288134648ce0b030bf1c6cfaefa2b66",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 54862864,
-          "t1": 54975702,
-          "t2": 55000689,
-          "t3": 56048476,
-          "t4": 56485716
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 112838,
-          "statusProofEnqueue": 24987,
-          "workerPublish": 1047787,
-          "browserReloadRender": 437240
-        },
-        "segmentSumMicroseconds": 1622852,
-        "totalMicroseconds": 1622852
-      },
-      {
-        "sample_id": "sha256:6cf19b216d3f1a2ea102721d2b9528bafd3b36b2d0a62e39e461c100c729f91d",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 57176113,
-          "t1": 57230409,
-          "t2": 57338411,
-          "t3": 58384611,
-          "t4": 58813802
-        },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 54296,
-          "statusProofEnqueue": 108002,
-          "workerPublish": 1046200,
-          "browserReloadRender": 429191
-        },
-        "segmentSumMicroseconds": 1637689,
-        "totalMicroseconds": 1637689
-      },
-      {
-        "sample_id": "sha256:94c9e08a341b49a69bd336ede11d5a14d8b34b0c9d0392b82f15c4438a3a8e2b",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 59489200,
-          "t1": 59600371,
-          "t2": 59624569,
-          "t3": 60665111,
-          "t4": 61071697
+          "canonicalCommit": 97955,
+          "statusProofEnqueue": 100309,
+          "workerPublish": 996229,
+          "browserReloadRender": 410548
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 111171,
-          "statusProofEnqueue": 24198,
-          "workerPublish": 1040542,
-          "browserReloadRender": 406586
-        },
-        "segmentSumMicroseconds": 1582497,
-        "totalMicroseconds": 1582497
+        "segmentSumMicroseconds": 1605041,
+        "totalMicroseconds": 1605041
       },
       {
-        "sample_id": "sha256:9d7a0f8357b6840964191e22b690b0ffa6ea2ff303a32c7a77aab2c7ca2383b1",
+        "sample_id": "sha256:6ed0330964eb4a376a49c89cae65c4bf2d2d1f996f470c1a231e2542b690a85e",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -693,49 +43,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 61739235,
-          "t1": 61850535,
-          "t2": 61873499,
-          "t3": 62910537,
-          "t4": 63327312
+          "t0": 4435188,
+          "t1": 4534745,
+          "t2": 4542414,
+          "t3": 5581272,
+          "t4": 6007845
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 111300,
-          "statusProofEnqueue": 22964,
-          "workerPublish": 1037038,
-          "browserReloadRender": 416775
-        },
-        "segmentSumMicroseconds": 1588077,
-        "totalMicroseconds": 1588077
-      },
-      {
-        "sample_id": "sha256:7effcaa9d08e847287c1ab302167da08352345013629639b6e6afa04527eba25",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 63996108,
-          "t1": 64093724,
-          "t2": 64121353,
-          "t3": 65160168,
-          "t4": 65562938
+          "canonicalCommit": 99557,
+          "statusProofEnqueue": 7669,
+          "workerPublish": 1038858,
+          "browserReloadRender": 426573
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 97616,
-          "statusProofEnqueue": 27629,
-          "workerPublish": 1038815,
-          "browserReloadRender": 402770
-        },
-        "segmentSumMicroseconds": 1566830,
-        "totalMicroseconds": 1566830
+        "segmentSumMicroseconds": 1572657,
+        "totalMicroseconds": 1572657
       },
       {
-        "sample_id": "sha256:89a837bc327b48f743e69c25e167ba8a49f1fa1ecc8ad833c3f2a4c9f9c7f6c3",
+        "sample_id": "sha256:adc100062efd6e1f00ceb3bde16fa7edebbb20e30d0ba83dee95d02ab4dca841",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -745,49 +69,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 66238909,
-          "t1": 66357761,
-          "t2": 66383629,
-          "t3": 67432517,
-          "t4": 67852464
+          "t0": 6699008,
+          "t1": 6736735,
+          "t2": 6839529,
+          "t3": 7872850,
+          "t4": 8261211
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 118852,
-          "statusProofEnqueue": 25868,
-          "workerPublish": 1048888,
-          "browserReloadRender": 419947
-        },
-        "segmentSumMicroseconds": 1613555,
-        "totalMicroseconds": 1613555
-      },
-      {
-        "sample_id": "sha256:b911ff72901c85bea2408f59c9dc29cf27e2a1b117628e54768141ca682572cd",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 68532607,
-          "t1": 68647623,
-          "t2": 68673992,
-          "t3": 69708866,
-          "t4": 70109881
+          "canonicalCommit": 37727,
+          "statusProofEnqueue": 102794,
+          "workerPublish": 1033321,
+          "browserReloadRender": 388361
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 115016,
-          "statusProofEnqueue": 26369,
-          "workerPublish": 1034874,
-          "browserReloadRender": 401015
-        },
-        "segmentSumMicroseconds": 1577274,
-        "totalMicroseconds": 1577274
+        "segmentSumMicroseconds": 1562203,
+        "totalMicroseconds": 1562203
       },
       {
-        "sample_id": "sha256:538c80dae7155c05255a6184b4c574ffdbf7068d30dda125a9128f0495153f79",
+        "sample_id": "sha256:9f460c266bf0f299e93550159e4faeea3a721c201089ade41923d10f775186d1",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -797,49 +95,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 70772152,
-          "t1": 70808004,
-          "t2": 70914683,
-          "t3": 71952493,
-          "t4": 72353142
+          "t0": 8863927,
+          "t1": 8961929,
+          "t2": 8969782,
+          "t3": 10003793,
+          "t4": 10391965
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 35852,
-          "statusProofEnqueue": 106679,
-          "workerPublish": 1037810,
-          "browserReloadRender": 400649
-        },
-        "segmentSumMicroseconds": 1580990,
-        "totalMicroseconds": 1580990
-      },
-      {
-        "sample_id": "sha256:402b18caa7e478bac984ae753b607c67ee9caabe5994c1acd3b8cfee8480a9b0",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 73019247,
-          "t1": 73118291,
-          "t2": 73145552,
-          "t3": 74182973,
-          "t4": 74584616
+          "canonicalCommit": 98002,
+          "statusProofEnqueue": 7853,
+          "workerPublish": 1034011,
+          "browserReloadRender": 388172
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 99044,
-          "statusProofEnqueue": 27261,
-          "workerPublish": 1037421,
-          "browserReloadRender": 401643
-        },
-        "segmentSumMicroseconds": 1565369,
-        "totalMicroseconds": 1565369
+        "segmentSumMicroseconds": 1528038,
+        "totalMicroseconds": 1528038
       },
       {
-        "sample_id": "sha256:5b2b74a6d7bc966dec1d5056524a1d9909d38e9c4d6dee0a178452ec78cd105d",
+        "sample_id": "sha256:f6da7d6d89616bd05223fc2e6c99ec6de3a075c29a79e3d47fdbf7e9750b3006",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -849,49 +121,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 75259486,
-          "t1": 75367624,
-          "t2": 75393015,
-          "t3": 76436206,
-          "t4": 76852750
+          "t0": 10997875,
+          "t1": 11085128,
+          "t2": 11103230,
+          "t3": 12143458,
+          "t4": 12534169
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 108138,
-          "statusProofEnqueue": 25391,
-          "workerPublish": 1043191,
-          "browserReloadRender": 416544
-        },
-        "segmentSumMicroseconds": 1593264,
-        "totalMicroseconds": 1593264
-      },
-      {
-        "sample_id": "sha256:641c683ef9f11c0a918a4206cf04b643ed7318172a00c34d64c883dd89b5bbea",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 77555501,
-          "t1": 77668222,
-          "t2": 77691750,
-          "t3": 78740417,
-          "t4": 79164233
+          "canonicalCommit": 87253,
+          "statusProofEnqueue": 18102,
+          "workerPublish": 1040228,
+          "browserReloadRender": 390711
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 112721,
-          "statusProofEnqueue": 23528,
-          "workerPublish": 1048667,
-          "browserReloadRender": 423816
-        },
-        "segmentSumMicroseconds": 1608732,
-        "totalMicroseconds": 1608732
+        "segmentSumMicroseconds": 1536294,
+        "totalMicroseconds": 1536294
       },
       {
-        "sample_id": "sha256:f887bc263c330f87f2c96208c4125a4e36906284d4ecd8f2bd1c97674c7f2168",
+        "sample_id": "sha256:195c05ea8bdbb17e1d4282e2101a229dbb265b4d727b5acc0f2a17d036dca71a",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -901,49 +147,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 79834707,
-          "t1": 79932547,
-          "t2": 79959342,
-          "t3": 81001808,
-          "t4": 81411658
+          "t0": 13165784,
+          "t1": 13251449,
+          "t2": 13275218,
+          "t3": 14310037,
+          "t4": 14708762
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 97840,
-          "statusProofEnqueue": 26795,
-          "workerPublish": 1042466,
-          "browserReloadRender": 409850
-        },
-        "segmentSumMicroseconds": 1576951,
-        "totalMicroseconds": 1576951
-      },
-      {
-        "sample_id": "sha256:69d0e66d1adc6680961bba99763b557881f8661cb2e44d372388183dc0e707d2",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 82086409,
-          "t1": 82193689,
-          "t2": 82216847,
-          "t3": 83257446,
-          "t4": 83659109
+          "canonicalCommit": 85665,
+          "statusProofEnqueue": 23769,
+          "workerPublish": 1034819,
+          "browserReloadRender": 398725
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 107280,
-          "statusProofEnqueue": 23158,
-          "workerPublish": 1040599,
-          "browserReloadRender": 401663
-        },
-        "segmentSumMicroseconds": 1572700,
-        "totalMicroseconds": 1572700
+        "segmentSumMicroseconds": 1542978,
+        "totalMicroseconds": 1542978
       },
       {
-        "sample_id": "sha256:be2a8935be2a348ad4488d873994ecb7a57ce0f9f5e7bec7d245ff5077dfba9e",
+        "sample_id": "sha256:08a6ba52433b5d16da0e9ae2a18857b61a5ce20c9ec0a95067d48142f2c687ea",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -953,49 +173,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 84309206,
-          "t1": 84409597,
-          "t2": 84438063,
-          "t3": 85474719,
-          "t4": 85889185
+          "t0": 15336565,
+          "t1": 15422275,
+          "t2": 15446368,
+          "t3": 16491363,
+          "t4": 16899847
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100391,
-          "statusProofEnqueue": 28466,
-          "workerPublish": 1036656,
-          "browserReloadRender": 414466
-        },
-        "segmentSumMicroseconds": 1579979,
-        "totalMicroseconds": 1579979
-      },
-      {
-        "sample_id": "sha256:373283c822df9244e5af00a026c31982340145031fb174aa082c5505a20508ae",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 86607313,
-          "t1": 86717321,
-          "t2": 86742004,
-          "t3": 87786384,
-          "t4": 88208782
+          "canonicalCommit": 85710,
+          "statusProofEnqueue": 24093,
+          "workerPublish": 1044995,
+          "browserReloadRender": 408484
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 110008,
-          "statusProofEnqueue": 24683,
-          "workerPublish": 1044380,
-          "browserReloadRender": 422398
-        },
-        "segmentSumMicroseconds": 1601469,
-        "totalMicroseconds": 1601469
+        "segmentSumMicroseconds": 1563282,
+        "totalMicroseconds": 1563282
       },
       {
-        "sample_id": "sha256:d15f00a5214e2ed0adb358f5a5ea4243720daee357b5e452fe3cb59187b65c6f",
+        "sample_id": "sha256:42c9ea01215ca0e209f8433eddfb138b9c2cd0f438ea1c612bd38b3e6fce86e5",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1005,49 +199,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 88895863,
-          "t1": 88931988,
-          "t2": 89031412,
-          "t3": 90072383,
-          "t4": 90479128
+          "t0": 17569306,
+          "t1": 17666478,
+          "t2": 17692983,
+          "t3": 18725320,
+          "t4": 19116661
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 36125,
-          "statusProofEnqueue": 99424,
-          "workerPublish": 1040971,
-          "browserReloadRender": 406745
-        },
-        "segmentSumMicroseconds": 1583265,
-        "totalMicroseconds": 1583265
-      },
-      {
-        "sample_id": "sha256:10631de048dfc8bdfc0bb6a89a27fc351d081b0aa5accd448036b47f799e5a2e",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 91161655,
-          "t1": 91272569,
-          "t2": 91294305,
-          "t3": 92342820,
-          "t4": 92747678
+          "canonicalCommit": 97172,
+          "statusProofEnqueue": 26505,
+          "workerPublish": 1032337,
+          "browserReloadRender": 391341
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 110914,
-          "statusProofEnqueue": 21736,
-          "workerPublish": 1048515,
-          "browserReloadRender": 404858
-        },
-        "segmentSumMicroseconds": 1586023,
-        "totalMicroseconds": 1586023
+        "segmentSumMicroseconds": 1547355,
+        "totalMicroseconds": 1547355
       },
       {
-        "sample_id": "sha256:286f9157b2eafa228d65a33f708157de764a12591c38b43b3088156f67db0748",
+        "sample_id": "sha256:be0fd5e0d0ddf4ea95b6979b316db2d560640bfcc60cf1048d5d13fd6cb5136d",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1057,49 +225,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 93432653,
-          "t1": 93543736,
-          "t2": 93569552,
-          "t3": 94612335,
-          "t4": 95024662
+          "t0": 19750942,
+          "t1": 19852949,
+          "t2": 19859872,
+          "t3": 20898545,
+          "t4": 21290197
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 111083,
-          "statusProofEnqueue": 25816,
-          "workerPublish": 1042783,
-          "browserReloadRender": 412327
-        },
-        "segmentSumMicroseconds": 1592009,
-        "totalMicroseconds": 1592009
-      },
-      {
-        "sample_id": "sha256:6c06a66d5c3cd23ce83c02ab4cb036ce50df2d56123f2a557454631f106895c8",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 95702259,
-          "t1": 95816230,
-          "t2": 95840168,
-          "t3": 96884470,
-          "t4": 97314361
+          "canonicalCommit": 102007,
+          "statusProofEnqueue": 6923,
+          "workerPublish": 1038673,
+          "browserReloadRender": 391652
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 113971,
-          "statusProofEnqueue": 23938,
-          "workerPublish": 1044302,
-          "browserReloadRender": 429891
-        },
-        "segmentSumMicroseconds": 1612102,
-        "totalMicroseconds": 1612102
+        "segmentSumMicroseconds": 1539255,
+        "totalMicroseconds": 1539255
       },
       {
-        "sample_id": "sha256:95b81c138cb4258df7c07803651aea1af0cf052996bbf921269429b9e3665bc1",
+        "sample_id": "sha256:aee1f3c0ec5963c91a3f62d32b6ce1237bdcd59a00498b7e01b26b2607ea04a0",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1109,49 +251,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 98003632,
-          "t1": 98116995,
-          "t2": 98142253,
-          "t3": 99191163,
-          "t4": 99618890
+          "t0": 21893787,
+          "t1": 21992111,
+          "t2": 21999190,
+          "t3": 23032265,
+          "t4": 23420338
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 113363,
-          "statusProofEnqueue": 25258,
-          "workerPublish": 1048910,
-          "browserReloadRender": 427727
-        },
-        "segmentSumMicroseconds": 1615258,
-        "totalMicroseconds": 1615258
-      },
-      {
-        "sample_id": "sha256:6ed2f0118356a7c321a44661eb4d853f7f779cfec4280df676fd7ba0699e041b",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 100324093,
-          "t1": 100383108,
-          "t2": 100481661,
-          "t3": 101538506,
-          "t4": 101949124
+          "canonicalCommit": 98324,
+          "statusProofEnqueue": 7079,
+          "workerPublish": 1033075,
+          "browserReloadRender": 388073
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 59015,
-          "statusProofEnqueue": 98553,
-          "workerPublish": 1056845,
-          "browserReloadRender": 410618
-        },
-        "segmentSumMicroseconds": 1625031,
-        "totalMicroseconds": 1625031
+        "segmentSumMicroseconds": 1526551,
+        "totalMicroseconds": 1526551
       },
       {
-        "sample_id": "sha256:2ed573cf35379ca304367b5ec8131316e703b42b83723ba7f29d50f1f287e249",
+        "sample_id": "sha256:64c9315dd286193d6ee72b8b880a23f95f9a7d91110b963ffa019b4984fb393e",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1161,49 +277,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 102642616,
-          "t1": 102764870,
-          "t2": 102786196,
-          "t3": 103824644,
-          "t4": 104240595
+          "t0": 24019542,
+          "t1": 24115322,
+          "t2": 24122956,
+          "t3": 25157419,
+          "t4": 25548831
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 122254,
-          "statusProofEnqueue": 21326,
-          "workerPublish": 1038448,
-          "browserReloadRender": 415951
-        },
-        "segmentSumMicroseconds": 1597979,
-        "totalMicroseconds": 1597979
-      },
-      {
-        "sample_id": "sha256:7f8daebe5bb504a75a27a6ec3859f9179d8c350482003960732cd169be4a854f",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 104956109,
-          "t1": 105085576,
-          "t2": 105093963,
-          "t3": 106134018,
-          "t4": 106548454
+          "canonicalCommit": 95780,
+          "statusProofEnqueue": 7634,
+          "workerPublish": 1034463,
+          "browserReloadRender": 391412
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 129467,
-          "statusProofEnqueue": 8387,
-          "workerPublish": 1040055,
-          "browserReloadRender": 414436
-        },
-        "segmentSumMicroseconds": 1592345,
-        "totalMicroseconds": 1592345
+        "segmentSumMicroseconds": 1529289,
+        "totalMicroseconds": 1529289
       },
       {
-        "sample_id": "sha256:c55b76c4784e9359088ce9b3a5c971114b39223412ee5c82999eb8897df58fbe",
+        "sample_id": "sha256:c484fae8c547f99d317e4c7760f9a8bc205cd4ef0017667a3fdc49975457c7d1",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1213,49 +303,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 107223413,
-          "t1": 107334720,
-          "t2": 107358953,
-          "t3": 108401898,
-          "t4": 108835667
+          "t0": 26159076,
+          "t1": 26260777,
+          "t2": 26267995,
+          "t3": 27310612,
+          "t4": 27729227
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 111307,
-          "statusProofEnqueue": 24233,
-          "workerPublish": 1042945,
-          "browserReloadRender": 433769
-        },
-        "segmentSumMicroseconds": 1612254,
-        "totalMicroseconds": 1612254
-      },
-      {
-        "sample_id": "sha256:29d779f7eb3e249787563840fd88f8e30de4c4065a43dd538773147316c87b53",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 109518255,
-          "t1": 109626566,
-          "t2": 109652243,
-          "t3": 110691796,
-          "t4": 111108889
+          "canonicalCommit": 101701,
+          "statusProofEnqueue": 7218,
+          "workerPublish": 1042617,
+          "browserReloadRender": 418615
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 108311,
-          "statusProofEnqueue": 25677,
-          "workerPublish": 1039553,
-          "browserReloadRender": 417093
-        },
-        "segmentSumMicroseconds": 1590634,
-        "totalMicroseconds": 1590634
+        "segmentSumMicroseconds": 1570151,
+        "totalMicroseconds": 1570151
       },
       {
-        "sample_id": "sha256:396991022fbcbc6ded69d19619bf59507fc122b0e49c0cce1cd633fdfe8f0feb",
+        "sample_id": "sha256:5d9c43cd215ddeb6f6a3e8083a2efb476cfd81d01a00932be6b0f783e00fe8cb",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1265,49 +329,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 111803807,
-          "t1": 111904575,
-          "t2": 111934948,
-          "t3": 112973841,
-          "t4": 113383052
+          "t0": 28399796,
+          "t1": 28499362,
+          "t2": 28526098,
+          "t3": 29557892,
+          "t4": 29945853
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100768,
-          "statusProofEnqueue": 30373,
-          "workerPublish": 1038893,
-          "browserReloadRender": 409211
-        },
-        "segmentSumMicroseconds": 1579245,
-        "totalMicroseconds": 1579245
-      },
-      {
-        "sample_id": "sha256:d1329d23e82d50c5dff897e97b62ab8075f02b01accce50aecda94747cc009c1",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 114038819,
-          "t1": 114150522,
-          "t2": 114173997,
-          "t3": 115211322,
-          "t4": 115614255
+          "canonicalCommit": 99566,
+          "statusProofEnqueue": 26736,
+          "workerPublish": 1031794,
+          "browserReloadRender": 387961
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 111703,
-          "statusProofEnqueue": 23475,
-          "workerPublish": 1037325,
-          "browserReloadRender": 402933
-        },
-        "segmentSumMicroseconds": 1575436,
-        "totalMicroseconds": 1575436
+        "segmentSumMicroseconds": 1546057,
+        "totalMicroseconds": 1546057
       },
       {
-        "sample_id": "sha256:e980736e5db024f44b1577a75bd1db9cb6137956183cc5f6bdd47be48e894ad5",
+        "sample_id": "sha256:3eadf0e392edd696fe9220b6b42e967e455ef126853f8c3232f6bb4aed2f6a2a",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1317,49 +355,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 116287322,
-          "t1": 116399081,
-          "t2": 116424108,
-          "t3": 117467423,
-          "t4": 117902132
+          "t0": 30545266,
+          "t1": 30647265,
+          "t2": 30654495,
+          "t3": 31689187,
+          "t4": 32077050
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 111759,
-          "statusProofEnqueue": 25027,
-          "workerPublish": 1043315,
-          "browserReloadRender": 434709
-        },
-        "segmentSumMicroseconds": 1614810,
-        "totalMicroseconds": 1614810
-      },
-      {
-        "sample_id": "sha256:c7f92174f8f37e414403ba447713f898ff6db4d02f39170fb80b9d1dad6eda10",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 118599641,
-          "t1": 118716759,
-          "t2": 118740723,
-          "t3": 119789894,
-          "t4": 120218356
+          "canonicalCommit": 101999,
+          "statusProofEnqueue": 7230,
+          "workerPublish": 1034692,
+          "browserReloadRender": 387863
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 117118,
-          "statusProofEnqueue": 23964,
-          "workerPublish": 1049171,
-          "browserReloadRender": 428462
-        },
-        "segmentSumMicroseconds": 1618715,
-        "totalMicroseconds": 1618715
+        "segmentSumMicroseconds": 1531784,
+        "totalMicroseconds": 1531784
       },
       {
-        "sample_id": "sha256:399ddc1f9f8939124cf749036aaf621e9f79a19e69aa708aa7850617c07fe966",
+        "sample_id": "sha256:c951dc0a6cebefe6107f570da08a4d3820b98a0e001fa458064f06860792fc58",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1369,49 +381,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 120910883,
-          "t1": 120948010,
-          "t2": 121043769,
-          "t3": 122091226,
-          "t4": 122501678
+          "t0": 32672234,
+          "t1": 32768089,
+          "t2": 32775054,
+          "t3": 33804368,
+          "t4": 34193464
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 37127,
-          "statusProofEnqueue": 95759,
-          "workerPublish": 1047457,
-          "browserReloadRender": 410452
-        },
-        "segmentSumMicroseconds": 1590795,
-        "totalMicroseconds": 1590795
-      },
-      {
-        "sample_id": "sha256:d101c271b27e40ac38e29cef81e59644bbacbc580c98eed47d4f0eda3879c641",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 123208101,
-          "t1": 123243250,
-          "t2": 123343243,
-          "t3": 124381680,
-          "t4": 124785492
+          "canonicalCommit": 95855,
+          "statusProofEnqueue": 6965,
+          "workerPublish": 1029314,
+          "browserReloadRender": 389096
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 35149,
-          "statusProofEnqueue": 99993,
-          "workerPublish": 1038437,
-          "browserReloadRender": 403812
-        },
-        "segmentSumMicroseconds": 1577391,
-        "totalMicroseconds": 1577391
+        "segmentSumMicroseconds": 1521230,
+        "totalMicroseconds": 1521230
       },
       {
-        "sample_id": "sha256:7d0120f4e6690501c5a96403711b4c206f2809deaa976f66d8a730eea03b60c1",
+        "sample_id": "sha256:282e5d1f990cfc44ff1cdccff1cdd59fff18773632f1b5586efd70e78d4b9dcd",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1421,49 +407,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 125452346,
-          "t1": 125566659,
-          "t2": 125589295,
-          "t3": 126626902,
-          "t4": 127060856
+          "t0": 34785831,
+          "t1": 34881451,
+          "t2": 34888914,
+          "t3": 35923812,
+          "t4": 36310982
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 114313,
-          "statusProofEnqueue": 22636,
-          "workerPublish": 1037607,
-          "browserReloadRender": 433954
-        },
-        "segmentSumMicroseconds": 1608510,
-        "totalMicroseconds": 1608510
-      },
-      {
-        "sample_id": "sha256:a2e5f18d3f78c3b75523e8b3d88f0b9f6fcc73aa13a70e9b2af56ff2c526a157",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 127929918,
-          "t1": 127967039,
-          "t2": 128076710,
-          "t3": 129130838,
-          "t4": 129557862
+          "canonicalCommit": 95620,
+          "statusProofEnqueue": 7463,
+          "workerPublish": 1034898,
+          "browserReloadRender": 387170
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 37121,
-          "statusProofEnqueue": 109671,
-          "workerPublish": 1054128,
-          "browserReloadRender": 427024
-        },
-        "segmentSumMicroseconds": 1627944,
-        "totalMicroseconds": 1627944
+        "segmentSumMicroseconds": 1525151,
+        "totalMicroseconds": 1525151
       },
       {
-        "sample_id": "sha256:38d17198aa1073b4cb858fe88d1e53318fc2959cf2e9dd388d2c1be24921031e",
+        "sample_id": "sha256:bdfbb02ac82b314ffba4653aca28b6121e2f99a244aebe168fff523d3df15e76",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1473,49 +433,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 130256580,
-          "t1": 130306533,
-          "t2": 130412293,
-          "t3": 131460728,
-          "t4": 131888163
+          "t0": 36910020,
+          "t1": 37005341,
+          "t2": 37012737,
+          "t3": 38052979,
+          "t4": 38468923
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 49953,
-          "statusProofEnqueue": 105760,
-          "workerPublish": 1048435,
-          "browserReloadRender": 427435
-        },
-        "segmentSumMicroseconds": 1631583,
-        "totalMicroseconds": 1631583
-      },
-      {
-        "sample_id": "sha256:74caea12cdb36023c0dcad0460de6ebe136e2908b95743e5b5ce9d9a2d6620e7",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 132634874,
-          "t1": 132747774,
-          "t2": 132773185,
-          "t3": 133811320,
-          "t4": 134217513
+          "canonicalCommit": 95321,
+          "statusProofEnqueue": 7396,
+          "workerPublish": 1040242,
+          "browserReloadRender": 415944
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 112900,
-          "statusProofEnqueue": 25411,
-          "workerPublish": 1038135,
-          "browserReloadRender": 406193
-        },
-        "segmentSumMicroseconds": 1582639,
-        "totalMicroseconds": 1582639
+        "segmentSumMicroseconds": 1558903,
+        "totalMicroseconds": 1558903
       },
       {
-        "sample_id": "sha256:8f510c5968633e65e1b01bd6e5903e225c64e4a34700b6c60d05e15805ecfd4e",
+        "sample_id": "sha256:19cfba44a7c5e7dbbef04f75ab7a3757ab72a8168a83554c8d0b3e61b3dcd0cd",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1525,49 +459,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 134888758,
-          "t1": 135006986,
-          "t2": 135035037,
-          "t3": 136075788,
-          "t4": 136494715
+          "t0": 39132819,
+          "t1": 39233914,
+          "t2": 39264818,
+          "t3": 40297163,
+          "t4": 40687398
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 118228,
-          "statusProofEnqueue": 28051,
-          "workerPublish": 1040751,
-          "browserReloadRender": 418927
-        },
-        "segmentSumMicroseconds": 1605957,
-        "totalMicroseconds": 1605957
-      },
-      {
-        "sample_id": "sha256:07c694692052a4b039434ab00470ef9c940ecae4244e62e3837fc9ebe322842f",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 137234294,
-          "t1": 137270337,
-          "t2": 137375340,
-          "t3": 138417872,
-          "t4": 138852041
+          "canonicalCommit": 101095,
+          "statusProofEnqueue": 30904,
+          "workerPublish": 1032345,
+          "browserReloadRender": 390235
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 36043,
-          "statusProofEnqueue": 105003,
-          "workerPublish": 1042532,
-          "browserReloadRender": 434169
-        },
-        "segmentSumMicroseconds": 1617747,
-        "totalMicroseconds": 1617747
+        "segmentSumMicroseconds": 1554579,
+        "totalMicroseconds": 1554579
       },
       {
-        "sample_id": "sha256:b3f255a9d8a2e63f4af17c1b598e3ddabf6b4521ae75fe937fe48f695e67422a",
+        "sample_id": "sha256:cdab40367f5c7c3b2282cec7e919c7c55c7968e38fbb9211749fb0ccbd900414",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1577,49 +485,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 139558849,
-          "t1": 139608270,
-          "t2": 139714003,
-          "t3": 140772080,
-          "t4": 141177903
+          "t0": 41290440,
+          "t1": 41393002,
+          "t2": 41400178,
+          "t3": 42433353,
+          "t4": 42818939
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 49421,
-          "statusProofEnqueue": 105733,
-          "workerPublish": 1058077,
-          "browserReloadRender": 405823
-        },
-        "segmentSumMicroseconds": 1619054,
-        "totalMicroseconds": 1619054
-      },
-      {
-        "sample_id": "sha256:e00b0b9631b59e51a679ff7e3b0afd423705587f1600deb30151cd118fa5a57d",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 141881873,
-          "t1": 141932501,
-          "t2": 142043547,
-          "t3": 143088063,
-          "t4": 143511944
+          "canonicalCommit": 102562,
+          "statusProofEnqueue": 7176,
+          "workerPublish": 1033175,
+          "browserReloadRender": 385586
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 50628,
-          "statusProofEnqueue": 111046,
-          "workerPublish": 1044516,
-          "browserReloadRender": 423881
-        },
-        "segmentSumMicroseconds": 1630071,
-        "totalMicroseconds": 1630071
+        "segmentSumMicroseconds": 1528499,
+        "totalMicroseconds": 1528499
       },
       {
-        "sample_id": "sha256:accf3aad6c540be992ae3d421adda9ff5f7ec28d2d5441fa38c8fbc6b81f00e7",
+        "sample_id": "sha256:7ccb97fced08bcff443e07852f5c80cd841bd384a3a200d14152cbd50c6edf0c",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1629,49 +511,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 144213336,
-          "t1": 144330153,
-          "t2": 144355472,
-          "t3": 145392482,
-          "t4": 145804476
+          "t0": 43424556,
+          "t1": 43523964,
+          "t2": 43531301,
+          "t3": 44565272,
+          "t4": 44950436
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 116817,
-          "statusProofEnqueue": 25319,
-          "workerPublish": 1037010,
-          "browserReloadRender": 411994
-        },
-        "segmentSumMicroseconds": 1591140,
-        "totalMicroseconds": 1591140
-      },
-      {
-        "sample_id": "sha256:ef08ec1945b810f75deff2efb03c13a2c0df9e5a51216ab42eee6ffdd3ee7e82",
-        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
-        "transaction_ids": [
-          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
-        ],
-        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
-        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
-        "g0": "workbench-generation-e2e-001",
-        "g1": "workbench-generation-e2e-002",
-        "marks": {
-          "t0": 146506004,
-          "t1": 146622437,
-          "t2": 146648553,
-          "t3": 147689034,
-          "t4": 148096925
+          "canonicalCommit": 99408,
+          "statusProofEnqueue": 7337,
+          "workerPublish": 1033971,
+          "browserReloadRender": 385164
         },
-        "segmentsMicroseconds": {
-          "canonicalCommit": 116433,
-          "statusProofEnqueue": 26116,
-          "workerPublish": 1040481,
-          "browserReloadRender": 407891
-        },
-        "segmentSumMicroseconds": 1590921,
-        "totalMicroseconds": 1590921
+        "segmentSumMicroseconds": 1525880,
+        "totalMicroseconds": 1525880
       },
       {
-        "sample_id": "sha256:37402aaa3705c4d0eea8176e1b4a9f046e60a47f8a60deb50be9aa5e0dc4d563",
+        "sample_id": "sha256:c73eafab380cd0ce77980570d327adeb49ddb089f39b09da1ecc7797145233ec",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1681,23 +537,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 148764204,
-          "t1": 148879525,
-          "t2": 148902027,
-          "t3": 149949779,
-          "t4": 150379380
+          "t0": 45550048,
+          "t1": 45652957,
+          "t2": 45660590,
+          "t3": 46693708,
+          "t4": 47081496
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 115321,
-          "statusProofEnqueue": 22502,
-          "workerPublish": 1047752,
-          "browserReloadRender": 429601
-        },
-        "segmentSumMicroseconds": 1615176,
-        "totalMicroseconds": 1615176
+          "canonicalCommit": 102909,
+          "statusProofEnqueue": 7633,
+          "workerPublish": 1033118,
+          "browserReloadRender": 387788
+        },
+        "segmentSumMicroseconds": 1531448,
+        "totalMicroseconds": 1531448
       },
       {
-        "sample_id": "sha256:9f7f5ecc7430d71b5e6eb7d4e64d218edb62650eff14c565d7eccff2b5e3d743",
+        "sample_id": "sha256:0c943744665b02ddc6c3abbb1b0f2ee0aff60d8a8b7e1159b6a5e320e9d8015f",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1707,23 +563,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 151102340,
-          "t1": 151220747,
-          "t2": 151245735,
-          "t3": 152298100,
-          "t4": 152704813
+          "t0": 47677776,
+          "t1": 47771555,
+          "t2": 47778403,
+          "t3": 48819926,
+          "t4": 49235495
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 118407,
-          "statusProofEnqueue": 24988,
-          "workerPublish": 1052365,
-          "browserReloadRender": 406713
-        },
-        "segmentSumMicroseconds": 1602473,
-        "totalMicroseconds": 1602473
+          "canonicalCommit": 93779,
+          "statusProofEnqueue": 6848,
+          "workerPublish": 1041523,
+          "browserReloadRender": 415569
+        },
+        "segmentSumMicroseconds": 1557719,
+        "totalMicroseconds": 1557719
       },
       {
-        "sample_id": "sha256:2f46eba63d60cf41d7c0ac5d532607784d557d3cd811d611d6b236846746aeeb",
+        "sample_id": "sha256:4739981124a2ee4015b2294e646743f36abb320a2fe261b0ed4d4eb697aa3255",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1733,23 +589,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 153381954,
-          "t1": 153489467,
-          "t2": 153514833,
-          "t3": 154557407,
-          "t4": 154964425
+          "t0": 49900077,
+          "t1": 50000483,
+          "t2": 50030099,
+          "t3": 51065495,
+          "t4": 51472942
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 107513,
-          "statusProofEnqueue": 25366,
-          "workerPublish": 1042574,
-          "browserReloadRender": 407018
-        },
-        "segmentSumMicroseconds": 1582471,
-        "totalMicroseconds": 1582471
+          "canonicalCommit": 100406,
+          "statusProofEnqueue": 29616,
+          "workerPublish": 1035396,
+          "browserReloadRender": 407447
+        },
+        "segmentSumMicroseconds": 1572865,
+        "totalMicroseconds": 1572865
       },
       {
-        "sample_id": "sha256:2387b5c88bd3761c50fd6676c987d3f9b5683f35ad7039f05c3c05bba691f7fe",
+        "sample_id": "sha256:2a59075bda1d4339c9949c503d19acb90de074a637bed3a8516bdb66568a2301",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1759,23 +615,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 155636758,
-          "t1": 155748471,
-          "t2": 155772515,
-          "t3": 156813960,
-          "t4": 157217962
+          "t0": 52137122,
+          "t1": 52221187,
+          "t2": 52244970,
+          "t3": 53278423,
+          "t4": 53662885
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 111713,
-          "statusProofEnqueue": 24044,
-          "workerPublish": 1041445,
-          "browserReloadRender": 404002
-        },
-        "segmentSumMicroseconds": 1581204,
-        "totalMicroseconds": 1581204
+          "canonicalCommit": 84065,
+          "statusProofEnqueue": 23783,
+          "workerPublish": 1033453,
+          "browserReloadRender": 384462
+        },
+        "segmentSumMicroseconds": 1525763,
+        "totalMicroseconds": 1525763
       },
       {
-        "sample_id": "sha256:269171f3c8932ebf176c5f6f1ffd69977f0ff6e62059176730bb7eb5ef3cf85d",
+        "sample_id": "sha256:651213bcb2e5bd4b7658cddb19d6a5993aa2cb9523ec0e0e9e7634c4d7c6115c",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1785,23 +641,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 157886372,
-          "t1": 157986305,
-          "t2": 158016758,
-          "t3": 159056425,
-          "t4": 159448851
+          "t0": 54256829,
+          "t1": 54354183,
+          "t2": 54361565,
+          "t3": 55395927,
+          "t4": 55790083
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 99933,
-          "statusProofEnqueue": 30453,
-          "workerPublish": 1039667,
-          "browserReloadRender": 392426
-        },
-        "segmentSumMicroseconds": 1562479,
-        "totalMicroseconds": 1562479
+          "canonicalCommit": 97354,
+          "statusProofEnqueue": 7382,
+          "workerPublish": 1034362,
+          "browserReloadRender": 394156
+        },
+        "segmentSumMicroseconds": 1533254,
+        "totalMicroseconds": 1533254
       },
       {
-        "sample_id": "sha256:f07a2fd876263cbda9d2de7d88baf7ad4095e8d665c3db321556f389c59f6daf",
+        "sample_id": "sha256:a83c51db8ae7d933a756cde07178d33cc985c985f6d4eeabb30e602fc48d04a8",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1811,23 +667,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 160105065,
-          "t1": 160213082,
-          "t2": 160238989,
-          "t3": 161284164,
-          "t4": 161697412
+          "t0": 56391840,
+          "t1": 56485755,
+          "t2": 56493011,
+          "t3": 57528328,
+          "t4": 57911678
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 108017,
-          "statusProofEnqueue": 25907,
-          "workerPublish": 1045175,
-          "browserReloadRender": 413248
-        },
-        "segmentSumMicroseconds": 1592347,
-        "totalMicroseconds": 1592347
+          "canonicalCommit": 93915,
+          "statusProofEnqueue": 7256,
+          "workerPublish": 1035317,
+          "browserReloadRender": 383350
+        },
+        "segmentSumMicroseconds": 1519838,
+        "totalMicroseconds": 1519838
       },
       {
-        "sample_id": "sha256:3f378dee88072634bdd524a984f1a125f4b852dac26115a3db78017c9aab32f9",
+        "sample_id": "sha256:435a4e50ca80ac70c04fa0b50fa8fa58089e62d891f397269aaaeb02e2981ce2",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1837,23 +693,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 162356988,
-          "t1": 162456899,
-          "t2": 162486392,
-          "t3": 163517448,
-          "t4": 163908675
+          "t0": 58509757,
+          "t1": 58610426,
+          "t2": 58617791,
+          "t3": 59654824,
+          "t4": 60062222
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 99911,
-          "statusProofEnqueue": 29493,
-          "workerPublish": 1031056,
-          "browserReloadRender": 391227
-        },
-        "segmentSumMicroseconds": 1551687,
-        "totalMicroseconds": 1551687
+          "canonicalCommit": 100669,
+          "statusProofEnqueue": 7365,
+          "workerPublish": 1037033,
+          "browserReloadRender": 407398
+        },
+        "segmentSumMicroseconds": 1552465,
+        "totalMicroseconds": 1552465
       },
       {
-        "sample_id": "sha256:7fbbe7479e72506da4f35142e8aca1e01ddb8b3d067dfba3fe2f77aeefff089a",
+        "sample_id": "sha256:2237585a66a8d22c282f4a95123af65ed9e65562c487f68e7a9410e6e20c350c",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1863,23 +719,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 164512462,
-          "t1": 164615210,
-          "t2": 164622518,
-          "t3": 165657239,
-          "t4": 166046982
+          "t0": 60724476,
+          "t1": 60836363,
+          "t2": 60860875,
+          "t3": 61891001,
+          "t4": 62273541
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 102748,
-          "statusProofEnqueue": 7308,
-          "workerPublish": 1034721,
-          "browserReloadRender": 389743
-        },
-        "segmentSumMicroseconds": 1534520,
-        "totalMicroseconds": 1534520
+          "canonicalCommit": 111887,
+          "statusProofEnqueue": 24512,
+          "workerPublish": 1030126,
+          "browserReloadRender": 382540
+        },
+        "segmentSumMicroseconds": 1549065,
+        "totalMicroseconds": 1549065
       },
       {
-        "sample_id": "sha256:2d43d1ced48a083ec9e1fc84b98608f6edf4b8d8ec5ed27c7bd006f82cd60335",
+        "sample_id": "sha256:e2f52f02cec708ff2b99a24a6a905d66fcf2a407d886db5b51c77dc0a706401d",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1889,23 +745,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 166661993,
-          "t1": 166749172,
-          "t2": 166773734,
-          "t3": 167808913,
-          "t4": 168200084
+          "t0": 62864904,
+          "t1": 62947958,
+          "t2": 62961092,
+          "t3": 64001274,
+          "t4": 64390090
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 87179,
-          "statusProofEnqueue": 24562,
-          "workerPublish": 1035179,
-          "browserReloadRender": 391171
-        },
-        "segmentSumMicroseconds": 1538091,
-        "totalMicroseconds": 1538091
+          "canonicalCommit": 83054,
+          "statusProofEnqueue": 13134,
+          "workerPublish": 1040182,
+          "browserReloadRender": 388816
+        },
+        "segmentSumMicroseconds": 1525186,
+        "totalMicroseconds": 1525186
       },
       {
-        "sample_id": "sha256:cddd92664077f536729a1173b5b58ce9d98b0a0386ddafecb14fd8df2a1802ae",
+        "sample_id": "sha256:be7170360ec6db12a5f3f80fa59b8422fbdc701eed6c0be7604e954d560a1133",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1915,23 +771,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 168823318,
-          "t1": 168911212,
-          "t2": 168935739,
-          "t3": 169983322,
-          "t4": 170410773
+          "t0": 64990854,
+          "t1": 65090577,
+          "t2": 65098021,
+          "t3": 66142703,
+          "t4": 66613887
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 87894,
-          "statusProofEnqueue": 24527,
-          "workerPublish": 1047583,
-          "browserReloadRender": 427451
-        },
-        "segmentSumMicroseconds": 1587455,
-        "totalMicroseconds": 1587455
+          "canonicalCommit": 99723,
+          "statusProofEnqueue": 7444,
+          "workerPublish": 1044682,
+          "browserReloadRender": 471184
+        },
+        "segmentSumMicroseconds": 1623033,
+        "totalMicroseconds": 1623033
       },
       {
-        "sample_id": "sha256:9d9d60dfd665f651327081f2df04b9f2ceeeceba25141fd75e8ab916f44023ba",
+        "sample_id": "sha256:e0ff2d08643d35f34ff2ac41f18301837c1495582edc51a9db3354fdc0808e17",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1941,23 +797,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 171108855,
-          "t1": 171217955,
-          "t2": 171239204,
-          "t3": 172281257,
-          "t4": 172671833
+          "t0": 67340457,
+          "t1": 67449570,
+          "t2": 67470872,
+          "t3": 68530412,
+          "t4": 68957181
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 109100,
-          "statusProofEnqueue": 21249,
-          "workerPublish": 1042053,
-          "browserReloadRender": 390576
-        },
-        "segmentSumMicroseconds": 1562978,
-        "totalMicroseconds": 1562978
+          "canonicalCommit": 109113,
+          "statusProofEnqueue": 21302,
+          "workerPublish": 1059540,
+          "browserReloadRender": 426769
+        },
+        "segmentSumMicroseconds": 1616724,
+        "totalMicroseconds": 1616724
       },
       {
-        "sample_id": "sha256:b709aff77bd67bc9c1b7082c386a2f411b61c5cf817b937a8eb3b0a428f4d638",
+        "sample_id": "sha256:57ed3f6a2b994ddaa07a5a854252f8c6cc64b3d40ada06c5ef69b5b2080e0805",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1967,23 +823,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 173276986,
-          "t1": 173365309,
-          "t2": 173389483,
-          "t3": 174423556,
-          "t4": 174814048
+          "t0": 69658906,
+          "t1": 69768843,
+          "t2": 69793966,
+          "t3": 70840209,
+          "t4": 71265815
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 88323,
-          "statusProofEnqueue": 24174,
-          "workerPublish": 1034073,
-          "browserReloadRender": 390492
-        },
-        "segmentSumMicroseconds": 1537062,
-        "totalMicroseconds": 1537062
+          "canonicalCommit": 109937,
+          "statusProofEnqueue": 25123,
+          "workerPublish": 1046243,
+          "browserReloadRender": 425606
+        },
+        "segmentSumMicroseconds": 1606909,
+        "totalMicroseconds": 1606909
       },
       {
-        "sample_id": "sha256:6aa64c144092ad5e9c1e454d2eb0050bf5d8756654f46f588c660616da514777",
+        "sample_id": "sha256:62e34d9c30b022ed8a0fdfcb266d4b5e759a49f1900be0e789c4b7c7b31b7e0d",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -1993,23 +849,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 175429486,
-          "t1": 175516896,
-          "t2": 175541071,
-          "t3": 176577635,
-          "t4": 176963894
+          "t0": 71959890,
+          "t1": 72067984,
+          "t2": 72093721,
+          "t3": 73148560,
+          "t4": 73573859
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 87410,
-          "statusProofEnqueue": 24175,
-          "workerPublish": 1036564,
-          "browserReloadRender": 386259
-        },
-        "segmentSumMicroseconds": 1534408,
-        "totalMicroseconds": 1534408
+          "canonicalCommit": 108094,
+          "statusProofEnqueue": 25737,
+          "workerPublish": 1054839,
+          "browserReloadRender": 425299
+        },
+        "segmentSumMicroseconds": 1613969,
+        "totalMicroseconds": 1613969
       },
       {
-        "sample_id": "sha256:8240b6d5dd2e3f63b126dc8c1d02139235695f4ed0ce3d834d0021b900b9e3d6",
+        "sample_id": "sha256:2ddbdf2214b25838898ad3af71949232ef00829ae11ccc43a4c3fe3eaf67758d",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2019,23 +875,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 177572207,
-          "t1": 177661625,
-          "t2": 177685420,
-          "t3": 178725438,
-          "t4": 179113628
+          "t0": 74261584,
+          "t1": 74368906,
+          "t2": 74393354,
+          "t3": 75433470,
+          "t4": 75837365
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 89418,
-          "statusProofEnqueue": 23795,
-          "workerPublish": 1040018,
-          "browserReloadRender": 388190
-        },
-        "segmentSumMicroseconds": 1541421,
-        "totalMicroseconds": 1541421
+          "canonicalCommit": 107322,
+          "statusProofEnqueue": 24448,
+          "workerPublish": 1040116,
+          "browserReloadRender": 403895
+        },
+        "segmentSumMicroseconds": 1575781,
+        "totalMicroseconds": 1575781
       },
       {
-        "sample_id": "sha256:39b8ff1bbefd9a4f45e42b2c7cbcf3ea742636bed35544765c5b8532b3bb65cd",
+        "sample_id": "sha256:4f491571ee1012c689b9ca9d3090f6229769284c2034a7420a32617e415d6685",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2045,23 +901,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 179718549,
-          "t1": 179808029,
-          "t2": 179822915,
-          "t3": 180877714,
-          "t4": 181287658
+          "t0": 76495685,
+          "t1": 76592296,
+          "t2": 76620094,
+          "t3": 77659180,
+          "t4": 78062554
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 89480,
-          "statusProofEnqueue": 14886,
-          "workerPublish": 1054799,
-          "browserReloadRender": 409944
-        },
-        "segmentSumMicroseconds": 1569109,
-        "totalMicroseconds": 1569109
+          "canonicalCommit": 96611,
+          "statusProofEnqueue": 27798,
+          "workerPublish": 1039086,
+          "browserReloadRender": 403374
+        },
+        "segmentSumMicroseconds": 1566869,
+        "totalMicroseconds": 1566869
       },
       {
-        "sample_id": "sha256:fce08d0a8932194a4e38f8f28d43ba39116674a46f603e68671373dfcea0355e",
+        "sample_id": "sha256:fd6303831f56472d8f56b1d0e7725be06c35efa5ebeeb181e24ad0d8832a7d30",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2071,23 +927,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 181973069,
-          "t1": 182016175,
-          "t2": 182111542,
-          "t3": 183153976,
-          "t4": 183546294
+          "t0": 78725681,
+          "t1": 78835003,
+          "t2": 78859301,
+          "t3": 79899246,
+          "t4": 80303583
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 43106,
-          "statusProofEnqueue": 95367,
-          "workerPublish": 1042434,
-          "browserReloadRender": 392318
-        },
-        "segmentSumMicroseconds": 1573225,
-        "totalMicroseconds": 1573225
+          "canonicalCommit": 109322,
+          "statusProofEnqueue": 24298,
+          "workerPublish": 1039945,
+          "browserReloadRender": 404337
+        },
+        "segmentSumMicroseconds": 1577902,
+        "totalMicroseconds": 1577902
       },
       {
-        "sample_id": "sha256:d515169d9f31b017fb6b32869230ef4ccf0e25524c0dc3a08f3de046bc5de172",
+        "sample_id": "sha256:860ff2f45b398b27c5c497a607445886ee337e665d0c905a0049d454f648855c",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2097,23 +953,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 184149090,
-          "t1": 184249457,
-          "t2": 184256985,
-          "t3": 185291321,
-          "t4": 185679814
+          "t0": 80993036,
+          "t1": 81134244,
+          "t2": 81155150,
+          "t3": 82189729,
+          "t4": 82609477
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100367,
-          "statusProofEnqueue": 7528,
-          "workerPublish": 1034336,
-          "browserReloadRender": 388493
-        },
-        "segmentSumMicroseconds": 1530724,
-        "totalMicroseconds": 1530724
+          "canonicalCommit": 141208,
+          "statusProofEnqueue": 20906,
+          "workerPublish": 1034579,
+          "browserReloadRender": 419748
+        },
+        "segmentSumMicroseconds": 1616441,
+        "totalMicroseconds": 1616441
       },
       {
-        "sample_id": "sha256:edf8d67d98263fbd626983a31a79dd863e1f3850319257948d9785a517537f5d",
+        "sample_id": "sha256:ee18be7c3b2dc8025eb609cc3072fc5d05d0a3d5fa70cd12c9ae863c485052a4",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2123,23 +979,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 186306866,
-          "t1": 186406730,
-          "t2": 186435648,
-          "t3": 187465420,
-          "t4": 187856860
+          "t0": 83315518,
+          "t1": 83446355,
+          "t2": 83455615,
+          "t3": 84502236,
+          "t4": 84959481
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 99864,
-          "statusProofEnqueue": 28918,
-          "workerPublish": 1029772,
-          "browserReloadRender": 391440
-        },
-        "segmentSumMicroseconds": 1549994,
-        "totalMicroseconds": 1549994
+          "canonicalCommit": 130837,
+          "statusProofEnqueue": 9260,
+          "workerPublish": 1046621,
+          "browserReloadRender": 457245
+        },
+        "segmentSumMicroseconds": 1643963,
+        "totalMicroseconds": 1643963
       },
       {
-        "sample_id": "sha256:3616de5321548283618ea6e966a2a09796a48dea17ad4c3c286da53b058ec495",
+        "sample_id": "sha256:dc5cd21ac2d54ebe04f1672b268c99b01c094463a9a685fb9e3ce26ee9ccfa4d",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2149,23 +1005,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 188460408,
-          "t1": 188546986,
-          "t2": 188571030,
-          "t3": 189607484,
-          "t4": 190001342
+          "t0": 86752596,
+          "t1": 86770231,
+          "t2": 87806704,
+          "t3": 88799645,
+          "t4": 89279915
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 86578,
-          "statusProofEnqueue": 24044,
-          "workerPublish": 1036454,
-          "browserReloadRender": 393858
-        },
-        "segmentSumMicroseconds": 1540934,
-        "totalMicroseconds": 1540934
+          "canonicalCommit": 17635,
+          "statusProofEnqueue": 1036473,
+          "workerPublish": 992941,
+          "browserReloadRender": 480270
+        },
+        "segmentSumMicroseconds": 2527319,
+        "totalMicroseconds": 2527319
       },
       {
-        "sample_id": "sha256:d03f41480fabaa4bf19710985780f50e7af7850aba7a796bb6e3dbf5e0b0dae3",
+        "sample_id": "sha256:784d070c8bd387e2a7c3a8d27f745956d7cc16c0d48bcd0d22c06969a15341f8",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2175,23 +1031,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 190646220,
-          "t1": 190684225,
-          "t2": 190790145,
-          "t3": 191832499,
-          "t4": 192251204
+          "t0": 89989062,
+          "t1": 90103214,
+          "t2": 90128991,
+          "t3": 91164057,
+          "t4": 91559166
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 38005,
-          "statusProofEnqueue": 105920,
-          "workerPublish": 1042354,
-          "browserReloadRender": 418705
-        },
-        "segmentSumMicroseconds": 1604984,
-        "totalMicroseconds": 1604984
+          "canonicalCommit": 114152,
+          "statusProofEnqueue": 25777,
+          "workerPublish": 1035066,
+          "browserReloadRender": 395109
+        },
+        "segmentSumMicroseconds": 1570104,
+        "totalMicroseconds": 1570104
       },
       {
-        "sample_id": "sha256:dc93fe5f57989ac8ff3f6c2ecff24070839782e485f71d895665ead00afcbb96",
+        "sample_id": "sha256:a769c896f56c0ba0813703326490b892ae60c8eec5d4e5092e0ba3cad1174db2",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2201,23 +1057,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 192902368,
-          "t1": 192989599,
-          "t2": 193014140,
-          "t3": 194047450,
-          "t4": 194439098
+          "t0": 92248228,
+          "t1": 92362196,
+          "t2": 92386934,
+          "t3": 93428145,
+          "t4": 93855116
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 87231,
-          "statusProofEnqueue": 24541,
-          "workerPublish": 1033310,
-          "browserReloadRender": 391648
-        },
-        "segmentSumMicroseconds": 1536730,
-        "totalMicroseconds": 1536730
+          "canonicalCommit": 113968,
+          "statusProofEnqueue": 24738,
+          "workerPublish": 1041211,
+          "browserReloadRender": 426971
+        },
+        "segmentSumMicroseconds": 1606888,
+        "totalMicroseconds": 1606888
       },
       {
-        "sample_id": "sha256:27389318ce9ab88ef943bfba93bdbc4d1640eaa217a55ed6b1de30cba33bee44",
+        "sample_id": "sha256:f5b819004c1385ada8d08e12e8a24a85f3ab53611f682f80d0938b45e52ee6f5",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2227,23 +1083,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 195055155,
-          "t1": 195160613,
-          "t2": 195168440,
-          "t3": 196202023,
-          "t4": 196599308
+          "t0": 94576770,
+          "t1": 94692982,
+          "t2": 94717143,
+          "t3": 95763146,
+          "t4": 96190072
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 105458,
-          "statusProofEnqueue": 7827,
-          "workerPublish": 1033583,
-          "browserReloadRender": 397285
-        },
-        "segmentSumMicroseconds": 1544153,
-        "totalMicroseconds": 1544153
+          "canonicalCommit": 116212,
+          "statusProofEnqueue": 24161,
+          "workerPublish": 1046003,
+          "browserReloadRender": 426926
+        },
+        "segmentSumMicroseconds": 1613302,
+        "totalMicroseconds": 1613302
       },
       {
-        "sample_id": "sha256:3ca8bcea30bb335737aae7aac40aada4f59634112d7c92e8beeec178da229ab8",
+        "sample_id": "sha256:b8ec091b32cf29ce33035e9227cbb02e110ed6accb29d1280853a13b54e64729",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2253,23 +1109,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 197215150,
-          "t1": 197307298,
-          "t2": 197321787,
-          "t3": 198362944,
-          "t4": 198753400
+          "t0": 96905720,
+          "t1": 97023458,
+          "t2": 97045394,
+          "t3": 98084305,
+          "t4": 98516720
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 92148,
-          "statusProofEnqueue": 14489,
-          "workerPublish": 1041157,
-          "browserReloadRender": 390456
-        },
-        "segmentSumMicroseconds": 1538250,
-        "totalMicroseconds": 1538250
+          "canonicalCommit": 117738,
+          "statusProofEnqueue": 21936,
+          "workerPublish": 1038911,
+          "browserReloadRender": 432415
+        },
+        "segmentSumMicroseconds": 1611000,
+        "totalMicroseconds": 1611000
       },
       {
-        "sample_id": "sha256:38ed3ee84c4c0c51741231b603d4cd33e4d54ca0673ecb62ba07b3683afcb098",
+        "sample_id": "sha256:0892e1d015f7f9d9741f9971c888869dbe81d9a1ceb555cdc5e97d7dc37dd6ae",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2279,23 +1135,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 199360606,
-          "t1": 199461371,
-          "t2": 199468717,
-          "t3": 200503564,
-          "t4": 200909145
+          "t0": 99192147,
+          "t1": 99302946,
+          "t2": 99326365,
+          "t3": 100363333,
+          "t4": 100765073
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100765,
-          "statusProofEnqueue": 7346,
-          "workerPublish": 1034847,
-          "browserReloadRender": 405581
-        },
-        "segmentSumMicroseconds": 1548539,
-        "totalMicroseconds": 1548539
+          "canonicalCommit": 110799,
+          "statusProofEnqueue": 23419,
+          "workerPublish": 1036968,
+          "browserReloadRender": 401740
+        },
+        "segmentSumMicroseconds": 1572926,
+        "totalMicroseconds": 1572926
       },
       {
-        "sample_id": "sha256:473fc69a13372b80205327867ac41b5237532c5552e33c64e76c89815b545e86",
+        "sample_id": "sha256:141fad35787dc42db04fa19ac178351e488bfb3b33d1962e854b9d7c116e46b0",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2305,23 +1161,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 201580621,
-          "t1": 201618832,
-          "t2": 201727517,
-          "t3": 202761289,
-          "t4": 203150589
+          "t0": 101435297,
+          "t1": 101546593,
+          "t2": 101579679,
+          "t3": 102615866,
+          "t4": 103041763
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 38211,
-          "statusProofEnqueue": 108685,
-          "workerPublish": 1033772,
-          "browserReloadRender": 389300
-        },
-        "segmentSumMicroseconds": 1569968,
-        "totalMicroseconds": 1569968
+          "canonicalCommit": 111296,
+          "statusProofEnqueue": 33086,
+          "workerPublish": 1036187,
+          "browserReloadRender": 425897
+        },
+        "segmentSumMicroseconds": 1606466,
+        "totalMicroseconds": 1606466
       },
       {
-        "sample_id": "sha256:5c9f5867209d5efbd8776a09598b4a30d9d97072e68a39a6038118df3efc8498",
+        "sample_id": "sha256:265987316a9a1e721915127464f3d898ed91450caba250032ef0239ab629c84e",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2331,23 +1187,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 203752965,
-          "t1": 203852887,
-          "t2": 203860808,
-          "t3": 204894701,
-          "t4": 205285793
+          "t0": 103766666,
+          "t1": 103893513,
+          "t2": 103910639,
+          "t3": 104960059,
+          "t4": 105370277
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 99922,
-          "statusProofEnqueue": 7921,
-          "workerPublish": 1033893,
-          "browserReloadRender": 391092
-        },
-        "segmentSumMicroseconds": 1532828,
-        "totalMicroseconds": 1532828
+          "canonicalCommit": 126847,
+          "statusProofEnqueue": 17126,
+          "workerPublish": 1049420,
+          "browserReloadRender": 410218
+        },
+        "segmentSumMicroseconds": 1603611,
+        "totalMicroseconds": 1603611
       },
       {
-        "sample_id": "sha256:67fd94997a36ddb209d51c3f884e6af79db1f2aa41df75c8ae9881f074734077",
+        "sample_id": "sha256:efb66ea95382321a3c7f6d2458f580fb5f9b69ca8effa4cb768c338f3e01ef95",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2357,23 +1213,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 205893069,
-          "t1": 205992921,
-          "t2": 206000161,
-          "t3": 207039306,
-          "t4": 207446497
+          "t0": 106058195,
+          "t1": 106112141,
+          "t2": 106215632,
+          "t3": 107255598,
+          "t4": 107671991
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 99852,
-          "statusProofEnqueue": 7240,
-          "workerPublish": 1039145,
-          "browserReloadRender": 407191
-        },
-        "segmentSumMicroseconds": 1553428,
-        "totalMicroseconds": 1553428
+          "canonicalCommit": 53946,
+          "statusProofEnqueue": 103491,
+          "workerPublish": 1039966,
+          "browserReloadRender": 416393
+        },
+        "segmentSumMicroseconds": 1613796,
+        "totalMicroseconds": 1613796
       },
       {
-        "sample_id": "sha256:15161cf8bd12ffe92e102be71e7006a8a331dbc952943198500ce8f61005f73c",
+        "sample_id": "sha256:4a082853d990f2c3d10393f7245f4c21093a0fdd7a4152ce4fd73f0aba119de2",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2383,23 +1239,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 208079114,
-          "t1": 208179603,
-          "t2": 208187255,
-          "t3": 209222099,
-          "t4": 209611006
+          "t0": 108365197,
+          "t1": 108479518,
+          "t2": 108504321,
+          "t3": 109539336,
+          "t4": 109950516
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100489,
-          "statusProofEnqueue": 7652,
-          "workerPublish": 1034844,
-          "browserReloadRender": 388907
-        },
-        "segmentSumMicroseconds": 1531892,
-        "totalMicroseconds": 1531892
+          "canonicalCommit": 114321,
+          "statusProofEnqueue": 24803,
+          "workerPublish": 1035015,
+          "browserReloadRender": 411180
+        },
+        "segmentSumMicroseconds": 1585319,
+        "totalMicroseconds": 1585319
       },
       {
-        "sample_id": "sha256:7f43829a94e26abd886a862ab9b038301b7db691207a0dd3df641767b9a58f25",
+        "sample_id": "sha256:497afc3bcd70789ce8d56631ccf2001d55063e07f37933121fecce72a146adae",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2409,23 +1265,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 210217743,
-          "t1": 210319901,
-          "t2": 210328930,
-          "t3": 211368522,
-          "t4": 211783199
+          "t0": 110635169,
+          "t1": 110748643,
+          "t2": 110772652,
+          "t3": 111819367,
+          "t4": 112234044
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 102158,
-          "statusProofEnqueue": 9029,
-          "workerPublish": 1039592,
+          "canonicalCommit": 113474,
+          "statusProofEnqueue": 24009,
+          "workerPublish": 1046715,
           "browserReloadRender": 414677
         },
-        "segmentSumMicroseconds": 1565456,
-        "totalMicroseconds": 1565456
+        "segmentSumMicroseconds": 1598875,
+        "totalMicroseconds": 1598875
       },
       {
-        "sample_id": "sha256:4017c886dfab705e717a0837be99ef170f371dcfaaa397daf64b93633ad514c3",
+        "sample_id": "sha256:af1a6675669ced2d156ded812d858b8bf936e6b3a4e2acfc11dddacb036ffb1e",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2435,23 +1291,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 212486624,
-          "t1": 212642993,
-          "t2": 212653051,
-          "t3": 213680154,
-          "t4": 214070261
+          "t0": 112930466,
+          "t1": 113043077,
+          "t2": 113067662,
+          "t3": 114115841,
+          "t4": 114536235
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 156369,
-          "statusProofEnqueue": 10058,
-          "workerPublish": 1027103,
-          "browserReloadRender": 390107
+          "canonicalCommit": 112611,
+          "statusProofEnqueue": 24585,
+          "workerPublish": 1048179,
+          "browserReloadRender": 420394
         },
-        "segmentSumMicroseconds": 1583637,
-        "totalMicroseconds": 1583637
+        "segmentSumMicroseconds": 1605769,
+        "totalMicroseconds": 1605769
       },
       {
-        "sample_id": "sha256:cb1801d5c569f20eb37d884f1157f86ce0ad8af48cb4fadbc733a0585697cb93",
+        "sample_id": "sha256:49969f04edc96767324d8d23e7ed30d456f82043faf8a67e4c3503e9e31787bf",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2461,23 +1317,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 214675744,
-          "t1": 214774138,
-          "t2": 214781706,
-          "t3": 215813436,
-          "t4": 216204260
+          "t0": 115228572,
+          "t1": 115286686,
+          "t2": 115390746,
+          "t3": 116431882,
+          "t4": 116843678
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 98394,
-          "statusProofEnqueue": 7568,
-          "workerPublish": 1031730,
-          "browserReloadRender": 390824
+          "canonicalCommit": 58114,
+          "statusProofEnqueue": 104060,
+          "workerPublish": 1041136,
+          "browserReloadRender": 411796
         },
-        "segmentSumMicroseconds": 1528516,
-        "totalMicroseconds": 1528516
+        "segmentSumMicroseconds": 1615106,
+        "totalMicroseconds": 1615106
       },
       {
-        "sample_id": "sha256:507ed21a7fcf6437972c9aa06de531ab46030381778e2db85b780fa56d2f2224",
+        "sample_id": "sha256:c021924bfbac72c833b06296377685c63d2c3f92e4f08953afebe23b7d21b2a6",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2487,23 +1343,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 216808243,
-          "t1": 216912164,
-          "t2": 216919694,
-          "t3": 217956195,
-          "t4": 218343681
+          "t0": 117523570,
+          "t1": 117626715,
+          "t2": 117648548,
+          "t3": 118696577,
+          "t4": 119362500
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 103921,
-          "statusProofEnqueue": 7530,
-          "workerPublish": 1036501,
-          "browserReloadRender": 387486
+          "canonicalCommit": 103145,
+          "statusProofEnqueue": 21833,
+          "workerPublish": 1048029,
+          "browserReloadRender": 665923
         },
-        "segmentSumMicroseconds": 1535438,
-        "totalMicroseconds": 1535438
+        "segmentSumMicroseconds": 1838930,
+        "totalMicroseconds": 1838930
       },
       {
-        "sample_id": "sha256:8abfc6d5677e3faff7f2d6cc14467f31959b8fab5ac5478033097459cf61c732",
+        "sample_id": "sha256:6ddfd7d5ac192b61736f61cb0ceccc232dbffe399ed1b4f4b0d5fe655b003706",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2513,23 +1369,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 218944656,
-          "t1": 219046321,
-          "t2": 219053600,
-          "t3": 220089968,
-          "t4": 220477747
+          "t0": 120391889,
+          "t1": 120427229,
+          "t2": 120625380,
+          "t3": 121660568,
+          "t4": 122098503
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 101665,
-          "statusProofEnqueue": 7279,
-          "workerPublish": 1036368,
-          "browserReloadRender": 387779
+          "canonicalCommit": 35340,
+          "statusProofEnqueue": 198151,
+          "workerPublish": 1035188,
+          "browserReloadRender": 437935
         },
-        "segmentSumMicroseconds": 1533091,
-        "totalMicroseconds": 1533091
+        "segmentSumMicroseconds": 1706614,
+        "totalMicroseconds": 1706614
       },
       {
-        "sample_id": "sha256:e579c5ab237e0ec31db8984a18843be376d3ac83b8f3489a8742532d05c17306",
+        "sample_id": "sha256:d8188e786fcd72eb1e4a98d7fa9d4b2500b9312041d54343e61027a75a0005a2",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2539,23 +1395,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 221089702,
-          "t1": 221210317,
-          "t2": 221215724,
-          "t3": 222256605,
-          "t4": 222672334
+          "t0": 122861596,
+          "t1": 122978980,
+          "t2": 123000659,
+          "t3": 124052965,
+          "t4": 124506001
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 120615,
-          "statusProofEnqueue": 5407,
-          "workerPublish": 1040881,
-          "browserReloadRender": 415729
+          "canonicalCommit": 117384,
+          "statusProofEnqueue": 21679,
+          "workerPublish": 1052306,
+          "browserReloadRender": 453036
         },
-        "segmentSumMicroseconds": 1582632,
-        "totalMicroseconds": 1582632
+        "segmentSumMicroseconds": 1644405,
+        "totalMicroseconds": 1644405
       },
       {
-        "sample_id": "sha256:7cb85d6e29dc8627709caf9403e448e9782b635634b5e87ea07f8f00d79f9477",
+        "sample_id": "sha256:ca88e731e43b0f335242ade1f0c40a73d8308a22aa1285d9998943341d5f7d7a",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2565,23 +1421,23 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 223329696,
-          "t1": 223421672,
-          "t2": 223436367,
-          "t3": 224477890,
-          "t4": 224870411
+          "t0": 125331595,
+          "t1": 125372313,
+          "t2": 125492428,
+          "t3": 126541798,
+          "t4": 126962403
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 91976,
-          "statusProofEnqueue": 14695,
-          "workerPublish": 1041523,
-          "browserReloadRender": 392521
+          "canonicalCommit": 40718,
+          "statusProofEnqueue": 120115,
+          "workerPublish": 1049370,
+          "browserReloadRender": 420605
         },
-        "segmentSumMicroseconds": 1540715,
-        "totalMicroseconds": 1540715
+        "segmentSumMicroseconds": 1630808,
+        "totalMicroseconds": 1630808
       },
       {
-        "sample_id": "sha256:dbc10cd00517bb31d2b4d64ca555eee9f49aba79c3458804c33ad16941763ac8",
+        "sample_id": "sha256:d6a2d948014c516cafa25132c60b7a2703b0e0cd47ec0774cdb73da31bf2eb07",
         "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
         "transaction_ids": [
           "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
@@ -2591,50 +1447,1194 @@
         "g0": "workbench-generation-e2e-001",
         "g1": "workbench-generation-e2e-002",
         "marks": {
-          "t0": 225525186,
-          "t1": 225625921,
-          "t2": 225632840,
-          "t3": 226663239,
-          "t4": 227053678
+          "t0": 127650560,
+          "t1": 127704661,
+          "t2": 127822474,
+          "t3": 128864069,
+          "t4": 129285029
         },
         "segmentsMicroseconds": {
-          "canonicalCommit": 100735,
-          "statusProofEnqueue": 6919,
-          "workerPublish": 1030399,
-          "browserReloadRender": 390439
+          "canonicalCommit": 54101,
+          "statusProofEnqueue": 117813,
+          "workerPublish": 1041595,
+          "browserReloadRender": 420960
         },
-        "segmentSumMicroseconds": 1528492,
-        "totalMicroseconds": 1528492
+        "segmentSumMicroseconds": 1634469,
+        "totalMicroseconds": 1634469
+      },
+      {
+        "sample_id": "sha256:ea165b994080cf15065ec7dadce6389f365fda9abf7d19c8597e0127f72b81ef",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 130051612,
+          "t1": 130107774,
+          "t2": 130221112,
+          "t3": 131260116,
+          "t4": 131688580
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 56162,
+          "statusProofEnqueue": 113338,
+          "workerPublish": 1039004,
+          "browserReloadRender": 428464
+        },
+        "segmentSumMicroseconds": 1636968,
+        "totalMicroseconds": 1636968
+      },
+      {
+        "sample_id": "sha256:29a25965bddaa848a2405594862d333072e6514e4e26ee4e3dc52780df2dd17f",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 132414050,
+          "t1": 132534198,
+          "t2": 132556204,
+          "t3": 133594361,
+          "t4": 134014668
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 120148,
+          "statusProofEnqueue": 22006,
+          "workerPublish": 1038157,
+          "browserReloadRender": 420307
+        },
+        "segmentSumMicroseconds": 1600618,
+        "totalMicroseconds": 1600618
+      },
+      {
+        "sample_id": "sha256:fc424072b28a60b6dc45d971e3715c603e0f56610dcb135fd20d158f7c8e184a",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 134736278,
+          "t1": 134775067,
+          "t2": 134885592,
+          "t3": 135932758,
+          "t4": 136355814
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 38789,
+          "statusProofEnqueue": 110525,
+          "workerPublish": 1047166,
+          "browserReloadRender": 423056
+        },
+        "segmentSumMicroseconds": 1619536,
+        "totalMicroseconds": 1619536
+      },
+      {
+        "sample_id": "sha256:af0a61c569bcbc4200fa3ab3627f946519cae52305a24b1a7b899198c3bd9c85",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 137147784,
+          "t1": 137297097,
+          "t2": 138328648,
+          "t3": 139320520,
+          "t4": 139735000
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 149313,
+          "statusProofEnqueue": 1031551,
+          "workerPublish": 991872,
+          "browserReloadRender": 414480
+        },
+        "segmentSumMicroseconds": 2587216,
+        "totalMicroseconds": 2587216
+      },
+      {
+        "sample_id": "sha256:c161a2aa0c4f1a0ae830777dc89fc3c48c2f43d070cbb1ace3b3968e92e88f43",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 140421624,
+          "t1": 140554119,
+          "t2": 140560428,
+          "t3": 141604893,
+          "t4": 142039245
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 132495,
+          "statusProofEnqueue": 6309,
+          "workerPublish": 1044465,
+          "browserReloadRender": 434352
+        },
+        "segmentSumMicroseconds": 1617621,
+        "totalMicroseconds": 1617621
+      },
+      {
+        "sample_id": "sha256:13e986e5554ff5f7508184679c6659e63ec657f8aca59c155522cb9287fef37e",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 142752206,
+          "t1": 142889373,
+          "t2": 142895691,
+          "t3": 143939364,
+          "t4": 144401780
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 137167,
+          "statusProofEnqueue": 6318,
+          "workerPublish": 1043673,
+          "browserReloadRender": 462416
+        },
+        "segmentSumMicroseconds": 1649574,
+        "totalMicroseconds": 1649574
+      },
+      {
+        "sample_id": "sha256:0f8d013a30ca88816276c3c4124f2729c2ec76ae84e890fa9dd214d98db90fea",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 145109979,
+          "t1": 145223974,
+          "t2": 145248765,
+          "t3": 146304122,
+          "t4": 146772315
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 113995,
+          "statusProofEnqueue": 24791,
+          "workerPublish": 1055357,
+          "browserReloadRender": 468193
+        },
+        "segmentSumMicroseconds": 1662336,
+        "totalMicroseconds": 1662336
+      },
+      {
+        "sample_id": "sha256:40bd80be998a713c016d6c137221d91c70f62fe507ea124b851487132bcadc69",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 147528709,
+          "t1": 147589261,
+          "t2": 147725126,
+          "t3": 148776110,
+          "t4": 149278899
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 60552,
+          "statusProofEnqueue": 135865,
+          "workerPublish": 1050984,
+          "browserReloadRender": 502789
+        },
+        "segmentSumMicroseconds": 1750190,
+        "totalMicroseconds": 1750190
+      },
+      {
+        "sample_id": "sha256:3a64fb9062305e03831d90d37807d758b12c9533f14649a5358b8b41f21851f4",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 150054038,
+          "t1": 150172988,
+          "t2": 150198240,
+          "t3": 151240684,
+          "t4": 151704914
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 118950,
+          "statusProofEnqueue": 25252,
+          "workerPublish": 1042444,
+          "browserReloadRender": 464230
+        },
+        "segmentSumMicroseconds": 1650876,
+        "totalMicroseconds": 1650876
+      },
+      {
+        "sample_id": "sha256:bb2fd9674be3cadc06a996c6e4517c76772e85239959776be10925438dea3671",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 152430771,
+          "t1": 152546001,
+          "t2": 152572496,
+          "t3": 153614522,
+          "t4": 154072674
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 115230,
+          "statusProofEnqueue": 26495,
+          "workerPublish": 1042026,
+          "browserReloadRender": 458152
+        },
+        "segmentSumMicroseconds": 1641903,
+        "totalMicroseconds": 1641903
+      },
+      {
+        "sample_id": "sha256:1dc0247f2dd1d042fbb180ebaa2fe63c14254732cfe8579282f8f7128b229348",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 154980999,
+          "t1": 155049240,
+          "t2": 155242419,
+          "t3": 156264375,
+          "t4": 156757300
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 68241,
+          "statusProofEnqueue": 193179,
+          "workerPublish": 1021956,
+          "browserReloadRender": 492925
+        },
+        "segmentSumMicroseconds": 1776301,
+        "totalMicroseconds": 1776301
+      },
+      {
+        "sample_id": "sha256:9540470de137093d8aa13f2833362d4ec87bd53b7aeaef628692876708ae72ae",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 157579565,
+          "t1": 157639423,
+          "t2": 157762111,
+          "t3": 158819696,
+          "t4": 159259693
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 59858,
+          "statusProofEnqueue": 122688,
+          "workerPublish": 1057585,
+          "browserReloadRender": 439997
+        },
+        "segmentSumMicroseconds": 1680128,
+        "totalMicroseconds": 1680128
+      },
+      {
+        "sample_id": "sha256:b07cfc26269a12c8258b9990a2c3a7b2ff7d405bd170504c8df6654ce6dd54a7",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 160059525,
+          "t1": 160131710,
+          "t2": 160290810,
+          "t3": 161340237,
+          "t4": 161789882
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 72185,
+          "statusProofEnqueue": 159100,
+          "workerPublish": 1049427,
+          "browserReloadRender": 449645
+        },
+        "segmentSumMicroseconds": 1730357,
+        "totalMicroseconds": 1730357
+      },
+      {
+        "sample_id": "sha256:adfacc95e61c5498323d7a846b2ba54644d5bdc7846cd965046161f36b00ff75",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 162582393,
+          "t1": 162640980,
+          "t2": 162769542,
+          "t3": 163816098,
+          "t4": 164237028
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 58587,
+          "statusProofEnqueue": 128562,
+          "workerPublish": 1046556,
+          "browserReloadRender": 420930
+        },
+        "segmentSumMicroseconds": 1654635,
+        "totalMicroseconds": 1654635
+      },
+      {
+        "sample_id": "sha256:7cb7fbe483503c654059d08e9111d00f9f1edd2ee83039271dc9212a4bbd2914",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 165007870,
+          "t1": 165072475,
+          "t2": 165191424,
+          "t3": 166255594,
+          "t4": 166698273
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 64605,
+          "statusProofEnqueue": 118949,
+          "workerPublish": 1064170,
+          "browserReloadRender": 442679
+        },
+        "segmentSumMicroseconds": 1690403,
+        "totalMicroseconds": 1690403
+      },
+      {
+        "sample_id": "sha256:fcc6b00b8be46b36c73312f60703bdf7ed7e64378723cb5d706165dbd1cd5a4b",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 167453835,
+          "t1": 167508820,
+          "t2": 167635391,
+          "t3": 168696701,
+          "t4": 169155586
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 54985,
+          "statusProofEnqueue": 126571,
+          "workerPublish": 1061310,
+          "browserReloadRender": 458885
+        },
+        "segmentSumMicroseconds": 1701751,
+        "totalMicroseconds": 1701751
+      },
+      {
+        "sample_id": "sha256:5cee0c4ae762feafc10420879730fbc934004cdb42d906557e80e786f1a17dc5",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 169965141,
+          "t1": 170028939,
+          "t2": 170170520,
+          "t3": 171223598,
+          "t4": 171680697
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 63798,
+          "statusProofEnqueue": 141581,
+          "workerPublish": 1053078,
+          "browserReloadRender": 457099
+        },
+        "segmentSumMicroseconds": 1715556,
+        "totalMicroseconds": 1715556
+      },
+      {
+        "sample_id": "sha256:d569ca74dc57f00f9b614110fa6dc92a8f7bc6218baca371f6307a1fd6fa5244",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 172533274,
+          "t1": 172597812,
+          "t2": 172804780,
+          "t3": 173870254,
+          "t4": 174326705
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 64538,
+          "statusProofEnqueue": 206968,
+          "workerPublish": 1065474,
+          "browserReloadRender": 456451
+        },
+        "segmentSumMicroseconds": 1793431,
+        "totalMicroseconds": 1793431
+      },
+      {
+        "sample_id": "sha256:3204d7e493a8fe6ff855fddcae1419175799a6e3f937e82d6c59daf0e8d3b54d",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 175180800,
+          "t1": 175260645,
+          "t2": 175519399,
+          "t3": 176514155,
+          "t4": 176978080
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 79845,
+          "statusProofEnqueue": 258754,
+          "workerPublish": 994756,
+          "browserReloadRender": 463925
+        },
+        "segmentSumMicroseconds": 1797280,
+        "totalMicroseconds": 1797280
+      },
+      {
+        "sample_id": "sha256:e7795c2eee63c784da1219cfe65090811193cbdd4db77130f073e21404cf4cec",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 177791155,
+          "t1": 177862949,
+          "t2": 178011862,
+          "t3": 179078659,
+          "t4": 179562340
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 71794,
+          "statusProofEnqueue": 148913,
+          "workerPublish": 1066797,
+          "browserReloadRender": 483681
+        },
+        "segmentSumMicroseconds": 1771185,
+        "totalMicroseconds": 1771185
+      },
+      {
+        "sample_id": "sha256:eb38343ecf13d98fabc3221e1a14feef8909bdf373c00a30d66a4bc400c24b4e",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 180443274,
+          "t1": 180510945,
+          "t2": 180759222,
+          "t3": 181764794,
+          "t4": 182206738
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 67671,
+          "statusProofEnqueue": 248277,
+          "workerPublish": 1005572,
+          "browserReloadRender": 441944
+        },
+        "segmentSumMicroseconds": 1763464,
+        "totalMicroseconds": 1763464
+      },
+      {
+        "sample_id": "sha256:07e84dc094b49f11356d996213968c1432e10ef7ab563d494069cf8a7c11d90b",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 182943753,
+          "t1": 183005884,
+          "t2": 183126015,
+          "t3": 184172178,
+          "t4": 184610527
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 62131,
+          "statusProofEnqueue": 120131,
+          "workerPublish": 1046163,
+          "browserReloadRender": 438349
+        },
+        "segmentSumMicroseconds": 1666774,
+        "totalMicroseconds": 1666774
+      },
+      {
+        "sample_id": "sha256:cfb56dffc68c3327bc45dbb52ac678a74e5b82342c1f3afaf76c76e8928ee7bd",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 185393474,
+          "t1": 185456402,
+          "t2": 185609789,
+          "t3": 186653310,
+          "t4": 187119379
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 62928,
+          "statusProofEnqueue": 153387,
+          "workerPublish": 1043521,
+          "browserReloadRender": 466069
+        },
+        "segmentSumMicroseconds": 1725905,
+        "totalMicroseconds": 1725905
+      },
+      {
+        "sample_id": "sha256:d7c888b2c908d309a3e1d724d516d25f490714947c18ec902c0ae52da2c9cbe8",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 187895635,
+          "t1": 187955940,
+          "t2": 188086511,
+          "t3": 189163319,
+          "t4": 189605441
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 60305,
+          "statusProofEnqueue": 130571,
+          "workerPublish": 1076808,
+          "browserReloadRender": 442122
+        },
+        "segmentSumMicroseconds": 1709806,
+        "totalMicroseconds": 1709806
+      },
+      {
+        "sample_id": "sha256:4c9d45669dde36d8e45f60f361833304f4316cdc0f39b40020dd92a7830daf2d",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 190791955,
+          "t1": 191090054,
+          "t2": 192090140,
+          "t3": 193082688,
+          "t4": 193535551
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 298099,
+          "statusProofEnqueue": 1000086,
+          "workerPublish": 992548,
+          "browserReloadRender": 452863
+        },
+        "segmentSumMicroseconds": 2743596,
+        "totalMicroseconds": 2743596
+      },
+      {
+        "sample_id": "sha256:f1ebb7bbb1b2ba573e6c95c4f33b781433b13d2c2ea88fddf1be5a274ee31f42",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 194361230,
+          "t1": 194418300,
+          "t2": 194538816,
+          "t3": 195590368,
+          "t4": 196006866
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 57070,
+          "statusProofEnqueue": 120516,
+          "workerPublish": 1051552,
+          "browserReloadRender": 416498
+        },
+        "segmentSumMicroseconds": 1645636,
+        "totalMicroseconds": 1645636
+      },
+      {
+        "sample_id": "sha256:fb04743d5263856223bd26c11b437c191d86ea08429945002034b59f11975d36",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 196702558,
+          "t1": 196823238,
+          "t2": 196848188,
+          "t3": 197899582,
+          "t4": 198332640
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 120680,
+          "statusProofEnqueue": 24950,
+          "workerPublish": 1051394,
+          "browserReloadRender": 433058
+        },
+        "segmentSumMicroseconds": 1630082,
+        "totalMicroseconds": 1630082
+      },
+      {
+        "sample_id": "sha256:a712da39a770601c56823cf677c1afc2790bd0e79f5b110b8d776f2f27c2e792",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 199054771,
+          "t1": 199114631,
+          "t2": 199248301,
+          "t3": 200302547,
+          "t4": 200757039
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 59860,
+          "statusProofEnqueue": 133670,
+          "workerPublish": 1054246,
+          "browserReloadRender": 454492
+        },
+        "segmentSumMicroseconds": 1702268,
+        "totalMicroseconds": 1702268
+      },
+      {
+        "sample_id": "sha256:73d686df1eeda02a8a24e69c9e2f6deecedb144bafdf687ad38a16dae5c557c3",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 201622445,
+          "t1": 201688952,
+          "t2": 201930754,
+          "t3": 202933697,
+          "t4": 203399329
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 66507,
+          "statusProofEnqueue": 241802,
+          "workerPublish": 1002943,
+          "browserReloadRender": 465632
+        },
+        "segmentSumMicroseconds": 1776884,
+        "totalMicroseconds": 1776884
+      },
+      {
+        "sample_id": "sha256:79c0b770b1e7294aeda10d975edf7892d0bf92b8e0a3a6ef7e5b45c76956165d",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 204177792,
+          "t1": 204234657,
+          "t2": 204357087,
+          "t3": 205400845,
+          "t4": 205841456
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 56865,
+          "statusProofEnqueue": 122430,
+          "workerPublish": 1043758,
+          "browserReloadRender": 440611
+        },
+        "segmentSumMicroseconds": 1663664,
+        "totalMicroseconds": 1663664
+      },
+      {
+        "sample_id": "sha256:49e827e8af42948013b3644f4302e424e8654ea5a6bf481e36c15645643bd5f7",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 206711926,
+          "t1": 206776623,
+          "t2": 206974162,
+          "t3": 207974048,
+          "t4": 208438999
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 64697,
+          "statusProofEnqueue": 197539,
+          "workerPublish": 999886,
+          "browserReloadRender": 464951
+        },
+        "segmentSumMicroseconds": 1727073,
+        "totalMicroseconds": 1727073
+      },
+      {
+        "sample_id": "sha256:c4ad2f22b062c36c038bd625da68683512a53bcd8d67e142db4460a7c86a7620",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 209343287,
+          "t1": 209408173,
+          "t2": 209669989,
+          "t3": 210674430,
+          "t4": 211139872
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 64886,
+          "statusProofEnqueue": 261816,
+          "workerPublish": 1004441,
+          "browserReloadRender": 465442
+        },
+        "segmentSumMicroseconds": 1796585,
+        "totalMicroseconds": 1796585
+      },
+      {
+        "sample_id": "sha256:48b42f104a065ec26996b11eeff811861894642e3fb2f6ac0ec39480030773cd",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 211970860,
+          "t1": 212034720,
+          "t2": 212173212,
+          "t3": 213231514,
+          "t4": 213735283
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 63860,
+          "statusProofEnqueue": 138492,
+          "workerPublish": 1058302,
+          "browserReloadRender": 503769
+        },
+        "segmentSumMicroseconds": 1764423,
+        "totalMicroseconds": 1764423
+      },
+      {
+        "sample_id": "sha256:bca1b56da4341e206fba36dc91f7891d1616b93458cb3d56f344733d8500c92c",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 214728249,
+          "t1": 214796739,
+          "t2": 215058338,
+          "t3": 216078553,
+          "t4": 216558195
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 68490,
+          "statusProofEnqueue": 261599,
+          "workerPublish": 1020215,
+          "browserReloadRender": 479642
+        },
+        "segmentSumMicroseconds": 1829946,
+        "totalMicroseconds": 1829946
+      },
+      {
+        "sample_id": "sha256:4d79c0be8a3dc395e0c929520e5f941a3f8713d2796558872a8593e09e088dd6",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 217478645,
+          "t1": 217554847,
+          "t2": 217800874,
+          "t3": 218800548,
+          "t4": 219245858
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 76202,
+          "statusProofEnqueue": 246027,
+          "workerPublish": 999674,
+          "browserReloadRender": 445310
+        },
+        "segmentSumMicroseconds": 1767213,
+        "totalMicroseconds": 1767213
+      },
+      {
+        "sample_id": "sha256:a8a9254a25ab46e53662410fab4452635ed1990f513812c193da1c61a11e2850",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 220027697,
+          "t1": 220084730,
+          "t2": 220209680,
+          "t3": 221264745,
+          "t4": 221722117
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 57033,
+          "statusProofEnqueue": 124950,
+          "workerPublish": 1055065,
+          "browserReloadRender": 457372
+        },
+        "segmentSumMicroseconds": 1694420,
+        "totalMicroseconds": 1694420
+      },
+      {
+        "sample_id": "sha256:e3a337960ab23ef8d6e24f72b91e62a5cd932f8f3327f63e9ac49a61804d04d8",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 222504735,
+          "t1": 222571272,
+          "t2": 222696208,
+          "t3": 223743984,
+          "t4": 224188116
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 66537,
+          "statusProofEnqueue": 124936,
+          "workerPublish": 1047776,
+          "browserReloadRender": 444132
+        },
+        "segmentSumMicroseconds": 1683381,
+        "totalMicroseconds": 1683381
+      },
+      {
+        "sample_id": "sha256:de6abda7534ac9d1f5a97409d2d8d8ba3842499b71f9e51047ea276f93b01228",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 224985917,
+          "t1": 225042296,
+          "t2": 225163994,
+          "t3": 226206553,
+          "t4": 226701224
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 56379,
+          "statusProofEnqueue": 121698,
+          "workerPublish": 1042559,
+          "browserReloadRender": 494671
+        },
+        "segmentSumMicroseconds": 1715307,
+        "totalMicroseconds": 1715307
+      },
+      {
+        "sample_id": "sha256:e3109bb7f52e23f7c84650ba8350a5f71ed793c6f3761124f26aa4044b28e154",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 227704316,
+          "t1": 227776099,
+          "t2": 228070565,
+          "t3": 229083933,
+          "t4": 229560315
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 71783,
+          "statusProofEnqueue": 294466,
+          "workerPublish": 1013368,
+          "browserReloadRender": 476382
+        },
+        "segmentSumMicroseconds": 1855999,
+        "totalMicroseconds": 1855999
+      },
+      {
+        "sample_id": "sha256:3c8343410563cab5a11e47491ef19257d2a9a544ee310d6f044bb93590bf74be",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 230528875,
+          "t1": 230611740,
+          "t2": 230864244,
+          "t3": 231872801,
+          "t4": 232320867
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 82865,
+          "statusProofEnqueue": 252504,
+          "workerPublish": 1008557,
+          "browserReloadRender": 448066
+        },
+        "segmentSumMicroseconds": 1791992,
+        "totalMicroseconds": 1791992
+      },
+      {
+        "sample_id": "sha256:17e00b38fd27d738b614c1e4f41eab0d04526e2c20800eafaad374f97f389eea",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 233198508,
+          "t1": 233477492,
+          "t2": 233543862,
+          "t3": 234543234,
+          "t4": 235011096
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 278984,
+          "statusProofEnqueue": 66370,
+          "workerPublish": 999372,
+          "browserReloadRender": 467862
+        },
+        "segmentSumMicroseconds": 1812588,
+        "totalMicroseconds": 1812588
+      },
+      {
+        "sample_id": "sha256:348bf7080a9bb3629fbe1e66ec8bfbd25da56705e70777071171323ba9bfc16d",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 235818064,
+          "t1": 235880815,
+          "t2": 236040187,
+          "t3": 237099105,
+          "t4": 237538284
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 62751,
+          "statusProofEnqueue": 159372,
+          "workerPublish": 1058918,
+          "browserReloadRender": 439179
+        },
+        "segmentSumMicroseconds": 1720220,
+        "totalMicroseconds": 1720220
+      },
+      {
+        "sample_id": "sha256:aacc9112ccf000ceb5cadc136b89622263f41779fb65b445b24626f017a9d5ed",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 238327817,
+          "t1": 238384695,
+          "t2": 238500744,
+          "t3": 239554290,
+          "t4": 239986620
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 56878,
+          "statusProofEnqueue": 116049,
+          "workerPublish": 1053546,
+          "browserReloadRender": 432330
+        },
+        "segmentSumMicroseconds": 1658803,
+        "totalMicroseconds": 1658803
+      },
+      {
+        "sample_id": "sha256:0760e52adbd261125b243d94fba131e96ab2e02dd9a1e5f73b2f056d514bbba4",
+        "batch_id": "sha256:688611d2b2f59ff06f3b6c73ce4952d86aaa39321e637a1c1c4d5c7b0fc178ce",
+        "transaction_ids": [
+          "sha256:6eae2275a8af8ccb5ebe0ac677f83b005bc93bb481a939d5a0d1b10e4e038a05"
+        ],
+        "business_identity": "sha256:ee1ac91442645d40478d6ad68a6783203d6d340fba9e134aafef5bb20653ca6d",
+        "exact_scope": "sha256:03b60d0a544a12ba79fe796191d734d6360337ca4c928f9fd2a8084f58386d50",
+        "g0": "workbench-generation-e2e-001",
+        "g1": "workbench-generation-e2e-002",
+        "marks": {
+          "t0": 240748651,
+          "t1": 240811014,
+          "t2": 240939560,
+          "t3": 242012984,
+          "t4": 242474276
+        },
+        "segmentsMicroseconds": {
+          "canonicalCommit": 62363,
+          "statusProofEnqueue": 128546,
+          "workerPublish": 1073424,
+          "browserReloadRender": 461292
+        },
+        "segmentSumMicroseconds": 1725625,
+        "totalMicroseconds": 1725625
       }
     ],
     "distributionsMicroseconds": {
       "canonicalCommit": {
-        "p50": 101665,
-        "p95": 120615,
-        "p99": 129467
+        "p50": 95620,
+        "p95": 132495,
+        "p99": 278984
       },
       "statusProofEnqueue": {
-        "p50": 24988,
-        "p95": 108002,
-        "p99": 109671
+        "p50": 26505,
+        "p95": 261599,
+        "p99": 1031551
       },
       "workerPublish": {
-        "p50": 1040542,
-        "p95": 1050324,
-        "p99": 1056845
+        "p50": 1040116,
+        "p95": 1061310,
+        "p99": 1073424
       },
       "browserReloadRender": {
-        "p50": 407718,
-        "p95": 433769,
-        "p99": 437240
+        "p50": 425897,
+        "p95": 483681,
+        "p99": 503769
       },
       "total": {
-        "p50": 1583265,
-        "p95": 1625031,
-        "p99": 1637689
+        "p50": 1617621,
+        "p95": 1829946,
+        "p99": 2587216
       }
     },
-    "total_p99_microseconds": 1637689,
+    "total_p99_microseconds": 2587216,
     "slo_microseconds": 3000000,
     "pass": true
   }

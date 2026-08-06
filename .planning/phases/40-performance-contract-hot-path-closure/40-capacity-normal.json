@@ -17,22 +17,24 @@
     "status": "measured",
     "window": null
   },
+  "capacity_concurrency_pass": true,
   "capacity_tier": "normal",
   "concurrency": 6,
-  "evidence_environment": "production-via-read-only-tunnel",
+  "evidence_environment": "production_read_only_tunnel",
   "evidence_window": {
-    "completed_at": "2026-08-06T09:00:56.528548+00:00",
-    "started_at": "2026-08-06T09:00:54.815031+00:00"
+    "completed_at": "2026-08-06T11:31:12.761118+00:00",
+    "started_at": "2026-08-06T11:31:10.852676+00:00"
   },
-  "generated_at": "2026-08-06T09:00:56.528548+00:00",
+  "generated_at": "2026-08-06T11:31:12.761118+00:00",
   "iterations": 20,
+  "observed_peak_concurrency": 6,
   "probes": [
     {
       "cache_statuses": {},
       "duration_ms": {
-        "p50": 272.565,
-        "p95": 464.141,
-        "p99": 465.426
+        "p50": 308.025,
+        "p95": 361.735,
+        "p99": 363.593
       },
       "error_count": 0,
       "error_counts": {},
@@ -45,6 +47,9 @@
       "kind": "api",
       "name": "workbench_refresh_status_all",
       "non_fresh_read_model_statuses": {},
+      "p95_pass": true,
+      "p99_pass": true,
+      "p99_target_ms": 2000.0,
       "path": "/api/workbench/refresh-status?month=all",
       "read_model_statuses": {
         "fresh": 20
@@ -70,7 +75,7 @@
   "summary": {
     "error_count": 0,
     "failed_probe_count": 0,
-    "max_p95_ms": 464.141,
+    "max_p95_ms": 361.735,
     "probe_count": 1,
     "request_count": 20,
     "response_bytes_total": 39760,

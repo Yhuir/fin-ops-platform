@@ -1,0 +1,8 @@
+{
+  "approved_by": "user_explicit_blanket_authorization_2026-08-06",
+  "c_normal": 6,
+  "c_peak": 6,
+  "contract_version": "acl-v11-phase40-20260806",
+  "mode": "capacity_contract",
+  "source": "production_settings_access_control_eligible_accounts"
+}

@@ -1,0 +1,13 @@
+{
+  "probes": [
+    {
+      "expected_statuses": [
+        200
+      ],
+      "name": "workbench_refresh_status_all",
+      "path": "/api/workbench/refresh-status?month=all",
+      "p99_target_ms": 2000,
+      "target_ms": 1000
+    }
+  ]
+}
