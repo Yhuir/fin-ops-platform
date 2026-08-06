@@ -1107,11 +1107,15 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
         for sql, params in connection.executed
         if "insert into app.oa_attachment_invoice_cache_sources" in sql
     )
-    assert "attachment_identity_invoice" in executed_sql
+    assert "('attachment_identity_' || source.source_kind)" in executed_sql
     assert "from app.oa_attachments attachment" in executed_sql
     assert any(
-        params == ("cache-key-1",) for sql, params in connection.executed if "attachment_identity_invoice" in sql
+        params == (False, [], True, ["cache-key-1"])
+        for sql, params in connection.executed
+        if "cache_evidence_sources as" in sql
     )
+    assert "source.source_kind in ('invoice', 'evidence', 'artifact')" in executed_sql
+    assert "is distinct from" in executed_sql
 
 
 def test_workbench_pair_history_load_preserves_original_mongo_array_order() -> None:

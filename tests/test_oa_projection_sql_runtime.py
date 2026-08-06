@@ -239,6 +239,16 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("insert into app.oa_application_items", executed_sql)
         self.assertIn("delete from app.oa_attachments", executed_sql)
         self.assertIn("insert into app.oa_attachments", executed_sql)
+        self.assertIn("('attachment_identity_' || source.source_kind)", executed_sql)
+        identity_bridge_calls = [
+            params
+            for sql, params in connection.executed
+            if "cache_evidence_sources as" in sql
+        ]
+        self.assertEqual(
+            identity_bridge_calls,
+            [(True, ["oa-exp-structured"], False, [])],
+        )
         item_insert = [params for sql, params in connection.executed if "insert into app.oa_application_items" in sql]
         attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
         self.assertEqual(len(item_insert), 1)
@@ -272,6 +282,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(
             any(sql.startswith("insert into app.oa_attachments") for sql, _params in connection.executed)
         )
+        self.assertFalse(any("cache_evidence_sources as" in sql for sql, _params in connection.executed))
 
     def test_postgres_oa_projection_repository_writes_attachment_files_as_structured_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

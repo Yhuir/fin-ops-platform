@@ -777,12 +777,28 @@ checkpoint 的 receipt 独立，confirm/withdraw/recovery 之间不得复用。
 - OA 附件正式发票在 Workbench/税金中缺失时，先检查是否已 promotion 到 `app.invoices` 且 `raw_payload.source_links[].source_type='oa_attachment_invoice'`；再检查 `app.oa_attachment_invoice_cache_sources` 的 `attachment_identity_*` bridge 是否能把 parser cache 映射回真实附件。生产 repair 必须先 dry-run：
 
 ```bash
-sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
-  --repair-attachment-identity-bridge --dry-run --json
+bridge_report="$(sudo -n /usr/local/sbin/finops-deploy-control \
+  workbench-rehydrate <release-name> \
+  --repair-attachment-identity-bridge --dry-run --json)"
+bridge_fingerprint="$(printf '%s' "$bridge_report" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["attachment_identity_bridge"]["candidate_fingerprint"])')"
 
 sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
-  --repair-attachment-identity-bridge --apply-repair --json
+  --repair-attachment-identity-bridge --apply-repair \
+  --expected-fingerprint "$bridge_fingerprint" --json
+
+promotion_report="$(sudo -n /usr/local/sbin/finops-deploy-control \
+  oa-attachment-invoice-promotion <release-name> --json)"
+promotion_fingerprint="$(printf '%s' "$promotion_report" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["candidate_fingerprint"])')"
+
+sudo -n /usr/local/sbin/finops-deploy-control \
+  oa-attachment-invoice-promotion <release-name> --apply \
+  --confirm-apply-oa-attachment-invoices \
+  --expected-fingerprint "$promotion_fingerprint" --json
 ```
+
+bridge 与 promotion apply 都必须使用紧邻 dry-run 输出的 exact fingerprint；候选集合变化时工具 fail closed，重新 dry-run，不得绕过门禁。promotion 只复用强身份 canonical invoice，并保留既有人工导入 provenance。
 
 rollback 只删除可再生的 `source_kind like 'attachment_identity_%'` bridge 行，不删除 OA 附件 cache 本体；仍需先 dry-run：
 

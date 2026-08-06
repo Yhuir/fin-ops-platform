@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fin_ops_platform.services.app_settings_service import OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import OAAttachmentInvoiceCandidate
 from fin_ops_platform.tools.oa_attachment_invoice_promotion import (
+    _candidate_fingerprint,
     _load_candidates,
     audit_oa_attachment_invoice_promotion,
     main,
@@ -29,7 +30,7 @@ class OAAttachmentInvoicePromotionToolTests(unittest.TestCase):
         ):
             report = audit_oa_attachment_invoice_promotion(connection=object(), example_limit=7)
 
-        self.assertEqual(report, expected)
+        self.assertEqual(report, {**expected, "candidate_fingerprint": _candidate_fingerprint([candidate])})
         promote.assert_called_once_with(
             [candidate],
             promotion_mode=OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
@@ -44,6 +45,26 @@ class OAAttachmentInvoicePromotionToolTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 2)
         self.assertIn("--confirm-apply-oa-attachment-invoices", stdout.getvalue())
+
+    def test_apply_requires_dry_run_fingerprint(self) -> None:
+        stdout = StringIO()
+
+        exit_code = main(["--apply", "--confirm-apply-oa-attachment-invoices"], stdout=stdout)
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("--expected-fingerprint", stdout.getvalue())
+
+    def test_apply_rejects_changed_candidate_fingerprint(self) -> None:
+        with patch(
+            "fin_ops_platform.tools.oa_attachment_invoice_promotion._load_candidates",
+            return_value=[_candidate()],
+        ):
+            with self.assertRaisesRegex(ValueError, "fingerprint changed"):
+                audit_oa_attachment_invoice_promotion(
+                    connection=object(),
+                    apply=True,
+                    expected_fingerprint="stale",
+                )
 
     def test_load_candidates_keeps_all_source_contexts_instead_of_first_only(self) -> None:
         rows = [

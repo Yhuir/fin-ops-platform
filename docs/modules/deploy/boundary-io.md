@@ -43,6 +43,7 @@
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
 | Request traceback lookup | API `requestId` | 同一严格 ID 和两小时时间窗；从异常摘要开始最多返回 64 行，并在 traceback 终止异常行停止；不包含 locals，不开放任意 journal 参数 |
 | Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id` |
+| OA 附件发票恢复 | `finops-deploy-control oa-attachment-invoice-promotion <release>` | 只调用 exact release 内固定 Python module；dry-run 返回候选 SHA-256 fingerprint，apply 必须同时携带该 fingerprint 和显式确认参数；不得开放任意 SQL/shell |
 
 ## 输出 I/O
 
@@ -56,6 +57,7 @@
 | Settings ACL post-deploy evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json` + `.sha256` | 可选专项验收产物；验证 006 full→read→denied、OA router/role、audit/latency 和 finally restore/read-back，不是标准发布完成条件 |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
+| OA 附件发票恢复报告 | operator | 只返回候选 fingerprint、计数、规范发票 ID、OA ID、跳过原因和应用结果；人工导入来源证据保留，强身份冲突 fail closed，不返回附件正文或凭据 |
 
 ## 持久化与投影
 

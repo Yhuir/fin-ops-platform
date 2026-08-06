@@ -15,6 +15,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     serialize_value,
     text,
 )
+from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
+    reconcile_oa_attachment_cache_identity_sources,
+)
 
 
 OA_PROJECTION_SYNC_VERSION = "2026-07-28-expense-item-display-fields-v3"
@@ -83,6 +86,7 @@ class PostgresOAProjectionRepository:
 
         def write(connection: Any) -> None:
             nonlocal changed_count
+            changed_row_ids: list[str] = []
             for record in normalized_records:
                 payload = serialize_value(record)
                 application_row = connection.fetch_one(
@@ -165,8 +169,14 @@ class PostgresOAProjectionRepository:
                 if not application_id:
                     continue
                 changed_count += 1
+                changed_row_ids.append(record.id)
                 self._replace_application_items(connection, application_id=application_id, record=record)
                 self._replace_application_attachments(connection, application_id=application_id, record=record)
+            if changed_row_ids:
+                reconcile_oa_attachment_cache_identity_sources(
+                    connection,
+                    oa_row_ids=changed_row_ids,
+                )
             self._migrate_legacy_row_references(connection, self._legacy_row_id_alias_pairs(normalized_records))
             self._delete_scope_records_not_in(
                 connection,

@@ -52,7 +52,7 @@
 | Dedicated role assignments | OA `sys_user_role` | 只替换三个专用 role members；menu/role/binding、业务 role/member 与其他 menu 零写 |
 | ACL preflight/post-deploy evidence | root-owned release artifact | identity/tier/topology counts、hashes、fingerprints 与 restore 结果；不含 raw IDs、业务 role key、token、密码、DSN 或非受保护用户名 |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
-| Completed OA attachment invoice promotion | canonical invoice repository / Workbench | `oa.sync` 只对本轮 completed projection 真实变化 scope 内的 records 调用统一 promotion service；相同 snapshot 必须零调用，禁止部署/周期同步重扫全部历史附件。设置页精确 `refresh-attachments` 只把本次成功返回的 completed records 交给同一个 promotion service，不维护第二套识别或写入规则；即使 canonical 发票已经幂等不变，该显式管理员修复入口仍为所选 OA 的既有五个月窗口补发一次 matching reconciliation，不能依赖版本 stale scan。显式 `digital_invoice_no` 与 20 位纯数字 `invoice_no` 必须归一为同一强身份并一次批量加载 canonical 发票，依据 Settings mode link/create，保留 `derived_from_oa_id + source_expense_item_id + source_attachment_key`。既有人工导入 provenance 必须合并保留；同一发票跨 OA 或跨非空 expense item 冲突时 fail closed；重复同步/刷新零 canonical write。promotion 异常使 `oa.sync` 失败重试，人工刷新则返回 `attachment_promotion_failed`，不得只报解析成功 |
+| Completed OA attachment invoice promotion | canonical invoice repository / Workbench | parser cache 与 `app.oa_attachments` 无论谁先落库，都必须调用同一个 `oa_attachment_identity_bridge` 集合式 repository 边界：cache 写入按单个 cache key 修复，completed OA projection 只在真实变化记录的附件落库后按 OA row ids 修复；重复执行零 bridge rewrite，禁止页面或周期任务全表扫描。桥接完成后，`oa.sync` 只对本轮 completed projection 真实变化 scope 内的 records 调用统一 promotion service；相同 snapshot 必须零调用。设置页精确 `refresh-attachments` 只把本次成功返回的 completed records 交给同一个 promotion service，不维护第二套识别或写入规则；即使 canonical 发票已经幂等不变，该显式管理员修复入口仍为所选 OA 的既有五个月窗口补发一次 matching reconciliation，不能依赖版本 stale scan。显式 `digital_invoice_no` 与 20 位纯数字 `invoice_no` 必须归一为同一强身份并一次批量加载 canonical 发票，依据 Settings mode link/create，保留 `derived_from_oa_id + source_expense_item_id + source_attachment_key`。既有人工导入 provenance 必须合并保留；同一发票跨 OA 或跨非空 expense item 冲突时 fail closed；重复同步/刷新零 canonical write。promotion 异常使 `oa.sync` 失败重试，人工刷新则返回 `attachment_promotion_failed`，不得只报解析成功 |
 | ETC OA form attachment value | OA form draft | 同一规范化引用同时写入 `response.data` 与 `response.extra.filePath`；历史错误 absolute 引用只能由受控 dry-run/backup/CAS repair 操作修改，不重新提交 OA、不改金额、流程或附件成员 |
 | OA source alias canonicalization | formal matching、Workbench relation alignment、object identity audit / downstream duplicate classifier | 附件来源引用先去掉 `:item:` 子项后缀，再以父 OA 自身显式 alias 归一到 canonical OA row id；原始 `source_expense_item_id` 保留在发票 canonical fact。页面只在同一正式 relation 内按显式 alias + 唯一 `source_expense_row_index` 映射 canonical item id；冲突或缺失保持父 OA 级证据 |
 | OA manual import mutation result | settings/workbench frontend | `refresh-attachments` 返回解析计数、`promotion_summary`、逐 row error 和 affected scope hints；`manual-imports` create/remove 返回业务结果与 affected scope hints。freshness targets 和 operation barrier targets 为空，当前/后续页面通过正常 GET 收敛 |
@@ -61,10 +61,10 @@
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/remove 逻辑上影响 `workbench`、`workbench_relation`、invoice lifecycle、tax offset 和 cost statistics，但写路径不 enqueue、不等待 operation barrier；消费页面访问时按 owner contract 读取。唯一例外是管理员显式 `refresh-attachments`：它只为所选 completed OA 的附件发票 promotion 补发既有 matching scope，不广播其它页面。
-- OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection，并在同一 Worker 主链路只对 `completed_projection_changed_scopes` 内的 completed records 提升已解析正式附件发票到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`；设置页人工精确刷新在同一 service 边界同步提升所选 completed records。两条入口复用同一强身份、冲突、模式和批量持久化合同，不允许 route/Application 私有 promotion。自动同步只在 canonical 发票真实变化时把发票写入与 matching dirty 原子提交；管理员精确刷新即使 canonical 发票不变也显式补发 matching reconciliation，但保持零 invoice rewrite。周期性相同输入必须是零 promotion 调用、零 projection/invoice rewrite、零重复 dirty；`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
+- OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection；真实变化记录写完 item/attachment 后，在同一事务按 OA row ids 执行一次 indexed identity bridge，再由 Worker 主链路只对 `completed_projection_changed_scopes` 内的 completed records 提升已解析正式附件发票到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`。cache 保存入口按 cache key 复用同一 bridge，因此 OA facts/cache 任一到达顺序都闭环。设置页人工精确刷新在同一 service 边界同步提升所选 completed records。两条入口复用同一强身份、冲突、模式和批量持久化合同，不允许 route/Application 私有 promotion。自动同步只在 canonical 发票真实变化时把发票写入与 matching dirty 原子提交；管理员精确刷新即使 canonical 发票不变也显式补发 matching reconciliation，但保持零 invoice rewrite。周期性相同输入必须是零 bridge/promotion 调用、零 projection/invoice rewrite、零重复 dirty；`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - `OA_PROJECTION_SYNC_VERSION=2026-07-28-expense-item-display-fields-v3` 触发一次存量重投，确保历史日常报销的 item/source binding 与 `fee_content` / `fee_description` 保真字段符合当前合同；重投仍由 durable `oa.sync` worker 执行且必须幂等。
 - External system：OA Mongo / OA app。
-- Repository：`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_invoice.py`、`oa_applicant_credentials.py`。
+- Repository：`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`oa_applicant_credentials.py`。
 
 ## 文件范围
 
@@ -73,7 +73,7 @@
 | Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` |
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Deployment verification | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh` |
-| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |
+| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |
 | OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_attachment_invoice_promotion_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
 | Related modules | OA pending payments、ETC、input invoice usage、settings、permissions |
@@ -92,6 +92,8 @@
 - `tests/test_oa_attachment_invoice_service.py`
 - `tests/test_oa_attachment_invoice_promotion_service.py`
 - `tests/test_oa_attachment_invoice_promotion_tool.py`
+- `tests/test_oa_pending_payment_postgres_integration.py`
+- `tests/test_rehydrate_workbench_read_models.py`
 - `tests/test_oa_manual_import_api.py`
 - `tests/test_oa_pending_payment_api.py`
 - `tests/test_target_oa_applicant_token_provider.py`

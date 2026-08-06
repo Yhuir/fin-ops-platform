@@ -1,5 +1,16 @@
 # OA 集成 实施记录
 
+## 2026-08-07 - OA附件身份桥双顺序闭环与历史修复门禁
+
+- 目标：修复 parser cache 先于 `app.oa_attachments` 落库时身份桥缺失，导致已有 canonical 发票只显示“人工导入”且无法恢复 OA 绑定的问题。
+- 影响范围：OA cache repository、completed OA projection、附件 promotion、Workbench matching、生产 bridge/promotion repair 工具。
+- 关键决策：抽出唯一 `oa_attachment_identity_bridge` repository 边界；cache 保存按 cache key、OA附件落库后按本轮真实变化 OA row ids 复用同一集合式 SQL。冲突更新仅在上下文真实变化时写入；不增加页面通知、read model、worker 或周期全表扫描。OA来源只追加，保留人工导入 provenance；弱身份和跨 OA/expense-item 冲突继续 fail closed。
+- 旧链删除：删除 `ops_tax_etc.py` 内依赖写入时序的私有跨身份 SQL，避免 cache writer 与 projection writer 各维护一套规则。
+- 性能：新增 cache source `(source_expense_item_id, source_attachment_name, cache_source_attachment_key, source_kind)` partial index；每批一次 bridge，no-op OA snapshot 零调用。
+- 安全：bridge 与 promotion apply 都要求紧邻 dry-run 的 SHA-256 candidate fingerprint；候选变化立即停止。
+- 测试覆盖：两种到达顺序真实 PostgreSQL integration、changed/no-op repository、source provenance/promotion、repair fingerprint、migration/index 与 deploy-control exact release command。
+- 未测风险：本地未配置 disposable PostgreSQL 时 integration tests 会跳过；发布后必须通过生产 dry-run/apply、identity audit、Workbench/进项使用/待找发票页面和性能指标补证。
+
 ## 2026-07-17 - 相同 OA snapshot 零写与 change-driven fan-out
 
 - 目标：消除周期性 `oa.sync` 在源数据未变化时更新 projection 时间戳、重写子表并让 OA/Workbench/成本统计等页面反复 refreshing 的写放大。

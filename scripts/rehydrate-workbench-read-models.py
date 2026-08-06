@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -47,6 +48,10 @@ def main() -> int:
         help="Apply an explicit repair or rollback action instead of previewing it.",
     )
     parser.add_argument(
+        "--expected-fingerprint",
+        help="Required when applying the attachment identity bridge repair; copy it from the dry-run report.",
+    )
+    parser.add_argument(
         "--explain-structured-attachments",
         action="store_true",
         help="Run read-only EXPLAIN ANALYZE diagnostics for the Workbench structured OA attachment query.",
@@ -67,6 +72,8 @@ def main() -> int:
         raise ValueError("Choose only one attachment identity bridge repair action.")
     if args.apply_repair and not repair_mode:
         raise ValueError("--apply-repair is only valid with an attachment identity bridge repair action.")
+    if args.apply_repair and args.repair_attachment_identity_bridge and not str(args.expected_fingerprint or "").strip():
+        raise ValueError("Attachment identity bridge repair apply requires --expected-fingerprint.")
     if repair_mode and args.explain_structured_attachments:
         raise ValueError("Attachment identity bridge repair cannot be combined with --explain-structured-attachments.")
     if repair_mode and not (args.dry_run or args.apply_repair):
@@ -97,6 +104,7 @@ def main() -> int:
             report["attachment_identity_bridge"] = _repair_attachment_identity_bridge(
                 connection,
                 apply_changes=bool(args.apply_repair),
+                expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
             )
         report["timings"].append({"step": "attachment_identity_bridge", "duration_ms": _duration_ms(repair_started_at)})
         report["duration_ms"] = _duration_ms(script_started_at)
@@ -404,23 +412,50 @@ def _structured_attachment_query_diagnostic(connection: PostgresConnection, scop
     }
 
 
-def _repair_attachment_identity_bridge(connection: Any, *, apply_changes: bool) -> dict[str, Any]:
+def _repair_attachment_identity_bridge(
+    connection: Any,
+    *,
+    apply_changes: bool,
+    expected_fingerprint: str | None = None,
+) -> dict[str, Any]:
     before = _attachment_identity_bridge_counts(connection)
-    candidates = _attachment_identity_bridge_candidate_counts(connection)
+    candidate_rows = _attachment_identity_bridge_candidate_rows(connection)
+    candidates = {
+        "total": len(candidate_rows),
+        "by_source_kind": _count_rows_by_key(candidate_rows, "source_kind"),
+    }
+    candidate_fingerprint = _fingerprint_rows(candidate_rows)
     result: dict[str, Any] = {
         "mode": "apply" if apply_changes else "dry_run",
         "before": before,
         "candidates": candidates,
+        "candidate_fingerprint": candidate_fingerprint,
     }
     if not apply_changes:
         result["applied"] = {"total": 0, "by_source_kind": {}}
         result["after"] = before
         return result
+    if expected_fingerprint != candidate_fingerprint:
+        raise ValueError("Attachment identity bridge candidate fingerprint changed; run dry-run again.")
 
-    rows = connection.fetch_all(
-        f"""
-        {_attachment_identity_bridge_matches_cte()}
-        insert into app.oa_attachment_invoice_cache_sources (
+    rows: list[dict[str, Any]] = []
+    if candidate_rows:
+        values_sql = ", ".join(["(%s, %s, %s, %s, %s, %s)"] * len(candidate_rows))
+        params = tuple(
+            value
+            for row in candidate_rows
+            for value in (
+                row.get("cache_source_attachment_key"),
+                row.get("source_attachment_key"),
+                row.get("source_kind"),
+                row.get("source_expense_item_id"),
+                row.get("source_expense_row_index"),
+                row.get("source_attachment_name"),
+            )
+        )
+        rows = connection.fetch_all(
+            f"""
+        insert into app.oa_attachment_invoice_cache_sources as existing (
             cache_source_attachment_key,
             source_attachment_key,
             source_kind,
@@ -430,22 +465,39 @@ def _repair_attachment_identity_bridge(connection: Any, *, apply_changes: bool) 
             updated_at
         )
         select
+            candidate.cache_source_attachment_key,
+            candidate.source_attachment_key,
+            candidate.source_kind,
+            candidate.source_expense_item_id,
+            candidate.source_expense_row_index,
+            candidate.source_attachment_name,
+            now()
+        from (values {values_sql}) as candidate(
             cache_source_attachment_key,
             source_attachment_key,
             source_kind,
             source_expense_item_id,
             source_expense_row_index,
-            source_attachment_name,
-            now()
-        from identity_matches
+            source_attachment_name
+        )
         on conflict (cache_source_attachment_key, source_attachment_key, source_kind) do update set
             source_expense_item_id = excluded.source_expense_item_id,
             source_expense_row_index = excluded.source_expense_row_index,
             source_attachment_name = excluded.source_attachment_name,
             updated_at = now()
+        where (
+            existing.source_expense_item_id,
+            existing.source_expense_row_index,
+            existing.source_attachment_name
+        ) is distinct from (
+            excluded.source_expense_item_id,
+            excluded.source_expense_row_index,
+            excluded.source_attachment_name
+        )
         returning source_kind
-        """
-    )
+            """,
+            params,
+        )
     result["applied"] = {"total": len(rows), "by_source_kind": _count_rows_by_key(rows, "source_kind")}
     result["after"] = _attachment_identity_bridge_counts(connection)
     return result
@@ -489,18 +541,35 @@ def _attachment_identity_bridge_counts(connection: Any) -> dict[str, Any]:
     return {"total": sum(by_kind.values()), "by_source_kind": by_kind}
 
 
-def _attachment_identity_bridge_candidate_counts(connection: Any) -> dict[str, Any]:
+def _attachment_identity_bridge_candidate_rows(connection: Any) -> list[dict[str, Any]]:
     rows = connection.fetch_all(
         f"""
         {_attachment_identity_bridge_matches_cte()}
-        select source_kind, count(*)::bigint as count
-        from identity_matches
-        group by source_kind
-        order by source_kind
+        select matched.cache_source_attachment_key,
+               matched.source_attachment_key,
+               matched.source_kind,
+               matched.source_expense_item_id,
+               matched.source_expense_row_index,
+               matched.source_attachment_name
+        from identity_matches matched
+        left join app.oa_attachment_invoice_cache_sources existing
+          on existing.cache_source_attachment_key = matched.cache_source_attachment_key
+         and existing.source_attachment_key = matched.source_attachment_key
+         and existing.source_kind = matched.source_kind
+        where existing.cache_source_attachment_key is null
+           or (
+                existing.source_expense_item_id,
+                existing.source_expense_row_index,
+                existing.source_attachment_name
+              ) is distinct from (
+                matched.source_expense_item_id,
+                matched.source_expense_row_index,
+                matched.source_attachment_name
+              )
+        order by matched.cache_source_attachment_key, matched.source_attachment_key, matched.source_kind
         """
     )
-    by_kind = {str(row.get("source_kind") or ""): int(row.get("count") or 0) for row in rows}
-    return {"total": sum(by_kind.values()), "by_source_kind": by_kind}
+    return [dict(row) for row in rows]
 
 
 def _count_rows_by_key(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -509,6 +578,18 @@ def _count_rows_by_key(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
         value = str(row.get(key) or "").strip() or "unknown"
         result[value] = result.get(value, 0) + 1
     return dict(sorted(result.items()))
+
+
+def _fingerprint_rows(rows: list[dict[str, Any]]) -> str:
+    normalized = sorted(
+        (
+            {key: row.get(key) for key in sorted(row)}
+            for row in rows
+        ),
+        key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True, default=str),
+    )
+    payload = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _attachment_identity_bridge_matches_cte() -> str:

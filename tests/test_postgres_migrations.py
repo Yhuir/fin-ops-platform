@@ -150,6 +150,7 @@ EXPECTED_MIGRATIONS = [
     "0134_restore_invoice_import_provenance.sql",
     "0135_batch_accounting_tag_selection.sql",
     "0136_unify_in_progress_oa_workbench_relations.sql",
+    "0137_oa_attachment_identity_context_index.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -305,7 +306,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 137)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 138)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1455,6 +1456,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("primary key (cache_source_attachment_key, source_attachment_key, source_kind)", table_body)
         self.assertIn("oa_attachment_invoice_cache_sources_source_idx", sql)
         self.assertIn("oa_attachment_invoice_cache_sources_cache_idx", sql)
+        self.assertIn("oa_attachment_invoice_cache_sources_identity_context_idx", sql)
         self.assertIn("oa_attachments_source_identity_idx", sql)
         self.assertIn("deduped_sources as", sql)
         self.assertIn("attachment_identity_invoice", sql)

@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query im
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
@@ -40,6 +41,77 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
                 require_fresh_relations=False,
             ),
+        )
+
+    def test_attachment_identity_bridge_converges_when_cache_arrives_before_oa_facts(self) -> None:
+        cache = PostgresOpsTaxEtcRepository(self.connection)
+        cache.save_oa_attachment_invoice_cache_entry(
+            "parser-cache-key-before",
+            _attachment_cache_payload("parser-cache-key-before"),
+        )
+
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[_record_with_attachment_file()],
+            admission_records=[_record_with_attachment_file()],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(
+                    flow_id="flow-integration-1",
+                    pay_status=0,
+                )
+            },
+        )
+
+        self.assertEqual(
+            int(
+                self.connection.fetch_one(
+                    """
+                    select count(*)::int as count
+                    from app.oa_attachment_invoice_cache_sources
+                    where cache_source_attachment_key = %s
+                      and source_attachment_key = %s
+                      and source_kind = 'attachment_identity_invoice'
+                    """,
+                    ("parser-cache-key-before", "actual-oa-attachment-key"),
+                )["count"]
+            ),
+            1,
+        )
+
+    def test_attachment_identity_bridge_converges_when_cache_arrives_after_oa_facts(self) -> None:
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[_record_with_attachment_file()],
+            admission_records=[_record_with_attachment_file()],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(
+                    flow_id="flow-integration-1",
+                    pay_status=0,
+                )
+            },
+        )
+
+        PostgresOpsTaxEtcRepository(self.connection).save_oa_attachment_invoice_cache_entry(
+            "parser-cache-key-after",
+            _attachment_cache_payload("parser-cache-key-after"),
+        )
+
+        self.assertEqual(
+            int(
+                self.connection.fetch_one(
+                    """
+                    select count(*)::int as count
+                    from app.oa_attachment_invoice_cache_sources
+                    where cache_source_attachment_key = %s
+                      and source_attachment_key = %s
+                      and source_kind = 'attachment_identity_invoice'
+                    """,
+                    ("parser-cache-key-after", "actual-oa-attachment-key"),
+                )["count"]
+            ),
+            1,
         )
 
     def test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh(self) -> None:
@@ -442,6 +514,44 @@ def _record() -> OAApplicationRecord:
             "paymentFlowId": "flow-integration-1",
         },
     )
+
+
+def _record_with_attachment_file() -> OAApplicationRecord:
+    record = _record()
+    record.expense_items = [
+        {
+            "expense_item_id": "oa-integration-1:item:0",
+            "row_index": "0",
+            "settlement_amount": "100.00",
+            "attachment_files": [
+                {
+                    "source_attachment_key": "actual-oa-attachment-key",
+                    "source_attachment_name": "invoice.pdf",
+                    "fileName": "invoice.pdf",
+                }
+            ],
+        }
+    ]
+    return record
+
+
+def _attachment_cache_payload(cache_key: str) -> dict[str, object]:
+    invoice = {
+        "source_attachment_key": cache_key,
+        "source_expense_item_id": "oa-integration-1:item:0",
+        "source_expense_row_index": "0",
+        "source_attachment_name": "invoice.pdf",
+        "evidence_type": "tax_invoice",
+        "digital_invoice_no": "26534000000060092011",
+        "total_with_tax": "100.00",
+    }
+    return {
+        "parser_version": "integration-v1",
+        "cache_schema_version": "integration-v1",
+        "invoices": [invoice],
+        "evidences": [],
+        "artifacts": [],
+    }
 
 
 def _in_progress_record() -> OAApplicationRecord:

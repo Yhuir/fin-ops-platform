@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from typing import Any, Sequence, TextIO
@@ -29,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--oa-row-id", action="append", default=[], help="Limit promotion to an exact OA row id.")
     parser.add_argument("--apply", action="store_true", help="Persist eligible OA attachment invoice links/creates.")
     parser.add_argument(
+        "--expected-fingerprint",
+        help="Required with --apply; must match the immediately preceding dry-run candidate fingerprint.",
+    )
+    parser.add_argument(
         APPLY_CONFIRMATION_FLAG,
         action="store_true",
         help="Required together with --apply to guard production writes.",
@@ -41,12 +46,16 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
     if bool(args.apply) and not bool(getattr(args, "confirm_apply_oa_attachment_invoices", False)):
         print(f"--apply requires {APPLY_CONFIRMATION_FLAG}", file=stdout)
         return 2
+    if bool(args.apply) and not str(args.expected_fingerprint or "").strip():
+        print("--apply requires --expected-fingerprint", file=stdout)
+        return 2
     connection = PostgresConnection(PostgresSettings.from_env())
     report = audit_oa_attachment_invoice_promotion(
         connection=connection,
         example_limit=max(int(args.limit or 50), 1),
         apply=bool(args.apply),
         oa_row_ids=list(args.oa_row_id or []),
+        expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
@@ -58,16 +67,22 @@ def audit_oa_attachment_invoice_promotion(
     example_limit: int = 50,
     apply: bool = False,
     oa_row_ids: list[str] | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
+    candidates = _load_candidates(connection, oa_row_ids=oa_row_ids)
+    candidate_fingerprint = _candidate_fingerprint(candidates)
+    if expected_fingerprint and expected_fingerprint != candidate_fingerprint:
+        raise ValueError("OA attachment invoice candidate fingerprint changed; run dry-run again.")
     service = OAAttachmentInvoicePromotionService(
         invoice_repository=PostgresOAAttachmentInvoiceRepository(connection),
     )
-    return service.promote_candidates(
-        _load_candidates(connection, oa_row_ids=oa_row_ids),
+    report = service.promote_candidates(
+        candidates,
         promotion_mode=OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
         apply=apply,
         example_limit=example_limit,
     )
+    return {**report, "candidate_fingerprint": candidate_fingerprint}
 
 
 def _load_candidates(
@@ -139,6 +154,21 @@ def _clean_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _candidate_fingerprint(candidates: list[OAAttachmentInvoiceCandidate]) -> str:
+    rows = sorted(
+        (
+            candidate.oa_row_id or "",
+            candidate.source_workbench_row_id or "",
+            candidate.cache_source_attachment_key,
+            str(candidate.invoice_index),
+            json.dumps(candidate.attachment_invoice, ensure_ascii=False, sort_keys=True, default=str),
+        )
+        for candidate in candidates
+    )
+    payload = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 if __name__ == "__main__":
