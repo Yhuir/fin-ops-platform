@@ -45,7 +45,7 @@ patterns-established:
 
 requirements-completed: []
 
-duration: 31min
+duration: 34min
 completed: 2026-08-06
 ---
 
@@ -55,9 +55,9 @@ completed: 2026-08-06
 
 ## Performance
 
-- **Duration:** 31 min
+- **Duration:** 34 min
 - **Started:** 2026-08-06T07:37:30Z
-- **Completed:** 2026-08-06T08:06:04Z
+- **Completed:** 2026-08-06T08:11:15Z
 - **Tasks:** 2
 - **Files modified:** 8
 
@@ -131,8 +131,8 @@ Each task was committed atomically with explicit TDD gates:
 
 ## Verification
 
-- `FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/fin_ops_test_40_07_executor python3 -m pytest tests/test_workbench_source_proof_contract.py tests/test_postgres_repositories_boundaries.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_runtime_worker_read_model_refresh_scopes.py -q` - **50 passed**.
-- `npm --prefix web test -- --run src/test/WorkbenchApi.test.ts` - **48 passed**.
+- `FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/fin_ops_test_40_07_executor PYTHONPATH=backend/src:. python3 -m pytest -q tests/test_workbench_source_proof_contract.py tests/test_postgres_repositories_boundaries.py tests/test_bank_flow_rule_batch_backend_boundary.py tests/test_bank_flow_rule_batch_application_service.py tests/test_bank_flow_rule_batch_routes.py tests/test_runtime_worker_read_model_refresh_scopes.py` - **100 passed**.
+- `npm --prefix web test -- --run src/test/WorkbenchApi.test.ts src/test/WorkbenchSelection.test.tsx` - **119 passed**.
 - `python3 -m pytest tests/test_permissions_write_entry_inventory.py -q` - **25 passed**.
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium` - **9 passed**.
 - `npm --prefix web run build` - **passed**; existing generated CSS minifier syntax warnings remained non-fatal.
