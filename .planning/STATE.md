@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 40-07-PLAN.md
-last_updated: "2026-08-06T08:11:39.538Z"
-last_activity: 2026-08-06 -- Completed 40-07 Workbench writer-proof and bank-flow convergence closure
+status: verifying
+stopped_at: Completed 40-08-PLAN.md
+last_updated: "2026-08-06T10:32:49.882Z"
+last_activity: 2026-08-06 -- Completed 40-08 capacity, browser p99 and production release closure
 progress:
   total_phases: 38
-  completed_phases: 11
+  completed_phases: 12
   total_plans: 111
-  completed_plans: 84
-  percent: 76
+  completed_plans: 85
+  percent: 77
 ---
 
 # Project State
@@ -25,21 +25,21 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 40 (performance-contract-hot-path-closure) — EXECUTING
+Phase: 40 (performance-contract-hot-path-closure) — COMPLETE
 Plan: 8 of 8
-Status: Ready to execute
-Last activity: 2026-08-06 -- Completed 40-07 Workbench writer-proof and bank-flow convergence closure
+Status: Phase complete — ready for verification
+Last activity: 2026-08-06 -- Completed 40-08 capacity, browser p99 and production release closure
 
-Progress: [█████████░] 7/8 plans complete
+Progress: [██████████] 8/8 plans complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 42
+- Total plans completed: 43
 - Baseline planning docs completed: 1
 - Average duration: N/A
-- Total execution time: 2 hours 21 minutes
+- Total execution time: 4 hours 26 minutes
 
 **By Phase:**
 
@@ -71,6 +71,7 @@ Progress: [█████████░] 7/8 plans complete
 | Phase 40 P06 | 10 min | 1 tasks | 3 files |
 | Phase 40 P04 | 41 min | 2 tasks | 13 files |
 | Phase 40 P07 | 34min | 2 tasks | 8 files |
+| Phase 40 P08 | 2h 05m | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -220,6 +221,10 @@ Progress: [█████████░] 7/8 plans complete
 - [Phase 40]: Application candidate c5557274bdc901c8137d6e2aeaae9036786ff216 remains local-only and is not full-green until three unrelated deferred gates and 40-08 target-scale evidence close.
 - [Phase 40]: Keep Workbench SQL proof unchanged after real PostgreSQL writer coverage. — Every mutable canonical dependency advanced its exact proof without notification fan-out.
 - [Phase 40]: Remove only Workbench-local operationBarrierTargets. — Freshness targets and global operator/maintenance paths remain live and were preserved.
+- [Phase 40]: Derive N_normal=6 and N_peak=8 from approved Settings ACL eligible-account capacity contract acl-v11-phase40-20260806 without retaining raw identities.
+- [Phase 40]: Keep 100-sample visibility evidence explicitly isolated_prod_equivalent with production_p99_claim=false until a sanctioned test-owned production bank-flow fixture exists.
+- [Phase 40]: Treat only exact periodic status endpoints as non-business drawer I/O while retaining bounded duplicate-I/O and motion regression protection.
+- [Phase 40]: Release one combined candidate at 9c572842598484d165fc38a66f17d348091e223d; pre/T+0/T+60/T+300 passed with no rollback.
 
 ### Roadmap Evolution
 
@@ -299,6 +304,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T08:07:57.833Z
-Stopped at: Completed 40-07-PLAN.md
+Last session: 2026-08-06T10:32:49.864Z
+Stopped at: Completed 40-08-PLAN.md
 Resume file: None

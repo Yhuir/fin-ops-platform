@@ -839,7 +839,7 @@ Plans:
   6. Target concurrency is derived from a named production evidence window or approved capacity contract; both derived load tiers meet p95/error/resource gates, and same-clock t0..t4 samples prove commit-to-visible p99 `<=3000ms` with every segment summing to the total.
   7. Retired Search/read-model and Workbench-local target paths are deleted with no fallback, double-read or retained-job regression; full local gates, one pushed `main`, one exact deployment, T+300 and rollback evidence prove correctness, isolation and performance.
 
-**Plans:** 7/8 plans executed
+**Plans:** 8/8 plans complete
 Plans:
 
 - [x] 40-01-PLAN — Wave 1: bounded performance probes/contract and constant-size FinanceTable pagination.
@@ -849,6 +849,6 @@ Plans:
 - [x] 40-05-PLAN — Wave 1: backend refresh-status exact self-heal and unchanged API/writer contracts.
 - [x] 40-06-PLAN — Wave 1: visible completion-driven one-second Workbench poller and interaction contracts.
 - [x] 40-07-PLAN — Wave 2 after 40-05/06: real writer→proof matrix, zero-fanout worker closure, local target cleanup and deterministic Browser E2E.
-- [ ] 40-08-PLAN — Wave 3 after 40-04/07: affected docs, derived target capacity, Playwright same-clock browser p99, full gates and the only push/deploy/production/rollback closure.
+- [x] 40-08-PLAN — Wave 3 after 40-04/07: affected docs, derived target capacity, Playwright same-clock browser p99, full gates and the only push/deploy/production/rollback closure.
 
 ---
