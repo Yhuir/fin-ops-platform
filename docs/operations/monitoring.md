@@ -397,9 +397,12 @@ scripts/with-production-admin-token.sh \
 `source/contract_version/approved_by/c_normal/c_peak`。缺字段、窗口不完整、未指定 tier、target 超过有界
 worker 上限或没有证据时均为 `not_measured`/失败，禁止继续发布。
 
-Workbench browser-inclusive 可见性证据是显式 opt-in 的真实后端 Playwright case。fixture manifest 必须
-root-owned、不可 group/world write、`fixture_ownership=test_owned`，隔离 run 至少 100 个唯一、exact-scope、
-可撤回样本；生产 smoke manifest 恰好一个样本。示例：
+Workbench browser-inclusive 可见性证据是显式 opt-in 的 Playwright case。fixture manifest 必须是 regular
+non-symlink file，由 root 或当前本地 operator 持有、不可带 group/world 权限，并声明
+`fixture_ownership=test_owned`。隔离 prod-equivalent browser/poller run 可显式登记一个可逆模板和准确的
+`isolated_repeat_count=100`，重复执行至少 100 个 same-clock 样本；该报告必须标记
+`evidence_environment=isolated_prod_equivalent_browser_poller`、`production_p99_claim=false`。生产 smoke
+manifest 恰好一个真实 test-owned、exact-scope、可撤回样本，不能启用 repeat。示例：
 
 ```bash
 FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO=1 \
@@ -413,7 +416,7 @@ npm --prefix web run e2e -- \
 ```
 
 报告固定写入 `.planning/phases/40-performance-contract-hot-path-closure/40-workbench-visibility-p99.json`，
-只保留哈希化 batch/transaction/business identity、generation、整数微秒 marks/segments 和分位数。
+只保留哈希化 sample/batch/transaction/business identity/exact scope、generation、整数微秒 marks/segments 和分位数。
 报告缺失、完整样本少于 100、segment sum 不等于 total、exact scope/generation/identity 不匹配、
 total p99 `>3000ms` 或 recovery 未回到 inactive，均为 `NOT_MEASURED`/release blocked。生产 smoke 必须通过
 `scripts/with-production-admin-token.sh` 注入 token，`samples=1`，只能补一行 reversible smoke，不可替代隔离 p99。

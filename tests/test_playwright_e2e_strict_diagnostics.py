@@ -67,10 +67,13 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         config = PLAYWRIGHT_CONFIG_PATH.read_text(encoding="utf-8")
 
         for required in (
-            "stat(",
-            "uid !== 0",
-            "samples.length !== 1",
-            "samples.length < requestedSampleCount",
+            "lstat(",
+            "metadata.isSymbolicLink()",
+            "metadata.uid !== operatorUid",
+            "metadata.mode & 0o077",
+            "templates.length !== 1",
+            "isolated_repeat_count",
+            "isolated_prod_equivalent_browser_poller",
             "transaction_ids",
             "exact_scope",
             "submit",

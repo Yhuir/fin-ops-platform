@@ -1,0 +1,83 @@
+{
+  "api_prefix": "",
+  "auth_configured": true,
+  "base_url": "http://127.0.0.1:18081/",
+  "capacity": {
+    "aggregate_sample_count": 0,
+    "c_normal": 6,
+    "c_peak": 6,
+    "method": "approved_capacity_contract",
+    "n_normal": 6,
+    "n_peak": 8,
+    "raw_client_data_retained": false,
+    "release_blocked": false,
+    "source": "production_settings_access_control_eligible_accounts",
+    "source_proof": "approved_by:user_explicit_blanket_authorization_2026-08-06",
+    "source_version": "acl-v11-phase40-20260806",
+    "status": "measured",
+    "window": null
+  },
+  "capacity_tier": "peak",
+  "concurrency": 8,
+  "evidence_environment": "production-via-read-only-tunnel",
+  "evidence_window": {
+    "completed_at": "2026-08-06T09:01:14.323786+00:00",
+    "started_at": "2026-08-06T09:01:12.698847+00:00"
+  },
+  "generated_at": "2026-08-06T09:01:14.323786+00:00",
+  "iterations": 20,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 292.788,
+        "p95": 422.407,
+        "p99": 433.182
+      },
+      "error_count": 0,
+      "error_counts": {},
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "workbench_refresh_status_all",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/workbench/refresh-status?month=all",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "request_count": 20,
+      "response_bytes": {
+        "p50": 1988.0,
+        "p95": 1988.0,
+        "p99": 1988.0
+      },
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    }
+  ],
+  "status": "pass",
+  "summary": {
+    "error_count": 0,
+    "failed_probe_count": 0,
+    "max_p95_ms": 422.407,
+    "probe_count": 1,
+    "request_count": 20,
+    "response_bytes_total": 39760,
+    "sample_count": 20
+  },
+  "target_concurrency": 8,
+  "timeout_seconds": 10.0,
+  "version": 1,
+  "warmup": 2
+}

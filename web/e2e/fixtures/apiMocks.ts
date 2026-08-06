@@ -59,6 +59,7 @@ type ApiMockOptions = {
   invoiceImportPreviewDelayMs?: number;
   bankFlowRuleCostFanout?: boolean;
   bankFlowRuleWorkbenchConvergence?: boolean;
+  bankFlowRuleWorkbenchConvergenceReads?: number;
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
@@ -1040,6 +1041,7 @@ function bankFlowRuleWorkbenchGroups(
   zone: WorkbenchZone,
   invoiceRequiredConfirmed = false,
   includeFullCollapsedRows = false,
+  includeFeeGroup = true,
 ) {
   const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
   if (zone === "paired") {
@@ -1065,7 +1067,7 @@ function bankFlowRuleWorkbenchGroups(
         collapsed_bank_rows: true,
       },
     };
-    return [{
+    const feeGroup = {
       group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
       group_type: "relation",
       match_confidence: "high",
@@ -1086,7 +1088,8 @@ function bankFlowRuleWorkbenchGroups(
       bank_rows: [summaryRow],
       invoice_rows: [],
       can_withdraw: false,
-    }, ...(invoiceRequiredConfirmed ? [invoiceRequiredGroup] : [])];
+    };
+    return [...(includeFeeGroup ? [feeGroup] : []), ...(invoiceRequiredConfirmed ? [invoiceRequiredGroup] : [])];
   }
   return invoiceRequiredConfirmed ? [] : [invoiceRequiredGroup];
 }
@@ -1501,8 +1504,9 @@ function bankFlowRuleWorkbenchGroupsPayload(
   page = 1,
   pageSize = 200,
   search = "",
+  includeFeeGroup = true,
 ) {
-  const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed);
+  const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed, false, includeFeeGroup);
   const normalizedSearch = search.trim().toLowerCase();
   const groups = normalizedSearch
     ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
@@ -8032,6 +8036,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     : "etc-recon-workflow-e2e-001";
   let bankFlowRuleBatchStatus: BankFlowRuleBrowserBatchStatus = "draft";
   let bankFlowRuleWorkbenchRefreshReads = 0;
+  const bankFlowRuleWorkbenchConvergenceReads = Math.max(2, options.bankFlowRuleWorkbenchConvergenceReads ?? 4);
   let bankFlowRuleBatchFailuresRemaining =
     options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
   const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
@@ -8145,7 +8150,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/refresh-status") {
       if (options.bankFlowRuleWorkbenchConvergence && bankFlowRuleBatchStatus === "submitted") {
         bankFlowRuleWorkbenchRefreshReads += 1;
-        const converged = bankFlowRuleWorkbenchRefreshReads >= 4;
+        const converged = bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
         return json(route, {
           scope_key: "all",
           read_model_status: converged ? "fresh" : "stale",
@@ -9046,6 +9051,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/submit-selection") {
       bankFlowRuleBatchStatus = "submitted";
+      bankFlowRuleWorkbenchRefreshReads = 0;
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
         bankFlowRuleMutationScope,
@@ -9063,6 +9069,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw") {
       bankFlowRuleBatchStatus = "withdrawn";
+      bankFlowRuleWorkbenchRefreshReads = 0;
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
         bankFlowRuleMutationScope,
@@ -9190,7 +9197,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.workbenchBankFlowRuleBatchScenario) {
         const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
           && bankFlowRuleBatchStatus === "submitted"
-          && bankFlowRuleWorkbenchRefreshReads >= 4;
+          && bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
         const readModelVersion = relationConfirmed || bankFlowRuleConverged
           ? "workbench-generation-e2e-002"
           : "workbench-generation-e2e-001";
@@ -9221,6 +9228,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             1,
             200,
             initialZoneSearch("paired"),
+            !options.bankFlowRuleWorkbenchConvergence || bankFlowRuleConverged,
           ),
           unpaired: bankFlowRuleWorkbenchGroupsPayload(
             "unpaired",
@@ -9441,12 +9449,16 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
       if (options.workbenchBankFlowRuleBatchScenario) {
+        const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
+          && bankFlowRuleBatchStatus === "submitted"
+          && bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
         return json(route, bankFlowRuleWorkbenchGroupsPayload(
           zone,
           relationConfirmed,
           Number.isFinite(requestedPage) ? requestedPage : 1,
           Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
           url.searchParams.get("search") ?? "",
+          !options.bankFlowRuleWorkbenchConvergence || bankFlowRuleConverged,
         ));
       }
       if (options.workbenchOaExpenseItemsScenario) {

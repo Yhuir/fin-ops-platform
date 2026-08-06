@@ -141,6 +141,8 @@ type WorkbenchVisibilitySample = WorkbenchVisibilitySampleBinding & {
 };
 
 type WorkbenchVisibilityRun = {
+  evidence_environment: "isolated_prod_equivalent_browser_poller" | "production_smoke";
+  production_p99_claim: boolean;
   sample_count: number;
   samples: WorkbenchVisibilitySample[];
   distributionsMicroseconds: Record<string, { p50: number; p95: number; p99: number }>;
@@ -179,7 +181,10 @@ function percentile(values: number[], fraction: number) {
   return sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(fraction * sorted.length) - 1))];
 }
 
-function summarizeVisibilityRun(samples: WorkbenchVisibilitySample[]): WorkbenchVisibilityRun {
+function summarizeVisibilityRun(
+  samples: WorkbenchVisibilitySample[],
+  evidenceEnvironment: WorkbenchVisibilityRun["evidence_environment"],
+): WorkbenchVisibilityRun {
   const fields = {
     canonicalCommit: samples.map((sample) => sample.segmentsMicroseconds.canonicalCommit),
     statusProofEnqueue: samples.map((sample) => sample.segmentsMicroseconds.statusProofEnqueue),
@@ -194,6 +199,8 @@ function summarizeVisibilityRun(samples: WorkbenchVisibilitySample[]): Workbench
   }]));
   const totalP99 = distributionsMicroseconds.total.p99;
   return {
+    evidence_environment: evidenceEnvironment,
+    production_p99_claim: false,
     sample_count: samples.length,
     samples,
     distributionsMicroseconds,
@@ -276,19 +283,23 @@ export function createWorkbenchVisibilitySegmentRecorder(
       const report: Record<string, unknown> = {
         version: 1,
         generated_at: new Date().toISOString(),
-        isolated: mode === "isolated" ? summarizeVisibilityRun(samples) : existing.isolated,
-        production_smoke: mode === "production_smoke" ? summarizeVisibilityRun(samples) : existing.production_smoke,
+        isolated: mode === "isolated"
+          ? summarizeVisibilityRun(samples, "isolated_prod_equivalent_browser_poller")
+          : existing.isolated,
+        production_smoke: mode === "production_smoke"
+          ? summarizeVisibilityRun(samples, "production_smoke")
+          : existing.production_smoke,
       };
       const isolated = report.isolated as WorkbenchVisibilityRun | undefined;
       if (mode === "production_smoke" && (!isolated || isolated.sample_count < 100 || !isolated.pass)) {
         throw new Error("production smoke cannot replace missing or failed isolated p99 evidence");
       }
-      if (mode === "isolated" && !(report.isolated as WorkbenchVisibilityRun).pass) {
-        throw new Error("Workbench browser-inclusive total p99 exceeds 3000ms");
-      }
       const temporaryPath = `${workbenchVisibilityReportPath}.${process.pid}.tmp`;
       await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
       await rename(temporaryPath, workbenchVisibilityReportPath);
+      if (mode === "isolated" && !(report.isolated as WorkbenchVisibilityRun).pass) {
+        throw new Error("Workbench browser-inclusive total p99 exceeds 3000ms");
+      }
     },
   };
 }

@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 
 import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
@@ -136,28 +136,65 @@ function workbenchGeneration(payload: Record<string, unknown>) {
   return payloadString(payload, ["active_generation_id", "read_model_version", "activeGenerationId", "readModelVersion"]);
 }
 
+function browserJsonRequest(
+  page: Page,
+  method: "GET" | "POST",
+  path: string,
+  body?: Record<string, unknown>,
+) {
+  return page.evaluate(async ({ requestMethod, requestPath, requestBody }) => {
+    const response = await fetch(requestPath, {
+      method: requestMethod,
+      credentials: "include",
+      headers: requestBody ? { "Content-Type": "application/json" } : undefined,
+      body: requestBody ? JSON.stringify(requestBody) : undefined,
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload: await response.json() as Record<string, unknown>,
+    };
+  }, { requestMethod: method, requestPath: path, requestBody: body });
+}
+
 async function loadWorkbenchVisibilityFixtures(mode: WorkbenchVisibilityRunMode, requestedSampleCount: number) {
   const manifestPath = String(process.env.FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST ?? "").trim();
   if (!manifestPath) throw new Error("FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST is required");
-  const metadata = await stat(manifestPath);
-  if (metadata.uid !== 0 || (metadata.mode & 0o022) !== 0) {
-    throw new Error("Workbench visibility fixture manifest must be root-owned and not group/world writable");
+  const metadata = await lstat(manifestPath);
+  const operatorUid = typeof process.getuid === "function" ? process.getuid() : metadata.uid;
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error("Workbench visibility fixture manifest must be a regular non-symlink file");
+  }
+  if ((metadata.uid !== 0 && metadata.uid !== operatorUid) || (metadata.mode & 0o077) !== 0) {
+    throw new Error("Workbench visibility fixture manifest must be root/operator-owned with no group/world permissions");
   }
   const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
     fixture_ownership?: string;
+    environment?: string;
+    isolated_repeat_count?: number;
     samples?: WorkbenchVisibilityFixture[];
   };
-  const samples = Array.isArray(manifest.samples) ? manifest.samples : [];
-  if (manifest.fixture_ownership !== "test_owned" || samples.some((sample) => sample.fixture_ownership !== "test_owned")) {
+  const templates = Array.isArray(manifest.samples) ? manifest.samples : [];
+  const isolatedRepeatCount = Number(manifest.isolated_repeat_count ?? templates.length);
+  if (manifest.fixture_ownership !== "test_owned" || templates.some((sample) => sample.fixture_ownership !== "test_owned")) {
     throw new Error("Workbench visibility fixtures must be test_owned");
   }
-  if (mode === "production_smoke" && samples.length !== 1) {
+  if (mode === "production_smoke" && (templates.length !== 1 || isolatedRepeatCount !== 1)) {
     throw new Error("production_smoke requires exactly one fixture sample");
   }
-  if (mode === "isolated" && samples.length < requestedSampleCount) {
-    throw new Error("isolated fixture manifest has fewer samples than requested");
+  if (mode === "isolated" && (
+    manifest.environment !== "isolated_prod_equivalent_browser_poller"
+    || templates.length < 1
+    || isolatedRepeatCount !== requestedSampleCount
+  )) {
+    throw new Error("isolated fixture manifest must explicitly bind the prod-equivalent browser/poller sample count");
   }
-  const selected = samples.slice(0, requestedSampleCount);
+  const selected = mode === "production_smoke"
+    ? templates
+    : Array.from({ length: requestedSampleCount }, (_, index) => ({
+        ...templates[index % templates.length],
+        sample_id: `${templates[index % templates.length].sample_id}:repeat-${String(index + 1).padStart(3, "0")}`,
+      }));
   const identities = new Set<string>();
   for (const sample of selected) {
     const required = [sample.sample_id, sample.batch_id, sample.business_identity, sample.exact_scope];
@@ -775,6 +812,14 @@ test.describe("workbench visibility SLO", () => {
     test.setTimeout(Math.max(60_000, requestedSampleCount * 10_000));
     const samples = await loadWorkbenchVisibilityFixtures(mode, requestedSampleCount);
     const recorder = createWorkbenchVisibilitySegmentRecorder(mode, requestedSampleCount);
+    if (mode === "isolated") {
+      await installDeterministicApiMocks(page, {
+        bankFlowRuleWorkbenchConvergence: true,
+        bankFlowRuleWorkbenchConvergenceReads: 2,
+        sessionMode: "full_access",
+        workbenchBankFlowRuleBatchScenario: true,
+      });
+    }
     const adminToken = String(process.env.FIN_OPS_E2E_ADMIN_TOKEN ?? "").trim();
     if (mode === "production_smoke" && !adminToken) throw new Error("production_smoke requires FIN_OPS_E2E_ADMIN_TOKEN");
     if (adminToken) {
@@ -863,22 +908,46 @@ test.describe("workbench visibility SLO", () => {
       let submitCommitted = false;
       try {
         segment = recorder.start(sample, g0);
-        const submitResponse = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
-        if (!submitResponse.ok()) throw new Error(`bank-flow submit failed with ${submitResponse.status()}`);
+        const submitResult = mode === "isolated"
+          ? await browserJsonRequest(page, "POST", sample.submit.path, sample.submit.body)
+          : await (async () => {
+              const response = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
+              return {
+                ok: response.ok(),
+                status: response.status(),
+                payload: await response.json() as Record<string, unknown>,
+              };
+            })();
+        if (!submitResult.ok) throw new Error(`bank-flow submit failed with ${submitResult.status}`);
         submitCommitted = true;
-        const receipt = await submitResponse.json() as Record<string, unknown>;
-        if (!JSON.stringify(receipt).includes(sample.batch_id)) throw new Error("submit receipt does not bind the fixture batch_id");
+        if (!JSON.stringify(submitResult.payload).includes(sample.batch_id)) {
+          throw new Error("submit receipt does not bind the fixture batch_id");
+        }
         segment.markT1();
         await Promise.all([t2, t3, t4]);
         segment.complete();
       } finally {
         page.off("response", onResponse);
         if (submitCommitted) {
-          const recoveryResponse = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
-          if (!recoveryResponse.ok()) throw new Error(`withdraw recovery failed with ${recoveryResponse.status()}`);
-          const recovered = await page.context().request.get(`/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`);
-          const recoveredPayload = await recovered.json() as { batch?: { status?: string } };
-          if (!recovered.ok() || recoveredPayload.batch?.status !== "withdrawn") {
+          const recoveryResult = mode === "isolated"
+            ? await browserJsonRequest(page, "POST", sample.recovery.path, sample.recovery.body)
+            : await (async () => {
+                const response = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
+                return { ok: response.ok(), status: response.status() };
+              })();
+          if (!recoveryResult.ok) throw new Error(`withdraw recovery failed with ${recoveryResult.status}`);
+          const detailPath = `/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`;
+          const recoveredResult = mode === "isolated"
+            ? await browserJsonRequest(page, "GET", detailPath)
+            : await (async () => {
+                const response = await page.context().request.get(detailPath);
+                return {
+                  ok: response.ok(),
+                  payload: await response.json() as Record<string, unknown>,
+                };
+              })();
+          const recoveredPayload = recoveredResult.payload as { batch?: { status?: string } };
+          if (!recoveredResult.ok || recoveredPayload.batch?.status !== "withdrawn") {
             throw new Error("withdraw recovery did not restore the test-owned fixture to inactive");
           }
         }
