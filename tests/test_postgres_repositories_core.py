@@ -7,6 +7,7 @@ from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatchRowResult, Invoice
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 
 
@@ -910,7 +911,7 @@ def test_save_import_delta_rolls_back_batch_when_file_write_fails() -> None:
 
 def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
     class ConflictConnection:
-        def execute(self, sql: str, _params: tuple = ()) -> int:
+        def execute_many_values(self, sql: str, _params_seq: list[tuple]) -> int:
             return 0 if "insert into app.import_batch_rows" in sql else 1
 
     repository = PostgresCoreRepository(ConflictConnection())
@@ -934,19 +935,31 @@ def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
 
 
 def test_import_batch_rows_use_bounded_multi_value_upsert() -> None:
-    class BatchConnection:
+    class RecordingCursor:
+        def __init__(self, connection: "RecordingRawConnection") -> None:
+            self.connection = connection
+            self.rowcount = 0
+
+        def __enter__(self) -> "RecordingCursor":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: tuple = ()) -> None:
+            self.connection.calls.append((" ".join(sql.lower().split()), params))
+            self.rowcount = len(params) // 19
+
+    class RecordingRawConnection:
         def __init__(self) -> None:
-            self.calls: list[tuple[str, list[tuple]]] = []
+            self.calls: list[tuple[str, tuple]] = []
 
-        def execute_many_values(self, sql: str, params_seq: list[tuple]) -> int:
-            self.calls.append((" ".join(sql.lower().split()), params_seq))
-            return len(params_seq)
+        def cursor(self) -> RecordingCursor:
+            return RecordingCursor(self)
 
-        def execute(self, _sql: str, _params: tuple = ()) -> int:
-            raise AssertionError("batch rows must not fall back to one database call per row")
-
-    connection = BatchConnection()
-    repository = PostgresCoreRepository(connection)
+    raw_connection = RecordingRawConnection()
+    transaction = PostgresTransaction(raw_connection)
+    repository = PostgresCoreRepository(transaction)
     rows = [
         ImportedBatchRowResult(
             id=f"batch_row:batch_import_0002:{row_no:05d}",
@@ -958,20 +971,44 @@ def test_import_batch_rows_use_bounded_multi_value_upsert() -> None:
             decision=ImportDecision.CREATED,
             decision_reason="new",
         )
-        for row_no in (1, 2)
+        for row_no in range(1, 2002)
     ]
 
     repository._save_batch_rows(
-        connection,
+        transaction,
         "batch_import_0002",
         rows,
-        [{"invoice_no": "INV-1"}, {"invoice_no": "INV-2"}],
+        [{"invoice_no": f"INV-{row_no}"} for row_no in range(1, 2002)],
     )
 
-    assert len(connection.calls) == 1
-    sql, params_seq = connection.calls[0]
-    assert "insert into app.import_batch_rows" in sql
-    assert len(params_seq) == 2
+    assert len(raw_connection.calls) == 3
+    assert all("insert into app.import_batch_rows" in sql for sql, _params in raw_connection.calls)
+    assert [len(params) for _sql, params in raw_connection.calls] == [19_000, 19_000, 19]
+
+
+def test_import_batch_rows_require_bounded_multi_value_capability() -> None:
+    class PerRowOnlyConnection:
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            return 1
+
+    repository = PostgresCoreRepository(PerRowOnlyConnection())
+    row = ImportedBatchRowResult(
+        id="batch_row:batch_import_0002:00001",
+        batch_id="batch_import_0002",
+        row_no=1,
+        source_record_type="invoice",
+        source_unique_key="invoice-key",
+        data_fingerprint=None,
+        decision=ImportDecision.CREATED,
+        decision_reason="new",
+    )
+
+    try:
+        repository._save_batch_rows(PerRowOnlyConnection(), "batch_import_0002", [row], [{}])
+    except AttributeError as exc:
+        assert "execute_many_values" in str(exc)
+    else:
+        raise AssertionError("Connections without bounded multi-value execution must fail fast.")
 
 
 def test_imported_invoice_total_repair_requires_unchanged_source_batch_owner() -> None:

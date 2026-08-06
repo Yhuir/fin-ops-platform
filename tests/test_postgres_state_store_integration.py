@@ -9,6 +9,8 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from fin_ops_platform.postgres import migrate
+from fin_ops_platform.domain.enums import BatchType, ImportDecision
+from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import (
@@ -26,10 +28,10 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlCommitOutcomeUnknown
-from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.tax_certified_import_service import (
@@ -836,6 +838,84 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(loaded_import_service.list_invoices()[0].source_batch_id, preview.batch.id)
         loaded_session = loaded_file_service.snapshot()["sessions"]["session_1"]
         self.assertEqual(loaded_session.files[0].batch_id, preview.batch.id)
+
+    def test_import_batch_row_owner_conflict_rolls_back_whole_batch(self) -> None:
+        repository = PostgresCoreRepository(self.connection)
+
+        def row(row_id: str, batch_id: str, row_no: int) -> ImportedBatchRowResult:
+            return ImportedBatchRowResult(
+                id=row_id,
+                batch_id=batch_id,
+                row_no=row_no,
+                source_record_type="invoice",
+                source_unique_key=f"invoice-key-{row_no}",
+                data_fingerprint=None,
+                decision=ImportDecision.CREATED,
+                decision_reason="new",
+            )
+
+        def insert_batch(transaction, batch_id: str) -> None:
+            transaction.execute(
+                """
+                insert into app.import_batches(
+                    legacy_mongo_id, batch_type, source_name, imported_by, status, raw_payload
+                ) values (%s, 'input_invoice', 'input.xlsx', 'tester', 'pending', '{}'::jsonb)
+                """,
+                (batch_id,),
+            )
+
+        shared_row_id = "batch-row-shared-owner"
+        with self.connection.transaction() as transaction:
+            insert_batch(transaction, "batch-owner-a")
+            repository._save_batch_rows(
+                transaction,
+                "batch-owner-a",
+                [row(shared_row_id, "batch-owner-a", 1)],
+                [{"invoice_no": "INV-A"}],
+            )
+
+        with self.connection.transaction() as transaction:
+            repository._save_batch_rows(
+                transaction,
+                "batch-owner-a",
+                [row(shared_row_id, "batch-owner-a", 1)],
+                [{"invoice_no": "INV-A"}],
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "refusing to re-parent"):
+            with self.connection.transaction() as transaction:
+                insert_batch(transaction, "batch-owner-b")
+                repository._save_batch_rows(
+                    transaction,
+                    "batch-owner-b",
+                    [
+                        row("batch-row-new-before-conflict", "batch-owner-b", 1),
+                        row(shared_row_id, "batch-owner-b", 2),
+                    ],
+                    [{"invoice_no": "INV-B-1"}, {"invoice_no": "INV-B-2"}],
+                )
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from app.import_batches where legacy_mongo_id in ('batch-owner-a', 'batch-owner-b');",
+            ),
+            "1",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from app.import_batch_rows where legacy_mongo_id in ('batch-row-shared-owner', 'batch-row-new-before-conflict');",
+            ),
+            "1",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select legacy_batch_id from app.import_batch_rows where legacy_mongo_id = 'batch-row-shared-owner';",
+            ),
+            "batch-owner-a",
+        )
 
     def test_tax_certified_imports_round_trip_through_formal_tables(self) -> None:
         imported_at = datetime(2026, 1, 20, tzinfo=UTC)
