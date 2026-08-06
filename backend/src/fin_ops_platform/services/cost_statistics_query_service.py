@@ -162,7 +162,15 @@ class CostStatisticsQueryService:
         normalized_transaction_id = str(transaction_id or "").strip()
         if not normalized_transaction_id:
             raise KeyError(transaction_id)
-        row = self._policy(project_scope=normalized_project_scope).transaction(
+        row = CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(
+                scope_kind=scope_kind,
+                scope_value=scope_value,
+                view=normalized_view,
+                include_statistics=False,
+            ),
+            project_scope=normalized_project_scope,
+        ).transaction(
             transaction_id=normalized_transaction_id,
             bank_flow_view=normalized_view in {"time", "bank_tag"},
             scope_kind=scope_kind,

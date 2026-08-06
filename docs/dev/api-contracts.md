@@ -76,7 +76,7 @@
 `GET /api/cost-statistics/transactions/{transaction_id}`
 
 - 必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_transaction_request`，未找到返回 `404`。
-- 详情从同一 canonical snapshot 计算，不跨页面 API/read model fallback。
+- 详情从同一 canonical snapshot 计算，并按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 

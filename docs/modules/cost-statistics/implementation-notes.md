@@ -4,6 +4,7 @@
 
 - 删除成本统计专属详情 modal 及其大卡片样式，复用全站 HeroUI `AppDrawer`、`Chip`、`Separator` 和 `Button`；详情内容改为扁平分区与字段行，不保留解释性文案。
 - 点击流水先打开抽屉，再发起既有单次详情请求；loading 使用无文字 skeleton，失败与重试只在抽屉内处理，不占用 explorer/导出状态。
+- 生产性能探针发现单条详情仍走全期间 snapshot 后，将详情请求已有的 `scope/view` 下推到 canonical repository，并固定 `include_statistics=false`；不增加缓存、read model、endpoint 或兼容路径。
 - 保留 policy 中共享的完成态 OA 判定作为唯一业务入口，不新增过滤器、API、查询或状态；补齐 project、bank、expense_type 的 policy/API 回归，明确进行中 OA 不进入成本视图，time/bank_tag 继续只读银行事实。
 - 删除 `CostTransactionDetailModal` 和旧 `.cost-detail-modal*` 样式，不保留兼容容器或双路径。
 

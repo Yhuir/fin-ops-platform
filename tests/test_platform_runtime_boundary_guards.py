@@ -2665,7 +2665,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             self.assertIn(table, repository_source)
         self.assertIn("normalized_payload", repository_source)
         self.assertIn("COMPLETED_WORKFLOW_STATUS_SQL", repository_source)
-        self.assertIn("self._canonical_repository.load_snapshot()", query_source)
+        self.assertIn("self._canonical_repository.load_snapshot(", query_source)
+        self.assertIn("scope_kind=scope_kind", query_source)
+        self.assertIn("include_statistics=False", query_source)
         for forbidden in (
             "read_model.cost_statistics",
             "ReadModelRefreshGateway",

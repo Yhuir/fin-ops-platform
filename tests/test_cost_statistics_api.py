@@ -145,6 +145,35 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(transaction["relation_case_ids"], ["CASE-COST-DIRECT-001"])
         self.assertEqual(transaction["cost_allocations"][0]["project_name"], "云南溯源科技")
 
+    def test_transaction_detail_loads_only_the_requested_scope(self) -> None:
+        repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
+        original_load_snapshot = repository.load_snapshot
+        calls: list[dict[str, object]] = []
+
+        def load_snapshot(**kwargs):
+            calls.append(dict(kwargs))
+            return original_load_snapshot(**kwargs)
+
+        repository.load_snapshot = load_snapshot
+
+        status, _detail = self._json(
+            f"/api/cost-statistics/transactions/{self.bank_id}"
+            "?scope=2026-03&view=time&project_scope=all"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "scope_kind": "month",
+                    "scope_value": "2026-03",
+                    "view": "time",
+                    "include_statistics": False,
+                }
+            ],
+        )
+
     def test_oa_cost_views_exclude_in_progress_oa(self) -> None:
         in_progress_oa = replace(self.oa, workflow_status="in_progress")
         self.app._cost_statistics_canonical_repository._oa_rows_by_ids_provider = (  # noqa: SLF001
