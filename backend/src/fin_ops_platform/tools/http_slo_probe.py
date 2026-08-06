@@ -8,6 +8,7 @@ import gzip
 import json
 from math import ceil
 from pathlib import Path
+from threading import Barrier, Lock
 from time import monotonic
 from typing import Any, Callable, Mapping, Sequence, TextIO
 import os
@@ -297,16 +298,22 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         evidence_environment=args.environment_name,
         require_auth=not bool(args.allow_unauthenticated),
         include_samples=bool(args.include_samples),
+        synchronize_concurrency=capacity is not None,
     )
     if capacity is not None:
         report["capacity"] = capacity
         report["capacity_tier"] = args.capacity_tier
         report["target_concurrency"] = int(capacity[f"n_{args.capacity_tier}"])
-        report["capacity_concurrency_pass"] = report.get("concurrency") == report["target_concurrency"]
+        report["capacity_concurrency_pass"] = (
+            report.get("concurrency") == report["target_concurrency"]
+            and report.get("observed_peak_concurrency") == report["target_concurrency"]
+        )
         if not report["capacity_concurrency_pass"]:
             report["status"] = "fail"
             report["release_blocked"] = True
-            report["error"] = "actual concurrency did not equal the derived target concurrency"
+            report["error"] = (
+                "configured and observed peak concurrency must equal the derived target concurrency"
+            )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -448,6 +455,7 @@ def collect_http_slo(
     require_auth: bool = True,
     include_samples: bool = False,
     request_fn: RequestFn | None = None,
+    synchronize_concurrency: bool = False,
 ) -> dict[str, Any]:
     normalized_headers = _normalized_probe_headers(headers or {})
     normalized_admin_headers = _normalized_probe_headers(admin_headers or {})
@@ -470,6 +478,26 @@ def collect_http_slo(
     normalized_iterations = max(1, iterations)
     normalized_warmup = max(0, warmup)
     normalized_concurrency = max(1, min(int(concurrency), normalized_iterations, MAX_CONCURRENCY))
+    concurrency_lock = Lock()
+    active_requests = 0
+    observed_peak_concurrency = 0
+
+    def measured_request(start_barrier: Barrier | None) -> RequestFn:
+        def invoke(url: str, request_headers: Mapping[str, str], request_timeout: float) -> HttpProbeResponse:
+            nonlocal active_requests, observed_peak_concurrency
+            if start_barrier is not None:
+                start_barrier.wait()
+            with concurrency_lock:
+                active_requests += 1
+                observed_peak_concurrency = max(observed_peak_concurrency, active_requests)
+            try:
+                return request(url, request_headers, request_timeout)
+            finally:
+                with concurrency_lock:
+                    active_requests -= 1
+
+        return invoke
+
     for probe in probes or DEFAULT_API_PROBES:
         url = resolve_probe_url(base_url, probe.path, api_prefix=api_prefix)
         probe_headers = _headers_for_probe(
@@ -491,6 +519,7 @@ def collect_http_slo(
             )
         measured_indexes = range(normalized_warmup, normalized_warmup + normalized_iterations)
         if normalized_concurrency == 1:
+            tracked_request = measured_request(None)
             samples.extend(
                 _collect_one(
                     probe,
@@ -499,26 +528,31 @@ def collect_http_slo(
                     warmup=False,
                     headers=probe_headers,
                     timeout_seconds=timeout_seconds,
-                    request_fn=request,
+                    request_fn=tracked_request,
                 )
                 for index in measured_indexes
             )
         else:
             with ThreadPoolExecutor(max_workers=normalized_concurrency) as executor:
-                futures = [
-                    executor.submit(
-                        _collect_one,
-                        probe,
-                        url=url,
-                        iteration=index + 1,
-                        warmup=False,
-                        headers=probe_headers,
-                        timeout_seconds=timeout_seconds,
-                        request_fn=request,
-                    )
-                    for index in measured_indexes
-                ]
-                samples.extend(future.result() for future in futures)
+                measured_index_list = list(measured_indexes)
+                for start in range(0, len(measured_index_list), normalized_concurrency):
+                    wave = measured_index_list[start:start + normalized_concurrency]
+                    start_barrier = Barrier(len(wave)) if synchronize_concurrency and len(wave) > 1 else None
+                    tracked_request = measured_request(start_barrier)
+                    futures = [
+                        executor.submit(
+                            _collect_one,
+                            probe,
+                            url=url,
+                            iteration=index + 1,
+                            warmup=False,
+                            headers=probe_headers,
+                            timeout_seconds=timeout_seconds,
+                            request_fn=tracked_request,
+                        )
+                        for index in wave
+                    ]
+                    samples.extend(future.result() for future in futures)
     measured = [sample for sample in samples if not sample.warmup]
     probe_summaries = [_summarize_probe(probe, measured) for probe in probes or DEFAULT_API_PROBES]
     status = "pass" if all(item["status"] == "pass" for item in probe_summaries) else "fail"
@@ -538,6 +572,7 @@ def collect_http_slo(
         "iterations": normalized_iterations,
         "warmup": normalized_warmup,
         "concurrency": normalized_concurrency,
+        "observed_peak_concurrency": observed_peak_concurrency,
         "timeout_seconds": timeout_seconds,
         "summary": {
             "probe_count": len(probe_summaries),

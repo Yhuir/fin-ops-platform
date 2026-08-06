@@ -5,7 +5,7 @@ from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Lock
+from threading import Event, Lock
 from time import sleep
 import unittest
 from unittest.mock import patch
@@ -127,7 +127,66 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(report["target_concurrency"], 8)
         self.assertTrue(report["release_blocked"])
 
-    def test_peak_capacity_run_uses_exact_derived_concurrency(self) -> None:
+    def test_peak_capacity_cli_runs_eight_overlapping_requests(self) -> None:
+        stdout = StringIO()
+        active = 0
+        observed_peak = 0
+        lock = Lock()
+        all_started = Event()
+
+        def overlapping_request(_url, _headers, _timeout):
+            nonlocal active, observed_peak
+            with lock:
+                active += 1
+                observed_peak = max(observed_peak, active)
+                if active == 8:
+                    all_started.set()
+            if not all_started.wait(timeout=1):
+                raise AssertionError("all eight capacity requests did not overlap")
+            try:
+                return http_slo_probe.HttpProbeResponse(
+                    status_code=200,
+                    headers={"content-type": "application/json"},
+                    body=b"{}",
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        with TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "capacity.json"
+            probe_path = Path(directory) / "probes.json"
+            evidence_path.write_text(json.dumps({
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "contract_version": "capacity-v1",
+                "approved_by": "FINOPS-CAPACITY-20260806",
+                "c_normal": 3,
+                "c_peak": 6,
+            }), encoding="utf-8")
+            probe_path.write_text(json.dumps({
+                "probes": [{"name": "capacity", "path": "/api/capacity"}],
+            }), encoding="utf-8")
+            with patch.object(http_slo_probe, "_urllib_request", side_effect=overlapping_request):
+                exit_code = http_slo_probe.main([
+                    "--capacity-evidence", str(evidence_path),
+                    "--capacity-tier", "peak",
+                    "--iterations", "8",
+                    "--warmup", "0",
+                    "--replace-default-probes",
+                    "--no-default-page-probe",
+                    "--probe-config", str(probe_path),
+                    "--allow-unauthenticated",
+                ], stdout=stdout)
+
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(observed_peak, 8)
+        self.assertEqual(report["concurrency"], report["target_concurrency"])
+        self.assertEqual(report["observed_peak_concurrency"], report["target_concurrency"])
+        self.assertTrue(report["capacity_concurrency_pass"])
+
+    def test_peak_capacity_run_blocks_release_when_observed_peak_is_lower(self) -> None:
         stdout = StringIO()
         with TemporaryDirectory() as directory:
             evidence_path = Path(directory) / "capacity.json"
@@ -139,10 +198,11 @@ class HttpSloProbeTests(unittest.TestCase):
                 "c_normal": 3,
                 "c_peak": 6,
             }), encoding="utf-8")
-            with patch.object(http_slo_probe, "collect_http_slo", side_effect=lambda **kwargs: {
+            with patch.object(http_slo_probe, "collect_http_slo", return_value={
                 "status": "pass",
-                "concurrency": kwargs["concurrency"],
-            }) as collect:
+                "concurrency": 8,
+                "observed_peak_concurrency": 7,
+            }):
                 exit_code = http_slo_probe.main([
                     "--capacity-evidence", str(evidence_path),
                     "--capacity-tier", "peak",
@@ -150,10 +210,12 @@ class HttpSloProbeTests(unittest.TestCase):
                 ], stdout=stdout)
 
         report = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(collect.call_args.kwargs["concurrency"], 8)
-        self.assertEqual(report["concurrency"], report["target_concurrency"])
-        self.assertTrue(report["capacity_concurrency_pass"])
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["concurrency"], 8)
+        self.assertEqual(report["observed_peak_concurrency"], 7)
+        self.assertFalse(report["capacity_concurrency_pass"])
+        self.assertTrue(report["release_blocked"])
 
     def test_capacity_access_evidence_requires_exact_fourteen_day_window(self) -> None:
         result = http_slo_probe.derive_capacity_targets(
