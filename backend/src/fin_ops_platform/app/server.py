@@ -665,6 +665,16 @@ class Application:
         etc_service = self._etc_service
         etc_reconciliation_task_service = self._etc_reconciliation_task_service
         save_etc_state = getattr(state_store, "save_etc_state", None)
+        category_repository = getattr(
+            state_store,
+            "bank_transaction_category_repository",
+            None,
+        )
+        category_source_proofs = getattr(
+            category_repository,
+            "turnover_bank_row_selection_proofs",
+            None,
+        )
         return SimpleNamespace(
             get_settings_payload=self._app_settings_service.get_settings_payload,
             replace_auto_tag_rules_from_file_source=self._bank_details_application_service().replace_auto_tag_rules_from_file_source,
@@ -674,6 +684,9 @@ class Application:
             workbench_relation_command_service=self._workbench_relation_command_service(),
             workbench_relation_reader=self._workbench_relation_command_service(),
             bank_transaction_effective_category_provider=self._bank_transaction_tag_reader(),
+            bank_transaction_category_source_proofs=(
+                category_source_proofs if callable(category_source_proofs) else None
+            ),
             get_bank_flow_rule_batch_tag_rules_payload=(
                 self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
             ),

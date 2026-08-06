@@ -143,6 +143,7 @@ def _run(
     argv: list[str],
     *,
     category_provider: object | None = None,
+    persisted_category_records: dict[str, dict[str, object]] | None = None,
     rules: object | None = None,
     persisted: list[str] | None = None,
 ) -> dict[str, object]:
@@ -155,6 +156,11 @@ def _run(
             repair_ops,
             "bank_transaction_effective_category_provider",
             return_value=category_provider or _CategoryProvider(),
+        ),
+        patch.object(
+            repair_ops,
+            "bank_transaction_category_source_proofs",
+            return_value=persisted_category_records or {},
         ),
         patch.object(
             repair_ops,
@@ -269,6 +275,40 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         self.assertFalse(metadata["requires_oa"])
         self.assertFalse(metadata["requires_invoice"])
         self.assertEqual(metadata["unrelated"], "keep")
+
+    def test_canonical_confirmation_proof_overrides_alias_missed_effective_source(self) -> None:
+        relation = _relation(
+            mode="manual_confirmed",
+            metadata={
+                "paired_requirement_source": "bank_transaction_paired_policy",
+                "paired_requirement_tag_codes": [],
+                "paired_requirement_version": 7,
+                "requires_oa": True,
+                "requires_invoice": True,
+            },
+        )
+        command = _CommandService([relation])
+        category_code = "expense:engineering_service:personnel_insurance"
+
+        report = _run(
+            command,
+            ["--dry-run"],
+            category_provider=_CategoryProvider(
+                category_code,
+                category_source="auto_rule",
+            ),
+            persisted_category_records={
+                "bank-case-1": {
+                    "category_code": category_code,
+                    "category_source": "auto_confirmation",
+                }
+            },
+            rules=_rules(requires_oa=False, requires_invoice=False),
+        )
+
+        self.assertEqual(report["target_relation_count"], 1)
+        self.assertEqual(report["manual_review_relation_count"], 0)
+        self.assertEqual(report["repair_reason_counts"], {"persisted_category_drift": 1})
 
     def test_rule_derived_category_drift_is_reported_without_write_target(self) -> None:
         relation = _relation(

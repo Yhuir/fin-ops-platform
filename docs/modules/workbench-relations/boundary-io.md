@@ -28,6 +28,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | page scope proof request | Workbench / 银行明细页面 query boundary | `source_versions_for_scopes(scope_keys)` 通过 `workbench_relation_scope_summaries(...)` 一次读取全部 concrete month scope 的 published proof/current-effective dirty status，再用一次 bulk canonical expected-version I/O 比较；只 enqueue mismatch/missing 的 exact scopes。`all` 先一次枚举 canonical object、active relation 与已有 projection 月份，再执行相同批量 proof，禁止逐月 N+1 或持久化伪 `all` scope |
 | OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
 | persisted bank category changed | Bank Details / Turnover category closure | effective category 实际变化后，在分类事务内按 changed bank member 锁定 active 普通 relation，复用当前 canonical classifier 与同一 settings policy snapshot 重冻结 requirement metadata 并追加 history。ETC/批量账务关系排除；无变化或无 active relation 时零 relation 写。 |
+| historical category source proof | requirement repair tool runtime port | 只读 PostgreSQL canonical category fact，同时返回 UUID/legacy transaction identity alias；仅用于证明 persisted confirmation 并修复旧 requirement snapshot，不作为在线分类或页面事实源。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O

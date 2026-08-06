@@ -14,6 +14,7 @@ from fin_ops_platform.services.workbench_relation_requirements import (
 )
 from fin_ops_platform.tools.runtime_application import (
     bank_flow_rule_batch_tag_rules_payload,
+    bank_transaction_category_source_proofs,
     bank_transaction_effective_category_provider,
     build_tool_runtime_application,
     import_service,
@@ -78,10 +79,21 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     category_provider = bank_transaction_effective_category_provider(app)
     raw_rules_payload = bank_flow_rule_batch_tag_rules_payload(app)
     rules_payload = raw_rules_payload if isinstance(raw_rules_payload, dict) else {}
+    bank_row_ids = list(
+        dict.fromkeys(
+            row_id
+            for relation in eligible_relations
+            for row_id in _bank_row_ids(relation)
+        )
+    )
     assessments = _build_plan(
         eligible_relations,
         category_provider=category_provider,
         bank_rows=import_service(app).list_transactions(month="all"),
+        persisted_category_records=bank_transaction_category_source_proofs(
+            app,
+            bank_row_ids,
+        ),
         rules_payload=rules_payload,
     )
     fresh_plan = [item for item in assessments if str(item.get("repair_reason") or "").strip()]
@@ -156,6 +168,7 @@ def _build_plan(
     category_provider: Any,
     bank_rows: list[Any],
     rules_payload: dict[str, Any],
+    persisted_category_records: dict[str, dict[str, object]] | None = None,
 ) -> list[dict[str, Any]]:
     bank_row_ids = list(
         dict.fromkeys(row_id for relation in relations for row_id in _bank_row_ids(relation))
@@ -165,6 +178,15 @@ def _build_plan(
     category_records = category_provider.bulk_get_for_rows(target_rows)
     if not isinstance(category_records, dict):
         raise RuntimeError("Bank transaction category provider returned an invalid result.")
+    persisted_records = persisted_category_records or {}
+    for row_id in bank_row_ids:
+        proof = persisted_records.get(row_id)
+        if (
+            isinstance(proof, dict)
+            and _category_code(proof)
+            and _category_source(proof) == "auto_confirmation"
+        ):
+            category_records[row_id] = proof
 
     plan: list[dict[str, Any]] = []
     for relation in sorted(relations, key=lambda item: str(item.get("case_id") or "")):
@@ -205,7 +227,12 @@ def _build_plan(
             and raw_tag_codes
             and all(raw_tag_codes)
             and all(
-                source in {"manual", "manual_confirmation", "turnover_ledger"}
+                source in {
+                    "manual",
+                    "auto_confirmation",
+                    "manual_confirmation",
+                    "turnover_ledger",
+                }
                 for source in tag_sources
             )
         )

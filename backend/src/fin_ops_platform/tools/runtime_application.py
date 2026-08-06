@@ -79,6 +79,23 @@ def bank_transaction_effective_category_provider(app: Any) -> Any:
     return provider
 
 
+def bank_transaction_category_source_proofs(
+    app: Any,
+    transaction_ids: list[str],
+) -> dict[str, dict[str, object]]:
+    provider = getattr(
+        tool_runtime_ports(app),
+        "bank_transaction_category_source_proofs",
+        None,
+    )
+    if not callable(provider):
+        return {}
+    result = provider(transaction_ids)
+    if not isinstance(result, dict):
+        raise RuntimeError("Bank transaction category source proof boundary returned an invalid result.")
+    return result
+
+
 def bank_flow_rule_batch_tag_rules_payload(app: Any) -> dict[str, Any]:
     provider = getattr(tool_runtime_ports(app), "get_bank_flow_rule_batch_tag_rules_payload", None)
     if not callable(provider):
