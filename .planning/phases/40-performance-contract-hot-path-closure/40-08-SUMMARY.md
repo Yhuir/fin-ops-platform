@@ -13,7 +13,7 @@ provides:
   - Approved 6/8 target-concurrency refresh-status evidence below the 1-second p95 SLO
   - 100-sample Node-monotonic browser-inclusive Workbench t0..t4 p99 evidence
   - Long-term Workbench self-convergence documentation across architecture and module sources
-  - One-push/one-deploy production closure through T+300 at exact SHA 9c5728425
+  - Final blocker-fix redeploy closure through T+300 at exact SHA 3f887475c
 affects: [reconciliation-workbench, performance-contract, monitoring, release-gate]
 
 tech-stack:
@@ -42,7 +42,7 @@ key-decisions:
   - "Derive N_normal=6 and N_peak=8 from the approved production Settings ACL eligible-account capacity contract; retain no raw client identity."
   - "Keep the 100-sample artifact explicitly isolated_prod_equivalent and production_p99_claim=false; do not manufacture a production mutation claim without a sanctioned test-owned fixture."
   - "Exclude only known periodic status endpoints from drawer close-time business-I/O assertions and keep bounded motion/I/O regression protection."
-  - "Release exactly one combined candidate after all component gates pass, preserving the previous application release as the rollback anchor."
+  - "After review exposed release-blocking evidence defects, fix only those root causes and redeploy one final combined candidate, preserving the previous healthy application release as rollback anchor."
 
 patterns-established:
   - "Capacity reports carry source/version/approver proof alongside bounded concurrency and fresh/error/bytes distributions."
@@ -50,19 +50,19 @@ patterns-established:
 
 requirements-completed: []
 
-duration: 2h 05m
+duration: 3h 49m
 completed: 2026-08-06
 ---
 
 # Phase 40 Plan 08: Capacity, Browser p99, and Production Release Summary
 
-**Workbench self-convergence is now backed by 6/8-client production capacity evidence, a 100-sample 1.638s browser-inclusive p99, and one exact-SHA production release that stayed healthy through T+300.**
+**Workbench self-convergence is backed by actual 6/8-client production concurrency, a 100-sample 2.587s browser-inclusive p99, and exact-SHA release `3f887475c` healthy through T+300.**
 
 ## Performance
 
-- **Duration:** 2h 05m
+- **Duration:** 3h 49m
 - **Started:** 2026-08-06T08:24:06Z
-- **Completed:** 2026-08-06T10:29:16Z
+- **Completed:** 2026-08-06T12:13:18Z
 - **Tasks:** 3
 - **Files modified/created:** 19
 
@@ -70,11 +70,11 @@ completed: 2026-08-06
 
 - Synchronized five long-term architecture/module documents on writer zero-notify, status-led exact self-healing, durable queue/worker atomic generation, visible single-flight polling, hidden pause, and one changed-generation reload.
 - Extended the bounded HTTP probe with target concurrency while preserving serial compatibility and existing report fields.
-- Derived `N_normal=6` and `N_peak=8` from an approved named capacity contract; production read-only refresh-status evidence passed at p95 464.141ms and 422.407ms with 0 errors.
+- Derived `N_normal=6` and `N_peak=8` from an approved named capacity contract; the final deployed release reached actual peak concurrency 6/8 and passed production read-only refresh-status at p95 367.902ms/385.950ms and p99 368.126ms/385.961ms with 0 errors and 40/40 fresh responses.
 - Added one Node-monotonic t0..t4 recorder with strict segment equality, hashed identity/scope binding, new-generation proof, prod-equivalent manifest controls, and report merge rules.
-- Produced 100 isolated prod-equivalent actual-browser samples with total p99 1,637.689ms against the 3,000ms SLO.
+- Produced 100 isolated prod-equivalent actual-browser samples with total p99 2,587.216ms against the 3,000ms SLO.
 - Passed full backend, frontend, Chromium, runtime, infra, lint and docs gates; removed the disposable PostgreSQL database afterward.
-- Pushed once and deployed once. `main-9c572842-20260806182033` passed pre/T+0/T+60/T+300 with six workers ready, queues/DLQ clear, audits passing and no rollback.
+- Closed every mandatory code-review blocker, pushed the final candidate to `origin/main`, and redeployed `main-3f887475-20260806200448`. Pre/T+0/T+60/T+300 all passed with six workers ready, queues/DLQ/dirty scopes clear, audits passing and no rollback.
 
 ## Task Commits
 
@@ -85,6 +85,9 @@ completed: 2026-08-06
 5. **Task 2 evidence: Close capacity and browser evidence gates** - `f0c741d95` (`test`)
 6. **Task 3 deviation: Bound overlapping Workbench polls** - `b91c1c430` (`test`)
 7. **Task 3 deviation: Stabilize drawer motion diagnostics** - `9c5728425` (`test`)
+8. **Release blocker fixes: generation race, capacity overlap, p99 gate, ambiguous recovery and canonical classification** - `9d2df5050`..`70c1d756d` (`fix`/`test`)
+9. **Final release gate and drawer self-convergence accounting** - `f8d26a9cf`, `b53b64fb3` (`fix`/`test`)
+10. **Final production evidence** - `3f887475c` (`test`)
 
 ## Files Created/Modified
 
@@ -108,7 +111,7 @@ completed: 2026-08-06
 - Kept the isolated browser report honest: it proves prod-equivalent application poller/debounce/payload/DOM behavior but explicitly does not claim production mutation p99.
 - Did not execute a production write smoke because no root-owned test fixture matched the required bank-flow identity/scope/recovery contract. The user explicitly authorized release with safe read-only production validation rather than inventing or repurposing a fixture.
 - Preserved all existing production runtime architecture: no endpoint, table, index, cache, worker, queue, notification fan-out, scheduler dependency or fallback was added.
-- Used the official release gate once. Previous release `main-2fce06f9-20260806042917` remained the rollback anchor and was not needed.
+- Used the official release gate again after mandatory blocker fixes. Previous healthy release `main-9c572842-20260806182033` remained the rollback anchor and was not needed.
 
 ## Deviations from Plan
 
@@ -148,7 +151,7 @@ completed: 2026-08-06
 
 ---
 
-**Total deviations:** 4 (3 Rule 1 test-contract fixes, 1 explicit user-authorized evidence adjustment)
+**Total deviations:** 4 original plan deviations plus the mandatory post-release review closure. The review closure fixed root causes in the existing shared boundaries; it added no runtime service, endpoint, queue, cache or compatibility path.
 **Impact on plan:** The fixes make diagnostics reflect real concurrent pollers and browser paint lifecycle without weakening business, I/O or SLO assertions. No production behavior or runtime architecture was expanded.
 
 ## Verification
@@ -157,15 +160,17 @@ completed: 2026-08-06
 - Task 2 HTTP and strict Playwright diagnostics: **36 passed**.
 - Targeted Phase 40 PostgreSQL suite: **528 passed**.
 - Targeted frontend suite: **128 passed**.
-- Full backend discovery: **3,966 passed**, 56 environment skips.
-- Full frontend: **954/954 passed**; production build passed.
-- Full Playwright Chromium: **174/174 passed**.
+- Full backend discovery: **3,971 passed**, 56 environment skips.
+- Full frontend: **956/956 passed**; production build passed.
+- Full Playwright Chromium: **176 core passes**, 2 production-only specs skipped; the only failure was the unrelated app-shell frame-timing assertion under full-suite host load, explicitly accepted as non-blocking by the user. Target Workbench visibility, drawer and relation flows passed.
 - Runtime check: ready on PostgreSQL schema 135.
 - Infra smoke: **71 passed**, one expected RabbitMQ environment skip; read-model DB step dry-run.
 - Ruff lint, docs and diff checks: passed.
-- Capacity: normal p95 **464.141ms**, peak p95 **422.407ms**, both zero error.
-- Browser t0..t4: **100/100**, p99 **1,637.689ms**, exact segment sums.
-- Release: pre/T+0/T+60/T+300 PASS, no rollback.
+- Capacity after final deployment: normal N=6/observed=6 p95/p99 **367.902/368.126ms**; peak N=8/observed=8 p95/p99 **385.950/385.961ms**; 40/40 HTTP 200/fresh, zero error and zero extra enqueue.
+- Browser t0..t4: **100/100**, p99 **2,587.216ms**, exact segment sums, `production_p99_claim=false`.
+- Code review: **Critical 0**; one non-blocking future production-smoke metadata warning remains outside the current no-production-mutation claim.
+- Release `main-3f887475-20260806200448`: pre/T+0/T+60/T+300 PASS, no rollback; pending/failed/publishing outbox, dirty scopes, durable/RabbitMQ DLQ and unknown/not-ready workers all zero.
+- Production browser smoke: **16/16 core routes** loaded without session/loading blockers and emitted no mutating request; admin AppHealth loaded with HTTP 200 and also emitted no mutating request.
 
 ## Issues Encountered
 
@@ -186,15 +191,15 @@ None - no dependency, environment, migration, worker or external service configu
 
 ## Next Phase Readiness
 
-- Phase 40 is fully released and stable at `main-9c572842-20260806182033`.
+- Phase 40 is fully released and stable at `main-3f887475-20260806200448` (`3f887475c3ee4274f99b47c21858818ff225a26f`).
 - The production write-smoke/p99 distinction remains explicit: a future production p99 claim requires a newly sanctioned test-owned bank-flow fixture; it is not a blocker for the completed read-only release closure authorized here.
-- Previous release `main-2fce06f9-20260806042917` remains the known rollback anchor recorded by the release gate.
+- Previous release `main-9c572842-20260806182033` remains the known rollback anchor recorded by the release gate.
 
 ## Self-Check: PASSED
 
 - All three evidence JSON files and `40-VERIFICATION.md` exist.
-- All seven task/TDD/deviation commits resolve in git history.
-- Official deploy output identifies exact Git SHA `9c572842598484d165fc38a66f17d348091e223d` and PASS at pre/T+0/T+60/T+300.
+- All task, TDD, mandatory review-fix and evidence commits resolve in git history.
+- Official deploy output identifies exact Git SHA `3f887475c3ee4274f99b47c21858818ff225a26f` and PASS at pre/T+0/T+60/T+300.
 - The disposable database `fin_ops_test_40_08_executor` is absent.
 - No untracked runtime/test artifact remains in the worktree.
 

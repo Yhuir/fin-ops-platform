@@ -22,19 +22,19 @@
   "concurrency": 6,
   "evidence_environment": "production_read_only_tunnel",
   "evidence_window": {
-    "completed_at": "2026-08-06T11:31:12.761118+00:00",
-    "started_at": "2026-08-06T11:31:10.852676+00:00"
+    "completed_at": "2026-08-06T12:13:15.962505+00:00",
+    "started_at": "2026-08-06T12:13:13.964401+00:00"
   },
-  "generated_at": "2026-08-06T11:31:12.761118+00:00",
+  "generated_at": "2026-08-06T12:13:15.962505+00:00",
   "iterations": 20,
   "observed_peak_concurrency": 6,
   "probes": [
     {
       "cache_statuses": {},
       "duration_ms": {
-        "p50": 308.025,
-        "p95": 361.735,
-        "p99": 363.593
+        "p50": 300.211,
+        "p95": 367.902,
+        "p99": 368.126
       },
       "error_count": 0,
       "error_counts": {},
@@ -75,7 +75,7 @@
   "summary": {
     "error_count": 0,
     "failed_probe_count": 0,
-    "max_p95_ms": 361.735,
+    "max_p95_ms": 367.902,
     "probe_count": 1,
     "request_count": 20,
     "response_bytes_total": 39760,
