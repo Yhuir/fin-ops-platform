@@ -547,6 +547,34 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["probes"][0]["read_model_statuses"], {})
 
+    def test_probe_fails_when_p95_passes_but_p99_exceeds_ceiling(self) -> None:
+        probe = http_slo_probe.HttpProbe("tail_latency", "/api/tail-latency")
+        samples = [
+            http_slo_probe.HttpProbeSample(
+                name=probe.name,
+                path=probe.path,
+                url=f"https://example.test{probe.path}",
+                kind=probe.kind,
+                iteration=index + 1,
+                warmup=False,
+                elapsed_ms=1.0 if index < 95 else 3_000.0,
+                status_code=200,
+                response_bytes=2,
+                content_type="application/json",
+                ok=True,
+            )
+            for index in range(100)
+        ]
+
+        summary = http_slo_probe._summarize_probe(probe, samples)
+
+        self.assertEqual(summary["duration_ms"]["p95"], 1.0)
+        self.assertEqual(summary["duration_ms"]["p99"], 3_000.0)
+        self.assertTrue(summary["p95_pass"])
+        self.assertFalse(summary["p99_pass"])
+        self.assertFalse(summary["slo_pass"])
+        self.assertEqual(summary["status"], "fail")
+
     def test_non_fresh_read_model_or_refresh_enqueue_fails_probe(self) -> None:
         responses = [
             {"read_model_status": "missing", "refresh_enqueued": True},

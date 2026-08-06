@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_TARGET_MS = 1_000.0
+DEFAULT_P99_TARGET_MS = 2_000.0
 DEFAULT_ITERATIONS = 5
 DEFAULT_WARMUP = 1
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -49,6 +50,7 @@ class HttpProbe:
     kind: str = "api"
     expected_statuses: tuple[int, ...] = (200,)
     target_ms: float = DEFAULT_TARGET_MS
+    p99_target_ms: float = DEFAULT_P99_TARGET_MS
     auth_scope: str = "user"
 
 
@@ -214,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--target-ms", type=float, default=DEFAULT_TARGET_MS)
+    parser.add_argument("--p99-target-ms", type=float, default=DEFAULT_P99_TARGET_MS)
     parser.add_argument("--bearer-token", default=os.getenv("FIN_OPS_HTTP_SLO_BEARER_TOKEN", ""))
     parser.add_argument("--admin-token", default=os.getenv("FIN_OPS_HTTP_SLO_ADMIN_TOKEN", ""))
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
@@ -659,20 +662,25 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
         if sample.refresh_enqueued:
             refresh_enqueued_count += 1
     success_count = sum(1 for sample in probe_samples if sample.ok)
-    p95 = _percentiles(durations)["p95"]
+    duration_percentiles = _percentiles(durations)
+    p95 = duration_percentiles["p95"]
+    p99 = duration_percentiles["p99"]
     non_fresh_statuses = {
         status: count
         for status, count in read_model_statuses.items()
         if status != "fresh"
     }
     passes_status = success_count == len(probe_samples) and bool(probe_samples)
-    passes_slo = p95 is not None and p95 <= probe.target_ms
+    passes_p95 = p95 is not None and p95 <= probe.target_ms
+    passes_p99 = p99 is not None and p99 <= probe.p99_target_ms
+    passes_slo = passes_p95 and passes_p99
     passes_freshness = not non_fresh_statuses and refresh_enqueued_count == 0
     return {
         "name": probe.name,
         "kind": probe.kind,
         "path": probe.path,
         "target_ms": probe.target_ms,
+        "p99_target_ms": probe.p99_target_ms,
         "expected_statuses": list(probe.expected_statuses),
         "sample_count": len(probe_samples),
         "request_count": len(probe_samples),
@@ -680,8 +688,10 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
         "error_count": len(probe_samples) - success_count,
         "failure_count": len(probe_samples) - success_count,
         "status_counts": status_counts,
-        "duration_ms": _percentiles(durations),
+        "duration_ms": duration_percentiles,
         "response_bytes": _percentiles(response_sizes),
+        "p95_pass": bool(passes_p95),
+        "p99_pass": bool(passes_p99),
         "slo_pass": bool(passes_slo),
         "freshness_pass": bool(passes_freshness),
         "status": "pass" if passes_status and passes_slo and passes_freshness else "fail",
@@ -706,13 +716,18 @@ def _configured_probes(args: argparse.Namespace) -> list[HttpProbe]:
             kind="page",
             expected_statuses=(200,),
             target_ms=float(args.target_ms),
+            p99_target_ms=float(args.p99_target_ms),
         )
         for index, path in enumerate(page_paths, start=1)
     )
     if not args.replace_default_probes:
-        probes.extend(_with_target(DEFAULT_API_PROBES, float(args.target_ms)))
+        probes.extend(_with_target(DEFAULT_API_PROBES, float(args.target_ms), float(args.p99_target_ms)))
     if args.probe_config is not None:
-        probes.extend(_load_probe_config(args.probe_config, default_target_ms=float(args.target_ms)))
+        probes.extend(_load_probe_config(
+            args.probe_config,
+            default_target_ms=float(args.target_ms),
+            default_p99_target_ms=float(args.p99_target_ms),
+        ))
     return probes
 
 
@@ -726,7 +741,12 @@ def _page_probe_name(path: str, *, fallback_index: int) -> str:
     return f"page_shell_{normalized or fallback_index}"
 
 
-def _load_probe_config(path: Path, *, default_target_ms: float) -> list[HttpProbe]:
+def _load_probe_config(
+    path: Path,
+    *,
+    default_target_ms: float,
+    default_p99_target_ms: float,
+) -> list[HttpProbe]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     raw_items = payload.get("probes") if isinstance(payload, dict) else payload
     if not isinstance(raw_items, list):
@@ -745,13 +765,14 @@ def _load_probe_config(path: Path, *, default_target_ms: float) -> list[HttpProb
                 kind=str(raw.get("kind") or "api").strip() or "api",
                 expected_statuses=tuple(int(value) for value in statuses),
                 target_ms=float(raw.get("target_ms") or default_target_ms),
+                p99_target_ms=float(raw.get("p99_target_ms") or default_p99_target_ms),
                 auth_scope=_normalize_auth_scope(raw.get("auth_scope")),
             )
         )
     return probes
 
 
-def _with_target(probes: Sequence[HttpProbe], target_ms: float) -> list[HttpProbe]:
+def _with_target(probes: Sequence[HttpProbe], target_ms: float, p99_target_ms: float) -> list[HttpProbe]:
     return [
         HttpProbe(
             name=probe.name,
@@ -759,6 +780,7 @@ def _with_target(probes: Sequence[HttpProbe], target_ms: float) -> list[HttpProb
             kind=probe.kind,
             expected_statuses=probe.expected_statuses,
             target_ms=target_ms,
+            p99_target_ms=p99_target_ms,
             auth_scope=probe.auth_scope,
         )
         for probe in probes
