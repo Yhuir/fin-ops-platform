@@ -830,6 +830,13 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
       count: invoiceSummary?.count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
       amount: normalizeMoney(invoiceSummary?.amount ?? batch.totalAmount ?? batch.total_amount),
     },
+    amountBreakdown: {
+      reportedAmount: normalizeMoney(String(amountBreakdown.reported_amount ?? amountBreakdown.reportedAmount ?? "")),
+      oaAmount: normalizeMoney(String(amountBreakdown.oa_amount ?? amountBreakdown.oaAmount ?? "")),
+      etcInvoiceAmount: normalizeMoney(String(amountBreakdown.etc_invoice_amount ?? amountBreakdown.etcInvoiceAmount ?? "")),
+      gapAmount: normalizeMoney(String(amountBreakdown.gap_amount ?? amountBreakdown.gapAmount ?? "")),
+      gapReason: String(amountBreakdown.gap_reason ?? amountBreakdown.gapReason ?? ""),
+    },
     createOaDraftAction: {
       enabled: Boolean(createOaDraftAction?.enabled),
       code: createOaDraftAction?.code ?? "action_unavailable",

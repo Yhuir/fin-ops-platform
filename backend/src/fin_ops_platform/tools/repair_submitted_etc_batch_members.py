@@ -43,8 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> int:
+    raw_argv = list(argv or sys.argv[1:])
+    if "--summary-only" in raw_argv:
+        from fin_ops_platform.tools.repair_etc_business_batch_summary import main as summary_main
+
+        return summary_main([argument for argument in raw_argv if argument != "--summary-only"], stdout=stdout)
     parser = build_parser()
-    args = parser.parse_args(list(argv or sys.argv[1:]))
+    args = parser.parse_args(raw_argv)
     if args.execute and not str(args.expected_fingerprint or "").strip():
         parser.error("--expected-fingerprint is required with --execute")
     if args.execute and not str(args.operator or "").strip():

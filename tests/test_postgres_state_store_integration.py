@@ -855,6 +855,20 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.etc_import_batches;"), "1")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.etc_submission_batches;"), "1")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.etc_business_batches;"), "1")
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select invoice_count from app.etc_business_batches where business_batch_id = 'etc_business_batch_0001';",
+            ),
+            "1",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select total_amount from app.etc_business_batches where business_batch_id = 'etc_business_batch_0001';",
+            ),
+            "100.00",
+        )
 
         reloaded_service = EtcService(state_store=self.store)
         invoices, total, _ = reloaded_service.list_invoices()

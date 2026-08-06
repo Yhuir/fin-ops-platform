@@ -1164,6 +1164,11 @@ export default function EtcTicketManagementPage() {
   const displayedOaDraftAmount = draftResult ? draftOaAmount : oaDraftAmount;
   const oaInvoiceAmountDifference = moneyDifference(oaDraftAmount, importedInvoiceAmount);
   const hasOaInvoiceAmountDifference = Number(oaInvoiceAmountDifference) > 0;
+  const selectedBatchGapAmount = selectedBatch?.amountBreakdown?.gapAmount ?? "0.00";
+  const hasSelectedBatchAmountGap = Number(selectedBatchGapAmount) !== 0;
+  const selectedBatchReportedAmount = selectedBatch?.amountBreakdown?.oaAmount
+    || selectedBatch?.amountBreakdown?.reportedAmount
+    || "0.00";
   const hasCurrentOaAmountContract = Boolean(
     selectedTask
     && currentBusinessBatch
@@ -2061,6 +2066,9 @@ export default function EtcTicketManagementPage() {
                   const titleEditing = editingBatchTitleId === batch.businessBatchId;
                   const titleSaving = titleSavingBatchId === batch.businessBatchId;
                   const selectRow = () => {
+                    if (selectedBatchIdRef.current === batch.businessBatchId) {
+                      return;
+                    }
                     setBusinessBatchDetail(null);
                     setSelectedTask(null);
                     setTaskListError(null);
@@ -2251,7 +2259,7 @@ export default function EtcTicketManagementPage() {
                 <section className="etc-batch-summary" aria-label="批次摘要">
                   <div className="etc-detail-metrics" aria-label="批次指标">
                     <div>
-                      <span>总金额</span>
+                      <span>发票金额</span>
                       <strong>{formatMoney(selectedBatch.invoiceSummary.amount)}</strong>
                     </div>
                     <div>
@@ -2267,6 +2275,22 @@ export default function EtcTicketManagementPage() {
                       <strong>{formatDateRange(selectedBatchMetrics?.passageStartDate ?? null, selectedBatchMetrics?.passageEndDate ?? null)}</strong>
                     </div>
                   </div>
+                  {hasSelectedBatchAmountGap ? (
+                    <section className="etc-oa-amount-summary" aria-label="批次金额口径">
+                      <div>
+                        <span>OA 提交金额</span>
+                        <strong>{formatMoney(selectedBatchReportedAmount)} 元</strong>
+                      </div>
+                      <div>
+                        <span>ETC 发票金额</span>
+                        <strong>{formatMoney(selectedBatch.invoiceSummary.amount)} 元</strong>
+                      </div>
+                      <p role="status">
+                        差额 {formatMoney(selectedBatchGapAmount)} 元
+                        {selectedBatch.amountBreakdown.gapReason ? ` · ${selectedBatch.amountBreakdown.gapReason}` : ""}
+                      </p>
+                    </section>
+                  ) : null}
                   {(selectedBatchMetrics?.plateSummary.length ?? 0) > 0 ? (
                     <div className="etc-plate-summary" aria-label="车牌汇总">
                       {(selectedBatchMetrics?.plateSummary ?? []).map((item) => (

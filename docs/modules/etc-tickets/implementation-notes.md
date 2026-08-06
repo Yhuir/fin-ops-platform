@@ -957,3 +957,9 @@
 - 一致性：先写对象，再以 business batch version CAS 持久化发票、提交批次汇总和逐发票审计；失败恢复内存 preimage 并删除本次对象。重复上传只返回零修复且不递增版本；不改批次成员、OA、关联台 relation、submitted 状态、read model 或 worker。
 - 旧链路收敛：不生成 PDF/XML、不从 canonical 字段猜车牌、不增加第二个脚本/路由/fallback；此前成员补录工具保留其“缺附件不伪造”职责，附件恢复统一进入现有受控 API。
 - 测试覆盖：真实 68 张结构的 64 完整 + 4 后补组合、嵌套 ZIP、4 张 bootstrap、两张车牌纠正、68 页下载、身份不一致、持久化回滚、对象清理、已有 hash 和幂等重放。
+
+## 2026-08-07 同批次重复点击与金额口径闭环
+
+- 同一已选 business batch 的再次点击直接返回，不清空已加载 detail/task，也不触发第二次 API 请求；切换批次的同步失效和并发加载保持不变。
+- `app.etc_business_batches.invoice_count/total_amount` 改为随完整 ETC snapshot 从实际 `invoice_ids` 成员发票求和；删除 OA `oa_total_amount/total_amount` 优先覆盖发票汇总的旧持久化逻辑。只有不完整历史 snapshot 才读取明确命名的 `etc_invoice_amount`，不会回退到 OA 金额。
+- 列表/详情继续复用既有轻量 scalar/API；页面把主指标明确标为“发票金额”，并消费既有 `amountBreakdown` 展示 OA 提交金额、ETC 发票金额、差额和事实源原因，不新增 API、read model、worker 或跨页面 I/O。

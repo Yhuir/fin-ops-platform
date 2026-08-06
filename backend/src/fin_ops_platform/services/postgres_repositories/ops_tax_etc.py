@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Iterator
 
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -1418,13 +1418,17 @@ class PostgresOpsTaxEtcRepository:
                     ),
                 )
             business_batches = normalized.get("business_batches") if isinstance(normalized, dict) else None
+            invoice_payloads = {invoice_id: payload for invoice_id, payload in iter_mapping(invoices)}
             for business_batch_id, payload in iter_mapping(business_batches):
                 invoice_ids = text_list(payload.get("invoice_ids"))
                 submission_batch_id = text(payload.get("submission_batch_id"))
                 submission_payload = submission_batch_payloads.get(submission_batch_id or "") if submission_batch_id else None
                 business_scope_month = self._etc_business_batch_scope_month(payload, submission_payload)
-                business_invoice_count = self._etc_business_batch_invoice_count(payload, submission_payload, invoice_ids)
-                business_total_amount = self._etc_business_batch_total_amount(payload, submission_payload)
+                business_invoice_count, business_total_amount = self._etc_business_batch_invoice_summary(
+                    submission_payload,
+                    invoice_ids,
+                    invoice_payloads,
+                )
                 connection.execute(
                     """
                     insert into app.etc_business_batches(
@@ -1496,55 +1500,26 @@ class PostgresOpsTaxEtcRepository:
         )
 
     @staticmethod
-    def _etc_business_batch_invoice_count(
-        payload: dict[str, Any],
+    def _etc_business_batch_invoice_summary(
         submission_payload: dict[str, Any] | None,
         invoice_ids: list[str],
-    ) -> int:
+        invoice_payloads: dict[str, dict[str, Any]],
+    ) -> tuple[int, str]:
         submission_payload = submission_payload if isinstance(submission_payload, dict) else {}
-        invoice_summary = payload.get("invoice_summary") if isinstance(payload.get("invoice_summary"), dict) else {}
-        for candidate in (
-            payload.get("etc_invoice_count"),
-            invoice_summary.get("count"),
-            submission_payload.get("etc_invoice_count"),
-            submission_payload.get("invoice_count"),
-        ):
-            count = int_value(candidate, -1)
-            if count >= 0:
-                return count
-        return len(invoice_ids)
+        if not invoice_ids:
+            return 0, "0"
+        member_payloads = [invoice_payloads[invoice_id] for invoice_id in invoice_ids if invoice_id in invoice_payloads]
+        if len(member_payloads) == len(invoice_ids):
+            total = sum(
+                (
+                    Decimal(decimal_text(member.get("total_amount") or member.get("total_with_tax")) or "0")
+                    for member in member_payloads
+                ),
+                Decimal("0"),
+            )
+            return len(invoice_ids), decimal_text(total) or "0"
 
-    @staticmethod
-    def _etc_business_batch_total_amount(
-        payload: dict[str, Any],
-        submission_payload: dict[str, Any] | None,
-    ) -> str:
-        submission_payload = submission_payload if isinstance(submission_payload, dict) else {}
-        invoice_summary = payload.get("invoice_summary") if isinstance(payload.get("invoice_summary"), dict) else {}
-        for candidate in (
-            payload.get("oa_total_amount"),
-            payload.get("total_amount"),
-            invoice_summary.get("amount"),
-            submission_payload.get("oa_total_amount"),
-            submission_payload.get("total_amount"),
-            submission_payload.get("etc_invoice_amount"),
-        ):
-            amount = PostgresOpsTaxEtcRepository._nonzero_decimal_text(candidate)
-            if amount is not None:
-                return amount
-        return decimal_text(payload.get("total_with_tax")) or "0"
-
-    @staticmethod
-    def _nonzero_decimal_text(value: Any) -> str | None:
-        normalized = decimal_text(value)
-        if not normalized:
-            return None
-        try:
-            if Decimal(normalized) == Decimal("0"):
-                return None
-        except (InvalidOperation, ValueError):
-            return None
-        return normalized
+        return len(invoice_ids), decimal_text(submission_payload.get("etc_invoice_amount")) or "0"
 
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
         tasks = load_keyed_rows(

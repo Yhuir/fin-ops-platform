@@ -289,7 +289,8 @@ describe("ETC ticket management page", () => {
     expect(taskCreateCalls).toHaveLength(0);
   });
 
-  test("unsubmitted mode shows batch list and whole-batch OA submit action", async () => {
+  test("unsubmitted mode keeps the selected batch stable when the same row is clicked again", async () => {
+    const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
 
@@ -321,6 +322,13 @@ describe("ETC ticket management page", () => {
       String(url) === "/api/etc/business-batches/etc-batch-unsubmitted-01"
     );
     expect(selectedDetailCalls).toHaveLength(1);
+
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).getByRole("button", { name: "查看批次 3月批次" }));
+
+    expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
+    expect(fetchMock.mock.calls.filter(([url]) =>
+      String(url) === "/api/etc/business-batches/etc-batch-unsubmitted-01"
+    )).toHaveLength(1);
   });
 
   test("loads every server page beyond the first 100 ETC business batches", async () => {

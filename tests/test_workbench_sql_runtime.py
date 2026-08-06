@@ -3055,11 +3055,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from read_model.workbench_generations", query)
 
 
-    def test_etc_state_repository_persists_business_batch_reported_submission_amount(self) -> None:
+    def test_etc_state_repository_persists_business_batch_member_invoice_summary(self) -> None:
         connection = EtcStateWriteConnection()
         repository = PostgresOpsTaxEtcRepository(connection)
 
         repository.save_etc_state({
+            "invoices": {
+                "ETC001": {"invoice_number": "ETC001", "total_amount": "13.07"},
+                "ETC002": {"invoice_number": "ETC002", "total_amount": "14.07"},
+            },
             "batches": {
                 "etc_20260520_001": {
                     "status": "submitted_confirmed",
@@ -3089,8 +3093,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(business_batch_writes), 1)
         params = business_batch_writes[0]
         self.assertEqual(params[4], "2026-05-01")
-        self.assertEqual(params[5], 37)
-        self.assertEqual(params[6], "1673.30")
+        self.assertEqual(params[5], 2)
+        self.assertEqual(params[6], "27.14")
 
     def test_repository_reads_workbench_summary_without_full_snapshot_payloads(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()

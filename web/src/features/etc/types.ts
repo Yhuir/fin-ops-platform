@@ -130,6 +130,14 @@ export type EtcCreateOaDraftAction = {
   message: string;
 };
 
+export type EtcBusinessBatchAmountBreakdown = {
+  reportedAmount: string;
+  oaAmount: string;
+  etcInvoiceAmount: string;
+  gapAmount: string;
+  gapReason: string;
+};
+
 export type EtcBusinessBatchSummary = {
   businessBatchId: string;
   taskId: string;
@@ -147,6 +155,7 @@ export type EtcBusinessBatchSummary = {
   oaRowId: string;
   oaProcessStatus: string;
   invoiceSummary: EtcBusinessBatchInvoiceSummary;
+  amountBreakdown: EtcBusinessBatchAmountBreakdown;
   createOaDraftAction: EtcCreateOaDraftAction;
   createdAt: string;
   updatedAt: string;
