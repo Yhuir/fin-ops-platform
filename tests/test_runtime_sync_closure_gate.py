@@ -847,6 +847,13 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         api_probes = [probe for probe in probes if probe.kind == "api"]
         self.assertTrue(page_probes)
         self.assertTrue(api_probes)
+        self.assertTrue(all(probe.target_ms == 1_000 for probe in probes))
+        self.assertTrue(
+            all(
+                probe.p99_target_ms == gate.http_slo_probe.DEFAULT_P99_TARGET_MS
+                for probe in probes
+            )
+        )
         self.assertTrue(
             all(
                 probe.path.startswith("https://www.yn-sourcing.com/")

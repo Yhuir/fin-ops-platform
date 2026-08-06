@@ -480,6 +480,7 @@ def _http_slo_check(
             *http_slo_probe.DEFAULT_API_PROBES,
         ],
         target_ms,
+        http_slo_probe.DEFAULT_P99_TARGET_MS,
     )
     started = monotonic()
     deadline = started + max(1.0, timeout_seconds)
@@ -531,7 +532,7 @@ def _http_slo_check(
     return ClosureCheck(
         "authenticated_http_slo",
         PASS if report.get("status") == PASS else FAIL,
-        "Authenticated page shells and first-screen APIs met p95 target." if report.get("status") == PASS else "Authenticated HTTP SLO failed.",
+        "Authenticated page shells and first-screen APIs met p95/p99 targets." if report.get("status") == PASS else "Authenticated HTTP SLO failed.",
         {**_compact_report(report), **wait_payload},
     )
 
