@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 40-02-PLAN.md
-last_updated: "2026-08-06T06:17:42.101Z"
+stopped_at: Completed 40-03-PLAN.md
+last_updated: "2026-08-06T06:18:23.285Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
@@ -30,7 +30,7 @@ Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 -- Phase 40 execution started
 
-Progress: [██░░░░░░░░] 2/8 plans complete
+Progress: [████░░░░░░] 3/8 plans complete
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [██░░░░░░░░] 2/8 plans complete
 | Phase 13 P15 | 2h 10m | 4 tasks | 11 files |
 | Phase 40 P01 | 9 min | 2 tasks | 7 files |
 | Phase 40 P02 | 8 min | 1 tasks | 5 files |
+| Phase 40 P03 | 8 min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,8 @@ Progress: [██░░░░░░░░] 2/8 plans complete
 - [Phase 40]: The existing FinanceTable constant-size token window is reused and protected by large-total keyboard regression coverage.
 - [Phase 40]: Reuse the three SQL root fixes already present in bb19c91ce; do not duplicate or churn the production owners. — The implementation predates the plan and exactly matches all three planned hotspot closures.
 - [Phase 40]: Close 40-02 with exact PostgreSQL fixtures and negative unbounded-ID query-shape guards; add no index, migration, dependency, cache, cursor, or fallback. — The plan requires result equivalence and forbids speculative structural optimization.
+- [Phase 40]: Require PostgresTransaction.execute_many_values directly for import batch rows; missing bounded capability fails fast instead of issuing per-row SQL.
+- [Phase 40]: Keep the existing import-row owner-guard predicate and affected-count rollback contract; optimize only the measured hotspot.
 
 ### Roadmap Evolution
 
@@ -286,6 +289,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T06:17:42.080Z
-Stopped at: Completed 40-02-PLAN.md
+Last session: 2026-08-06T06:18:23.269Z
+Stopped at: Completed 40-03-PLAN.md
 Resume file: None
