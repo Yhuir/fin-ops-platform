@@ -121,7 +121,12 @@ type WorkbenchVisibilityFixture = WorkbenchVisibilitySampleBinding & {
 };
 
 function cleanStrings(value: unknown) {
-  return Array.isArray(value) ? value.map((item) => String(item ?? "").trim()).filter(Boolean) : [];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === "string") return item.trim();
+    if (!item || typeof item !== "object") return "";
+    return payloadString(item as Record<string, unknown>, ["scope_key", "scopeKey"]);
+  }).filter(Boolean);
 }
 
 function payloadString(payload: Record<string, unknown>, keys: string[]) {
@@ -864,6 +869,15 @@ test.describe("bank flow rule batches browser flow", () => {
 });
 
 test.describe("workbench visibility SLO", () => {
+  test("parses production dirty-scope DTOs", () => {
+    expect(cleanStrings([
+      "2026-04",
+      { scope_key: "2026-05", status: "processing" },
+      { scopeKey: "all", status: "pending" },
+      { status: "fresh" },
+    ])).toEqual(["2026-04", "2026-05", "all"]);
+  });
+
   test("recovers an exact test-owned batch after an ambiguous submit", async ({ page }) => {
     const sample = {
       sample_id: "ambiguous-submit",
