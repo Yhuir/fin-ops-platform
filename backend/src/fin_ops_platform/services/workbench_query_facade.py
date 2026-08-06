@@ -979,21 +979,11 @@ class WorkbenchQueryFacade:
 
     def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
         scope_key = self._scope_key_for_month(month or "all")
-        get_refresh_status = getattr(self._repository, "get_workbench_groups_freshness_status", None)
-        if not callable(get_refresh_status):
-            get_refresh_status = getattr(self._repository, "get_workbench_refresh_status", None)
-        if not callable(get_refresh_status):
-            return WorkbenchQueryResult(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "read_model_unavailable",
-                    "read_model_status": "unavailable",
-                    "scope_key": scope_key,
-                    "message": "Workbench SQL refresh status repository is not configured.",
-                },
-            )
         try:
-            payload = get_refresh_status(scope_key=scope_key)
+            payload = self._groups_refresh_status_payload(
+                scope_key,
+                enqueue_non_fresh=True,
+            )
         except Exception as error:
             if self._transient_read_model_error(error):
                 return self._read_model_temporarily_unavailable_result(
@@ -1001,8 +991,6 @@ class WorkbenchQueryFacade:
                     scope_key=scope_key,
                 )
             raise
-        if isinstance(payload, dict) and callable(self._refresh_status_with_source_freshness):
-            payload = self._refresh_status_with_source_freshness(payload, scope_key=scope_key)
         return WorkbenchQueryResult(
             HTTPStatus.OK,
             self._normalize_refresh_status(payload if isinstance(payload, dict) else {}, scope_key=scope_key, payload_is_dict=isinstance(payload, dict)),
