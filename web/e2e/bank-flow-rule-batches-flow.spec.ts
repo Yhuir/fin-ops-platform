@@ -157,6 +157,72 @@ function browserJsonRequest(
   }, { requestMethod: method, requestPath: path, requestBody: body });
 }
 
+async function runWithRecovery<T>(operation: () => Promise<T>, recovery: () => Promise<void>) {
+  let result: T | undefined;
+  let operationError: unknown;
+  try {
+    result = await operation();
+  } catch (error) {
+    operationError = error;
+  }
+  try {
+    await recovery();
+  } catch (recoveryError) {
+    if (operationError !== undefined) {
+      throw new AggregateError([operationError, recoveryError], "operation and recovery both failed");
+    }
+    throw recoveryError;
+  }
+  if (operationError !== undefined) throw operationError;
+  return result as T;
+}
+
+async function recoverWorkbenchVisibilityFixture(
+  page: Page,
+  mode: WorkbenchVisibilityRunMode,
+  sample: WorkbenchVisibilityFixture,
+) {
+  const detailPath = `/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`;
+  const loadDetail = async () => {
+    const result = mode === "isolated"
+      ? await browserJsonRequest(page, "GET", detailPath)
+      : await (async () => {
+          const response = await page.context().request.get(detailPath);
+          return {
+            ok: response.ok(),
+            status: response.status(),
+            payload: await response.json() as Record<string, unknown>,
+          };
+        })();
+    if (!result.ok || !result.payload || typeof result.payload.batch !== "object" || result.payload.batch === null) {
+      throw new Error(`cannot determine exact fixture batch state (${result.status})`);
+    }
+    const batch = result.payload.batch as Record<string, unknown>;
+    const batchId = payloadString(batch, ["id", "batch_id", "batchId"]);
+    const status = payloadString(batch, ["status"]).toLowerCase();
+    if (batchId !== sample.batch_id || !status) {
+      throw new Error("cannot determine exact fixture batch identity or status");
+    }
+    return status;
+  };
+
+  const initialStatus = await loadDetail();
+  if (["withdrawn", "unsubmitted", "inactive"].includes(initialStatus)) return;
+  if (!["active", "submitted"].includes(initialStatus)) {
+    throw new Error(`unexpected fixture batch status: ${initialStatus}`);
+  }
+  const recoveryResult = mode === "isolated"
+    ? await browserJsonRequest(page, "POST", sample.recovery.path, sample.recovery.body)
+    : await (async () => {
+        const response = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
+        return { ok: response.ok(), status: response.status() };
+      })();
+  if (!recoveryResult.ok) throw new Error(`withdraw recovery failed with ${recoveryResult.status}`);
+  if (await loadDetail() !== "withdrawn") {
+    throw new Error("withdraw recovery did not restore the test-owned fixture to inactive");
+  }
+}
+
 async function loadWorkbenchVisibilityFixtures(mode: WorkbenchVisibilityRunMode, requestedSampleCount: number) {
   const manifestPath = String(process.env.FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST ?? "").trim();
   if (!manifestPath) throw new Error("FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST is required");
@@ -798,6 +864,66 @@ test.describe("bank flow rule batches browser flow", () => {
 });
 
 test.describe("workbench visibility SLO", () => {
+  test("recovers an exact test-owned batch after an ambiguous submit", async ({ page }) => {
+    const sample = {
+      sample_id: "ambiguous-submit",
+      batch_id: "ambiguous-submit-batch",
+      business_identity: "AMBIGUOUS-SUBMIT-IDENTITY",
+      exact_scope: "2026-05",
+      transaction_ids: ["ambiguous-submit-row"],
+      fixture_ownership: "test_owned",
+      submit: { path: "/api/bank-flow-rule-batches/ambiguous-submit-batch/submit", body: {} },
+      recovery: {
+        path: "/api/bank-flow-rule-batches/ambiguous-submit-batch/withdraw",
+        body: { expected_version: 1, reason: "ambiguous submit recovery" },
+      },
+    } satisfies WorkbenchVisibilityFixture;
+    let status = "unsubmitted";
+    let submitAttempted = false;
+    let recoveryCalls = 0;
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await page.route("**/api/bank-flow-rule-batches/ambiguous-submit-batch**", async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() === "POST" && pathname.endsWith("/withdraw")) {
+        recoveryCalls += 1;
+        status = "withdrawn";
+        await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ batch: { id: sample.batch_id, status } }),
+      });
+    });
+    await page.goto("/");
+
+    await expect(runWithRecovery(async () => {
+      submitAttempted = true;
+      status = "submitted";
+      throw new Error("submit response lost after commit");
+    }, async () => {
+      if (submitAttempted) await recoverWorkbenchVisibilityFixture(page, "isolated", sample);
+    })).rejects.toThrow("submit response lost after commit");
+
+    expect(recoveryCalls).toBe(1);
+    expect(status).toBe("withdrawn");
+  });
+
+  test("preserves the operation and recovery failures", async () => {
+    const operationError = new Error("submit response lost");
+    const recoveryError = new Error("recovery state unavailable");
+
+    const failure = await runWithRecovery(
+      async () => { throw operationError; },
+      async () => { throw recoveryError; },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([operationError, recoveryError]);
+  });
+
   test("commit-to-visible same-clock", async ({ page }) => {
     const workbenchVisibilitySloEnabled = process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1";
     if (!workbenchVisibilitySloEnabled) return;
@@ -905,53 +1031,34 @@ test.describe("workbench visibility SLO", () => {
         })().catch(rejectConvergence);
       };
       page.on("response", onResponse);
-      let submitCommitted = false;
-      try {
-        segment = recorder.start(sample, g0);
-        const submitResult = mode === "isolated"
-          ? await browserJsonRequest(page, "POST", sample.submit.path, sample.submit.body)
-          : await (async () => {
-              const response = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
-              return {
-                ok: response.ok(),
-                status: response.status(),
-                payload: await response.json() as Record<string, unknown>,
-              };
-            })();
-        if (!submitResult.ok) throw new Error(`bank-flow submit failed with ${submitResult.status}`);
-        submitCommitted = true;
-        if (!JSON.stringify(submitResult.payload).includes(sample.batch_id)) {
-          throw new Error("submit receipt does not bind the fixture batch_id");
-        }
-        segment.markT1();
-        await Promise.all([t2, t3, t4]);
-        segment.complete();
-      } finally {
-        page.off("response", onResponse);
-        if (submitCommitted) {
-          const recoveryResult = mode === "isolated"
-            ? await browserJsonRequest(page, "POST", sample.recovery.path, sample.recovery.body)
+      let submitAttempted = false;
+      await runWithRecovery(async () => {
+        try {
+          segment = recorder.start(sample, g0);
+          submitAttempted = true;
+          const submitResult = mode === "isolated"
+            ? await browserJsonRequest(page, "POST", sample.submit.path, sample.submit.body)
             : await (async () => {
-                const response = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
-                return { ok: response.ok(), status: response.status() };
-              })();
-          if (!recoveryResult.ok) throw new Error(`withdraw recovery failed with ${recoveryResult.status}`);
-          const detailPath = `/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`;
-          const recoveredResult = mode === "isolated"
-            ? await browserJsonRequest(page, "GET", detailPath)
-            : await (async () => {
-                const response = await page.context().request.get(detailPath);
+                const response = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
                 return {
                   ok: response.ok(),
+                  status: response.status(),
                   payload: await response.json() as Record<string, unknown>,
                 };
               })();
-          const recoveredPayload = recoveredResult.payload as { batch?: { status?: string } };
-          if (!recoveredResult.ok || recoveredPayload.batch?.status !== "withdrawn") {
-            throw new Error("withdraw recovery did not restore the test-owned fixture to inactive");
+          if (!submitResult.ok) throw new Error(`bank-flow submit failed with ${submitResult.status}`);
+          if (!JSON.stringify(submitResult.payload).includes(sample.batch_id)) {
+            throw new Error("submit receipt does not bind the fixture batch_id");
           }
+          segment.markT1();
+          await Promise.all([t2, t3, t4]);
+          segment.complete();
+        } finally {
+          page.off("response", onResponse);
         }
-      }
+      }, async () => {
+        if (submitAttempted) await recoverWorkbenchVisibilityFixture(page, mode, sample);
+      });
     }
     await recorder.writeReport();
   });
