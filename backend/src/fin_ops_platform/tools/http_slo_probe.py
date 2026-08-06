@@ -258,6 +258,18 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 "error": f"derived concurrency exceeds the bounded probe ceiling ({MAX_CONCURRENCY})",
             }, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
             return 1
+        if args.iterations < target_concurrency:
+            print(json.dumps({
+                "version": 1,
+                "status": "fail",
+                "release_blocked": True,
+                "capacity": capacity,
+                "capacity_tier": args.capacity_tier,
+                "target_concurrency": target_concurrency,
+                "iterations": args.iterations,
+                "error": "capacity iterations must be at least the derived target concurrency",
+            }, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+            return 1
         args.concurrency = target_concurrency
     headers = _auth_headers(
         bearer_token=args.bearer_token or args.admin_token,
@@ -287,6 +299,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         report["capacity"] = capacity
         report["capacity_tier"] = args.capacity_tier
         report["target_concurrency"] = int(capacity[f"n_{args.capacity_tier}"])
+        report["capacity_concurrency_pass"] = report.get("concurrency") == report["target_concurrency"]
+        if not report["capacity_concurrency_pass"]:
+            report["status"] = "fail"
+            report["release_blocked"] = True
+            report["error"] = "actual concurrency did not equal the derived target concurrency"
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

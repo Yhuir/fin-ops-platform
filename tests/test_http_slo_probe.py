@@ -3,9 +3,12 @@ from __future__ import annotations
 import gzip
 from io import StringIO
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Lock
 from time import sleep
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.tools import http_slo_probe
 
@@ -98,6 +101,59 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(report["status"], "not_measured")
         self.assertTrue(report["release_blocked"])
+
+    def test_default_peak_capacity_run_fails_when_iterations_cannot_reach_target(self) -> None:
+        stdout = StringIO()
+        with TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "capacity.json"
+            evidence_path.write_text(json.dumps({
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "contract_version": "capacity-v1",
+                "approved_by": "FINOPS-CAPACITY-20260806",
+                "c_normal": 3,
+                "c_peak": 6,
+            }), encoding="utf-8")
+
+            exit_code = http_slo_probe.main(
+                ["--capacity-evidence", str(evidence_path), "--capacity-tier", "peak"],
+                stdout=stdout,
+            )
+
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["iterations"], http_slo_probe.DEFAULT_ITERATIONS)
+        self.assertEqual(report["target_concurrency"], 8)
+        self.assertTrue(report["release_blocked"])
+
+    def test_peak_capacity_run_uses_exact_derived_concurrency(self) -> None:
+        stdout = StringIO()
+        with TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "capacity.json"
+            evidence_path.write_text(json.dumps({
+                "mode": "capacity_contract",
+                "source": "approved-visible-client-capacity",
+                "contract_version": "capacity-v1",
+                "approved_by": "FINOPS-CAPACITY-20260806",
+                "c_normal": 3,
+                "c_peak": 6,
+            }), encoding="utf-8")
+            with patch.object(http_slo_probe, "collect_http_slo", side_effect=lambda **kwargs: {
+                "status": "pass",
+                "concurrency": kwargs["concurrency"],
+            }) as collect:
+                exit_code = http_slo_probe.main([
+                    "--capacity-evidence", str(evidence_path),
+                    "--capacity-tier", "peak",
+                    "--iterations", "8",
+                ], stdout=stdout)
+
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(collect.call_args.kwargs["concurrency"], 8)
+        self.assertEqual(report["concurrency"], report["target_concurrency"])
+        self.assertTrue(report["capacity_concurrency_pass"])
 
     def test_capacity_access_evidence_requires_exact_fourteen_day_window(self) -> None:
         result = http_slo_probe.derive_capacity_targets(
