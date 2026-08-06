@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-08-04
+日期：2026-08-06
 
 ## 模块化状态
 
@@ -44,6 +44,7 @@ generations 组合，不发布 materialized `all` parent；各 producer 必须�
 
 - OA 待付款。
 - BankFlow 规则批次；未提交候选由同一请求内的 canonical facts 实时推导。
+- Legacy no-OA 批次 API；列表、详情和命令保留 canonical batch/relation 边界。
 - ETC 管理。
 - Turnover ledger。
 - 进项发票使用。

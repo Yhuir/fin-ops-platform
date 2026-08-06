@@ -62,6 +62,9 @@ Manifest、scope policy、App Status registry 和带 `read_model_key` 的 worker
 两个 read model 都使用月份 shard；关联台查询层可组合 fresh active month generations 为 `all` 视图，
 共享 relation 模型的 `all` 只做 fan-out command。Search runtime 已删除；legacy no-OA API 直接读取
 canonical batch/relation facts，不进入 read-model manifest、worker、queue 或 App Status。
+当前 required worker 也必须精确为 6 个：`oa-sync`、`workbench-matching`、`workbench`、
+`workbench-relation`、`import`、`settings-maintenance`。其中只有 `workbench` 与 `workbench_relation`
+绑定上述两个 read model；其余 4 个是 canonical/integration/domain job owner。
 
 它们的 refresh 状态事实源是 `job.outbox_events` 和 `job.read_model_dirty_scopes`。非事务 refresh 必须经
 `ReadModelRefreshGateway` normalize、validate 和 dedupe；业务 service 不得直接写 queue SQL。Redis 只能

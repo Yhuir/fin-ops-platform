@@ -1,6 +1,6 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-08-01
+日期：2026-08-06
 
 ## 模块化状态
 
@@ -15,7 +15,7 @@
 ### 负责
 
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
-- 导入完成后返回精确 affected scopes；银行明细及下游页面只在进入或重新可见时，通过各自 freshness gateway 检查并刷新当前 scope。
+- 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 记录导入预览审计。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
@@ -46,8 +46,8 @@ file/session preview/retry 只允许输出当前 `session_id`、files 与其 `pr
 confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，必要的 Workbench auto-matching 领域任务 enqueue 在后。batch 与 file/session 任一写入失败必须整体回滚且不得发布领域任务；普通 confirm 禁止发布 tax/read-model refresh，禁止让 worker 在 canonical facts 可见之前消费 scope，也禁止后台状态写入与 confirm 形成丢失更新窗口。
 
 批次明细持久化必须复用 PostgreSQL connection 的 bounded `execute_many_values` chunk，不得按行建立数据库
-round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必须保持 fail closed。无 batch capability
-的测试/local adapter 才允许逐行执行，仍处于同一事务。
+round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必须保持 fail closed。缺少 batch capability
+的 transaction 必须 fail fast，不得回退为逐行 SQL；同一事务继续承担 owner guard 与整体回滚。
 
 通用 `Application._persist_state()` 已从 import canonical/session 写链隔离，不得再包含 `imports`、`file_imports` 或调用其全量 snapshot。preview/retry 只通过 `_persist_import_preview_delta(session_id)` 写当前 session-scoped delta，confirm 只通过上述 selected-files delta 边界持久化正式事实；OA 附件发票晋升和 ETC metadata 关联分别使用 `save_invoices` 与 `save_invoice_etc_metadata` 窄端口。
 

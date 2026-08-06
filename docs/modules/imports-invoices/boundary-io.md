@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-08-06
 
 ## 模块化状态
 
@@ -16,7 +16,7 @@
 
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
 - 将导入结果转化为发票源事实与精确 affected scopes。
-- 受影响页面在进入或重新可见时，通过自己的 freshness gateway 精确检查、入队并等待当前 scope 收敛。
+- Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。
 
 ### 不负责
@@ -52,7 +52,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Own read model：无独立 manifest entry。
 - Page Audit：`imports.invoices` 是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
 - 下游 direct-canonical consumer：税金抵扣与成本统计在 import job 提交 `app.invoices` 后由各自页面 GET 直接读取新事实，不等待页面 read model。
-- 逻辑影响 read model：`invoice_lifecycle`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`search`、`workbench`、`workbench_relation`、`oa_pending_payment`；页面访问按当前 scope 收敛，不表示写后全量入队。
+- 保留 read-model 消费者：`workbench`、`workbench_relation`；其余发票生命周期、待找发票、进/销项、OA 待付款、税金和成本均为 direct-canonical 消费者。Search runtime 没有当前入口。
 - Worker：import job/runtime handlers。
 
 ## 文件范围
@@ -94,7 +94,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Owned facts: `app.invoices` 的导入正式化事实，以及对应 `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` 中的发票导入事实。
 - Allowed writes: invoice import preview/confirm/job、`ImportNormalizationService`、受控 OA/ETC 现有发票 link/promotion adapter。
 - Allowed reads: invoice import facts repository、发票查询/context ports、owner API。
-- Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、search、workbench、workbench_relation、tax、cost 可比较的 canonical source-version 变化；各页面访问 gateway 自行创建精确 dirty scope。
+- Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、OA pending、tax、cost 直接读取 canonical facts；`workbench`、`workbench_relation` 按自身访问/maintenance 合同使用精确 dirty scope。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
 - Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。

@@ -20,7 +20,7 @@ class FakeNoOaApplicationService:
     def list_batches_payload(self, query, *, relation_mode="no_oa_bank_batch"):
         self.list_relation_modes.append(relation_mode)
         self.calls.append(("list", query))
-        return {"summary": {}, "batches": [], "read_model_status": "fresh"}
+        return {"summary": {}, "batches": []}
 
     def tag_selection_payload(self):
         self.calls.append(("tag_selection", None))

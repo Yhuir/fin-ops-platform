@@ -1,6 +1,6 @@
 # 免 OA 流水批量处理模块边界与 I/O
 
-日期：2026-08-01
+日期：2026-08-06
 
 ## 模块状态
 
@@ -12,6 +12,7 @@
 
 - Route 只处理 `/api/no-oa-bank-batches/*` HTTP mapping、权限和 payload 校验。
 - Application service 负责 no-OA batch submit/withdraw/bulk submit、canonical relation command 与原子 mutation persistence。
+- 实际消费者包括 server 注册的 legacy HTTP routes、BankFlow selection command 和 Workbench internal-transfer command adapter；这些消费者只调用 canonical application boundary，不使用旧 no-OA projection。
 - 写入输入是显式 batch/case identity、actor、version/reason 与精确 affected months；不接受下游 read-model target planner。
 - 列表查询按请求 month/filter/page 调用 `refresh_batches(apply_relation_repairs=False)`，再从 canonical batch service 读取；GET 不访问 freshness gateway、dirty scope、outbox、readiness 或 Redis。
 

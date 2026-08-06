@@ -123,7 +123,7 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 Workbench rehydrate 发布新 active generation；页面 GET 不允许同步重算。
 
 如果 relation facts 发生变更，只通过既有 runtime queue/backfill 入口刷新仍登记的
-`workbench`、`workbench_relation` 与 `search` scope；银行明细、成本统计及其它 direct-canonical 页面由下一次 API
+`workbench`、`workbench_relation` scope；银行明细、成本统计及其它 direct-canonical 页面由下一次 API
 请求直接读取 canonical facts。不得直接修改 `read_model.*`，也不得为了改变页面归属而手工改正确的
 no-OA/internal-transfer relation。修复后必须证明 `paired = active relation members`、
 `unpaired = canonical facts - paired`、两者无交集且并集不漏事实，并等待保留 read model 的相关
@@ -389,7 +389,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 判定原则：
 
 - 默认目标是每个 probe p95 `<= 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
-- read model API 可接受 `200` 或 `202`，但必须记录响应中的 `read_model_status`、`cache_status` 和 `refresh_enqueued`，用于区分 fresh snapshot、refreshing 和后台追赶。
+- 仅保留的 Workbench/read-model API 可接受 `200` 或 `202`，并必须记录 `read_model_status`、`cache_status` 和 `refresh_enqueued`。直接 canonical API 不返回这些字段，只以 HTTP/result contract 和延迟判定。
 - OA 待付款还必须单独统计条件 `304` 的 p50/p95/p99 和 `200/202/304` 比例；`304` body为空且不得执行rows/filter聚合，`202`不得携带旧rows。生产验收目标为fresh rows p95 `<=250ms`、p99 `<=500ms`，304 p95 `<=30ms`；未完成1000次样本前不得宣称达标。
 - 工具默认要求真实认证；没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`FIN_OPS_HTTP_SLO_BEARER_TOKEN`、`FIN_OPS_HTTP_SLO_COOKIE` 或 CLI auth 参数时返回 `auth_missing`，不能作为生产页面 SLO 证据。
 - 工具默认发送 `Accept-Encoding: gzip`，用于对齐真实浏览器经过 Nginx 的传输口径；JSON/HTML 解析会先解压 gzip body，`response_bytes` 记录压缩后的网络传输字节数。生产公网性能判断应使用该默认口径，避免用未压缩的大 JSON 传输时间误判浏览器首屏 SLO。
@@ -449,15 +449,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
   --output /tmp/finops-write-operation-slo-$(date +%Y%m%d%H%M%S).json
 ```
 
-默认 profile 覆盖当前高影响写操作的 read model refresh 事件：
-
-- `turnover_manual_closure_or_withdraw`：`turnover_relation_changed` 必须覆盖 `turnover_ledger`、`workbench`、
-  `workbench_relation`、`cost_statistics`、`search`，并匹配 `turnover_relation_zero_difference_closure`、
-  `withdraw_relation` 或 `turnover_relation_withdraw` action metadata。
-- `turnover_relation_extra`、`turnover_tag_selection`：必须刷新 `turnover_ledger`。
-- `bank_row_tags_batch`：必须覆盖银行明细、关联台和往来款相关 refresh，并匹配 bank row tags action metadata。
-- `bank_auto_tag_rules`、`bank_category_confirmation`、`no_oa_tag_selection`：必须能在 durable outbox 中看到对应
-  read model refresh。
+默认 profile 保留旧事件名仅用于负向审计：所有 `OperationExpectation.forbidden=true`，当前写操作必须证明
+银行明细、Turnover、Cost、Search、no-OA projection 等已退役页面 refresh event 样本为零。具体事件名只用于识别历史污染，
+不表示当前 registry 或 required worker 重新接线这些 scope。当前唯一允许的 read-model 集合仍为 `workbench`、`workbench_relation`。
 
 判定原则：
 
@@ -548,7 +542,6 @@ shape，并必须包含 checkpoints、inverse/recovery 与最终 inactive 断言
 | OA 待付款 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 不自动写真实 OA 付款状态；用 test-owned relation 场景证明零 OA refresh，并在页面访问时收敛。 |
 | 税金抵扣 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 tax refresh；随后税金页访问证明 canonical invoice/certified facts 收敛。 |
 | 成本统计 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 Cost refresh；随后 Cost 访问按 Workbench dependency gate 两阶段收敛。 |
-| 搜索 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 Search refresh；随后 Search API 访问证明 exact-scope 收敛。 |
 | 批量账务 | `access_convergence_evidence` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 test-owned Workbench relation withdraw 证明写后零页面 fan-out和批量账务/关系页访问收敛，不新增独立 production apply。 |
 | 导入：银行流水 / 发票 / ETC | `no_standing_production_apply` | 无 | 无 standing ticket | 只能 staging 或单次审批的可回滚 scenario；不得用 standing approval 自动执行导入写入。 |
 | 设置 | `no_standing_production_apply` | 无 | 无 standing ticket | 设置写入会改变系统口径或权限，只能 staging 或单次审批。 |
@@ -761,7 +754,7 @@ sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name>
 # 1. 在真实 PostgreSQL/Redis 配置下启动 API，并确认 psycopg_pool 已加载。
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.server
 
-# 2. 分别压测 combined initial、groups summary、group detail、search/cost/tax。
+# 2. 分别压测 combined initial、groups summary、group detail、Workbench 关键词筛选与 cost/tax direct API。
 # 记录每个 endpoint 的 p50/p95、平均响应体大小和错误率。
 
 # 3. 读取 /health.api_performance，按 endpoint 对比：
@@ -780,7 +773,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_gene
 
 是否进入 Go read API sidecar 只按结果判断。第一阶段和 Phase 1.5 后同时满足以下任意 2 到 3 条，才进入 sidecar 设计：
 
-- `/api/workbench`、`/api/workbench/groups?detail_level=summary`、search/cost/tax 的核心只读 p95 仍高于 300 到 500ms。
+- `/api/workbench`、`/api/workbench/groups?detail_level=summary`、Workbench 关键词筛选与 cost/tax direct API 的核心只读 p95 仍高于 300 到 500ms。
 - `connection_acquire_ms + sql_execute_fetch_ms` 低于总耗时 30% 到 40%，但整体 p95 仍高。
 - Python worker/进程 CPU 持续 70% 到 90% 以上，且 Redis/read model 命中后仍不下降。
 - summary 物化和 groups summary 命中后仍慢，瓶颈落在对象构造、JSON 序列化、请求调度或连接并发。
