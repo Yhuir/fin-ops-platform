@@ -135,7 +135,7 @@ async function openWorkbenchDetail(page: Page) {
 }
 
 test.describe("right drawer motion", () => {
-  test("travels from and to the right edge without layout shift or close-time I/O", async ({ page }) => {
+  test("travels without layout shift or close-triggered non-periodic business I/O", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
