@@ -21,7 +21,7 @@
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
 | 1. 业务核心 | 适用 | `tests/test_bank_details_service.py`：标签、分类、候选、冲突、金额和空集 |
-| 2. Service/repository | 适用 | `tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_export_service.py`：snapshot、set-based SQL、active relation、导出上限 |
+| 2. Service/repository | 适用 | `tests/test_bank_category_relation_closure_service.py`、`tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_export_service.py`：分类与 requirement/history 原子闭环、提交后镜像增量、snapshot、set-based SQL、active relation、导出上限 |
 | 3. API contract | 适用 | `tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`：参数、权限、response shape、retired 字段缺失 |
 | 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`：旧 runtime 不得回归 |
 | 5. 前端交互 | 适用 | `web/src/test/BankDetailsPage.test.tsx`：loading/empty/error、筛选/分页/排序、账户、分类和写后 refetch |

@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-08-02
+日期：2026-08-07
 
 ## 模块化状态
 
@@ -36,7 +36,7 @@
 | 统一配对关系 | `app.workbench_pair_relations` | 仅按本页实际银行 row ids 做 bounded overlap 查询；active relation 是关联台与外部往来款共同事实源 |
 | Turnover 自有关系和 extras | `app.turnover_relations`、`app.turnover_ledger_extras` | 保留通用 suggested/confirmed relation 与页面补充字段的现有业务语义 |
 | 页面 Audit | admin-only page audit API | 与页面一样直接审计 canonical facts；检查 relation member shape、银行成员存在性、active case 唯一性和手工 Turnover relation 成员存在性，不读取投影/dirty/outbox |
-| 确认/撤回/标签/extra 写操作 | `TurnoverLedgerWriteFacade` / UoW / adapters | 只提交 canonical relation/category/settings/extra/event/audit；成功响应不携带页面 freshness target，不产生跨页 fan-out |
+| 确认/撤回/标签/extra 写操作 | `TurnoverLedgerWriteFacade` / UoW / adapters | 只提交 canonical relation/category/settings/extra/event/audit；标签 effective category 变化与既有 active 普通 relation requirement/history 使用同一 UoW transaction，外层提交后才发布 changed-case 进程镜像；成功响应不携带页面 freshness target，不产生跨页 fan-out |
 
 ## 输出 I/O
 
@@ -80,6 +80,7 @@
 
 - 允许：route → query service → canonical state/repository ports → page service。
 - 允许：route → write facade/UoW → owned writer ports / Workbench relation command。
+- 必须：批量银行标签写复用 `BankCategoryRelationClosureService`，不得绕过为仅写 category 的旧 writer 路径。
 - 禁止：query service → read model gateway/queue/worker/readiness。
 - 禁止：write facade → page GET、跨页 refresh producer 或 read model SQL。
 - 禁止：前端把 App Status、visibility/focus 或旧 freshness metadata 当作页面数据源。

@@ -60,15 +60,24 @@ class _CommandService:
 
 
 class _CategoryProvider:
-    def __init__(self, category_code: str = "expense:engineering_service:personnel_insurance") -> None:
+    def __init__(
+        self,
+        category_code: str = "expense:engineering_service:personnel_insurance",
+        *,
+        category_source: str = "manual",
+    ) -> None:
         self.category_code = category_code
+        self.category_source = category_source
         self.calls: list[list[str]] = []
 
     def bulk_get_for_rows(self, rows: list[dict[str, object]]) -> dict[str, object]:
         row_ids = [str(row.get("id") or "") for row in rows]
         self.calls.append(list(row_ids))
         return {
-            row_id: {"effective_category_code": self.category_code}
+            row_id: {
+                "effective_category_code": self.category_code,
+                "effective_category_source": self.category_source,
+            }
             for row_id in row_ids
             if self.category_code
         }
@@ -220,6 +229,72 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         self.assertEqual(by_case["turnover"]["special_metadata"]["requires_invoice"], True)
         self.assertEqual(by_case["ordinary"]["special_metadata"]["requires_invoice"], False)
         self.assertEqual(by_case["ordinary"]["special_metadata"]["requires_oa"], True)
+
+    def test_persisted_category_drift_recomputes_complete_ordinary_relation(self) -> None:
+        relation = _relation(
+            mode="manual_confirmed",
+            metadata={
+                "paired_requirement_source": "bank_transaction_paired_policy",
+                "paired_requirement_tag_codes": [],
+                "paired_requirement_version": 7,
+                "requires_oa": True,
+                "requires_invoice": True,
+                "unrelated": "keep",
+            },
+        )
+        command = _CommandService([relation])
+
+        dry_run = _run(
+            command,
+            ["--dry-run"],
+            category_provider=_CategoryProvider(category_source="manual"),
+            rules=_rules(requires_oa=False, requires_invoice=False),
+        )
+
+        self.assertEqual(dry_run["target_relation_count"], 1)
+        self.assertEqual(
+            dry_run["repair_reason_counts"],
+            {"persisted_category_drift": 1},
+        )
+        fingerprint = str(dry_run["source_fingerprint"])
+        applied = _run(
+            command,
+            ["--execute", "--expected-fingerprint", fingerprint],
+            category_provider=_CategoryProvider(category_source="manual"),
+            rules=_rules(requires_oa=False, requires_invoice=False),
+        )
+
+        self.assertEqual(applied["written_relation_count"], 1)
+        metadata = command.relations[0]["special_metadata"]
+        self.assertFalse(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
+        self.assertEqual(metadata["unrelated"], "keep")
+
+    def test_rule_derived_category_drift_is_reported_without_write_target(self) -> None:
+        relation = _relation(
+            mode="manual_confirmed",
+            metadata={
+                "paired_requirement_source": "bank_transaction_paired_policy",
+                "paired_requirement_tag_codes": [],
+                "paired_requirement_version": 7,
+                "requires_oa": True,
+                "requires_invoice": True,
+            },
+        )
+        command = _CommandService([relation])
+
+        report = _run(
+            command,
+            ["--dry-run"],
+            category_provider=_CategoryProvider(category_source="auto_rule"),
+        )
+
+        self.assertEqual(report["target_relation_count"], 0)
+        self.assertEqual(report["manual_review_relation_count"], 1)
+        self.assertEqual(
+            report["manual_review_reason_counts"],
+            {"category_source_not_persisted": 1},
+        )
 
     def test_forward_fingerprint_binds_exact_preimage_and_intended_after(self) -> None:
         relation = _relation(metadata={"legacy_key": "before"})

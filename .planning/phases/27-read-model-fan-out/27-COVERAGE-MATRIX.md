@@ -109,6 +109,7 @@
 | --- | --- | --- | --- | --- |
 | `web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx` | batch accounting | `writable` | `saveBatchAccountingTagRules` | read-export 只读；CAS 保存后只刷新当前页，不 fan-out |
 | `web/src/components/common/OaDraftPrefillDrawer.tsx` | ETC / input usage | `writable` | `saveOaDraftPrefill` | 仅 admin 展示入口和保存；两个独立 setting family 使用 version CAS，零 read-model fan-out |
+| `web/src/components/cost-statistics/CostTransactionDetailDrawer.tsx` | cost | `read-only` | none | freshness-gated transaction detail read only |
 | `web/src/components/cost-statistics/CostStatisticsTagRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsTagRules` | rule version save；不 rebuild read model |
 | `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx` | input usage | `read-only` | none | freshness-gated detail read only |
 | `web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx` | input usage | `read-only` | none | export read only；不得 dirty |

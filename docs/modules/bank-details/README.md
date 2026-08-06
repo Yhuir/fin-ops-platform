@@ -34,7 +34,7 @@
 - 正式关系只读取 `app.workbench_pair_relations` 中 `status=active` 的事实；关系 overlap 查询只接收当前可见或导出目标流水 IDs，不读取 Workbench 页面 payload、`workbench_relation` projection 或其它页面 read model。
 - 账户列表和余额直接以有界 SQL 聚合 canonical `app.bank_transactions`，保留账户 identity、最新余额、最新流水、币种和空余额账户语义，不在 Python 或浏览器全量聚合。
 - 页面响应不再携带 `read_model_status`、`source_versions`、refresh scope/job/barrier；前端不轮询。loading、empty、error 与用户重试仍是可观察状态。
-- 分类、候选确认、人工补分类和自动标签规则写入继续走 canonical fact、CAS、审计和定向写入；成功后当前页面只重新 GET 一次。
+- 分类、候选确认和人工补分类继续走 canonical fact、审计和定向写入；effective 标签实际变化时，同一事务重冻结既有 active 普通关系的 requirement metadata/history。页面仍只重新 GET 一次，不通知关联台、不产生跨页 refresh。
 
 旧 `bank_detail` / `bank_account_balance` read model、worker、下游 tagged-row ports、backfill 和部署单元已在跨页面清理中删除。历史 migration/表暂留作回滚证据，不存在页面或 worker 运行时调用方。
 

@@ -3383,7 +3383,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         mutation_calls: list[dict[str, object]] = []
         mutation_writer = SimpleNamespace(
             persist_many=lambda **kwargs: mutation_calls.append(dict(kwargs))
-            or {"changed": True, "affected_months": ["2026-02"]}
+            or {"changed": True, "affected_months": ["2026-02"]},
+            apply_committed_relation_delta=lambda _result: None,
         )
         transaction = _RecordingTransaction()
         port = port_class(
@@ -3391,7 +3392,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             relation_service=relation_service,
             bank_rows_provider=lambda: [{"id": "bank_txn_1"}],
             persistence_repository_factory=persistence_factory,
-            category_mutation_writer=mutation_writer,
+            category_mutation_service=mutation_writer,
         )
         updates = [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}]
 

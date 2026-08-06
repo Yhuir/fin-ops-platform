@@ -91,6 +91,9 @@ from fin_ops_platform.services.bank_batch_service import (
     BankBatchRelationRepairReadPort,
     BankBatchService,
 )
+from fin_ops_platform.services.bank_category_relation_closure_service import (
+    BankCategoryRelationClosureService,
+)
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import (
     BankDetailAutoCategorySuggestionProvider,
 )
@@ -294,7 +297,10 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAWorkflowRepository,
 )
-from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
+    APP_SETTINGS_KEY,
+    PostgresOpsTaxEtcRepository,
+)
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
     LocalTaxOffsetCanonicalRepository,
     PostgresTaxOffsetCanonicalRepository,
@@ -2581,7 +2587,7 @@ class Application:
                 transaction,
                 state_store=state_store,
             ),
-            category_mutation_writer=self._bank_transaction_category_mutation_writer(),
+            category_mutation_service=self._bank_category_relation_closure_service(),
             postgres_idempotency_store_factory=self._turnover_ledger_bank_row_tags_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_bank_row_tags_local_idempotency_store,
         ).build()
@@ -6741,7 +6747,7 @@ class Application:
         state_store = getattr(self, "_state_store", None)
         storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
         category_store = state_store if storage_backend != "postgres" else None
-        category_mutation_writer = self._bank_transaction_category_mutation_writer()
+        category_mutation_service = self._bank_category_relation_closure_service()
         connection = (
             getattr(state_store, "_sql_read_connection", None)
             or getattr(state_store, "_connection", None)
@@ -6762,7 +6768,37 @@ class Application:
             bank_transaction_category_store=category_store,
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
-            category_mutation_writer=category_mutation_writer,
+            category_mutation_service=category_mutation_service,
+        )
+
+    def _bank_category_relation_closure_service(
+        self,
+    ) -> BankCategoryRelationClosureService | None:
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        connection = getattr(state_store, "_connection", None)
+        category_writer = self._bank_transaction_category_mutation_writer()
+        if connection is None or category_writer is None:
+            return None
+        return BankCategoryRelationClosureService(
+            connection=connection,
+            category_writer=category_writer,
+            relation_repository_factory=PostgresWorkbenchRelationRepository,
+            effective_category_rows=(
+                PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows
+            ),
+            settings_snapshot_provider=lambda transaction: (
+                AppSettingsService.bank_category_relation_policy_snapshot(
+                    PostgresOpsTaxEtcRepository(transaction).load_settings(
+                        APP_SETTINGS_KEY
+                    )
+                )
+            ),
+            relation_delta_publisher=getattr(
+                self,
+                "_workbench_pair_relation" + "_service",
+            ).apply_snapshot_delta,
         )
 
     def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:

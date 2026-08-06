@@ -6,12 +6,26 @@ import json
 import sys
 from typing import Any, TextIO
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_category_relation_closure_service import (
+    BankCategoryRelationClosureService,
+)
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
     BankTransactionCategoryMutationWriter,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
+)
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
+    APP_SETTINGS_KEY,
+    PostgresOpsTaxEtcRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
 )
 
 
@@ -89,6 +103,18 @@ def _apply_repair(
         connection=connection,
         repository=repository,
     )
+    closure_service = BankCategoryRelationClosureService(
+        connection=connection,
+        category_writer=writer,
+        relation_repository_factory=PostgresWorkbenchRelationRepository,
+        effective_category_rows=(
+            PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows
+        ),
+        settings_snapshot_provider=lambda transaction: AppSettingsService.bank_category_relation_policy_snapshot(
+            PostgresOpsTaxEtcRepository(transaction).load_settings(APP_SETTINGS_KEY)
+        ),
+        relation_delta_publisher=lambda *_args, **_kwargs: None,
+    )
     with connection.transaction() as transaction:
         inspection = repository.inspect_unknown_manual_clear_candidates(reader=transaction)
         strict_candidates = list(inspection.get("strict_candidates") or [])
@@ -103,7 +129,7 @@ def _apply_repair(
             "mutation_results": [],
         }
         if strict_candidates:
-            mutation_result = writer.persist_many(
+            mutation_result = closure_service.persist_many(
                 mutations=[
                     {
                         "transaction_id": str(candidate["transaction_id"]),
@@ -121,6 +147,7 @@ def _apply_repair(
                 ],
                 transaction=transaction,
             )
+            mutation_result = closure_service.public_result(mutation_result)
     report = _inspection_report(inspection, mode="apply")
     report.update(
         {

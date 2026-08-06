@@ -13,6 +13,12 @@
 - 删除旧 snapshot writer 与 active `unknown` 撤销表示，不新增第二套 adapter、fallback、worker 或表；Turnover 页面/API 合同不变。
 - 回归覆盖批量去重、一次 enqueue、queue failure rollback、bank-details 下游可见性及现有 Turnover API/UoW 行为。
 
+## 2026-08-07 - 批量标签补齐正式关系 requirement 闭环
+
+- `TurnoverLedgerBankdetailWritePort` 不再直接调用低层 category writer；改为复用 Bank Details 的分类关系闭环 service，并继续使用 Turnover 既有外层事务。
+- category/event/audit、受影响 active 普通 relation requirement/history 原子提交；只有外层 UoW commit 后才发布 changed-case 进程镜像，rollback 清理 pending delta。页面 read model、queue、API 与跨页通知合同不变。
+- `tests/test_turnover_ledger_uow_contract.py` 与 `tests/test_bank_category_relation_closure_service.py` 保护外层事务、提交/回滚和零 refresh 合同。
+
 ## 2026-07-20 - 写命令重复 I/O 收口
 
 - 第二轮生产证据：release `ffdcfcdcb` 三轮业务与恢复均通过，response-to-fresh/visible p95 为 `1210.886/1805.972ms`，但 command p95 仍为 `5443.004ms`，热态约 `1.09–1.34s`。一次性 PostgreSQL 对同一请求的 17/15 条 SQL trace 证明，relation repository 仍自行执行 3 条 scope 解析和 1 次 outbox batch，Turnover UoW 随后又执行第二次 outbox batch。

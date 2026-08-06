@@ -72,7 +72,9 @@ class _PostgresFakeTransaction:
         normalized_sql = " ".join(sql.lower().split())
         if "from app.workbench_pair_relations" in normalized_sql:
             snapshot = self._workbench_pair_relation_snapshot()
-            relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else {}
+            relations = (
+                snapshot.get("pair_relations") if isinstance(snapshot, dict) else {}
+            ) or {}
             return [
                 {"key": str(case_id), "raw_payload": {"normalized_payload": dict(payload)}}
                 for case_id, payload in sorted(dict(relations).items())

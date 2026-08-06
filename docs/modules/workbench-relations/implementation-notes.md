@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-08-07 - 银行标签变更重冻结既有关系 requirement
+
+银行分类写不再只更新 category fact。Bank Details 与 Turnover 统一通过一个窄 closure service，在同一 PostgreSQL 事务内复用 canonical classifier、当前 settings policy snapshot 和正式 relation command/repository，更新受影响 active 普通 relation 的 frozen tags/requirements 并追加 history；数据库提交后才发布 changed-case 进程镜像。无变化/无关系短路，ETC 与批量账务排除，且不新增 dirty/outbox、worker、页面通知或 read-time fallback。
+
+历史 drift 复用既有可回滚 repair：missing snapshot 与有持久化分类来源证据的 drift 可执行；规则推导/未知来源只列入人工复核。旧未接线 category callback 和绕过 closure 的 Turnover 直接 writer 路径已移除。
+
 ## 2026-07-30 - 人工 ETC summary 写入合同
 
 人工 confirm 不再信任 preview DTO 作为写入事实：relation UoW 使用同一事务的 canonical query 重新解析 selected row ids/types，任何漂移整批冲突退出。合法折叠 ETC summary 必须解析为唯一 external batch 并写入 relation special metadata；多个 batch、缺 summary 或类型不一致不写 relation/history/idempotency。

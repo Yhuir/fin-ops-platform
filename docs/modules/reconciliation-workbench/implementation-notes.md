@@ -1,5 +1,10 @@
 # 关联台 实施记录
 
+## 2026-08-07 - 标签变更后的 canonical requirement 闭环
+
+- 关联台 1 秒 refresh-status/generation 链路不变，也不接收普通页面写后通知。修复位于上游 canonical write：银行 effective category 变化与既有 active 普通 relation requirement/history 原子提交。
+- 因此关联台下一次自己的 freshness 收敛会读取正确 tags/requirements；不再出现 generation 已 fresh 但 relation metadata 仍是旧空标签、错误要求发票的状态。未增加页面轮询、队列、worker、缓存或 read-time settings fallback。
+
 ## 2026-08-06 - 进行中 OA 入台与完成门禁
 
 - Workbench OA facts 统一读取 completed projection 与 in-progress admission，关系仍只读取 formal `app.workbench_pair_relations`。

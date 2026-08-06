@@ -49,8 +49,7 @@ class BankDetailsApplicationService:
         bank_transaction_category_store: BankTransactionCategoryStorePort | None,
         affected_months_provider: Callable[[list[str]], list[str]],
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
-        category_mutation_writer: Any | None = None,
-        after_category_mutation: Callable[[list[str]], Any] | None = None,
+        category_mutation_service: Any | None = None,
     ) -> None:
         if bank_transaction_category_store is not None and not callable(
             getattr(
@@ -77,8 +76,7 @@ class BankDetailsApplicationService:
         )
         self._affected_months_provider = affected_months_provider
         self._suggestion_provider = suggestion_provider
-        self._category_mutation_writer = category_mutation_writer
-        self._after_category_mutation = after_category_mutation
+        self._category_mutation_service = category_mutation_service
         self._category_mutation_lock = RLock()
 
     def accounts_payload(
@@ -487,9 +485,9 @@ class BankDetailsApplicationService:
         metadata: dict[str, object],
     ) -> dict[str, object]:
         affected_months = self._affected_months_provider(transaction_ids)
-        if self._category_mutation_writer is not None:
+        if self._category_mutation_service is not None:
             persisted = dict(
-                self._category_mutation_writer.persist(
+                self._category_mutation_service.persist(
                     transaction_id=transaction_id,
                     mutation_type=mutation_type,
                     record=self._bank_transaction_category_service.get(
@@ -516,8 +514,6 @@ class BankDetailsApplicationService:
                     **dict(metadata),
                 },
             )
-            if affected_months and self._after_category_mutation is not None:
-                self._after_category_mutation(affected_months)
             return {**persisted, "affected_months": affected_months}
         if self._bank_transaction_category_store is None:
             raise RuntimeError(
@@ -537,8 +533,6 @@ class BankDetailsApplicationService:
                 **dict(metadata),
             },
         )
-        if affected_months and self._after_category_mutation is not None:
-            self._after_category_mutation(affected_months)
         return {"changed": True, "affected_months": affected_months}
 
     def _latest_auto_category_suggestion(

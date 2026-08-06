@@ -588,7 +588,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         replace_relation_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
         persistence_repository_factory: Callable[[Any], Any],
-        category_mutation_writer: Any | None,
+        category_mutation_service: Any | None,
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
@@ -600,7 +600,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         self._replace_relation_snapshot = replace_relation_snapshot
         self._emit_persistence_warning = emit_persistence_warning
         self._persistence_repository_factory = persistence_repository_factory
-        self._category_mutation_writer = category_mutation_writer
+        self._category_mutation_service = category_mutation_service
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
 
@@ -615,7 +615,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
                 relation_service=self._relation_service,
                 bank_rows_provider=self._bank_rows_provider,
                 persistence_repository_factory=self._persistence_repository_factory,
-                category_mutation_writer=self._category_mutation_writer,
+                category_mutation_service=self._category_mutation_service,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
@@ -2151,14 +2151,15 @@ class TurnoverLedgerBankdetailWritePort:
         relation_service: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
         persistence_repository_factory: Callable[[Any], Any],
-        category_mutation_writer: Any,
+        category_mutation_service: Any,
     ) -> None:
         self._category_service = category_service
         self._relation_service = relation_service
         self._bank_rows_provider = bank_rows_provider
         self._persistence_repository_factory = persistence_repository_factory
-        self._category_mutation_writer = category_mutation_writer
+        self._category_mutation_service = category_mutation_service
         self._pending_category_snapshot: dict[str, object] | None = None
+        self._pending_category_mutation_result: dict[str, object] | None = None
 
     def apply_turnover_category_updates(
         self,
@@ -2167,8 +2168,8 @@ class TurnoverLedgerBankdetailWritePort:
         actor_id: str,
         transaction: Any,
     ) -> dict[str, object]:
-        if self._category_mutation_writer is None:
-            raise RuntimeError("PostgreSQL turnover category mutation writer is unavailable.")
+        if self._category_mutation_service is None:
+            raise RuntimeError("PostgreSQL category relation closure service is unavailable.")
         before_snapshot = dict(self._category_service.snapshot() or {})
         self._pending_category_snapshot = before_snapshot
         apply_updates = getattr(self._category_service, "apply_turnover_updates", None)
@@ -2182,7 +2183,7 @@ class TurnoverLedgerBankdetailWritePort:
                 )
                 or {}
             )
-            self._category_mutation_writer.persist_many(
+            mutation_result = self._category_mutation_service.persist_many(
                 mutations=[
                     {
                         "transaction_id": transaction_id,
@@ -2197,6 +2198,7 @@ class TurnoverLedgerBankdetailWritePort:
                 ],
                 transaction=transaction,
             )
+            self._pending_category_mutation_result = dict(mutation_result or {})
             rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
             if not callable(rebuild):
                 raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
@@ -2213,6 +2215,7 @@ class TurnoverLedgerBankdetailWritePort:
         except Exception:
             self._category_service.restore_snapshot(before_snapshot)
             self._pending_category_snapshot = None
+            self._pending_category_mutation_result = None
             raise
 
     def rollback_in_memory(self) -> None:
@@ -2220,9 +2223,15 @@ class TurnoverLedgerBankdetailWritePort:
             return
         self._category_service.restore_snapshot(self._pending_category_snapshot)
         self._pending_category_snapshot = None
+        self._pending_category_mutation_result = None
 
     def commit_in_memory(self) -> None:
+        if self._pending_category_mutation_result is not None:
+            self._category_mutation_service.apply_committed_relation_delta(
+                self._pending_category_mutation_result
+            )
         self._pending_category_snapshot = None
+        self._pending_category_mutation_result = None
 
 
 class TurnoverLedgerLocalRelationExtraConnection:

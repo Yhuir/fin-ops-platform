@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 import hashlib
 from time import sleep
@@ -833,6 +834,29 @@ class AppSettingsService:
             self._snapshot["bank_flow_rule_batch_tag_rules"],
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
         )
+
+    @staticmethod
+    def bank_category_relation_policy_snapshot(
+        settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        bank_transaction_tags = deepcopy(
+            settings.get("bank_transaction_tags")
+            if isinstance(settings.get("bank_transaction_tags"), dict)
+            else default_bank_transaction_tag_dictionary_payload()
+        )
+        paired_rules = settings.get("bank_flow_rule_batch_tag_rules")
+        paired_rules = (
+            deepcopy(paired_rules)
+            if isinstance(paired_rules, dict)
+            else deepcopy(DEFAULT_BANK_FLOW_RULE_BATCH_TAG_RULES)
+        )
+        return {
+            "bank_transaction_tags": bank_transaction_tags,
+            "paired_policy": AppSettingsService._public_bank_transaction_paired_policy(
+                paired_rules,
+                bank_transaction_tags=bank_transaction_tags,
+            ),
+        }
 
     def update_no_oa_bank_batch_tag_selection(
         self,

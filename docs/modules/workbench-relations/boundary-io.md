@@ -1,6 +1,6 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-08-05
+日期：2026-08-07
 
 ## Owner
 
@@ -27,6 +27,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 | page scope proof request | Workbench / 银行明细页面 query boundary | `source_versions_for_scopes(scope_keys)` 通过 `workbench_relation_scope_summaries(...)` 一次读取全部 concrete month scope 的 published proof/current-effective dirty status，再用一次 bulk canonical expected-version I/O 比较；只 enqueue mismatch/missing 的 exact scopes。`all` 先一次枚举 canonical object、active relation 与已有 projection 月份，再执行相同批量 proof，禁止逐月 N+1 或持久化伪 `all` scope |
 | OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
+| persisted bank category changed | Bank Details / Turnover category closure | effective category 实际变化后，在分类事务内按 changed bank member 锁定 active 普通 relation，复用当前 canonical classifier 与同一 settings policy snapshot 重冻结 requirement metadata 并追加 history。ETC/批量账务关系排除；无变化或无 active relation 时零 relation 写。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O
@@ -34,7 +35,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
-| frozen completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case 但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过冻结要求或实际成员类型。规则保存不得追溯改写；下游 linked ownership 仍只由 active status 决定。 |
+| frozen completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case 但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过冻结要求或实际成员类型。持久化分类事实变化必须原子重冻结其既有关系；单独保存规则不得追溯改写未发生分类变化的关系。下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
 | command result | caller | relation/version/affected rows/months/idempotent replay；普通关系操作的 `freshness_targets` / `operation_barrier_targets` 为空，月份/scope 只作读侧重校验提示 |
 | ETC relation enrichment | Workbench projection/Audit | 人工确认折叠 ETC summary 时，relation UoW 在同一事务重读 canonical selected rows，并把唯一 `external_etc_batch_id` 写入 `special_metadata`；自动补全继续由 `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额。一个 external batch 只能有一个 active relation owner，Audit 只认可 batch identity 与确定性 `etc-summary-<batch>` row id 同时匹配。 |
@@ -51,6 +52,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
 - relation、history、idempotency 与 audit 的业务事务必须原子；失败不得留下半关系。普通关系写入不承担下游 dirty/outbox 事务，页面访问通过 canonical version drift 发现并收敛。
+- 分类关系闭环只能通过 category writer + relation command/repository 的同一事务完成；提交后只发布 changed-case 进程镜像增量。禁止恢复写后 callback、页面通知、第二条 metadata writer 或事务外补偿。
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
 - 单 case active relation 读取必须走显式窄 I/O；禁止 adapter fallback 先复制全局 snapshot 再筛 case，禁止为只读校验加载该 case 全部 history。
 - 在线 command 持久化必须走显式 changed-case delta I/O：relation upsert/delete 与本次新 history event 在同一事务写入，history 只能 append/idempotent upsert，不得先删除再重写该 case 的完整历史。全量 relation/history replacement 只用于 migration、restore 或 repair，不得重新进入 confirm/cancel/withdraw 热链。

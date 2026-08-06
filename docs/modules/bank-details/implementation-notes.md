@@ -8,7 +8,7 @@
 - 银行明细页面读只走 `BankDetailsCanonicalQueryService` -> `PostgresBankDetailsCanonicalQueryRepository`，直接读取 PostgreSQL canonical facts。
 - rows/statistics/facets/current-page active relation tags 使用同一 repeatable-read read-only snapshot；账户余额使用同一 direct-query 边界内的 SQL 聚合。
 - 页面不消费 `bank_detail`、`bank_account_balance` 或 `workbench_relation` projection，不输出 freshness/status/job/barrier，不轮询。
-- 银行分类写入 owner 仍为 `BankDetailsApplicationService` 与 `BankTransactionCategoryMutationWriter`；canonical category/event/audit/CAS 保持，普通写后只由当前页面重新 GET。
+- 银行分类写入由 `BankDetailsApplicationService` 进入 `BankCategoryRelationClosureService`，再复用 `BankTransactionCategoryMutationWriter` 与正式 relation command/repository；分类事实、受影响 relation requirement/history 原子提交，普通写后仍只由当前页面重新 GET。
 - 旧页面 RM 共享资源仍有 pending/bank-flow/search/turnover/cost 等消费者，由跨页面主控统一清理；本分支不修改 global manifest/worker/deploy/App Status。
 
 ## 记录模板
@@ -531,3 +531,10 @@
 - 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
 - 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该设置，仅在当前 read-only transaction 关闭短查询 JIT。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描规则必需列，分类中间态只保留决策字段，精确统计/排序只处理 key，完整行仅回连首屏分页。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
+## 2026-08-07 - 标签变更与正式关系要求原子闭环
+
+- 根因：银行分类事实已经更新，但既有 active relation 仍保留创建时的空标签 fail-closed requirement snapshot，关联台 fresh generation 因而正确地把过期 canonical metadata 投影为缺发票。
+- 实施：新增一个窄的分类关系闭环 service，复用现有 category writer、canonical classifier、settings policy mapper、relation command/repository 和 changed-case delta；分类事实、requirement metadata 与 history 同事务提交，数据库成功后才更新进程镜像。无实际变化或无 active relation 时短路，ETC/批量账务排除。
+- 清理：删除未接线的 `after_category_mutation` 回调；Bank Details 与 Turnover 的 PostgreSQL 标签写统一进入同一闭环，不新增通知、队列、worker、缓存、API 或页面 refresh。
+- 历史数据：扩展既有 fingerprint-bound `workbench-requirement-repair`，只自动修复有持久化分类来源证据的 snapshot drift；规则推导或未知来源仅报告人工复核。保留 dry-run、幂等续跑、history、rollback 与 exempt owner 合同。
+- 测试：`tests/test_bank_category_relation_closure_service.py` 覆盖原子更新、no-op、外层事务提交后发布和失败不污染镜像；repair tests 覆盖 persisted drift 与 rule-derived fail closed；Bank Details、Turnover、Workbench command 和架构守卫回归保护旧页面。

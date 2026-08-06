@@ -13,7 +13,7 @@
 | 自动标签解析 | `auto_matched` | 当前 active 自动标签规则 | 当前最高优先级仅命中一个规则。 |
 | 自动标签解析 | `needs_confirmation` | 当前 active 自动标签规则 | 当前最高优先级命中多个规则；只能从当前候选确认。 |
 | 自动标签解析 | `unmatched` | 当前 active 自动标签规则 | 可人工补分类。 |
-| 自动标签解析 | `manual_confirmed` | active confirmation/category fact | 候选确认可撤销；人工补分类可清除；随后 normal GET 重算当前状态。 |
+| 自动标签解析 | `manual_confirmed` | active confirmation/category fact | 候选确认可撤销；人工补分类可清除；effective 标签实际变化时，分类事实与受影响 active 普通关系 requirement/history 原子提交，随后 normal GET 重算当前状态。 |
 | 自动标签规则 | active / archived | canonical app settings | PUT/file replacement 通过版本 CAS 变更；reapply 不改版本，只写审计并重新 GET。 |
 | 正式关系 | unlinked / linked | `app.workbench_pair_relations status=active` | relation owner 写入或撤回；银行页面下次 GET 直接看到已提交状态。 |
 | 账户余额 | has_balance / missing_balance | canonical 银行流水最新非空 balance | 导入、删除、重导或原始余额变化后，下次 accounts GET 直接聚合。 |
@@ -25,6 +25,7 @@
 - 人工补分类清除把 active fact 标记为 `cleared`，不得写 active `unknown`。
 - 分类与规则写保留 canonical fact/version/audit/CAS；不创建页面 read-model dirty/outbox 或 freshness target。
 - 正式关系只认 active canonical relation；candidate/withdrawn/turnover manual closure 不生成页面 linked 标签。
+- 分类写闭环不得更新 ETC/批量账务关系，不得发送关联台页面通知；关联台按自己的 freshness/generation 读取已提交 canonical relation。
 
 ## 页面请求状态
 

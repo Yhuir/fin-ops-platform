@@ -583,8 +583,9 @@ fingerprint、operator 和 reason。它只补 canonical ETC member/link、归一
 `read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
 用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
 由 helper 加载 runtime env，不提供任意 shell 执行能力。
-`workbench-requirement-repair` 修复普通银行正式关系缺失的冻结要求，以及 active Turnover 旧 source、
-缺 tag/version 的 requirement snapshot。dry-run 使用一次 fresh 银行标签批量读取，fingerprint 同时绑定
+`workbench-requirement-repair` 修复普通银行正式关系缺失的冻结要求、active Turnover 旧 source/缺 tag/version，
+以及“关系已冻结但之后发生了有持久化来源证据的 effective category 变更”造成的 snapshot drift。规则推导或
+未知来源差异只进入 `manual_review_*` 报告，不自动写。dry-run 使用一次 fresh 银行标签批量读取，fingerprint 同时绑定
 完整 metadata preimage 与 intended after；execute 通过 fingerprint-bound history 重建 original plan，支持
 中断后幂等续跑。`rollback-dry-run` / `rollback` 只选择同 fingerprint 的 execute history，在首写前检查
 after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢复完整 `special_metadata` preimage；

@@ -70,16 +70,26 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0
 
-    targets = [relation for relation in relations if _snapshot_missing(relation)]
+    eligible_relations = [
+        relation
+        for relation in relations
+        if _eligible_bank_relation(relation)
+    ]
     category_provider = bank_transaction_effective_category_provider(app)
     raw_rules_payload = bank_flow_rule_batch_tag_rules_payload(app)
     rules_payload = raw_rules_payload if isinstance(raw_rules_payload, dict) else {}
-    fresh_plan = _build_plan(
-        targets,
+    assessments = _build_plan(
+        eligible_relations,
         category_provider=category_provider,
         bank_rows=import_service(app).list_transactions(month="all"),
         rules_payload=rules_payload,
     )
+    fresh_plan = [item for item in assessments if str(item.get("repair_reason") or "").strip()]
+    manual_review = [
+        item
+        for item in assessments
+        if str(item.get("manual_review_reason") or "").strip()
+    ]
 
     if mode == "execute":
         fingerprint = str(args.expected_fingerprint)
@@ -104,7 +114,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         for item in pending_plan:
             result = command_service.update_relation_metadata_for_case_id(
                 case_id=item["case_id"],
-                special_metadata=item["special_metadata"],
+                special_metadata=item["intended_special_metadata"],
+                replace_special_metadata=True,
                 actor_id=REPAIR_ACTOR_ID,
                 note=f"{_FORWARD_NOTE_PREFIX}{fingerprint}",
                 idempotency_key=f"workbench-requirement-backfill-v2:{fingerprint}:{item['case_id']}",
@@ -123,6 +134,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         written=written,
         affected_months=affected_months,
         original_plan_count=len(full_plan),
+        manual_review=manual_review,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
@@ -177,7 +189,34 @@ def _build_plan(
         )
         existing = relation.get("special_metadata")
         existing = deepcopy(existing) if isinstance(existing, dict) else {}
-        if str(relation.get("relation_mode") or "").strip() != "turnover_manual_closure":
+        stored_tag_codes = _stored_requirement_tag_codes(existing)
+        tag_sources = [
+            _category_source(
+                category_records.get(row_id)
+                if isinstance(category_records.get(row_id), dict)
+                else {}
+            )
+            for row_id in _bank_row_ids(relation)
+        ]
+        snapshot_missing = _snapshot_missing(relation)
+        persisted_category_drift = bool(
+            not snapshot_missing
+            and stored_tag_codes != tag_codes
+            and raw_tag_codes
+            and all(raw_tag_codes)
+            and all(
+                source in {"manual", "auto_confirmation", "turnover_ledger"}
+                for source in tag_sources
+            )
+        )
+        manual_review_reason = ""
+        if not snapshot_missing and stored_tag_codes != tag_codes and not persisted_category_drift:
+            manual_review_reason = "category_source_not_persisted"
+
+        if (
+            not persisted_category_drift
+            and str(relation.get("relation_mode") or "").strip() != "turnover_manual_closure"
+        ):
             built["requires_oa"] = _existing_or_built_requirement(
                 existing,
                 canonical_key="requires_oa",
@@ -190,7 +229,22 @@ def _build_plan(
                 legacy_key="paired_requires_invoice",
                 built=bool(built["requires_invoice"]),
             )
-        intended_special_metadata = {**existing, **deepcopy(built)}
+        intended_special_metadata = {
+            key: value
+            for key, value in existing.items()
+            if key
+            not in {
+                "paired_requirement_source",
+                "paired_requirement_tag_codes",
+                "paired_requirement_tag_code",
+                "paired_requirement_version",
+                "requires_oa",
+                "requires_invoice",
+                "paired_requires_oa",
+                "paired_requires_invoice",
+            }
+        }
+        intended_special_metadata.update(deepcopy(built))
         plan.append(
             {
                 "case_id": str(relation.get("case_id") or "").strip(),
@@ -200,16 +254,33 @@ def _build_plan(
                 "month_scope": str(relation.get("month_scope") or "all"),
                 "row_types": [str(value) for value in list(relation.get("row_types") or [])],
                 "bank_tag_codes": tag_codes,
+                "bank_tag_sources": tag_sources,
+                "stored_bank_tag_codes": stored_tag_codes,
+                "repair_reason": (
+                    "missing_snapshot"
+                    if snapshot_missing
+                    else "persisted_category_drift"
+                    if persisted_category_drift
+                    else ""
+                ),
+                "manual_review_reason": manual_review_reason,
             }
         )
     return plan
 
 
-def _snapshot_missing(relation: dict[str, Any]) -> bool:
+def _eligible_bank_relation(relation: dict[str, Any]) -> bool:
     if str(relation.get("status") or "").strip() != "active":
         return False
-    row_types = {str(value or "").strip().lower() for value in list(relation.get("row_types") or [])}
-    if "bank" not in row_types or _is_exempt_relation(relation):
+    row_types = {
+        str(value or "").strip().lower()
+        for value in list(relation.get("row_types") or [])
+    }
+    return "bank" in row_types and not _is_exempt_relation(relation)
+
+
+def _snapshot_missing(relation: dict[str, Any]) -> bool:
+    if not _eligible_bank_relation(relation):
         return False
     metadata = relation.get("special_metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -479,6 +550,29 @@ def _category_code(record: dict[str, Any]) -> str:
     return str(record.get("effective_category_code") or record.get("category_code") or "").strip()
 
 
+def _category_source(record: dict[str, Any]) -> str:
+    return str(
+        record.get("effective_category_source")
+        or record.get("category_source")
+        or record.get("source")
+        or ""
+    ).strip()
+
+
+def _stored_requirement_tag_codes(metadata: dict[str, Any]) -> list[str]:
+    values = metadata.get("paired_requirement_tag_codes")
+    if isinstance(values, list):
+        return list(
+            dict.fromkeys(
+                str(value or "").strip()
+                for value in values
+                if str(value or "").strip()
+            )
+        )
+    single = str(metadata.get("paired_requirement_tag_code") or "").strip()
+    return [single] if single else []
+
+
 def _existing_or_built_requirement(
     metadata: dict[str, Any],
     *,
@@ -530,6 +624,7 @@ def _public_forward_report(
     written: int,
     affected_months: set[str],
     original_plan_count: int,
+    manual_review: list[dict[str, Any]],
 ) -> dict[str, Any]:
     requirement_counts = Counter(
         "oa={oa},invoice={invoice}".format(
@@ -545,6 +640,14 @@ def _public_forward_report(
         for item in plan
     )
     tag_counts = Counter(tag_code for item in plan for tag_code in item["bank_tag_codes"])
+    repair_reason_counts = Counter(
+        str(item.get("repair_reason") or "unknown")
+        for item in plan
+    )
+    manual_review_reason_counts = Counter(
+        str(item.get("manual_review_reason") or "unknown")
+        for item in manual_review
+    )
     return {
         "status": "applied" if mode == "execute" else "dry_run",
         "mode": mode,
@@ -558,6 +661,10 @@ def _public_forward_report(
         "requirement_counts": dict(sorted(requirement_counts.items())),
         "row_type_counts": dict(sorted(row_type_counts.items())),
         "top_tag_codes": tag_counts.most_common(20),
+        "repair_reason_counts": dict(sorted(repair_reason_counts.items())),
+        "manual_review_relation_count": len(manual_review),
+        "manual_review_reason_counts": dict(sorted(manual_review_reason_counts.items())),
+        "manual_review_sample_case_ids": [item["case_id"] for item in manual_review[:10]],
         "affected_months": sorted(affected_months),
         "sample_case_ids": [item["case_id"] for item in plan[:10]],
     }
