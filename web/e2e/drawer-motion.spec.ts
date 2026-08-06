@@ -108,7 +108,12 @@ function expectFullWidthTravel(samples: DrawerMotionSample[], direction: "enter"
   expect(width).toBeGreaterThan(0);
   expect(maxLeft - minLeft).toBeGreaterThan(width * 0.75);
   expect(Math.abs((openFrame?.right ?? 0) - (openFrame?.viewportWidth ?? 0))).toBeLessThanOrEqual(2);
-  expect(closedFrame?.left).toBeGreaterThanOrEqual((closedFrame?.viewportWidth ?? 0) - 2);
+  // HeroUI removes the modal at transition end, so the last paint sampled before
+  // removal can trail the computed 100% endpoint by a few pixels under load.
+  const exitEndpointTolerance = Math.max(2, width * 0.01);
+  expect(closedFrame?.left).toBeGreaterThanOrEqual(
+    (closedFrame?.viewportWidth ?? 0) - exitEndpointTolerance,
+  );
   expect(intermediateIndex).toBeGreaterThan(0);
   expect(frames[intermediateIndex]?.left).toBeGreaterThan(openFrame?.left ?? 0);
   expect(frames[intermediateIndex]?.left).toBeLessThan(closedFrame?.left ?? 0);
@@ -150,8 +155,12 @@ test.describe("right drawer motion", () => {
       }).observe({ type: "layout-shift", buffered: true });
     });
 
+    const periodicStatusCalls = new Set([
+      "GET /api/oa-sync/status",
+      "GET /api/workbench/refresh-status",
+    ]);
     const businessCallCount = () => api.calls.filter(
-      (call) => call !== "GET /api/workbench/refresh-status",
+      (call) => !periodicStatusCalls.has(call),
     ).length;
     const requestsBeforeOpen = businessCallCount();
     await armDrawerSampler(page);
