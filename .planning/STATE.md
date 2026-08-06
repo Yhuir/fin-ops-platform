@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 40-01-PLAN.md
-last_updated: "2026-08-06T05:53:38.350Z"
+stopped_at: Completed 40-02-PLAN.md
+last_updated: "2026-08-06T06:05:56.509Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 111
-  completed_plans: 78
+  completed_plans: 79
   percent: 29
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 40 (performance-contract-hot-path-closure) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 -- Phase 40 execution started
 
-Progress: [█░░░░░░░░░] 1/8 plans complete
+Progress: [██░░░░░░░░] 2/8 plans complete
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [█░░░░░░░░░] 1/8 plans complete
 | Phase 13 P14 | 40min | 3 tasks | 8 files |
 | Phase 13 P15 | 2h 10m | 4 tasks | 11 files |
 | Phase 40 P01 | 9 min | 2 tasks | 7 files |
+| Phase 40 P02 | 8 min | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,8 @@ Progress: [█░░░░░░░░░] 1/8 plans complete
 - [Phase 40]: HTTP probe concurrency is capped at 8 while the serial default and existing report fields remain compatible.
 - [Phase 40]: Target-scale evidence remains not_measured until an isolated target-size database benchmark exists.
 - [Phase 40]: The existing FinanceTable constant-size token window is reused and protected by large-total keyboard regression coverage.
+- [Phase 40]: Reuse the three SQL root fixes already present in bb19c91ce; do not duplicate or churn the production owners. — The implementation predates the plan and exactly matches all three planned hotspot closures.
+- [Phase 40]: Close 40-02 with exact PostgreSQL fixtures and negative unbounded-ID query-shape guards; add no index, migration, dependency, cache, cursor, or fallback. — The plan requires result equivalence and forbids speculative structural optimization.
 
 ### Roadmap Evolution
 
@@ -283,6 +286,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T05:52:47.157Z
-Stopped at: Completed 40-01-PLAN.md
+Last session: 2026-08-06T06:05:56.491Z
+Stopped at: Completed 40-02-PLAN.md
 Resume file: None

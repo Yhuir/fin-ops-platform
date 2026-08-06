@@ -839,11 +839,11 @@ Plans:
   6. Target concurrency is derived from a named production evidence window or approved capacity contract; both derived load tiers meet p95/error/resource gates, and same-clock t0..t4 samples prove commit-to-visible p99 `<=3000ms` with every segment summing to the total.
   7. Retired Search/read-model and Workbench-local target paths are deleted with no fallback, double-read or retained-job regression; full local gates, one pushed `main`, one exact deployment, T+300 and rollback evidence prove correctness, isolation and performance.
 
-**Plans:** 1/8 plans executed
+**Plans:** 2/8 plans executed
 Plans:
 
 - [x] 40-01-PLAN — Wave 1: bounded performance probes/contract and constant-size FinanceTable pagination.
-- [ ] 40-02-PLAN — Wave 1: three proven SQL hot paths with exact-result PostgreSQL regression.
+- [x] 40-02-PLAN — Wave 1: three proven SQL hot paths with exact-result PostgreSQL regression.
 - [ ] 40-03-PLAN — Wave 1: proven import batch-row multi-value path only; speculative page/DTO hot paths excluded.
 - [ ] 40-04-PLAN — Wave 2 after 40-01/02/03: Search/no-OA fact/guard cleanup, full local gates and exact candidate handoff; no push/deploy.
 - [ ] 40-05-PLAN — Wave 1: backend refresh-status exact self-heal and unchanged API/writer contracts.
