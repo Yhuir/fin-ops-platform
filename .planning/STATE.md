@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 40-05-PLAN.md out of order; 40-04 remains incomplete
-last_updated: "2026-08-06T06:31:56.606Z"
+stopped_at: Completed 40-06-PLAN.md out of order; 40-04 remains incomplete
+last_updated: "2026-08-06T06:45:46.818Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 111
-  completed_plans: 81
+  completed_plans: 82
   percent: 29
 ---
 
@@ -30,7 +30,7 @@ Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-08-06 -- Phase 40 execution started
 
-Progress: [█████░░░░░] 4/8 plans complete
+Progress: [██████░░░░] 5/8 plans complete
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████░░░░░] 4/8 plans complete
 | Phase 40 P02 | 8 min | 1 tasks | 5 files |
 | Phase 40 P03 | 8 min | 1 tasks | 3 files |
 | Phase 40 P05 | 7 min | 1 tasks | 3 files |
+| Phase 40 P06 | 10 min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,8 @@ Progress: [█████░░░░░] 4/8 plans complete
 - [Phase 40]: Close 40-02 with exact PostgreSQL fixtures and negative unbounded-ID query-shape guards; add no index, migration, dependency, cache, cursor, or fallback. — The plan requires result equivalence and forbids speculative structural optimization.
 - [Phase 40]: Require PostgresTransaction.execute_many_values directly for import batch rows; missing bounded capability fails fast instead of issuing per-row SQL.
 - [Phase 40]: Keep the existing import-row owner-guard predicate and affected-count rollback contract; optimize only the measured hotspot.
+- [Phase 40]: Workbench refresh status uses one page-local visible completion-plus-one-second single-flight loop; hidden pages schedule no timer or new request. — This bounds client request rate and deletes interval-driven abort overlap without adding a scheduler abstraction.
+- [Phase 40]: Only a changed fresh Workbench generation enters the existing 300ms combined reload debounce; all non-fresh and failure outcomes remain status-only. — The existing version ref and reload owner already provide the required one-generation reload contract.
 
 ### Roadmap Evolution
 
@@ -290,6 +293,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T06:31:56.587Z
-Stopped at: Completed 40-05-PLAN.md out of order; 40-04 remains incomplete
+Last session: 2026-08-06T06:45:46.802Z
+Stopped at: Completed 40-06-PLAN.md out of order; 40-04 remains incomplete
 Resume file: None
