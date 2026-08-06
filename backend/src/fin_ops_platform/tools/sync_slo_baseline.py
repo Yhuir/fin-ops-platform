@@ -12,6 +12,13 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 
 
 DEFAULT_LIMIT = 20
+CURRENT_PRODUCTION_CRITICAL_SECTIONS = (
+    "runtime_health",
+    "runtime_snapshot",
+    "postgres_connections",
+    "postgres_table_sizes",
+    "postgres_index_usage",
+)
 
 
 EXPLAIN_PROBES: tuple[tuple[str, str], ...] = (
@@ -88,15 +95,51 @@ def collect_baseline(
 ) -> dict[str, Any]:
     runtime = RuntimeMonitoringRepository(connection)
     normalized_limit = max(1, int(limit))
+    sections = {
+        "runtime_health": _safe_section(lambda: runtime.health_summary()),
+        "runtime_snapshot": _runtime_attention_snapshot(runtime),
+        "dashboard_read_models": _safe_section(runtime.dashboard_read_model_metrics),
+        "dashboard_workers": _safe_section(runtime.dashboard_worker_metrics),
+        "dashboard_queues": _safe_section(runtime.dashboard_queue_metrics),
+        "dashboard_outbox": _safe_section(runtime.dashboard_outbox_metric),
+        "postgres_connections": _safe_section(lambda: _postgres_connections(connection)),
+        "postgres_table_sizes": _safe_section(
+            lambda: _postgres_table_sizes(connection, limit=normalized_limit)
+        ),
+        "postgres_index_usage": _safe_section(
+            lambda: _postgres_index_usage(connection, limit=normalized_limit)
+        ),
+        "pg_stat_statements": _safe_section(
+            lambda: _pg_stat_statements(connection, limit=normalized_limit)
+        ),
+        "explain_probes": (
+            _safe_section(lambda: _explain_probes(connection, analyze=analyze_explain))
+            if include_explain
+            else {"status": "skipped", "reason": "include_explain_false"}
+        ),
+    }
+    unavailable_critical_sections = [
+        name
+        for name in CURRENT_PRODUCTION_CRITICAL_SECTIONS
+        if sections[name].get("status") != "available"
+    ]
+    current_production_measured = not unavailable_critical_sections
+    current_production = {
+        "status": "measured" if current_production_measured else "not_measured",
+        "source": "read_only_postgresql_baseline",
+        "release_blocked": not current_production_measured,
+    }
+    if unavailable_critical_sections:
+        current_production["reason"] = (
+            "critical baseline sections unavailable: "
+            + ", ".join(unavailable_critical_sections)
+        )
     return {
         "version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": "read_only" if not analyze_explain else "read_only_with_explain_analyze",
         "evidence_bands": {
-            "current_production": {
-                "status": "measured",
-                "source": "read_only_postgresql_baseline",
-            },
+            "current_production": current_production,
             "target_scale": {
                 "status": "not_measured",
                 "requires_isolated_database": True,
@@ -114,21 +157,7 @@ def collect_baseline(
             "write_operation_to_fresh_p99_ms": 3000,
             "retained_read_model_keys": ["workbench", "workbench_relation"],
         },
-        "runtime_health": _safe_section(lambda: runtime.health_summary()),
-        "runtime_snapshot": _runtime_attention_snapshot(runtime),
-        "dashboard_read_models": _safe_section(runtime.dashboard_read_model_metrics),
-        "dashboard_workers": _safe_section(runtime.dashboard_worker_metrics),
-        "dashboard_queues": _safe_section(runtime.dashboard_queue_metrics),
-        "dashboard_outbox": _safe_section(runtime.dashboard_outbox_metric),
-        "postgres_connections": _safe_section(lambda: _postgres_connections(connection)),
-        "postgres_table_sizes": _safe_section(lambda: _postgres_table_sizes(connection, limit=normalized_limit)),
-        "postgres_index_usage": _safe_section(lambda: _postgres_index_usage(connection, limit=normalized_limit)),
-        "pg_stat_statements": _safe_section(lambda: _pg_stat_statements(connection, limit=normalized_limit)),
-        "explain_probes": (
-            _safe_section(lambda: _explain_probes(connection, analyze=analyze_explain))
-            if include_explain
-            else {"status": "skipped", "reason": "include_explain_false"}
-        ),
+        **sections,
         "api_performance": {
             "status": "not_collected",
             "reason": "api p95 is process-local dashboard/authenticated endpoint data; collect with logged-in HTTP sampling.",

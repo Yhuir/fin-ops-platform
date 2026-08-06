@@ -159,6 +159,7 @@ class SyncSloBaselineTests(unittest.TestCase):
 
         self.assertEqual(payload["mode"], "read_only")
         self.assertEqual(payload["evidence_bands"]["current_production"]["status"], "measured")
+        self.assertFalse(payload["evidence_bands"]["current_production"]["release_blocked"])
         self.assertEqual(payload["evidence_bands"]["target_scale"]["status"], "not_measured")
         self.assertTrue(payload["evidence_bands"]["target_scale"]["requires_isolated_database"])
         self.assertEqual(
@@ -176,6 +177,20 @@ class SyncSloBaselineTests(unittest.TestCase):
         self.assertEqual(payload["explain_probes"]["status"], "available")
         self.assertEqual(payload["explain_probes"]["data"][0]["node_type"], "Aggregate")
         self.assertEqual(payload["api_performance"]["status"], "not_collected")
+
+    def test_collect_baseline_fails_closed_when_critical_sections_are_unavailable(self) -> None:
+        unavailable = {"status": "unavailable", "error": "database unavailable"}
+        with (
+            patch.object(sync_slo_baseline, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository),
+            patch.object(sync_slo_baseline, "_safe_section", return_value=unavailable),
+        ):
+            payload = sync_slo_baseline.collect_baseline(FakeConnection(), limit=5)
+
+        current = payload["evidence_bands"]["current_production"]
+        self.assertEqual(current["status"], "not_measured")
+        self.assertTrue(current["release_blocked"])
+        self.assertIn("runtime_health", current["reason"])
+        self.assertIn("postgres_index_usage", current["reason"])
 
     def test_pg_stat_statements_falls_back_to_legacy_time_columns(self) -> None:
         result = sync_slo_baseline._pg_stat_statements(
