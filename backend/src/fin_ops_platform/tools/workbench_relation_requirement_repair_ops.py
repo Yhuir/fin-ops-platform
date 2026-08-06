@@ -205,7 +205,7 @@ def _build_plan(
             and raw_tag_codes
             and all(raw_tag_codes)
             and all(
-                source in {"manual", "auto_confirmation", "turnover_ledger"}
+                source in {"manual", "manual_confirmation", "turnover_ledger"}
                 for source in tag_sources
             )
         )

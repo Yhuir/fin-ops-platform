@@ -39,7 +39,7 @@
 - 已有 OA+附件发票 relation 可由唯一同额员工流水补齐第三栏；流水必须与 OA 合计一致，附件发票差额继续进入异常链路，currency/direction、连通性和 `target_case_id` 必须同时成立。唯一同额单笔优先于同额多笔组合；多个同额单笔、跨 case 竞争、完整三栏与撤回 fingerprint 均 fail closed。全局建图或高密度 active case 的资源保护不得丢弃已证明安全的单笔计划或同批其它独立 exact case；大量同类型 OA 噪声不得消耗跨 pane 建边预算，多笔精确合计兜底仍必须可用。
 - changed-case 持久化后只替换或删除目标 case/history；无关关系与审计保持不变，且 adapter 不得调用全局 `snapshot()` 做镜像重建。
 - persisted effective category 实际变化时，category fact 与受影响普通 relation requirement/history 必须同事务提交；无变化、无 active relation、ETC/批量账务关系均零 metadata 写。外层 UoW 只在 commit 后发布进程镜像，失败/rollback 不污染。
-- requirement repair 只自动修复 missing snapshot 或有 `manual|auto_confirmation|turnover_ledger` 持久化来源证据的 tag drift；rule-derived/未知来源只报告人工复核，dry-run fingerprint、幂等续跑、history 和 rollback 必须保留。
+- requirement repair 只自动修复 missing snapshot 或有 `manual|manual_confirmation|turnover_ledger` 有效分类来源证据的 tag drift；rule-derived/未知来源只报告人工复核，dry-run fingerprint、幂等续跑、history 和 rollback 必须保留。
 - active case 校验只执行一条 relation query，不查询 history；in-memory fallback 直接按 case 读取，不能复制全局 snapshot。
 - confirm overlap 校验只执行 active relation query，不加载 cancelled relation/history；command delta 只携带本次 history event，数据库不删除或重写旧 history，重复 operation id 保持幂等。
 - 下游只把 active relation 视为 linked；关联台的 `paired` 还必须满足页面完整性合同。普通 OA+发票 active relation 缺银行时保持 owner/case 不变但显示为 `unpaired`；只有显式 batch-accounting 关系豁免完成要求，ETC marker 只证明 batch identity。

@@ -247,7 +247,7 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         dry_run = _run(
             command,
             ["--dry-run"],
-            category_provider=_CategoryProvider(category_source="manual"),
+            category_provider=_CategoryProvider(category_source="manual_confirmation"),
             rules=_rules(requires_oa=False, requires_invoice=False),
         )
 
@@ -260,7 +260,7 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         applied = _run(
             command,
             ["--execute", "--expected-fingerprint", fingerprint],
-            category_provider=_CategoryProvider(category_source="manual"),
+            category_provider=_CategoryProvider(category_source="manual_confirmation"),
             rules=_rules(requires_oa=False, requires_invoice=False),
         )
 
