@@ -64,7 +64,9 @@ describe("workbench api runtime base path", () => {
     const status = await fetchWorkbenchRefreshStatus("all");
 
     expect(status.readModelStatus).toBe("fresh");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0][0])).toBe("/fin-ops-api/api/workbench/refresh-status?month=all");
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ method: "GET" });
   });
 
 });

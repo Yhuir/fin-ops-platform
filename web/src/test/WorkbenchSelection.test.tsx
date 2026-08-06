@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
@@ -10,6 +10,10 @@ import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   window.sessionStorage.clear();
 });
 
@@ -70,7 +74,186 @@ function isWorkbenchInitialRequest(input: RequestInfo | URL) {
   return fetchPath(input).startsWith("/api/workbench?");
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<Response>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function setDocumentVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: state,
+  });
+  fireEvent(document, new Event("visibilitychange"));
+}
+
 describe("Workbench row selection and detail drawer", () => {
+  test("polls refresh status only when visible with completion plus one second single-flight cadence", async () => {
+    vi.useFakeTimers();
+    setDocumentVisibility("visible");
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    const refreshRequests: Array<ReturnType<typeof deferredResponse> & { signal: AbortSignal | null }> = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
+        const request = deferredResponse();
+        refreshRequests.push({ ...request, signal: init?.signal ?? null });
+        return request.promise;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+
+    const rendered = renderWorkbenchPage();
+    expect(refreshRequests).toHaveLength(1);
+
+    fireEvent.focus(window);
+    setDocumentVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(refreshRequests).toHaveLength(1);
+    expect(refreshRequests[0].signal?.aborted).toBe(false);
+
+    await act(async () => {
+      refreshRequests[0].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "refreshing",
+        read_model_version: "generation-v1",
+      }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(refreshRequests).toHaveLength(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(refreshRequests).toHaveLength(2);
+
+    fireEvent.focus(window);
+    setDocumentVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(refreshRequests).toHaveLength(2);
+
+    setDocumentVisibility("hidden");
+    await act(async () => {
+      refreshRequests[1].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "stale",
+        read_model_version: "generation-v1",
+      }));
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(refreshRequests).toHaveLength(2);
+
+    setDocumentVisibility("visible");
+    fireEvent.focus(window);
+    expect(refreshRequests).toHaveLength(3);
+
+    rendered.unmount();
+    expect(refreshRequests[2].signal?.aborted).toBe(true);
+    fireEvent.focus(window);
+    setDocumentVisibility("visible");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(refreshRequests).toHaveLength(3);
+  });
+
+  test("keeps failed and thrown refresh checks on cadence and reloads one changed fresh generation once", async () => {
+    vi.useFakeTimers();
+    setDocumentVisibility("visible");
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    const refreshRequests: Array<ReturnType<typeof deferredResponse>> = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
+        const request = deferredResponse();
+        refreshRequests.push(request);
+        return request.promise;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderWorkbenchPage();
+    expect(refreshRequests).toHaveLength(1);
+    const initialRequestCount = fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    )).length;
+
+    await act(async () => {
+      refreshRequests[0].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "failed",
+        read_model_version: "generation-v1",
+        last_error: "投影刷新失败",
+      }));
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(refreshRequests).toHaveLength(2);
+    await act(async () => {
+      refreshRequests[1].reject(new Error("network down"));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(refreshRequests).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(refreshRequests).toHaveLength(3);
+
+    await act(async () => {
+      refreshRequests[2].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "fresh",
+        read_model_version: "generation-v2",
+      }));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    ))).toHaveLength(initialRequestCount + 1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    expect(refreshRequests).toHaveLength(4);
+    await act(async () => {
+      refreshRequests[3].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "fresh",
+        read_model_version: "generation-v2",
+      }));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    ))).toHaveLength(initialRequestCount + 1);
+  });
+
   test("shows the unified page Audit control to admins", async () => {
     installMockApiFetch();
     renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
