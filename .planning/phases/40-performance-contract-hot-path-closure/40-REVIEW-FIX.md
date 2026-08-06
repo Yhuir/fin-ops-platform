@@ -1,8 +1,8 @@
 ---
 phase: 40-performance-contract-hot-path-closure
-fixed_at: 2026-08-06T11:21:26Z
+fixed_at: 2026-08-06T11:34:34Z
 review_path: .planning/phases/40-performance-contract-hot-path-closure/40-REVIEW.md
-iteration: 2
+iteration: 3
 findings_in_scope: 1
 fixed: 1
 skipped: 0
@@ -11,15 +11,23 @@ status: all_fixed
 
 # Phase 40: Code Review Fix Report
 
-**Fixed at:** 2026-08-06T11:21:26Z
+**Fixed at:** 2026-08-06T11:34:34Z
 **Source review:** `.planning/phases/40-performance-contract-hot-path-closure/40-REVIEW.md`
-**Iteration:** 2
+**Iteration:** 3
 
 **Summary:**
 
 - Findings in scope: 1
 - Fixed: 1
 - Skipped: 0
+
+## Iteration 3 Fixed Issue
+
+### Infra blocker: Runtime closure gate omitted the HTTP p99 target
+
+**Files modified:** `backend/src/fin_ops_platform/tools/runtime_sync_closure_gate.py`, `tests/test_runtime_sync_closure_gate.py`
+**Commit:** `f8d26a9cf`
+**Applied fix:** Updated the only stale cross-module `_with_target()` call to reuse `http_slo_probe.DEFAULT_P99_TARGET_MS`. The closure-gate regression now asserts that every public page and internal API probe receives both the existing p95 target and the default p99 ceiling, and the pass message reflects that both targets are enforced.
 
 ## Iteration 2 Fixed Issue
 
@@ -95,6 +103,8 @@ status: all_fixed
 
 ## Verification
 
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_sync_closure_gate -v` — 25 passed in iteration 3.
+- `bash scripts/verify.sh infra-smoke` — 71 passed/skipped as configured; no failures. PostgreSQL and RabbitMQ integration checks were skipped because their external test URLs were not set.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe -v` — 29 passed in iteration 2.
 - CLI/real-collector capacity regression — observed eight concurrent request-function calls at target 8.
 - Lower-peak release regression — observed peak 7 produced `status=fail`, `release_blocked=true`, and exit code 1.
@@ -109,10 +119,10 @@ status: all_fixed
 
 ## Documentation Impact
 
-Docs updates are not applicable to the iteration 2 fix: it makes the existing capacity evidence and release-gate contract mechanically true without changing its external target or operational policy. WR-03 remains outside this pass by direct instruction.
+Docs updates are not applicable to the iteration 3 fix: it restores the existing documented HTTP p99 contract at the runtime closure-gate call site without changing targets, configuration, or operational policy. WR-03 remains outside this pass by direct instruction.
 
 ---
 
-_Fixed: 2026-08-06T11:21:26Z_
+_Fixed: 2026-08-06T11:34:34Z_
 _Fixer: the agent (gsd-code-fixer)_
-_Iteration: 2_
+_Iteration: 3_
