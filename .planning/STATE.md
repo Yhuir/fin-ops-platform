@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 40-04-PLAN.md; 40-07 and 40-08 remain
-last_updated: "2026-08-06T07:34:07.194Z"
+stopped_at: Completed 40-07-PLAN.md
+last_updated: "2026-08-06T08:08:10.923Z"
 last_activity: 2026-08-06 -- Phase 40 execution started
 progress:
   total_phases: 38
   completed_phases: 11
   total_plans: 111
-  completed_plans: 83
-  percent: 75
+  completed_plans: 84
+  percent: 76
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 40 (performance-contract-hot-path-closure) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
-Last activity: 2026-08-06 -- Phase 40 execution started
+Last activity: 2026-08-06 -- Completed 40-07 Workbench writer-proof and bank-flow convergence closure
 
-Progress: [████████░░] 6/8 plans complete
+Progress: [█████████░] 7/8 plans complete
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [████████░░] 6/8 plans complete
 | Phase 40 P05 | 7 min | 1 tasks | 3 files |
 | Phase 40 P06 | 10 min | 1 tasks | 3 files |
 | Phase 40 P04 | 41 min | 2 tasks | 13 files |
+| Phase 40 P07 | 31min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -217,6 +218,8 @@ Progress: [████████░░] 6/8 plans complete
 - [Phase 40]: Only a changed fresh Workbench generation enters the existing 300ms combined reload debounce; all non-fresh and failure outcomes remain status-only. — The existing version ref and reload owner already provide the required one-generation reload contract.
 - [Phase 40]: Current runtime facts are exactly six required workers and two retained read models; Search/no-OA derived runtime stays retired while canonical no-OA consumers remain.
 - [Phase 40]: Application candidate c5557274bdc901c8137d6e2aeaae9036786ff216 remains local-only and is not full-green until three unrelated deferred gates and 40-08 target-scale evidence close.
+- [Phase 40]: Keep Workbench SQL proof unchanged after real PostgreSQL writer coverage. — Every mutable canonical dependency advanced its exact proof without notification fan-out.
+- [Phase 40]: Remove only Workbench-local operationBarrierTargets. — Freshness targets and global operator/maintenance paths remain live and were preserved.
 
 ### Roadmap Evolution
 
@@ -296,6 +299,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-06T07:33:57.651Z
-Stopped at: Completed 40-04-PLAN.md; 40-07 and 40-08 remain
+Last session: 2026-08-06T08:07:57.833Z
+Stopped at: Completed 40-07-PLAN.md
 Resume file: None
