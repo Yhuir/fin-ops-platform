@@ -199,7 +199,7 @@ function normalizedAmountForInput(value: string) {
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
-const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
+const WORKBENCH_REFRESH_POLL_DELAY_MS = 1_000;
 const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
 const WORKBENCH_OPERATION_FRESH_POLL_MS = 150;
 const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
@@ -1141,11 +1141,32 @@ export default function ReconciliationWorkbenchPage() {
       return undefined;
     }
     let isActive = true;
-    let pollIntervalId: number | null = null;
+    let pollTimeoutId: number | null = null;
     let pollController: AbortController | null = null;
 
+    const clearPollTimer = () => {
+      if (pollTimeoutId !== null) {
+        window.clearTimeout(pollTimeoutId);
+        pollTimeoutId = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      if (!isActive || document.visibilityState === "hidden") {
+        return;
+      }
+      clearPollTimer();
+      pollTimeoutId = window.setTimeout(() => {
+        pollTimeoutId = null;
+        pollRefreshStatus();
+      }, WORKBENCH_REFRESH_POLL_DELAY_MS);
+    };
+
     const pollRefreshStatus = () => {
-      pollController?.abort();
+      if (!isActive || document.visibilityState === "hidden" || pollController) {
+        return;
+      }
+      clearPollTimer();
       const controller = new AbortController();
       pollController = controller;
       void fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH, controller.signal)
@@ -1155,35 +1176,42 @@ export default function ReconciliationWorkbenchPage() {
           }
           applyWorkbenchRefreshStatus(status);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          if (pollController === controller) {
+            pollController = null;
+          }
+          scheduleNextPoll();
+        });
     };
 
-    const startPolling = () => {
-      if (pollIntervalId !== null) {
+    const pollImmediately = () => {
+      if (document.visibilityState === "hidden") {
+        clearPollTimer();
         return;
       }
-      pollRefreshStatus();
-      pollIntervalId = window.setInterval(pollRefreshStatus, WORKBENCH_REFRESH_POLL_INTERVAL_MS);
-    };
-
-    startPolling();
-
-    const handleFocus = () => {
+      clearPollTimer();
       pollRefreshStatus();
     };
-    window.addEventListener("focus", handleFocus);
+
+    const handleVisibilityChange = () => {
+      pollImmediately();
+    };
+
+    pollImmediately();
+    window.addEventListener("focus", pollImmediately);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       isActive = false;
-      if (pollIntervalId !== null) {
-        window.clearInterval(pollIntervalId);
-      }
+      clearPollTimer();
       pollController?.abort();
       if (workbenchRefreshReloadTimeoutRef.current !== null) {
         window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
         workbenchRefreshReloadTimeoutRef.current = null;
       }
-      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("focus", pollImmediately);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [active, applyWorkbenchRefreshStatus]);
 

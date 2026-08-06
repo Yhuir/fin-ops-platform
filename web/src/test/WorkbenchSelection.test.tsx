@@ -213,7 +213,11 @@ describe("Workbench row selection and detail drawer", () => {
     });
     expect(refreshRequests).toHaveLength(2);
     await act(async () => {
-      refreshRequests[1].reject(new Error("network down"));
+      refreshRequests[1].resolve(jsonResponse({
+        scope_key: "all",
+        read_model_status: "unavailable",
+        read_model_version: "generation-v1",
+      }));
       await Promise.resolve();
       await vi.advanceTimersByTimeAsync(999);
     });
@@ -224,7 +228,14 @@ describe("Workbench row selection and detail drawer", () => {
     expect(refreshRequests).toHaveLength(3);
 
     await act(async () => {
-      refreshRequests[2].resolve(jsonResponse({
+      refreshRequests[2].reject(new Error("network down"));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(refreshRequests).toHaveLength(4);
+
+    await act(async () => {
+      refreshRequests[3].resolve(jsonResponse({
         scope_key: "all",
         read_model_status: "fresh",
         read_model_version: "generation-v2",
@@ -239,9 +250,9 @@ describe("Workbench row selection and detail drawer", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(700);
     });
-    expect(refreshRequests).toHaveLength(4);
+    expect(refreshRequests).toHaveLength(5);
     await act(async () => {
-      refreshRequests[3].resolve(jsonResponse({
+      refreshRequests[4].resolve(jsonResponse({
         scope_key: "all",
         read_model_status: "fresh",
         read_model_version: "generation-v2",
