@@ -1503,7 +1503,7 @@ describe("workbench exception api", () => {
     });
   });
 
-  test("applyWorkbenchException posts selected action payload and maps refresh semantics", async () => {
+  test("applyWorkbenchException maps freshness without restoring a local operation barrier", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1514,7 +1514,6 @@ describe("workbench exception api", () => {
           affected_row_ids: ["bank-1"],
           affected_scope_keys: ["2026-05"],
           freshness_targets: [],
-          operation_barrier_targets: [],
           workbench_refresh_required: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1552,7 +1551,7 @@ describe("workbench exception api", () => {
         }),
       }),
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
       case: { id: "EXC-1" },
       pairRelation: { id: "REL-1" },
@@ -1560,9 +1559,9 @@ describe("workbench exception api", () => {
       affectedRowIds: ["bank-1"],
       affectedScopeKeys: ["2026-05"],
       freshnessTargets: [],
-      operationBarrierTargets: [],
       workbenchRefreshRequired: true,
     });
+    expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 });
 
