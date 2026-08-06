@@ -1,27 +1,36 @@
 ---
 phase: 40-performance-contract-hot-path-closure
-fixed_at: 2026-08-06T11:07:58Z
+fixed_at: 2026-08-06T11:21:26Z
 review_path: .planning/phases/40-performance-contract-hot-path-closure/40-REVIEW.md
-iteration: 1
-findings_in_scope: 9
-fixed: 8
-skipped: 1
-status: partial
+iteration: 2
+findings_in_scope: 1
+fixed: 1
+skipped: 0
+status: all_fixed
 ---
 
 # Phase 40: Code Review Fix Report
 
-**Fixed at:** 2026-08-06T11:07:58Z
+**Fixed at:** 2026-08-06T11:21:26Z
 **Source review:** `.planning/phases/40-performance-contract-hot-path-closure/40-REVIEW.md`
-**Iteration:** 1
+**Iteration:** 2
 
 **Summary:**
 
-- Findings in scope: 9
-- Fixed: 8
-- Skipped: 1
+- Findings in scope: 1
+- Fixed: 1
+- Skipped: 0
 
-## Fixed Issues
+## Iteration 2 Fixed Issue
+
+### CR-02: Capacity evidence can still pass without reaching the target number of concurrent clients
+
+**Status:** fixed: requires human verification
+**Files modified:** `backend/src/fin_ops_platform/tools/http_slo_probe.py`, `tests/test_http_slo_probe.py`
+**Commit:** `70c1d756d`
+**Applied fix:** Capacity sampling now submits bounded waves and uses a barrier to release the target number of workers together. A lock-protected counter wraps each real measured request and reports `observed_peak_concurrency`. The release gate retains the iteration, configured-width, and maximum-width preconditions and additionally requires the observed peak to equal the derived target. A CLI regression runs the real collector with an instrumented request function and proves eight overlapping calls at target 8; a second regression proves an observed peak of 7 blocks release.
+
+## Iteration 1 Fixed Issues
 
 ### CR-01: Workbench startup can display an older generation after a newer refresh-status response
 
@@ -76,7 +85,7 @@ status: partial
 **Commit:** `aa6c1a388`
 **Applied fix:** Narrowed the test title and contract to the behavior its existing assertion proves: no close-triggered non-periodic business I/O. The periodic OA/Workbench status traffic remains explicitly identified and excluded from that narrower contract.
 
-## Skipped Issues
+## Iteration 1 Skipped Issue
 
 ### WR-03: Production smoke can be merged with stale isolated evidence from another release
 
@@ -86,6 +95,9 @@ status: partial
 
 ## Verification
 
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe -v` — 29 passed in iteration 2.
+- CLI/real-collector capacity regression — observed eight concurrent request-function calls at target 8.
+- Lower-peak release regression — observed peak 7 produced `status=fail`, `release_blocked=true`, and exit code 1.
 - `npx vitest run src/test/WorkbenchSelection.test.tsx` — 73 passed.
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe tests.test_sync_slo_baseline tests.test_playwright_e2e_strict_diagnostics -v` — 43 passed.
 - Focused Chromium visibility tests for dirty-scope parsing, ambiguous-submit recovery, and dual-error preservation — 3 passed.
@@ -97,10 +109,10 @@ status: partial
 
 ## Documentation Impact
 
-Docs updates are not applicable to the eight applied fixes: they restore existing documented contracts or narrow a test title to its existing assertion. WR-03 is intentionally not implemented because it would require a new documented release-evidence contract.
+Docs updates are not applicable to the iteration 2 fix: it makes the existing capacity evidence and release-gate contract mechanically true without changing its external target or operational policy. WR-03 remains outside this pass by direct instruction.
 
 ---
 
-_Fixed: 2026-08-06T11:07:58Z_
+_Fixed: 2026-08-06T11:21:26Z_
 _Fixer: the agent (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_
