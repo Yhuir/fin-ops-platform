@@ -88,7 +88,7 @@ function expectProjectCostTable(name: string) {
 function expectProjectCostDialog(name: string) {
   const dialog = screen.getByRole("dialog", { name });
   expect(dialog.closest(".MuiDialog-root")).toBeNull();
-  expect(dialog).toHaveClass(name === "导出中心" ? "export-center-modal" : "cost-detail-modal");
+  expect(dialog).toHaveClass(name === "导出中心" ? "export-center-modal" : "cost-transaction-detail-drawer");
 }
 
 async function waitForCostStatisticsReady() {
@@ -169,7 +169,9 @@ describe("Cost statistics page", () => {
     expect(css).not.toMatch(/\.cost-section-heading span,/);
     expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
-    expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
+    expect(css).toMatch(/\.cost-transaction-detail-drawer \.finance-drawer__body\s*{[^}]*padding:\s*0/s);
+    expect(css).toMatch(/\.cost-detail-field-row\s*{[^}]*grid-template-columns:\s*112px minmax\(0,\s*1fr\)/s);
+    expect(css).not.toContain(".cost-detail-modal");
   });
 
   test("uses a lightweight inline interaction lock instead of a dialog while initial data is unverified", async () => {
@@ -422,19 +424,63 @@ describe("Cost statistics page", () => {
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
     const detailBankName = within(dialog).getByText("工商银行");
     expect(detailBankName).toBeInTheDocument();
-    expect(detailBankName.closest(".bank-account-tag")).not.toBeNull();
+    expect(detailBankName.closest('[data-slot="chip"]')).not.toBeNull();
     expect(within(dialog).getByText("0001")).toBeInTheDocument();
     expect(within(dialog).queryByText("工商银行 账户 0001")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
+    expect(within(dialog).getByText("支出").closest('[data-slot="chip"]')).not.toBeNull();
     expect(within(dialog).getByRole("heading", { name: "OA 成本拆分" })).toBeInTheDocument();
-    expect(within(dialog).getByText("云南溯源科技 · 设备货款及材料费")).toBeInTheDocument();
-    expect(within(dialog).getByText("昆明升级项目 · 安装服务费")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("云南溯源科技").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("设备货款及材料费").length).toBeGreaterThan(0);
+    expect(within(dialog).getByText("昆明升级项目")).toBeInTheDocument();
+    expect(within(dialog).getByText("安装服务费")).toBeInTheDocument();
     expect(within(dialog).getByText(/6000\.00/)).toBeInTheDocument();
     expect(within(dialog).getByText(/4000\.00/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(within(dialog).queryByText(/查看当前成本流水|展示这条支出流水|用于快速核对|保留原始银行流水/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "关闭流水详情" }));
     expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument();
+  });
+
+  test("opens the transaction drawer immediately without page-level loading copy", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costDetailDelayMs: 500 });
+
+    renderCostStatisticsPage();
+    const transactionTable = await screen.findByRole("grid", { name: "按时间统计表" });
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+
+    const drawer = screen.getByRole("dialog", { name: "流水详情" });
+    expect(drawer).toHaveClass("cost-transaction-detail-drawer");
+    expect(within(drawer).getByRole("status", { name: "流水详情加载中" })).toBeInTheDocument();
+    expect(screen.queryByText(/正在加载流水/)).not.toBeInTheDocument();
+    expect(document.querySelector('button[aria-label="刷新成本统计"]')).not.toBeDisabled();
+    const exportButton = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "导出中心");
+    expect(exportButton).toBeInstanceOf(HTMLButtonElement);
+    expect(exportButton).not.toBeDisabled();
+    expect((await within(drawer).findAllByText("设备采购款")).length).toBeGreaterThan(0);
+    expect(within(drawer).queryByRole("status", { name: "流水详情加载中" })).not.toBeInTheDocument();
+  });
+
+  test("keeps transaction detail failures inside the drawer and retries locally", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costDetailFailuresBeforeSuccess: 1 });
+
+    renderCostStatisticsPage();
+    const transactionTable = await screen.findByRole("grid", { name: "按时间统计表" });
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+
+    const drawer = screen.getByRole("dialog", { name: "流水详情" });
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent("流水详情加载失败，请稍后重试。");
+    expect(screen.queryByText("无法确认成本数据状态")).not.toBeInTheDocument();
+    expect(document.querySelector('[role="grid"][aria-label="按时间统计表"]')).not.toBeNull();
+
+    await user.click(within(drawer).getByRole("button", { name: "重试" }));
+    expect((await within(drawer).findAllByText("设备采购款")).length).toBeGreaterThan(0);
+    expect(within(drawer).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   test("keeps upstream lanes and clears only dependent lanes during project drilldown", async () => {
@@ -573,7 +619,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
   });
 
-  test("expense type view shows time, project name, amount and expense content in a modal drilldown", async () => {
+  test("expense type view shows time, project name, amount and expense content in a drawer drilldown", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -604,7 +650,7 @@ describe("Cost statistics page", () => {
     expect(dialog).toBeInTheDocument();
     const expenseDetailBankName = within(dialog).getByText("招商银行");
     expect(expenseDetailBankName).toBeInTheDocument();
-    expect(expenseDetailBankName.closest(".bank-account-tag")).not.toBeNull();
+    expect(expenseDetailBankName.closest('[data-slot="chip"]')).not.toBeNull();
     expect(within(dialog).getByText("2201")).toBeInTheDocument();
     expect(within(dialog).queryByText("招商银行 账户 2201")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();

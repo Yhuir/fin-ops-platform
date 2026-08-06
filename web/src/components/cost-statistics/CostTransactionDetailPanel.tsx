@@ -1,22 +1,22 @@
+import { Chip, Separator } from "@heroui/react";
+
 import type { CostTransactionDetail } from "../../features/cost-statistics/types";
 import BankAccountValue from "../BankAccountValue";
-import DirectionTag from "../DirectionTag";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
 type CostTransactionDetailPanelProps = {
   detail: CostTransactionDetail["transaction"];
 };
 
-function renderFieldRows(fields: Record<string, string>) {
-  const entries = Object.entries(fields).filter(([label, value]) => label !== "资金方向" && value);
-  if (entries.length === 0) {
-    return <div className="state-panel">当前流水没有更多字段。</div>;
-  }
+function fieldEntries(fields: Record<string, string>) {
+  return Object.entries(fields).filter(([label, value]) => label !== "资金方向" && value);
+}
 
+function renderFieldRows(entries: Array<[string, string]>) {
   return (
-    <dl className="cost-detail-grid">
+    <dl className="cost-detail-field-list">
       {entries.map(([label, value]) => (
-        <div key={label} className="cost-detail-item">
+        <div key={label} className="cost-detail-field-row">
           <dt>{label}</dt>
           <dd>
             {label === "支付账户" || label === "收款账户"
@@ -32,56 +32,63 @@ function renderFieldRows(fields: Record<string, string>) {
 }
 
 export default function CostTransactionDetailPanel({ detail }: CostTransactionDetailPanelProps) {
+  const summaryEntries = fieldEntries(detail.summaryFields);
+  const detailEntries = fieldEntries(detail.detailFields);
+  const direction = detail.direction === "收入" ? "收入" : "支出";
+
   return (
     <div className="cost-detail-stack">
-      <div className="cost-detail-summary">
-        <div className="cost-detail-summary-item">
-          <span>项目名称</span>
-          <strong>{detail.projectName}</strong>
-        </div>
-        <div className="cost-detail-summary-item">
-          <span>费用类型</span>
-          <strong>{detail.expenseType}</strong>
-        </div>
-        <div className="cost-detail-summary-item">
-          <span>金额</span>
-          <strong className="money-cell-stack money-detail-stack">
-            <span className="money-detail-value">
-              <span>{formatCostAmount(detail.amount)}</span>
-            </span>
-            <span className="money-cell-meta-row">
-              <DirectionTag direction={detail.direction} />
-              <span className="money-cell-account">
-                <BankAccountValue value={detail.paymentAccountLabel} variant="tag" />
-              </span>
-            </span>
-          </strong>
-        </div>
-        <div className="cost-detail-summary-item">
-          <span>交易时间</span>
-          <strong>{detail.tradeTime}</strong>
-        </div>
-      </div>
+      <section className="cost-detail-section" aria-labelledby="cost-detail-overview-title">
+        <h3 id="cost-detail-overview-title">流水概览</h3>
+        <dl className="cost-detail-overview">
+          <div>
+            <dt>金额</dt>
+            <dd className="cost-detail-amount">{formatCostAmount(detail.amount)}</dd>
+          </div>
+          <div>
+            <dt>方向与账户</dt>
+            <dd className="cost-detail-chips">
+              <Chip color={direction === "收入" ? "success" : "danger"} size="sm" variant="soft">
+                <Chip.Label>{direction}</Chip.Label>
+              </Chip>
+              <Chip color="default" size="sm" variant="soft">
+                <Chip.Label><BankAccountValue value={detail.paymentAccountLabel} /></Chip.Label>
+              </Chip>
+            </dd>
+          </div>
+          <div>
+            <dt>交易时间</dt>
+            <dd>{detail.tradeTime}</dd>
+          </div>
+          <div>
+            <dt>对方户名</dt>
+            <dd>{detail.counterpartyName || "—"}</dd>
+          </div>
+        </dl>
+      </section>
 
-      <section className="cost-detail-section">
-        <header className="cost-detail-section-header">
-          <h2>成本归属</h2>
-          <p>展示这条支出流水对应的 OA 成本字段，便于核对项目归属和费用分类。</p>
-        </header>
-        <dl className="cost-detail-grid compact">
-          <div className="cost-detail-item">
+      <Separator className="cost-detail-separator" />
+
+      <section className="cost-detail-section" aria-labelledby="cost-detail-attribution-title">
+        <h3 id="cost-detail-attribution-title">成本归属</h3>
+        <dl className="cost-detail-field-list">
+          <div className="cost-detail-field-row">
+            <dt>项目名称</dt>
+            <dd>{detail.projectName}</dd>
+          </div>
+          <div className="cost-detail-field-row">
+            <dt>OA费用类型</dt>
+            <dd>{detail.expenseType}</dd>
+          </div>
+          <div className="cost-detail-field-row">
             <dt>OA提交人</dt>
             <dd>{detail.oaApplicant}</dd>
           </div>
-          <div className="cost-detail-item">
+          <div className="cost-detail-field-row">
             <dt>费用内容</dt>
             <dd>{detail.expenseContent}</dd>
           </div>
-          <div className="cost-detail-item">
-            <dt>对方户名</dt>
-            <dd>{detail.counterpartyName}</dd>
-          </div>
-          <div className="cost-detail-item">
+          <div className="cost-detail-field-row">
             <dt>备注</dt>
             <dd>{detail.remark || "—"}</dd>
           </div>
@@ -89,40 +96,47 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
       </section>
 
       {detail.costAllocations.length > 1 ? (
-        <section className="cost-detail-section">
-          <header className="cost-detail-section-header">
-            <h2>OA 成本拆分</h2>
-            <p>该流水按 OA 明确金额拆分；各行合计等于流水成本金额。</p>
-          </header>
-          <dl className="cost-detail-grid compact">
-            {detail.costAllocations.map((allocation) => (
-              <div key={allocation.rowKey} className="cost-detail-item">
-                <dt>{allocation.projectName} · {allocation.expenseType}</dt>
-                <dd>
-                  {formatCostAmount(allocation.amount)}
-                  {allocation.expenseContent ? ` · ${allocation.expenseContent}` : ""}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </section>
+        <>
+          <Separator className="cost-detail-separator" />
+          <section className="cost-detail-section" aria-labelledby="cost-detail-allocation-title">
+            <h3 id="cost-detail-allocation-title">OA 成本拆分</h3>
+            <ol className="cost-detail-allocation-list">
+              {detail.costAllocations.map((allocation) => (
+                <li key={allocation.rowKey}>
+                  <span className="cost-detail-allocation-main">
+                    <strong>{allocation.projectName}</strong>
+                    <span>{allocation.expenseType}</span>
+                  </span>
+                  <strong className="cost-detail-allocation-amount">{formatCostAmount(allocation.amount)}</strong>
+                  {allocation.expenseContent ? (
+                    <span className="cost-detail-allocation-content">{allocation.expenseContent}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </section>
+        </>
       ) : null}
 
-      <section className="cost-detail-section">
-        <header className="cost-detail-section-header">
-          <h2>流水摘要字段</h2>
-          <p>用于快速核对当前流水在工作台主表中的关键信息。</p>
-        </header>
-        {renderFieldRows(detail.summaryFields)}
-      </section>
+      {summaryEntries.length > 0 ? (
+        <>
+          <Separator className="cost-detail-separator" />
+          <section className="cost-detail-section" aria-labelledby="cost-detail-summary-title">
+            <h3 id="cost-detail-summary-title">流水摘要字段</h3>
+            {renderFieldRows(summaryEntries)}
+          </section>
+        </>
+      ) : null}
 
-      <section className="cost-detail-section">
-        <header className="cost-detail-section-header">
-          <h2>流水详细字段</h2>
-          <p>保留原始银行流水详情字段，方便继续向下核查。</p>
-        </header>
-        {renderFieldRows(detail.detailFields)}
-      </section>
+      {detailEntries.length > 0 ? (
+        <>
+          <Separator className="cost-detail-separator" />
+          <section className="cost-detail-section" aria-labelledby="cost-detail-fields-title">
+            <h3 id="cost-detail-fields-title">流水详细字段</h3>
+            {renderFieldRows(detailEntries)}
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

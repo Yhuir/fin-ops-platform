@@ -276,6 +276,55 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["project_name"], "已完成项目")
         self.assertEqual(payload["time_rows"][0]["expense_type"], "材料费")
 
+        policy = CostStatisticsPolicy(
+            {
+                "settings": {},
+                "bank_rows": [],
+                "cost_groups": [only_in_progress, mixed],
+            },
+            project_scope="all",
+        )
+        cases = (
+            (
+                "project",
+                {"project_name": "已完成项目", "expense_type": "材料费"},
+                "primary_facets",
+                "project_name",
+            ),
+            (
+                "bank",
+                {
+                    "payment_account_label": "工商银行 账户 0001",
+                    "project_name": "已完成项目",
+                },
+                "secondary_facets",
+                "project_name",
+            ),
+            (
+                "expense_type",
+                {"expense_type": "材料费"},
+                "primary_facets",
+                "expense_type",
+            ),
+        )
+        for view, filters, facet_key, label_key in cases:
+            with self.subTest(view=view):
+                page = policy.explorer_page(
+                    scope_kind="month",
+                    scope_value="2026-03",
+                    view=view,
+                    filters=filters,
+                    cursor_values=None,
+                    page_size=50,
+                )
+                self.assertEqual(page["summary"]["total_amount"], "1000.00")
+                self.assertEqual(page["row_count"], 1)
+                self.assertEqual(page["rows"][0]["project_name"], "已完成项目")
+                self.assertEqual(
+                    {facet[label_key] for facet in page[facet_key]},
+                    {"材料费" if label_key == "expense_type" else "已完成项目"},
+                )
+
     def test_projection_ignores_legacy_oa_exclusion_markers(self) -> None:
         legacy_exclusion_fields = (
             {"cost_excluded": True},

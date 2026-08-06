@@ -145,6 +145,30 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(transaction["relation_case_ids"], ["CASE-COST-DIRECT-001"])
         self.assertEqual(transaction["cost_allocations"][0]["project_name"], "云南溯源科技")
 
+    def test_oa_cost_views_exclude_in_progress_oa(self) -> None:
+        in_progress_oa = replace(self.oa, workflow_status="in_progress")
+        self.app._cost_statistics_canonical_repository._oa_rows_by_ids_provider = (  # noqa: SLF001
+            lambda _row_ids: [in_progress_oa]
+        )
+
+        for view in ("project", "bank", "expense_type"):
+            with self.subTest(view=view):
+                status, payload = self._json(
+                    "/api/cost-statistics/explorer"
+                    f"?scope=2026-03&view={view}&project_scope=all"
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["summary"]["total_amount"], "0.00")
+                self.assertEqual(payload["rows"], [])
+                self.assertEqual(payload["row_count"], 0)
+
+        time_status, time_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+        )
+        self.assertEqual(time_status, 200)
+        self.assertEqual(time_payload["row_count"], 1)
+        self.assertEqual(time_payload["rows"][0]["transaction_id"], self.bank_id)
+
     def test_daily_reimbursement_items_drive_views_detail_and_export(self) -> None:
         daily_oa = replace(
             self.oa,

@@ -27,6 +27,8 @@ type MockApiOptions = {
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
   costExplorerDelayMs?: number;
+  costDetailFailuresBeforeSuccess?: number;
+  costDetailDelayMs?: number;
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
   costTagRulesCanSave?: boolean;
@@ -4544,6 +4546,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let costExplorerFailuresRemaining = Math.max(0, options.costExplorerFailuresBeforeSuccess ?? 0);
+  let costDetailFailuresRemaining = Math.max(0, options.costDetailFailuresBeforeSuccess ?? 0);
   let latestImportSession = buildImportPreviewPayload(
     options.initialImportPreviewFileNames ?? [],
     options.initialImportPreviewOverrides ?? [],
@@ -7509,6 +7512,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
     }
     if (url.pathname.startsWith("/api/cost-statistics/transactions/")) {
+      if (costDetailFailuresRemaining > 0) {
+        costDetailFailuresRemaining -= 1;
+        return jsonResponse({
+          status: 503,
+          body: { error: "cost_statistics_detail_unavailable" },
+        });
+      }
+      if (options.costDetailDelayMs) {
+        await new Promise((resolve) => window.setTimeout(resolve, options.costDetailDelayMs));
+      }
       const transactionId = url.pathname.split("/").pop() ?? "";
       return jsonResponse(buildCostStatisticsTransactionPayload(transactionId));
     }

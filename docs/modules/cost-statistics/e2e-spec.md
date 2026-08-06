@@ -13,13 +13,14 @@
 | --- | --- | --- |
 | `COST-E2E-001` | 五种视图 | time/project/bank/expense_type/bank_tag 均返回完整、正确数据 |
 | `COST-E2E-002` | 关系确认与撤回 | 下一次 Cost 请求读取更新后的 active relation；写后无 Cost fan-out |
-| `COST-E2E-003` | 下钻 | explorer 与 transaction detail 使用一致 snapshot 口径 |
+| `COST-E2E-003` | 下钻 | explorer 与 transaction detail 使用一致 snapshot 口径；点击流水立即打开右侧抽屉，详情 loading/error 不污染页面状态 |
 | `COST-E2E-004` | 导出 | preview/download 与当前视图、筛选和权限一致 |
 | `COST-E2E-005` | 加载失败恢复 | 请求失败显示明确错误；页面刷新发起全新请求并可恢复 |
 | `COST-E2E-006` | 隔离 | Cost 请求不读取或触发其它页面 read model，不影响其它页面 API |
 | `COST-E2E-007` | 性能 | 候选发布记录各视图多次请求耗时；本任务不设 3 秒硬门槛 |
 | `COST-E2E-008` | 日常报销明细 | 单流水精确匹配时按 `expense_items` 金额拆分；支付申请仍按 OA 外层金额；三种成本视图、详情和导出不生成 `多项目` / `多费用类型` |
 | `COST-E2E-009` | 分配歧义 | 金额不守恒、无效/重复明细 ID 或多流水映射不确定时不猜测，流水金额仅计一次并 fail closed |
+| `COST-E2E-010` | OA 完成态口径 | project/bank/expense_type 及其 summary、facets、rows、详情和导出排除进行中 OA；纯银行 time/bank_tag 视图保持不变 |
 
 ## 生产验证
 

@@ -50,7 +50,7 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、详情 modal、export center 和 read model refreshing/empty/error 状态不能漂移。 |
+| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、HeroUI 详情 drawer、export center 和 direct-read loading/empty/error 状态不能漂移。 |
 | Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、read model status、错误 JSON message 和缓存 key 不能漂移。 |
 | API/service/read model | `/api/cost-statistics*`、`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsSqlProjectionBuilder`、`CostStatisticsReadModelRepositoryPort` | project scope、export row-limit、归集规则、parent/shard readiness、scope normalization、durable invalidation 和 worker enqueue 必须保持一致；不得恢复进程内 read model owner。 |
 | Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/project scope/filter；结构化后端错误必须展示给用户，不得误当文件下载。 |

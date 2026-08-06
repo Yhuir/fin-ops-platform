@@ -14,7 +14,7 @@ import ExportCenterModal, {
 import CostStatisticsTable, {
   type CostStatisticsTableColumn,
 } from "../components/cost-statistics/CostStatisticsTable";
-import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
+import CostTransactionDetailDrawer from "../components/cost-statistics/CostTransactionDetailDrawer";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -49,6 +49,7 @@ import type {
 } from "../features/cost-statistics/types";
 
 type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
+type CostTransactionDetailSource = CostViewMode;
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
 type ExplorerScopeSelection = {
@@ -518,7 +519,8 @@ export default function CostStatisticsPage() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [isExportReferenceLoading, setIsExportReferenceLoading] = useState(false);
-  const [detailLoadingMessage, setDetailLoadingMessage] = useState<string | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
@@ -688,7 +690,8 @@ export default function CostStatisticsPage() {
     setSelectedBankTransactionId(null);
     setSelectedExpenseTransactionId(null);
     setSelectedBankTagTransactionId(null);
-    setDetailLoadingMessage(null);
+    setIsDetailLoading(false);
+    setDetailError(null);
   }, []);
 
   const resetExplorerSelection = useCallback((targetView: CostViewMode) => {
@@ -1141,7 +1144,7 @@ export default function CostStatisticsPage() {
       const lockedRegions = [headerControlsRef.current, headerActionsRef.current, contentShellRef.current];
       const ownsActiveFocus = Boolean(activeElement && (
         lockedRegions.some((region) => region?.contains(activeElement))
-        || activeElement.closest(".cost-detail-modal, .export-center-modal, .cost-tag-rules-drawer")
+        || activeElement.closest(".cost-transaction-detail-drawer, .export-center-modal, .cost-tag-rules-drawer")
       ));
       if (activeElement && ownsActiveFocus) {
         lastLockedFocusRef.current = activeElement;
@@ -1204,13 +1207,43 @@ export default function CostStatisticsPage() {
           : expenseTypeRows.length === 0
     : false;
 
-  async function openTransactionDetail(row: CostTimeRow, source: "time" | "project" | "bank" | "expenseType" | "bankTag") {
+  async function loadTransactionDetail(transactionId: string, source: CostTransactionDetailSource) {
     detailRequestRef.current?.abort();
     const controller = new AbortController();
     detailRequestRef.current = controller;
-    setLoadError(null);
-    setExportFeedback(null);
-    setDetailLoadingMessage(`正在加载流水 ${row.transactionId} 的详情...`);
+    setTransactionDetail(null);
+    setDetailError(null);
+    setIsDetailLoading(true);
+    try {
+      const detailView =
+        source === "bankTag"
+          ? "bank_tag"
+          : source === "expenseType"
+            ? "expense_type"
+            : source;
+      const payload = await fetchCostTransactionDetail(
+        transactionId,
+        detailView,
+        explorerScope,
+        controller.signal,
+        costProjectScope,
+      );
+      if (!controller.signal.aborted) {
+        setTransactionDetail(payload);
+      }
+    } catch (caught) {
+      if (!controller.signal.aborted && !isAbortLikeError(caught)) {
+        setDetailError("流水详情加载失败，请稍后重试。");
+      }
+    } finally {
+      if (detailRequestRef.current === controller) {
+        detailRequestRef.current = null;
+        setIsDetailLoading(false);
+      }
+    }
+  }
+
+  async function openTransactionDetail(row: CostTimeRow, source: CostTransactionDetailSource) {
     if (source === "time") {
       setSelectedTimeTransactionId(row.transactionId);
     }
@@ -1226,33 +1259,7 @@ export default function CostStatisticsPage() {
     if (source === "bankTag") {
       setSelectedBankTagTransactionId(row.transactionId);
     }
-    try {
-      const detailView =
-        source === "bankTag"
-          ? "bank_tag"
-          : source === "expenseType"
-            ? "expense_type"
-            : source;
-      const payload = await fetchCostTransactionDetail(
-        row.transactionId,
-        detailView,
-        explorerScope,
-        controller.signal,
-        costProjectScope,
-      );
-      if (!controller.signal.aborted) {
-        setTransactionDetail(payload);
-      }
-    } catch {
-      if (!controller.signal.aborted) {
-        setLoadError("流水详情加载失败，请稍后重试。");
-      }
-    } finally {
-      if (detailRequestRef.current === controller) {
-        detailRequestRef.current = null;
-        setDetailLoadingMessage(null);
-      }
-    }
+    await loadTransactionDetail(row.transactionId, source);
   }
 
   function handleViewModeChange(nextViewMode: CostViewMode) {
@@ -1533,7 +1540,6 @@ export default function CostStatisticsPage() {
     exportRequestRef.current?.abort();
     const controller = new AbortController();
     exportRequestRef.current = controller;
-    setDetailLoadingMessage(null);
     setLoadError(null);
     setExportFeedback(null);
     setIsExporting(true);
@@ -1712,7 +1718,7 @@ export default function CostStatisticsPage() {
     loadMoreError,
     onRequestNextPage: () => void loadMoreExplorerRows(),
   };
-  const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
+  const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
   const visibleStatistics = pageStatistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -1820,7 +1826,7 @@ export default function CostStatisticsPage() {
             aria-label="刷新成本统计"
             className="cost-export-button cost-refresh-button"
             type="button"
-            disabled={isExplorerLoading || Boolean(detailLoadingMessage)}
+            disabled={isExplorerLoading}
             onClick={handleManualRefresh}
           >
             刷新
@@ -1836,7 +1842,7 @@ export default function CostStatisticsPage() {
           <button
             className="cost-export-button"
             type="button"
-            disabled={isExplorerLoading || isExportReferenceLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError}
+            disabled={isExplorerLoading || isExportReferenceLoading || hasExplorerLoadError}
             onClick={() => void openExportCenter()}
           >
 	          {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
@@ -1885,7 +1891,6 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
         {loadError && explorerData ? <div className="state-panel error">{loadError}</div> : null}
-        {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
         {exportFeedback && !isExportCenterOpen ? (
           <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
         ) : null}
@@ -2361,15 +2366,18 @@ export default function CostStatisticsPage() {
         </div>
       </div>
 
-      {transactionDetail && activeTransactionId ? (
-        <CostTransactionDetailModal
-          detail={transactionDetail.transaction}
-          onClose={() => {
-            resetDetailSelection();
-            setTransactionDetail(null);
-          }}
-        />
-      ) : null}
+      <CostTransactionDetailDrawer
+        detail={transactionDetail?.transaction ?? null}
+        error={detailError}
+        loading={isDetailLoading}
+        onClose={resetDetailSelection}
+        onRetry={() => {
+          if (activeTransactionId) {
+            void loadTransactionDetail(activeTransactionId, viewMode);
+          }
+        }}
+        open={Boolean(activeTransactionId)}
+      />
 
       <CostStatisticsTagRulesDrawer
         canSave={canMutateData && !interactionLocked && (tagRules?.canSave ?? true)}

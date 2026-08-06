@@ -364,7 +364,7 @@ test.describe("cost statistics browser flow", () => {
     const incomeDetailDialog = page.getByRole("dialog", { name: "流水详情" });
     await expect(incomeDetailDialog).toContainText("收入");
     await expect(incomeDetailDialog).toContainText("8888.00");
-    await incomeDetailDialog.getByRole("button", { name: "关闭" }).click();
+    await incomeDetailDialog.getByRole("button", { name: "关闭流水详情" }).click();
 
     const refreshResponse = waitForCostStatisticsExplorer(page, "2026-03", "active");
     await recordLatency({
@@ -564,13 +564,15 @@ test.describe("cost statistics browser flow", () => {
       await mark("finalSettledLatencyMs", expect(detailDialog.getByText("浏览器成本统计明细").first()).toBeVisible());
     });
     expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
+    await expect(detailDialog).toHaveClass(/cost-transaction-detail-drawer/);
     await expect(detailDialog.getByText("PLC 模块采购").first()).toBeVisible();
+    await expect(detailDialog.getByText(/查看当前成本流水|展示这条支出流水|用于快速核对|保留原始银行流水/)).toHaveCount(0);
     await recordLatency({
       operationId: "cost-statistics.close-transaction-detail",
-      visibleLabel: "关闭",
+      visibleLabel: "关闭流水详情",
       actionType: "click",
     }, async (mark) => {
-      await detailDialog.getByRole("button", { name: "关闭" }).click();
+      await detailDialog.getByRole("button", { name: "关闭流水详情" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0));
       await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0));
     });
@@ -655,7 +657,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(bankDetailDialog).toBeVisible();
     await expect(bankDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
     await expect(bankDetailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
-    await bankDetailDialog.getByRole("button", { name: "关闭" }).click();
+    await bankDetailDialog.getByRole("button", { name: "关闭流水详情" }).click();
     await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "按OA费用类型" }).click();
@@ -677,7 +679,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(expenseDetailDialog).toBeVisible();
     await expect(expenseDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
     await expect(expenseDetailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
-    await expenseDetailDialog.getByRole("button", { name: "关闭" }).click();
+    await expenseDetailDialog.getByRole("button", { name: "关闭流水详情" }).click();
     await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
     expect(browserErrors).toEqual([]);
   });

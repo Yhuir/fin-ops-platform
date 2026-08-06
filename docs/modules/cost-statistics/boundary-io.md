@@ -42,11 +42,13 @@ HTTP GET
 - 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - `CostStatisticsPolicy` 将支付申请作为一个分配单元，将日常报销的 canonical `expense_items` 作为付款明细分配单元；仅在单流水与全部分配金额按分精确相等时拆分。任何歧义都不猜测，流水金额只计一次并归入共同维度或 `未归集项目` / `未分类`。
+- OA 成本分配在 policy 边界统一调用共享完成态判定；进行中 OA 在聚合前排除，因此 `project / bank / expense_type` 的 summary、facets、rows、transaction detail 和导出使用同一完成态口径。`time / bank_tag` 仍是纯银行事实视图，不受 OA 流程状态影响。
 - `project / bank / expense_type`、transaction detail 和导出共享同一分配结果；成本统计链路不生成 `多项目` / `多费用类型`。
 - `time` 行只映射银行交易时间、对方户名、标签、方向、金额、银行账户和流水摘要，不用 OA 占位值伪装项目或费用类型。
 - 主标签和子标签复用同一个“仅支出、混合、仅收入、零金额”排序键；同组再按总金额、笔数和标签名稳定排序。
 - 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
+- 流水详情使用全站 `AppDrawer` 作为唯一容器；选择流水后先打开抽屉，再发起单次详情 GET。详情的 loading/error/retry 状态不写入 explorer、导出或页级 loading 状态。
 
 ## 文件范围
 
