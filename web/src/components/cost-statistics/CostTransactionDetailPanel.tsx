@@ -74,19 +74,19 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
         <dl className="cost-detail-field-list">
           <div className="cost-detail-field-row">
             <dt>项目名称</dt>
-            <dd>{detail.projectName}</dd>
+            <dd>{detail.projectName || "—"}</dd>
           </div>
           <div className="cost-detail-field-row">
             <dt>OA费用类型</dt>
-            <dd>{detail.expenseType}</dd>
+            <dd>{detail.expenseType || "—"}</dd>
           </div>
           <div className="cost-detail-field-row">
             <dt>OA提交人</dt>
-            <dd>{detail.oaApplicant}</dd>
+            <dd>{detail.oaApplicant || "—"}</dd>
           </div>
           <div className="cost-detail-field-row">
             <dt>费用内容</dt>
-            <dd>{detail.expenseContent}</dd>
+            <dd>{detail.expenseContent || "—"}</dd>
           </div>
           <div className="cost-detail-field-row">
             <dt>备注</dt>
