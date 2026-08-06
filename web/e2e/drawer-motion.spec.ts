@@ -11,8 +11,8 @@ type DrawerMotionSample = {
   viewportWidth: number;
 };
 
-async function armDrawerSampler(page: Page, durationMs = 360) {
-  await page.evaluate((duration) => {
+async function armDrawerSampler(page: Page) {
+  await page.evaluate(() => {
     const state = window as typeof window & {
       __drawerMotionDone?: boolean;
       __drawerMotionSamples?: DrawerMotionSample[];
@@ -20,10 +20,17 @@ async function armDrawerSampler(page: Page, durationMs = 360) {
     state.__drawerMotionDone = false;
     state.__drawerMotionSamples = [];
     const startedAt = performance.now();
+    let observedContent: HTMLElement | null = null;
+    let observer: MutationObserver;
+    const finish = () => {
+      observer.disconnect();
+      state.__drawerMotionDone = true;
+    };
     const sampleDrawer = (timestamp: number) => {
-      const drawer = document.querySelector<HTMLElement>(
-        ".finance-drawer__content[data-placement='right'] .finance-drawer",
+      const content = document.querySelector<HTMLElement>(
+        ".finance-drawer__content[data-placement='right']",
       );
+      const drawer = content?.querySelector<HTMLElement>(".finance-drawer") ?? null;
       if (drawer) {
         const rect = drawer.getBoundingClientRect();
         state.__drawerMotionSamples?.push({
@@ -34,20 +41,30 @@ async function armDrawerSampler(page: Page, durationMs = 360) {
           viewportWidth: window.innerWidth,
         });
       }
+      if (content && drawer && content !== observedContent) {
+        observedContent = content;
+        content.addEventListener("transitionend", (event) => {
+          if (event.propertyName !== "translate" || (event.target !== content && event.target !== drawer)) {
+            return;
+          }
+          sampleDrawer(performance.now());
+          finish();
+        });
+      }
+      if (!content && observedContent && !observedContent.isConnected) {
+        finish();
+      }
     };
-    const observer = new MutationObserver(() => sampleDrawer(performance.now()));
+    observer = new MutationObserver(() => sampleDrawer(performance.now()));
     observer.observe(document.body, { childList: true, subtree: true });
     const sampleFrame = (timestamp: number) => {
       sampleDrawer(timestamp);
-      if (timestamp - startedAt < duration) {
+      if (!state.__drawerMotionDone) {
         requestAnimationFrame(sampleFrame);
-      } else {
-        observer.disconnect();
-        state.__drawerMotionDone = true;
       }
     };
     requestAnimationFrame(sampleFrame);
-  }, durationMs);
+  });
 }
 
 async function drawerSamples(page: Page) {
@@ -133,20 +150,23 @@ test.describe("right drawer motion", () => {
       }).observe({ type: "layout-shift", buffered: true });
     });
 
-    const requestsBeforeOpen = api.calls.length;
+    const businessCallCount = () => api.calls.filter(
+      (call) => call !== "GET /api/workbench/refresh-status",
+    ).length;
+    const requestsBeforeOpen = businessCallCount();
     await armDrawerSampler(page);
     const drawer = await openWorkbenchDetail(page);
     const entering = await drawerSamples(page);
     expectFullWidthTravel(entering, "enter");
-    const requestsAfterOpen = api.calls.length;
+    const requestsAfterOpen = businessCallCount();
     expect(requestsAfterOpen - requestsBeforeOpen).toBeLessThanOrEqual(1);
 
-    await armDrawerSampler(page, 300);
+    await armDrawerSampler(page);
     await drawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     const exiting = await drawerSamples(page);
     expectFullWidthTravel(exiting, "exit");
     await expect(drawer).toHaveCount(0);
-    expect(api.calls.length).toBe(requestsAfterOpen);
+    expect(businessCallCount()).toBe(requestsAfterOpen);
     expect(await page.evaluate(() => (
       window as typeof window & { __drawerCls?: number }
     ).__drawerCls ?? 0)).toBeLessThan(0.01);
@@ -167,7 +187,7 @@ test.describe("right drawer motion", () => {
     expectFullWidthTravel(await drawerSamples(page), "enter");
     const requestsBeforeClose = api.calls.length;
 
-    await armDrawerSampler(page, 300);
+    await armDrawerSampler(page);
     await drawer.getByRole("button", { name: "关闭流水规则标签管理" }).click();
     expectFullWidthTravel(await drawerSamples(page), "exit");
     await expect(drawer).toHaveCount(0);
@@ -198,7 +218,7 @@ test.describe("right drawer motion", () => {
     const opener = page.getByRole("button", { name: "关联支出流水" });
     await expect(opener).toBeEnabled();
 
-    await armDrawerSampler(page, 700);
+    await armDrawerSampler(page);
     await opener.click();
     const drawer = page.getByRole("dialog", { name: "关联支出流水抽屉" });
     await expect(drawer).toBeVisible();
@@ -214,7 +234,7 @@ test.describe("right drawer motion", () => {
     expectFullWidthTravel(await drawerSamples(page), "enter");
     const requestsBeforeClose = api.calls.length;
 
-    await armDrawerSampler(page, 300);
+    await armDrawerSampler(page);
     await drawer.getByRole("button", { name: "关闭关联支出流水抽屉" }).click();
     expectFullWidthTravel(await drawerSamples(page), "exit");
     await expect(drawer).toHaveCount(0);
@@ -237,7 +257,7 @@ test.describe("right drawer motion", () => {
     expectFullWidthTravel(await drawerSamples(page), "enter");
     const requestsBeforeClose = api.calls.length;
 
-    await armDrawerSampler(page, 300);
+    await armDrawerSampler(page);
     await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();
     const persistentDrawer = page.locator(".finance-drawer__content--persistent");
     await expect(persistentDrawer).toHaveAttribute("data-exiting", "true");
