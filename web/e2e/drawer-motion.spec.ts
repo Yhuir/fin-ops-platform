@@ -155,13 +155,16 @@ test.describe("right drawer motion", () => {
       }).observe({ type: "layout-shift", buffered: true });
     });
 
-    const periodicStatusCalls = new Set([
+    const workbenchSelfConvergenceCalls = new Set([
       "GET /api/oa-sync/status",
+      "GET /api/workbench",
       "GET /api/workbench/refresh-status",
     ]);
     const businessCallCount = () => api.calls.filter(
-      (call) => !periodicStatusCalls.has(call),
+      (call) => !workbenchSelfConvergenceCalls.has(call),
     ).length;
+    const detailRequest = "GET /api/workbench/rows/oa-large-202603-001";
+    const detailRequestsBeforeOpen = api.count(detailRequest);
     const requestsBeforeOpen = businessCallCount();
     await armDrawerSampler(page);
     const drawer = await openWorkbenchDetail(page);
@@ -169,6 +172,7 @@ test.describe("right drawer motion", () => {
     expectFullWidthTravel(entering, "enter");
     const requestsAfterOpen = businessCallCount();
     expect(requestsAfterOpen - requestsBeforeOpen).toBeLessThanOrEqual(1);
+    expect(api.count(detailRequest)).toBe(detailRequestsBeforeOpen + 1);
 
     await armDrawerSampler(page);
     await drawer.getByRole("button", { name: "关闭详情抽屉" }).click();
