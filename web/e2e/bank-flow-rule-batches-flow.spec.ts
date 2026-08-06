@@ -440,6 +440,8 @@ test.describe("bank flow rule batches browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankFlowRuleCostFanout: true,
       sessionMode: "full_access",
+      workbenchBankFlowRuleBatchScenario: true,
+      bankFlowRuleWorkbenchConvergence: true,
     });
     const recordLatency = createBankFlowRuleBatchLatencyRecorder(page, testInfo);
 
@@ -478,7 +480,12 @@ test.describe("bank flow rule batches browser flow", () => {
       transaction_ids?: string[];
     };
     expect(submitBody.transaction_ids).toEqual(["bank-flow-rule-e2e-001"]);
-    expect((await submitResponse).status()).toBe(200);
+    const resolvedSubmitResponse = await submitResponse;
+    expect(resolvedSubmitResponse.status()).toBe(200);
+    const submitPayload = await resolvedSubmitResponse.json() as Record<string, unknown>;
+    expect(submitPayload).not.toHaveProperty("operation_barrier_targets");
+    expect(submitPayload).not.toHaveProperty("freshness_targets");
+    expect(submitPayload).not.toHaveProperty("workbench_refresh_required");
     expect(api.count("POST /api/bank-flow-rule-batches/submit-selection")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeSubmit + 1);
@@ -502,6 +509,52 @@ test.describe("bank flow rule batches browser flow", () => {
     const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
     await expect(projectRows).toContainText("网银手续费");
     await expect(projectRows).toContainText("建设银行");
+    await expectNoUnexpectedSuccessUiErrors(page);
+
+    const workbenchReadsBeforeVisit = api.count("GET /api/workbench");
+    const refreshStatusReadsBeforeVisit = api.count("GET /api/workbench/refresh-status");
+    const workbenchGenerationResponses: string[] = [];
+    page.on("response", (response) => {
+      if (
+        response.request().method() !== "GET"
+        || !responsePathMatches(response.url(), "/api/workbench")
+        || response.status() !== 200
+      ) {
+        return;
+      }
+      void response.json().then((payload: Record<string, unknown>) => {
+        workbenchGenerationResponses.push(String(payload.active_generation_id ?? ""));
+      });
+    });
+    const convergedGenerationResponse = page.waitForResponse(async (response) => {
+      if (
+        response.request().method() !== "GET"
+        || !responsePathMatches(response.url(), "/api/workbench")
+        || response.status() !== 200
+      ) {
+        return false;
+      }
+      const payload = await response.json() as Record<string, unknown>;
+      return payload.active_generation_id === "workbench-generation-e2e-002";
+    });
+    await page.goto("/");
+    expect((await convergedGenerationResponse).status()).toBe(200);
+    await expect.poll(
+      () => api.count("GET /api/workbench/refresh-status"),
+    ).toBeGreaterThanOrEqual(refreshStatusReadsBeforeVisit + 4);
+    await expect.poll(
+      () => workbenchGenerationResponses.filter(
+        (generationId) => generationId === "workbench-generation-e2e-002",
+      ).length,
+    ).toBe(1);
+    expect(workbenchGenerationResponses).toContain("workbench-generation-e2e-001");
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchReadsBeforeVisit);
+    const convergedGroup = page.getByTestId(
+      "candidate-group-paired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
+    );
+    await expect(convergedGroup).toBeVisible();
+    await expect(convergedGroup).toContainText("流水规则手续费批次");
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await page.goto("/bank-flow-rule-batches");

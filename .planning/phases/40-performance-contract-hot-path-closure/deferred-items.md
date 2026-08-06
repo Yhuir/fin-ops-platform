@@ -10,21 +10,21 @@ no-OA route, command, and Workbench consumers remain covered.
 
 No deferred items remain from 40-03.
 
-## 40-04 full-suite discovery
+## Resolved by 40-07
 
 - `tests/test_permissions_write_entry_inventory.py::PermissionsWriteEntryInventoryTests::test_phase_27_mutating_api_function_coverage_is_bidirectional`
-  fails because `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md` still lists
-  `workbench/api.ts#unignoreWorkbenchRow`, while that frontend export is no longer present.
+  now passes after a whole-repository scan proved `workbench/api.ts#unignoreWorkbenchRow` has no
+  export or consumer and 40-07 removed only that stale Phase 27 coverage entry.
+- `web/e2e/app-shell-responsive.spec.ts` now passes unchanged in the 40-07 rerun.
 
-This inventory drift existed at the 40-04 execution baseline and is unrelated to the Search/no-OA
-runtime-fact closure. It remains deferred to the permissions/frontend coverage owner; 40-04 does
-not edit Phase 27 history to make its own full-suite gate appear green.
+## 40-07 unchanged drawer-motion rerun
 
-- `web/e2e/app-shell-responsive.spec.ts` exceeded its local animation-frame p95 threshold while
-  collapsing the embedded OA shell (`54.225ms > 25ms`).
-- `web/e2e/drawer-motion.spec.ts` sampled the closing drawer before it reached the expected right
-  edge (`1304.21px < 1364px`).
+- `web/e2e/drawer-motion.spec.ts` remains flaky outside the Workbench/bank-flow scope. In the
+  combined unchanged-code rerun, 7/8 tests passed and the primary drawer test captured no
+  intermediate frame (`intermediateIndex = -1`). An immediate isolated rerun failed a different
+  sampling assertion because the open-frame right edge was `3.6084px` from the viewport edge
+  (threshold `2px`).
 
-The complete deterministic browser run finished with 171 passed / 2 failed. Both failures concern
-pre-existing shell/drawer motion and are outside the 40-04 runtime-fact and no-OA contract files;
-their traces, screenshots, and videos remain in gitignored Playwright test output for the UI owner.
+40-07 did not modify drawer or shell production code. The differing failures under identical code
+confirm a sampling-sensitive test/runtime issue; current traces, screenshots, and videos remain in
+gitignored Playwright output for the UI owner.

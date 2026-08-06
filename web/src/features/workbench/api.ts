@@ -669,22 +669,6 @@ type ApiWorkbenchExceptionApplyResult = {
     scopeKey?: unknown;
     scope_key?: unknown;
   }>;
-  operation_barrier_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  operationBarrierTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
   workbench_refresh_required?: boolean;
   workbenchRefreshRequired?: boolean;
   message?: string;
@@ -1750,7 +1734,6 @@ function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
   const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
-  const operationBarrierTargets = cleanFreshnessTargets(payload.operationBarrierTargets ?? payload.operation_barrier_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
@@ -1760,7 +1743,6 @@ function mapWorkbenchExceptionApplyResult(
     affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
       .filter((scopeKey) => scopeKey !== "all"),
     freshnessTargets,
-    operationBarrierTargets: operationBarrierTargets.length > 0 ? operationBarrierTargets : freshnessTargets,
     workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };

@@ -58,6 +58,7 @@ type ApiMockOptions = {
   invoiceImportIncludeCorruptFile?: boolean;
   invoiceImportPreviewDelayMs?: number;
   bankFlowRuleCostFanout?: boolean;
+  bankFlowRuleWorkbenchConvergence?: boolean;
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
@@ -8030,6 +8031,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     ? "etc-recon-e2e-001"
     : "etc-recon-workflow-e2e-001";
   let bankFlowRuleBatchStatus: BankFlowRuleBrowserBatchStatus = "draft";
+  let bankFlowRuleWorkbenchRefreshReads = 0;
   let bankFlowRuleBatchFailuresRemaining =
     options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
   const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
@@ -8141,6 +8143,25 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/refresh-status") {
+      if (options.bankFlowRuleWorkbenchConvergence && bankFlowRuleBatchStatus === "submitted") {
+        bankFlowRuleWorkbenchRefreshReads += 1;
+        const converged = bankFlowRuleWorkbenchRefreshReads >= 4;
+        return json(route, {
+          scope_key: "all",
+          read_model_status: converged ? "fresh" : "stale",
+          read_model_version: converged
+            ? "workbench-generation-e2e-002"
+            : "workbench-generation-e2e-001",
+          active_generation_id: converged
+            ? "workbench-generation-e2e-002"
+            : "workbench-generation-e2e-001",
+          refresh_scope_keys: converged ? [] : ["2026-05"],
+          dirty_scopes: converged
+            ? []
+            : [{ scope_key: "2026-05", status: "processing", active_event: true }],
+          retryable: false,
+        });
+      }
       return json(route, workbenchRefreshStatusPayload(options.workbenchRefreshStatus));
     }
 
@@ -9167,7 +9188,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         });
       }
       if (options.workbenchBankFlowRuleBatchScenario) {
-        const readModelVersion = relationConfirmed
+        const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
+          && bankFlowRuleBatchStatus === "submitted"
+          && bankFlowRuleWorkbenchRefreshReads >= 4;
+        const readModelVersion = relationConfirmed || bankFlowRuleConverged
           ? "workbench-generation-e2e-002"
           : "workbench-generation-e2e-001";
         return json(route, {
