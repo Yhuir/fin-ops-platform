@@ -4792,3 +4792,9 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 真实原因：生产 747.06 银行流水的 canonical 币种值为 `人民币元`，OA 与附件发票为 `CNY`。旧事实 repository 原样输出币种，导致精确单笔和组合匹配都在金额、员工强证据与日期判断之前被分入不同币种桶；页面显示相同人民币金额，但 matching 零候选。
 - 最小修复：只在 `PostgresWorkbenchFormalRelationFactRepository` 的 OA、流水、发票事实 I/O 边界把已有人民币别名归一为 `CNY`，并复用同一归一值生成销项红蓝冲销 identity。未知币种保持大写原值并继续隔离，不修改 canonical 数据、UI、API、表、worker、queue 或关系写入合同。
 - 版本与回归：matching rule 升至 `2026-08-05-canonical-currency-v12` 触发 completed scope stale-scan；repository 测试覆盖 `人民币` / `人民币元` / `rmb` 同桶，原有不同真实币种 fail-closed、唯一单笔、一对多、多对一、多对多与撤回保护继续保留。
+
+## 2026-08-08 - unavailable OA relation 定向修复边界
+
+- 生产审计定位 `CASE-AUTO-0112`、`CASE-AUTO-0118`、`CASE-AUTO-0119`、`CASE-AUTO-0120` 的 active relation 引用了已经不在 canonical OA 表中的成员，污染 Workbench 及七个下游页面审计。
+- 定向工具只接受单一 case，先输出包含 relation version、成员、缺失 OA 与预期动作的 SHA-256 fingerprint；execute 必须匹配 fingerprint，并通过 `remove_rows_from_active_relations`、正式 delta persist 和 history actor/reason 完成写入。
+- 删除 OA 后仍有 bank + invoice 且无 attachment parent 冲突时保留关系，否则取消关系；禁止直接 SQL 修改 relation/read model，不增加在线 API、worker、fallback 或常驻扫描。

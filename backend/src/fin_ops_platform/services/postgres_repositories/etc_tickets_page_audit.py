@@ -1172,6 +1172,7 @@ def _batch_controls(
 ) -> tuple[int, Decimal]:
     invoice_ids = _text_set(payload.get("invoice_ids"))
     summary = _dict(payload.get("invoice_summary"))
+    amount_breakdown = _dict(payload.get("amount_breakdown"))
     count_value = _first(payload, "etc_invoice_count")
     if count_value is None and summary.get("count") is not None:
         count_value = summary.get("count")
@@ -1179,10 +1180,13 @@ def _batch_controls(
         count_value = _first(submission_payload, "etc_invoice_count", "invoice_count")
     count = _integer(count_value) if count_value is not None else len(invoice_ids)
     amount_candidates = (
-        _first(payload, "oa_total_amount", "total_amount"),
+        amount_breakdown.get("etc_invoice_amount"),
         summary.get("amount"),
-        _first(submission_payload, "oa_total_amount", "total_amount", "etc_invoice_amount"),
+        payload.get("total_amount"),
+        _first(submission_payload, "etc_invoice_amount", "total_amount"),
         payload.get("total_with_tax"),
+        payload.get("oa_total_amount"),
+        submission_payload.get("oa_total_amount"),
     )
     amount = next(
         (

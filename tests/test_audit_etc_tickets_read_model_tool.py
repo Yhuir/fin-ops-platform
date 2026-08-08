@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from fin_ops_platform.services.postgres_repositories import etc_tickets_page_audit
 
@@ -88,6 +89,25 @@ class FakeConnection:
 
 
 class EtcTicketsPageAuditTests(unittest.TestCase):
+    def test_batch_controls_use_etc_invoice_total_before_oa_reported_amount(self) -> None:
+        count, amount = etc_tickets_page_audit._batch_controls(
+            {
+                "invoice_ids": ["etc-invoice-1"],
+                "invoice_summary": {"count": 1, "amount": "1879.45"},
+                "oa_total_amount": "1935.45",
+                "amount_breakdown": {
+                    "coverage_status": "partial",
+                    "etc_invoice_amount": "1879.45",
+                    "gap_amount": "56.00",
+                    "gap_reason": "OA 金额包含非 ETC 费用",
+                },
+            },
+            {"oa_total_amount": "1935.45"},
+        )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(amount, Decimal("1879.45"))
+
     def test_clean_direct_canonical_facts_pass_without_writes(self) -> None:
         connection = FakeConnection()
 

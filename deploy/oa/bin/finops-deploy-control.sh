@@ -68,6 +68,9 @@ commands:
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
                                       repair historical frozen OA/invoice requirements through relation commands
+  workbench-unavailable-oa-relation-repair <release-name> --case-id ID --dry-run
+  workbench-unavailable-oa-relation-repair <release-name> --case-id ID --execute --expected-fingerprint <sha256>
+                                      remove unavailable canonical OA members through relation commands
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --dry-run
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --execute --expected-fingerprint <sha256>
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --rollback-dry-run --expected-fingerprint <sha256>
@@ -1408,6 +1411,31 @@ workbench_requirement_repair() {
   src="$(release_src "$release")"
   assert_runtime_env_contract
   run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_relation_requirement_repair_ops "$@"
+}
+
+workbench_unavailable_oa_relation_repair() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-unavailable-oa-relation-repair requires release name"
+  shift
+  [[ "${1:-}" == "--case-id" && "${2:-}" =~ ^[A-Za-z0-9._-]+$ ]] || \
+    die "workbench-unavailable-oa-relation-repair requires a safe --case-id"
+  local mode="${3:-}"
+  case "$mode" in
+    --dry-run)
+      [[ "$#" -eq 3 ]] || die "workbench-unavailable-oa-relation-repair only permits dry-run or fingerprinted execute"
+      ;;
+    --execute)
+      [[ "$#" -eq 5 && "${4:-}" == "--expected-fingerprint" && "${5:-}" =~ ^[0-9a-f]{64}$ ]] || \
+        die "workbench-unavailable-oa-relation-repair only permits dry-run or fingerprinted execute"
+      ;;
+    *)
+      die "workbench-unavailable-oa-relation-repair only permits dry-run or fingerprinted execute"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_unavailable_oa_relation_repair_ops "$@"
 }
 
 workbench_etc_summary_repair() {
@@ -2786,6 +2814,10 @@ case "$cmd" in
   workbench-requirement-repair)
     shift
     workbench_requirement_repair "$@"
+    ;;
+  workbench-unavailable-oa-relation-repair)
+    shift
+    workbench_unavailable_oa_relation_repair "$@"
     ;;
   workbench-etc-summary-repair)
     shift

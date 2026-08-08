@@ -963,3 +963,8 @@
 - 同一已选 business batch 的再次点击直接返回，不清空已加载 detail/task，也不触发第二次 API 请求；切换批次的同步失效和并发加载保持不变。
 - `app.etc_business_batches.invoice_count/total_amount` 改为随完整 ETC snapshot 从实际 `invoice_ids` 成员发票求和；删除 OA `oa_total_amount/total_amount` 优先覆盖发票汇总的旧持久化逻辑。只有不完整历史 snapshot 才读取明确命名的 `etc_invoice_amount`，不会回退到 OA 金额。
 - 列表/详情继续复用既有轻量 scalar/API；页面把主指标明确标为“发票金额”，并消费既有 `amountBreakdown` 展示 OA 提交金额、ETC 发票金额、差额和事实源原因，不新增 API、read model、worker 或跨页面 I/O。
+
+## 2026-08-08 ETC 页面审计金额事实源对齐
+
+- 根因：ETC Page Audit 仍优先拿 OA 提交金额核对 ETC 发票成员，导致有明确 `partial` coverage / `gap_reason` 的三个历史批次被误报为汇总损坏。
+- 修复：审计与页面统一优先读取 `amount_breakdown.etc_invoice_amount`，其次读取 `invoice_summary.amount`；OA 金额只保留为旧记录缺少 ETC 汇总字段时的末级 fallback。本次不修改历史业务数据，不新增 API、read model、worker 或缓存。
