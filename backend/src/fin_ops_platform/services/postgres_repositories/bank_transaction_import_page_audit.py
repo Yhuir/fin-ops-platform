@@ -504,8 +504,6 @@ def _canonical_transaction_issues(
 def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) -> list[AuditIssue]:
     row_id = _text(row.get("row_id"))
     comparisons = {
-        "source_unique_key": (_text(row.get("source_unique_key")), _text(transaction.get("source_unique_key"))),
-        "data_fingerprint": (_text(row.get("data_fingerprint")), _text(transaction.get("data_fingerprint"))),
         "account_no": (_text(row.get("account_no")), _text(transaction.get("account_no"))),
         "trade_time": (_time_text(row.get("trade_time")), _time_text(transaction.get("trade_time"))),
         "direction": (_text(row.get("direction")), _text(transaction.get("txn_direction"))),
@@ -515,8 +513,36 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
             _text(transaction.get("counterparty_name_raw")),
         ),
     }
+    if not _identity_matches(row, transaction):
+        comparisons.update(
+            {
+                "source_unique_key": (
+                    _text(row.get("source_unique_key")),
+                    _text(transaction.get("source_unique_key")),
+                ),
+                "data_fingerprint": (
+                    _text(row.get("data_fingerprint")),
+                    _text(transaction.get("data_fingerprint")),
+                ),
+            }
+        )
     mismatches = {key: {"row": left, "transaction": right} for key, (left, right) in comparisons.items() if left != right}
     return [_issue("bank_import_transaction_field_mismatch", row_id, {"fields": mismatches})] if mismatches else []
+
+
+def _identity_matches(row: dict[str, Any], transaction: dict[str, Any]) -> bool:
+    row_source_key = _text(row.get("source_unique_key"))
+    row_fingerprint = _text(row.get("data_fingerprint"))
+    transaction_source_key = _text(transaction.get("source_unique_key"))
+    transaction_fingerprint = _text(transaction.get("data_fingerprint"))
+    if (row_source_key, row_fingerprint) == (transaction_source_key, transaction_fingerprint):
+        return True
+    return (
+        not row_fingerprint
+        and row_source_key.startswith("bank:")
+        and row_source_key == transaction_fingerprint
+        and (not transaction_source_key or transaction_source_key.startswith("bank-v2:"))
+    )
 
 
 def _job_issues(

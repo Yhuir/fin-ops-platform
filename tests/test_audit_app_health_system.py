@@ -446,7 +446,7 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
             clean["audit_status"],
             {"integrity": "pass", "freshness": "fresh", "queue": "drained", "external": "unknown"},
         )
-        self.assertEqual(clean["summary"]["passed_business_page_count"], 16)
+        self.assertEqual(clean["summary"]["passed_business_page_count"], 18)
         self.assertTrue(clean["database_system_snapshot"]["snapshot_identity"])
 
         def drifted_dashboard(connection: object) -> dict[str, object]:
