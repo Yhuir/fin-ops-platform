@@ -34,6 +34,7 @@
 | ACL env contract | `/etc/fin-ops/*.env` | prerequisite 检查 root-owned/non-writable env、DSN、fixed OA selector 与 role-sync config；strict contract要求三 retired admission key 和 legacy admin key 全部缺席。发布只读断言，不再在每次激活中重写 env |
 | Manual-root helper candidate | 已上传 exact release 的 `finops-deploy-control.sh` + approved SHA-256 | 只允许 root 以同文件系统 temp、`root:root 0755`、syntax/hash check 和 atomic `mv` bootstrap；release/activate 不得 self-update，也不得触碰 runtime-worker helper、service、DB/OA/ACL |
 | Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
+| Pre-activation canonical audit | 当前 runtime 鉴权 HTTP system audit + 候选 release 审计代码 + 同一生产 PostgreSQL | 当前 HTTP 必须成功鉴权、返回 200 且提供完整 repeatable-read snapshot/contract。只有旧 runtime 返回已识别的内部页面完整性失败时，候选 gate 才以候选代码直接执行同一只读系统审计并复用同一严格 validator；transport/auth/payload contract 失败和候选审计失败不得 fallback。激活后的 T+0/T+60/T+300 必须由候选 HTTP 审计直接通过 |
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |

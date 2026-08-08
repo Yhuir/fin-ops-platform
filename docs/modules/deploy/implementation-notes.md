@@ -40,6 +40,11 @@
 
 ## 当前决策
 
+- 预激活 canonical page audit 仍先要求当前 runtime 的鉴权 HTTP 系统审计可达且返回完整 snapshot/contract；
+  若它仅因旧 release 的页面审计实现返回已识别的内部完整性失败，候选 gate 才用候选代码对同一生产
+  PostgreSQL 执行一次 `repeatable_read_read_only` 系统审计，并复用同一严格结果校验器。HTTP 401、非 200、
+  非法 JSON、snapshot/contract 缺失及候选审计失败全部 fail closed；T+0 以后仍必须由已激活候选的 HTTP
+  系统审计直接通过。该边界只解决审计代码本身升级时的预激活死锁，不跳过鉴权、不放宽页数/顺序/状态合同。
 - 生产发布入口保持 `./scripts/deploy-oa.sh`，只走 release-based 部署；`legacy-current` 覆盖式部署入口已经移除。
 - Nightly CI 的唯一全量入口是 `bash scripts/verify.sh all`；它必须同时运行 clean app check、后端 unittest discovery、前端 Vitest、前端 build、deterministic Playwright browser smoke 和 docs check。clean app check 使用临时 `FIN_OPS_DATA_DIR`，不读取本地 legacy app Mongo；当前配置 runtime check 必须显式运行 `bash scripts/verify.sh runtime-check`。
 - deploy-control helper 必须使用 `/etc/fin-ops/fin-ops.common.env`、`fin-ops.secrets.env` 和 migration-only env；API/worker 不允许直接加载 migrator env 或旧 `/root` env。

@@ -11,7 +11,10 @@ from time import monotonic, sleep
 from typing import Any, Mapping, Sequence, TextIO
 from uuid import uuid4
 
+from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
+from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
@@ -47,6 +50,13 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "rabbitmq_unacked_messages",
     "rabbitmq_dlq_count",
     "rabbitmq_queues",
+)
+CANDIDATE_AUDIT_BOOTSTRAP_ERRORS = frozenset(
+    {
+        "system_audit_business_pages_failed",
+        "system_audit_internal_gate_failed",
+        "system_audit_page_count_or_contract_failed",
+    }
 )
 
 
@@ -274,9 +284,11 @@ def run_closure_gate(
     # and terminal publish reconciliation has converged.
     checks.append(
         _page_canonical_audit_check(
+            connection,
             base_url=base_url,
             api_prefix=api_prefix,
             headers=canonical_audit_headers,
+            tenant_id=tenant_id,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
             require_auth=not allow_unauthenticated_http,
@@ -669,10 +681,12 @@ def _postgres_reversible_write_check(
 
 
 def _page_canonical_audit_check(
+    connection: Any,
     *,
     base_url: str,
     api_prefix: str,
     headers: Mapping[str, str],
+    tenant_id: str,
     timeout_seconds: float,
     poll_interval_seconds: float,
     require_auth: bool,
@@ -700,7 +714,17 @@ def _page_canonical_audit_check(
         request_fn=write_operation_e2e_smoke._http_request,
         excluded_audit_ids=set(),
     )
-    passed = audit.get("status") == PASS
+    verification_source = "current_http_api"
+    candidate_audit: dict[str, Any] | None = None
+    if audit.get("status") != PASS and audit.get("error") in CANDIDATE_AUDIT_BOOTSTRAP_ERRORS:
+        candidate_audit = _candidate_system_audit(
+            connection,
+            tenant_id=tenant_id,
+            timeout_seconds=timeout_seconds,
+        )
+        verification_source = "candidate_read_only_snapshot"
+    passed = audit.get("status") == PASS or bool(candidate_audit and candidate_audit.get("status") == PASS)
+    verified_audit = candidate_audit if candidate_audit and candidate_audit.get("status") == PASS else audit
     return ClosureCheck(
         "page_canonical_audit",
         PASS if passed else FAIL,
@@ -712,9 +736,61 @@ def _page_canonical_audit_check(
         {
             "status": PASS if passed else FAIL,
             "audit_count": 1 if passed else 0,
-            "system_audits": [audit] if passed else [],
-            **({"error": audit.get("error") or "page_canonical_audit_failed"} if not passed else {}),
+            "verification_source": verification_source,
+            "system_audits": [verified_audit] if passed else [],
+            "current_http_audit": audit,
+            **({"candidate_audit": candidate_audit} if candidate_audit is not None else {}),
+            **(
+                {
+                    "error": (
+                        (candidate_audit or {}).get("error")
+                        or audit.get("error")
+                        or "page_canonical_audit_failed"
+                    )
+                }
+                if not passed
+                else {}
+            ),
         },
+    )
+
+
+def _candidate_system_audit(
+    connection: Any,
+    *,
+    tenant_id: str,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    try:
+        report = PostgresOperationsAuditRepository(connection).audit_system(
+            tenant_id=tenant_id,
+            sample_limit=50,
+            dashboard_payload_builder=lambda snapshot_connection: OperationsDashboardService(
+                snapshot_connection,
+                api_performance_recorder=ApiPerformanceRecorder(),
+            ).build_payload(),
+        )
+    except Exception as exc:
+        return {"status": FAIL, "error": str(exc) or exc.__class__.__name__}
+
+    response = http_slo_probe.HttpProbeResponse(
+        status_code=200,
+        headers={"Content-Type": "application/json"},
+        body=json.dumps(report, ensure_ascii=False, default=str).encode("utf-8"),
+    )
+    checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+        name="release-gate-candidate-canonical-page-audit",
+        operations=(),
+        steps=(),
+        system_audit_path=write_operation_e2e_smoke.SYSTEM_AUDIT_PATH,
+    )
+    return write_operation_e2e_smoke._collect_system_audit(
+        checkpoint,
+        base_url="https://candidate-release.invalid",
+        api_prefix="",
+        headers={},
+        timeout_seconds=timeout_seconds,
+        request_fn=lambda *_args: response,
     )
 
 

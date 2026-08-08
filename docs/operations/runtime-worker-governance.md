@@ -576,6 +576,11 @@ pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运�
 页面 audit 则以候选 release 的 `PAGE_AUDIT_REGISTRY` 为预期集合，严格核对当前 runtime 返回的 summary
 和逐页 proof。旧 runtime 尚未返回 registry 明细字段时，只有逐页 proof、页数和顺序全部与候选 registry
 一致才可通过；三个 registry 字段部分缺失、漏页或额外页面均 fail closed。
+若当前 runtime 的鉴权 HTTP 审计已经证明 200、完整 snapshot/contract，但仅因旧 release 的页面审计实现
+返回内部完整性失败，候选 gate 可用候选代码对同一 PostgreSQL 执行一次
+`repeatable_read_read_only` 系统审计，并复用相同的 registry、页数、逐页状态和 queue/freshness validator。
+HTTP 鉴权失败、transport/JSON/snapshot/contract 失败不得进入该路径；候选直接审计失败仍阻断激活。
+激活后的 T+0/T+60/T+300 必须由候选 runtime 的 HTTP 系统审计直接通过，不能继续依赖预激活候选审计证据。
 不存在“候选已激活但没有有效 gate evidence”的成功状态。
 
 RabbitMQ dispatcher 每次领取待发布事件前，会把业务消费已经完成的

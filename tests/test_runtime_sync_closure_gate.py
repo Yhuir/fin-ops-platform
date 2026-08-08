@@ -307,9 +307,11 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
 
     def test_page_canonical_audit_requires_authentication(self) -> None:
         check = gate._page_canonical_audit_check(
+            object(),
             base_url="https://example.test",
             api_prefix="/fin-ops-api",
             headers={},
+            tenant_id="default",
             timeout_seconds=1,
             poll_interval_seconds=0.05,
             require_auth=True,
@@ -331,9 +333,11 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
             return_value=audit,
         ) as wait_for_audit:
             check = gate._page_canonical_audit_check(
+                object(),
                 base_url="https://example.test",
                 api_prefix="/fin-ops-api",
                 headers={"Authorization": "Bearer token"},
+                tenant_id="default",
                 timeout_seconds=1,
                 poll_interval_seconds=0.05,
                 require_auth=True,
@@ -342,7 +346,98 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
         self.assertEqual(check.status, gate.PASS)
         self.assertEqual(check.payload["audit_count"], 1)
         self.assertEqual(check.payload["system_audits"], [audit])
+        self.assertEqual(check.payload["verification_source"], "current_http_api")
         wait_for_audit.assert_called_once()
+
+    def test_page_canonical_audit_bootstraps_candidate_audit_code_after_valid_http_failure(self) -> None:
+        current_audit = {
+            "status": "fail",
+            "error": "system_audit_page_count_or_contract_failed",
+        }
+        candidate_audit = {
+            "status": "pass",
+            "system_audit_id": "system-audit:candidate",
+            "snapshot_identity": "snapshot:candidate",
+            "external_evidence": "pass",
+        }
+        with patch.object(
+            gate.write_operation_e2e_smoke,
+            "_wait_for_system_audit",
+            return_value=current_audit,
+        ), patch.object(
+            gate,
+            "_candidate_system_audit",
+            return_value=candidate_audit,
+        ) as candidate_system_audit:
+            check = gate._page_canonical_audit_check(
+                object(),
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                tenant_id="default",
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(check.payload["verification_source"], "candidate_read_only_snapshot")
+        self.assertEqual(check.payload["current_http_audit"], current_audit)
+        self.assertEqual(check.payload["candidate_audit"], candidate_audit)
+        self.assertEqual(check.payload["system_audits"], [candidate_audit])
+        candidate_system_audit.assert_called_once()
+
+    def test_page_canonical_audit_does_not_bootstrap_transport_or_auth_failure(self) -> None:
+        current_audit = {"status": "fail", "error": "unexpected_status:401"}
+        with patch.object(
+            gate.write_operation_e2e_smoke,
+            "_wait_for_system_audit",
+            return_value=current_audit,
+        ), patch.object(gate, "_candidate_system_audit") as candidate_system_audit:
+            check = gate._page_canonical_audit_check(
+                object(),
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                tenant_id="default",
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(check.payload["error"], "unexpected_status:401")
+        candidate_system_audit.assert_not_called()
+
+    def test_page_canonical_audit_still_fails_when_candidate_snapshot_fails(self) -> None:
+        current_audit = {
+            "status": "fail",
+            "error": "system_audit_internal_gate_failed",
+        }
+        candidate_audit = {"status": "fail", "error": "system_audit_business_pages_failed"}
+        with patch.object(
+            gate.write_operation_e2e_smoke,
+            "_wait_for_system_audit",
+            return_value=current_audit,
+        ), patch.object(
+            gate,
+            "_candidate_system_audit",
+            return_value=candidate_audit,
+        ):
+            check = gate._page_canonical_audit_check(
+                object(),
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                tenant_id="default",
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(check.payload["error"], "system_audit_business_pages_failed")
+        self.assertEqual(check.payload["system_audits"], [])
 
 
 class RuntimeSyncClosureGateTests(unittest.TestCase):
@@ -675,7 +770,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             captured_http.update(kwargs)
             return http_pass_report()
 
-        def collect_audit(**kwargs):
+        def collect_audit(*_args, **kwargs):
             captured_audit.update(kwargs)
             return gate.ClosureCheck(
                 "page_canonical_audit",

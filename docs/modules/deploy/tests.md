@@ -26,6 +26,7 @@
 | 当前配置 runtime app check 必须显式使用 `verify.sh runtime-check`，避免把 legacy app Mongo 数据问题混入 clean CI 门禁 | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
 | release remote script 使用 versioned release、deploy-control、worker ensure、storage preflight、cleanup | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | 候选 gate 读取旧 stable system audit 时，以候选 registry + summary + 完整逐页 proof 严格验真；部分 registry 字段、漏页和顺序漂移失败关闭 | `tests/test_write_operation_e2e_smoke.py` | 2026-07-31 更新 |
+| 旧 stable HTTP 审计仅因旧页面审计实现失败时，候选 gate 用候选代码执行同库只读审计；HTTP 鉴权、transport 或 payload contract 失败不得触发该路径 | `tests/test_runtime_sync_closure_gate.py` | 2026-08-08 更新 |
 | runtime convergence 先协调 terminal publish 并取得干净样本，canonical audit 最后执行 | `tests/test_runtime_sync_closure_gate.py` | 2026-07-31 更新 |
 | release 激活后先等 `/health/ready`，再检查公网 session API route JSON proxy | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | no-activate 只上传和校验，不激活、不清理、不启动 worker ensure | `tests/test_deploy_oa_script.py` | 已覆盖 |
