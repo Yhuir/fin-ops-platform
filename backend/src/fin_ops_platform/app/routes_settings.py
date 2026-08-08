@@ -33,6 +33,11 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetService,
 )
+from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
+    SettingsDataResetAlreadyActive,
+    SettingsDataResetIdempotencyConflict,
+)
+from fin_ops_platform.services.settings_data_reset_request import SettingsDataResetEnqueueError
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlVersionConflict
 
 JsonResponse = Callable[[HTTPStatus, object], Any]
@@ -42,7 +47,7 @@ SettingsServiceProvider = Callable[[], AppSettingsService]
 SettingsDataResetServiceProvider = Callable[[], SettingsDataResetService | None]
 ServiceProvider = Callable[[], Any]
 FinalizeSettingsEvent = Callable[[dict[str, Any]], None]
-DataResetEnqueuer = Callable[[Any, str], None]
+DataResetRequester = Callable[..., tuple[Any, bool]]
 
 
 class SettingsApiRoutes:
@@ -64,7 +69,7 @@ class SettingsApiRoutes:
         load_json_body: JsonBodyLoader,
         json_response: JsonResponse,
         finalize_settings_event: FinalizeSettingsEvent,
-        enqueue_data_reset: DataResetEnqueuer,
+        request_data_reset: DataResetRequester,
         serialize_sync_run: Callable[[object], dict[str, object]],
         serialize_data_reset_background_job: Callable[[Any], dict[str, object]],
         import_job_processing_enabled: Callable[[], bool],
@@ -86,7 +91,7 @@ class SettingsApiRoutes:
         self._load_json_body = load_json_body
         self._json_response = json_response
         self._finalize_settings_event = finalize_settings_event
-        self._enqueue_data_reset = enqueue_data_reset
+        self._request_data_reset = request_data_reset
         self._serialize_sync_run = serialize_sync_run
         self._serialize_data_reset_background_job = serialize_data_reset_background_job
         self._import_job_processing_enabled = import_job_processing_enabled
@@ -676,8 +681,24 @@ class SettingsApiRoutes:
             return self._unsupported_settings_data_reset_response()
 
         owner_user_id = str(admin_session.identity.username or actor_id_for_session(admin_session))
-        active_job = self._active_data_reset_background_job(owner_user_id)
-        if active_job is not None:
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "settings_data_reset_idempotency_key_required",
+                    "message": "idempotency_key is required.",
+                },
+            )
+        try:
+            job, _created = self._request_data_reset(
+                action=action,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                label=self._data_reset_job_label(action),
+            )
+        except SettingsDataResetAlreadyActive as exc:
+            active_job = self._background_job_service().job_from_payload(exc.payload)
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {
@@ -686,33 +707,21 @@ class SettingsApiRoutes:
                     "job": self._serialize_data_reset_background_job(active_job),
                 },
             )
-
-        background_job_service = self._background_job_service()
-        job = background_job_service.create_job(
-            job_type="settings_data_reset",
-            label=self._data_reset_job_label(action),
-            owner_user_id=owner_user_id,
-            visibility="system",
-            phase="queued",
-            current=1,
-            total=100,
-            message="数据重置任务已排队。",
-            result_summary={"action": action},
-            source={"action": action},
-            affected_scopes=["settings", "workbench"],
-        )
-        try:
-            self._enqueue_data_reset(job, action)
-        except Exception as exc:
-            background_job_service.fail_job(job.job_id, "数据重置任务入队失败。", str(exc))
+        except SettingsDataResetIdempotencyConflict:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "settings_data_reset_idempotency_conflict",
+                    "message": "该操作标识已用于不同的数据重置请求。",
+                },
+            )
+        except SettingsDataResetEnqueueError as exc:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
                     "error": "settings_data_reset_enqueue_failed",
                     "message": "数据重置任务暂时无法入队，请稍后重试。",
-                    "job": self._serialize_data_reset_background_job(
-                        background_job_service.get_job(job.job_id, owner_user_id)
-                    ),
+                    "job": self._serialize_data_reset_background_job(exc.job),
                 },
             )
         return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})

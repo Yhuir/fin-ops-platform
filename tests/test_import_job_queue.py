@@ -13,6 +13,7 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.services.import_job_queue import (
     IMPORT_PROCESS_REQUESTED_EVENT,
     ImportJob,
+    ImportJobIdempotencyConflict,
     ImportJobRepository,
     ImportJobWorker,
 )
@@ -131,6 +132,7 @@ class FakeImportJobRepository:
         self.processing: list[tuple[str, str]] = []
         self.succeeded: list[tuple[str, str, dict[str, object]]] = []
         self.failed: list[tuple[str, str, str, dict[str, object], str]] = []
+        self.retryable: list[tuple[str, str, str]] = []
 
     def mark_processing(self, import_job_id: str, *, worker_id: str):
         self.processing.append((import_job_id, worker_id))
@@ -147,6 +149,10 @@ class FakeImportJobRepository:
         self.failed.append((import_job_id, worker_id, error, result_payload or {}, stage))
         return True
 
+    def mark_retryable(self, import_job_id: str, *, worker_id: str, error: str, stage="retry_pending"):
+        self.retryable.append((import_job_id, worker_id, error))
+        return True
+
 
 def job_row(**overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
@@ -156,6 +162,7 @@ def job_row(**overrides: object) -> dict[str, object]:
         "import_session_id": "session-1",
         "source_file_id": "file-1",
         "idempotency_key": "bank_transactions.import:session-1",
+        "request_fingerprint": "fingerprint-1",
         "status": "pending",
         "stage": "queued",
         "priority": "normal",
@@ -180,6 +187,7 @@ def import_job(**overrides: object) -> ImportJob:
         import_session_id="session-1",
         source_file_id="file-1",
         idempotency_key="bank_transactions.import:session-1",
+        request_fingerprint=str(overrides.get("request_fingerprint", "fingerprint-1")),
         status=str(overrides.get("status", "pending")),
         stage=str(overrides.get("stage", "queued")),
         priority=str(overrides.get("priority", "normal")),
@@ -347,6 +355,43 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertIn("where idempotency_key is not null", normalized_sql)
         self.assertEqual(params[:5], ("default", "bank_transactions.import", "session-1", "file-1", "bank_transactions.import:session-1"))
 
+    def test_create_or_get_job_rejects_same_key_with_different_request(self) -> None:
+        repository = ImportJobRepository(FakeConnection(FakeTransaction(rows=[None])))
+
+        with self.assertRaises(ImportJobIdempotencyConflict):
+            repository.create_or_get_job(
+                import_type="bank_transactions.import",
+                import_session_id="session-2",
+                idempotency_key="bank_transactions.import:shared-key",
+                payload={"session_id": "session-2"},
+            )
+
+    def test_mark_processing_only_reclaims_an_expired_processing_lease(self) -> None:
+        transaction = FakeTransaction(rows=[job_row(status="processing", attempt_count=2)])
+        repository = ImportJobRepository(FakeConnection(transaction))
+
+        job = repository.mark_processing("job-1", worker_id="worker-1", lock_timeout_seconds=300)
+
+        self.assertIsNotNone(job)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'pending' and available_at <= now()", normalized_sql)
+        self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
+        self.assertEqual(params[:4], ("processing", "worker-1", "job-1", 300))
+
+    def test_mark_retryable_returns_processing_job_to_pending(self) -> None:
+        transaction = FakeTransaction(rows=[job_row(status="pending", stage="retry_pending")])
+        repository = ImportJobRepository(FakeConnection(transaction))
+
+        updated = repository.mark_retryable("job-1", worker_id="worker-1", error="transient")
+
+        self.assertTrue(updated)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'pending'", normalized_sql)
+        self.assertIn("available_at = now()", normalized_sql)
+        self.assertEqual(params, ("retry_pending", "transient", "job-1", "worker-1"))
+
     def test_enqueue_process_requested_keeps_rabbitmq_envelope_small(self) -> None:
         repository = ImportJobRepository(FakeConnection(FakeTransaction()))
         queue = FakeRuntimeQueue()
@@ -389,6 +434,34 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 431)
         self.assertEqual(repository.succeeded[0][0], "job-1")
         self.assertEqual(repository.failed, [])
+
+    def test_worker_releases_transient_failure_for_durable_retry(self) -> None:
+        repository = FakeImportJobRepository(import_job(max_attempts=5))
+        worker = ImportJobWorker(
+            repository=repository,
+            worker_id="worker-1",
+            processors={"bank_transactions.import": lambda _job: (_ for _ in ()).throw(RuntimeError("temporary"))},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "temporary"):
+            worker.handle_runtime_event(_runtime_event(attempts=1))
+
+        self.assertEqual(repository.retryable, [("job-1", "worker-1", "temporary")])
+        self.assertEqual(repository.failed, [])
+
+    def test_worker_marks_final_attempt_failed_before_outbox_dead_letter(self) -> None:
+        repository = FakeImportJobRepository(import_job(max_attempts=2))
+        worker = ImportJobWorker(
+            repository=repository,
+            worker_id="worker-1",
+            processors={"bank_transactions.import": lambda _job: (_ for _ in ()).throw(RuntimeError("still broken"))},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "still broken"):
+            worker.handle_runtime_event(_runtime_event(attempts=2))
+
+        self.assertEqual(repository.retryable, [])
+        self.assertEqual(repository.failed[0][4], "processor_failed")
 
     def test_worker_check_exposes_import_job_handler_and_route(self) -> None:
         stdout = StringIO()
@@ -506,7 +579,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(status_payload["import_job"]["status"], "succeeded")
         self.assertEqual(status_payload["import_job"]["result_payload"]["batch"]["persisted_record_count"], 2)
 
-def _runtime_event():
+def _runtime_event(*, attempts: int = 1):
     from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
     return RuntimeQueueEvent(
@@ -519,7 +592,7 @@ def _runtime_event():
         scope_key="bank_transactions.import",
         dedupe_key="import.process.requested:default:job-1",
         payload={"import_job_id": "job-1"},
-        attempts=1,
+        attempts=attempts,
         status="processing",
         source_version=0,
     )

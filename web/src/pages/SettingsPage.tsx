@@ -311,6 +311,7 @@ export default function SettingsPage() {
   const handleSettingsDataReset = async (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
+    idempotencyKey: string;
     onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }): Promise<WorkbenchSettingsDataResetResult> => {
     if (!canAdminAccess) {

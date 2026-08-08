@@ -31,6 +31,7 @@
 | --- | --- | --- |
 | Outbox/job event | PostgreSQL durable queue | event type 必须在 registry 中登记。read model refresh metadata 只允许白名单字段进入 outbox；Workbench own proof使用`freshness_token + expected_source_versions`，Cost child等待Workbench使用`workbench_scope_key + workbench_freshness_token + workbench_expected_source_versions`，proof必须JSON可序列化、受大小上限约束且由worker校验token/scope后才能复用。操作级 `row_ids` / `case_ids` 只能作为 worker 局部投影提示，`relation_deltas + row_ids` 才能授权 relation-only delta，均不能替代 dirty scope/source_version 事实源；`force_refresh=true` 仅用于显式运维重建并强制 full projection。支持 fan-out 的 handler 必须把 force 传播给每个具体 shard。`invoice-usage-collection` 只处理进项使用/销项收款；`oa-pending-payment` 只处理 OA 待付款，二者不得互相 claim。普通命令、import confirm 与 OA 权威 integration snapshot 都不产生页面 refresh outbox；显式 `all` 仅用于低优先级运维 fan-out。同 scope pending 事件合并时必须删除 row 级 metadata并让 handler full rebuild；禁止保留不完整 delta却继续局部发布 |
 | Settings reset event | `settings.data_reset.requested` | 只包含 job id、owner 和 action；OA 密码只在 API 请求内复核，禁止持久化。worker 对未知 interrupted destructive reset fail closed，不自动重放。 |
+| Worker retry contract | `RuntimeWorker` + business job repository | durable event 采用 at-least-once；瞬时失败先把业务 job 归还 pending，再由 outbox 安排重试。达到最大次数才把业务 job 与 event 收敛为终态；processing lease 仅在超时后允许接管，活跃 lease 不得被第二个 worker 抢占。 |
 | Active refresh state | PostgreSQL outbox + dirty scope | gateway 的 ensure/wakeup coalescing 必须通过 repository 的 exact-scope 原子入口执行。单 scope 委托同一个 batch 入口；多 scope 在一个事务内按稳定顺序 advisory-lock 全部 `tenant/type/key`，一次读取 `job.outbox_events pending/processing`，再以既有 set-based CTE 只写未覆盖 scopes。覆盖关系为 `force > full scope > partial delta`；partial 不得吞掉 full，非 force 不得吞掉 force，partial 之间只有语义覆盖才 no-op。新增语义在该锁内合并 pending event，或为 processing event 建立 pending follow-up。只有活跃事件才证明 worker 会继续推进；最新完成的 `force_refresh` 只证明当次运维任务，不得覆盖后续访问产生的新 target；orphan dirty 必须允许重新 enqueue。handler 返回 `stale_source_version` 或 `stale_source_version_after_publish` 时，worker 必须先通过 durable gateway 建立同 scope successor，再 ACK 原事件；successor enqueue 失败时禁止 ACK。禁止逐 scope 事务/SQL N+1、两事务竞态或同 scope 丢失新语义。canonical mutation、显式 repair/reapply 与 force 不走此 ensure 合并边界 |
 | Refresh availability timestamp | `job.outbox_events.available_at` | write-operation / read-model refresh SLO 以 `available_at -> processed_at` 衡量 enqueue-to-done；事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间，不能让 transaction-level `now()` 把业务写事务耗时计入 worker drain；同 scope pending refresh 被新 source_version 合并时，active outbox event 的 `created_at`/`updated_at` 也必须重置为当前 enqueue 时间，避免兼容报表继续读到旧 pending 年龄 |
 | Worker instance env | deploy/systemd | 生产 systemd 必须传 `--registration <instance>` 与 `--worker-instance <instance>`；instance name、event types、claim scope filters 与 handler flags 由 registry 派生。`release-gate-activate` 在切换前后必须比较 registry required instances 与 systemd concrete units，`unknown_worker_count` 和 `required_worker_not_ready` 均为 0 才允许 PASS；已启用、运行或失败但不在当前 registry 中的 `fin-ops-worker@*.service` 必须先 stop/disable/reset-failed。该动作不删除旧 env，保留上一 release 受控回滚能力。PostgreSQL durable queue worker 默认 idle poll 为 `0.05s`，`workbench` 使用 `0.01s`；已退役 Search/no-OA/secondary/page worker 参数不得迁移或启动 |
@@ -54,6 +55,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Job result/status | runtime queue/app health | 成功、失败、重试和 readiness 可观察；影响 read model 的 job completion result summary 必须携带 target envelope 或明确不适用 |
+| Execution attempt history | `job.runtime_event_attempts` | 每次 claim 都新增独立 attempt；成功、retry、失败、dead-letter、graceful release、defer 和 lease expiry 都记录 worker、起止时间、耗时、错误与安全结果摘要，不复制业务 payload。release/defer 即使不消耗 retry budget 也必须保留独立历史。 |
 | Background job affected months | `job.background_jobs.affected_months` | 只保存实际 `YYYY-MM`；无月份归属保存空数组。全量运维 scope 使用 scope/event 合同中的 `all`，不得再写入月份数组。migration `0131` 已清理历史 `all` 并验证该约束。 |
 | Fan-out parent result | readiness / app health | manifest 为 `fan_out_command` 的 command-only `all` parent 只负责入队 child scopes，不写 current readiness；parent event/dirty scope 的当前失败仍可观察，历史 readiness 只作为 diagnostics。 |
 | Worker heartbeat | `job.runtime_worker_heartbeats` | 空轮询 `idle` heartbeat 必须节流，禁止每个 0.05s poll 同步写库；`processing`、`deferred`、`failed`、`stopping`、`stopped` 等事件状态必须即时写入 |
@@ -68,7 +70,7 @@
 | 层 | 文件或目录 |
 | --- | --- |
 | Runtime queue | `backend/src/fin_ops_platform/services/runtime_queue.py` |
-| Runtime queue migrations | `backend/src/fin_ops_platform/postgres/migrations/*runtime_queue*.sql` |
+| Runtime queue migrations | `backend/src/fin_ops_platform/postgres/migrations/*runtime_queue*.sql`、`0139_idempotency_and_worker_attempt_history.sql` |
 | Worker registry | `backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
 | Worker runtime | `backend/src/fin_ops_platform/services/runtime_worker.py`、`runtime_worker_handlers.py` |
 | App worker entry | `backend/src/fin_ops_platform/app/worker.py`、`backend/src/fin_ops_platform/services/oa_attachment_invoice_promotion_service.py` |
@@ -90,6 +92,7 @@
 - `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_passes_claim_scope_filters_to_queue`
 - `tests/test_runtime_worker_read_model_refresh_scopes.py`
 - `tests/test_runtime_queue.py`
+- `tests/test_runtime_infrastructure_postgres_integration.py`
 - `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_claim_next_can_filter_scope_keys_for_split_worker_lanes`
 - `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_claim_event_by_id_honors_scope_filters_for_rabbitmq_consumers`
 - `tests/test_deploy_runtime_examples.py`

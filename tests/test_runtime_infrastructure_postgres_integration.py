@@ -4,7 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 import unittest
 
 from fin_ops_platform.postgres import migrate
+from fin_ops_platform.services.background_job_service import BackgroundJobService
+from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict, ImportJobRepository
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
+    PostgresSettingsDataResetRequestRepository,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -25,7 +30,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.runtime_queue = RuntimeQueueRepository(self.connection)
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
-        for table in ("job.read_model_dirty_scopes", "job.runtime_worker_heartbeats"):
+        for table in (
+            "job.read_model_dirty_scopes",
+            "job.runtime_event_attempts",
+            "job.runtime_worker_heartbeats",
+        ):
             exists = fetch_scalar(
                 self.database_url,
                 f"select to_regclass('{table}') is not null;",
@@ -761,6 +770,35 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["attempts"], 1)
         self.assertEqual(row["attempt_count"], 1)
 
+    def test_runtime_queue_records_each_execution_attempt_and_result(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.attempt-history")
+        claimed = self.runtime_queue.claim_next(
+            "worker-attempt-history",
+            event_types=["runtime.integration.attempt-history"],
+        )
+        self.assertIsNotNone(claimed)
+
+        self.assertTrue(
+            self.runtime_queue.complete(
+                event.event_id,
+                "worker-attempt-history",
+                {"processed": 1},
+            )
+        )
+        attempt = self.connection.fetch_one(
+            """
+            select queue_attempt, worker_id, outcome, result_summary, duration_ms
+            from job.runtime_event_attempts
+            where event_id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(attempt["queue_attempt"], 1)
+        self.assertEqual(attempt["worker_id"], "worker-attempt-history")
+        self.assertEqual(attempt["outcome"], "succeeded")
+        self.assertEqual(attempt["result_summary"], {"processed": 1})
+        self.assertGreaterEqual(attempt["duration_ms"], 0)
+
     def test_runtime_queue_release_and_defer_persist_attempt_decrements(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.attempt-decrement")
         claimed = self.runtime_queue.claim_next(
@@ -816,6 +854,144 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual((deferred["attempts"], deferred["attempt_count"]), (0, 0))
         self.assertIsNone(deferred["locked_by"])
         self.assertIsNone(deferred["locked_at"])
+        attempts = self.connection.fetch_all(
+            """
+            select queue_attempt, outcome
+            from job.runtime_event_attempts
+            where event_id = %s
+            order by started_at, id
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(
+            [(attempt["queue_attempt"], attempt["outcome"]) for attempt in attempts],
+            [(1, "released"), (1, "deferred")],
+        )
+
+    def test_settings_reset_job_and_event_are_atomic_and_idempotent(self) -> None:
+        jobs = BackgroundJobService()
+        queue = RuntimeQueueRepository(self.connection)
+        repository = PostgresSettingsDataResetRequestRepository(self.connection, queue)
+        job = jobs.build_job(
+            job_type="settings_data_reset",
+            label="重置银行流水",
+            owner_user_id="YNSYLP005",
+            visibility="system",
+            idempotency_key="reset-request-1",
+            source={"action": "reset_bank_transactions"},
+        )
+
+        created_payload, created = repository.create_or_get(
+            job_payload=job.to_payload(),
+            request_fingerprint="fingerprint-1",
+            event_type="settings.data_reset.requested",
+            action="reset_bank_transactions",
+        )
+        replay_payload, replay_created = repository.create_or_get(
+            job_payload=jobs.build_job(
+                job_type="settings_data_reset",
+                label="重置银行流水",
+                owner_user_id="YNSYLP005",
+                visibility="system",
+                idempotency_key="reset-request-1",
+                source={"action": "reset_bank_transactions"},
+            ).to_payload(),
+            request_fingerprint="fingerprint-1",
+            event_type="settings.data_reset.requested",
+            action="reset_bank_transactions",
+        )
+
+        self.assertTrue(created)
+        self.assertFalse(replay_created)
+        self.assertEqual(created_payload["job_id"], replay_payload["job_id"])
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.background_jobs where job_type = 'settings_data_reset';",
+            ),
+            "1",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.outbox_events where event_type = 'settings.data_reset.requested';",
+            ),
+            "1",
+        )
+
+    def test_settings_reset_request_rolls_back_job_when_enqueue_fails(self) -> None:
+        class FailingQueue:
+            @staticmethod
+            def enqueue_in_transaction(**_kwargs):
+                raise RuntimeError("queue unavailable")
+
+        repository = PostgresSettingsDataResetRequestRepository(self.connection, FailingQueue())
+        job = BackgroundJobService().build_job(
+            job_type="settings_data_reset",
+            label="重置银行流水",
+            owner_user_id="YNSYLP005",
+            visibility="system",
+            idempotency_key="reset-request-rollback",
+            source={"action": "reset_bank_transactions"},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+            repository.create_or_get(
+                job_payload=job.to_payload(),
+                request_fingerprint="fingerprint-rollback",
+                event_type="settings.data_reset.requested",
+                action="reset_bank_transactions",
+            )
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.background_jobs where idempotency_key = 'reset-request-rollback';",
+            ),
+            "0",
+        )
+
+    def test_import_job_request_identity_and_retry_lease_are_durable(self) -> None:
+        repository = ImportJobRepository(self.connection)
+        job = repository.create_or_get_job(
+            import_type="bank_transactions.import",
+            import_session_id="integration-session-1",
+            source_file_id="integration-file-1",
+            idempotency_key="integration-import-1",
+            payload={"session_id": "integration-session-1"},
+        )
+        replay = repository.create_or_get_job(
+            import_type="bank_transactions.import",
+            import_session_id="integration-session-1",
+            source_file_id="integration-file-1",
+            idempotency_key="integration-import-1",
+            payload={"session_id": "integration-session-1"},
+        )
+        self.assertEqual(job.import_job_id, replay.import_job_id)
+        self.assertEqual(job.request_fingerprint, replay.request_fingerprint)
+
+        with self.assertRaises(ImportJobIdempotencyConflict):
+            repository.create_or_get_job(
+                import_type="bank_transactions.import",
+                import_session_id="integration-session-2",
+                source_file_id="integration-file-2",
+                idempotency_key="integration-import-1",
+                payload={"session_id": "integration-session-2"},
+            )
+
+        processing = repository.mark_processing(job.import_job_id, worker_id="integration-import-worker")
+        self.assertIsNotNone(processing)
+        self.assertIsNone(repository.mark_processing(job.import_job_id, worker_id="competing-worker"))
+        self.assertTrue(
+            repository.mark_retryable(
+                job.import_job_id,
+                worker_id="integration-import-worker",
+                error="transient integration failure",
+            )
+        )
+        retried = repository.mark_processing(job.import_job_id, worker_id="integration-import-worker")
+        self.assertIsNotNone(retried)
+        self.assertEqual(retried.attempt_count, 2)
 
     def test_runtime_queue_claim_next_reclaims_stale_processing_event(self) -> None:
         row = self.connection.fetch_one(

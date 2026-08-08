@@ -169,66 +169,99 @@ class RuntimeQueueRepository:
         priority: str = "normal",
         trace_id: str | None = None,
     ) -> RuntimeQueueEvent:
+        with self._connection.transaction() as transaction:
+            return self.enqueue_in_transaction(
+                transaction=transaction,
+                event_type=event_type,
+                aggregate_type=aggregate_type,
+                aggregate_id=aggregate_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                dedupe_key=dedupe_key,
+                payload=payload,
+                tenant_id=tenant_id,
+                available_at=available_at,
+                source_version=source_version,
+                priority=priority,
+                trace_id=trace_id,
+            )
+
+    def enqueue_in_transaction(
+        self,
+        *,
+        transaction: Any,
+        event_type: str,
+        aggregate_type: str | None = None,
+        aggregate_id: str | None = None,
+        scope_type: str | None = None,
+        scope_key: str | None = None,
+        dedupe_key: str | None = None,
+        payload: dict[str, Any] | None = None,
+        tenant_id: str = "default",
+        available_at: Any | None = None,
+        source_version: int | str | None = None,
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> RuntimeQueueEvent:
         normalized_source_version = _optional_int(source_version)
         normalized_priority = _normalize_priority(priority)
         normalized_trace_id = str(trace_id or "").strip() or None
-        with self._connection.transaction() as transaction:
-            row = transaction.fetch_one(
-                """
-                insert into job.outbox_events (
-                    tenant_id,
-                    event_type,
-                    aggregate_type,
-                    aggregate_id,
-                    scope_type,
-                    scope_key,
-                    dedupe_key,
-                    payload,
-                    available_at,
-                    schema_version,
-                    source_version,
-                    priority,
-                    trace_id
-                )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s, now()), 1, %s, %s, %s)
-                on conflict (tenant_id, dedupe_key)
-                where dedupe_key is not null and status = 'pending'
-                do update set updated_at = job.outbox_events.updated_at
-                returning
-                    id::text as event_id,
-                    tenant_id,
-                    event_type,
-                    aggregate_type,
-                    aggregate_id,
-                    scope_type,
-                    scope_key,
-                    dedupe_key,
-                    payload,
-                    attempts,
-                    status,
-                    schema_version,
-                    source_version,
-                    priority,
-                    trace_id
-                """,
-                (
-                    tenant_id,
-                    event_type,
-                    aggregate_type,
-                    aggregate_id,
-                    scope_type,
-                    scope_key,
-                    dedupe_key,
-                    self._json_param(payload or {}),
-                    available_at,
-                    normalized_source_version,
-                    normalized_priority,
-                    normalized_trace_id,
-                ),
+        row = transaction.fetch_one(
+            """
+            insert into job.outbox_events (
+                tenant_id,
+                event_type,
+                aggregate_type,
+                aggregate_id,
+                scope_type,
+                scope_key,
+                dedupe_key,
+                payload,
+                available_at,
+                schema_version,
+                source_version,
+                priority,
+                trace_id
             )
-            if row is None:
-                raise RuntimeError("Runtime queue enqueue did not return an event.")
-            return _event_from_row(row)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s, now()), 1, %s, %s, %s)
+            on conflict (tenant_id, dedupe_key)
+            where dedupe_key is not null and status = 'pending'
+            do update set updated_at = job.outbox_events.updated_at
+            returning
+                id::text as event_id,
+                tenant_id,
+                event_type,
+                aggregate_type,
+                aggregate_id,
+                scope_type,
+                scope_key,
+                dedupe_key,
+                payload,
+                attempts,
+                status,
+                schema_version,
+                source_version,
+                priority,
+                trace_id
+            """,
+            (
+                tenant_id,
+                event_type,
+                aggregate_type,
+                aggregate_id,
+                scope_type,
+                scope_key,
+                dedupe_key,
+                self._json_param(payload or {}),
+                available_at,
+                normalized_source_version,
+                normalized_priority,
+                normalized_trace_id,
+            ),
+        )
+        if row is None:
+            raise RuntimeError("Runtime queue enqueue did not return an event.")
+        return _event_from_row(row)
 
     def enqueue_read_model_refresh(
         self,

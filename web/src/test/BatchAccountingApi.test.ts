@@ -5,6 +5,7 @@ import {
   fetchBatchAccountingTagRules,
   saveBatchAccountingTagRules,
   submitBatchAccounting,
+  withdrawBatchAccounting,
 } from "../features/batchAccounting/api";
 
 afterEach(() => {
@@ -70,6 +71,7 @@ describe("batch accounting API", () => {
       expectedVersion: 3,
       expectedTagSelectionVersion: 4,
       note: "确认",
+      idempotencyKey: "batch-submit-1",
     });
 
     expect(payload.affectedScopeKeys).toEqual(["2026-05"]);
@@ -85,6 +87,37 @@ describe("batch accounting API", () => {
           expected_version: 3,
           expected_tag_selection_version: 4,
           note: "确认",
+          idempotency_key: "batch-submit-1",
+        }),
+      }),
+    );
+  });
+
+  test("sends the withdraw idempotency key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        success: true,
+        relation_id: "CASE-BATCH-001",
+        affected_months: ["2026-05"],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    await withdrawBatchAccounting({
+      relationId: "CASE-BATCH-001",
+      expectedVersion: 3,
+      reason: "更正",
+      idempotencyKey: "batch-withdraw-1",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/batch-accounting/CASE-BATCH-001/withdraw",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          expected_version: 3,
+          reason: "更正",
+          idempotency_key: "batch-withdraw-1",
         }),
       }),
     );

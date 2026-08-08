@@ -233,6 +233,8 @@ export default function BatchAccountingPage() {
   const [tagRulesLoading, setTagRulesLoading] = useState(false);
   const [tagRulesSaving, setTagRulesSaving] = useState(false);
   const [tagRulesError, setTagRulesError] = useState<string | null>(null);
+  const submitIntentRef = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
+  const withdrawIntentRef = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const loadRequestIdRef = useRef(0);
   const tagRulesRequestIdRef = useRef(0);
 
@@ -464,6 +466,18 @@ export default function BatchAccountingPage() {
     if (!selectedBankRow || !canSubmit) {
       return;
     }
+    const submitFingerprint = JSON.stringify({
+      bankYear,
+      bankRowId: selectedBankRow.id,
+      oaRowIds: selectedOaRows.map((row) => row.id).sort(),
+      expectedVersion: selectedBankRow.version,
+      expectedTagSelectionVersion: payload.tagSelectionVersion,
+      note: isAmountMismatch ? differenceNote.trim() : "",
+    });
+    if (submitIntentRef.current?.fingerprint !== submitFingerprint) {
+      submitIntentRef.current = { fingerprint: submitFingerprint, idempotencyKey: crypto.randomUUID() };
+    }
+    const idempotencyKey = submitIntentRef.current.idempotencyKey;
     const result = await runOperation({
       loadingMessage: "正在保存批量账务关联...",
       action: async ({ setMessage }) => {
@@ -476,6 +490,7 @@ export default function BatchAccountingPage() {
             expectedVersion: selectedBankRow.version,
             expectedTagSelectionVersion: payload.tagSelectionVersion,
             note: isAmountMismatch ? differenceNote : "",
+            idempotencyKey,
           });
           setMessage("正在加载批量账务最新数据...");
           try {
@@ -494,6 +509,7 @@ export default function BatchAccountingPage() {
       errorMessage: (caught) => mutationErrorMessage(caught, "关联OA项与流水失败"),
     });
     if (result.status === "success") {
+      submitIntentRef.current = null;
       handleMutationComplete("已关联批量账务流水与 OA。", result.value);
     } else {
       setFeedback({ severity: "error", message: mutationErrorMessage(result.error, "关联OA项与流水失败") });
@@ -507,6 +523,11 @@ export default function BatchAccountingPage() {
     const relationId = selectedBankRow.relationId;
     const expectedVersion = selectedBankRow.version;
     const reason = withdrawReason.trim();
+    const withdrawFingerprint = JSON.stringify({ relationId, expectedVersion, reason });
+    if (withdrawIntentRef.current?.fingerprint !== withdrawFingerprint) {
+      withdrawIntentRef.current = { fingerprint: withdrawFingerprint, idempotencyKey: crypto.randomUUID() };
+    }
+    const idempotencyKey = withdrawIntentRef.current.idempotencyKey;
     const result = await runOperation({
       loadingMessage: "正在撤回批量账务关联...",
       action: async ({ setMessage }) => {
@@ -516,6 +537,7 @@ export default function BatchAccountingPage() {
             relationId,
             expectedVersion,
             reason,
+            idempotencyKey,
           });
           setWithdrawOpen(false);
           setWithdrawReason("");
@@ -536,6 +558,7 @@ export default function BatchAccountingPage() {
       errorMessage: (caught) => mutationErrorMessage(caught, "撤回关联失败"),
     });
     if (result.status === "success") {
+      withdrawIntentRef.current = null;
       handleMutationComplete("已撤回批量账务关联。", result.value);
     } else {
       setFeedback({ severity: "error", message: mutationErrorMessage(result.error, "撤回关联失败") });

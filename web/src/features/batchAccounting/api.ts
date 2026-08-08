@@ -394,6 +394,7 @@ export async function submitBatchAccounting({
   expectedVersion,
   expectedTagSelectionVersion,
   note,
+  idempotencyKey,
   signal,
 }: SubmitBatchAccountingRequest): Promise<BatchAccountingMutationResult> {
   const payload = await requestJson<ApiMutationResult>("/api/batch-accounting/submit", {
@@ -406,6 +407,7 @@ export async function submitBatchAccounting({
       expected_version: expectedVersion,
       expected_tag_selection_version: expectedTagSelectionVersion,
       note: String(note ?? "").trim(),
+      idempotency_key: idempotencyKey,
     }),
     signal,
   });
@@ -416,6 +418,7 @@ export async function withdrawBatchAccounting({
   relationId,
   expectedVersion,
   reason,
+  idempotencyKey,
   signal,
 }: WithdrawBatchAccountingRequest): Promise<BatchAccountingMutationResult> {
   const payload = await requestJson<ApiMutationResult>(
@@ -423,7 +426,7 @@ export async function withdrawBatchAccounting({
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_version: expectedVersion, reason }),
+      body: JSON.stringify({ expected_version: expectedVersion, reason, idempotency_key: idempotencyKey }),
       signal,
     },
   );

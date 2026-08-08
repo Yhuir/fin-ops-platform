@@ -62,6 +62,7 @@ type SettingsPageContentProps = {
   onDataReset: (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
+    idempotencyKey: string;
     onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }) => Promise<WorkbenchSettingsDataResetResult>;
   onSyncProjects: () => Promise<WorkbenchSettings>;
@@ -86,8 +87,8 @@ type SettingsDraftSession = {
 };
 
 type DataResetDialogState =
-  | { step: "confirm"; action: WorkbenchSettingsDataResetAction }
-  | { step: "password"; action: WorkbenchSettingsDataResetAction }
+  | { step: "confirm"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string }
+  | { step: "password"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string }
   | null;
 
 const OA_INVOICE_OFFSET_SETTINGS_VISIBLE_USERNAMES = new Set(["YNSYLP005", "YNSYKJ001"]);
@@ -703,7 +704,7 @@ export default function SettingsPageContent({
       return;
     }
     setDataResetStatus(null);
-    setDataResetDialog({ step: "confirm", action });
+    setDataResetDialog({ step: "confirm", action, idempotencyKey: crypto.randomUUID() });
   }
 
   function handleContinueDataReset() {
@@ -711,7 +712,11 @@ export default function SettingsPageContent({
       return;
     }
     setDataResetPassword("");
-    setDataResetDialog({ step: "password", action: dataResetDialog.action });
+    setDataResetDialog({
+      step: "password",
+      action: dataResetDialog.action,
+      idempotencyKey: dataResetDialog.idempotencyKey,
+    });
   }
 
   async function handleConfirmDataReset() {
@@ -725,6 +730,7 @@ export default function SettingsPageContent({
       const result = await onDataReset({
         action: dataResetDialog.action,
         oaPassword: dataResetPassword,
+        idempotencyKey: dataResetDialog.idempotencyKey,
         onProgress: (job) => {
           setDataResetPassword("");
           setDataResetDialog(null);

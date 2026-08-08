@@ -6520,7 +6520,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def oa_applicant_credentials(",
             "def create_oa_manual_imports(",
             "def create_data_reset_job(",
-            "job_type=\"settings_data_reset\"",
+            "self._request_data_reset(",
             "app_settings_persistence_failed",
         ):
             if marker not in route_class:
@@ -6543,7 +6543,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_settings_data_reset_uses_background_job_service_only(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         routes_source = (APP_ROOT / "routes_settings.py").read_text(encoding="utf-8")
-        combined_source = f"{server_source}\n{routes_source}"
+        request_service_source = (SERVICES_ROOT / "settings_data_reset_request.py").read_text(encoding="utf-8")
+        combined_source = f"{server_source}\n{routes_source}\n{request_service_source}"
 
         violations: list[str] = []
         for forbidden in (
@@ -6563,10 +6564,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in server_source:
                 violations.append(f"server.py still owns settings data reset route concern {forbidden}")
-        if "job_type=\"settings_data_reset\"" not in routes_source:
-            violations.append("settings route owner data reset job create no longer uses BackgroundJobService")
-        if "def _active_data_reset_background_job(" not in routes_source:
-            violations.append("settings route owner data reset active job lookup no longer uses BackgroundJobService")
+        if "self._background_jobs.build_job(" not in request_service_source:
+            violations.append("settings data reset request service no longer uses BackgroundJobService")
+        if "self._request_data_reset(" not in routes_source:
+            violations.append("settings route owner bypasses the atomic data reset request boundary")
 
         self.assertEqual(violations, [])
 

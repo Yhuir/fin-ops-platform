@@ -16,7 +16,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note |
+| manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note；浏览器为一次 preview/confirm 或 withdraw 意图生成稳定 key，并在 ambiguous 网络重试中复用，缺失时 API fail closed。 |
 | in-progress OA bank link | OA pending payment command | canonical OA/bank ids、workflow snapshot、actor、scope；只允许创建新 formal case 或扩展唯一 active case并保留其发票成员，多个 owner/冲突 fail closed |
 | formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash；OA 显式 source reference 必须先经父 OA 自身字段及其 FK-owned 付款明细/附件的 alias map 归一为 canonical typed identity，计划携带由 `attachment_source` 直接证明的 exact `(parent OA row id, invoice row id)` binding |
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
@@ -53,6 +53,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
 - relation、history、idempotency 与 audit 的业务事务必须原子；失败不得留下半关系。普通关系写入不承担下游 dirty/outbox 事务，页面访问通过 canonical version drift 发现并收敛。
+- PostgreSQL 生产运行时固定使用 durable idempotency repository；旧 feature flag 和生产内存幂等路径已删除，本地非 PostgreSQL 测试只使用显式内存适配器。
 - 分类关系闭环只能通过 category writer + relation command/repository 的同一事务完成；提交后只发布 changed-case 进程镜像增量。禁止恢复写后 callback、页面通知、第二条 metadata writer 或事务外补偿。
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
 - 单 case active relation 读取必须走显式窄 I/O；禁止 adapter fallback 先复制全局 snapshot 再筛 case，禁止为只读校验加载该 case 全部 history。

@@ -48,6 +48,12 @@ class BatchAccountingApiRoutes:
     def submit(self, payload: dict[str, Any], *, session: OARequestSession) -> tuple[HTTPStatus, dict[str, Any]]:
         actor = self._actor(payload, session)
         year = str(payload.get("year") or "")
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "batch_accounting_idempotency_key_required",
+                "message": "idempotency_key is required.",
+            }
         try:
             result = self._service_factory().submit(
                 year=year,
@@ -60,6 +66,7 @@ class BatchAccountingApiRoutes:
                 expected_tag_selection_version=self._optional_int(
                     payload.get("expected_tag_selection_version")
                 ),
+                idempotency_key=idempotency_key,
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
@@ -112,12 +119,19 @@ class BatchAccountingApiRoutes:
         *,
         session: OARequestSession,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            return HTTPStatus.BAD_REQUEST, {
+                "error": "batch_accounting_idempotency_key_required",
+                "message": "idempotency_key is required.",
+            }
         try:
             result = self._service_factory().withdraw(
                 relation_id=relation_id,
                 actor=self._actor(payload, session),
                 reason=str(payload.get("reason") or payload.get("note") or ""),
                 expected_version=self._optional_int(payload.get("expected_version")),
+                idempotency_key=idempotency_key,
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)

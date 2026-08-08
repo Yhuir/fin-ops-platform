@@ -35,7 +35,7 @@
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
-| Job event | runtime worker handlers | 后台处理必须可恢复 |
+| Job event | runtime worker handlers | 后台处理必须可恢复；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；活跃 processing lease 不得被并发 worker 接管。 |
 
 preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSON 解析前通过共享 mutation guard；`imported_by` 与 background job owner 只取已认证 session username，客户端 form/body 同名字段不具有身份语义。
 

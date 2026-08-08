@@ -34,6 +34,7 @@ from fin_ops_platform.app.auth import (
     tenant_id_for_session,
 )
 from fin_ops_platform.app.http_upload import MultipartBodyError, parse_multipart_body
+from fin_ops_platform.app.route_access_policy import requires_data_mutation
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
@@ -48,7 +49,6 @@ from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoute
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.routes_output_invoice_collections import OutputInvoiceCollectionApiRoutes
 from fin_ops_platform.app.routes_pending_invoices import PendingInvoiceApiRoutes, PendingInvoiceExportFile
-from fin_ops_platform.app.route_access_policy import requires_data_mutation
 from fin_ops_platform.app.routes_settings import SettingsApiRoutes
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_turnover_ledger import (
@@ -69,10 +69,6 @@ from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
     AppSettingsValidationError,
-)
-from fin_ops_platform.services.oa_draft_prefill import (
-    ETC_OA_DRAFT_PREFILL_FAMILY,
-    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
 )
 from fin_ops_platform.services.app_status_overview_service import AppStatusOverviewService
 from fin_ops_platform.services.audit import AuditTrailService
@@ -226,6 +222,10 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
+from fin_ops_platform.services.oa_draft_prefill import (
+    ETC_OA_DRAFT_PREFILL_FAMILY,
+    INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
+)
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -270,6 +270,7 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceQueryService,
     record_pending_invoice_audit,
 )
+from fin_ops_platform.services.postgres_connection import PostgresConnection
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
@@ -302,6 +303,9 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
     APP_SETTINGS_KEY,
     PostgresOpsTaxEtcRepository,
 )
+from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
+    PostgresSettingsDataResetRequestRepository,
+)
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
     LocalTaxOffsetCanonicalRepository,
     PostgresTaxOffsetCanonicalRepository,
@@ -323,11 +327,11 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.runtime_bootstrap import RuntimeRepositoryContext
 from fin_ops_platform.services.seeds import build_demo_seed
+from fin_ops_platform.services.settings_data_reset_request import SettingsDataResetRequestService
 from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetPairSnapshotPort,
     SettingsDataResetService,
 )
-from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.target_oa_applicant_token_provider import (
     OaLoginClient,
@@ -367,36 +371,13 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+from fin_ops_platform.services.workbench_amount_mismatch_exception_service import (
+    WorkbenchAmountMismatchExceptionService,
+)
 from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
     WorkbenchConfirmLinkContextRelationReadPort,
 )
 from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
-from fin_ops_platform.services.workbench_groups_page_cache import (
-    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-    build_workbench_initial_redis_cache_key,
-    build_workbench_groups_redis_cache_key_from_version,
-    is_default_workbench_initial_query,
-    workbench_groups_redis_cache_version_from_key,
-    workbench_groups_redis_ttl_seconds_from_env,
-    workbench_groups_redis_version_key,
-)
-from fin_ops_platform.services.workbench_query_freshness_service import (
-    WorkbenchQueryFreshnessService,
-)
-from fin_ops_platform.services.workbench_relation_grouping import (
-    WorkbenchRelationGroupingService,
-    WorkbenchRelationPreviewGroupingService,
-)
-from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
-from fin_ops_platform.services.workbench_write_facade import (
-    WorkbenchWriteFacade,
-    WorkbenchWriteRelationReadSnapshotPort,
-    WorkbenchWriteRelationSpecialMetadataMutationPort,
-    WorkbenchWriteResult,
-)
-from fin_ops_platform.services.workbench_amount_mismatch_exception_service import (
-    WorkbenchAmountMismatchExceptionService,
-)
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
@@ -406,6 +387,15 @@ from fin_ops_platform.services.workbench_exception_rollback_restore_service impo
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_free_matching_engine import (
     RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+)
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+    build_workbench_groups_redis_cache_key_from_version,
+    build_workbench_initial_redis_cache_key,
+    is_default_workbench_initial_query,
+    workbench_groups_redis_cache_version_from_key,
+    workbench_groups_redis_ttl_seconds_from_env,
+    workbench_groups_redis_version_key,
 )
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
@@ -425,8 +415,15 @@ from fin_ops_platform.services.workbench_pair_relation_rollback_restore_service 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_payload_relation_read_port import WorkbenchPayloadRelationReadPort
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+from fin_ops_platform.services.workbench_query_freshness_service import (
+    WorkbenchQueryFreshnessService,
+)
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
+from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
 from fin_ops_platform.services.workbench_relation_case_id_allocator import WorkbenchRelationCaseIdAllocator
 from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
     WorkbenchRelationCommandRepositoryAdapter,
@@ -439,6 +436,10 @@ from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor imp
     WorkbenchRelationDerivedLifecycleExecutor,
 )
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
+from fin_ops_platform.services.workbench_relation_grouping import (
+    WorkbenchRelationGroupingService,
+    WorkbenchRelationPreviewGroupingService,
+)
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
 from fin_ops_platform.services.workbench_relation_sql_projection import (
@@ -446,14 +447,19 @@ from fin_ops_platform.services.workbench_relation_sql_projection import (
     WorkbenchRelationSqlProjectionBuilder,
 )
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
-from fin_ops_platform.services.workbench_read_model_version import (
-    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
-)
 from fin_ops_platform.services.workbench_sql_projection import (
     MONTH_RE as WORKBENCH_SQL_MONTH_RE,
+)
+from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
+from fin_ops_platform.services.workbench_write_facade import (
+    WorkbenchWriteFacade,
+    WorkbenchWriteRelationReadSnapshotPort,
+    WorkbenchWriteRelationSpecialMetadataMutationPort,
+    WorkbenchWriteResult,
+)
 
 CASH_TURNOVER_TAG = "现金往来"
 
@@ -2985,19 +2991,16 @@ class Application:
         row.update(TurnoverLedgerApiRoutes._row_extra_fields(extra))
         return row
 
-    @staticmethod
-    def _workbench_durable_idempotency_enabled() -> bool:
-        raw_value = str(os.getenv("FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY") or "").strip().lower()
-        return raw_value in {"1", "true", "yes", "on"}
-
     def _workbench_write_idempotency_store(self, attribute_name: str, connection: object) -> object:
         idempotency_store = getattr(self, attribute_name, None)
         if idempotency_store is not None:
             return idempotency_store
-        if self._workbench_durable_idempotency_enabled():
-            idempotency_store = PostgresWorkbenchIdempotencyRepository(connection)
-        else:
-            idempotency_store = InMemoryWorkbenchIdempotencyRepository()
+        state_store = getattr(self, "_state_store", None)
+        idempotency_store = (
+            PostgresWorkbenchIdempotencyRepository(connection)
+            if isinstance(getattr(state_store, "_connection", None), PostgresConnection)
+            else InMemoryWorkbenchIdempotencyRepository()
+        )
         setattr(self, attribute_name, idempotency_store)
         return idempotency_store
 
@@ -5494,7 +5497,7 @@ class Application:
             load_json_body=self._load_json_body,
             json_response=self._json_response,
             finalize_settings_event=self._finalize_workbench_settings_event,
-            enqueue_data_reset=self._enqueue_settings_data_reset_job,
+            request_data_reset=self._request_settings_data_reset_job,
             serialize_sync_run=self._serialize_sync_run,
             serialize_data_reset_background_job=self._serialize_data_reset_background_job,
             import_job_processing_enabled=self._import_job_processing_enabled,
@@ -5506,22 +5509,44 @@ class Application:
         self._settings_api_routes = routes
         return routes
 
-    def _enqueue_settings_data_reset_job(self, job: object, action: str) -> None:
+    def _request_settings_data_reset_job(
+        self,
+        *,
+        action: str,
+        owner_user_id: str,
+        idempotency_key: str,
+        label: str,
+    ) -> tuple[object, bool]:
+        service = getattr(self, "_settings_data_reset_request_service_instance", None)
+        if isinstance(service, SettingsDataResetRequestService):
+            return service.request(
+                action=action,
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                label=label,
+            )
         queue = getattr(self._runtime_repositories, "queue_repository", None)
-        enqueue = getattr(queue, "enqueue", None)
-        if not callable(enqueue):
+        if queue is None:
             raise RuntimeError("Durable settings maintenance queue is unavailable.")
-        job_id = str(getattr(job, "job_id", "") or "").strip()
-        owner_user_id = str(getattr(job, "owner_user_id", "") or "").strip()
-        enqueue(
-            event_type=SETTINGS_DATA_RESET_REQUESTED_EVENT,
-            aggregate_type="settings_data_reset",
-            aggregate_id=job_id,
-            scope_type="settings",
-            scope_key=action,
-            dedupe_key=f"settings-data-reset:{job_id}",
-            priority="urgent",
-            payload={"job_id": job_id, "owner_user_id": owner_user_id, "action": action},
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        atomic_repository = (
+            PostgresSettingsDataResetRequestRepository(connection, queue)
+            if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres"
+            and connection is not None
+            else None
+        )
+        service = SettingsDataResetRequestService(
+            background_jobs=self._background_job_service,
+            queue_repository=queue,
+            atomic_repository=atomic_repository,
+        )
+        self._settings_data_reset_request_service_instance = service
+        return service.request(
+            action=action,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            label=label,
         )
 
     def _input_invoice_usage_oa_reverse_service(self) -> InputInvoiceUsageOaReverseService:
@@ -7581,6 +7606,8 @@ class Application:
             created_by=created_by,
             priority=priority,
         )
+        if import_job.status in {"succeeded", "failed", "canceled"}:
+            return import_job, None
         event = repository.enqueue_process_requested(
             queue_repository=queue_repository,
             import_job=import_job,

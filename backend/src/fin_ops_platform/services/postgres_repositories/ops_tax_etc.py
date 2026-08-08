@@ -1784,9 +1784,9 @@ class PostgresOpsTaxEtcRepository:
                     insert into job.background_jobs(
                         job_id, job_type, status, owner_id, visibility, source,
                         affected_months, progress, result_summary, error, retry_mode,
-                        attention, superseded_by_job_id, raw_payload
+                        attention, superseded_by_job_id, raw_payload, idempotency_key
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (job_id) do update set
                         job_type = excluded.job_type,
                         status = excluded.status,
@@ -1800,6 +1800,7 @@ class PostgresOpsTaxEtcRepository:
                         retry_mode = excluded.retry_mode,
                         attention = excluded.attention,
                         superseded_by_job_id = excluded.superseded_by_job_id,
+                        idempotency_key = excluded.idempotency_key,
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
                     """,
@@ -1807,7 +1808,7 @@ class PostgresOpsTaxEtcRepository:
                         job_id,
                         text(payload.get("job_type") or payload.get("type") or "unknown"),
                         text(payload.get("status") or "unknown"),
-                        text(payload.get("owner_id")),
+                        text(payload.get("owner_id") or payload.get("owner_user_id")),
                         text(payload.get("visibility")),
                         text(payload.get("source")),
                         text_list(payload.get("affected_months") or payload.get("months")),
@@ -1818,6 +1819,7 @@ class PostgresOpsTaxEtcRepository:
                         jsonb(payload.get("attention") if isinstance(payload.get("attention"), dict) else {}),
                         text(payload.get("superseded_by_job_id")),
                         jsonb({"normalized_payload": payload}),
+                        text(payload.get("idempotency_key")),
                     ),
                 )
 

@@ -697,6 +697,7 @@ type ConfirmLinkPayload = {
   expectedReadModelVersion: string;
   caseId?: string;
   note?: string;
+  idempotencyKey: string;
 };
 
 type WithdrawLinkPayload = {
@@ -707,6 +708,7 @@ type WithdrawLinkPayload = {
   operationType?: "withdraw_relation";
   previewId?: string;
   expectedVersions?: Record<string, unknown>;
+  idempotencyKey: string;
 };
 
 type MarkExceptionPayload = {
@@ -722,6 +724,7 @@ type CancelLinkPayload = {
   rowId: string;
   expectedReadModelVersion: string;
   comment?: string;
+  idempotencyKey: string;
 };
 
 type UpdateBankExceptionPayload = {
@@ -833,6 +836,7 @@ type ApiWorkbenchSettingsDataResetJobResponse = {
 type WorkbenchSettingsDataResetPayload = {
   action: WorkbenchSettingsDataResetAction;
   oaPassword: string;
+  idempotencyKey: string;
   onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   pollIntervalMs?: number;
 };
@@ -3181,6 +3185,7 @@ export async function resetWorkbenchSettingsData(
     body: JSON.stringify({
       action: payload.action,
       oa_password: payload.oaPassword,
+      idempotency_key: payload.idempotencyKey,
     }),
   });
   const createdJob = mapDataResetJob(createdPayload.job ?? {});
@@ -3317,11 +3322,13 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
     expected_read_model_version: string;
     case_id?: string;
     note?: string;
+    idempotency_key: string;
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
     expected_read_model_version: payload.expectedReadModelVersion,
     case_id: payload.caseId,
+    idempotency_key: payload.idempotencyKey,
   };
   if (payload.note?.trim()) {
     requestBody.note = payload.note.trim();
@@ -3334,7 +3341,9 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
   return mapWorkbenchActionResult(result);
 }
 
-export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): Promise<WorkbenchRelationPreview> {
+export async function previewWorkbenchConfirmLink(
+  payload: Omit<ConfirmLinkPayload, "idempotencyKey">,
+): Promise<WorkbenchRelationPreview> {
   const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/confirm-link/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3348,7 +3357,9 @@ export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): 
   return mapRelationPreview(result);
 }
 
-export async function previewWorkbenchWithdrawLink(payload: WithdrawLinkPayload): Promise<WorkbenchRelationPreview> {
+export async function previewWorkbenchWithdrawLink(
+  payload: Omit<WithdrawLinkPayload, "idempotencyKey">,
+): Promise<WorkbenchRelationPreview> {
   const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/withdraw-link/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3407,10 +3418,12 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
     operation_type?: "withdraw_relation";
     preview_id?: string;
     expected_versions?: Record<string, unknown>;
+    idempotency_key: string;
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
     expected_read_model_version: payload.expectedReadModelVersion,
+    idempotency_key: payload.idempotencyKey,
   };
   if (payload.note?.trim()) {
     requestBody.note = payload.note.trim();
@@ -3456,6 +3469,7 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<W
       row_id: payload.rowId,
       expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
+      idempotency_key: payload.idempotencyKey,
     }),
   });
   return mapWorkbenchActionResult(result);

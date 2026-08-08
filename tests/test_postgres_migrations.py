@@ -152,6 +152,7 @@ EXPECTED_MIGRATIONS = [
     "0136_unify_in_progress_oa_workbench_relations.sql",
     "0137_oa_attachment_identity_context_index.sql",
     "0138_operation_audit_and_financial_fact_guard.sql",
+    "0139_idempotency_and_worker_attempt_history.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -161,6 +162,7 @@ EXPECTED_TABLES = [
     "job.outbox_events",
     "job.background_jobs",
     "job.import_jobs",
+    "job.runtime_event_attempts",
     "job.workbench_matching_dirty_scopes",
     "job.read_model_dirty_scopes",
     "job.runtime_worker_heartbeats",
@@ -308,7 +310,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 139)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 140)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1442,6 +1444,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             operation_audit_sql,
             "approved_operation_audit_and_financial_fact_guard;",
         )
+        idempotency_reliability_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR / "0139_idempotency_and_worker_attempt_history.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(idempotency_reliability_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            idempotency_reliability_sql,
+            "approved_idempotency_and_worker_attempt_history;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1502,6 +1514,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
                 "audit.external_control_evidence",
                 "audit.external_control_evidence_items",
                 "app.financial_fact_corrections",
+                "job.runtime_event_attempts",
             }:
                 continue
             self.assertIn("id uuid primary key default gen_random_uuid()", body, table)

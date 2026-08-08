@@ -142,6 +142,7 @@ class BatchAccountingService:
         note: str | None = None,
         expected_version: int | None = None,
         expected_tag_selection_version: int | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         resolved_bank_year = self._validate_year(bank_year or year or "")
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
@@ -245,6 +246,7 @@ class BatchAccountingService:
                 before_relations=before_relations,
                 replace_existing=True,
                 history_operation_type="confirm_link",
+                idempotency_key=idempotency_key,
             )
         except WorkbenchRelationCommandError as exc:
             raise self._command_error(exc) from exc
@@ -271,6 +273,7 @@ class BatchAccountingService:
         actor: str,
         reason: str,
         expected_version: int | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         normalized_relation_id = self._required_id(relation_id, "relation_id")
         note = str(reason or "").strip()
@@ -298,6 +301,7 @@ class BatchAccountingService:
                 actor_id=str(actor or "").strip() or "web_finance_user",
                 reason=note,
                 history_operation_type="withdraw_link",
+                idempotency_key=idempotency_key,
             )
         except WorkbenchRelationCommandError as exc:
             raise self._command_error(exc) from exc

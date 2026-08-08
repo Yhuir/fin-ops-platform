@@ -708,17 +708,14 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workbench/actions/confirm-link",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            month: "all",
-            row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-            expected_read_model_version: "mock-workbench-generation-1",
-          }),
-        }),
-      );
+      const call = fetchMock.mock.calls.find(([input]) => fetchPath(input) === "/api/workbench/actions/confirm-link");
+      expect(call?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
+        month: "all",
+        row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+        expected_read_model_version: "mock-workbench-generation-1",
+        idempotency_key: expect.any(String),
+      });
     });
   });
 
@@ -1186,17 +1183,14 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workbench/actions/confirm-link",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            month: "all",
-            row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
-            expected_read_model_version: "mock-workbench-generation-1",
-          }),
-        }),
-      );
+      const call = fetchMock.mock.calls.find(([input]) => fetchPath(input) === "/api/workbench/actions/confirm-link");
+      expect(call?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
+        month: "all",
+        row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
+        expected_read_model_version: "mock-workbench-generation-1",
+        idempotency_key: expect.any(String),
+      });
     });
   });
 
@@ -2319,16 +2313,13 @@ describe("Workbench row selection and detail drawer", () => {
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
     await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/data-reset/jobs",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          action: "reset_bank_transactions",
-          oa_password: "correct-password",
-        }),
-      }),
-    );
+    const resetRequest = fetchMock.mock.calls.find(([url]) => url === "/api/workbench/settings/data-reset/jobs");
+    expect(resetRequest?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(String(resetRequest?.[1]?.body ?? "{}"))).toMatchObject({
+      action: "reset_bank_transactions",
+      oa_password: "correct-password",
+      idempotency_key: expect.any(String),
+    });
     expect(await screen.findByText(/正在清理 app 内部状态。 25%/)).toBeInTheDocument();
     expect(await screen.findAllByText("已完成数据重置。")).not.toHaveLength(0);
   });
@@ -2907,18 +2898,15 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workbench/actions/withdraw-link",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            month: "all",
-            row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
-            expected_read_model_version: "mock-workbench-generation-1",
-            operation_type: "withdraw_relation",
-          }),
-        }),
-      );
+      const call = fetchMock.mock.calls.find(([input]) => fetchPath(input) === "/api/workbench/actions/withdraw-link");
+      expect(call?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+      expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
+        month: "all",
+        row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+        expected_read_model_version: "mock-workbench-generation-1",
+        idempotency_key: expect.any(String),
+        operation_type: "withdraw_relation",
+      });
     });
 
     await waitFor(() => {

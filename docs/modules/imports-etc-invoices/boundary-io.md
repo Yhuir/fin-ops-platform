@@ -19,6 +19,7 @@
 - 触发 ETC reconciliation 与附件识别领域流程；普通确认不触发页面 read model lifecycle fan-out。
 - 为 ETC 票据管理页面提供导入后业务事实。
 - 后台导入 job 完成后，`result_summary` 必须返回精确 affected months；普通导入的页面 read model targets 与 operation barrier targets 为空，queued admission 阶段不得伪造 targets。
+- 相同 import idempotency key 只接受相同 request fingerprint；瞬时失败把业务 job 归还 pending 并由 durable outbox 重试，达到最大次数才终态失败。processing lease 只有超时后才能被其它 worker 接管。
 
 ### 不负责
 

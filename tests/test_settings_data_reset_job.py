@@ -79,7 +79,11 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "secret-password"}),
+                body=json.dumps({
+                    "action": RESET_BANK_TRANSACTIONS_ACTION,
+                    "oa_password": "secret-password",
+                    "idempotency_key": "reset-request-1",
+                }),
                 headers={"Authorization": "Bearer admin-token"},
             )
             payload = json.loads(response.body)
@@ -108,7 +112,11 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "secret-password"}),
+                body=json.dumps({
+                    "action": RESET_BANK_TRANSACTIONS_ACTION,
+                    "oa_password": "secret-password",
+                    "idempotency_key": "reset-request-1",
+                }),
                 headers={"Authorization": "Bearer finance-token"},
             )
             payload = json.loads(response.body)
@@ -134,7 +142,11 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "wrong-secret"}),
+                body=json.dumps({
+                    "action": RESET_BANK_TRANSACTIONS_ACTION,
+                    "oa_password": "wrong-secret",
+                    "idempotency_key": "reset-request-1",
+                }),
                 headers={"Authorization": "Bearer admin-token"},
             )
 
@@ -151,16 +163,50 @@ class SettingsDataResetJobTests(unittest.TestCase):
                 None,
             )
             app._verify_reset_oa_password = lambda _session, _password: None
-            request = json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "secret-password"})
+            first_request = json.dumps({
+                "action": RESET_BANK_TRANSACTIONS_ACTION,
+                "oa_password": "secret-password",
+                "idempotency_key": "reset-request-1",
+            })
+            second_request = json.dumps({
+                "action": RESET_BANK_TRANSACTIONS_ACTION,
+                "oa_password": "secret-password",
+                "idempotency_key": "reset-request-2",
+            })
 
             headers = {"X-User": "YNSYLP005"}
-            first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request, headers=headers)
-            second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request, headers=headers)
+            first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=first_request, headers=headers)
+            second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=second_request, headers=headers)
 
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 409)
         self.assertEqual(len(queue.events), 1)
         self.assertNotIn("secret-password", str(second.body))
+
+    def test_api_replays_same_reset_request_without_duplicate_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_local_state_application(data_dir=Path(temp_dir))
+            queue = install_durable_import_queue(app)
+            app._resolve_admin_session = lambda _headers: (
+                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
+                None,
+            )
+            app._verify_reset_oa_password = lambda _session, _password: None
+            request = json.dumps({
+                "action": RESET_BANK_TRANSACTIONS_ACTION,
+                "oa_password": "secret-password",
+                "idempotency_key": "reset-request-1",
+            })
+
+            first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
+            second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
+            first_payload = json.loads(first.body)
+            second_payload = json.loads(second.body)
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first_payload["job"]["job_id"], second_payload["job"]["job_id"])
+        self.assertEqual(len(queue.events), 1)
 
     def test_api_fails_closed_when_durable_queue_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -176,7 +222,11 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({"action": RESET_BANK_TRANSACTIONS_ACTION, "oa_password": "secret-password"}),
+                body=json.dumps({
+                    "action": RESET_BANK_TRANSACTIONS_ACTION,
+                    "oa_password": "secret-password",
+                    "idempotency_key": "reset-request-1",
+                }),
             )
             payload = json.loads(response.body)
 

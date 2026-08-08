@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+    PostgresWorkbenchIdempotencyRepository,
+)
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
     WorkbenchIdempotencyRecord,
@@ -253,33 +255,22 @@ class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
         self.assertNotIn("authorization", stored_response_payload)
         self.assertEqual(record.status, "failed")
 
-    def test_server_uses_in_memory_idempotency_repository_by_default(self) -> None:
+    def test_server_uses_durable_idempotency_repository_by_default(self) -> None:
         app = object.__new__(Application)
-        app._state_store = _PostgresStateStore(_RecordingSqlExecutor())
-        app._runtime_repositories = SimpleNamespace(queue_repository=_QueueRepository())
-
-        with patch.dict(os.environ, {"FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY": "0"}):
-            uow = Application._workbench_confirm_link_unit_of_work(app)
-
-        self.assertIsNotNone(uow)
-        self.assertIsInstance(uow._idempotency_store, InMemoryWorkbenchIdempotencyRepository)
-
-    def test_server_can_wire_durable_idempotency_repository_behind_explicit_flag(self) -> None:
-        from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
-            PostgresWorkbenchIdempotencyRepository,
+        app._state_store = _PostgresStateStore(
+            PostgresConnection(
+                PostgresSettings(
+                    database_url="postgresql://finops-test@127.0.0.1/finops-test",
+                    pool_enabled=False,
+                )
+            )
         )
-
-        app = object.__new__(Application)
-        connection = _RecordingSqlExecutor()
-        app._state_store = _PostgresStateStore(connection)
         app._runtime_repositories = SimpleNamespace(queue_repository=_QueueRepository())
 
-        with patch.dict(os.environ, {"FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY": "1"}):
-            uow = Application._workbench_confirm_link_unit_of_work(app)
+        uow = Application._workbench_confirm_link_unit_of_work(app)
 
         self.assertIsNotNone(uow)
         self.assertIsInstance(uow._idempotency_store, PostgresWorkbenchIdempotencyRepository)
-
 
 if __name__ == "__main__":
     unittest.main()

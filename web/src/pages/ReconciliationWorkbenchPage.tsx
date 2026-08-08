@@ -86,6 +86,7 @@ type RelationPreviewDialogState = {
   preview: WorkbenchRelationPreview;
   rowIds: string[];
   caseId?: string;
+  idempotencyKey: string;
 };
 
 type RelationPreviewRequestKind = "confirm" | "withdraw";
@@ -2017,6 +2018,7 @@ export default function ReconciliationWorkbenchPage() {
         preview,
         rowIds,
         caseId: kind === "withdraw" ? resolveSelectedCaseId(rows) : undefined,
+        idempotencyKey: crypto.randomUUID(),
       });
     } finally {
       if (relationPreviewRequestKindRef.current === kind) {
@@ -2041,7 +2043,7 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       throw new Error("当前状态不允许执行写操作。");
     }
-    const { preview, rowIds, caseId } = relationPreviewDialog;
+    const { preview, rowIds, caseId, idempotencyKey } = relationPreviewDialog;
     if (preview.operation === "confirm_link") {
       let submittedResult: WorkbenchActionResult | null = null;
       const message = await executeWorkbenchActionWithFreshness({
@@ -2054,6 +2056,7 @@ export default function ReconciliationWorkbenchPage() {
             expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             caseId,
             note,
+            idempotencyKey,
           });
           submittedResult = result;
           return result;
@@ -2089,6 +2092,7 @@ export default function ReconciliationWorkbenchPage() {
           operationType: "withdraw_relation",
           previewId: preview.previewId,
           expectedVersions: preview.submitExpectedVersions,
+          idempotencyKey,
         });
         submittedResult = result;
         return result;

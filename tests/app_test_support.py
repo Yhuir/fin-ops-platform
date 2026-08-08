@@ -349,6 +349,7 @@ class DurableImportQueueHarness:
             import_session_id=str(kwargs.get("import_session_id") or "") or None,
             source_file_id=str(kwargs.get("source_file_id") or "") or None,
             idempotency_key=idempotency_key or None,
+            request_fingerprint=None,
             status="pending",
             stage="queued",
             priority=str(kwargs.get("priority") or "normal"),

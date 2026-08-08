@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection
@@ -15,6 +17,10 @@ class ImportJobDataError(ValueError):
     pass
 
 
+class ImportJobIdempotencyConflict(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ImportJob:
     import_job_id: str
@@ -23,6 +29,7 @@ class ImportJob:
     import_session_id: str | None
     source_file_id: str | None
     idempotency_key: str | None
+    request_fingerprint: str | None
     status: str
     stage: str
     priority: str
@@ -66,6 +73,13 @@ class ImportJobRepository:
         normalized_payload = _normalize_payload(payload, "payload")
         normalized_raw_payload = _normalize_payload(raw_payload, "raw_payload")
         normalized_idempotency_key = _optional_text(idempotency_key)
+        request_fingerprint = _import_request_fingerprint(
+            tenant_id=normalized_tenant_id,
+            import_type=normalized_import_type,
+            import_session_id=_optional_text(import_session_id),
+            source_file_id=_optional_text(source_file_id),
+            payload=normalized_payload,
+        )
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(
                 """
@@ -75,6 +89,7 @@ class ImportJobRepository:
                     import_session_id,
                     source_file_id,
                     idempotency_key,
+                    request_fingerprint,
                     status,
                     stage,
                     priority,
@@ -85,59 +100,26 @@ class ImportJobRepository:
                     trace_id,
                     available_at
                 )
-                values (%s, %s, %s, %s, %s, 'pending', 'queued', %s, %s, %s, %s, %s, %s, coalesce(%s, now()))
+                values (%s, %s, %s, %s, %s, %s, 'pending', 'queued', %s, %s, %s, %s, %s, %s, coalesce(%s, now()))
                 on conflict (tenant_id, idempotency_key)
                 where idempotency_key is not null
                 do update set
-                    status = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then 'pending'
-                        else job.import_jobs.status
-                    end,
-                    stage = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then 'queued'
-                        else job.import_jobs.stage
-                    end,
+                    request_fingerprint = coalesce(job.import_jobs.request_fingerprint, excluded.request_fingerprint),
                     payload = case
-                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.payload
+                        when job.import_jobs.status = 'pending' then excluded.payload
                         else job.import_jobs.payload
                     end,
                     raw_payload = case
-                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.raw_payload
+                        when job.import_jobs.status = 'pending' then excluded.raw_payload
                         else job.import_jobs.raw_payload
                     end,
                     created_by = case
-                        when job.import_jobs.status in ('pending', 'failed', 'dead_lettered') then excluded.created_by
+                        when job.import_jobs.status = 'pending' then excluded.created_by
                         else job.import_jobs.created_by
                     end,
-                    attempt_count = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then 0
-                        else job.import_jobs.attempt_count
-                    end,
-                    last_error = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
-                        else job.import_jobs.last_error
-                    end,
-                    result_payload = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then '{}'::jsonb
-                        else job.import_jobs.result_payload
-                    end,
-                    available_at = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then excluded.available_at
-                        else job.import_jobs.available_at
-                    end,
-                    locked_by = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
-                        else job.import_jobs.locked_by
-                    end,
-                    locked_at = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
-                        else job.import_jobs.locked_at
-                    end,
-                    finished_at = case
-                        when job.import_jobs.status in ('failed', 'dead_lettered') then null
-                        else job.import_jobs.finished_at
-                    end,
                     updated_at = now()
+                where job.import_jobs.request_fingerprint is null
+                   or job.import_jobs.request_fingerprint = excluded.request_fingerprint
                 returning
                     id::text as import_job_id,
                     tenant_id,
@@ -145,6 +127,7 @@ class ImportJobRepository:
                     import_session_id,
                     source_file_id,
                     idempotency_key,
+                    request_fingerprint,
                     status,
                     stage,
                     priority,
@@ -163,6 +146,7 @@ class ImportJobRepository:
                     _optional_text(import_session_id),
                     _optional_text(source_file_id),
                     normalized_idempotency_key,
+                    request_fingerprint,
                     normalized_priority,
                     normalized_max_attempts,
                     self._json_param(normalized_payload),
@@ -173,7 +157,7 @@ class ImportJobRepository:
                 ),
             )
         if row is None:
-            raise RuntimeError("Import job create_or_get_job did not return a row.")
+            raise ImportJobIdempotencyConflict("The same import idempotency key was used for a different request.")
         return _job_from_row(row)
 
     def get_job(self, import_job_id: str) -> ImportJob | None:
@@ -188,6 +172,7 @@ class ImportJobRepository:
                     import_session_id,
                     source_file_id,
                     idempotency_key,
+                    request_fingerprint,
                     status,
                     stage,
                     priority,
@@ -206,7 +191,14 @@ class ImportJobRepository:
             )
         return _job_from_row(row) if row is not None else None
 
-    def mark_processing(self, import_job_id: str, *, worker_id: str, stage: str = "processing") -> ImportJob | None:
+    def mark_processing(
+        self,
+        import_job_id: str,
+        *,
+        worker_id: str,
+        stage: str = "processing",
+        lock_timeout_seconds: int = 300,
+    ) -> ImportJob | None:
         normalized_id = _required_text(import_job_id, "import_job_id")
         normalized_worker_id = _required_text(worker_id, "worker_id")
         normalized_stage = _optional_text(stage) or "processing"
@@ -224,8 +216,13 @@ class ImportJobRepository:
                     last_error = null,
                     updated_at = now()
                 where id = %s
-                  and status in ('pending', 'processing')
-                  and available_at <= now()
+                  and (
+                      (status = 'pending' and available_at <= now())
+                      or (
+                          status = 'processing'
+                          and locked_at < now() - (%s * interval '1 second')
+                      )
+                  )
                 returning
                     id::text as import_job_id,
                     tenant_id,
@@ -233,6 +230,7 @@ class ImportJobRepository:
                     import_session_id,
                     source_file_id,
                     idempotency_key,
+                    request_fingerprint,
                     status,
                     stage,
                     priority,
@@ -245,9 +243,40 @@ class ImportJobRepository:
                     created_by,
                     trace_id
                 """,
-                (normalized_stage, normalized_worker_id, normalized_id),
+                (normalized_stage, normalized_worker_id, normalized_id, max(1, int(lock_timeout_seconds))),
             )
         return _job_from_row(row) if row is not None else None
+
+    def mark_retryable(
+        self,
+        import_job_id: str,
+        *,
+        worker_id: str,
+        error: str,
+        stage: str = "retry_pending",
+    ) -> bool:
+        normalized_id = _required_text(import_job_id, "import_job_id")
+        normalized_worker_id = _required_text(worker_id, "worker_id")
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                update job.import_jobs
+                set
+                    status = 'pending',
+                    stage = %s,
+                    last_error = %s,
+                    available_at = now(),
+                    locked_by = null,
+                    locked_at = null,
+                    updated_at = now()
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                returning id
+                """,
+                (_optional_text(stage) or "retry_pending", _required_text(error, "error"), normalized_id, normalized_worker_id),
+            )
+        return row is not None
 
     def mark_succeeded(
         self,
@@ -408,13 +437,20 @@ class ImportJobWorker:
             processor_result = processor(job)
         except Exception as exc:
             error = str(exc) or exc.__class__.__name__
-            self._repository.mark_failed(
-                job.import_job_id,
-                worker_id=self._worker_id,
-                error=error,
-                result_payload={"error_code": "processor_failed"},
-                stage="processor_failed",
-            )
+            if event.attempts >= job.max_attempts:
+                self._repository.mark_failed(
+                    job.import_job_id,
+                    worker_id=self._worker_id,
+                    error=error,
+                    result_payload={"error_code": "processor_failed"},
+                    stage="processor_failed",
+                )
+            else:
+                self._repository.mark_retryable(
+                    job.import_job_id,
+                    worker_id=self._worker_id,
+                    error=error,
+                )
             raise
 
         result_payload = dict(processor_result) if isinstance(processor_result, dict) else {}
@@ -440,6 +476,7 @@ def _job_from_row(row: dict[str, Any]) -> ImportJob:
         import_session_id=_optional_text(row.get("import_session_id")),
         source_file_id=_optional_text(row.get("source_file_id")),
         idempotency_key=_optional_text(row.get("idempotency_key")),
+        request_fingerprint=_optional_text(row.get("request_fingerprint")),
         status=str(row["status"]),
         stage=str(row["stage"]),
         priority=_normalize_priority(row.get("priority") or "normal"),
@@ -460,6 +497,31 @@ def _normalize_payload(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ImportJobDataError(f"{name} must be a JSON object.")
     return value
+
+
+def _import_request_fingerprint(
+    *,
+    tenant_id: str,
+    import_type: str,
+    import_session_id: str | None,
+    source_file_id: str | None,
+    payload: dict[str, Any],
+) -> str:
+    business_payload = {key: value for key, value in payload.items() if key != "background_job_id"}
+    encoded = json.dumps(
+        {
+            "tenant_id": tenant_id,
+            "import_type": import_type,
+            "import_session_id": import_session_id,
+            "source_file_id": source_file_id,
+            "payload": business_payload,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _required_text(value: Any, name: str) -> str:

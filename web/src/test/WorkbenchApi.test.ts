@@ -435,6 +435,7 @@ describe("workbench api bank amount mapping", () => {
       rowIds: ["oa-partial", "bank-partial"],
       expectedReadModelVersion: "generation-set-1",
       caseId: "CASE-PARTIAL",
+      idempotencyKey: "confirm-partial-1",
     });
 
     expect(result.operationProjection?.after.pairedGroups).toHaveLength(1);
@@ -486,6 +487,7 @@ describe("workbench api bank amount mapping", () => {
       rowIds: ["bank-only", "invoice-only"],
       expectedReadModelVersion: "generation-set-1",
       caseId: "CASE-TWO-PANE",
+      idempotencyKey: "confirm-two-pane-1",
     });
 
     expect(result.operationProjection?.after.pairedGroups).toEqual([]);

@@ -116,6 +116,44 @@ class BackgroundJobService:
         affected_scopes: list[str] | None = None,
         affected_months: list[str] | None = None,
     ) -> BackgroundJob:
+        job = self.build_job(
+            job_type=job_type,
+            label=label,
+            owner_user_id=owner_user_id,
+            visibility=visibility,
+            phase=phase,
+            current=current,
+            total=total,
+            message=message,
+            result_summary=result_summary,
+            idempotency_key=idempotency_key,
+            source=source,
+            affected_scopes=affected_scopes,
+            affected_months=affected_months,
+        )
+        with self._lock:
+            jobs = self._load_jobs()
+            jobs[job.job_id] = job.to_payload()
+            self._save_jobs(jobs)
+        return job
+
+    def build_job(
+        self,
+        *,
+        job_type: str,
+        label: str,
+        owner_user_id: str,
+        visibility: str = "owner",
+        phase: str = "queued",
+        current: int = 0,
+        total: int = 0,
+        message: str | None = None,
+        result_summary: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+        source: dict[str, object] | None = None,
+        affected_scopes: list[str] | None = None,
+        affected_months: list[str] | None = None,
+    ) -> BackgroundJob:
         now = self._now()
         safe_current, safe_total, percent = self._normalize_progress(current, total)
         job = BackgroundJob(
@@ -146,11 +184,11 @@ class BackgroundJobService:
             superseded_at=None,
         )
         job.short_label = self._build_short_label(job)
-        with self._lock:
-            jobs = self._load_jobs()
-            jobs[job.job_id] = job.to_payload()
-            self._save_jobs(jobs)
         return job
+
+    @classmethod
+    def job_from_payload(cls, payload: dict[str, object]) -> BackgroundJob:
+        return cls._job_from_payload(payload)
 
     def create_or_get_idempotent_job(
         self,

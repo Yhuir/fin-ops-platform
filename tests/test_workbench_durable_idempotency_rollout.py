@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
     PostgresWorkbenchIdempotencyRepository,
 )
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
-
 
 DOC_PATH = Path("docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md")
 
@@ -33,7 +31,12 @@ class _QueueRepository:
 
 def _new_application(connection: object | None = None) -> Application:
     app = object.__new__(Application)
-    app._state_store = _PostgresStateStore(connection or _Connection())
+    app._state_store = _PostgresStateStore(
+        connection
+        or PostgresConnection(
+            PostgresSettings(database_url="postgresql://finops-test@127.0.0.1/finops-test", pool_enabled=False)
+        )
+    )
     app._runtime_repositories = SimpleNamespace(queue_repository=_QueueRepository())
     return app
 
@@ -46,12 +49,8 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
         for token in (
             "Rollout Readiness Matrix",
             "ready",
-            "blocked",
             "documented-risk",
-            "future-test-needed",
-            "FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY",
-            "default-off safety",
-            "opt-in feature flag wiring",
+            "production-always-on",
             "transaction-bound reserve/commit",
             "committed replay",
             "same-key different-fingerprint conflict",
@@ -63,36 +62,30 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
         ):
             self.assertIn(token, text)
 
-    def test_feature_flag_remains_default_off_and_opt_in_only(self) -> None:
+    def test_postgres_runtime_always_uses_durable_idempotency(self) -> None:
         app = _new_application()
-        with patch.dict(os.environ, {"FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY": ""}, clear=False):
-            default_uow = Application._workbench_confirm_link_unit_of_work(app)
+        uow = Application._workbench_confirm_link_unit_of_work(app)
 
-        self.assertIsNotNone(default_uow)
-        self.assertIsInstance(default_uow._idempotency_store, InMemoryWorkbenchIdempotencyRepository)
+        self.assertIsNotNone(uow)
+        self.assertIsInstance(uow._idempotency_store, PostgresWorkbenchIdempotencyRepository)
 
-        enabled_app = _new_application()
-        with patch.dict(os.environ, {"FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY": "1"}, clear=False):
-            enabled_uow = Application._workbench_confirm_link_unit_of_work(enabled_app)
+    def test_local_test_runtime_keeps_explicit_in_memory_adapter(self) -> None:
+        app = object.__new__(Application)
+        app._state_store = SimpleNamespace(storage_backend="local")
 
-        self.assertIsNotNone(enabled_uow)
-        self.assertIsInstance(enabled_uow._idempotency_store, PostgresWorkbenchIdempotencyRepository)
+        store = Application._workbench_write_idempotency_store(app, "_test_idempotency_store", _Connection())
 
-    def test_readiness_document_keeps_remaining_target_contracts_as_blockers(self) -> None:
-        self.assertTrue(DOC_PATH.exists(), "PF-P040 must document blockers before durable idempotency can be enabled.")
+        self.assertIsInstance(store, InMemoryWorkbenchIdempotencyRepository)
+
+    def test_readiness_document_keeps_remaining_operational_risks_explicit(self) -> None:
+        self.assertTrue(DOC_PATH.exists())
 
         text = DOC_PATH.read_text(encoding="utf-8")
-        for blocker in (
-            "real PostgreSQL row-lock concurrency",
-            "actor/tenant auth context",
-        ):
-            with self.subTest(blocker=blocker):
-                self.assertIn(blocker, text)
+        self.assertIn("PostgreSQL integration", text)
         self.assertIn("| reserved/in-progress duplicate policy | ready |", text)
         self.assertIn("| expired reserved takeover | ready |", text)
         self.assertIn("| failed reservation policy | ready |", text)
         self.assertIn("cleanup/retention", text)
-        self.assertIn("Feature flag must remain off", text)
 
 
 if __name__ == "__main__":

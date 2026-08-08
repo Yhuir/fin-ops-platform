@@ -40,8 +40,9 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 - App 负责：通过 `RuntimeQueueRepository` 写入 `job.outbox_events`、`job.read_model_dirty_scopes`，
   接收 worker heartbeat，并在 `/health` 与 App Health 中暴露 missing/stale/mismatch/backlog。
 - file import confirm 必须先写 `job.import_jobs` 再通过同一 repository/gateway 写 `import.process.requested` outbox；`FIN_OPS_IMPORT_PROCESSING_BACKEND` 只允许 `postgres` 或 `rabbitmq`。PostgreSQL polling 是 durable 基线，RabbitMQ 只是 wakeup；API 进程不得 inline confirm，queue/repository 缺失必须 `503` fail closed。
+- import job 的幂等身份由业务请求 fingerprint 约束：同一 key 只能重放同一请求，不能覆盖 payload、复活 failed job 或并发抢占仍有效的 processing lease。瞬时失败在 outbox 重试预算内回到 pending；达到预算才进入 terminal failed，避免 outbox 重试被已失败 job 提前 ACK。
 - ETC invoice confirm 遵循同一 durable 基线，但 preview 还必须先登记 `app.etc_import_sessions`、session files 和 verified file objects。独立 worker 从 session 重载 ZIP；Web 进程内存、inline `run_job` 和先改 task 再 enqueue 都不是允许的生产路径。
-- Settings data reset 通过 required `settings-maintenance` worker 消费 `settings.data_reset.requested`。API 只做 admin/OA 密码复核、创建 durable job 和入队；event/job/source/log 不得包含密码。worker 启动时显式执行 background-job/ETC interrupted-state recovery，API 构造期不执行 recovery、historical reconcile 或 stale scan。destructive reset 进入 `running` 后若进程中断，不自动重放，必须由管理员核对后重新发起。
+- Settings data reset 通过 required `settings-maintenance` worker 消费 `settings.data_reset.requested`。API 只做 admin/OA 密码复核，并以稳定 idempotency key 在同一 PostgreSQL 事务内创建 durable job 和 outbox event；任一步失败必须整体回滚，event/job/source/log 不得包含密码。worker 启动时显式执行 background-job/ETC interrupted-state recovery，API 构造期不执行 recovery、historical reconcile 或 stale scan。destructive reset 进入 `running` 后若进程中断，不自动重放，必须由管理员核对后重新发起。
 - Reset 完成后 maintenance worker 读取 root-owned runtime env 中的 `FIN_OPS_HTTP_PIDFILE`，校验同用户 Gunicorn master 后发送 `SIGHUP`，让 API worker graceful reload 进程内状态。pidfile 缺失、owner/命令不匹配或信号失败时 reset job 标为 failed/partial，不能伪报完整闭环。
 - systemd 负责：启动、停止、重启 worker 进程，保持进程常驻。
 - deploy helper 负责：从 registry 生成 required worker 矩阵，安装 env，执行 `--check`，重启
@@ -67,6 +68,7 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 - PostgreSQL durable queue worker 的空轮询 heartbeat 必须节流。`idle` 只证明 worker 存活和当前无可 claim event，
   不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
   必须即时写入，保证 App Health 和故障定位不丢关键状态。
+- 每次 durable event claim 都由数据库触发器写入 `job.runtime_event_attempts`，并在同一 queue 状态事务中闭合为 succeeded、retry_scheduled、failed、dead_lettered、released、deferred 或 lease_expired。该表是执行历史事实源；运维不得通过日志推测或直接改表伪造 attempt 结果。
 - 同一 event type 确有当前吞吐隔离需求时，只允许使用 worker registry / worker env 暴露的 claim scope include/exclude；当前没有并行 read-model lane。scope policy 仍是 read model contract 的事实源，queue 层只做 claim，不承载业务 scope 校验。
 - `job.outbox_events` active queue claim hot path 必须保留 `outbox_events_claim_event_type_priority_idx`。
   该索引按 `event_type/status/priority rank/available_at/created_at/id` 支撑 worker lane claim，减少 grouped read model smoke

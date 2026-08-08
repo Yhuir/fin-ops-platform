@@ -672,9 +672,11 @@ class BatchAccountingServiceTests(unittest.TestCase):
             actor="finance-user",
             reason="更正",
             expected_version=3,
+            idempotency_key="batch-withdraw-1",
         )
         self.assertTrue(result["success"])
         self.assertEqual(command.cancel_calls[0]["history_operation_type"], "withdraw_link")
+        self.assertEqual(command.cancel_calls[0]["idempotency_key"], "batch-withdraw-1")
         self.assertEqual(result["affected_scope_keys"], ["2026-01"])
 
     def test_missing_query_or_command_dependency_fails_closed(self) -> None:
@@ -764,6 +766,7 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
                 "bank_year": "2026",
                 "bank_row_id": BANK_ROW_ID,
                 "oa_row_ids": [OA_ROW_ID],
+                "idempotency_key": "batch-submit-conflict-1",
             },
             session=self._session(),
         )
@@ -784,11 +787,13 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
                 "bank_year": "2026",
                 "bank_row_id": BANK_ROW_ID,
                 "oa_row_ids": [OA_ROW_ID],
+                "idempotency_key": "batch-submit-1",
             },
             session=self._session(),
         )
 
         self.assertEqual(status, 200)
+        self.assertEqual(command.confirm_calls[0]["idempotency_key"], "batch-submit-1")
         self.assertEqual(payload["affected_months"], ["2026-01"])
         for old_field in (
             "read_model_status",
@@ -798,6 +803,24 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
             "operation_barrier_targets",
         ):
             self.assertNotIn(old_field, payload)
+
+    def test_mutation_routes_require_idempotency_keys(self) -> None:
+        routes = BatchAccountingApiRoutes(lambda: service())
+
+        submit_status, submit_payload = routes.submit(
+            {"bank_year": "2026", "bank_row_id": BANK_ROW_ID, "oa_row_ids": [OA_ROW_ID]},
+            session=self._session(),
+        )
+        withdraw_status, withdraw_payload = routes.withdraw(
+            RELATION_ID,
+            {"expected_version": 1, "reason": "更正"},
+            session=self._session(),
+        )
+
+        self.assertEqual(submit_status, 400)
+        self.assertEqual(submit_payload["error"], "batch_accounting_idempotency_key_required")
+        self.assertEqual(withdraw_status, 400)
+        self.assertEqual(withdraw_payload["error"], "batch_accounting_idempotency_key_required")
 
     def test_read_export_only_session_cannot_submit_or_update_tag_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

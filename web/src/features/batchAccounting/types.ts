@@ -107,6 +107,7 @@ export type SubmitBatchAccountingRequest = {
   expectedVersion?: number | null;
   expectedTagSelectionVersion?: number | null;
   note?: string;
+  idempotencyKey: string;
   signal?: AbortSignal;
 };
 
@@ -120,6 +121,7 @@ export type WithdrawBatchAccountingRequest = {
   relationId: string;
   expectedVersion?: number | null;
   reason: string;
+  idempotencyKey: string;
   signal?: AbortSignal;
 };
 

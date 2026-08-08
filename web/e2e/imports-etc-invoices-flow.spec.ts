@@ -230,7 +230,10 @@ test.describe("ETC invoice import browser flow", () => {
     expect(etcBatchPayload?.items).toHaveLength(1);
     const importedBatchRow = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(importedBatchRow).toBeVisible();
-    await expect(importedBatchRow).toContainText("ETC-E2E-2026-03");
+    await expect(importedBatchRow).toContainText("2026-06-17 09:00");
+    await expect(importedBatchRow).toContainText("已导入");
+    await expect(importedBatchRow).toContainText("2 张 · 32.26 元");
+    await expect(importedBatchRow).not.toContainText("ETC-E2E-2026-03");
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 

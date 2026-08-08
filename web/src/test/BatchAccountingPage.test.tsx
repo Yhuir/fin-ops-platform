@@ -368,6 +368,15 @@ function lastSubmitBody(fetchMock: ReturnType<typeof installFetchMock>) {
   return JSON.parse(String(submitCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
 }
 
+function lastWithdrawBody(fetchMock: ReturnType<typeof installFetchMock>) {
+  const withdrawCall = fetchMock.mock.calls.find(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/batch-accounting/CASE-202602-001/withdraw";
+  });
+  expect(withdrawCall).toBeTruthy();
+  return JSON.parse(String(withdrawCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -745,20 +754,15 @@ describe("BatchAccountingPage", () => {
       await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
       await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/batch-accounting/submit",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({
-              bank_year: "2026",
-              bank_row_id: "bank-row-001",
-              oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
-              expected_version: 1,
-              expected_tag_selection_version: 3,
-              note: "",
-            }),
-          }),
-        );
+        expect(lastSubmitBody(fetchMock)).toMatchObject({
+          bank_year: "2026",
+          bank_row_id: "bank-row-001",
+          oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
+          expected_version: 1,
+          expected_tag_selection_version: 3,
+          note: "",
+          idempotency_key: expect.any(String),
+        });
       });
     expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
   });
@@ -917,20 +921,15 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/batch-accounting/submit",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            bank_year: "2026",
-            bank_row_id: "bank-row-001",
-            oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
-            expected_version: 1,
-            expected_tag_selection_version: 3,
-            note: "",
-          }),
-        }),
-      );
+      expect(lastSubmitBody(fetchMock)).toMatchObject({
+        bank_year: "2026",
+        bank_row_id: "bank-row-001",
+        oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
+        expected_version: 1,
+        expected_tag_selection_version: 3,
+        note: "",
+        idempotency_key: expect.any(String),
+      });
     });
   });
 
@@ -1029,13 +1028,11 @@ describe("BatchAccountingPage", () => {
       await user.click(screen.getByRole("button", { name: "确认撤回" }));
 
       await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith(
-          "/api/batch-accounting/CASE-202602-001/withdraw",
-          expect.objectContaining({
-            method: "POST",
-            body: JSON.stringify({ expected_version: 2, reason: "选择错误" }),
-          }),
-        );
+        expect(lastWithdrawBody(fetchMock)).toMatchObject({
+          expected_version: 2,
+          reason: "选择错误",
+          idempotency_key: expect.any(String),
+        });
       });
     expect(await screen.findByText("已撤回批量账务关联。")).toBeInTheDocument();
   });
