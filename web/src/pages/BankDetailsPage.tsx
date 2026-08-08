@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
+  Button,
   Chip,
   ListBox,
   ListBoxItem,
@@ -10,7 +11,7 @@ import {
   PopoverRoot,
   PopoverTrigger,
 } from "@heroui/react";
-import { CalendarDays, Filter, Tags } from "lucide-react";
+import { CalendarDays, Filter, RefreshCw, Tags } from "lucide-react";
 
 import {
   FinanceTable,
@@ -1554,18 +1555,6 @@ export default function BankDetailsPage() {
     }
   }, [applyCategorySnapshotPayload]);
 
-  const refreshAutoTagRules = useCallback(() => {
-    fetchBankAutoTagRules()
-      .then((payload) => {
-        setActiveAutoTagRules(payload.activeRules);
-      })
-      .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
-          setError(caught instanceof Error ? caught.message : "自动标签规则加载失败。");
-        }
-      });
-  }, []);
-
   useEffect(() => {
     if (!active) {
       return undefined;
@@ -1602,7 +1591,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [activationGeneration, active, dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
+  }, [activationGeneration, active, dateFilter.dateFrom, dateFilter.dateTo, refreshToken, setSelectedAccountKey]);
 
   useEffect(() => {
     if (!active) {
@@ -1619,7 +1608,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [active, activationGeneration]);
+  }, [active, activationGeneration, refreshToken]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2178,6 +2167,18 @@ export default function BankDetailsPage() {
         <div className="page-title-row">
           <h1 className="page-title">银行明细</h1>
           {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
+        </div>
+        <div className="page-header-actions">
+          <Button
+            aria-label="刷新银行明细"
+            isDisabled={loading || rowLoading}
+            onPress={() => setRefreshToken((current) => current + 1)}
+            size="sm"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            刷新
+          </Button>
         </div>
       </header>
       <div className="bank-details-workbench">

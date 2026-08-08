@@ -16,7 +16,6 @@ import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
   fetchBankFlowRuleBatches,
-  resetSubmittedBankFlowRuleBatches,
   saveBankFlowRuleBatchTagSelection,
   submitBankFlowRuleBatch,
   submitBankFlowRuleBatchSelection,
@@ -591,36 +590,6 @@ export default function BankFlowRuleBatchPage() {
     }
   };
 
-  const handleResetSubmitted = async () => {
-    if (!canMutateData || mutating) {
-      return;
-    }
-    const result = await runOperation({
-      loadingMessage: "正在重置已提交流水规则批次...",
-      action: async ({ setMessage }) => {
-        setMutating(true);
-        try {
-          const resetResult = await resetSubmittedBankFlowRuleBatches({
-            reason: "流水规则批量处理：全部已提交批次重新过规则",
-          });
-          setBucket("unsubmitted");
-          setBatchPage(1);
-          setMessage("正在加载未提交批次最新数据...");
-          await reloadBatchesAfterMutation({ bucket: "unsubmitted", page: 1 });
-          return resetResult;
-        } finally {
-          setMutating(false);
-        }
-      },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "重置已提交批次失败",
-    });
-    if (result.status === "success") {
-      handleMutationComplete(`已重置 ${result.value.results.length} 个已提交批次`);
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "重置已提交批次失败" });
-    }
-  };
-
   const saveTagSelection = async () => {
     if (!canMutateData || tagLoading || mutating) {
       return;
@@ -809,16 +778,6 @@ export default function BankFlowRuleBatchPage() {
             onClick={handleSubmitSelected}
           >
             提交批次
-          </button>
-        ) : null}
-        {canMutateData && payload.summary.submittedCount > 0 ? (
-          <button
-            className="bank-flow-rule-batches-button"
-            disabled={mutating}
-            type="button"
-            onClick={handleResetSubmitted}
-          >
-            重置全部已提交
           </button>
         ) : null}
           {selectedTransactionIds.size > 0 ? (

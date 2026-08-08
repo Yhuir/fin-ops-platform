@@ -19,6 +19,7 @@
 - 自动标签规则展示、CAS 保存、文件替换、reapply 审计。
 - 候选确认/撤销、人工分类覆盖/清除的 canonical category fact、event 和 audit；人工覆盖原子替换旧 active category/confirmation，并在所有消费端优先于当前自动规则；有效标签变化时，同一事务通过正式 relation command/repository 重冻结受影响 active 普通关系的配对要求。
 - 当前页面写成功后的一次 direct GET 重新读取。
+- 页面头部手动刷新重新读取账户、自动标签规则和当前筛选流水；不执行浏览器 reload，不触发其它页面或 read model I/O。
 
 ### 不负责
 
@@ -52,6 +53,7 @@
 | 分类/规则写响应 | 当前页面 | 保留 `changed`、`affected_months`、version、error/message 等业务字段；不返回 freshness target、refresh job、operation barrier 或 202 refreshing envelope。 |
 | relation requirement delta | workbench-relations owner | 仅 changed case 的 canonical metadata/history；数据库提交后才发布同 case 进程镜像增量。失败整体回滚，不发页面通知、不写 dirty/outbox。 |
 | 写后重读 | 当前页面 | 成功后只触发一次当前 query GET；不轮询、不等待 worker、不触发页面 RM fan-out。 |
+| 页面手动刷新 | 当前页面 | 并发重新读取账户、自动标签规则和当前筛选流水；保留页面筛选条件，不写 canonical facts。 |
 
 金额和余额的页面文本统一为无千分位两位小数；keyword 搜索直接包含 canonical 金额/余额文本，不生成分组格式的重复搜索值。
 

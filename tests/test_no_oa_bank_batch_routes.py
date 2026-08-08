@@ -80,22 +80,6 @@ class FakeNoOaApplicationService:
             "affected_months": ["2026-05"],
         }
 
-    def reset_submitted_bank_flow_rule_batches(self, *, actor, reason):
-        self.calls.append(
-            (
-                "reset_submitted_bank_flow_rule_batches",
-                {
-                    "actor": actor,
-                    "reason": reason,
-                },
-            )
-        )
-        return {
-            "summary": {"reset_count": 2, "batch_count": 2, "row_count": 4, "affected_months": ["2026-05"]},
-            "affected_months": ["2026-05"],
-            "results": [{"batch_id": "batch-001", "status": "withdrawn"}],
-        }
-
     def persist_mutation(self, *, changed_case_ids, changed_scope_keys):
         self.calls.append(
             (

@@ -148,12 +148,11 @@
 
 ## 2026-07-01 Read model / 操作 API 性能收敛
 
-目标：降低流水规则批量处理页面常用操作耗时，移除 detail/withdraw/reset 中可避免的 `all` scope 同步刷新，并让 bank-flow worker 使用专属 source-version summary 跳过 unchanged scope。
+目标：降低流水规则批量处理页面常用操作耗时，移除 detail/withdraw 中可避免的 `all` scope 同步刷新，并让 bank-flow worker 使用专属 source-version summary 跳过 unchanged scope。
 
 关键决策：
 
 - `detail_payload(batch_id)` 和 `withdraw_batch(batch_id)` 先读取当前 bank-flow batch storage；只有 batch 缺失时才 fallback `scope_key=all` runtime snapshot refresh。
-- `reset_submitted_bank_flow_rule_batches()` 不再做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - `unchanged_read_model_scope_result(...)` 按 relation mode 选择 `bank_flow_rule_batch_source_versions_summary(...)` 或 no-OA summary；worker 对 bank-flow 也启用 unchanged skip。
 - `tag-rules` 保存仍保留 `all` refresh enqueue，因为规则变更可能影响所有 active bank-flow relation requirement metadata；要进一步优化需要先引入 tag/relation 到 affected scope 的可靠索引。
 
@@ -163,7 +162,6 @@
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_detail_falls_back_to_all_scope_refresh_when_batch_is_missing`
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_withdraw_uses_current_bank_flow_batch_without_all_scope_refresh`
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_withdraw_falls_back_to_all_scope_refresh_when_batch_is_missing`
-- `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_reset_submitted_refreshes_affected_months_without_preflight_all_refresh`
 - `tests/test_bank_flow_rule_batch_application_service.py::BankFlowRuleBatchApplicationServiceTests::test_unchanged_read_model_scope_uses_bank_flow_source_version_summary`
 
 验证命令：
@@ -404,25 +402,6 @@
 - `npm --prefix web run build`
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`
 - `git diff --check`
-
-## 2026-06-29 已提交批次重置 slice
-
-目标：
-
-- 将流水规则批量处理页当前所有 `submitted` 批次恢复为可重新按规则处理的未提交候选。
-- 整理迁移期数据库状态，但不手工 SQL 修改批次表或 relation 表。
-
-关键决策：
-
-- 新增 `POST /api/bank-flow-rule-batches/reset-submitted`，由页面“重置全部已提交”触发。
-- 后端复用既有 `withdraw_batch`、`WorkbenchRelationCommandService.cancel_relation(...)`、`persist_mutation(...)` 和 operation barrier；旧批次进入 withdrawn/audit history。
-- read model 后续 rebuild 后，释放的银行 rows 按当前银行标签和 OA/发票规则重新进入未提交候选；不会自动重新提交。
-
-验证：
-
-- `tests/test_no_oa_bank_batch_tag_selection_api.py` 覆盖提交后 reset、relation 取消、row 回到未提交候选。
-- `web/src/test/BankFlowRuleBatchPage.test.tsx` 覆盖页面按钮、API payload、operation event。
-- `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖浏览器提交后 reset 并回到未提交。
 
 ## 2026-06-30 已提交批次运行时同步修复
 

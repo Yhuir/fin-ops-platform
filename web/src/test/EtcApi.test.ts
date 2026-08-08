@@ -22,7 +22,6 @@ import {
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   revokeEtcBusinessBatchOaDraft,
-  updateEtcBusinessBatchTitle,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
   uploadEtcSupplementEvidences,
@@ -176,46 +175,6 @@ describe("etc api", () => {
         code: "oa_confirmation_pending",
       }),
     });
-  });
-
-  test("updates ETC business batch title with expected version", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({
-        ok: true,
-        data: {
-          businessBatch: {
-            business_batch_id: "etc_business_batch_0001",
-            task_id: "etc-recon-task-001",
-            title: "高速费三月批次",
-            status: "draft",
-            version: 8,
-          },
-        },
-        error: null,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
-    global.fetch = fetchMock as typeof fetch;
-
-    const result = await updateEtcBusinessBatchTitle("etc_business_batch_0001", {
-      title: " 高速费三月批次 ",
-      expectedVersion: 7,
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/business-batches/etc_business_batch_0001",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ title: "高速费三月批次", expectedVersion: 7 }),
-      }),
-    );
-    expect(result).toMatchObject({
-      businessBatchId: "etc_business_batch_0001",
-      taskId: "etc-recon-task-001",
-      title: "高速费三月批次",
-      version: 8,
-    });
-    await expect(updateEtcBusinessBatchTitle("etc_business_batch_0001", { title: "  " })).rejects.toThrow("批次标题不能为空。");
   });
 
   test("sends business-batch OA actions with expected version and reason", async () => {

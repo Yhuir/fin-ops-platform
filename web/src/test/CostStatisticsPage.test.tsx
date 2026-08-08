@@ -152,7 +152,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*42px[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*34px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(144px,\s*0\.8fr\) minmax\(144px,\s*0\.8fr\) minmax\(420px,\s*2\.4fr\)/s);
@@ -867,13 +867,12 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按时间" }));
-    await user.click(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" }));
-    const scopeControls = screen.getByRole("button", { name: "时间统计时间范围：2026年3月" }).closest(".cost-scope-controls");
+    const trigger = screen.getByRole("button", { name: "时间统计时间范围：2026年3月" });
+    const scopeControls = trigger.closest(".cost-scope-controls");
+    await user.click(trigger);
     expect(scopeControls).not.toBeNull();
     expect(scopeControls).not.toHaveClass("MuiTabs-root");
-    const floatingPanel = scopeControls?.querySelector(".cost-scope-popover");
-    expect(floatingPanel).not.toBeNull();
-    expect(floatingPanel).toHaveAttribute("role", "dialog");
+    expect(await screen.findByRole("dialog", { name: "时间统计时间范围选择器" })).toHaveClass("popover__dialog");
   });
 
   test("scope picker closes when clicking the active button again or clicking outside", async () => {

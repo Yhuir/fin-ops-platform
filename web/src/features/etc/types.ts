@@ -190,11 +190,6 @@ export type EtcBusinessBatchVersionedPayload = {
   idempotencyKey?: string;
 };
 
-export type EtcUpdateBusinessBatchTitlePayload = {
-  title: string;
-  expectedVersion?: number;
-};
-
 export type EtcBusinessBatchReasonedPayload = EtcBusinessBatchVersionedPayload & {
   reason: string;
 };

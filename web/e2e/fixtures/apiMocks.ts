@@ -5678,14 +5678,6 @@ function bankFlowRuleBatchMutationPayload(
   };
 }
 
-function bankFlowRuleBatchResetSubmittedPayload() {
-  return {
-    ...bankFlowRuleBatchMutationPayload("withdrawn"),
-    batch: null,
-    results: [{ batch_id: "bank-flow-rule-batch-e2e-001", status: "withdrawn" }],
-  };
-}
-
 const defaultBankFlowRuleBatchTagRules = [
   { tag_code: "fee", requires_oa: false, requires_invoice: false },
   { tag_code: "salary", requires_oa: false, requires_invoice: false },
@@ -9125,12 +9117,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         url.searchParams.get("bucket"),
         options.bankFlowRuleBatchScenario ?? "single",
       ));
-    }
-
-    if (path === "/api/bank-flow-rule-batches/reset-submitted") {
-      const payload = bankFlowRuleBatchResetSubmittedPayload();
-      bankFlowRuleBatchStatus = "draft";
-      return json(route, payload);
     }
 
     const bankFlowRuleBatchDetailMatch = path.match(/^\/api\/bank-flow-rule-batches\/([^/]+)$/);

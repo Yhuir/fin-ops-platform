@@ -59,8 +59,6 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             self.assertIn(required, spec)
 
         self.assertNotIn("Date.now()", helper)
-        self.assertNotIn("reset-submitted", spec.split('test("commit-to-visible same-clock', 1)[-1])
-
     def test_workbench_visibility_slo_manifest_and_production_run_fail_closed(self) -> None:
         helper = OPERATION_LATENCY_PATH.read_text(encoding="utf-8")
         spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")

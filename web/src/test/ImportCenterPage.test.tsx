@@ -456,6 +456,26 @@ describe("Import pages", () => {
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
   });
 
+  test("invoice import refreshes the persisted preview without clearing the draft", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetchWithInvoicePreviewSession();
+    seedInvoicePreviewSession();
+    renderAppAt("/imports/invoices");
+
+    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
+    const sessionPath = "/imports/files/sessions/import_session_0001";
+    const initialSessionReads = fetchMock.mock.calls.filter(([url]) => String(url) === sessionPath).length;
+
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === sessionPath).length).toBeGreaterThan(initialSessionReads);
+    });
+    expect(await screen.findByText("导入预览已刷新。")).toBeInTheDocument();
+    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
+  });
+
   test("invoice import clears persisted preview when files are cleared", async () => {
     installMockApiFetchWithInvoicePreviewSession();
     seedInvoicePreviewSession();

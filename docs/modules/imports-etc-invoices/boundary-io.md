@@ -32,10 +32,11 @@
 | --- | --- | --- |
 | ETC 文件/ZIP | `ImportEtcInvoicesPage.tsx` | 原件先经 verified file-object I/O 登记；route 不保存 bytes |
 | 预览确认 | import workflow | preview application service 持久化 session；confirm 只创建 durable job/outbox |
+| 页面手动刷新 | import workflow | 重新读取当前可导入的 ETC 对账任务；保留当前文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 
 ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前通过共享 mutation guard；confirm job owner 只取已认证 session username，不再调用容错型 owner resolver 或接受客户端 actor。
 | Reconciliation trigger | ETC services | 产生后续候选和 lifecycle |
-| Ready task selector | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | 下拉标题使用 reconciliation task `title`；ETC business batch title 修改后由 ETC 票据管理同步该 task title，导入页不得自行派生或缓存旧标题 |
+| Ready task selector | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | 下拉标题使用 reconciliation task `title`；导入页不得自行缓存旧标题，手动刷新重新读取当前 ready tasks。 |
 
 ## 输出 I/O
 

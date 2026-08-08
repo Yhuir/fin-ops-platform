@@ -41,7 +41,7 @@
 | OA 草稿预填配置 | `GET/PUT /api/workbench/settings/oa-draft-prefill/etc` | 页面右上角 admin-only 抽屉读取/保存独立 versioned family；ETC prepare 原子保存当次配置快照和 session display name，锁外 OA I/O 不重读设置。申请日期和金额由当次创建动态填充；申请事由只显示业务文本，ETC/business batch ID 仅放结构化字段供同步识别 |
 | OA 金额与发票金额展示 | linked reconciliation task `oaTotalAmount`、business batch `invoiceSummary`、`amountBreakdown` | `oaTotalAmount`/`amountBreakdown.oaAmount` 是 OA 提交金额事实源；`invoiceSummary` 的持久化标量只从 business batch `invoice_ids` 对应 ETC 发票求数量和含税总额，不得被 submission/OA `total_amount`、`oa_total_amount` 覆盖。列表与详情必须返回同一发票汇总；历史差额使用既有 `amountBreakdown.gapAmount/gapReason` 如实展示，不据差额自动补发票。所有金额以无千分位两位小数展示；差额只提示、不阻断、不写回；禁止为该展示新增共享 API、read model、queue 或跨页面写入 |
 | OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | `submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗只暴露这两个 command，草稿打开/PDF 下载属于暂存区只读工具。该 command 只写 business batch / reconciliation task / audit 与精确 affected scope，禁止 relink canonical invoice，也不写后投递 Workbench/matching/Tax/Cost/history 页面 refresh |
-| 批次标题编辑 | `EtcTicketManagementPage.tsx`、`PATCH /api/etc/business-batches/{id}` | 只允许未提交 business batch 修改 `title`；请求带 `expectedVersion`，后端持久化 business batch title 并同步 linked reconciliation task title |
+| 批次列表标题 | `EtcTicketManagementPage.tsx` | 左栏仅展示 `created_at` 的用户可读时间，并在同一行展示发票数量和金额；不展示或编辑 internal business batch ID、external batch ID 或历史内部 title。后端 title/PATCH 合同只保留给现有非页面调用方。 |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
@@ -54,7 +54,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC ticket/batch payload | 前端页面 | summary DTO 只含当前页列表展示、三 bucket counts、全量 statistics、pagination 和统一 `createOaDraftAction`；页面 rail 的“批次数”展示 `pagination.total`，不是当前页 `items.length`。不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
+| ETC ticket/batch payload | 前端页面 | summary DTO 只含当前页列表展示、三 bucket counts、全量 statistics、pagination 和统一 `createOaDraftAction`；页面 rail 的“批次数”展示 `pagination.total`，不是当前页 `items.length`，每行只显示创建时间、发票数量和金额。不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
 | Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |

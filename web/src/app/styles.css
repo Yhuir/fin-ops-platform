@@ -2394,9 +2394,9 @@ textarea {
 }
 
 .oa-pending-payments-field {
-  display: grid;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  gap: 4px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 800;
@@ -3372,9 +3372,9 @@ textarea {
 }
 
 .output-invoice-collections-field {
-  display: grid;
+  display: flex;
+  align-items: center;
   min-width: 0;
-  gap: 4px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 800;
@@ -7812,60 +7812,21 @@ textarea {
   min-width: 0;
 }
 
-.pending-invoices-page__scaffold .page-description {
-  margin: 0;
-}
-
 .pending-invoices-direction-segment {
   display: inline-flex;
   align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-}
-
-.pending-invoices-direction-button {
-  min-height: 30px;
-  min-width: 70px;
-  padding: 0 var(--fp-space-3);
-  border: 0;
-  border-right: 1px solid var(--fp-border);
-  background: transparent;
-  color: var(--fp-text-secondary);
-  cursor: pointer;
-  font-size: var(--fp-text-label);
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.pending-invoices-direction-button:last-child {
-  border-right: 0;
-}
-
-.pending-invoices-direction-button:hover,
-.pending-invoices-direction-button:focus-visible {
-  background: var(--fp-surface-muted);
-  color: var(--fp-text-primary);
-  outline: none;
-}
-
-.pending-invoices-direction-button[aria-pressed="true"] {
-  background: var(--fp-accent-soft);
-  color: var(--fp-accent);
-}
-
-.pending-invoices-direction-button:active {
-  transform: translateY(1px);
 }
 
 .pending-invoices-toolbar {
   min-width: 0;
+}
+
+.pending-invoices-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-3);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .pending-invoices-status-text {
@@ -7958,23 +7919,28 @@ textarea {
 
 .pending-invoices-search {
   width: min(220px, 100%);
-  min-height: 30px;
   min-width: 140px;
-  padding: 5px var(--fp-space-3);
+}
+
+.pending-invoices-search-group {
+  min-height: 30px;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-label);
   transition:
     border-color var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard);
 }
 
-.pending-invoices-search:focus-visible {
+.pending-invoices-search-group:focus-within {
   border-color: var(--fp-accent);
   outline: 2px solid color-mix(in srgb, var(--fp-accent) 20%, transparent);
   outline-offset: 0;
+}
+
+.pending-invoices-search-input {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-label);
 }
 
 .pending-invoice-status-filter {
@@ -9408,11 +9374,6 @@ textarea {
   .pending-invoices-toolbar-actions,
   .pending-invoices-pagination {
     width: 100%;
-  }
-
-  .pending-invoices-direction-button {
-    flex: 1 1 0;
-    min-width: 0;
   }
 
   .pending-invoices-search {
@@ -19748,22 +19709,15 @@ body.column-layout-dragging {
 }
 
 .cost-scope-controls {
-  position: relative;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-}
-
-.cost-scope-picker {
-  position: relative;
-  display: inline-flex;
 }
 
 .cost-scope-trigger {
   display: inline-flex;
-  min-width: 168px;
-  min-height: 42px;
+  min-width: 156px;
+  min-height: 34px;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
@@ -19824,10 +19778,6 @@ body.column-layout-dragging {
 }
 
 .cost-scope-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 12;
   width: min(360px, calc(100vw - 32px));
   padding: 12px;
   border: 1px solid var(--fp-border);
@@ -24252,6 +24202,7 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-height: 34px;
 }
 
 .etc-panel-heading__title {
@@ -25784,42 +25735,6 @@ body.column-layout-dragging {
   font-size: 13px;
 }
 
-.etc-batch-title-button {
-  min-width: 0;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: text;
-  background: transparent;
-  border: 0;
-}
-
-.etc-batch-title-button:hover,
-.etc-batch-title-button:focus-visible {
-  color: var(--fp-primary);
-  outline: none;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.etc-batch-title-input {
-  width: min(220px, 100%);
-  min-width: 0;
-  padding: 2px 6px;
-  color: var(--fp-text);
-  font: inherit;
-  font-weight: 800;
-  background: var(--fp-surface);
-  border: 1px solid var(--fp-primary);
-  border-radius: var(--fp-radius-xs);
-  outline: none;
-}
-
-.etc-batch-title-input:focus {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
-}
-
 .etc-batch-fields {
   display: flex;
   flex-wrap: wrap;
@@ -25950,6 +25865,7 @@ body.column-layout-dragging {
   flex: 1;
   align-content: start;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 0;
   border-top: 1px solid var(--fp-border);
   border-radius: 0;

@@ -88,27 +88,6 @@
 - active relation 继续 paired，不因当前规则变化回到 unpaired。
 - 资格变化时只返回信息性受影响月份，不写 bank-flow/Workbench/turnover dirty/outbox；下一次页面 GET 直接读取 canonical facts。资格未变化时同样零 projection work。
 
-## BRB-E2E-008 已提交批次批量重置回未提交候选
-
-前置：
-
-- 流水规则批量处理页存在 `submitted` 批次。
-- 对应 active relation 由 `relation_mode=bank_flow_rule_batch` 创建。
-
-步骤：
-
-1. 在页面提交一组银行流水。
-2. 点击“重置全部已提交”。
-3. command 成功后通过当前页正常 GET 收敛。
-4. 查看未提交列表。
-
-验收：
-
-- API 调用 `POST /api/bank-flow-rule-batches/reset-submitted`。
-- 后端通过 withdraw + relation command 取消 active relation，不手工 SQL 修改 relation 表。
-- 页面提示重置成功，并切回未提交。
-- 银行 rows 只有在当前标签 OA/发票双 false 时才重新进入未提交候选；需要任一单据时退出本页面，且不会自动重新提交。
-
 ## BRB-E2E-006 权限、空集和失败状态 fail closed
 
 前置：

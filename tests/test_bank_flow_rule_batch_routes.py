@@ -96,10 +96,6 @@ class FakeBankFlowRuleBatchApplicationService:
         )
         return {"affected_months": ["2026-05"]}
 
-    def reset_submitted_bank_flow_rule_batches(self, *, actor, reason):  # type: ignore[no-untyped-def]
-        self.calls.append(("reset", {"actor": actor, "reason": reason}))
-        return {"summary": {"reset_count": 2}, "affected_months": ["2026-05"]}
-
 
 class BankFlowRuleBatchRoutesTests(unittest.TestCase):
     def test_list_route_uses_bank_flow_relation_mode(self) -> None:
@@ -328,19 +324,6 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(payload["error"], "invalid_bank_flow_rule_batch_month")
-
-    def test_reset_route_maps_actor_and_reason(self) -> None:
-        service = FakeBankFlowRuleBatchApplicationService()
-        routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
-
-        status, payload = routes.reset_submitted_batches(
-            {"reason": "  全部重新过规则  "},
-            session=SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="oa-001")),
-        )
-
-        self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(payload["summary"]["reset_count"], 2)
-        self.assertEqual(service.calls, [("reset", {"actor": "finance-user", "reason": "全部重新过规则"})])
 
     def test_http_boundary_uses_bank_flow_error_codes_without_legacy_translation(self) -> None:
         conflict_status, conflict_payload = BankFlowRuleBatchApiRoutes._value_error_response(

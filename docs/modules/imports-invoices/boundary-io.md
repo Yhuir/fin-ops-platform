@@ -31,6 +31,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
+| 页面手动刷新 | `ImportWorkflowPage.tsx` | 有持久化 preview session 时精确重读 `/imports/files/sessions/{session_id}`；保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Job event | import job queue | 后台可恢复处理 |
 
 preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSON 解析前通过共享 mutation guard；`imported_by` 与 background job owner 只取已认证 session username，客户端 form/body 同名字段不具有身份语义。

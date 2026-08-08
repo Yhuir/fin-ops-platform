@@ -178,6 +178,26 @@ describe("Bank details page", () => {
     expect(transactionRequest?.searchParams.get("account_key")).toBeNull();
   });
 
+  test("refreshes accounts, rules, and transactions from their page APIs", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
+    const initialRuleRequests = requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").length;
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
+      expect(requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").length).toBeGreaterThan(initialRuleRequests);
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+  });
+
   test("requests the current year range for both accounts and transactions by default", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();

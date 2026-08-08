@@ -343,9 +343,8 @@ export default function OaPendingPaymentsPage() {
                     </button>
                   </div>
                   <div className="oa-pending-payments-field">
-                    <span id="oa-pending-payments-month-label">月份</span>
                     <span
-                      aria-labelledby="oa-pending-payments-month-label"
+                      aria-label="OA月份筛选"
                       className="oa-pending-payments-month-picker"
                       role="group"
                     >

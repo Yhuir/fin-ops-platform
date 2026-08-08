@@ -755,7 +755,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         ]
         self.assertEqual(relation_snapshot, before_relation_snapshot)
 
-    def test_bank_flow_rule_reset_submitted_withdraws_all_submitted_batches(self) -> None:
+    def test_bank_flow_rule_withdraw_releases_submitted_batch(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -792,23 +792,26 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
-        batch_id = _json(submit_response)["batch"]["batch_id"]
+        submitted_batch = _json(submit_response)["batch"]
+        batch_id = submitted_batch["batch_id"]
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
 
-        reset_response = app.handle_request(
+        withdraw_response = app.handle_request(
             "POST",
-            "/api/bank-flow-rule-batches/reset-submitted",
-            body=json.dumps({"reason": "全部重新过流水规则"}),
+            f"/api/bank-flow-rule-batches/{batch_id}/withdraw",
+            body=json.dumps({
+                "expected_version": submitted_batch["version"],
+                "reason": "重新过流水规则",
+            }),
             headers={"Content-Type": "application/json"},
         )
-        reset = _json(reset_response)
+        withdrawn = _json(withdraw_response)
 
-        self.assertEqual(reset_response.status_code, 200)
-        self.assertEqual(reset["summary"]["reset_count"], 1)
-        self.assertEqual(reset["summary"]["row_count"], 1)
-        self.assertEqual(reset["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
-        self.assertNotIn("operation_barrier_targets", reset)
-        self.assertNotIn("read_model_scope_keys", reset)
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertEqual(withdrawn["batch"]["batch_id"], batch_id)
+        self.assertEqual(withdrawn["batch"]["status"], "withdrawn")
+        self.assertNotIn("operation_barrier_targets", withdrawn)
+        self.assertNotIn("read_model_scope_keys", withdrawn)
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
 
@@ -821,11 +824,11 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         )
         self.assertEqual([batch["batch_type"] for batch in unsubmitted], ["fee"])
 
-    def test_bank_flow_rule_reset_submitted_tolerates_missing_active_relation(self) -> None:
+    def test_bank_flow_rule_withdraw_tolerates_missing_active_relation(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
-            source_name="fees-bank-flow-reset-missing-relation.xlsx",
+            source_name="fees-bank-flow-withdraw-missing-relation.xlsx",
             imported_by="user_finance_01",
             rows=[
                 {
@@ -858,18 +861,22 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
-        batch_id = _json(submit_response)["batch"]["batch_id"]
+        submitted_batch = _json(submit_response)["batch"]
+        batch_id = submitted_batch["batch_id"]
         app._workbench_pair_relation_service.cancel_relation(batch_id)
 
-        reset_response = app.handle_request(
+        withdraw_response = app.handle_request(
             "POST",
-            "/api/bank-flow-rule-batches/reset-submitted",
-            body=json.dumps({"reason": "全部重新过流水规则"}),
+            f"/api/bank-flow-rule-batches/{batch_id}/withdraw",
+            body=json.dumps({
+                "expected_version": submitted_batch["version"],
+                "reason": "重新过流水规则",
+            }),
             headers={"Content-Type": "application/json"},
         )
 
-        self.assertEqual(reset_response.status_code, 200)
-        self.assertEqual(_json(reset_response)["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertEqual(_json(withdraw_response)["batch"]["status"], "withdrawn")
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         app._bank_flow_rule_batch_application_service().refresh_batches(
             scope_key="2026-05",

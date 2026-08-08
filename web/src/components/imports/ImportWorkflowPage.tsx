@@ -1,5 +1,5 @@
 import { Alert, Button, Chip, Tabs } from "@heroui/react";
-import { ArrowLeft, Trash2, UploadCloud } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
@@ -810,6 +810,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
+  const [contextRefreshToken, setContextRefreshToken] = useState(0);
+  const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   const mountedRef = useRef(false);
 
   const title = TITLES[mode];
@@ -858,7 +860,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [activationGeneration, mode, pageActive, setErrorMessage]);
+  }, [activationGeneration, contextRefreshToken, mode, pageActive, setErrorMessage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -890,7 +892,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [activationGeneration, mode, pageActive, setErrorMessage]);
+  }, [activationGeneration, contextRefreshToken, mode, pageActive, setErrorMessage]);
 
   useEffect(() => {
     if (!pageActive || mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
@@ -929,6 +931,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }, [
     activationGeneration,
     clearPersistedSession,
+    contextRefreshToken,
     mode,
     pageActive,
     previewPayload,
@@ -1156,6 +1159,23 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     resetPreviewState();
   }
 
+  async function handleRefresh() {
+    if (isRefreshingContext || isPreviewing || isConfirming) return;
+    setContextRefreshToken((current) => current + 1);
+    if (mode === "etc_invoice" || !previewPayload?.session.id) return;
+    setIsRefreshingContext(true);
+    setErrorMessage(null);
+    try {
+      const payload = await fetchImportSession(previewPayload.session.id);
+      setPreviewPayload(payload);
+      setFeedbackMessage("导入预览已刷新。");
+    } catch (caught) {
+      setErrorMessage(resolveImportApiErrorMessage(caught, "导入预览刷新失败。"));
+    } finally {
+      setIsRefreshingContext(false);
+    }
+  }
+
   function buildPreviewOverrides(): ImportFilePreviewOverride[] {
     return selectedFiles.map((file) => {
       const selection = fileSelections[buildSelectedFileKey(file)];
@@ -1353,6 +1373,16 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               返回关联台
             </RouterLink>
+            <Button
+              isDisabled={isPreviewing || isConfirming || isRefreshingContext || settingsLoading || readyEtcTasksLoading}
+              onPress={handleRefresh}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden="true" size={16} />
+              刷新
+            </Button>
             <Button
               isDisabled={!hasDraftContent || isPreviewing || isConfirming}
               onPress={handleClearFiles}

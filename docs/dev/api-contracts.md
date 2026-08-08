@@ -362,27 +362,6 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
 - 成功响应返回 batch/relation receipt、`case_id` 和 `affected_months`；不返回 read-model/freshness/operation-barrier envelope。当前页面随后执行一次正常 GET。
 
-`POST /api/bank-flow-rule-batches/reset-submitted`
-
-受控撤回当前所有已提交流水规则批次，让相关银行流水回到可重新按当前规则进入未提交候选的状态。该接口用于重新按当前规则处理已提交批次，不能用手写 SQL 替代。
-
-请求示例：
-
-```json
-{
-  "reason": "全部重新过流水规则"
-}
-```
-
-处理规则：
-
-- 只处理当前 `submitted` 批次；没有 submitted 时返回空结果且保持幂等。
-- 每个批次必须通过既有 withdraw 领域边界校验状态与 version；所有 active relation 通过一次 `WorkbenchRelationCommandService.cancel_relations_by_case_ids(...)` 取消，changed relations 与显式 changed batch IDs 在一次 mutation persistence transaction 中保存。
-- HTTP command 不执行 read-model rebuild；command 成功后前端重新调用一次本模块正常 GET。
-- 不直接修改银行流水、银行标签或 `app.workbench_pair_relations` 表。
-- 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months` 和 `results`；不得恢复 bank-flow、Workbench 或其它页面 barrier。
-- 撤回后的旧批次进入 withdrawn/audit history；下一次 canonical GET 按当前标签规则与 active relation 占用读取可见批次，不自动重新提交。
-
 ## 免 OA 流水批量处理 API
 
 状态：legacy。新通用功能应实现 `流水规则批量处理 API`，不要继续扩展本节为新的通用规则合同。

@@ -18,7 +18,7 @@
 - 维护 `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`。
 - 只展示 active tag 且 `requires_oa=false`、`requires_invoice=false` 的未提交批次。
 - 读取已提交/已撤回批次及 `app.bank_flow_rule_batch_events` 历史。
-- 通过 relation command 创建、撤回或 reset `relation_mode=bank_flow_rule_batch` 的正式关系。
+- 通过 relation command 创建或按单批次撤回 `relation_mode=bank_flow_rule_batch` 的正式关系。
 - 提交时冻结标签、requirement metadata、资格版本和行级分类 snapshot。
 
 ### 不负责
@@ -40,11 +40,11 @@
 | 银行流水 | `app.bank_transactions` | 未提交月份边界内批量读取 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
 | 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 返回月份窗口内全部 non-deleted 银行流水及人工/确认事实，不用人工分类 SQL 预筛；application service 复用 `BankTransactionEffectiveCategoryProvider` 与现有自动分类规则批量得出 effective category。confirmation、manual 与 auto 的优先级和银行明细一致。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
-| 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用和 submitted 可撤回；禁止使用 `workbench_relation` projection。 |
+| 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
 | 批量提交 | `submit-selection` / `submit` | `submit-selection` 必须携带 `scope_month=YYYY-MM`。流水、当前有效分类、标签规则、OA/发票 requirement 和 active relation 占用均从同一个 canonical source 读取，禁止回退到 import/category/settings 启动时快照；最终 `SERIALIZABLE` 写事务同时比较 selected-row proof 与 rule proof。selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
-| 撤回/reset | `withdraw` / `reset-submitted` | 保持一次 relation command/bulk cancel 与一次 changed-batch delta 保存；不直接改表，不同步 rebuild。 |
-| 权限/session | session / permissions | 读、规则写、提交、撤回和 reset 分别 fail closed。 |
+| 撤回 | `POST /api/bank-flow-rule-batches/{batch_id}/withdraw` | 只撤回用户明确选中的已提交批次；保持一次 relation command 与一次 changed-batch delta 保存，不直接改表，不同步 rebuild。active relation 已缺失视为 cancel 幂等完成，批次和事件仍原子持久化。 |
+| 权限/session | session / permissions | 读、规则写、提交和撤回分别 fail closed。 |
 
 ## 输出 I/O
 
@@ -55,7 +55,7 @@
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
 | 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
-| 写后页面状态 | submit-selection、submit、withdraw、reset 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
+| 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
 | 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 只在银行栏使用 bank-flow summary；1 到 3 行直接完整展示。 |
 
 ## 一致性与查询预算
@@ -65,7 +65,7 @@
 - 正式详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。live candidate 详情先确认不存在正式批次，再执行一次与列表相同的月份 canonical snapshot；不逐行查询、不写 draft。
 - repository 不得加载跨月份全量银行流水；application service 可以对已按月份窗口约束的 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
 - 未提交 batch 由共享 builder 实时推导，必须同时满足：有效分类命中当前双 false 标签、所有成员仍存在且分类一致、成员未与任一 active relation overlap。禁止在 SQL 层仅按 manual/confirmation category 预筛，否则 auto-only 候选会被静默遗漏。
-- submitted 的可撤回性只由同一 canonical batch 的 active relation 决定。
+- submitted 的可撤回性由 canonical batch 状态决定；active relation 已缺失不能阻断批次收口。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。跨月配对以最早成员所在月份作为唯一 owner month：例如 5 月 31 日与 6 月 1 日配对只属于 5 月请求，6 月请求不得重复生成相邻月份候选。
 - 页面查询不新增 cache、materialized view、queue、worker、fallback 或双读；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
 
@@ -88,14 +88,14 @@ Canonical facts：
 - `save_bank_flow_rule_batch_items(...)`
 - 显式 `changed_batch_ids`
 
-一次 submit、submit-selection、withdraw 或 reset 的 PostgreSQL 写入必须由
+一次 submit、submit-selection 或 withdraw 的 PostgreSQL 写入必须由
 `save_bank_flow_rule_batch_mutation(...)` 持有唯一外层 transaction，并把 relation/history
 与正式 batch/events 全部绑定到该 transaction；内部 repository 不得另开 transaction。
 任一 relation、batch 或 event 写入失败都必须整体 rollback，不得留下半关系、半批次或缺失事件。
 本地 StateStore 的 relation 与 bank-flow batch snapshot 同样必须通过单个 `state.pkl`
 原子替换提交，失败时保留旧快照。
 
-提交/撤回/reset 不得改回 month-scope replace、全量 runtime refresh、Workbench snapshot 写入、no-OA persistence 或 read-model fan-out。已提交/历史的冻结 payload 与事件是审计事实；当前规则变化不追溯修改。
+提交/撤回不得改回 month-scope replace、全量 runtime refresh、Workbench snapshot 写入、no-OA persistence 或 read-model fan-out。已提交/历史的冻结 payload 与事件是审计事实；当前规则变化不追溯修改。
 
 ## 文件范围
 

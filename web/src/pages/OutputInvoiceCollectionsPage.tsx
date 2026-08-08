@@ -309,9 +309,8 @@ export default function OutputInvoiceCollectionsPage() {
             <PageToolbar className="output-invoice-collections-query">
               <div className="output-invoice-collections-query__grid">
                 <div className="output-invoice-collections-field">
-                  <span>月份</span>
                   <MonthPicker
-                    allOptionLabel="全部发票"
+                    allOptionLabel="全部时间"
                     ariaLabel="销项发票月份"
                     caption={null}
                     onChange={(month) => setQuery((current) => ({ ...current, month, page: 1 }))}

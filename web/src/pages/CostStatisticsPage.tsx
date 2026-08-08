@@ -1,5 +1,13 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { SearchField, Spinner } from "@heroui/react";
+import {
+  Button,
+  PopoverContent,
+  PopoverDialog,
+  PopoverRoot,
+  PopoverTrigger,
+  SearchField,
+  Spinner,
+} from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 
 import { formatMonthLabel } from "../components/MonthPicker";
@@ -370,13 +378,17 @@ function ScopeRangePicker({
   }
 
   return (
-    <div className="cost-scope-picker">
-      <button
-        aria-expanded={open}
+    <PopoverRoot
+      isOpen={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen === open) return;
+        if (nextOpen) onToggle();
+        else onClose();
+      }}
+    >
+      <PopoverTrigger
         aria-label={`${ariaLabel}：${selectedLabel}`}
         className={open ? "cost-scope-trigger is-open" : "cost-scope-trigger"}
-        type="button"
-        onClick={onToggle}
       >
         <span className="cost-scope-trigger-label">
           <span>{label}</span>
@@ -385,30 +397,32 @@ function ScopeRangePicker({
         <span aria-hidden="true" className="cost-scope-trigger-icon">
           ▾
         </span>
-      </button>
-      {open ? (
-        <div className="cost-scope-popover" role="dialog" aria-label={`${ariaLabel}选择器`}>
-          <button
+      </PopoverTrigger>
+      <PopoverContent className="cost-scope-popover" containerPadding={12} maxHeight={440} offset={8} placement="bottom end">
+        <PopoverDialog aria-label={`${ariaLabel}选择器`}>
+          <Button
             aria-pressed={mode === "all"}
             className={mode === "all" ? "cost-scope-option all active" : "cost-scope-option all"}
-            type="button"
-            onClick={selectAll}
+            onPress={selectAll}
+            size="sm"
+            variant={mode === "all" ? "primary" : "tertiary"}
           >
             全部时间
-          </button>
+          </Button>
           <div className="cost-scope-panel-section">
             <span>年份</span>
             <div className="cost-scope-option-grid years">
               {pickerYears.map((candidateYear) => (
-                <button
+                <Button
                   key={candidateYear}
                   aria-pressed={mode === "year" && candidateYear === year}
                   className={mode === "year" && candidateYear === year ? "cost-scope-option active" : "cost-scope-option"}
-                  type="button"
-                  onClick={() => selectYear(candidateYear)}
+                  onPress={() => selectYear(candidateYear)}
+                  size="sm"
+                  variant={mode === "year" && candidateYear === year ? "primary" : "tertiary"}
                 >
                   {candidateYear}年
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -419,22 +433,23 @@ function ScopeRangePicker({
                 const monthNumber = index + 1;
                 const isActive = activeMonth === String(monthNumber).padStart(2, "0");
                 return (
-                  <button
+                  <Button
                     key={monthLabel}
                     aria-pressed={mode === "month" && isActive}
                     className={mode === "month" && isActive ? "cost-scope-option active" : "cost-scope-option"}
-                    type="button"
-                    onClick={() => selectMonth(monthNumber)}
+                    onPress={() => selectMonth(monthNumber)}
+                    size="sm"
+                    variant={mode === "month" && isActive ? "primary" : "tertiary"}
                   >
                     {monthLabel}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </div>
-        </div>
-      ) : null}
-    </div>
+        </PopoverDialog>
+      </PopoverContent>
+    </PopoverRoot>
   );
 }
 

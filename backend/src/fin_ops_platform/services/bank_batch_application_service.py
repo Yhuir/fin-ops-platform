@@ -277,18 +277,6 @@ class BankBatchApplicationService:
             raise
         return result
 
-    def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
-        return [
-            batch
-            for batch in self._bank_batch_service.list_batches(
-                {
-                    "bucket": "submitted",
-                    "relation_mode": relation_mode,
-                }
-            )
-            if str(batch.get("status") or "").strip() == "submitted"
-        ]
-
     def _eligible_tag_codes_for_relation_mode(self, relation_mode: str) -> set[str]:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             return self._eligible_bank_flow_rule_batch_tag_codes(
@@ -457,6 +445,8 @@ class BankBatchApplicationService:
                 history_operation_type=history_operation_type,
             )
         except WorkbenchRelationCommandError as exc:
+            if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE and exc.error_code == "workbench_relation_not_found":
+                return
             raise self._relation_command_error(exc) from exc
 
     def _require_relation_command_service(self) -> Any:

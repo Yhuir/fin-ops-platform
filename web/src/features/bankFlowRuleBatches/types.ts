@@ -153,11 +153,6 @@ export type WithdrawBankFlowRuleBatchRequest = {
   signal?: AbortSignal;
 };
 
-export type ResetSubmittedBankFlowRuleBatchesRequest = {
-  reason?: string;
-  signal?: AbortSignal;
-};
-
 export type SubmitBankFlowRuleBatchesRequest = {
   batches: Array<{
     batchId: string;

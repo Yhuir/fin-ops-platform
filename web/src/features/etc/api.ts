@@ -11,7 +11,6 @@ import type {
   EtcBusinessBatchReasonedPayload,
   EtcBusinessBatchStatus,
   EtcBusinessBatchSummary,
-  EtcUpdateBusinessBatchTitlePayload,
   EtcBusinessBatchVersionedPayload,
   EtcCreateBusinessBatchPayload,
   EtcImportConfirmResult,
@@ -1455,30 +1454,6 @@ export async function createEtcBusinessBatch(payload: EtcCreateBusinessBatchPayl
       ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
     }),
   });
-  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
-}
-
-export async function updateEtcBusinessBatchTitle(
-  businessBatchId: string,
-  payload: EtcUpdateBusinessBatchTitlePayload,
-): Promise<EtcBusinessBatchDetail> {
-  const title = payload.title.trim();
-  if (!title) {
-    throw new Error("批次标题不能为空。");
-  }
-  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
-    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title,
-        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
-      }),
-    },
-  );
   return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
 }
 

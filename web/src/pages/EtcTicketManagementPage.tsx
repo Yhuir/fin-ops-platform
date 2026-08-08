@@ -41,7 +41,6 @@ import {
   patchEtcReconciliationItem,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
-  updateEtcBusinessBatchTitle,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
   uploadEtcTicketRootFiles,
@@ -279,41 +278,11 @@ function isOaConfirmationPendingStatus(status: EtcBusinessBatchStatus) {
   return status === "oa_confirmation_pending";
 }
 
-function formatMonthName(value: string | null | undefined) {
-  const [year, month] = String(value || "").split("-");
-  if (!year || !month) {
-    return "";
-  }
-  const parsedMonth = Number(month);
-  return Number.isFinite(parsedMonth) && parsedMonth > 0 ? `${parsedMonth}月` : "";
-}
-
-function monthFromBatchIdentifier(value: string | null | undefined) {
-  const text = String(value || "");
-  const dashed = text.match(/(20\d{2})[-/年](0?[1-9]|1[0-2])/);
-  if (dashed) {
-    return `${dashed[1]}-${String(dashed[2]).padStart(2, "0")}`;
-  }
-  const compact = text.match(/(20\d{2})(0[1-9]|1[0-2])(?:\d{2})?/);
-  return compact ? `${compact[1]}-${compact[2]}` : "";
-}
-
 function batchDisplayTitle(
-  batch: Pick<EtcBusinessBatchSummary, "scopeMonth" | "externalEtcBatchId" | "businessBatchId" | "title">,
+  batch: Pick<EtcBusinessBatchSummary, "createdAt">,
 ) {
-  const explicitTitle = String(batch.title ?? "").trim();
-  if (explicitTitle) {
-    return explicitTitle;
-  }
-  const monthLabel = formatMonthName(
-    batch.scopeMonth
-    || monthFromBatchIdentifier(batch.externalEtcBatchId)
-    || monthFromBatchIdentifier(batch.businessBatchId),
-  );
-  if (monthLabel) {
-    return `${monthLabel}批次`;
-  }
-  return "未记录月份批次";
+  const { date, time } = splitDateTimeParts(batch.createdAt);
+  return date === "-" ? "未记录时间" : `${date}${time ? ` ${time.slice(0, 5)}` : ""}`;
 }
 
 function reconciliationStatusLabel(status: EtcReconciliationTask["status"]) {
@@ -724,13 +693,9 @@ export default function EtcTicketManagementPage() {
   const [draftOaAmount, setDraftOaAmount] = useState("0.00");
   const [oaActionDecision, setOaActionDecision] = useState<"submitted" | "not_submitted" | null>(null);
   const oaActionLoading = oaActionDecision !== null;
-  const [editingBatchTitleId, setEditingBatchTitleId] = useState("");
-  const [editingBatchTitle, setEditingBatchTitle] = useState("");
-  const [titleSavingBatchId, setTitleSavingBatchId] = useState("");
   const [oaPrefillOpen, setOaPrefillOpen] = useState(false);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
-  const titleEditCancelRef = useRef(false);
   const activeStatusRef = useRef(activeStatus);
   const batchPageRef = useRef(batchPage);
   const activeBatchListRequestRef = useRef<{
@@ -750,9 +715,7 @@ export default function EtcTicketManagementPage() {
     || deleteSubmitting
     || draftCreating
     || oaActionLoading
-    || supplementUploadSubmitting
-    || Boolean(editingBatchTitleId)
-    || Boolean(titleSavingBatchId);
+    || supplementUploadSubmitting;
 
   const loadBatches = useCallback(async ({
     bucket = activeStatusRef.current,
@@ -1229,68 +1192,11 @@ export default function EtcTicketManagementPage() {
     setSelectedTask(task);
   }, []);
 
-  const replaceBusinessBatch = useCallback((batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
-    setBusinessBatches((current) => current.map((item) => (
-      item.businessBatchId === batch.businessBatchId ? batch : item
-    )));
-    setBusinessBatchDetail((current) => (
-      current?.businessBatchId === batch.businessBatchId ? { ...current, ...batch } : current
-    ));
-  }, []);
-
   const handleStatusChange = (nextStatus: EtcBusinessBatchBucket) => {
     if (nextStatus === activeStatus || batchNavigationDisabled) {
       return;
     }
     void changeBatchQuery(nextStatus, 1);
-  };
-
-  const startBusinessBatchTitleEdit = (businessBatch: EtcBusinessBatchSummary) => {
-    if (!canMutateData || activeStatus !== "unsubmitted") {
-      return;
-    }
-    setEditingBatchTitleId(businessBatch.businessBatchId);
-    setEditingBatchTitle(batchDisplayTitle(businessBatch));
-    titleEditCancelRef.current = false;
-    setActionError(null);
-  };
-
-  const cancelBusinessBatchTitleEdit = () => {
-    titleEditCancelRef.current = true;
-    setEditingBatchTitleId("");
-    setEditingBatchTitle("");
-  };
-
-  const saveBusinessBatchTitle = async (
-    businessBatch: EtcBusinessBatchSummary,
-  ) => {
-    if (titleSavingBatchId === businessBatch.businessBatchId) {
-      return;
-    }
-    const title = editingBatchTitle.trim();
-    if (!title) {
-      setActionError("批次标题不能为空。");
-      return;
-    }
-    if (title === batchDisplayTitle(businessBatch)) {
-      cancelBusinessBatchTitleEdit();
-      return;
-    }
-    setTitleSavingBatchId(businessBatch.businessBatchId);
-    setActionError(null);
-    try {
-      const updatedBatch = await updateEtcBusinessBatchTitle(businessBatch.businessBatchId, {
-        title,
-        expectedVersion: businessBatch.version,
-      });
-      replaceBusinessBatch(updatedBatch);
-      cancelBusinessBatchTitleEdit();
-      setDetailReloadKey((current) => current + 1);
-    } catch (caught) {
-      setActionError(formatEtcUiErrorMessage(caught, "批次标题保存失败。"));
-    } finally {
-      setTitleSavingBatchId("");
-    }
   };
 
   const runTaskAction = async (action: () => Promise<EtcReconciliationTask>) => {
@@ -2058,13 +1964,8 @@ export default function EtcTicketManagementPage() {
                 {visibleBatches.map((batch) => {
                   const deletable = canDeleteBatch(batch);
                   const selected = selectedBatchId === batch.businessBatchId;
-                  const rowCountText = `发票 ${batch.invoiceSummary.count}`;
-                  const rowAmountText = `${batch.invoiceSummary.count} 张 / ${formatMoney(batch.invoiceSummary.amount)} 元`;
+                  const rowSummary = `${batch.invoiceSummary.count} 张 · ${formatMoney(batch.invoiceSummary.amount)} 元`;
                   const displayTitle = batchDisplayTitle(batch);
-                  const rowExternalBatchId = batch.externalEtcBatchId;
-                  const titleEditable = Boolean(canMutateData && activeStatus === "unsubmitted");
-                  const titleEditing = editingBatchTitleId === batch.businessBatchId;
-                  const titleSaving = titleSavingBatchId === batch.businessBatchId;
                   const selectRow = () => {
                     if (selectedBatchIdRef.current === batch.businessBatchId) {
                       return;
@@ -2098,61 +1999,13 @@ export default function EtcTicketManagementPage() {
                         }}
                       >
                         <span className="etc-row-title">
-                          {titleEditing ? (
-                            <input
-                              className="etc-batch-title-input"
-                              aria-label={`批次标题 ${displayTitle}`}
-                              value={editingBatchTitle}
-                              disabled={titleSaving}
-                              autoFocus
-                              onChange={(event) => setEditingBatchTitle(event.target.value)}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                event.stopPropagation();
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  cancelBusinessBatchTitleEdit();
-                                  return;
-                                }
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  event.currentTarget.blur();
-                                }
-                              }}
-                              onBlur={() => {
-                                if (titleEditCancelRef.current) {
-                                  titleEditCancelRef.current = false;
-                                  return;
-                                }
-                                void saveBusinessBatchTitle(batch);
-                              }}
-                            />
-                          ) : titleEditable ? (
-                            <button
-                              type="button"
-                              className="etc-batch-title-button"
-                              aria-label={`编辑批次标题 ${displayTitle}`}
-                              onKeyDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                startBusinessBatchTitleEdit(batch);
-                              }}
-                            >
-                              <strong>{displayTitle}</strong>
-                            </button>
-                          ) : (
-                            <strong>{displayTitle}</strong>
-                          )}
+                          <strong>{displayTitle}</strong>
                           <StatusChip tone={businessBatchTone(batch.status)}>
                             {businessBatchStatusLabel(batch.status)}
                           </StatusChip>
                         </span>
                         <span className="etc-batch-fields">
-                          {rowExternalBatchId ? <span>批次号 {rowExternalBatchId}</span> : null}
-                          <span>{rowCountText}</span>
-                          <span>{rowAmountText}</span>
+                          <span>{rowSummary}</span>
                         </span>
                       </div>
                       <button

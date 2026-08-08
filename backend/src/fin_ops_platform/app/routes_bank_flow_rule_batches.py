@@ -54,13 +54,6 @@ class BankFlowRuleBatchApiRoutes:
             return self._json_write(body, headers, lambda payload, session: self.update_tag_rules(payload, session=session))
         if method == "POST" and route_path == "/api/bank-flow-rule-batches/submit-selection":
             return self._json_write(body, headers, lambda payload, session: self.submit_selection(payload, session=session))
-        if method == "POST" and route_path == "/api/bank-flow-rule-batches/reset-submitted":
-            return self._json_write(
-                body,
-                headers,
-                lambda payload, session: self.reset_submitted_batches(payload, session=session),
-            )
-
         prefix = "/api/bank-flow-rule-batches/"
         submit_suffix = "/submit"
         withdraw_suffix = "/withdraw"
@@ -204,23 +197,6 @@ class BankFlowRuleBatchApiRoutes:
                 note=str(payload.get("note") or "").strip() or None,
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
                 scope_month=str(payload.get("scope_month") or "").strip() or None,
-            )
-        except BankBatchPersistenceError as exc:
-            return self._persistence_error_response(exc)
-        except ValueError as exc:
-            return self._value_error_response(exc)
-        return HTTPStatus.OK, result
-
-    def reset_submitted_batches(
-        self,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession,
-    ) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            result = self._application_service.reset_submitted_bank_flow_rule_batches(
-                actor=self._actor(payload, session),
-                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
             )
         except BankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)

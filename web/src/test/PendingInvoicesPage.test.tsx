@@ -1074,9 +1074,9 @@ describe("Pending invoices page", () => {
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
     expect(within(page).queryByText("正在加载待找发票。")).not.toBeInTheDocument();
     expect(within(page).queryByText(/对方尾号/)).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "全部 431" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "支出 356" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "收入 75" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "全部 431" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "支出 356" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "收入 75" })).toBeInTheDocument();
     expect(within(page).getByRole("heading", { name: "待找发票" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
@@ -1252,7 +1252,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(await within(page).findByRole("button", { name: "收入 75" }));
+    await user.click(await within(page).findByRole("radio", { name: "收入 75" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
@@ -1742,7 +1742,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(await within(page).findByRole("button", { name: "收入 75" }));
+    await user.click(await within(page).findByRole("radio", { name: "收入 75" }));
     await within(page).findByText("收入批量客户A");
     expect(within(page).queryByRole("button", { name: "标记无需开票" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "标记现金收入" })).not.toBeInTheDocument();

@@ -231,7 +231,7 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("3月批次");
+    await expect(row).toContainText("2026-06-17 09:00");
     await expect(page.getByLabel("车牌", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("关键词", { exact: true })).toHaveCount(0);
     const lifecycle = page.getByRole("list", { name: "批次生命周期" });
@@ -270,19 +270,19 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("3月批次");
+    await expect(row).toContainText("2026-06-17 09:00");
 
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
     await recordLatency({
       operationId: "etc-tickets.open-delete-unsubmitted-dialog",
-      visibleLabel: "删除批次 3月批次",
+      visibleLabel: "删除批次 2026-06-17 09:00",
       actionType: "click",
     }, async (mark) => {
-      await row.getByRole("button", { name: "删除批次 3月批次" }).click();
+      await row.getByRole("button", { name: "删除批次 2026-06-17 09:00" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(deleteDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("3月批次"));
+      await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("2026-06-17 09:00"));
     });
-    await expect(deleteDialog).toContainText("3月批次");
+    await expect(deleteDialog).toContainText("2026-06-17 09:00");
 
     await recordLatency({
       operationId: "etc-tickets.confirm-delete-unsubmitted-failed",
@@ -357,16 +357,16 @@ test.describe("ETC ticket management browser flow", () => {
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("3月批次");
+    await expect(row).toContainText("2026-06-17 09:00");
     await expect(row).toContainText("人工确认已提交");
 
     const deleteDialog = page.getByRole("dialog", { name: "删除批次" });
     await recordLatency({
       operationId: "etc-tickets.open-delete-submitted-dialog",
-      visibleLabel: "删除批次 3月批次",
+      visibleLabel: "删除批次 2026-06-17 09:00",
       actionType: "click",
     }, async (mark) => {
-      await row.getByRole("button", { name: "删除批次 3月批次" }).click();
+      await row.getByRole("button", { name: "删除批次 2026-06-17 09:00" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(deleteDialog).toBeVisible());
       await mark("finalSettledLatencyMs", expect(deleteDialog).toContainText("取消发票合并"));
     });
@@ -791,8 +791,8 @@ test.describe("ETC ticket management browser flow", () => {
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
-    await expect(row).toContainText("3月批次");
-    await expect(row).toContainText("发票 2");
+    await expect(row).toContainText("2026-06-17 09:00");
+    await expect(row).toContainText("2 张 · 32.26 元");
     await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
 
@@ -812,7 +812,7 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible();
     await expect(createDialog.getByText("已导入 ETC 发票：2 张 / 32.26 元")).toBeVisible();
     await expect(createDialog.getByText("差额 87.74 元")).toBeVisible();
-    await expect(createDialog.getByText("批次：3月批次")).toBeVisible();
+    await expect(createDialog.getByText("批次：2026-06-17 09:00")).toBeVisible();
 
     const draftResponse = page.waitForResponse((response) =>
       response.url().includes("/api/etc/business-batches/etc-business-e2e-001/oa-draft")
@@ -855,7 +855,7 @@ test.describe("ETC ticket management browser flow", () => {
     const submittedRow = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(submittedRow).toBeVisible();
     await expect(submittedRow).toContainText("人工确认已提交");
-    await expect(submittedRow).toContainText("3月批次");
+    await expect(submittedRow).toContainText("2026-06-17 09:00");
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

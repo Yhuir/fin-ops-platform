@@ -506,62 +506,6 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("resets submitted flow rule batches back to unsubmitted", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-    });
-    const recordLatency = createBankFlowRuleBatchLatencyRecorder(page, testInfo);
-
-    await page.goto("/bank-flow-rule-batches");
-    await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
-    await expect(draftTable).toBeVisible();
-    await clickCheckbox(draftTable.getByLabel("选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106"));
-    await recordLatency({
-      operationId: "bank-flow-rule-batches.submit-selected-before-reset",
-      visibleLabel: "提交批次",
-      actionType: "click",
-    }, async (mark) => {
-      const submitResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/submit-selection"));
-      const listReload = waitForBankFlowRuleBatches(page);
-      await page.getByRole("button", { name: "提交批次" }).click();
-      await mark("apiLatencyMs", submitResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("选中流水已提交")).toBeVisible());
-      await mark("finalSettledLatencyMs", listReload);
-    });
-
-    const resetRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/bank-flow-rule-batches/reset-submitted")
-      && request.method() === "POST",
-    );
-    const resetResponse = page.waitForResponse(postResponse("/api/bank-flow-rule-batches/reset-submitted"));
-    const listReadsBeforeReset = api.count("GET /api/bank-flow-rule-batches");
-    const resetListReload = waitForBankFlowRuleBatches(page);
-    await recordLatency({
-      operationId: "bank-flow-rule-batches.reset-submitted",
-      visibleLabel: "重置全部已提交",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: "重置全部已提交" }).click();
-      await mark("apiLatencyMs", resetResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已重置 1 个已提交批次")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true"));
-    });
-    await resetListReload;
-    const resetBody = JSON.parse((await resetRequest).postData() ?? "{}") as { reason?: string };
-    expect(resetBody.reason).toBe("流水规则批量处理：全部已提交批次重新过规则");
-    expect((await resetResponse).status()).toBe(200);
-
-    await page.getByRole("button", { name: "查看建设银行8106流水" }).click();
-    await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
-    expect(api.count("POST /api/bank-flow-rule-batches/reset-submitted")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeReset + 1);
-    await expectNoUnexpectedSuccessUiErrors(page);
-    expect(browserErrors).toEqual([]);
-  });
-
   test("submits internal transfer batches without blocking on workbench visibility refresh", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

@@ -5,7 +5,6 @@ import {
   fetchBankFlowRuleBatchTagSelection,
   fetchBankFlowRuleBatches,
   saveBankFlowRuleBatchTagSelection,
-  resetSubmittedBankFlowRuleBatches,
   submitBankFlowRuleBatch,
   submitBankFlowRuleBatches,
   submitBankFlowRuleBatchSelection,
@@ -88,35 +87,6 @@ describe("bank flow rule batch API", () => {
     );
     expect(saved.version).toBe(4);
     expect(saved).not.toHaveProperty("refreshEnqueued");
-  });
-
-  test("resets all submitted flow rule batches through the reset endpoint", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      affected_months: ["2026-01"],
-      results: [
-        { batch_id: "flow-batch-001", status: "withdrawn" },
-        { batch_id: "flow-batch-002", status: "withdrawn" },
-      ],
-    }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await resetSubmittedBankFlowRuleBatches({ reason: "全部重新过规则" });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/bank-flow-rule-batches/reset-submitted",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ reason: "全部重新过规则" }),
-      }),
-    );
-    expect(result).toMatchObject({
-      affectedMonths: ["2026-01"],
-      results: [
-        { batch_id: "flow-batch-001", status: "withdrawn" },
-        { batch_id: "flow-batch-002", status: "withdrawn" },
-      ],
-    });
-    expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 
   test("maps snake_case and camelCase batch payloads", async () => {

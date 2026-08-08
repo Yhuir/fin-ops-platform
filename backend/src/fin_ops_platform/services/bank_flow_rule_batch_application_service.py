@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
@@ -947,117 +946,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             reason=reason,
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
-
-    def _submitted_batches_for_relation_mode(self, relation_mode: str) -> list[dict[str, object]]:
-        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            return super()._submitted_batches_for_relation_mode(relation_mode)
-        read_submitted = getattr(self._query_repository, "read_submitted_batches", None)
-        if not callable(read_submitted):
-            raise RuntimeError(
-                "bank_flow_rule_batch canonical query repository requires read_submitted_batches."
-            )
-        batches = [
-            dict(batch)
-            for batch in list(read_submitted() or [])
-            if isinstance(batch, dict)
-        ]
-        for batch in batches:
-            batch_id = str(batch.get("batch_id") or "").strip()
-            if batch_id:
-                self._restore_formal_bank_flow_rule_batch_runtime_item(
-                    batch_id,
-                    allowed_statuses={"submitted"},
-                )
-        return batches
-
-    def reset_submitted_bank_flow_rule_batches(
-        self,
-        *,
-        actor: str,
-        reason: str | None,
-    ) -> dict[str, object]:
-        previous_batch_snapshot = self._bank_batch_service.snapshot()
-        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
-        candidates = self._submitted_batches_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        if not candidates:
-            return {
-                "summary": {
-                    "reset_count": 0,
-                    "batch_count": 0,
-                    "row_count": 0,
-                    "affected_months": [],
-                },
-                "affected_months": [],
-                "results": [],
-            }
-
-        withdrawn_batches: list[dict[str, object]] = []
-        affected_months: set[str] = set()
-        resolved_reason = str(reason or "").strip() or "流水规则批量处理：重置全部已提交批次为未提交"
-        try:
-            for candidate in candidates:
-                batch_id = str(candidate.get("batch_id") or "").strip()
-                if not batch_id:
-                    continue
-                before_batch = self._bank_batch_service.get_batch(batch_id)
-                withdrawn = self._bank_batch_service.withdraw_batch(
-                    batch_id,
-                    actor=actor,
-                    expected_version=int(before_batch.get("version") or 1),
-                    reason=resolved_reason,
-                )
-                withdrawn_batches.append(withdrawn)
-                affected_months.update(self.affected_months(withdrawn))
-
-            case_ids = [
-                str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-                for batch in withdrawn_batches
-                if str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-            ]
-            version_fingerprint = "|".join(
-                f"{batch.get('batch_id')}:{batch.get('version')}"
-                for batch in sorted(withdrawn_batches, key=lambda item: str(item.get("batch_id") or ""))
-            )
-            cancel_result = self._require_relation_command_service().cancel_relations_by_case_ids(
-                case_ids=case_ids,
-                actor_id=str(actor or ""),
-                reason=resolved_reason,
-                idempotency_key=(
-                    "bank_flow_rule_batch:reset_submitted:"
-                    f"{sha256(version_fingerprint.encode('utf-8')).hexdigest()[:20]}"
-                ),
-                history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
-            )
-            changed_case_ids = [
-                str(case_id).strip()
-                for case_id in list(cancel_result.get("changed_case_ids") or [])
-                if str(case_id).strip()
-            ]
-            self.persist_mutation(
-                changed_case_ids=changed_case_ids,
-                changed_batch_ids=[
-                    str(batch.get("batch_id") or "").strip()
-                    for batch in withdrawn_batches
-                    if str(batch.get("batch_id") or "").strip()
-                ],
-                changed_scope_keys=sorted(affected_months),
-            )
-        except Exception:
-            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
-            raise
-        return {
-            "summary": {
-                "reset_count": len(withdrawn_batches),
-                "batch_count": len(withdrawn_batches),
-                "row_count": sum(int(batch.get("row_count") or 0) for batch in withdrawn_batches),
-                "affected_months": sorted(affected_months),
-            },
-            "affected_months": sorted(affected_months),
-            "results": [
-                {"batch_id": batch.get("batch_id"), "status": "withdrawn"}
-                for batch in withdrawn_batches
-            ],
-        }
 
     def persist_mutation(
         self,

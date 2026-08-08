@@ -16,7 +16,6 @@ import type {
   SubmitBankFlowRuleBatchRequest,
   SubmitBankFlowRuleBatchSelectionRequest,
   WithdrawBankFlowRuleBatchRequest,
-  ResetSubmittedBankFlowRuleBatchesRequest,
 } from "./types";
 import { apiRequestJson } from "../apiClient";
 
@@ -629,22 +628,6 @@ export async function withdrawBankFlowRuleBatch({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_version: expectedVersion, reason }),
-      signal,
-    },
-  );
-  return mapMutationResult(payload);
-}
-
-export async function resetSubmittedBankFlowRuleBatches({
-  reason,
-  signal,
-}: ResetSubmittedBankFlowRuleBatchesRequest = {}): Promise<BankFlowRuleBatchMutationResult> {
-  const payload = await requestJson<ApiBankFlowRuleBatchMutationResult>(
-    "/api/bank-flow-rule-batches/reset-submitted",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: reason ?? "" }),
       signal,
     },
   );

@@ -482,12 +482,6 @@ function installFetchMock(
         results: [],
       });
     }
-    if (url.pathname === "/api/bank-flow-rule-batches/reset-submitted") {
-      return jsonResponse({
-        affected_months: ["2026-05"],
-        results: [{ batch_id: "batch-submitted-salary", status: "withdrawn" }],
-      });
-    }
     if (url.pathname === "/api/operation-barrier/status") {
       return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
@@ -1366,39 +1360,6 @@ describe("BankFlowRuleBatchPage", () => {
           body: JSON.stringify({ expected_version: 2, reason: "金额复核" }),
         }),
       );
-    });
-  });
-
-  test("resets all submitted flow rule batches from the page", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installFetchMock();
-    renderPage();
-    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
-    await user.click(await screen.findByRole("button", { name: "重置全部已提交" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/bank-flow-rule-batches/reset-submitted",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ reason: "流水规则批量处理：全部已提交批次重新过规则" }),
-        }),
-      );
-    });
-    expect(await screen.findByText("已重置 1 个已提交批次")).toBeInTheDocument();
-    await waitFor(() => {
-      const resetCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches/reset-submitted";
-      });
-      expect(resetCallIndex).toBeGreaterThanOrEqual(0);
-      expect(fetchMock.mock.calls.slice(resetCallIndex + 1).some(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/bank-flow-rule-batches"
-          && (!init?.method || init.method === "GET")
-          && url.searchParams.get("bucket") === "unsubmitted"
-          && url.searchParams.get("page") === "1";
-      })).toBe(true);
     });
   });
 

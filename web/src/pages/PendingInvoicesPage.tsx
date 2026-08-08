@@ -1,3 +1,5 @@
+import { Button, SearchField, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import type { Key } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
@@ -665,41 +667,20 @@ export default function PendingInvoicesPage() {
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
       <PageScaffold
-        description={(
-          <div aria-label="待找发票流水范围" className="pending-invoices-direction-segment" role="group">
-            {([
-              ["all", `全部 ${summaryCounts.all}`],
-              ["expense", `支出 ${summaryCounts.expense}`],
-              ["income", `收入 ${summaryCounts.income}`],
-            ] as const).map(([value, label]) => (
-              <button
-                aria-pressed={direction === value}
-                className="pending-invoices-direction-button"
-                key={value}
-                onClick={() => handleDirectionChange(value)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
         actions={(
           <div className="pending-invoices-toolbar-actions pending-invoices-toolbar-actions--primary">
-            <button className="pending-invoices-button" onClick={() => handleOpenRules("expense")} type="button">
+            <Button onPress={() => setRefreshToken((current) => current + 1)} isDisabled={loading} size="sm" variant="secondary">
+              刷新
+            </Button>
+            <Button onPress={() => handleOpenRules("expense")} size="sm" variant="secondary">
               支出待找发票规则设置
-            </button>
-            <button className="pending-invoices-button" onClick={() => handleOpenRules("income")} type="button">
+            </Button>
+            <Button onPress={() => handleOpenRules("income")} size="sm" variant="secondary">
               收入待找发票规则设置
-            </button>
-            <button
-              className="pending-invoices-button pending-invoices-button--primary"
-              disabled={exportDisabled}
-              onClick={() => setActiveDrawer("export")}
-              type="button"
-            >
+            </Button>
+            <Button isDisabled={exportDisabled} onPress={() => setActiveDrawer("export")} size="sm" variant="primary">
               筛选内容导出
-            </button>
+            </Button>
           </div>
         )}
         className="pending-invoices-page__scaffold"
@@ -709,11 +690,29 @@ export default function PendingInvoicesPage() {
         <PageToolbar
           className="pending-invoices-toolbar"
           left={(
-            <div
-              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
-              role={error ? "alert" : "status"}
-            >
-              {compactStatusText}
+            <div className="pending-invoices-toolbar-left">
+              <ToggleButtonGroup
+                aria-label="待找发票流水范围"
+                className="pending-invoices-direction-segment"
+                disallowEmptySelection
+                selectedKeys={new Set<Key>([direction])}
+                selectionMode="single"
+                size="sm"
+                onSelectionChange={(keys) => {
+                  const [next] = Array.from(keys);
+                  if (next === "all" || next === "expense" || next === "income") handleDirectionChange(next);
+                }}
+              >
+                <ToggleButton id="all">全部 {summaryCounts.all}</ToggleButton>
+                <ToggleButton id="expense"><ToggleButtonGroup.Separator />支出 {summaryCounts.expense}</ToggleButton>
+                <ToggleButton id="income"><ToggleButtonGroup.Separator />收入 {summaryCounts.income}</ToggleButton>
+              </ToggleButtonGroup>
+              <div
+                className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
+                role={error ? "alert" : "status"}
+              >
+                {compactStatusText}
+              </div>
             </div>
           )}
           right={(
@@ -751,21 +750,22 @@ export default function PendingInvoicesPage() {
                   </button>
                 </div>
               ) : null}
-              <input
+              <SearchField
                 aria-label="搜索流水"
                 className="pending-invoices-search"
-                onChange={(event) => {
-                  setKeyword(event.target.value);
+                onChange={(value) => {
+                  setKeyword(value);
                   clearSelectedTransactions();
                   setPage(1);
                 }}
-                placeholder="搜索流水"
-                type="search"
                 value={keyword}
-              />
-              <button className="pending-invoices-button" onClick={() => setRefreshToken((current) => current + 1)} type="button">
-                刷新
-              </button>
+              >
+                <SearchField.Group className="pending-invoices-search-group">
+                  <SearchField.SearchIcon />
+                  <SearchField.Input className="pending-invoices-search-input" placeholder="搜索流水" />
+                  <SearchField.ClearButton aria-label="清空搜索" />
+                </SearchField.Group>
+              </SearchField>
             </div>
           )}
         />
