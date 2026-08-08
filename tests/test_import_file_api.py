@@ -194,11 +194,11 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(file_map[INVOICE_JAN.name]["batch_type"], "input_invoice")
         self.assertGreater(file_map[INVOICE_JAN.name]["row_count"], 0)
 
-        self.assertEqual(file_map[ICBC_JAN.name]["template_code"], "icbc_historydetail")
+        self.assertEqual(file_map[ICBC_JAN.name]["template_code"], "bank_statement")
         self.assertEqual(file_map[ICBC_JAN.name]["batch_type"], "bank_transaction")
         self.assertGreater(file_map[ICBC_JAN.name]["row_count"], 0)
 
-        self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "pingan_transaction_detail")
+        self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "bank_statement")
         self.assertEqual(file_map[PINGAN_JAN.name]["batch_type"], "bank_transaction")
         self.assertGreater(file_map[PINGAN_JAN.name]["row_count"], 0)
 
@@ -218,16 +218,16 @@ class ImportFileApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         file_map = {item["file_name"]: item for item in payload["files"]}
 
-        self.assertEqual(file_map[CEB_JAN.name]["template_code"], "ceb_transaction_detail")
+        self.assertEqual(file_map[CEB_JAN.name]["template_code"], "bank_statement")
         self.assertGreater(file_map[CEB_JAN.name]["row_count"], 0)
 
-        self.assertEqual(file_map[CCB_JAN.name]["template_code"], "ccb_transaction_detail")
+        self.assertEqual(file_map[CCB_JAN.name]["template_code"], "bank_statement")
         self.assertGreater(file_map[CCB_JAN.name]["row_count"], 0)
 
-        self.assertEqual(file_map[CMBC_JAN.name]["template_code"], "cmbc_transaction_detail")
+        self.assertEqual(file_map[CMBC_JAN.name]["template_code"], "bank_statement")
         self.assertGreater(file_map[CMBC_JAN.name]["row_count"], 0)
 
-        self.assertEqual(file_map[BOCOM_JAN.name]["template_code"], "bocom_transaction_detail")
+        self.assertEqual(file_map[BOCOM_JAN.name]["template_code"], "bank_statement")
         self.assertEqual(file_map[BOCOM_JAN.name]["detected_bank_name"], "交通银行")
         self.assertEqual(file_map[BOCOM_JAN.name]["detected_last4"], "3847")
         self.assertEqual(file_map[BOCOM_JAN.name]["row_count"], 2)
@@ -245,7 +245,7 @@ class ImportFileApiTests(unittest.TestCase):
                 },
                 {
                     "file_name": PINGAN_JAN.name,
-                    "template_code": "pingan_transaction_detail",
+                    "template_code": "bank_statement",
                     "batch_type": "bank_transaction",
                     "bank_mapping_id": "bank_mapping_pingan_override",
                     "bank_name": "平安银行",
@@ -263,8 +263,8 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(file_map[INVOICE_JAN.name]["batch_type"], "output_invoice")
         self.assertEqual(file_map[INVOICE_JAN.name]["override_batch_type"], "output_invoice")
-        self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "pingan_transaction_detail")
-        self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "pingan_transaction_detail")
+        self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "bank_statement")
+        self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "bank_statement")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_mapping_id"], "bank_mapping_pingan_override")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_name"], "平安银行")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_short_name"], "平安")
@@ -278,7 +278,7 @@ class ImportFileApiTests(unittest.TestCase):
             file_overrides=[
                 {
                     "file_name": PINGAN_JAN.name,
-                    "template_code": "pingan_transaction_detail",
+                    "template_code": "bank_statement",
                     "batch_type": "bank_transaction",
                     "bank_mapping_id": "bank_mapping_manual_8826",
                     "bank_name": "建设银行",
@@ -445,7 +445,7 @@ class ImportFileApiTests(unittest.TestCase):
             file_overrides=[
                 {
                     "file_name": PINGAN_JAN.name,
-                    "template_code": "pingan_transaction_detail",
+                    "template_code": "bank_statement",
                     "batch_type": "bank_transaction",
                     "bank_mapping_id": "bank_mapping_pingan_0093",
                     "bank_name": "平安银行",

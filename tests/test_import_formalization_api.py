@@ -279,7 +279,10 @@ class ImportFormalizationApiTests(unittest.TestCase):
             templates_response = app.handle_request("GET", "/imports/templates")
             self.assertEqual(templates_response.status_code, 200)
             templates_payload = json.loads(templates_response.body)
-            self.assertGreaterEqual(len(templates_payload["templates"]), 6)
+            self.assertEqual(
+                {item["template_code"] for item in templates_payload["templates"]},
+                {"invoice_export", "bank_statement"},
+            )
 
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",

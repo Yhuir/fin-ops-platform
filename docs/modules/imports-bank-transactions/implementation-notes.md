@@ -11,6 +11,14 @@
 - confirm 是异步导入动作；返回 `job` / `import_job` 只能说明已开始处理，不能说明银行明细、关联台、成本统计等下游已 fresh。
 - 银行导入的跨页一致性以后端 lifecycle、dirty scope、read model worker 和 App Status 为准，前端只展示 job feedback 和刷新提示。
 
+## 2026-08-08 - canonical 表头归一与人工映射闭环
+
+- 目标：处理银行官方 Excel 表头版本差异，同时避免维护按银行、按版本膨胀的模板集合。
+- 关键决策：保留单一 `bank_statement` parser；前 60 行有界定位表头，NFKC/空白/单位/括号归一后只匹配明确 alias。核心字段不完整则 fail closed，由页面提交字段映射；相同表头签名从既有 import file audit payload 复用最近一次人工映射。
+- 删除项：六套银行 exact-header template definition、detector 分支和 parser 分支；不保留兼容 fallback，不新增模板表、worker 或 read model。
+- 测试覆盖：现有六家银行 fixture、建行 `/元` 半角括号与元数据账号、未知字段人工 retry/持久化复用、API 嵌套 mapping 和 HeroUI 交互。
+- 未测风险：加密/损坏/超大文件与完全无表头线索的文件仍需人工处理；系统不会为追求“全自动”猜测金额或方向。
+
 ## 2026-08-01 - import batch rows 批量 upsert
 
 - 活动 `save_import_delta` 链路中的 `import_batch_rows` 从逐行 execute 改为复用现有 `execute_many_values` bounded chunk；`ON CONFLICT` owner guard、事务回滚、审计 payload 和 canonical delta 不变。

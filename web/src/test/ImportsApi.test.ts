@@ -116,7 +116,11 @@ describe("imports api", () => {
     global.fetch = fetchMock as typeof fetch;
 
     await retryImportFiles("import_session_0001", ["import_file_0001"], {
-      import_file_0001: { templateCode: "invoice_export", batchType: "output_invoice" },
+      import_file_0001: {
+        templateCode: "bank_statement",
+        batchType: "bank_transaction",
+        fieldMapping: { credit_amount: "2" },
+      },
     });
     await confirmImportFiles("import_session_0001", ["import_file_0001"]);
     await fetchImportSession("import_session_0001");
@@ -152,6 +156,15 @@ describe("imports api", () => {
     fetchMock.mock.calls.forEach(([, init]) => {
       const headers = init?.headers as Headers;
       expect(headers.get("Authorization")).toBe("Bearer mock-cookie-token");
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({
+      overrides: {
+        import_file_0001: {
+          template_code: "bank_statement",
+          batch_type: "bank_transaction",
+          field_mapping: { credit_amount: "2" },
+        },
+      },
     });
   });
 

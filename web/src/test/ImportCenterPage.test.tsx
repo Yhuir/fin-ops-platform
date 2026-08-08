@@ -236,6 +236,46 @@ describe("Import pages", () => {
     expect(screen.getByText("将导入 14 条唯一记录，跳过 4 条重复。")).toBeInTheDocument();
   });
 
+  test("bank transaction import maps an unknown amount header and retries the same file", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderAppAt("/imports/bank-transactions");
+
+    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传银行流水文件", "上传文件"), [
+      new File(["bank-demo"], "建行需映射.xls", {
+        type: "application/vnd.ms-excel",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("对应账户 建行需映射.xls"), "bank_mapping_8826");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    const mappingPanel = await screen.findByRole("region", { name: "建行需映射.xls 字段映射" });
+    await user.click(screen.getByRole("button", { name: /收入金额源列/ }));
+    await user.click(await screen.findByRole("option", { name: "第3列 · 收到数额" }));
+    await user.click(screen.getByRole("button", { name: "保存并重新解析" }));
+
+    expect(await screen.findByText("字段映射已保存并重新完成预览。")).toBeInTheDocument();
+    expect(mappingPanel).not.toBeInTheDocument();
+    const retryCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/retry");
+    expect(JSON.parse(String((retryCall?.[1] as RequestInit).body))).toEqual(expect.objectContaining({
+      selected_file_ids: ["import_file_0001"],
+      overrides: {
+        import_file_0001: expect.objectContaining({
+          batch_type: "bank_transaction",
+          field_mapping: {
+            txn_date: "0",
+            debit_amount: "1",
+            credit_amount: "2",
+            counterparty_name: "3",
+          },
+        }),
+      },
+    }));
+  });
+
   test("invoice import uses the standalone route and sends per-file directions", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

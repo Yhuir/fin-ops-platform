@@ -109,44 +109,12 @@ const templateRegistry = [
     required_headers: ["发票代码", "发票号码", "销方识别号", "购买方名称"],
   },
   {
-    template_code: "icbc_historydetail",
-    label: "工商银行流水",
-    file_extensions: [".xlsx"],
+    template_code: "bank_statement",
+    label: "银行流水",
+    file_extensions: [".xls", ".xlsx"],
     record_type: "bank_transaction",
     allowed_batch_types: ["bank_transaction"],
-    required_headers: ["[HISTORYDETAIL]", "交易时间", "对方单位"],
-  },
-  {
-    template_code: "ceb_transaction_detail",
-    label: "光大银行流水",
-    file_extensions: [".xls"],
-    record_type: "bank_transaction",
-    allowed_batch_types: ["bank_transaction"],
-    required_headers: ["交易日期", "交易时间", "借方发生额"],
-  },
-  {
-    template_code: "ccb_transaction_detail",
-    label: "建设银行流水",
-    file_extensions: [".xls"],
-    record_type: "bank_transaction",
-    allowed_batch_types: ["bank_transaction"],
-    required_headers: ["账号", "账户名称", "借方发生额（支取）"],
-  },
-  {
-    template_code: "cmbc_transaction_detail",
-    label: "民生银行流水",
-    file_extensions: [".xlsx"],
-    record_type: "bank_transaction",
-    allowed_batch_types: ["bank_transaction"],
-    required_headers: ["交易时间", "交易流水号", "借方发生额"],
-  },
-  {
-    template_code: "pingan_transaction_detail",
-    label: "平安银行流水",
-    file_extensions: [".xlsx"],
-    record_type: "bank_transaction",
-    allowed_batch_types: ["bank_transaction"],
-    required_headers: ["交易时间", "收入", "支出"],
+    required_headers: ["交易日期或时间", "借方和贷方金额，或金额和收支方向"],
   },
 ];
 
@@ -1250,34 +1218,34 @@ function createEtcReconciliationTaskStore() {
 function detectMockBankSelection(fileName: string) {
   if (fileName.includes("historydetail")) {
     return {
-      templateCode: "icbc_historydetail",
+      templateCode: "bank_statement",
       bankName: "工商银行",
       last4: "4080",
     };
   }
   if (fileName.includes("交易明细")) {
     return {
-      templateCode: "pingan_transaction_detail",
+      templateCode: "bank_statement",
       bankName: "平安银行",
       last4: "0093",
     };
   }
   if (fileName.includes("民生")) {
     return {
-      templateCode: "cmbc_transaction_detail",
+      templateCode: "bank_statement",
       bankName: "民生银行",
       last4: "9486",
     };
   }
   if (fileName.includes("光大")) {
     return {
-      templateCode: "ceb_transaction_detail",
+      templateCode: "bank_statement",
       bankName: "光大银行",
       last4: "8826",
     };
   }
   return {
-    templateCode: "pingan_transaction_detail",
+    templateCode: "bank_statement",
     bankName: "平安银行",
     last4: "0093",
   };
@@ -1369,6 +1337,52 @@ function buildImportPreviewPayload(
             : null,
         ].filter(Boolean).join("；")
         : null;
+      if (!isInvoice && fileName.includes("需映射")) {
+        return {
+          id: `import_file_${String(index + 1).padStart(4, "0")}`,
+          file_name: fileName,
+          template_code: "bank_statement",
+          batch_type: "bank_transaction",
+          status: "unrecognized_template",
+          message: "缺少收入金额字段，请补充字段映射。",
+          row_count: 0,
+          success_count: 0,
+          error_count: 0,
+          duplicate_count: 0,
+          suspected_duplicate_count: 0,
+          updated_count: 0,
+          preview_batch_id: null,
+          batch_id: null,
+          selected_bank_mapping_id: selectedBankMappingId,
+          selected_bank_name: selectedBankName,
+          selected_bank_short_name: selectedBankShortName,
+          selected_bank_last4: selectedBankLast4,
+          detected_bank_name: detectedBank.bankName,
+          detected_last4: detectedBank.last4,
+          bank_selection_conflict: false,
+          conflict_message: null,
+          header_signature: "mock-bank-header-signature",
+          mapping_candidates: [
+            { key: "0", label: "第1列 · 交易日" },
+            { key: "1", label: "第2列 · 支出金额" },
+            { key: "2", label: "第3列 · 收到数额" },
+            { key: "3", label: "第4列 · 对方名称" },
+          ],
+          mapping_fields: [
+            { key: "txn_date", label: "交易日期", selected: "0", required: true },
+            { key: "debit_amount", label: "支出金额", selected: "1", required: true },
+            { key: "credit_amount", label: "收入金额", selected: null, required: true },
+            { key: "counterparty_name", label: "对方名称", selected: "3", required: false },
+          ],
+          field_mapping: {
+            txn_date: "0",
+            debit_amount: "1",
+            counterparty_name: "3",
+          },
+          mapping_source: "auto",
+          row_results: [],
+        };
+      }
       return {
         id: `import_file_${String(index + 1).padStart(4, "0")}`,
         file_name: fileName,
@@ -7355,14 +7369,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             return file;
           }
           const override = overrides[file.id] ?? {};
+          const fieldMapping = override.field_mapping && typeof override.field_mapping === "object"
+            ? override.field_mapping as Record<string, string>
+            : null;
+          const isBankFile = override.batch_type === "bank_transaction" || file.batch_type === "bank_transaction";
           return {
             ...file,
-            template_code: override.template_code ?? file.template_code ?? "invoice_export",
-            batch_type: override.batch_type ?? file.batch_type ?? "input_invoice",
+            template_code: override.template_code ?? file.template_code ?? (isBankFile ? "bank_statement" : "invoice_export"),
+            batch_type: override.batch_type ?? file.batch_type ?? (isBankFile ? "bank_transaction" : "input_invoice"),
             status: "preview_ready",
             message: "模板识别成功。",
             override_template_code: override.template_code ?? null,
             override_batch_type: override.batch_type ?? null,
+            field_mapping: fieldMapping ?? file.field_mapping ?? {},
+            mapping_source: fieldMapping ? "manual" : file.mapping_source ?? null,
           };
         }),
       };

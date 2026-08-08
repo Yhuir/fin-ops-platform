@@ -1,4 +1,4 @@
-import { Alert, Button, Chip, Tabs } from "@heroui/react";
+import { Alert, Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { ArrowLeft, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -22,6 +22,7 @@ import {
   confirmImportFiles,
   fetchImportSession,
   previewImportFiles,
+  retryImportFiles,
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
@@ -812,6 +813,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
   const [isRefreshingContext, setIsRefreshingContext] = useState(false);
+  const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
   const mountedRef = useRef(false);
 
   const title = TITLES[mode];
@@ -1002,6 +1005,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
     [previewPayload],
   );
+  const mappingRequiredFiles = useMemo(
+    () => previewPayload?.files.filter((file) => (
+      file.status === "unrecognized_template" && file.mappingCandidates.length > 0 && file.mappingFields.length > 0
+    )) ?? [],
+    [previewPayload],
+  );
   const conflictConfirmLabel = useMemo(() => {
     const selectedAccountLabel = formatSelectedBankAccountLabel(conflictingPreviewFiles[0] ?? {});
     return selectedAccountLabel
@@ -1058,6 +1067,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setEtcPreviewPayload(null);
     setEtcImported(false);
     setConflictDialogOpen(false);
+    setMappingDrafts({});
+    setMappingRetryingFileId(null);
     setFeedbackMessage(null);
     setErrorMessage(null);
     clearPersistedSession();
@@ -1265,6 +1276,37 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setErrorMessage(resolveImportApiErrorMessage(error, "文件预览失败，请稍后重试。"));
     } finally {
       setIsPreviewing(false);
+    }
+  }
+
+  async function handleApplyFieldMapping(file: ImportFilePreview) {
+    if (!previewPayload || mappingRetryingFileId) return;
+    const fieldMapping = { ...file.fieldMapping, ...(mappingDrafts[file.id] ?? {}) };
+    setMappingRetryingFileId(file.id);
+    setErrorMessage(null);
+    try {
+      const payload = await retryImportFiles(previewPayload.session.id, [file.id], {
+        [file.id]: {
+          batchType: "bank_transaction",
+          bankMappingId: file.selectedBankMappingId,
+          bankName: file.selectedBankName,
+          bankShortName: file.selectedBankShortName,
+          last4: file.selectedBankLast4,
+          fieldMapping,
+        },
+      });
+      setPreviewPayload(payload);
+      setMappingDrafts((current) => {
+        const next = { ...current };
+        delete next[file.id];
+        return next;
+      });
+      const refreshed = payload.files.find((item) => item.id === file.id);
+      setFeedbackMessage(refreshed?.status === "preview_ready" ? "字段映射已保存并重新完成预览。" : null);
+    } catch (error) {
+      setErrorMessage(resolveImportApiErrorMessage(error, "字段映射保存失败，请重试。"));
+    } finally {
+      setMappingRetryingFileId(null);
     }
   }
 
@@ -1649,6 +1691,59 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     <div className="import-workflow-grid-shell import-workflow-grid-shell--preview">
                       <ImportPreviewTable loading={isPreviewing} rows={previewRows} />
                     </div>
+                    {mappingRequiredFiles.map((file) => {
+                      const values = { ...file.fieldMapping, ...(mappingDrafts[file.id] ?? {}) };
+                      return (
+                        <section key={file.id} aria-label={`${file.fileName} 字段映射`} className="import-workflow-mapping-panel">
+                          <div className="import-workflow-mapping-panel__header">
+                            <div>
+                              <h3 className="import-workflow-preview-title">字段映射</h3>
+                              <p className="import-workflow-muted-text">{file.fileName} · {file.message}</p>
+                            </div>
+                            <Button
+                              isDisabled={mappingRetryingFileId !== null}
+                              onPress={() => { void handleApplyFieldMapping(file); }}
+                              size="sm"
+                              type="button"
+                            >
+                              {mappingRetryingFileId === file.id ? "解析中..." : "保存并重新解析"}
+                            </Button>
+                          </div>
+                          <div className="import-workflow-mapping-grid">
+                            {file.mappingFields.map((field) => (
+                              <label key={field.key} className="import-workflow-mapping-field">
+                                <span>{field.label}{field.required ? " *" : ""}</span>
+                                <Select
+                                  aria-label={`${field.label}源列`}
+                                  onSelectionChange={(key) => {
+                                    setMappingDrafts((current) => ({
+                                      ...current,
+                                      [file.id]: {
+                                        ...file.fieldMapping,
+                                        ...(current[file.id] ?? {}),
+                                        [field.key]: String(key),
+                                      },
+                                    }));
+                                  }}
+                                  selectedKey={values[field.key] ?? ""}
+                                >
+                                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                                  <Select.Popover>
+                                    <ListBox>
+                                      {file.mappingCandidates.map((candidate) => (
+                                        <ListBox.Item id={candidate.key} key={candidate.key} textValue={candidate.label}>
+                                          {candidate.label}
+                                        </ListBox.Item>
+                                      ))}
+                                    </ListBox>
+                                  </Select.Popover>
+                                </Select>
+                              </label>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    })}
                     <div className="import-workflow-detail-shell">
                       <Tabs
                         className="import-workflow-detail-tabs-root"

@@ -28,6 +28,12 @@
 - `/api/operations/app-health/page-audit`：管理员只读页面业务 read model / relation 全量对账审计。
 - 进项使用、销项收款和待找发票的旧 AppHealth refresh routes 已删除并返回 `404`；统一 page audit 保持只读。
 
+### 银行流水文件预览与字段映射
+
+- `POST /imports/files/preview` 的银行文件只使用 `template_code=bank_statement`。成功文件返回 `preview_ready`；已定位表头但核心字段不完整时返回 `unrecognized_template`，同时返回 `header_signature`、`mapping_candidates[{key,label}]`、`mapping_fields[{key,label,selected,required}]`、`field_mapping` 和 `mapping_source`，且不生成可确认 rows。
+- `POST /imports/files/retry` 可在 `overrides[file_id].field_mapping` 提交 canonical 字段到源列 key 的映射。服务端必须校验列存在、核心日期/金额组合完整和方向合同；失败仍保持不可确认，成功重新生成 preview。
+- 字段映射仅属于 import file/session 的解析审计信息，不是 canonical 银行交易事实；confirm 仍只接受 `preview_ready` 文件，并继续执行去重、preview stale 和账户冲突合同。
+
 ## 页面标题完整性统计契约
 
 银行明细、OA 待付款、外部往来款、ETC 业务批次、税金抵扣、待找发票、进项发票使用、销项发票收款、关联台和成本统计的现有页面主响应可以携带 additive `statistics` 对象。前端默认复用该对象；只有本文件明确登记的首屏热路径可以用同一 endpoint 的非阻塞统计请求，禁止新增跨页统一统计接口。

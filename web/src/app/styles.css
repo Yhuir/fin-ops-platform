@@ -10213,6 +10213,42 @@ textarea {
   height: 220px;
 }
 
+.import-workflow-mapping-panel {
+  display: grid;
+  gap: var(--fp-space-3);
+  border-block: 1px solid var(--fp-border);
+  padding-block: var(--fp-space-3);
+}
+
+.import-workflow-mapping-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.import-workflow-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--fp-space-2);
+}
+
+.import-workflow-mapping-field {
+  display: grid;
+  gap: var(--fp-space-1);
+  min-width: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 700;
+}
+
+.import-workflow-mapping-field [data-slot="trigger"] {
+  min-height: 34px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
 .import-workflow-detail-shell {
   overflow: hidden;
   border: 1px solid var(--fp-border);
@@ -10277,6 +10313,7 @@ textarea {
   .import-workflow-actions,
   .import-workflow-panel__header,
   .import-workflow-preview-heading,
+  .import-workflow-mapping-panel__header,
   .import-workflow-file-card__header {
     align-items: stretch;
     flex-direction: column;

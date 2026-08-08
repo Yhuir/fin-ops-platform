@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认和后台处理；确认只提交 canonical facts、source version、审计与必要领域任务，不写页面 read model，也不扇出页面 refresh job。
 - 当前缺口：App 内部 direct-canonical Audit 已闭环；外部银行回单页数、行数、control total 与上传前字节真实性仍须独立来源证据，不能由 App 文件登记 hash 推导。
-- 旧代码删除状态：生产与前端只保留 `/imports/files/*` file/session I/O。旧 `/imports/preview`、`/imports/confirm` JSON route/handler/entrypoint、无生产者的 `general_import.confirm` worker 类型、processor、preview-only orchestration dependencies 和无 session 范围的 preview 全量 snapshot writer 已删除；`FileImportService.snapshot/from_snapshot` 只保留为跨进程恢复 I/O，不作为增量写入接口。
+- 旧代码删除状态：生产与前端只保留 `/imports/files/*` file/session I/O。旧 `/imports/preview`、`/imports/confirm` JSON route/handler/entrypoint、六套按银行精确表头识别/parser 分支、无生产者的 `general_import.confirm` worker 类型、processor、preview-only orchestration dependencies 和无 session 范围的 preview 全量 snapshot writer已删除；`FileImportService.snapshot/from_snapshot` 只保留为跨进程恢复 I/O，不作为增量写入接口。
 
 ## 职责边界
 
@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
+| 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Job event | runtime worker handlers | 后台处理必须可恢复 |
 
@@ -56,7 +57,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认 |
+| 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次写入影响的精确月份；不在写路径展开成页面 refresh jobs |
@@ -80,6 +81,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
+| Persistence | `services/postgres_repositories/core.py` 只在既有 `app.import_files.raw_payload` 中保存字段映射、来源和表头签名，用于 session 恢复及相同签名复用；不新增模板事实表。 |
 | Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/postgres_repositories/import_audit_repair.py`、`services/page_audit_registry.py` |
 | Controlled repair | `services/import_audit_repair_service.py` 输出纯 plan；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
 | Worker/runtime | `runtime_worker_handlers.py`、`app_status_job_registry.py` |
@@ -107,6 +109,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 ## 当前缺口和删除条件
 
 - 模板识别变更必须覆盖预览、确认、失败恢复，以及导入后首次访问受影响页面时的 downstream freshness。
+- 银行表头只有在 canonical 核心字段完整时才能解析；未知字段不得用字符串相似度、列位置或模型猜测自动写入。相同标准化表头签名可复用最近一次成功人工映射；签名变化必须重新确认。
+- 六套银行专用 exact-header parser 已删除，禁止以兼容名、隐藏 fallback 或并行模板注册重新引入；银行差异只能作为有证据的字段别名或明确的金额符号规则进入单一解析器。
 - 旧 JSON import API 及其 `general_import.confirm` worker 链已删除；测试造数只能调用保留的 service-level normalization ports，HTTP 行为必须走 file/session API。
 - 删除任何 file/session snapshot 持久化前，必须先提供 import worker 跨进程恢复替代方案；不能把 `FileImportService.snapshot/from_snapshot` 误判为旧 full snapshot fallback。
 - Audit pass 只证明已登记 App 内部事实闭包；外部银行 control evidence 与下游受影响页面各自的 Audit 仍是独立 gate。

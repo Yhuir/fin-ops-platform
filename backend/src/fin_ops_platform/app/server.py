@@ -7475,6 +7475,7 @@ class Application:
                     selected_bank_name=override.get("bank_name"),
                     selected_bank_short_name=override.get("bank_short_name"),
                     selected_bank_last4=override.get("last4"),
+                    field_mapping=dict(override.get("field_mapping") or {}),
                 )
                 for file, override in zip(files, file_overrides)
             ]
@@ -7672,7 +7673,7 @@ class Application:
         self,
         fields: dict[str, list[str]],
         file_count: int,
-    ) -> tuple[list[dict[str, str]], Response | None]:
+    ) -> tuple[list[dict[str, Any]], Response | None]:
         raw_values = fields.get("file_overrides") or []
         if not raw_values:
             return [{} for _ in range(file_count)], None
@@ -7694,18 +7695,23 @@ class Application:
                     "message": "file_overrides must be a JSON array.",
                 },
             )
-        normalized: list[dict[str, str]] = []
+        normalized: list[dict[str, Any]] = []
         for raw_override in raw_overrides[:file_count]:
             if not isinstance(raw_override, dict):
                 normalized.append({})
                 continue
-            normalized.append(
-                {
+            normalized_override: dict[str, Any] = {
                     key: value.strip()
                     for key in ("template_code", "batch_type", "bank_mapping_id", "bank_name", "bank_short_name", "last4")
                     if isinstance((value := raw_override.get(key)), str) and value.strip()
+            }
+            if isinstance(raw_override.get("field_mapping"), dict):
+                normalized_override["field_mapping"] = {
+                    str(key): str(value)
+                    for key, value in raw_override["field_mapping"].items()
+                    if str(key).strip() and str(value).strip()
                 }
-            )
+            normalized.append(normalized_override)
         while len(normalized) < file_count:
             normalized.append({})
         return normalized, None

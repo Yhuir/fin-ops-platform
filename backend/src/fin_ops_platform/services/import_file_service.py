@@ -5,8 +5,10 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from copy import deepcopy
+import hashlib
 import re
 from typing import Any, Callable
+import unicodedata
 import warnings
 
 from openpyxl import load_workbook
@@ -58,54 +60,77 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
         "required_headers": sorted(INVOICE_REQUIRED_HEADERS),
     },
     {
-        "template_code": "icbc_historydetail",
-        "label": "工商银行流水",
-        "file_extensions": [".xlsx"],
-        "record_type": "bank_transaction",
-        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["[HISTORYDETAIL]", "凭证号", "交易时间", "对方单位", "对方账号", "转入金额", "转出金额"],
-    },
-    {
-        "template_code": "ceb_transaction_detail",
-        "label": "光大银行流水",
+        "template_code": "bank_statement",
+        "label": "银行流水",
         "file_extensions": [".xls", ".xlsx"],
         "record_type": "bank_transaction",
         "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["交易日期", "交易时间", "借方发生额/借方金额", "贷方发生额/贷方金额", "账户余额", "对方名称", "对方账号"],
-    },
-    {
-        "template_code": "ccb_transaction_detail",
-        "label": "建设银行流水",
-        "file_extensions": [".xls"],
-        "record_type": "bank_transaction",
-        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["账号/客户账号", "账户名称", "交易时间", "借方发生额（支取）", "贷方发生额（收入）", "对方户名"],
-    },
-    {
-        "template_code": "cmbc_transaction_detail",
-        "label": "民生银行流水",
-        "file_extensions": [".xlsx"],
-        "record_type": "bank_transaction",
-        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["交易时间", "交易流水号", "借方发生额", "贷方发生额", "账户余额", "对方账号名称"],
-    },
-    {
-        "template_code": "pingan_transaction_detail",
-        "label": "平安银行流水",
-        "file_extensions": [".xlsx"],
-        "record_type": "bank_transaction",
-        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["交易时间", "账号", "收入", "支出", "对方户名", "交易流水号", "核心唯一流水号"],
-    },
-    {
-        "template_code": "bocom_transaction_detail",
-        "label": "交通银行流水",
-        "file_extensions": [".xls", ".xlsx"],
-        "record_type": "bank_transaction",
-        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
-        "required_headers": ["交易时间", "借方发生额（支出）", "贷方发生额（收入）", "账户余额", "对方账号", "对方户名", "摘要"],
+        "required_headers": ["交易日期或时间", "借方和贷方金额，或金额和收支方向"],
     },
 ]
+
+BANK_FIELD_LABELS = {
+    "account_no": "本方账号",
+    "account_name": "本方户名",
+    "trade_time": "交易时间",
+    "txn_date": "交易日期",
+    "txn_clock": "交易时刻",
+    "debit_amount": "支出金额",
+    "credit_amount": "收入金额",
+    "amount": "交易金额",
+    "direction": "收支方向",
+    "balance": "账户余额",
+    "counterparty_name": "对方名称",
+    "counterparty_account_no": "对方账号",
+    "counterparty_bank_name": "对方开户行",
+    "summary": "摘要",
+    "remark": "备注/用途",
+    "bank_serial_no": "银行流水号",
+    "account_detail_no": "账户明细编号",
+    "enterprise_serial_no": "企业流水号",
+    "voucher_kind": "凭证种类",
+    "voucher_no": "凭证号",
+    "currency": "币种",
+    "booked_date": "记账日期",
+}
+BANK_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "account_no": ("账号", "帐号", "客户账号", "查询账号", "本方账号", "账户号", "卡号"),
+    "account_name": ("账户名称", "帐户名称", "户名", "本方户名", "客户名称"),
+    "trade_time": ("交易时间", "交易日期时间", "交易日期及时间", "发生时间", "入账时间", "记账时间"),
+    "txn_date": ("交易日期", "交易日", "日期"),
+    "txn_clock": ("交易时刻", "交易时间点", "时间"),
+    "debit_amount": (
+        "借方发生额", "借方发生额支取", "借方发生额支出", "借方金额", "借方金额支出", "支出", "支出金额", "转出金额", "付出金额",
+    ),
+    "credit_amount": (
+        "贷方发生额", "贷方发生额收入", "贷方金额", "贷方金额收入", "收入", "收入金额", "转入金额", "收款金额",
+    ),
+    "amount": ("交易金额", "发生额", "金额", "本次金额"),
+    "direction": ("收支方向", "交易方向", "借贷标志", "收付标志", "收支标志", "借贷方向"),
+    "balance": ("余额", "账户余额", "帐户余额", "交易后余额", "可用余额"),
+    "counterparty_name": (
+        "对方户名", "对方名称", "对方单位", "对方账号名称", "对手方名称", "对手方户名", "收付款人名称",
+    ),
+    "counterparty_account_no": ("对方账号", "对方账户", "对手方账号", "收付款人账号"),
+    "counterparty_bank_name": ("对方开户行", "对方开户机构", "对方银行", "对方账号开户行", "对手方开户行", "对方行名"),
+    "summary": ("摘要", "交易摘要"),
+    "remark": ("备注", "用途", "交易用途", "客户附言", "附言"),
+    "bank_serial_no": ("银行流水号", "交易流水号", "流水号", "核心唯一流水号", "银行交易流水号"),
+    "account_detail_no": ("账户明细编号交易流水号", "账户明细编号", "明细编号"),
+    "enterprise_serial_no": ("企业流水号", "业务流水号", "客户流水号"),
+    "voucher_kind": ("凭证种类", "凭证类型"),
+    "voucher_no": ("凭证号", "凭证号码"),
+    "currency": ("币种", "货币种类"),
+    "booked_date": ("记账日期", "入账日期", "账务日期"),
+}
+BANK_NAME_MARKERS = {
+    "工商银行": ("中国工商银行", "工商银行", "[historydetail]"),
+    "建设银行": ("中国建设银行", "建设银行"),
+    "光大银行": ("中国光大银行", "光大银行"),
+    "民生银行": ("中国民生银行", "民生银行"),
+    "平安银行": ("平安银行", "核心唯一流水号"),
+    "交通银行": ("交通银行",),
+}
 
 
 @dataclass(slots=True)
@@ -118,6 +143,7 @@ class UploadedImportFile:
     selected_bank_name: str | None = None
     selected_bank_short_name: str | None = None
     selected_bank_last4: str | None = None
+    field_mapping: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -147,6 +173,11 @@ class FileImportPreviewItem:
     detected_last4: str | None = None
     bank_selection_conflict: bool = False
     conflict_message: str | None = None
+    header_signature: str | None = None
+    mapping_candidates: list[dict[str, str]] = field(default_factory=list)
+    mapping_fields: list[dict[str, Any]] = field(default_factory=list)
+    field_mapping: dict[str, str] = field(default_factory=dict)
+    mapping_source: str | None = None
     row_results: list[ImportedBatchRowResult] = field(default_factory=list)
     normalized_rows: list[dict[str, Any]] = field(default_factory=list)
     audit: ImportPreviewAuditCounts = field(default_factory=ImportPreviewAuditCounts)
@@ -169,6 +200,31 @@ class ParsedImportFile:
     template_code: str
     batch_type: BatchType
     rows: list[dict[str, Any]]
+    detected_bank_name: str | None = None
+    header_signature: str | None = None
+    mapping_candidates: list[dict[str, str]] = field(default_factory=list)
+    mapping_fields: list[dict[str, Any]] = field(default_factory=list)
+    field_mapping: dict[str, str] = field(default_factory=dict)
+    mapping_source: str | None = None
+
+
+class BankStatementMappingRequired(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        header_signature: str | None = None,
+        candidates: list[dict[str, str]] | None = None,
+        mapping_fields: list[dict[str, Any]] | None = None,
+        field_mapping: dict[str, str] | None = None,
+        detected_bank_name: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.header_signature = header_signature
+        self.candidates = list(candidates or [])
+        self.mapping_fields = list(mapping_fields or [])
+        self.field_mapping = dict(field_mapping or {})
+        self.detected_bank_name = detected_bank_name
 
 
 class FileImportService:
@@ -269,6 +325,7 @@ class FileImportService:
                 selected_bank_name=upload.selected_bank_name,
                 selected_bank_short_name=upload.selected_bank_short_name,
                 selected_bank_last4=upload.selected_bank_last4,
+                field_mapping=upload.field_mapping,
             )
             session.files.append(file_item)
 
@@ -345,7 +402,7 @@ class FileImportService:
         *,
         session_id: str,
         selected_file_ids: list[str],
-        overrides: dict[str, dict[str, str]] | None = None,
+        overrides: dict[str, dict[str, Any]] | None = None,
     ) -> FileImportSession:
         session = self._sessions[session_id]
         override_map = overrides or {}
@@ -366,8 +423,12 @@ class FileImportService:
                 selected_bank_name=item.selected_bank_name,
                 selected_bank_short_name=item.selected_bank_short_name,
                 selected_bank_last4=item.selected_bank_last4,
+                field_mapping=item.field_mapping,
             )
             override_payload = override_map.get(item.id, {})
+            field_mapping = override_payload.get("field_mapping")
+            if not isinstance(field_mapping, dict):
+                field_mapping = item.field_mapping
             refreshed = self._preview_single_file(
                 imported_by=session.imported_by,
                 upload=upload,
@@ -379,6 +440,7 @@ class FileImportService:
                 selected_bank_name=override_payload.get("bank_name") or item.selected_bank_name,
                 selected_bank_short_name=override_payload.get("bank_short_name") or item.selected_bank_short_name,
                 selected_bank_last4=override_payload.get("last4") or item.selected_bank_last4,
+                field_mapping={str(key): str(value) for key, value in field_mapping.items()},
             )
             item.template_code = refreshed.template_code
             item.batch_type = refreshed.batch_type
@@ -403,6 +465,11 @@ class FileImportService:
             item.detected_last4 = refreshed.detected_last4
             item.bank_selection_conflict = refreshed.bank_selection_conflict
             item.conflict_message = refreshed.conflict_message
+            item.header_signature = refreshed.header_signature
+            item.mapping_candidates = refreshed.mapping_candidates
+            item.mapping_fields = refreshed.mapping_fields
+            item.field_mapping = refreshed.field_mapping
+            item.mapping_source = refreshed.mapping_source
 
         session.status = "preview_ready_with_errors" if any(
             file.status == "unrecognized_template" for file in session.files
@@ -424,14 +491,48 @@ class FileImportService:
         selected_bank_name: str | None = None,
         selected_bank_short_name: str | None = None,
         selected_bank_last4: str | None = None,
+        field_mapping: dict[str, str] | None = None,
     ) -> FileImportPreviewItem:
         try:
             rows = self._read_rows(upload)
-            parsed = self._parse_rows(
-                rows=rows,
-                template_code_override=template_code_override,
-                batch_type_override=batch_type_override,
-            )
+            try:
+                parsed = self._parse_rows(
+                    rows=rows,
+                    template_code_override=template_code_override,
+                    batch_type_override=batch_type_override,
+                    field_mapping=field_mapping,
+                )
+                if field_mapping and parsed.batch_type == BatchType.BANK_TRANSACTION:
+                    parsed.mapping_source = "manual"
+            except BankStatementMappingRequired as mapping_error:
+                saved_mapping = self._saved_field_mapping(mapping_error.header_signature)
+                if field_mapping or not saved_mapping:
+                    return self._build_preview_error_item(
+                        file_id=file_id,
+                        upload=upload,
+                        stored_file_path=stored_file_path,
+                        message=str(mapping_error),
+                        template_code_override=template_code_override,
+                        batch_type_override=batch_type_override,
+                        selected_bank_mapping_id=selected_bank_mapping_id,
+                        selected_bank_name=selected_bank_name,
+                        selected_bank_short_name=selected_bank_short_name,
+                        selected_bank_last4=selected_bank_last4,
+                        template_code="bank_statement",
+                        batch_type=BatchType.BANK_TRANSACTION,
+                        header_signature=mapping_error.header_signature,
+                        mapping_candidates=mapping_error.candidates,
+                        mapping_fields=mapping_error.mapping_fields,
+                        field_mapping=mapping_error.field_mapping,
+                        detected_bank_name=mapping_error.detected_bank_name,
+                    )
+                parsed = self._parse_rows(
+                    rows=rows,
+                    template_code_override="bank_statement",
+                    batch_type_override=BatchType.BANK_TRANSACTION.value,
+                    field_mapping=saved_mapping,
+                )
+                parsed.mapping_source = "saved"
         except ValueError as exc:
             return self._build_preview_error_item(
                 file_id=file_id,
@@ -524,6 +625,11 @@ class FileImportService:
             detected_last4=detected_last4,
             bank_selection_conflict=bank_selection_conflict,
             conflict_message=conflict_message,
+            header_signature=parsed.header_signature,
+            mapping_candidates=parsed.mapping_candidates,
+            mapping_fields=parsed.mapping_fields,
+            field_mapping=parsed.field_mapping,
+            mapping_source=parsed.mapping_source,
             row_results=preview.row_results,
             normalized_rows=preview.normalized_rows,
         )
@@ -612,12 +718,19 @@ class FileImportService:
         selected_bank_name: str | None,
         selected_bank_short_name: str | None,
         selected_bank_last4: str | None,
+        template_code: str | None = None,
+        batch_type: BatchType | None = None,
+        header_signature: str | None = None,
+        mapping_candidates: list[dict[str, str]] | None = None,
+        mapping_fields: list[dict[str, Any]] | None = None,
+        field_mapping: dict[str, str] | None = None,
+        detected_bank_name: str | None = None,
     ) -> FileImportPreviewItem:
         return FileImportPreviewItem(
             id=file_id,
             file_name=upload.file_name,
-            template_code=None,
-            batch_type=None,
+            template_code=template_code,
+            batch_type=batch_type,
             status="unrecognized_template",
             message=message,
             row_count=0,
@@ -628,6 +741,11 @@ class FileImportService:
             selected_bank_name=selected_bank_name,
             selected_bank_short_name=selected_bank_short_name,
             selected_bank_last4=selected_bank_last4,
+            detected_bank_name=detected_bank_name,
+            header_signature=header_signature,
+            mapping_candidates=list(mapping_candidates or []),
+            mapping_fields=list(mapping_fields or []),
+            field_mapping=dict(field_mapping or {}),
         )
 
     def _parse_rows(
@@ -636,9 +754,14 @@ class FileImportService:
         rows: list[list[str]],
         template_code_override: str | None = None,
         batch_type_override: str | None = None,
+        field_mapping: dict[str, str] | None = None,
     ) -> ParsedImportFile:
-        detector = TemplateDetector(rows)
-        template_code = template_code_override or detector.detect()
+        template_code = template_code_override
+        if not template_code:
+            try:
+                template_code = detect_invoice_template(rows)
+            except ValueError:
+                template_code = "bank_statement"
         if template_code == "invoice_export":
             parsed_rows = parse_invoice_rows(rows)
             resolved_batch_type = self._resolve_invoice_batch_type(parsed_rows, batch_type_override)
@@ -651,43 +774,18 @@ class FileImportService:
                 batch_type=resolved_batch_type,
                 rows=parsed_rows,
             )
-        if template_code == "icbc_historydetail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_icbc_rows(rows),
-            )
-        if template_code == "pingan_transaction_detail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_pingan_rows(rows),
-            )
-        if template_code == "cmbc_transaction_detail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_cmbc_rows(rows),
-            )
-        if template_code == "ccb_transaction_detail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_ccb_rows(rows),
-            )
-        if template_code == "ceb_transaction_detail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_ceb_rows(rows),
-            )
-        if template_code == "bocom_transaction_detail":
-            return ParsedImportFile(
-                template_code=template_code,
-                batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_bocom_rows(rows),
-            )
+        if template_code == "bank_statement" or batch_type_override == BatchType.BANK_TRANSACTION.value:
+            return parse_bank_statement_rows(rows, field_mapping=field_mapping)
         raise ValueError("无法识别文件模板。")
+
+    def _saved_field_mapping(self, header_signature: str | None) -> dict[str, str]:
+        if not header_signature:
+            return {}
+        for session in reversed(list(self._sessions.values())):
+            for item in reversed(session.files):
+                if item.header_signature == header_signature and item.field_mapping and item.mapping_source in {"manual", "saved"}:
+                    return dict(item.field_mapping)
+        return {}
 
     @staticmethod
     def _read_rows(upload: UploadedImportFile) -> list[list[str]]:
@@ -752,14 +850,7 @@ class FileImportService:
     def _detect_bank_selection(parsed: ParsedImportFile) -> tuple[str | None, str | None]:
         if parsed.batch_type != BatchType.BANK_TRANSACTION:
             return None, None
-        detected_bank_name = {
-            "icbc_historydetail": "工商银行",
-            "pingan_transaction_detail": "平安银行",
-            "cmbc_transaction_detail": "民生银行",
-            "ccb_transaction_detail": "建设银行",
-            "ceb_transaction_detail": "光大银行",
-            "bocom_transaction_detail": "交通银行",
-        }.get(parsed.template_code)
+        detected_bank_name = parsed.detected_bank_name
         detected_last4 = None
         for row in parsed.rows:
             account_no = clean(row.get("account_no"))
@@ -809,34 +900,9 @@ class FileImportService:
         return selected_alias == detected_alias or selected_alias in detected_alias or detected_alias in selected_alias
 
 
-class TemplateDetector:
-    def __init__(self, rows: list[list[str]]) -> None:
-        self._rows = rows
-
-    def detect(self) -> str:
-        for row in self._rows:
-            normalized = normalize_row(row)
-            if not normalized:
-                continue
-            row_set = set(normalized)
-            invoice_row_set = {canonical_invoice_header(value) for value in normalized}
-            if INVOICE_REQUIRED_HEADERS.issubset(invoice_row_set):
-                return "invoice_export"
-            if "[HISTORYDETAIL]" in row_set:
-                return "icbc_historydetail"
-            if {"交易时间", "账号", "收入", "支出", "对方户名", "交易流水号", "核心唯一流水号"}.issubset(row_set):
-                return "pingan_transaction_detail"
-            if {"交易时间", "交易流水号", "借方发生额", "贷方发生额", "账户余额", "对方账号", "对方账号名称"}.issubset(
-                row_set
-            ):
-                return "cmbc_transaction_detail"
-            if is_ccb_header_row(row_set):
-                return "ccb_transaction_detail"
-            if is_ceb_header_row(row_set):
-                return "ceb_transaction_detail"
-            if is_bocom_header_row(row_set):
-                return "bocom_transaction_detail"
-        raise ValueError("无法识别文件模板。")
+def detect_invoice_template(rows: list[list[str]]) -> str:
+    find_invoice_header_index(rows)
+    return "invoice_export"
 
 
 def read_xlsx_rows(content: bytes) -> list[list[str]]:
@@ -852,10 +918,11 @@ def _select_template_sheet(workbook: Any) -> Any:
     for sheet in workbook.worksheets:
         rows = _worksheet_rows(sheet)
         try:
-            TemplateDetector(rows).detect()
+            detect_invoice_template(rows)
             return sheet
         except ValueError:
-            continue
+            if find_bank_header_candidate(rows) is not None:
+                return sheet
     return first_sheet
 
 
@@ -868,11 +935,22 @@ def _worksheet_rows(sheet: Any) -> list[list[str]]:
 
 def read_xls_rows(content: bytes) -> list[list[str]]:
     workbook = xlrd.open_workbook(file_contents=content)
-    sheet = workbook.sheet_by_index(0)
-    rows: list[list[str]] = []
-    for row_index in range(sheet.nrows):
-        rows.append([stringify_cell(sheet.cell_value(row_index, column_index)) for column_index in range(sheet.ncols)])
-    return rows
+    first_rows: list[list[str]] = []
+    for sheet_index in range(workbook.nsheets):
+        sheet = workbook.sheet_by_index(sheet_index)
+        rows = [
+            [stringify_cell(sheet.cell_value(row_index, column_index)) for column_index in range(sheet.ncols)]
+            for row_index in range(sheet.nrows)
+        ]
+        if sheet_index == 0:
+            first_rows = rows
+        try:
+            detect_invoice_template(rows)
+            return rows
+        except ValueError:
+            if find_bank_header_candidate(rows) is not None:
+                return rows
+    return first_rows
 
 
 def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
@@ -1026,268 +1104,260 @@ def is_invoice_summary_footer(mapped: dict[str, str]) -> bool:
     )
 
 
-def parse_icbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(rows, {"凭证号", "交易时间", "对方单位", "对方账号", "转入金额", "转出金额", "摘要"})
-    header = rows[header_index]
-    metadata_account_no = extract_account_no_from_metadata(rows[:header_index])
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
+@dataclass(slots=True)
+class BankHeaderCandidate:
+    index: int
+    headers: list[str]
+    candidates: list[dict[str, str]]
+    automatic_mapping: dict[str, str]
+    signature: str
+
+
+def normalize_bank_header(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value).strip() if value is not None else "").lower()
+    text = text.replace("帐号", "账号").replace("帐户", "账户")
+    text = re.sub(r"人民币|rmb|cny|/元|\(元\)|元", "", text)
+    return re.sub(r"[\s/\\()\[\]{}<>:：_\-—]+", "", text)
+
+
+_BANK_ALIAS_LOOKUP = {
+    normalize_bank_header(alias): field_name
+    for field_name, aliases in BANK_FIELD_ALIASES.items()
+    for alias in aliases
+}
+
+
+def find_bank_header_candidate(rows: list[list[str]]) -> BankHeaderCandidate | None:
+    best: tuple[int, BankHeaderCandidate] | None = None
+    for index, row in enumerate(rows[:60]):
+        headers = [clean(cell) for cell in row]
+        populated = [(column, header) for column, header in enumerate(headers) if header]
+        if len(populated) < 3:
             continue
-        trade_time = normalize_datetime_string(mapped.get("交易时间"))
-        account_no = metadata_account_no or extract_account_no_from_mapping(mapped)
-        data_rows.append(
-            {
-                "account_no": account_no,
-                "trade_time": trade_time,
-                "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("交易时间")),
-                "counterparty_name": mapped.get("对方单位") or mapped.get("对方行名") or "未知对手方",
-                "counterparty_account_no": mapped.get("对方账号"),
-                "counterparty_bank_name": mapped.get("对方行名"),
-                "credit_amount": mapped.get("转入金额"),
-                "debit_amount": mapped.get("转出金额"),
-                "balance": mapped.get("余额"),
-                "summary": mapped.get("摘要"),
-                "remark": mapped.get("附言") or mapped.get("用途"),
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "voucher_no": mapped.get("凭证号"),
-                "bank_serial_no": mapped.get("附言") or mapped.get("凭证号"),
-                "currency": "CNY",
-            }
+        resolved: dict[str, list[int]] = {}
+        keyword_count = 0
+        for column, header in populated:
+            normalized = normalize_bank_header(header)
+            field_name = _BANK_ALIAS_LOOKUP.get(normalized)
+            if field_name:
+                resolved.setdefault(field_name, []).append(column)
+            if re.search(r"时间|日期|金额|余额|对方|账号|户名|摘要|备注|流水|凭证|收支|借方|贷方", header):
+                keyword_count += 1
+        automatic_mapping = {
+            field_name: str(columns[0])
+            for field_name, columns in resolved.items()
+            if len(columns) == 1
+        }
+        next_row = rows[index + 1] if index + 1 < len(rows) else []
+        data_score = sum(
+            1
+            for value in next_row
+            if re.search(r"\d{4}[-/]?\d{2}[-/]?\d{2}|^-?[\d,]+(?:\.\d+)?$", clean(value))
         )
-    return data_rows
-
-
-def parse_pingan_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(rows, {"交易时间", "账号", "收入", "支出", "对方户名", "交易流水号", "核心唯一流水号"})
-    header = rows[header_index]
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
+        score = len(automatic_mapping) * 10 + keyword_count + min(data_score, 5)
+        if score < 5:
             continue
-        trade_time = normalize_datetime_string(mapped.get("交易时间"))
-        data_rows.append(
-            {
-                "account_no": mapped.get("账号"),
-                "trade_time": trade_time,
-                "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("交易日期") or mapped.get("交易时间")),
-                "counterparty_name": mapped.get("对方户名"),
-                "counterparty_account_no": mapped.get("对方账号"),
-                "counterparty_bank_name": mapped.get("对方账号开户行"),
-                "credit_amount": mapped.get("收入"),
-                "debit_amount": mapped.get("支出"),
-                "balance": mapped.get("账户余额"),
-                "summary": mapped.get("摘要"),
-                "remark": mapped.get("交易用途"),
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "bank_serial_no": mapped.get("核心唯一流水号") or mapped.get("交易流水号"),
-                "enterprise_serial_no": mapped.get("业务流水号"),
-                "account_detail_no": mapped.get("交易流水号"),
-                "currency": mapped.get("币种") or "CNY",
-            }
+        candidates = [
+            {"key": str(column), "label": f"第{column + 1}列 · {header}"}
+            for column, header in populated
+        ]
+        signature_source = "|".join(normalize_bank_header(header) for header in headers)
+        candidate = BankHeaderCandidate(
+            index=index,
+            headers=headers,
+            candidates=candidates,
+            automatic_mapping=automatic_mapping,
+            signature=hashlib.sha256(signature_source.encode("utf-8")).hexdigest()[:24],
         )
-    return data_rows
+        if best is None or score > best[0]:
+            best = (score, candidate)
+    return best[1] if best else None
 
 
-def parse_cmbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(rows, {"交易时间", "交易流水号", "借方发生额", "贷方发生额", "账户余额", "对方账号", "对方账号名称"})
-    header = rows[header_index]
-    meta = extract_key_value_metadata(rows[:header_index])
-    account_no = meta.get("账号")
-    account_name = meta.get("账户名称")
-    currency = meta.get("币种") or "CNY"
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
-            continue
-        trade_time = normalize_datetime_string(mapped.get("交易时间"))
-        data_rows.append(
-            {
-                "account_no": account_no,
-                "account_name": account_name,
-                "trade_time": trade_time,
-                "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("交易时间")),
-                "counterparty_name": mapped.get("对方账号名称") or "未知对手方",
-                "counterparty_account_no": mapped.get("对方账号"),
-                "counterparty_bank_name": mapped.get("对方开户行"),
-                "credit_amount": mapped.get("贷方发生额"),
-                "debit_amount": mapped.get("借方发生额"),
-                "balance": mapped.get("账户余额"),
-                "summary": None,
-                "remark": mapped.get("客户附言"),
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "voucher_no": mapped.get("凭证号"),
-                "bank_serial_no": mapped.get("交易流水号"),
-                "currency": currency,
-            }
+def parse_bank_statement_rows(
+    rows: list[list[str]],
+    *,
+    field_mapping: dict[str, str] | None = None,
+) -> ParsedImportFile:
+    candidate = find_bank_header_candidate(rows)
+    if candidate is None:
+        raise ValueError("无法识别银行流水表头，请确认文件包含交易明细。")
+    mapping = dict(candidate.automatic_mapping)
+    for field_name, raw_column in dict(field_mapping or {}).items():
+        if field_name not in BANK_FIELD_LABELS or not str(raw_column).isdigit():
+            raise ValueError("字段映射无效，请重新选择源列。")
+        column = int(raw_column)
+        if column < 0 or column >= len(candidate.headers) or not candidate.headers[column]:
+            raise ValueError("字段映射中的源列不存在，请重新选择。")
+        mapping[field_name] = str(column)
+
+    mapping_fields = _bank_mapping_fields(mapping)
+    missing = _missing_bank_core_fields(mapping)
+    detected_bank_name = detect_bank_name(rows, header_index=candidate.index)
+    if missing:
+        raise BankStatementMappingRequired(
+            f"需要补充字段映射：{'、'.join(missing)}。",
+            header_signature=candidate.signature,
+            candidates=candidate.candidates,
+            mapping_fields=mapping_fields,
+            field_mapping=mapping,
+            detected_bank_name=detected_bank_name,
         )
-    return data_rows
 
-
-def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_ccb_header_index(rows)
-    header = rows[header_index]
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
+    header = candidate.headers
+    metadata = extract_key_value_metadata(rows[: candidate.index])
+    metadata_account_no = extract_account_no_from_metadata(rows[: candidate.index])
+    metadata_account_name = first_metadata_value(metadata, "账户名称", "帐户名称", "户名")
+    metadata_currency = first_metadata_value(metadata, "币种", "货币种类") or "CNY"
+    parsed_rows: list[dict[str, Any]] = []
+    for row in rows[candidate.index + 1 :]:
+        if not any(clean(cell) for cell in row):
             continue
-        trade_time = normalize_datetime_string(mapped.get("交易时间"))
-        data_rows.append(
-            {
-                "account_no": first_mapped_value(mapped, "账号", "客户账号"),
-                "account_name": mapped.get("账户名称"),
-                "trade_time": trade_time,
-                "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("记账日期") or mapped.get("交易时间")),
-                "booked_date": to_date_string(mapped.get("记账日期")),
-                "counterparty_name": mapped.get("对方户名") or "未知对手方",
-                "counterparty_account_no": mapped.get("对方账号"),
-                "counterparty_bank_name": mapped.get("对方开户机构"),
-                "credit_amount": mapped.get("贷方发生额（收入）"),
-                "debit_amount": mapped.get("借方发生额（支取）"),
-                "balance": mapped.get("余额"),
-                "summary": mapped.get("摘要"),
-                "remark": mapped.get("备注"),
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "account_detail_no": mapped.get("账户明细编号-交易流水号"),
-                "enterprise_serial_no": mapped.get("企业流水号"),
-                "voucher_kind": mapped.get("凭证种类"),
-                "voucher_no": first_mapped_value(mapped, "凭证号", "凭证号码"),
-                "currency": mapped.get("币种") or "CNY",
-            }
-        )
-    return data_rows
 
+        def cell(field_name: str) -> str | None:
+            raw_index = mapping.get(field_name)
+            if raw_index is None:
+                return None
+            column = int(raw_index)
+            return clean(row[column] if column < len(row) else "") or None
 
-def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_ceb_header_index(rows)
-    header = rows[header_index]
-    meta = extract_key_value_metadata(rows[:header_index])
-    account_no = meta.get("账号")
-    account_name = meta.get("账户名称")
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
+        raw_trade_time = cell("trade_time")
+        raw_txn_date = cell("txn_date") or cell("booked_date")
+        raw_txn_clock = cell("txn_clock")
+        if raw_trade_time and to_date_string(raw_trade_time) is None and raw_txn_date:
+            raw_trade_time = f"{raw_txn_date} {raw_trade_time}"
+        elif not raw_trade_time and raw_txn_date:
+            raw_trade_time = f"{raw_txn_date} {raw_txn_clock or '00:00:00'}"
+        txn_date = to_date_string(raw_txn_date or raw_trade_time)
+        if not txn_date:
             continue
-        trade_time = normalize_datetime_string(f"{mapped.get('交易日期')} {mapped.get('交易时间')}")
+        trade_time = normalize_datetime_string(raw_trade_time)
         debit_amount, credit_amount = normalize_signed_debit_credit_columns(
-            first_mapped_value(mapped, "借方发生额", "借方发生额（元）", "借方金额（支出）"),
-            first_mapped_value(mapped, "贷方发生额", "贷方发生额（元）", "贷方金额（收入）"),
+            cell("debit_amount"),
+            cell("credit_amount"),
         )
-        data_rows.append(
+        if not debit_amount and not credit_amount:
+            debit_amount, credit_amount = split_amount_by_direction(cell("amount"), cell("direction"))
+        account_detail_no = cell("account_detail_no")
+        voucher_no = cell("voucher_no")
+        remark = cell("remark")
+        parsed_rows.append(
             {
-                "account_no": account_no,
-                "account_name": account_name,
+                "account_no": cell("account_no") or metadata_account_no,
+                "account_name": cell("account_name") or metadata_account_name,
                 "trade_time": trade_time,
                 "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("交易日期")),
-                "counterparty_name": mapped.get("对方名称") or "未知对手方",
-                "counterparty_account_no": mapped.get("对方账号"),
-                "counterparty_bank_name": mapped.get("对方银行"),
+                "txn_date": txn_date,
+                "booked_date": to_date_string(cell("booked_date")),
+                "counterparty_name": cell("counterparty_name") or "未知对手方",
+                "counterparty_account_no": cell("counterparty_account_no"),
+                "counterparty_bank_name": cell("counterparty_bank_name"),
                 "credit_amount": credit_amount,
                 "debit_amount": debit_amount,
-                "balance": first_mapped_value(mapped, "账户余额", "账户余额（元）"),
-                "summary": mapped.get("摘要"),
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "voucher_no": mapped.get("凭证号"),
-                "bank_serial_no": mapped.get("流水号") or mapped.get("凭证号"),
-                "currency": "CNY",
+                "balance": cell("balance"),
+                "summary": cell("summary"),
+                "remark": remark,
+                "bank_text_fields": extract_bank_text_fields_from_row(header, row),
+                "bank_serial_no": cell("bank_serial_no") or account_detail_no or voucher_no or remark,
+                "account_detail_no": account_detail_no,
+                "enterprise_serial_no": cell("enterprise_serial_no"),
+                "voucher_kind": cell("voucher_kind"),
+                "voucher_no": voucher_no,
+                "currency": cell("currency") or metadata_currency,
             }
         )
-    return data_rows
-
-
-def parse_bocom_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_bocom_header_index(rows)
-    header = rows[header_index]
-    meta = extract_key_value_metadata(rows[:header_index])
-    account_no = meta.get("查询账号") or extract_account_no_from_metadata(rows[:header_index])
-    account_name = meta.get("户名") or meta.get("户  名")
-    data_rows = []
-    for row in rows[header_index + 1 :]:
-        mapped = row_to_dict(header, row)
-        if not any(mapped.values()):
-            continue
-        if to_date_string(mapped.get("交易时间")) is None:
-            continue
-        trade_time = normalize_datetime_string(mapped.get("交易时间"))
-        data_rows.append(
-            {
-                "account_no": account_no,
-                "account_name": account_name,
-                "trade_time": trade_time,
-                "pay_receive_time": trade_time,
-                "txn_date": to_date_string(mapped.get("交易时间")),
-                "counterparty_name": mapped.get("对方户名") or "未知对手方",
-                "counterparty_account_no": mapped.get("对方账号"),
-                "credit_amount": mapped.get("贷方发生额（收入）"),
-                "debit_amount": mapped.get("借方发生额（支出）"),
-                "balance": mapped.get("账户余额"),
-                "summary": mapped.get("摘要"),
-                "remark": None,
-                "bank_text_fields": extract_bank_text_fields(mapped),
-                "bank_serial_no": first_mapped_value(mapped, "流水号", "交易流水号", "凭证号"),
-                "currency": "CNY",
-            }
-        )
-    return data_rows
-
-
-def is_ceb_header_row(row_set: set[str]) -> bool:
-    return (
-        {"交易日期", "交易时间", "对方名称", "对方账号"}.issubset(row_set)
-        and bool({"借方发生额", "借方发生额（元）", "借方金额（支出）"} & row_set)
-        and bool({"贷方发生额", "贷方发生额（元）", "贷方金额（收入）"} & row_set)
-        and bool({"账户余额", "账户余额（元）"} & row_set)
+    if not parsed_rows:
+        raise ValueError("未找到可导入的银行交易明细。")
+    return ParsedImportFile(
+        template_code="bank_statement",
+        batch_type=BatchType.BANK_TRANSACTION,
+        rows=parsed_rows,
+        detected_bank_name=detected_bank_name,
+        header_signature=candidate.signature,
+        mapping_candidates=candidate.candidates,
+        mapping_fields=mapping_fields,
+        field_mapping=mapping,
+        mapping_source="manual" if field_mapping else "auto",
     )
 
 
-def is_ccb_header_row(row_set: set[str]) -> bool:
-    return (
-        bool({"账号", "客户账号"} & row_set)
-        and {
-            "账户名称",
-            "交易时间",
-            "借方发生额（支取）",
-            "贷方发生额（收入）",
-            "对方户名",
-            "账户明细编号-交易流水号",
-        }.issubset(row_set)
+def _bank_mapping_fields(mapping: dict[str, str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "key": field_name,
+            "label": label,
+            "selected": mapping.get(field_name),
+            "required": field_name in {"trade_time", "txn_date", "debit_amount", "credit_amount", "amount", "direction"},
+        }
+        for field_name, label in BANK_FIELD_LABELS.items()
+    ]
+
+
+def _missing_bank_core_fields(mapping: dict[str, str]) -> list[str]:
+    missing: list[str] = []
+    if not ({"trade_time", "txn_date"} & mapping.keys()):
+        missing.append("交易日期或时间")
+    has_split_amount = {"debit_amount", "credit_amount"}.issubset(mapping)
+    has_directed_amount = {"amount", "direction"}.issubset(mapping)
+    if not has_split_amount and not has_directed_amount:
+        missing.append("借方和贷方金额，或金额和收支方向")
+    return missing
+
+
+def detect_bank_name(rows: list[list[str]], *, header_index: int | None = None) -> str | None:
+    limit = min((header_index + 1) if header_index is not None else 20, 20)
+    sample = " ".join(clean(cell).lower() for row in rows[:limit] for cell in row if clean(cell))
+    for bank_name, markers in BANK_NAME_MARKERS.items():
+        if any(marker.lower() in sample for marker in markers):
+            return bank_name
+    normalized = normalize_bank_header(sample)
+    structural_markers = (
+        ("工商银行", ("historydetail",)),
+        ("平安银行", ("核心唯一流水号",)),
+        ("民生银行", ("对方账号名称", "交易流水号")),
+        ("建设银行", ("账户明细编号交易流水号",)),
+        ("交通银行", ("查询账号", "借方发生额支出", "贷方发生额收入")),
     )
+    for bank_name, markers in structural_markers:
+        if all(normalize_bank_header(marker) in normalized for marker in markers):
+            return bank_name
+    return None
 
 
-def is_bocom_header_row(row_set: set[str]) -> bool:
-    return {
-        "交易时间",
-        "借方发生额（支出）",
-        "贷方发生额（收入）",
-        "账户余额",
-        "对方账号",
-        "对方户名",
-        "摘要",
-    }.issubset(row_set)
+def split_amount_by_direction(amount: str | None, direction: str | None) -> tuple[str | None, str | None]:
+    amount_text = clean(amount)
+    direction_text = clean(direction).lower()
+    if not amount_text:
+        return None, None
+    if any(marker in direction_text for marker in ("支", "出", "借", "付", "debit")):
+        return amount_text.lstrip("-"), None
+    if any(marker in direction_text for marker in ("收", "入", "贷", "credit")):
+        return None, amount_text.lstrip("-")
+    return None, None
 
 
-def find_bocom_header_index(rows: list[list[str]]) -> int:
-    for index, row in enumerate(rows):
-        if is_bocom_header_row(set(normalize_row(row))):
-            return index
-    raise ValueError("无法识别文件模板。")
+def first_metadata_value(metadata: dict[str, str], *keys: str) -> str | None:
+    normalized = {normalize_bank_header(key): value for key, value in metadata.items()}
+    for key in keys:
+        value = clean(normalized.get(normalize_bank_header(key)))
+        if value:
+            return value
+    return None
 
 
-def find_ccb_header_index(rows: list[list[str]]) -> int:
-    for index, row in enumerate(rows):
-        if is_ccb_header_row(set(normalize_row(row))):
-            return index
-    raise ValueError("无法识别文件模板。")
+def extract_bank_text_fields_from_row(header: list[str], row: list[str]) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    normalized_header = [normalize_bank_header(label) for label in header]
+    for label in BANK_TEXT_FIELD_LABELS:
+        normalized_label = normalize_bank_header(label)
+        for index, header_label in enumerate(normalized_header):
+            if header_label != normalized_label:
+                continue
+            value = clean(row[index] if index < len(row) else "")
+            if value:
+                fields.append({"label": clean(header[index]), "value": value})
+            break
+    return fields
 
 
 def normalize_row(row: list[str]) -> list[str]:
@@ -1295,7 +1365,7 @@ def normalize_row(row: list[str]) -> list[str]:
 
 
 def normalize_header(value: str) -> str:
-    return clean(value).replace(" ", "")
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", clean(value)))
 
 
 def canonical_invoice_header(value: str) -> str:
@@ -1317,26 +1387,10 @@ def stringify_cell(value: Any) -> str:
     return str(value).strip()
 
 
-def find_header_index(rows: list[list[str]], required_headers: set[str]) -> int:
-    normalized_required = {normalize_header(value) for value in required_headers}
-    for index, row in enumerate(rows):
-        normalized_row = set(normalize_row(row))
-        if normalized_required.issubset(normalized_row):
-            return index
-    raise ValueError("无法识别文件模板。")
-
-
 def find_invoice_header_index(rows: list[list[str]]) -> int:
     for index, row in enumerate(rows):
         normalized_row = {canonical_invoice_header(cell) for cell in normalize_row(row)}
         if INVOICE_REQUIRED_HEADERS.issubset(normalized_row):
-            return index
-    raise ValueError("无法识别文件模板。")
-
-
-def find_ceb_header_index(rows: list[list[str]]) -> int:
-    for index, row in enumerate(rows):
-        if is_ceb_header_row(set(normalize_row(row))):
             return index
     raise ValueError("无法识别文件模板。")
 
@@ -1352,14 +1406,6 @@ def row_to_dict(header: list[str], row: list[str]) -> dict[str, str]:
     return payload
 
 
-def first_mapped_value(mapped: dict[str, str], *keys: str) -> str | None:
-    for key in keys:
-        value = clean(mapped.get(key))
-        if value:
-            return value
-    return None
-
-
 def normalize_signed_debit_credit_columns(debit_amount: str | None, credit_amount: str | None) -> tuple[str | None, str | None]:
     debit_text = clean(debit_amount)
     credit_text = clean(credit_amount)
@@ -1368,15 +1414,6 @@ def normalize_signed_debit_credit_columns(debit_amount: str | None, credit_amoun
     if credit_text.startswith("-") and not debit_text:
         return credit_text[1:].strip(), None
     return debit_amount, credit_amount
-
-
-def extract_bank_text_fields(mapped: dict[str, str]) -> list[dict[str, str]]:
-    fields: list[dict[str, str]] = []
-    for label in BANK_TEXT_FIELD_LABELS:
-        value = clean(mapped.get(label))
-        if value:
-            fields.append({"label": label, "value": value})
-    return fields
 
 
 def extract_key_value_metadata(rows: list[list[str]]) -> dict[str, str]:
@@ -1405,15 +1442,6 @@ def extract_key_value_metadata(rows: list[list[str]]) -> dict[str, str]:
 def extract_account_no_from_metadata(rows: list[list[str]]) -> str | None:
     metadata = extract_key_value_metadata(rows)
     for key, value in metadata.items():
-        if is_account_no_key(key):
-            account_no = normalize_account_no(value)
-            if account_no:
-                return account_no
-    return None
-
-
-def extract_account_no_from_mapping(mapped: dict[str, str]) -> str | None:
-    for key, value in mapped.items():
         if is_account_no_key(key):
             account_no = normalize_account_no(value)
             if account_no:

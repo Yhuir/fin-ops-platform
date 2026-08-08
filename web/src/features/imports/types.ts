@@ -101,6 +101,11 @@ export type ImportFilePreview = {
   detectedLast4?: string | null;
   bankSelectionConflict?: boolean;
   conflictMessage?: string | null;
+  headerSignature?: string | null;
+  mappingCandidates: Array<{ key: string; label: string }>;
+  mappingFields: Array<{ key: string; label: string; selected?: string | null; required: boolean }>;
+  fieldMapping: Record<string, string>;
+  mappingSource?: "auto" | "manual" | "saved" | null;
   rowResults: ImportRowResult[];
 };
 
@@ -112,6 +117,7 @@ export type ImportFilePreviewOverride = {
   bankName?: string | null;
   bankShortName?: string | null;
   last4?: string | null;
+  fieldMapping?: Record<string, string>;
 };
 
 export type ImportTemplate = {

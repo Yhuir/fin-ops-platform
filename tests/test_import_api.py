@@ -3,7 +3,7 @@ import unittest
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.import_file_service import parse_ccb_rows, parse_cmbc_rows, parse_icbc_rows, parse_pingan_rows
+from fin_ops_platform.services.import_file_service import parse_bank_statement_rows
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
@@ -42,7 +42,7 @@ class ImportApiTests(unittest.TestCase):
             ],
         ]
 
-        parsed = parse_pingan_rows(rows)
+        parsed = parse_bank_statement_rows(rows).rows
 
         self.assertEqual(
             parsed[0]["bank_text_fields"],
@@ -70,9 +70,9 @@ class ImportApiTests(unittest.TestCase):
             ["2026-04-13 10:05:43", "CMBC-001", "65000.00", "", "8189.46", "9800000000041", "本公司帐户", "2502014019350006386", "云南溯源科技有限公司", "中国工商银行总行清算中心"],
         ]
 
-        icbc = parse_icbc_rows(icbc_rows)[0]
-        ccb = parse_ccb_rows(ccb_rows)[0]
-        cmbc = parse_cmbc_rows(cmbc_rows)[0]
+        icbc = parse_bank_statement_rows(icbc_rows).rows[0]
+        ccb = parse_bank_statement_rows(ccb_rows).rows[0]
+        cmbc = parse_bank_statement_rows(cmbc_rows).rows[0]
 
         self.assertEqual(
             icbc["bank_text_fields"],

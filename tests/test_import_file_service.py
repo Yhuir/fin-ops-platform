@@ -9,10 +9,12 @@ from openpyxl import Workbook, load_workbook
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import (
+    BankStatementMappingRequired,
     FileImportService,
     UploadedImportFile,
     aggregate_invoice_line_rows,
     is_company_identity,
+    parse_bank_statement_rows,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
 
@@ -61,6 +63,7 @@ class FakeImportIdStore:
         self._existing_session_ids = {"import_session_0001", "import_session_0002"}
         self._existing_file_ids = {"import_file_0001", "import_file_0002"}
         self._stored_refs: list[str] = []
+        self._stored_files: dict[str, bytes] = {}
 
     def import_session_exists(self, session_id: str) -> bool:
         return session_id in self._existing_session_ids
@@ -73,7 +76,11 @@ class FakeImportIdStore:
         self._existing_file_ids.add(file_id)
         ref = f"stored://{session_id}/{file_id}/{file_name}"
         self._stored_refs.append(ref)
+        self._stored_files[ref] = content
         return ref
+
+    def read_import_file(self, stored_file_path: str) -> bytes:
+        return self._stored_files[stored_file_path]
 
 
 class FakeImportEntityRegistry:
@@ -101,6 +108,106 @@ class FailingSubmittedEtcIdentityRepository:
 
 
 class ImportFileServiceTests(unittest.TestCase):
+    def test_ccb_current_export_header_uses_metadata_account_and_unit_aliases(self) -> None:
+        parsed = parse_bank_statement_rows(
+            [
+                ["中国建设银行"],
+                ["账　　号", "53001905038050548106", "账户名称", "云南溯源科技有限公司"],
+                [
+                    "交易时间",
+                    "借方发生额/元(支取)",
+                    "贷方发生额/元(收入)",
+                    "余额",
+                    "币种",
+                    "对方户名",
+                    "对方账号",
+                    "对方开户机构",
+                    "记账日期",
+                    "摘要",
+                    "备注",
+                    "账户明细编号-交易流水号",
+                ],
+                [
+                    "20260801 15:24:03",
+                    "2100.00",
+                    "0",
+                    "131301.08",
+                    "人民币元",
+                    "张丽芬",
+                    "62166022700000810872",
+                    "中国银行昭通支行",
+                    "20260801",
+                    "电子转账",
+                    "住宿费",
+                    "13835-530905038F4BFMPXRK8",
+                ],
+            ]
+        )
+
+        self.assertEqual(parsed.template_code, "bank_statement")
+        self.assertEqual(parsed.detected_bank_name, "建设银行")
+        self.assertEqual(parsed.rows[0]["account_no"], "53001905038050548106")
+        self.assertEqual(parsed.rows[0]["debit_amount"], "2100.00")
+        self.assertEqual(parsed.rows[0]["account_detail_no"], "13835-530905038F4BFMPXRK8")
+
+    def test_manual_mapping_is_reused_for_same_header_signature(self) -> None:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["交易日", "付出金额", "收到数额", "对方名称", "流水标识"])
+        sheet.append(["2026-08-01", "0", "88.50", "测试客户", "BANK-001"])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        content = buffer.getvalue()
+        file_store = FakeImportIdStore()
+        service = FileImportService(ImportNormalizationService(), file_store=file_store)
+
+        first = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name="unknown-header.xlsx",
+                    content=content,
+                    batch_type_override="bank_transaction",
+                    selected_bank_mapping_id="bank_mapping_test_0093",
+                    selected_bank_name="平安银行",
+                    selected_bank_last4="0093",
+                )
+            ],
+        )
+        first_file = first.files[0]
+        self.assertEqual(first_file.status, "unrecognized_template")
+        self.assertTrue(first_file.header_signature)
+        with self.assertRaises(BankStatementMappingRequired):
+            parse_bank_statement_rows([
+                ["交易日", "付出金额", "收到数额", "对方名称", "流水标识"],
+                ["2026-08-01", "0", "88.50", "测试客户", "BANK-001"],
+            ])
+
+        retried = service.retry_session_files(
+            session_id=first.id,
+            selected_file_ids=[first_file.id],
+            overrides={first_file.id: {"field_mapping": {"credit_amount": "2", "bank_serial_no": "4"}}},
+        )
+        self.assertEqual(retried.files[0].status, "preview_ready")
+        self.assertEqual(retried.files[0].mapping_source, "manual")
+
+        second = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name="same-header.xlsx",
+                    content=content,
+                    batch_type_override="bank_transaction",
+                    selected_bank_mapping_id="bank_mapping_test_0093",
+                    selected_bank_name="平安银行",
+                    selected_bank_last4="0093",
+                )
+            ],
+        )
+        self.assertEqual(second.files[0].status, "preview_ready")
+        self.assertEqual(second.files[0].mapping_source, "saved")
+        self.assertEqual(second.files[0].normalized_rows[0]["amount"], "88.50")
+
     def test_invoice_export_aggregates_distinct_lines_and_discount_into_one_invoice(self) -> None:
         header = {
             "digital_invoice_no": "26117000001052654674",
@@ -441,7 +548,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         preview_file = session.files[0]
         self.assertEqual(preview_file.status, "preview_ready")
-        self.assertEqual(preview_file.template_code, "icbc_historydetail")
+        self.assertEqual(preview_file.template_code, "bank_statement")
         self.assertEqual(preview_file.detected_bank_name, "工商银行")
         self.assertIsNone(preview_file.detected_last4)
         self.assertFalse(preview_file.bank_selection_conflict)
@@ -681,7 +788,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         preview_file = session.files[0]
         self.assertEqual(preview_file.status, "preview_ready")
-        self.assertEqual(preview_file.template_code, "icbc_historydetail")
+        self.assertEqual(preview_file.template_code, "bank_statement")
         self.assertEqual(preview_file.detected_bank_name, "工商银行")
         self.assertEqual(preview_file.detected_last4, "6386")
         self.assertFalse(preview_file.bank_selection_conflict)
@@ -719,7 +826,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         preview_file = session.files[0]
         self.assertEqual(preview_file.status, "preview_ready")
-        self.assertEqual(preview_file.template_code, "ceb_transaction_detail")
+        self.assertEqual(preview_file.template_code, "bank_statement")
         self.assertEqual(preview_file.detected_bank_name, "光大银行")
         self.assertEqual(preview_file.detected_last4, "8826")
         self.assertEqual(preview_file.row_count, 1)
@@ -795,7 +902,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         preview_file = session.files[0]
         self.assertEqual(preview_file.status, "preview_ready")
-        self.assertEqual(preview_file.template_code, "ceb_transaction_detail")
+        self.assertEqual(preview_file.template_code, "bank_statement")
         self.assertEqual(preview_file.detected_bank_name, "光大银行")
         self.assertEqual(preview_file.detected_last4, "8826")
         self.assertEqual(preview_file.row_count, 2)
@@ -855,7 +962,7 @@ class ImportFileServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(parsed.template_code, "ccb_transaction_detail")
+        self.assertEqual(parsed.template_code, "bank_statement")
         self.assertEqual(parsed.batch_type.value, "bank_transaction")
         self.assertEqual(parsed.rows[0]["account_no"], "53001905038050548106")
         self.assertEqual(parsed.rows[0]["voucher_no"], "108095854700")
@@ -881,7 +988,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         preview_file = session.files[0]
         self.assertEqual(preview_file.status, "preview_ready")
-        self.assertEqual(preview_file.template_code, "bocom_transaction_detail")
+        self.assertEqual(preview_file.template_code, "bank_statement")
         self.assertEqual(preview_file.batch_type.value, "bank_transaction")
         self.assertEqual(preview_file.detected_bank_name, "交通银行")
         self.assertEqual(preview_file.detected_last4, "3847")

@@ -37,6 +37,11 @@ type ApiImportFile = {
   detected_last4?: string | null;
   bank_selection_conflict?: boolean;
   conflict_message?: string | null;
+  header_signature?: string | null;
+  mapping_candidates?: Array<{ key: string; label: string }>;
+  mapping_fields?: Array<{ key: string; label: string; selected?: string | null; required?: boolean }>;
+  field_mapping?: Record<string, string>;
+  mapping_source?: "auto" | "manual" | "saved" | null;
   row_results?: Array<{
     id: string;
     row_no: number;
@@ -304,6 +309,16 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
         detectedLast4: file.detected_last4,
         bankSelectionConflict: file.bank_selection_conflict ?? false,
         conflictMessage: file.conflict_message,
+        headerSignature: file.header_signature,
+        mappingCandidates: file.mapping_candidates ?? [],
+        mappingFields: (file.mapping_fields ?? []).map((field) => ({
+          key: field.key,
+          label: field.label,
+          selected: field.selected,
+          required: field.required ?? false,
+        })),
+        fieldMapping: file.field_mapping ?? {},
+        mappingSource: file.mapping_source,
         rowResults: (file.row_results ?? []).map((row) => ({
           ...mapPreviewDetailFields(row),
           id: row.id,
@@ -358,6 +373,9 @@ export async function previewImportFiles(
           ...(override.bankName ? { bank_name: override.bankName } : {}),
           ...(override.bankShortName ? { bank_short_name: override.bankShortName } : {}),
           ...(override.last4 ? { last4: override.last4 } : {}),
+          ...(override.fieldMapping && Object.keys(override.fieldMapping).length > 0
+            ? { field_mapping: override.fieldMapping }
+            : {}),
         })),
       ),
     );
@@ -380,6 +398,7 @@ export async function retryImportFiles(
     bankName?: string | null;
     bankShortName?: string | null;
     last4?: string | null;
+    fieldMapping?: Record<string, string>;
   }>,
 ): Promise<ImportSessionPayload> {
   const payload = await requestJson<ApiImportSessionPayload>("/imports/files/retry", {
@@ -400,6 +419,9 @@ export async function retryImportFiles(
             ...(override.bankName ? { bank_name: override.bankName } : {}),
             ...(override.bankShortName ? { bank_short_name: override.bankShortName } : {}),
             ...(override.last4 ? { last4: override.last4 } : {}),
+            ...(override.fieldMapping && Object.keys(override.fieldMapping).length > 0
+              ? { field_mapping: override.fieldMapping }
+              : {}),
           },
         ]),
       ),
