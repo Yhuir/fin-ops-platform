@@ -84,6 +84,7 @@ const settingsPage = lazyPage(() => import("../pages/SettingsPage"));
 const appHealthOperationsPage = lazyPage(() => import("../pages/AppHealthOperationsPage"));
 const operationHistoryPage = lazyPage(() => import("../pages/OperationHistoryPage"));
 const importBankTransactionsPage = lazyPage(() => import("../pages/imports/ImportBankTransactionsPage"));
+const importCenterPage = lazyPage(() => import("../pages/ImportCenterPage"));
 const importInvoicesPage = lazyPage(() => import("../pages/imports/ImportInvoicesPage"));
 const importEtcInvoicesPage = lazyPage(() => import("../pages/imports/ImportEtcInvoicesPage"));
 
@@ -194,6 +195,14 @@ export const appPageDefinitions: AppPageDefinition[] = [
     preload: operationHistoryPage.preload,
     requiresAdmin: true,
     sidebar: { group: "system", label: "操作历史", icon: History },
+  },
+  {
+    path: "/imports",
+    pageKey: "imports.center",
+    component: importCenterPage.component,
+    preload: importCenterPage.preload,
+    end: true,
+    sidebar: { group: "system", label: "导入中心", icon: Inbox },
   },
   {
     path: "/imports/bank-transactions",

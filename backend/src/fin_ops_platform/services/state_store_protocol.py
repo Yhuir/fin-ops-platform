@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import unicodedata
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
-import unicodedata
-
 
 PROTECTED_ADMIN_USERNAME = "YNSYLP005"
 SETTINGS_ACCESS_CONTROL_KEYS = frozenset(
@@ -209,6 +208,13 @@ class ApplicationStateStoreProtocol(Protocol):
     def remove_manual_oa_import(self, row_id: str, *, actor_id: str | None = None) -> bool: ...
 
     def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str: ...
+
+    def find_confirmed_import_file_by_sha256(
+        self,
+        *,
+        content_sha256: str,
+        exclude_file_id: str,
+    ) -> dict[str, Any] | None: ...
 
     def read_import_file(self, stored_file_path: str) -> bytes: ...
 

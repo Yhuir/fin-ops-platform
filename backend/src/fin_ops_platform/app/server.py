@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from decimal import Decimal
 from enum import Enum
 from hmac import compare_digest
 from http import HTTPStatus
+from io import StringIO
 from pathlib import Path
 from threading import Lock
 from time import monotonic
@@ -1925,6 +1927,9 @@ class Application:
             case_id = route_path.rsplit("/", 1)[-1]
             return self._handle_reconciliation_case_detail(case_id)
         if method == "GET" and route_path.startswith("/imports/batches/"):
+            if route_path.endswith("/errors.csv"):
+                batch_id = route_path.rsplit("/", 2)[-2]
+                return self._handle_import_batch_errors_csv(batch_id)
             if route_path.endswith("/download"):
                 batch_id = route_path.rsplit("/", 2)[-2]
                 return self._handle_import_batch_download(batch_id)
@@ -1998,6 +2003,7 @@ class Application:
                 "/foundation/seed",
                 "/imports/templates",
                 "/imports/batches/{batch_id}/download",
+                "/imports/batches/{batch_id}/errors.csv",
                 "/imports/files/preview",
                 "/imports/files/confirm",
                 "/imports/files/retry",
@@ -7634,6 +7640,47 @@ class Application:
             headers={
                 "Content-Type": "application/json; charset=utf-8",
                 "Content-Disposition": f'attachment; filename="{batch_id}.json"',
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
+
+    def _handle_import_batch_errors_csv(self, batch_id: str) -> Response:
+        try:
+            preview = self._import_service.get_batch(batch_id)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "batch_not_found", "batch_id": batch_id},
+            )
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["行号", "数据类型", "处理结果", "原因", "银行账户", "交易时间", "收支方向", "金额", "对方名称"])
+        for row in preview.row_results:
+            decision = row.decision.value if isinstance(row.decision, Enum) else str(row.decision)
+            if decision not in {"error", "suspected_duplicate"}:
+                continue
+            writer.writerow(
+                [
+                    row.row_no,
+                    row.source_record_type,
+                    decision,
+                    row.decision_reason,
+                    row.account_no or "",
+                    row.trade_time or "",
+                    row.direction or "",
+                    row.amount or "",
+                    row.counterparty_name or "",
+                ]
+            )
+        body = "\ufeff" + output.getvalue()
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=body,
+            headers={
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": 'attachment; filename="import-errors.csv"',
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 PageAuditExecutor = Literal[
     "workbench",
     "cost_statistics",
@@ -11,6 +10,7 @@ PageAuditExecutor = Literal[
     "tax_offset",
     "etc_tickets",
     "settings",
+    "imports_center",
     "bank_transaction_import",
     "invoice_import",
     "etc_import",
@@ -228,6 +228,15 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         relation_proof_required=False,
         external_source_boundary="not_applicable; audit events are App-internal durable facts",
         external_evidence_keys=(),
+    ),
+    "imports.center": _ready(
+        "imports.center",
+        "导入中心",
+        "imports_center",
+        (),
+        relation_proof_required=False,
+        external_source_boundary="original bank, invoice, and ETC file evidence before App registration",
+        external_evidence_keys=("bank", "invoice", "etc"),
     ),
     "imports.bank-transactions": _ready(
         "imports.bank-transactions",

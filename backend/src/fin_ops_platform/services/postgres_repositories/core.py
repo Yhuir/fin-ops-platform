@@ -7,9 +7,21 @@ from enum import Enum
 from types import SimpleNamespace
 from typing import Any
 
-from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection, TransactionStatus
+from fin_ops_platform.domain.enums import (
+    BatchStatus,
+    BatchType,
+    ImportDecision,
+    InvoiceStatus,
+    InvoiceType,
+    TransactionDirection,
+    TransactionStatus,
+)
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatch, ImportedBatchRowResult, Invoice
-from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportSession
+from fin_ops_platform.services.import_file_service import (
+    FileImportPreviewItem,
+    FileImportSession,
+    SourceControlEvidence,
+)
 from fin_ops_platform.services.import_preview_audit import ImportPreviewAuditCounts, ImportPreviewDuplicateGroup
 from fin_ops_platform.services.imports import ImportPreview
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
@@ -368,9 +380,15 @@ class PostgresCoreRepository:
     def find_transaction_identity(self, *, source_unique_key: str) -> BankTransaction | None:
         return self.find_bank_transaction_by_identity(canonical_key=source_unique_key)
 
-    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
+    def find_bank_transaction_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> BankTransaction | None:
         source_unique_key = canonical_key
-        if not source_unique_key:
+        data_fingerprint = suspected_key
+        if not source_unique_key and not data_fingerprint:
             return None
         row = self._connection.fetch_one(
             f"""
@@ -381,10 +399,10 @@ class PostgresCoreRepository:
                    data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
                    currency, summary, remark, bank_text_fields, status, raw_payload
             from app.bank_transactions
-            where source_unique_key = %s
+            where source_unique_key = %s or data_fingerprint = %s
             limit 1
             """,
-            (source_unique_key,),
+            (source_unique_key, data_fingerprint),
         )
         return self._transaction_from_row(row) if row else None
 
@@ -1534,6 +1552,7 @@ class PostgresCoreRepository:
 
     def _file_item_from_row(self, row: dict[str, Any], payload: dict[str, Any]) -> FileImportPreviewItem:
         batch_type = self._text(payload.get("batch_type") or payload.get("override_batch_type"))
+        source_control_payload = payload.get("source_control") if isinstance(payload.get("source_control"), dict) else None
         return FileImportPreviewItem(
             id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
             file_name=self._text(payload.get("file_name") or row.get("original_filename")) or "unknown",
@@ -1568,6 +1587,26 @@ class PostgresCoreRepository:
             row_results=self._file_row_results_from_payload(payload),
             normalized_rows=self._file_normalized_rows_from_payload(payload),
             audit=self._audit_counts_from_payload(payload.get("audit")),
+            content_sha256=self._text(payload.get("content_sha256")),
+            duplicate_file_name=self._text(payload.get("duplicate_file_name")),
+            source_control=(
+                SourceControlEvidence(
+                    status=self._text(source_control_payload.get("status")) or "unavailable",
+                    computed_row_count=self._int(source_control_payload.get("computed_row_count"), 0),
+                    declared_row_count=(
+                        self._int(source_control_payload.get("declared_row_count"), 0)
+                        if source_control_payload.get("declared_row_count") is not None
+                        else None
+                    ),
+                    computed_debit_total=self._text(source_control_payload.get("computed_debit_total")),
+                    declared_debit_total=self._text(source_control_payload.get("declared_debit_total")),
+                    computed_credit_total=self._text(source_control_payload.get("computed_credit_total")),
+                    declared_credit_total=self._text(source_control_payload.get("declared_credit_total")),
+                    mismatch_fields=tuple(source_control_payload.get("mismatch_fields") or ()),
+                )
+                if source_control_payload
+                else None
+            ),
         )
 
     def _file_summary_item_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -1588,6 +1627,8 @@ class PostgresCoreRepository:
             "preview_batch_id": self._text(row.get("payload_preview_batch_id")),
             "batch_id": self._text(row.get("payload_batch_id")),
             "stored_file_path": self._text(row.get("stored_file_path")),
+            "uploaded_by": self._text(row.get("uploaded_by")),
+            "uploaded_at": self._datetime(row.get("uploaded_at")).isoformat(),
             "audit": self._serialize(self._audit_counts_from_payload(row.get("payload_audit"))),
         }
 

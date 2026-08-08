@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from io import StringIO
 import os
-from pathlib import Path
 import re
 import tempfile
 import unittest
+from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
-
 
 MIGRATIONS_DIR = Path("backend/src/fin_ops_platform/postgres/migrations")
 EXPECTED_MIGRATIONS = [
@@ -153,6 +152,7 @@ EXPECTED_MIGRATIONS = [
     "0137_oa_attachment_identity_context_index.sql",
     "0138_operation_audit_and_financial_fact_guard.sql",
     "0139_idempotency_and_worker_attempt_history.sql",
+    "0140_bank_transaction_identity_strength.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -310,7 +310,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 140)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 141)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -906,6 +906,12 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
 
 class PostgresMigrationSqlTests(unittest.TestCase):
+    def test_bank_transaction_weak_fingerprint_is_not_a_unique_identity(self) -> None:
+        sql = (MIGRATIONS_DIR / "0140_bank_transaction_identity_strength.sql").read_text().lower()
+        self.assertIn("drop index if exists app.bank_transactions_data_fingerprint_uidx", sql)
+        self.assertIn("create index if not exists bank_transactions_data_fingerprint_idx", sql)
+        self.assertNotIn("create unique index", sql)
+
     def test_sql_contains_required_schemas_and_tables(self) -> None:
         sql = migration_sql().lower()
         for schema in ("app", "read_model", "job", "audit", "staging"):

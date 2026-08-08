@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import hashlib
+import json
+import pickle
+import re
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-import hashlib
-import json
 from pathlib import Path
-import pickle
-import re
 from threading import RLock
 from typing import Any
 
@@ -20,7 +20,6 @@ from fin_ops_platform.services.state_store_protocol import (
     SettingsAccessControlVersionConflict,
     settings_access_control_from_payload,
 )
-
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 GRIDFS_REF_PREFIX = "gridfs://"
@@ -1519,6 +1518,14 @@ class ApplicationStateStore:
         if self._is_gridfs_ref(stored_file_path):
             raise RuntimeError("Legacy GridFS import file references are not supported by ApplicationStateStore.")
         return Path(stored_file_path).read_bytes()
+
+    def find_confirmed_import_file_by_sha256(
+        self,
+        *,
+        content_sha256: str,
+        exclude_file_id: str,
+    ) -> dict[str, Any] | None:
+        return None
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int:
         deleted_count = 0

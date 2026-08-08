@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import ImportDecision, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
@@ -14,7 +14,7 @@ class FakeObjectIdentityRepository:
         self.invoices = list(invoices or [])
         self.transactions = list(transactions or [])
         self.invoice_queries: list[tuple[str | None, str | None]] = []
-        self.bank_queries: list[str | None] = []
+        self.bank_queries: list[tuple[str | None, str | None]] = []
 
     def find_invoice_by_identity(
         self,
@@ -30,10 +30,17 @@ class FakeObjectIdentityRepository:
                 return invoice
         return None
 
-    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
-        self.bank_queries.append(canonical_key)
+    def find_bank_transaction_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> BankTransaction | None:
+        self.bank_queries.append((canonical_key, suspected_key))
         for transaction in self.transactions:
             if canonical_key and transaction.source_unique_key == canonical_key:
+                return transaction
+            if suspected_key and transaction.data_fingerprint == suspected_key:
                 return transaction
         return None
 
@@ -65,7 +72,9 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
             amount=Decimal("88.00"),
             signed_amount=Decimal("-88.00"),
             trade_time="2026-03-23 09:15:01",
-            source_unique_key="bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme",
+            bank_serial_no="SERIAL-001",
+            source_unique_key="bank-v2:62220001:bank_serial_no:SERIAL-001",
+            data_fingerprint="bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme",
         )
 
     def test_invoice_decision_returns_status_update_duplicate_and_suspected(self) -> None:
@@ -162,12 +171,30 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
                 "txn_direction": "outflow",
                 "amount": "88.00",
                 "counterparty_name": "Acme",
+                "bank_serial_no": "SERIAL-001",
             }
         )
 
         self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(decision.linked_object_id, "txn-1")
-        self.assertEqual(repo.bank_queries, ["bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme"])
+        self.assertEqual(repo.bank_queries, [("bank-v2:62220001:bank_serial_no:SERIAL-001", None)])
+
+    def test_bank_transaction_weak_match_is_only_suspected(self) -> None:
+        repo = FakeObjectIdentityRepository(transactions=[self.transaction])
+        service = ObjectDedupDecisionService(object_identity_repository=repo)
+
+        decision = service.decide_bank_transaction_import(
+            {
+                "account_no": "62220001",
+                "trade_time": "2026-03-23 09:15:01",
+                "txn_direction": "outflow",
+                "amount": "88.00",
+                "counterparty_name": "Acme",
+            }
+        )
+
+        self.assertEqual(decision.decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertEqual(repo.bank_queries, [(None, self.transaction.data_fingerprint)])
 
 
 if __name__ == "__main__":

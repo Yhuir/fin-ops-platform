@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
@@ -73,7 +73,7 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
         self.assertEqual(identity.suspected_key, "invoice:acme supplies:2026-03-22:66.00")
         self.assertEqual(identity.audit_fields["suspected_key_kind"], "legacy_counterparty_amount")
 
-    def test_bank_transaction_identity_does_not_use_serial_as_canonical_in_this_schema(self) -> None:
+    def test_bank_transaction_identity_uses_account_scoped_official_serial(self) -> None:
         first = self.policy.identify_bank_transaction_mapping(
             {
                 "account_no": "62220001",
@@ -95,7 +95,8 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(first.canonical_key_kind, "business_fields")
+        self.assertEqual(first.canonical_key_kind, "bank_serial_no")
+        self.assertEqual(first.canonical_key, "bank-v2:62220001:bank_serial_no:SERIAL-SAME")
         self.assertNotEqual(first.canonical_key, second.canonical_key)
 
     def test_oa_attachment_invoice_identity_preserves_existing_stable_hash(self) -> None:
@@ -306,7 +307,8 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
 
         identity = self.policy.identify_bank_transaction(transaction)
 
-        self.assertEqual(identity.canonical_key, "bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme supplies")
+        self.assertIsNone(identity.canonical_key)
+        self.assertEqual(identity.suspected_key, "bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme supplies")
         self.assertEqual(identity.source_row_id, "txn-1")
 
 

@@ -96,6 +96,8 @@ const BATCH_TYPE_LABELS: Record<ImportBatchType, string> = {
 const STATUS_LABELS: Record<string, string> = {
   preview_ready: "待确认",
   preview_ready_with_errors: "待确认",
+  duplicate_file: "重复文件",
+  source_control_mismatch: "控制合计不一致",
   unrecognized_template: "无法识别",
   confirmed: "已确认导入",
   skipped: "已跳过",
@@ -185,6 +187,13 @@ function canConfirmFile(file: ImportFilePreview) {
 
 function statusLabel(status: string) {
   return STATUS_LABELS[status] ?? status;
+}
+
+function sourceControlLabel(status?: string) {
+  if (status === "verified") return "已核对";
+  if (status === "mismatch") return "不一致";
+  if (status === "not_applicable") return "不适用";
+  return "未提供";
 }
 
 function batchTypeLabel(batchType?: ImportBatchType | null) {
@@ -562,7 +571,7 @@ function PreviewTableEmptyRow({ message }: { message: string }) {
       <FinanceTableCell columnRole="description" textValue={message}>
         <EmptyValue value={message} />
       </FinanceTableCell>
-      {Array.from({ length: 15 }, (_, index) => (
+      {Array.from({ length: 16 }, (_, index) => (
         <FinanceTableCell key={index} columnRole="description" textValue="--">
           <EmptyValue value="--" />
         </FinanceTableCell>
@@ -575,12 +584,13 @@ function ImportPreviewTable({ rows, loading }: { rows: ImportFilePreviewRow[]; l
   const emptyMessage = loading ? "正在加载..." : "--";
 
   return (
-    <FinanceTable ariaLabel="导入预览结果" minWidth={1500}>
+    <FinanceTable ariaLabel="导入预览结果" minWidth={1600}>
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" id="fileName" isRowHeader>文件</FinanceTableColumn>
         <FinanceTableColumn columnRole="status" id="status">状态</FinanceTableColumn>
         <FinanceTableColumn columnRole="status" id="batchTypeLabel">类型</FinanceTableColumn>
         <FinanceTableColumn columnRole="account" id="accountLabel">账户</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="sourceControl">控制合计</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity" id="auditOriginalCount">原始</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity" id="auditUniqueCount">唯一</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity" id="auditDuplicateInFileCount">文件内重复</FinanceTableColumn>
@@ -610,6 +620,19 @@ function ImportPreviewTable({ rows, loading }: { rows: ImportFilePreviewRow[]; l
             <FinanceTableCell columnRole="status" textValue={row.batchTypeLabel}>{row.batchTypeLabel}</FinanceTableCell>
             <FinanceTableCell columnRole="account" textValue={row.accountLabel}>
               <TruncatedCellText value={row.accountLabel} />
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="status" textValue={sourceControlLabel(row.sourceControl?.status)}>
+              <FinanceStatusTag
+                tone={row.sourceControl?.status === "verified"
+                  ? "success"
+                  : row.sourceControl?.status === "mismatch"
+                    ? "danger"
+                    : row.sourceControl?.status === "unavailable"
+                      ? "warning"
+                      : "neutral"}
+              >
+                {sourceControlLabel(row.sourceControl?.status)}
+              </FinanceStatusTag>
             </FinanceTableCell>
             <FinanceTableCell columnRole="quantity" textValue={String(row.auditOriginalCount)}>{row.auditOriginalCount}</FinanceTableCell>
             <FinanceTableCell columnRole="quantity" textValue={String(row.auditUniqueCount)}>{row.auditUniqueCount}</FinanceTableCell>

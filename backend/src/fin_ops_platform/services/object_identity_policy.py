@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
-import json
 from typing import Any
 
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService, normalize_name
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
-
 
 OBJECT_IDENTITY_POLICY_SCHEMA_VERSION = "2026-06-object-identity-policy-v1"
 CENT = Decimal("0.01")
@@ -127,14 +126,14 @@ class FinancialObjectIdentityPolicy:
         source_row_id: str | None = None,
     ) -> ObjectIdentity:
         identity = self._bank_transaction_identity_service.identity_for_mapping(values)
-        confidence = "canonical" if identity.identity_key else "missing"
+        confidence = "canonical" if identity.identity_key else "suspected" if identity.suspected_key else "missing"
         return ObjectIdentity(
             object_type="bank_transaction",
             source_kind=source_kind,
             source_row_id=source_row_id,
             canonical_key=identity.identity_key,
-            canonical_key_kind="business_fields" if identity.identity_key else None,
-            suspected_key=None,
+            canonical_key_kind=identity.canonical_key_kind,
+            suspected_key=identity.suspected_key,
             missing_fields=tuple(identity.missing_fields),
             confidence=confidence,
             components=dict(identity.components),
@@ -158,6 +157,7 @@ class FinancialObjectIdentityPolicy:
                 "amount": transaction.amount,
                 "counterparty_name": transaction.counterparty_name_raw,
                 "bank_serial_no": transaction.bank_serial_no,
+                "account_detail_no": transaction.account_detail_no,
                 "enterprise_serial_no": transaction.enterprise_serial_no,
                 "voucher_no": transaction.voucher_no,
             },

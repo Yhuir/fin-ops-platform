@@ -42,8 +42,8 @@
 
 - `not_run`：尚未执行，不能显示绿色。
 - `running`：一个 outer `REPEATABLE READ READ ONLY` transaction 正在执行 16 个子页面 proof 和 App Health database plane；不触发 refresh/repair。
-- `internal_pass_external_unknown`：17 页已登记 App 内部合同在同一 snapshot 内通过，但外部 control evidence 缺失；`overall_status=pass`、`audit_status.external=unknown`、`end_to_end_source_truth=unproven` 同时成立。
-- `internal_pass_external_pass`：内部 17 页通过，且银行/OA/发票/ETC 最新、未过期的 complete manifest 与当前 canonical exact set、关键字段和 controls 全部一致；只允许声明 `proven_as_of_external_evidence`，有效时间边界是各 evidence 的 observed/source snapshot 与当前 system snapshot。
+- `internal_pass_external_unknown`：19 页已登记 App 内部合同在同一 snapshot 内通过，但外部 control evidence 缺失；`overall_status=pass`、`audit_status.external=unknown`、`end_to_end_source_truth=unproven` 同时成立。
+- `internal_pass_external_pass`：内部 19 页通过，且银行/OA/发票/ETC 最新、未过期的 complete manifest 与当前 canonical exact set、关键字段和 controls 全部一致；只允许声明 `proven_as_of_external_evidence`，有效时间边界是各 evidence 的 observed/source snapshot 与当前 system snapshot。
 - `external_fail`：任一最新 evidence revoked/expired、contract/coverage 非法，或存在 missing/extra/duplicate/field/control mismatch；即使内部 `overall_status=pass` 也必须保持 `end_to_end_source_truth=unproven`，不得回退旧 evidence。
 - `issues_found`：任一子页 integrity/freshness/queue、dashboard inventory、manifest/status registry、required worker 或 current outbox 不一致；不得显示系统通过。
 - `request_failed`：snapshot/SQL/runtime projection 不可执行，HTTP 返回 fail-closed error；不能用上一次绿色替代。

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.page_audit_registry import (
     PAGE_AUDIT_CONTRACT_REVISION,
@@ -10,7 +10,6 @@ from fin_ops_platform.services.page_audit_registry import (
     legacy_domain_page_key,
     page_audit_registration,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE_REGISTRY_PATH = ROOT / "web" / "src" / "app" / "pageRegistry.tsx"
@@ -35,13 +34,13 @@ class PageAuditRegistryTests(unittest.TestCase):
 
         self.assertEqual(len(frontend_page_keys), len(set(frontend_page_keys)))
         self.assertEqual(set(PAGE_AUDIT_REGISTRY), set(frontend_page_keys))
-        self.assertEqual(len(PAGE_AUDIT_REGISTRY), 18)
+        self.assertEqual(len(PAGE_AUDIT_REGISTRY), 19)
 
     def test_ready_and_unavailable_pages_are_explicit_and_fail_closed(self) -> None:
         ready = [item for item in PAGE_AUDIT_REGISTRY.values() if item.availability == "ready"]
         unavailable = [item for item in PAGE_AUDIT_REGISTRY.values() if item.availability == "unavailable"]
 
-        self.assertEqual(len(ready), 18)
+        self.assertEqual(len(ready), 19)
         self.assertEqual(len(unavailable), 0)
         self.assertEqual(PAGE_AUDIT_REGISTRY["tax-offset"].executor, "tax_offset")
         self.assertFalse(PAGE_AUDIT_REGISTRY["tax-offset"].relation_proof_required)
@@ -65,6 +64,7 @@ class PageAuditRegistryTests(unittest.TestCase):
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].external_evidence_keys, ())
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].executor, "operation_history")
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].external_evidence_keys, ())
+        self.assertEqual(PAGE_AUDIT_REGISTRY["imports.center"].executor, "imports_center")
         direct_page_keys = {
             "cost-statistics",
             "bank-details",

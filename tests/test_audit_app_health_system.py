@@ -242,11 +242,11 @@ class AppHealthSystemAuditTests(unittest.TestCase):
                 "select set_config('statement_timeout', %s, true)",
             ],
         )
-        self.assertEqual(len(repository.snapshots), 17)
+        self.assertEqual(len(repository.snapshots), 18)
         self.assertEqual(len({id(snapshot) for snapshot in repository.snapshots}), 1)
         self.assertEqual(report["overall_status"], "pass")
-        self.assertEqual(report["summary"]["registered_page_count"], 18)
-        self.assertEqual(report["summary"]["audited_business_page_count"], 17)
+        self.assertEqual(report["summary"]["registered_page_count"], 19)
+        self.assertEqual(report["summary"]["audited_business_page_count"], 18)
         self.assertEqual(
             set(report["audit_contract"]["audited_business_page_keys"]),
             set(report["audit_contract"]["registered_page_keys"]) - {"app-health-operations"},

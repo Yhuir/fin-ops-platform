@@ -74,7 +74,7 @@
 
 ## ACL 证据边界
 
-- 本地自动化已经由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和 `permissions-role-matrix.spec.ts` 证明 admin/full/read/denied、direct route、17-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
+- 本地自动化由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和权限矩阵保护 admin/full/read/denied、direct route、19-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
 - backend direct API denial 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 和 `tests/test_route_access_policy.py` 独立证明，不能用 sidebar/menu 隐藏替代。
 - 生产 fresh token、fresh `/system/menu/getRouters`、三专用 role exact set 与 finally restore 只接受 root-owned post-deploy artifact/hash；当前文档只记录已实现 release-prep 合同，不声称生产已部署或证据已采集。
 

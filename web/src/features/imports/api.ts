@@ -5,6 +5,9 @@ import type {
   ImportPreviewDuplicateGroup,
   ImportSessionPayload,
   ImportTemplate,
+  ImportFactBatch,
+  ImportFactFile,
+  ImportFactPage,
   MatchingRunSummary,
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
@@ -42,6 +45,17 @@ type ApiImportFile = {
   mapping_fields?: Array<{ key: string; label: string; selected?: string | null; required?: boolean }>;
   field_mapping?: Record<string, string>;
   mapping_source?: "auto" | "manual" | "saved" | null;
+  duplicate_file_name?: string | null;
+  source_control?: {
+    status?: "not_applicable" | "unavailable" | "verified" | "mismatch";
+    computed_row_count?: number;
+    declared_row_count?: number | null;
+    computed_debit_total?: string | null;
+    declared_debit_total?: string | null;
+    computed_credit_total?: string | null;
+    declared_credit_total?: string | null;
+    mismatch_fields?: string[];
+  } | null;
   row_results?: Array<{
     id: string;
     row_no: number;
@@ -319,6 +333,17 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
         })),
         fieldMapping: file.field_mapping ?? {},
         mappingSource: file.mapping_source,
+        duplicateFileName: file.duplicate_file_name,
+        sourceControl: file.source_control ? {
+          status: file.source_control.status ?? "unavailable",
+          computedRowCount: numberOrZero(file.source_control.computed_row_count),
+          declaredRowCount: file.source_control.declared_row_count,
+          computedDebitTotal: file.source_control.computed_debit_total,
+          declaredDebitTotal: file.source_control.declared_debit_total,
+          computedCreditTotal: file.source_control.computed_credit_total,
+          declaredCreditTotal: file.source_control.declared_credit_total,
+          mismatchFields: file.source_control.mismatch_fields ?? [],
+        } : null,
         rowResults: (file.row_results ?? []).map((row) => ({
           ...mapPreviewDetailFields(row),
           id: row.id,
@@ -459,4 +484,58 @@ export async function fetchImportTemplates(): Promise<ImportTemplate[]> {
     method: "GET",
   });
   return mapImportTemplates(payload);
+}
+
+type ApiImportFactPage<T> = {
+  items: T[];
+  pagination: { page: number; page_size: number; total: number };
+};
+
+function mapFactPage<TApi, T>(payload: ApiImportFactPage<TApi>, mapItem: (item: TApi) => T): ImportFactPage<T> {
+  return {
+    items: payload.items.map(mapItem),
+    page: payload.pagination.page,
+    pageSize: payload.pagination.page_size,
+    total: payload.pagination.total,
+  };
+}
+
+export async function fetchImportFactFiles(page = 1, pageSize = 50): Promise<ImportFactPage<ImportFactFile>> {
+  const payload = await requestJson<ApiImportFactPage<Record<string, unknown>>>(
+    `/api/import-facts/files?page=${page}&page_size=${pageSize}`,
+  );
+  return mapFactPage(payload, (item) => ({
+    id: stringOrEmpty(item.id),
+    fileName: stringOrEmpty(item.file_name),
+    batchType: (item.batch_type as ImportBatchType | null | undefined) ?? null,
+    status: stringOrEmpty(item.status),
+    rowCount: numberOrZero(item.row_count),
+    successCount: numberOrZero(item.success_count),
+    errorCount: numberOrZero(item.error_count),
+    duplicateCount: numberOrZero(item.duplicate_count),
+    suspectedDuplicateCount: numberOrZero(item.suspected_duplicate_count),
+    previewBatchId: item.preview_batch_id ? stringOrEmpty(item.preview_batch_id) : null,
+    batchId: item.batch_id ? stringOrEmpty(item.batch_id) : null,
+    uploadedBy: item.uploaded_by ? stringOrEmpty(item.uploaded_by) : null,
+    uploadedAt: item.uploaded_at ? stringOrEmpty(item.uploaded_at) : null,
+  }));
+}
+
+export async function fetchImportFactBatches(page = 1, pageSize = 50): Promise<ImportFactPage<ImportFactBatch>> {
+  const payload = await requestJson<ApiImportFactPage<Record<string, unknown>>>(
+    `/api/import-facts/batches?page=${page}&page_size=${pageSize}`,
+  );
+  return mapFactPage(payload, (item) => ({
+    id: stringOrEmpty(item.id),
+    batchType: item.batch_type as ImportBatchType,
+    sourceName: stringOrEmpty(item.source_name),
+    importedBy: stringOrEmpty(item.imported_by),
+    rowCount: numberOrZero(item.row_count),
+    successCount: numberOrZero(item.success_count),
+    errorCount: numberOrZero(item.error_count),
+    duplicateCount: numberOrZero(item.duplicate_count),
+    suspectedDuplicateCount: numberOrZero(item.suspected_duplicate_count),
+    status: stringOrEmpty(item.status),
+    importedAt: stringOrEmpty(item.imported_at),
+  }));
 }

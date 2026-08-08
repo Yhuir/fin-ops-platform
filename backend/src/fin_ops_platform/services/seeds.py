@@ -59,7 +59,7 @@ def build_demo_seed() -> dict[str, Any]:
         amount=Decimal("30.00"),
         signed_amount=Decimal("30.00"),
         bank_serial_no="SERIAL-DEMO-001",
-        source_unique_key="SERIAL-DEMO-001",
+        source_unique_key="bank-v2:62220001:bank_serial_no:SERIAL-DEMO-001",
         data_fingerprint="bank:62220001:acme supplies ltd.:2026-03-22:inflow:30.00",
         txn_date="2026-03-22",
         project_id="proj_demo_001",

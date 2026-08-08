@@ -41,6 +41,7 @@
 | `settings` | 设置 | 页面模块 | `/settings` | `../../modules/settings/README.md` + `../../modules/settings/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `app-health-operations` | 系统状态 | 页面模块 | `/operations/app-health` | `../../modules/app-health-operations/README.md` + `../../modules/app-health-operations/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `operation-history` | 操作历史 | 页面模块 | `/operations/history` | `../../modules/operation-history/README.md` + `../../modules/operation-history/boundary-io.md` | 模块 README 代码入口 + boundary-io；`audit.events` 直接 canonical 读取 |
+| `import-center` | 导入中心 | 页面模块 | `/imports` | `../../modules/import-center/README.md` + `../../modules/import-center/boundary-io.md` | 既有 import facts API + 三个导入模块 proof；无第二状态模型 |
 | `imports-bank-transactions` | 银行流水导入 | 页面模块 | `/imports/bank-transactions` | `../../modules/imports-bank-transactions/README.md` + `../../modules/imports-bank-transactions/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `imports-invoices` | 发票导入 | 页面模块 | `/imports/invoices` | `../../modules/imports-invoices/README.md` + `../../modules/imports-invoices/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `imports-etc-invoices` | ETC发票导入 | 页面模块 | `/imports/etc-invoices` | `../../modules/imports-etc-invoices/README.md` + `../../modules/imports-etc-invoices/boundary-io.md` | 模块 README 代码入口 + boundary-io |

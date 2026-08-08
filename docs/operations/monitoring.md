@@ -4,7 +4,7 @@
 
 - 生产可逆关系 smoke 统一使用 `write_operation_e2e_smoke` 的 checkpoint 模式；成功的 confirm/withdraw 从同一已提交 UoW response receipt 取得精确 `outbox_event_ids`，再按这些 IDs 查询 durable outbox/dirty scope，不得只按时间窗/profile 抽取样本。receipt ID 是因果边界；同 scope enqueue 去重到请求前已经 pending 的 durable event 时，exact-ID 查询不得再附加 `created_at` fallback 窗口，也不得用既存事件的旧 `reason/action_name` 否定本次事务 receipt。receipt 模式仍必须按 `event_type + scope_type` 完整落入登记的 operation profile，任何额外 scope/event、缺失 ID、未 done 或超时都 fail closed；无 receipt 的 fallback 模式继续严格按时间窗、reason/action 识别样本。HTTP 歧义时才回读 committed `app.workbench_idempotency_records`；证据缺失必须 fail closed。
 - 受控 runner 使用 runtime 登录角色只读查询上述 durable 证据；该角色仅拥有 `SELECT`，业务写仍只能经 API/UoW 事务角色完成，runner 不得 insert/update/delete 幂等记录。
-- 首次 mutation 前必须先通过固定 admin-only `GET /api/operations/app-health/page-audit?page=app-health-operations`；scenario 不能覆盖 Audit path。每个 checkpoint 再依次通过 required/optional scope 合同、worker done/dirty done、consumer API `fresh`、绑定 fixture identity 的 affected assertions、non-consumer 写前/写后 baseline equality，以及新的 17/16 页只读 System Audit。System Audit 对 `queue=backlog` / `freshness=not_fresh` 和 500/502/503/504 瞬时状态在同一受控 timeout 内轮询，权限、payload、snapshot 或 contract 错误立即失败；每次通过都必须取得未被本 scenario 使用过的新 `system_audit_id`。任一事件 ID 未被正式 profile 接受、页面/path/role 不匹配、超时未收敛或复用旧 Audit 均失败。
+- 首次 mutation 前必须先通过固定 admin-only `GET /api/operations/app-health/page-audit?page=app-health-operations`；scenario 不能覆盖 Audit path。每个 checkpoint 再依次通过 required/optional scope 合同、worker done/dirty done、consumer API `fresh`、绑定 fixture identity 的 affected assertions、non-consumer 写前/写后 baseline equality，以及新的 19/18 页只读 System Audit。System Audit 对 `queue=backlog` / `freshness=not_fresh` 和 500/502/503/504 瞬时状态在同一受控 timeout 内轮询，权限、payload、snapshot 或 contract 错误立即失败；每次通过都必须取得未被本 scenario 使用过的新 `system_audit_id`。任一事件 ID 未被正式 profile 接受、页面/path/role 不匹配、超时未收敛或复用旧 Audit 均失败。
 - 只允许 `fixture_ownership=test_owned`、最多 20 个显式 row IDs、三种登记 shape、审批票和正式 mutation contract。bank+invoice/full 只走 Workbench preview/confirm/withdraw；bank+turnover 只走 turnover closure confirm 与 relation-id withdraw。confirm 已提交而后置 gate 失败时执行声明的 recovery checkpoint；withdraw 已提交后不重复撤回；网络结果不明确时不盲重试，输出 `recovery_required`。
 - 该闭环证明 App 内部已登记 canonical/read model/relation 合同，不证明外部银行/OA/发票/ETC 未漏导；外部 evidence `unknown` 可以保留，但不得扩大结论。
 
@@ -15,7 +15,7 @@
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
 - `GET /api/operations/app-health/page-audit?page=input-invoice-usage` 管理员只读进项使用 canonical/relation 对账审计。
 - `GET /api/operations/app-health/page-audit?page=output-invoice-collections` 管理员只读销项收款 canonical/relation 对账审计。
-- `GET /api/operations/app-health/page-audit?page=<page_key>` 管理员只读页面业务 canonical/relation 对账审计；registry 全覆盖 17 页，未实现 proof 的页面 fail closed。
+- `GET /api/operations/app-health/page-audit?page=<page_key>` 管理员只读页面业务 canonical/relation 对账审计；registry 全覆盖 19 页，未实现 proof 的页面 fail closed。
 - OA 同步状态。
 - 两个保留 read model（`workbench`、`workbench_relation`）的 dirty scopes。
 - 后台任务状态。
@@ -243,7 +243,7 @@ curl -sS \
   "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?page=bank-details"
 ```
 
-当前 17 个注册页面均为 `ready`，具体页面键以 `PAGE_AUDIT_REGISTRY` 为唯一事实源；包括本统计合同涉及的 `reconciliation-workbench`、`cost-statistics`、`bank-details`、`oa-pending-payments`、`turnover-ledger`、`etc-tickets`、`tax-offset`、`pending-invoices`、`input-invoice-usage`、`output-invoice-collections`。若后续 registry 登记为 unavailable，接口返回 `409 page_audit_proof_unavailable`，不能作为通过证据。
+当前 19 个注册页面均为 `ready`，具体页面键以 `PAGE_AUDIT_REGISTRY` 为唯一事实源；包括本统计合同涉及的 `reconciliation-workbench`、`imports.center`、`cost-statistics`、`bank-details`、`oa-pending-payments`、`turnover-ledger`、`etc-tickets`、`tax-offset`、`pending-invoices`、`input-invoice-usage`、`output-invoice-collections`。若后续 registry 登记为 unavailable，接口返回 `409 page_audit_proof_unavailable`，不能作为通过证据。
 
 报告还必须带 `proof_availability=ready`、非空 `contract_revision`、repeatable-read database snapshot，且 `audit_status.integrity=pass`、`freshness=fresh`、`queue=drained`，才可作为该页面已登记 proof 一致的证据。outbox/dirty scope 按 tenant 隔离，问题只返回样本；该审计不能证明尚未登记的 consumer projection，也不能证明外部银行/OA 系统本身没有漏同步。
 

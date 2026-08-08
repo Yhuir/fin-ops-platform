@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-import re
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
-
 
 CENT = Decimal("0.01")
 PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
@@ -20,6 +20,8 @@ COMPACT_DATE_TIME_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d
 @dataclass(frozen=True, slots=True)
 class BankTransactionIdentity:
     identity_key: str | None
+    suspected_key: str | None = None
+    canonical_key_kind: str | None = None
     missing_fields: list[str] = field(default_factory=list)
     components: dict[str, str] = field(default_factory=dict)
     audit_fields: dict[str, str | None] = field(default_factory=dict)
@@ -55,24 +57,25 @@ class BankTransactionIdentityService:
 
         audit_fields = {
             "bank_serial_no": clean_placeholder(values.get("bank_serial_no")),
+            "account_detail_no": clean_placeholder(values.get("account_detail_no")),
             "enterprise_serial_no": clean_placeholder(values.get("enterprise_serial_no")),
             "voucher_no": clean_placeholder(values.get("voucher_no")),
         }
-        if missing_fields:
-            return BankTransactionIdentity(
-                identity_key=None,
-                missing_fields=missing_fields,
-                components=components,
-                audit_fields=audit_fields,
-            )
-
+        reference_kind, reference = self._official_reference(audit_fields)
         identity_key = (
+            f"bank-v2:{account_no}:{reference_kind}:{reference}"
+            if account_no and reference_kind and reference
+            else None
+        )
+        suspected_key = None if missing_fields else (
             f"bank:{components['account_no']}:{components['trade_time']}:{components['direction']}:"
             f"{components['amount']}:{components['counterparty_name']}"
         )
         return BankTransactionIdentity(
             identity_key=identity_key,
-            missing_fields=[],
+            suspected_key=suspected_key,
+            canonical_key_kind=reference_kind,
+            missing_fields=[] if identity_key or suspected_key else missing_fields,
             components=components,
             audit_fields=audit_fields,
         )
@@ -87,6 +90,7 @@ class BankTransactionIdentityService:
             "amount": transaction.amount,
             "counterparty_name": transaction.counterparty_name_raw,
             "bank_serial_no": transaction.bank_serial_no,
+            "account_detail_no": transaction.account_detail_no,
             "enterprise_serial_no": transaction.enterprise_serial_no,
             "voucher_no": transaction.voucher_no,
         }
@@ -97,6 +101,16 @@ class BankTransactionIdentityService:
 
     def canonical_key_for_transaction(self, transaction: BankTransaction) -> str | None:
         return self.identity_for_transaction(transaction).identity_key
+
+    @staticmethod
+    def _official_reference(audit_fields: dict[str, str | None]) -> tuple[str | None, str | None]:
+        for field_name in ("account_detail_no", "bank_serial_no", "enterprise_serial_no"):
+            value = audit_fields.get(field_name)
+            if value:
+                normalized = WHITESPACE_RE.sub("", unicodedata.normalize("NFKC", value)).upper()
+                if normalized:
+                    return field_name, normalized
+        return None, None
 
     @staticmethod
     def _normalize_trade_time(value: Any) -> str | None:

@@ -7,7 +7,7 @@
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认和后台处理；确认只提交 canonical facts、source version、审计与必要领域任务，不写页面 read model，也不扇出页面 refresh job。
-- 当前缺口：App 内部 direct-canonical Audit 已闭环；外部银行回单页数、行数、control total 与上传前字节真实性仍须独立来源证据，不能由 App 文件登记 hash 推导。
+- 当前缺口：App 已核对文件内可提取的行数与借贷 control total；银行渠道导出范围是否完整、上传前字节真实性和未提供的控制字段仍须独立来源证据，不能由 App 文件登记 hash 推导。
 - 旧代码删除状态：生产与前端只保留 `/imports/files/*` file/session I/O。旧 `/imports/preview`、`/imports/confirm` JSON route/handler/entrypoint、六套按银行精确表头识别/parser 分支、无生产者的 `general_import.confirm` worker 类型、processor、preview-only orchestration dependencies 和无 session 范围的 preview 全量 snapshot writer已删除；`FileImportService.snapshot/from_snapshot` 只保留为跨进程恢复 I/O，不作为增量写入接口。
 
 ## 职责边界
@@ -17,6 +17,9 @@
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 记录导入预览审计。
+- 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。
+- 银行强 identity 仅来自账户与官方参考号；业务字段指纹只产生 `suspected_duplicate` 人工复核，不触发自动跳过。
+- 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。
@@ -33,6 +36,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
+| 导入历史 | `/imports` | 只读调用 `/api/import-facts/files`、`/api/import-facts/batches`，不得复制 session 或 canonical facts |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Job event | runtime worker handlers | 后台处理必须可恢复；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；活跃 processing lease 不得被并发 worker 接管。 |
@@ -58,6 +62,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。 |
+| 来源控制证据 | 前端导入页面 | `source_control.status` 只允许 `verified/mismatch/unavailable/not_applicable`；mismatch 文件不可确认。 |
+| 错误明细 | `/imports/batches/{batch_id}/errors.csv` | 仅输出用户可读字段，不输出内部对象 ID。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
 | Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次写入影响的精确月份；不在写路径展开成页面 refresh jobs |

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-import re
 from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import ImportDecision
 from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-
 
 PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
 WHITESPACE_RE = re.compile(r"\s+")
@@ -145,6 +144,8 @@ class BankTransactionIdentityStrategy:
         identity = self._identity_policy.identify_bank_transaction_mapping(values)
         if identity.canonical_key:
             return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.canonical_key, identity_kind="stable")
+        if identity.suspected_key:
+            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.suspected_key, identity_kind="suspected")
         return ImportRecordIdentity(record_type=self.record_type, identity_key=None, identity_kind=None)
 
 

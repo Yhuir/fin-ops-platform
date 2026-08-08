@@ -10,7 +10,6 @@ from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoic
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 
-
 STRONG_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
 
@@ -56,7 +55,11 @@ def audit_object_identity(
         select id::text as id, coalesce(legacy_mongo_id, id::text) as legacy_id,
                account_no, account_name, txn_direction, counterparty_name_raw,
                amount, signed_amount, txn_date, trade_time, pay_receive_time,
-               bank_serial_no, source_unique_key, data_fingerprint, status
+               bank_serial_no,
+               raw_payload->'normalized_payload'->>'account_detail_no' as account_detail_no,
+               raw_payload->'normalized_payload'->>'enterprise_serial_no' as enterprise_serial_no,
+               raw_payload->'normalized_payload'->>'voucher_no' as voucher_no,
+               source_unique_key, data_fingerprint, status
         from app.bank_transactions
         order by txn_month nulls last, created_at, id
         """
@@ -244,6 +247,9 @@ def _bank_identity_payload(policy: FinancialObjectIdentityPolicy, row: dict[str,
         amount=row.get("amount") or 0,
         signed_amount=row.get("signed_amount") or row.get("amount") or 0,
         bank_serial_no=row.get("bank_serial_no"),
+        account_detail_no=row.get("account_detail_no"),
+        enterprise_serial_no=row.get("enterprise_serial_no"),
+        voucher_no=row.get("voucher_no"),
         source_unique_key=row.get("source_unique_key"),
         data_fingerprint=row.get("data_fingerprint"),
         txn_date=str(row.get("txn_date")) if row.get("txn_date") is not None else None,
@@ -259,6 +265,7 @@ def _bank_identity_payload(policy: FinancialObjectIdentityPolicy, row: dict[str,
         "stored_data_fingerprint": row.get("data_fingerprint"),
         "policy_canonical_key": identity.canonical_key,
         "policy_canonical_key_kind": identity.canonical_key_kind,
+        "policy_suspected_key": identity.suspected_key,
         "missing_fields": list(identity.missing_fields),
     }
 

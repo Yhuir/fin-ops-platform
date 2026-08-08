@@ -9,6 +9,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_effective_categories,
+    bank_flow_rule_batch_rule_proof,
+    bank_flow_rule_batch_selected_row_proofs,
+    build_live_bank_flow_rule_batch_service,
+)
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.object_storage import (
     ObjectStorageReadError,
@@ -29,13 +36,6 @@ from fin_ops_platform.services.postgres_repositories import (
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
-from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
-    bank_flow_rule_batch_candidate_guard,
-    bank_flow_rule_batch_effective_categories,
-    bank_flow_rule_batch_rule_proof,
-    bank_flow_rule_batch_selected_row_proofs,
-    build_live_bank_flow_rule_batch_service,
-)
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_no_oa_bank_batches,
@@ -43,8 +43,8 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_workbench_pair_relations,
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 from fin_ops_platform.services.state_store_protocol import default_settings_access_control
+from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 APP_SETTINGS_KEY = "app_settings"
 GRIDFS_REF_PREFIX = "gridfs://"
@@ -1222,6 +1222,26 @@ class PostgresStateStore:
 
     def read_import_file(self, stored_file_path: str) -> bytes:
         return self._read_file(stored_file_path)
+
+    def find_confirmed_import_file_by_sha256(
+        self,
+        *,
+        content_sha256: str,
+        exclude_file_id: str,
+    ) -> dict[str, Any] | None:
+        return self._connection.fetch_one(
+            """
+            select import_files.original_filename as file_name, import_files.uploaded_at
+            from app.import_files import_files
+            join app.file_objects file_objects on file_objects.id = import_files.file_object_id
+            where file_objects.sha256 = %s
+              and import_files.status = 'confirmed'
+              and coalesce(import_files.legacy_mongo_id, import_files.id::text) <> %s
+            order by import_files.uploaded_at desc
+            limit 1
+            """,
+            (content_sha256, exclude_file_id),
+        )
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int:
         deleted = 0

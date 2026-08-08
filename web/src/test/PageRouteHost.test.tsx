@@ -162,7 +162,7 @@ describe("PageRouteHost", () => {
     const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
     const systemItems = sidebarGroups.find((group) => group.title === "系统操作")?.items ?? [];
 
-    expect(appPageRoutes).toHaveLength(18);
+    expect(appPageRoutes).toHaveLength(19);
     expect(appPageRoutes.map((route) => route.path)).toEqual([
       "/",
       "/cost-statistics",
@@ -179,12 +179,13 @@ describe("PageRouteHost", () => {
       "/settings",
       "/operations/app-health",
       "/operations/history",
+      "/imports",
       "/imports/bank-transactions",
       "/imports/invoices",
       "/imports/etc-invoices",
     ]);
     expect(financeItems).toHaveLength(12);
-    expect(systemItems).toHaveLength(6);
+    expect(systemItems).toHaveLength(7);
     expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);
     expect(sidebarItems.every((item) => routeByPath.has(item.to))).toBe(true);
     expect(sidebarItems.every((item) => typeof item.preload === "function")).toBe(true);
@@ -214,10 +215,11 @@ describe("PageRouteHost", () => {
       "src/pages/SettingsPage.tsx",
       "src/pages/AppHealthOperationsPage.tsx",
       "src/pages/OperationHistoryPage.tsx",
+      "src/pages/ImportCenterPage.tsx",
       "src/components/imports/ImportWorkflowPage.tsx",
     ];
 
-    expect(appPageRoutes).toHaveLength(18);
+    expect(appPageRoutes).toHaveLength(19);
     for (const path of pageOwners) {
       expect(readFileSync(path, "utf8"), path).toContain("useOptionalPageActivation");
     }

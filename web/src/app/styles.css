@@ -4895,6 +4895,16 @@ textarea {
   gap: 12px;
 }
 
+.import-center-page {
+  min-width: 0;
+}
+
+.import-center-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .operation-history-filters {
   display: grid;
   grid-template-columns: minmax(220px, 1.8fr) repeat(2, minmax(150px, 1fr)) repeat(2, 150px) auto;

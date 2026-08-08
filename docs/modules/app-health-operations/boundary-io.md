@@ -35,7 +35,7 @@
 | OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |
 | 进项/销项页面全量审计 | `app.invoices`、`app.workbench_pair_relations` | 页面与 App Health 分别调用统一 `/api/operations/app-health/page-audit?page=input-invoice-usage` / `?page=output-invoice-collections`；在同一只读快照内检查 canonical 发票与 active relation。旧 specialized HTTP routes 和页面 projection 审计已删除。 |
 | 已退休页面 refresh routes | 旧 admin request | `input-invoice-usage-refresh`、`output-invoice-collection-refresh`、`pending-invoice-refresh` 已删除并返回 `404`；这些页面直接读取 canonical facts，App Health 只保留只读 page audit，不再代页面写入 runtime queue |
-| 页面 Audit registry 与统一入口 | `PAGE_AUDIT_REGISTRY` 的 17 个 frontend page key 和对应 proof owner metadata | `/api/operations/app-health/page-audit?page=<page_key>` admin-only 只读。registry 必须与 `web/src/app/pageRegistry.tsx` 集合严格相等；当前 17 页全部 `ready`。单页 Audit 各自打开一个 `REPEATABLE READ READ ONLY` snapshot；`page=app-health-operations` 是 system owner，只打开一个 outer snapshot 并把同一 `AuditSnapshot` 显式传给其余 16 个正式 proof owner。审计 snapshot 使用 transaction-local 60 秒 statement timeout，事务结束自动恢复，不改变普通 API/业务 SQL 的 10 秒默认上限。结果必须带 `page_key`、`contract_revision`、`proof_availability=ready`；不得刷新、修复或写入。 |
+| 页面 Audit registry 与统一入口 | `PAGE_AUDIT_REGISTRY` 的 19 个 frontend page key 和对应 proof owner metadata | `/api/operations/app-health/page-audit?page=<page_key>` admin-only 只读。registry 必须与 `web/src/app/pageRegistry.tsx` 集合严格相等；当前 19 页全部 `ready`。单页 Audit 各自打开一个 `REPEATABLE READ READ ONLY` snapshot；`page=app-health-operations` 是 system owner，只打开一个 outer snapshot 并把同一 `AuditSnapshot` 显式传给其余 18 个正式 proof owner。审计 snapshot 使用 transaction-local 60 秒 statement timeout，事务结束自动恢复，不改变普通 API/业务 SQL 的 10 秒默认上限。结果必须带 `page_key`、`contract_revision`、`proof_availability=ready`；不得刷新、修复或写入。 |
 | App Health system Audit | 16 个页面正式 proof、dashboard database inventory、`READ_MODEL_MANIFEST`、`RUNTIME_WORKER_REGISTRY`、current durable runtime、四域 external manifest header/items | 返回 `database_system_snapshot`、`runtime_observation`、`external_evidence`。所有数据库证明共享同一 `snapshot_identity`/`system_audit_id`；外部 owner 独立重算 canonical exact set/field fingerprints/controls。缺证据 unknown，latest revoked/expired/mismatch fail，四域精确通过才是 `proven_as_of_external_evidence`。 |
 | External evidence 运维输入 | 可信来源 artifact + manifest、显式 actor/reason、validate/dry-run/apply/revoke 命令 | 只允许 `ExternalControlEvidenceService -> PostgresExternalControlEvidenceRepository`；header/items immutable append，撤销写审计事件，不新增 HTTP/UI 写入口。artifact 必须在 DB I/O 前复验 sha256/size；System Audit 不采集外部网络、不登记、不修复。 |
 
@@ -94,7 +94,7 @@
 ## 当前缺口和删除条件
 
 - 如果引入直接修复操作，必须拆成独立运维 command 模块并补权限/审计；只入队 read model refresh 的操作必须保持 admin-only、scope policy 校验和 runtime queue 边界。
-- 17 个 registry 页面均已 ready。App Health 不拥有普通 read model 或业务 relation；它的 ready 合同是 system operational proof，而不是虚构页面 projection。
+- 19 个 registry 页面均已 ready。App Health 不拥有普通 read model 或业务 relation；它的 ready 合同是 system operational proof，而不是虚构页面 projection。
 - App Health 旧 `InputInvoiceUsageAuditPanel`、专项 state/callback 和 Browser mock specialized URL 已删除；进项页仍通过自己的统一 page key Audit 控件证明自身合同。
 - specialized input/output HTTP routes、frontend clients 和 service/repository public methods 已删除；统一 repository executor 与只读 CLI thin adapters 继续复用同一 invoice proof core。
 

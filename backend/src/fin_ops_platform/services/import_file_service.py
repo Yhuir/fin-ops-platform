@@ -1,35 +1,35 @@
 from __future__ import annotations
 
+import hashlib
+import re
+import unicodedata
+import warnings
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-from copy import deepcopy
-import hashlib
-import re
 from typing import Any, Callable
-import unicodedata
-import warnings
+from zipfile import BadZipFile, ZipFile
 
-from openpyxl import load_workbook
 import xlrd
+from openpyxl import load_workbook
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_preview_audit import (
     BankTransactionIdentityStrategy,
-    ImportRecordIdentity,
     ImportPreviewAuditCounts,
-    ImportPreviewFileAudit,
     ImportPreviewAuditRow,
     ImportPreviewDuplicateGroup,
+    ImportPreviewFileAudit,
     ImportPreviewSessionAudit,
     ImportPreviewStaleError,
+    ImportRecordIdentity,
     InvoiceIdentityStrategy,
     build_import_preview_session_audit,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
-
 
 DATE_ONLY_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})$")
 DATE_TIME_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})$")
@@ -131,6 +131,14 @@ BANK_NAME_MARKERS = {
     "平安银行": ("平安银行", "核心唯一流水号"),
     "交通银行": ("交通银行",),
 }
+XLS_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
+MAX_WORKBOOK_SHEETS = 32
+MAX_WORKBOOK_ROWS = 200_000
+MAX_WORKBOOK_COLUMNS = 256
+MAX_WORKBOOK_CELLS = 2_000_000
+MAX_XLSX_MEMBERS = 10_000
+MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 200
 
 
 @dataclass(slots=True)
@@ -144,6 +152,18 @@ class UploadedImportFile:
     selected_bank_short_name: str | None = None
     selected_bank_last4: str | None = None
     field_mapping: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SourceControlEvidence:
+    status: str
+    computed_row_count: int
+    declared_row_count: int | None = None
+    computed_debit_total: str | None = None
+    declared_debit_total: str | None = None
+    computed_credit_total: str | None = None
+    declared_credit_total: str | None = None
+    mismatch_fields: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -181,6 +201,9 @@ class FileImportPreviewItem:
     row_results: list[ImportedBatchRowResult] = field(default_factory=list)
     normalized_rows: list[dict[str, Any]] = field(default_factory=list)
     audit: ImportPreviewAuditCounts = field(default_factory=ImportPreviewAuditCounts)
+    content_sha256: str | None = None
+    duplicate_file_name: str | None = None
+    source_control: SourceControlEvidence | None = None
 
 
 @dataclass(slots=True)
@@ -206,6 +229,7 @@ class ParsedImportFile:
     mapping_fields: list[dict[str, Any]] = field(default_factory=list)
     field_mapping: dict[str, str] = field(default_factory=dict)
     mapping_source: str | None = None
+    source_control: SourceControlEvidence | None = None
 
 
 class BankStatementMappingRequired(ValueError):
@@ -311,25 +335,46 @@ class FileImportService:
             files=[],
         )
 
+        seen_hashes: dict[str, str] = {}
         for upload in uploads:
             file_id = self._next_file_id()
             stored_file_path = self._store_upload_file(session.id, file_id, upload)
-            file_item = self._preview_single_file(
-                imported_by=imported_by,
-                upload=upload,
-                file_id=file_id,
-                stored_file_path=stored_file_path,
-                template_code_override=upload.template_code_override,
-                batch_type_override=upload.batch_type_override,
-                selected_bank_mapping_id=upload.selected_bank_mapping_id,
-                selected_bank_name=upload.selected_bank_name,
-                selected_bank_short_name=upload.selected_bank_short_name,
-                selected_bank_last4=upload.selected_bank_last4,
-                field_mapping=upload.field_mapping,
-            )
+            content_sha256 = hashlib.sha256(upload.content).hexdigest()
+            duplicate_name = seen_hashes.get(content_sha256)
+            if duplicate_name:
+                file_item = self._build_preview_error_item(
+                    file_id=file_id,
+                    upload=upload,
+                    stored_file_path=stored_file_path,
+                    message=f"文件内容与本次上传的“{duplicate_name}”完全相同。",
+                    status="duplicate_file",
+                    content_sha256=content_sha256,
+                    duplicate_file_name=duplicate_name,
+                    template_code_override=upload.template_code_override,
+                    batch_type_override=upload.batch_type_override,
+                    selected_bank_mapping_id=upload.selected_bank_mapping_id,
+                    selected_bank_name=upload.selected_bank_name,
+                    selected_bank_short_name=upload.selected_bank_short_name,
+                    selected_bank_last4=upload.selected_bank_last4,
+                )
+            else:
+                file_item = self._preview_single_file(
+                    imported_by=imported_by,
+                    upload=upload,
+                    file_id=file_id,
+                    stored_file_path=stored_file_path,
+                    template_code_override=upload.template_code_override,
+                    batch_type_override=upload.batch_type_override,
+                    selected_bank_mapping_id=upload.selected_bank_mapping_id,
+                    selected_bank_name=upload.selected_bank_name,
+                    selected_bank_short_name=upload.selected_bank_short_name,
+                    selected_bank_last4=upload.selected_bank_last4,
+                    field_mapping=upload.field_mapping,
+                )
+            seen_hashes.setdefault(content_sha256, upload.file_name)
             session.files.append(file_item)
 
-        if any(file.status == "unrecognized_template" for file in session.files):
+        if any(file.status != "preview_ready" for file in session.files):
             session.status = "preview_ready_with_errors"
 
         self._refresh_session_audit(session)
@@ -470,9 +515,12 @@ class FileImportService:
             item.mapping_fields = refreshed.mapping_fields
             item.field_mapping = refreshed.field_mapping
             item.mapping_source = refreshed.mapping_source
+            item.content_sha256 = refreshed.content_sha256
+            item.duplicate_file_name = refreshed.duplicate_file_name
+            item.source_control = refreshed.source_control
 
         session.status = "preview_ready_with_errors" if any(
-            file.status == "unrecognized_template" for file in session.files
+            file.status != "preview_ready" for file in session.files
         ) else "preview_ready"
         self._refresh_session_audit(session)
         self._sessions[session.id] = session
@@ -493,6 +541,27 @@ class FileImportService:
         selected_bank_last4: str | None = None,
         field_mapping: dict[str, str] | None = None,
     ) -> FileImportPreviewItem:
+        content_sha256 = hashlib.sha256(upload.content).hexdigest()
+        duplicate_file_name = self._find_confirmed_duplicate_file(
+            content_sha256=content_sha256,
+            exclude_file_id=file_id,
+        )
+        if duplicate_file_name:
+            return self._build_preview_error_item(
+                file_id=file_id,
+                upload=upload,
+                stored_file_path=stored_file_path,
+                message=f"该文件内容已通过“{duplicate_file_name}”确认导入。",
+                status="duplicate_file",
+                content_sha256=content_sha256,
+                duplicate_file_name=duplicate_file_name,
+                template_code_override=template_code_override,
+                batch_type_override=batch_type_override,
+                selected_bank_mapping_id=selected_bank_mapping_id,
+                selected_bank_name=selected_bank_name,
+                selected_bank_short_name=selected_bank_short_name,
+                selected_bank_last4=selected_bank_last4,
+            )
         try:
             rows = self._read_rows(upload)
             try:
@@ -561,6 +630,25 @@ class FileImportService:
             )
 
         detected_bank_name, detected_last4 = self._detect_bank_selection(parsed)
+        if parsed.source_control and parsed.source_control.status == "mismatch":
+            return self._build_preview_error_item(
+                file_id=file_id,
+                upload=upload,
+                stored_file_path=stored_file_path,
+                message="文件控制合计与解析明细不一致，已阻止导入。",
+                status="source_control_mismatch",
+                content_sha256=content_sha256,
+                source_control=parsed.source_control,
+                template_code_override=template_code_override,
+                batch_type_override=batch_type_override,
+                selected_bank_mapping_id=selected_bank_mapping_id,
+                selected_bank_name=selected_bank_name,
+                selected_bank_short_name=selected_bank_short_name,
+                selected_bank_last4=selected_bank_last4,
+                template_code=parsed.template_code,
+                batch_type=parsed.batch_type,
+                detected_bank_name=detected_bank_name,
+            )
         conflict_message = self._build_bank_selection_conflict_message(
             selected_bank_name=selected_bank_name,
             selected_bank_short_name=selected_bank_short_name,
@@ -632,6 +720,8 @@ class FileImportService:
             mapping_source=parsed.mapping_source,
             row_results=preview.row_results,
             normalized_rows=preview.normalized_rows,
+            content_sha256=content_sha256,
+            source_control=parsed.source_control,
         )
 
     def _refresh_session_audit(self, session: FileImportSession) -> None:
@@ -725,13 +815,17 @@ class FileImportService:
         mapping_fields: list[dict[str, Any]] | None = None,
         field_mapping: dict[str, str] | None = None,
         detected_bank_name: str | None = None,
+        status: str = "unrecognized_template",
+        content_sha256: str | None = None,
+        duplicate_file_name: str | None = None,
+        source_control: SourceControlEvidence | None = None,
     ) -> FileImportPreviewItem:
         return FileImportPreviewItem(
             id=file_id,
             file_name=upload.file_name,
             template_code=template_code,
             batch_type=batch_type,
-            status="unrecognized_template",
+            status=status,
             message=message,
             row_count=0,
             stored_file_path=stored_file_path,
@@ -746,6 +840,9 @@ class FileImportService:
             mapping_candidates=list(mapping_candidates or []),
             mapping_fields=list(mapping_fields or []),
             field_mapping=dict(field_mapping or {}),
+            content_sha256=content_sha256 or hashlib.sha256(upload.content).hexdigest(),
+            duplicate_file_name=duplicate_file_name,
+            source_control=source_control,
         )
 
     def _parse_rows(
@@ -773,6 +870,10 @@ class FileImportService:
                 template_code=template_code,
                 batch_type=resolved_batch_type,
                 rows=parsed_rows,
+                source_control=SourceControlEvidence(
+                    status="not_applicable",
+                    computed_row_count=len(parsed_rows),
+                ),
             )
         if template_code == "bank_statement" or batch_type_override == BatchType.BANK_TRANSACTION.value:
             return parse_bank_statement_rows(rows, field_mapping=field_mapping)
@@ -846,6 +947,19 @@ class FileImportService:
             return False
         return bool(checker(identifier))
 
+    def _find_confirmed_duplicate_file(self, *, content_sha256: str, exclude_file_id: str) -> str | None:
+        for session in self._sessions.values():
+            for item in session.files:
+                if item.id != exclude_file_id and item.status == "confirmed" and item.content_sha256 == content_sha256:
+                    return item.file_name
+        finder = getattr(self._file_store, "find_confirmed_import_file_by_sha256", None)
+        if not callable(finder):
+            return None
+        match = finder(content_sha256=content_sha256, exclude_file_id=exclude_file_id)
+        if isinstance(match, dict):
+            return clean(match.get("file_name")) or None
+        return None
+
     @staticmethod
     def _detect_bank_selection(parsed: ParsedImportFile) -> tuple[str | None, str | None]:
         if parsed.batch_type != BatchType.BANK_TRANSACTION:
@@ -906,38 +1020,61 @@ def detect_invoice_template(rows: list[list[str]]) -> str:
 
 
 def read_xlsx_rows(content: bytes) -> list[list[str]]:
+    if not content.startswith(b"PK"):
+        raise ValueError("文件扩展名为 .xlsx，但文件内容不是有效的 Excel 工作簿。")
+    _validate_xlsx_archive(content)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        workbook = load_workbook(BytesIO(content), data_only=True)
-    sheet = _select_template_sheet(workbook)
-    return _worksheet_rows(sheet)
-
-
-def _select_template_sheet(workbook: Any) -> Any:
-    first_sheet = workbook[workbook.sheetnames[0]]
-    for sheet in workbook.worksheets:
-        rows = _worksheet_rows(sheet)
-        try:
-            detect_invoice_template(rows)
-            return sheet
-        except ValueError:
-            if find_bank_header_candidate(rows) is not None:
-                return sheet
-    return first_sheet
+        workbook = load_workbook(BytesIO(content), data_only=True, read_only=True)
+    try:
+        if not workbook.sheetnames or len(workbook.sheetnames) > MAX_WORKBOOK_SHEETS:
+            raise ValueError(f"Excel 工作表数量必须在 1 到 {MAX_WORKBOOK_SHEETS} 之间。")
+        first_rows: list[list[str]] | None = None
+        for sheet in workbook.worksheets:
+            rows = _worksheet_rows(sheet)
+            if first_rows is None:
+                first_rows = rows
+            try:
+                detect_invoice_template(rows)
+                return rows
+            except ValueError:
+                if find_bank_header_candidate(rows) is not None:
+                    return rows
+        return first_rows or []
+    finally:
+        workbook.close()
 
 
 def _worksheet_rows(sheet: Any) -> list[list[str]]:
     rows: list[list[str]] = []
-    for excel_row in sheet.iter_rows(values_only=True):
+    cell_count = 0
+    for row_index, excel_row in enumerate(sheet.iter_rows(values_only=True), start=1):
+        if row_index > MAX_WORKBOOK_ROWS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_ROWS} 行限制。")
+        if len(excel_row) > MAX_WORKBOOK_COLUMNS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_COLUMNS} 列限制。")
+        cell_count += len(excel_row)
+        if cell_count > MAX_WORKBOOK_CELLS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_CELLS} 个单元格限制。")
         rows.append([stringify_cell(value) for value in excel_row])
     return rows
 
 
 def read_xls_rows(content: bytes) -> list[list[str]]:
+    if not content.startswith(XLS_SIGNATURE):
+        raise ValueError("文件扩展名为 .xls，但文件内容不是有效的 Excel 工作簿。")
     workbook = xlrd.open_workbook(file_contents=content)
+    if workbook.nsheets < 1 or workbook.nsheets > MAX_WORKBOOK_SHEETS:
+        raise ValueError(f"Excel 工作表数量必须在 1 到 {MAX_WORKBOOK_SHEETS} 之间。")
     first_rows: list[list[str]] = []
     for sheet_index in range(workbook.nsheets):
         sheet = workbook.sheet_by_index(sheet_index)
+        if sheet.nrows > MAX_WORKBOOK_ROWS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_ROWS} 行限制。")
+        if sheet.ncols > MAX_WORKBOOK_COLUMNS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_COLUMNS} 列限制。")
+        if sheet.nrows * sheet.ncols > MAX_WORKBOOK_CELLS:
+            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_CELLS} 个单元格限制。")
         rows = [
             [stringify_cell(sheet.cell_value(row_index, column_index)) for column_index in range(sheet.ncols)]
             for row_index in range(sheet.nrows)
@@ -951,6 +1088,30 @@ def read_xls_rows(content: bytes) -> list[list[str]]:
             if find_bank_header_candidate(rows) is not None:
                 return rows
     return first_rows
+
+
+def _validate_xlsx_archive(content: bytes) -> None:
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_XLSX_MEMBERS:
+                raise ValueError("Excel 压缩包包含过多内部文件。")
+            names = {member.filename for member in members}
+            if "[Content_Types].xml" not in names or "xl/workbook.xml" not in names:
+                raise ValueError("Excel 工作簿结构不完整。")
+            total_uncompressed = 0
+            for member in members:
+                if member.flag_bits & 0x1:
+                    raise ValueError("不支持加密的 Excel 文件。")
+                if ".." in member.filename.split("/"):
+                    raise ValueError("Excel 工作簿包含非法内部路径。")
+                total_uncompressed += member.file_size
+                if total_uncompressed > MAX_XLSX_UNCOMPRESSED_BYTES:
+                    raise ValueError("Excel 解压后内容过大。")
+                if member.file_size and member.file_size / max(member.compress_size, 1) > MAX_XLSX_COMPRESSION_RATIO:
+                    raise ValueError("Excel 压缩比异常，已停止解析。")
+    except BadZipFile as exc:
+        raise ValueError("Excel 工作簿压缩结构已损坏。") from exc
 
 
 def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
@@ -1258,7 +1419,7 @@ def parse_bank_statement_rows(
                 "summary": cell("summary"),
                 "remark": remark,
                 "bank_text_fields": extract_bank_text_fields_from_row(header, row),
-                "bank_serial_no": cell("bank_serial_no") or account_detail_no or voucher_no or remark,
+                "bank_serial_no": cell("bank_serial_no"),
                 "account_detail_no": account_detail_no,
                 "enterprise_serial_no": cell("enterprise_serial_no"),
                 "voucher_kind": cell("voucher_kind"),
@@ -1278,7 +1439,92 @@ def parse_bank_statement_rows(
         mapping_fields=mapping_fields,
         field_mapping=mapping,
         mapping_source="manual" if field_mapping else "auto",
+        source_control=build_bank_source_control_evidence(rows, parsed_rows),
     )
+
+
+def build_bank_source_control_evidence(
+    source_rows: list[list[str]],
+    parsed_rows: list[dict[str, Any]],
+) -> SourceControlEvidence:
+    metadata = extract_key_value_metadata(source_rows)
+    debit_count_raw = _control_metadata_value(metadata, "借方交易笔数", "借方笔数", "支出笔数")
+    credit_count_raw = _control_metadata_value(metadata, "贷方交易笔数", "贷方笔数", "收入笔数")
+    total_count_raw = _control_metadata_value(metadata, "交易总笔数", "交易笔数", "明细笔数", "合计笔数")
+    debit_total_raw = _control_metadata_value(metadata, "借方交易金额", "借方金额合计", "支出金额合计")
+    credit_total_raw = _control_metadata_value(metadata, "贷方交易金额", "贷方金额合计", "收入金额合计")
+    has_declared_controls = any(
+        value is not None
+        for value in (debit_count_raw, credit_count_raw, total_count_raw, debit_total_raw, credit_total_raw)
+    )
+    computed_debit = sum((_control_decimal(row.get("debit_amount")) or Decimal("0") for row in parsed_rows), Decimal("0"))
+    computed_credit = sum((_control_decimal(row.get("credit_amount")) or Decimal("0") for row in parsed_rows), Decimal("0"))
+    if not has_declared_controls:
+        return SourceControlEvidence(
+            status="unavailable",
+            computed_row_count=len(parsed_rows),
+            computed_debit_total=_control_decimal_text(computed_debit),
+            computed_credit_total=_control_decimal_text(computed_credit),
+        )
+
+    mismatch_fields: list[str] = []
+    declared_row_count: int | None = None
+    if total_count_raw is not None:
+        declared_row_count = _control_integer(total_count_raw)
+        if declared_row_count is None or declared_row_count != len(parsed_rows):
+            mismatch_fields.append("row_count")
+    elif debit_count_raw is not None and credit_count_raw is not None:
+        debit_count = _control_integer(debit_count_raw)
+        credit_count = _control_integer(credit_count_raw)
+        if debit_count is not None and credit_count is not None:
+            declared_row_count = debit_count + credit_count
+        if declared_row_count is None or declared_row_count != len(parsed_rows):
+            mismatch_fields.append("row_count")
+
+    declared_debit = _control_decimal(debit_total_raw)
+    declared_credit = _control_decimal(credit_total_raw)
+    if debit_total_raw is not None and (declared_debit is None or declared_debit != computed_debit):
+        mismatch_fields.append("debit_total")
+    if credit_total_raw is not None and (declared_credit is None or declared_credit != computed_credit):
+        mismatch_fields.append("credit_total")
+    return SourceControlEvidence(
+        status="mismatch" if mismatch_fields else "verified",
+        computed_row_count=len(parsed_rows),
+        declared_row_count=declared_row_count,
+        computed_debit_total=_control_decimal_text(computed_debit),
+        declared_debit_total=_control_decimal_text(declared_debit) if declared_debit is not None else None,
+        computed_credit_total=_control_decimal_text(computed_credit),
+        declared_credit_total=_control_decimal_text(declared_credit) if declared_credit is not None else None,
+        mismatch_fields=tuple(mismatch_fields),
+    )
+
+
+def _control_metadata_value(metadata: dict[str, str], *aliases: str) -> str | None:
+    normalized = {normalize_bank_header(key): value for key, value in metadata.items()}
+    for alias in aliases:
+        value = normalized.get(normalize_bank_header(alias))
+        if clean(value):
+            return clean(value)
+    return None
+
+
+def _control_decimal(value: Any) -> Decimal | None:
+    text = clean(value).replace(",", "").replace("￥", "").replace("¥", "")
+    if not text:
+        return None
+    try:
+        return Decimal(text).quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return None
+
+
+def _control_integer(value: Any) -> int | None:
+    amount = _control_decimal(value)
+    return int(amount) if amount is not None and amount == amount.to_integral_value() else None
+
+
+def _control_decimal_text(value: Decimal) -> str:
+    return format(value.quantize(Decimal("0.01")), "f")
 
 
 def _bank_mapping_fields(mapping: dict[str, str]) -> list[dict[str, Any]]:

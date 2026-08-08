@@ -76,7 +76,7 @@
 ## 测试与验证
 
 - `web/src/test/App.test.tsx`
-- `web/src/test/PageRouteHost.test.tsx`（17 route owner 注册、route mount 单次加载、focus/visibility/BFCache 零业务 reload、旧刷新模块静态删除守卫）
+- `web/src/test/PageRouteHost.test.tsx`（19 route owner 注册、route mount 单次加载、focus/visibility/BFCache 零业务 reload、旧刷新模块静态删除守卫）
 - `web/src/test/AppSidebar.test.tsx`
 - `web/e2e/app-shell.spec.ts`
 - `web/e2e/permissions-role-matrix.spec.ts`

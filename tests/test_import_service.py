@@ -1,10 +1,10 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
-from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 
 class BulkInvoiceIdentityRepository:
@@ -134,8 +134,8 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             signed_amount=Decimal("-88.00"),
             txn_date="2026-03-23",
             trade_time="2026-03-23 09:15:01",
-            source_unique_key="SERIAL-001",
-            data_fingerprint="bank:62220001:acme supplies ltd.:2026-03-23:outflow:88.00",
+            source_unique_key="bank-v2:62220001:bank_serial_no:SERIAL-001",
+            data_fingerprint="bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme supplies ltd.",
             bank_serial_no="SERIAL-001",
         )
         self.service = ImportNormalizationService(
@@ -438,7 +438,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                     "counterparty_name": "Acme Supplies Ltd.",
                     "debit_amount": "88.00",
                     "credit_amount": "",
-                    "bank_serial_no": "DIFFERENT-SERIAL",
+                    "bank_serial_no": "",
                     "voucher_no": "",
                     "enterprise_serial_no": "",
                     "summary": "same as old but no official id",
@@ -462,7 +462,8 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.row_results[0].direction, TransactionDirection.OUTFLOW.value)
         self.assertEqual(preview.row_results[0].amount, "50.00")
         self.assertEqual(preview.row_results[0].counterparty_name, "Vendor A")
-        self.assertEqual(preview.row_results[1].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(preview.row_results[1].decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertEqual(preview.row_results[1].identity_kind, "suspected")
         self.assertEqual(preview.row_results[2].decision, ImportDecision.ERROR)
 
     def test_invoice_placeholder_digital_number_does_not_mask_stable_code_number_key(self) -> None:
@@ -506,9 +507,16 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
-        self.assertEqual(preview.normalized_rows[0]["source_unique_key"], "bank:62229999:2026-03-24 10:00:00:outflow:50.00:vendor a")
+        self.assertEqual(
+            preview.normalized_rows[0]["source_unique_key"],
+            "bank-v2:62229999:bank_serial_no:SERIAL-001",
+        )
+        self.assertEqual(
+            preview.normalized_rows[0]["data_fingerprint"],
+            "bank:62229999:2026-03-24 10:00:00:outflow:50.00:vendor a",
+        )
 
-    def test_bank_transaction_same_serial_but_different_identity_is_not_duplicate(self) -> None:
+    def test_bank_transaction_same_official_serial_is_duplicate(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-serial-not-key-demo.json",
@@ -526,9 +534,9 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
 
-    def test_bank_transaction_missing_second_level_time_imports_without_stable_identity(self) -> None:
+    def test_bank_transaction_official_reference_is_stable_without_second_level_time(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-missing-time-demo.json",
@@ -546,15 +554,42 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
-        self.assertIsNone(preview.row_results[0].source_unique_key)
-        self.assertIsNone(preview.row_results[0].identity_kind)
-        self.assertEqual(preview.normalized_rows[0]["source_unique_key"], None)
+        self.assertEqual(
+            preview.row_results[0].source_unique_key,
+            "bank-v2:62220001:bank_serial_no:SERIAL-DATE-ONLY-001",
+        )
+        self.assertEqual(preview.row_results[0].identity_kind, "stable")
+        self.assertIsNone(preview.normalized_rows[0]["data_fingerprint"])
 
         self.service.confirm_import(preview.id)
 
         created = next(transaction for transaction in self.service.list_transactions() if transaction.bank_serial_no == "SERIAL-DATE-ONLY-001")
         self.assertEqual(created.txn_date, "2026-03-23")
-        self.assertIsNone(created.source_unique_key)
+        self.assertEqual(created.source_unique_key, "bank-v2:62220001:bank_serial_no:SERIAL-DATE-ONLY-001")
+
+    def test_confirm_import_accepts_reviewed_weak_bank_match(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-weak-match-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "88.00",
+                    "credit_amount": "",
+                },
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.SUSPECTED_DUPLICATE)
+        batch = self.service.confirm_import(preview.id)
+
+        self.assertEqual(batch.status.value, "completed")
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
+        self.assertEqual(len(self.service.list_transactions()), 2)
 
     def test_confirm_import_persists_created_rows_and_updates_source_status(self) -> None:
         preview = self.service.preview_import(

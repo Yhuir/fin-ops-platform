@@ -39,6 +39,8 @@
 
 - `POST /imports/files/preview` 的银行文件只使用 `template_code=bank_statement`。成功文件返回 `preview_ready`；已定位表头但核心字段不完整时返回 `unrecognized_template`，同时返回 `header_signature`、`mapping_candidates[{key,label}]`、`mapping_fields[{key,label,selected,required}]`、`field_mapping` 和 `mapping_source`，且不生成可确认 rows。
 - `POST /imports/files/retry` 可在 `overrides[file_id].field_mapping` 提交 canonical 字段到源列 key 的映射。服务端必须校验列存在、核心日期/金额组合完整和方向合同；失败仍保持不可确认，成功重新生成 preview。
+- `GET /api/import-facts/files?page&page_size` 与 `GET /api/import-facts/batches?page&page_size` 是 `/imports` 导入中心的只读摘要合同；不得返回完整预览 payload。`GET /imports/batches/{batch_id}/errors.csv` 只输出错误/需复核行的用户可读字段，下载文件名不得暴露内部 ID。
+- 相同文件内容以 SHA-256 判断，不受文件名影响；同批或历史已确认文件命中时返回 `duplicate_file`。银行来源控制合计不一致返回 `source_control_mismatch` 且不可确认。
 - 字段映射仅属于 import file/session 的解析审计信息，不是 canonical 银行交易事实；confirm 仍只接受 `preview_ready` 文件，并继续执行去重、preview stale 和账户冲突合同。
 
 ## 页面标题完整性统计契约
@@ -1252,7 +1254,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 未登录或登录态失效返回现有 `401 invalid_oa_session`。
 - 非管理员返回 `403 admin_only`。
 
-`page_key` 与 frontend page registry 完全一致。当前 17 个页面全部为 `ready`；`app-health-operations` 是 system proof owner，其余 16 个页面分别由有限、显式的 proof owner 执行。任何新页面在进入 frontend registry 时都必须同时登记 Audit 合同；未完成 proof 时只能 fail closed，不能把登记本身解释为可证明。
+`page_key` 与 frontend page registry 完全一致。当前 19 个页面全部为 `ready`；`app-health-operations` 是 system proof owner，其余 18 个页面分别由有限、显式的 proof owner 执行。任何新页面在进入 frontend registry 时都必须同时登记 Audit 合同；未完成 proof 时只能 fail closed，不能把登记本身解释为可证明。
 
 该接口是只读页面业务审计入口，复用 App 后端已有 PostgreSQL 连接，不要求调用方提供 DB URL。无 PostgreSQL runtime connection 时返回 `503 postgres_required`；未知 `page` 返回 `400 unsupported_page_audit_page`；已登记但 proof 未实现返回 `409 page_audit_proof_unavailable` 和 `overall_status=unavailable`；审计 SQL 失败返回 `500 page_audit_failed`。该接口不得刷新 read model、不得自动修复 relation、不得写入业务表。
 
@@ -1317,14 +1319,14 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 ### App Health System Audit 响应
 
-`page=app-health-operations` 不打开第 17 个独立事务。后端只打开一个 outer `REPEATABLE READ READ ONLY` transaction，把同一 caller-owned Audit snapshot 传给其余 16 个页面 proof，并在该 snapshot 内独立重算 App Health inventory、read model manifest/status、required worker heartbeat 和 current durable queue。响应在普通 page Audit 字段之外至少包含：
+`page=app-health-operations` 不打开第 19 个独立事务。后端只打开一个 outer `REPEATABLE READ READ ONLY` transaction，把同一 caller-owned Audit snapshot 传给其余 18 个页面 proof，并在该 snapshot 内独立重算 App Health inventory、read model manifest/status、required worker heartbeat 和 current durable queue。响应在普通 page Audit 字段之外至少包含：
 
-- `database_system_snapshot`：`system_audit_id`、PostgreSQL `snapshot_identity`/时间、17 页合同 revision/version set、页面结果、registry/manifest/worker fingerprint 和 durable runtime 证明。
+- `database_system_snapshot`：`system_audit_id`、PostgreSQL `snapshot_identity`/时间、19 页合同 revision/version set、页面结果、registry/manifest/worker fingerprint 和 durable runtime 证明。
 - `runtime_observation`：request metrics、RabbitMQ transport 等 point-in-time 观测；必须明确 `database_snapshot=false`，不能冒充数据库快照事实。
 - `external_evidence`：银行、OA、发票和 ETC 四个独立 `complete_snapshot/all` manifest 与 App canonical facts 的精确双向证明。每个 domain 返回 evidence id/fingerprint、source snapshot、observed/valid time、missing/extra/field mismatch/control mismatch 和有上限的问题样本；页面覆盖来自 registry 的显式 domain keys，不从说明文字猜测。
 - `page_projection`：与 database system proof 同一 snapshot 构建的 App Health dashboard payload。
 
-System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 17 页已登记的 App 内部合同完整一致。只有四个外部 domain 同时 `pass` 时，`external_evidence.status=pass` 与 `end_to_end_source_truth=proven_as_of_external_evidence` 才成立；该声明严格绑定 manifest 的 `observed_at/source_snapshot_id` 与当前 App immutable snapshot。缺 manifest 为 `unknown/unproven`，最新 manifest 被撤销、过期、覆盖不全或精确集合/字段/control 不一致为 `fail/unproven`，不得回退旧版本。它仍不证明 Audit 后发生的写入或外部实时状态。页面下一次普通 dashboard refresh 必须清除历史 Audit 绿色状态，避免把旧 snapshot 继续展示为当前结论。
+System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 19 页已登记的 App 内部合同完整一致。只有四个外部 domain 同时 `pass` 时，`external_evidence.status=pass` 与 `end_to_end_source_truth=proven_as_of_external_evidence` 才成立；该声明严格绑定 manifest 的 `observed_at/source_snapshot_id` 与当前 App immutable snapshot。缺 manifest 为 `unknown/unproven`，最新 manifest 被撤销、过期、覆盖不全或精确集合/字段/control 不一致为 `fail/unproven`，不得回退旧版本。它仍不证明 Audit 后发生的写入或外部实时状态。页面下一次普通 dashboard refresh 必须清除历史 Audit 绿色状态，避免把旧 snapshot 继续展示为当前结论。
 
 ## 已退休页面 Read Model 刷新 API
 

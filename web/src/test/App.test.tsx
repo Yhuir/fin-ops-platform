@@ -141,7 +141,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("href", "/settings");
-    expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
     expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("href", "/imports/bank-transactions");
     expect(screen.getByRole("link", { name: "发票导入" })).toHaveAttribute("href", "/imports/invoices");
     expect(screen.getByRole("link", { name: "ETC发票导入" })).toHaveAttribute("href", "/imports/etc-invoices");
@@ -155,7 +155,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", "2026");
     expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute("aria-valuenow", "3");
@@ -174,7 +174,7 @@ describe("Finance operations shell", () => {
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
     expect(screen.getByRole("link", { name: "成本统计" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -312,7 +312,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
   });
 
   test("navigates to the standalone bank transaction import page from the shell sidebar", async () => {

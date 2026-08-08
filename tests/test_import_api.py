@@ -160,7 +160,7 @@ class ImportApiTests(unittest.TestCase):
         )
 
         self.assertEqual(duplicate_preview.normalized_rows[0]["source_unique_key"], first_key)
-        self.assertEqual(duplicate_preview.row_results[0].decision.value, "duplicate_skipped")
+        self.assertEqual(duplicate_preview.row_results[0].decision.value, "suspected_duplicate")
 
     def test_preview_confirm_and_fetch_batch_round_trip(self) -> None:
         app = build_application()

@@ -44,6 +44,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | --- | --- | --- |
 | 预览 rows/errors | 前端页面 / `app.import_batches` / `app.import_batch_rows` / `app.import_files` | 未确认前不作为业务事实；只写当前 session/preview batches，不得携带正式 `invoices` / `transactions` facts，也不得覆盖其它 session 的 terminal 状态 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
+| 导入中心摘要 | `/imports` | 复用上述只读文件摘要和 `/api/import-facts/batches`；不新增发票导入状态或写入口 |
 | 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态 |
 | Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次 canonical 写入影响的精确月份，不在写路径展开为页面 refresh jobs |
 | Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`；普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作，页面访问负责精确收敛 |
@@ -89,6 +90,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 
 - 发票模板变更必须覆盖导入后首次访问进项/销项/待找时的 downstream 展示状态。
 - 普通导入不得恢复下游 operation barrier targets；显式运维 refresh 才能返回并等待其明确 targets。
+- 普通发票 XLS/XLSX 与银行文件共享签名、容器资源上限和 SHA-256 文件级防重；同内容改名后不得再次确认。
 
 ## Canonical facts ownership
 

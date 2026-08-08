@@ -56,7 +56,7 @@ class ImportPreviewAuditTests(unittest.TestCase):
         self.assertEqual(len(session_audit.duplicate_groups), 1)
         self.assertEqual(session_audit.duplicate_groups[0].duplicate_type, "duplicate_in_file")
 
-    def test_bank_transaction_without_official_serial_uses_stable_business_identity(self) -> None:
+    def test_bank_transaction_without_official_serial_uses_suspected_business_identity(self) -> None:
         identity = BankTransactionIdentityStrategy().identify(
             {
                 "account_no": "acct-a",
@@ -67,7 +67,7 @@ class ImportPreviewAuditTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(identity.identity_kind, "stable")
+        self.assertEqual(identity.identity_kind, "suspected")
         self.assertEqual(identity.identity_key, "bank:acct-a:2026-03-23 09:15:01:outflow:88.00:acme supplies")
 
     def test_bank_transaction_same_serial_on_different_accounts_is_not_duplicate(self) -> None:

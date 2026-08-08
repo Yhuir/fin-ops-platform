@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import unittest
 from contextlib import contextmanager
+from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
     evaluate_audit_issues,
     read_only_audit_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.operations_audit import audit_import_center_page
 
 
 class OperationsAuditReportTests(unittest.TestCase):
@@ -61,6 +63,37 @@ class OperationsAuditReportTests(unittest.TestCase):
             convergence.audit_status,
             {"integrity": "pass", "freshness": "not_fresh", "queue": "backlog"},
         )
+
+    def test_import_center_uses_one_snapshot_and_fails_when_any_import_proof_fails(self) -> None:
+        clean = {
+            "overall_status": "pass",
+            "audit_status": {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+            "issues": [],
+        }
+        blocked = {
+            "overall_status": "issues_found",
+            "audit_status": {"integrity": "issues_found", "freshness": "fresh", "queue": "drained"},
+            "issues": [{"severity": "error", "code": "file_mismatch"}],
+        }
+        with (
+            patch(
+                "fin_ops_platform.services.postgres_repositories.operations_audit.audit_bank_transaction_import_page",
+                return_value=clean,
+            ),
+            patch(
+                "fin_ops_platform.services.postgres_repositories.operations_audit.audit_invoice_import_page",
+                return_value=blocked,
+            ),
+            patch(
+                "fin_ops_platform.services.postgres_repositories.operations_audit.audit_etc_import_page",
+                return_value=clean,
+            ),
+        ):
+            report = audit_import_center_page(object())
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(report["summary"]["blocking_component_count"], 1)
 
 
 class _SnapshotTransaction:

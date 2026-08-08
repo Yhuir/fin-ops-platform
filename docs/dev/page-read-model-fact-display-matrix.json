@@ -276,6 +276,22 @@
       "production_readonly_gates": ["http_slo_probe:operation_history"]
     },
     {
+      "module": "import-center",
+      "page_key": "imports.center",
+      "route": "/imports",
+      "read_model_keys": [],
+      "freshness_probe_names": ["import_facts_batches", "import_facts_files"],
+      "fact_sources": ["app.file_objects", "app.import_files", "app.import_batches", "app.import_batch_rows", "app.etc_import_sessions", "app.etc_import_session_files", "job.import_jobs", "job.outbox_events"],
+      "pairing_relation_fact_sources": [],
+      "deterministic_evidence": [
+        {
+          "path": "web/src/test/ImportCenterSummaryPage.test.tsx",
+          "required_markers": ["导入中心", "建行流水.xlsx", "/api/import-facts/files?page=1&page_size=50", "/api/import-facts/batches?page=1&page_size=50"]
+        }
+      ],
+      "production_readonly_gates": ["http_slo_probe:import_facts_batches", "http_slo_probe:import_facts_files"]
+    },
+    {
       "module": "imports-bank-transactions",
       "page_key": "imports.bank-transactions",
       "route": "/imports/bank-transactions",

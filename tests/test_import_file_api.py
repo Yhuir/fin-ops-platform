@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
-import unittest
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
-from tests.app_test_support import build_local_state_application as build_application, install_durable_import_queue
 
+from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import install_durable_import_queue
 from tests.mock_import_files import (
     BOCOM_JAN,
     CCB_JAN,
@@ -61,6 +62,24 @@ def build_multipart_payload(
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def test_import_batch_error_csv_contains_review_rows_without_internal_ids(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(  # type: ignore[attr-defined]
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="invalid.xlsx",
+            imported_by="user_finance_01",
+            rows=[{"invoice_no": "", "amount": "bad"}],
+        )
+
+        response = app.handle_request("GET", f"/imports/batches/{preview.id}/errors.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "text/csv; charset=utf-8")
+        self.assertTrue(response.body.startswith("\ufeff行号,数据类型,处理结果,原因"))
+        self.assertIn(",error,", response.body)
+        self.assertNotIn(preview.row_results[0].id, response.body)
+        app.close()
+
     def test_import_fact_files_list_omits_preview_detail_payloads(self) -> None:
         class FakeImportFactRepository:
             def list_import_files_page(self, **_kwargs):
@@ -173,7 +192,7 @@ class ImportFileApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         file_map = {item["file_name"]: item for item in payload["files"]}
         self.assertEqual(file_map["损坏流水.xlsx"]["status"], "unrecognized_template")
-        self.assertIn("文件读取失败", file_map["损坏流水.xlsx"]["message"])
+        self.assertIn("不是有效的 Excel 工作簿", file_map["损坏流水.xlsx"]["message"])
         self.assertEqual(file_map[INVOICE_JAN.name]["status"], "preview_ready")
 
     def test_preview_files_detects_supported_templates_and_keeps_unrecognized_file_level_error(self) -> None:

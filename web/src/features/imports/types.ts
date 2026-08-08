@@ -6,6 +6,8 @@ export type ImportFileStatus =
   | "preview_ready"
   | "preview_ready_with_errors"
   | "unrecognized_template"
+  | "duplicate_file"
+  | "source_control_mismatch"
   | "confirmed"
   | "skipped"
   | "reverted";
@@ -106,7 +108,57 @@ export type ImportFilePreview = {
   mappingFields: Array<{ key: string; label: string; selected?: string | null; required: boolean }>;
   fieldMapping: Record<string, string>;
   mappingSource?: "auto" | "manual" | "saved" | null;
+  duplicateFileName?: string | null;
+  sourceControl?: ImportSourceControlEvidence | null;
   rowResults: ImportRowResult[];
+};
+
+export type ImportSourceControlEvidence = {
+  status: "not_applicable" | "unavailable" | "verified" | "mismatch";
+  computedRowCount: number;
+  declaredRowCount?: number | null;
+  computedDebitTotal?: string | null;
+  declaredDebitTotal?: string | null;
+  computedCreditTotal?: string | null;
+  declaredCreditTotal?: string | null;
+  mismatchFields: string[];
+};
+
+export type ImportFactFile = {
+  id: string;
+  fileName: string;
+  batchType?: ImportBatchType | null;
+  status: string;
+  rowCount: number;
+  successCount: number;
+  errorCount: number;
+  duplicateCount: number;
+  suspectedDuplicateCount: number;
+  previewBatchId?: string | null;
+  batchId?: string | null;
+  uploadedBy?: string | null;
+  uploadedAt?: string | null;
+};
+
+export type ImportFactBatch = {
+  id: string;
+  batchType: ImportBatchType;
+  sourceName: string;
+  importedBy: string;
+  rowCount: number;
+  successCount: number;
+  errorCount: number;
+  duplicateCount: number;
+  suspectedDuplicateCount: number;
+  status: string;
+  importedAt: string;
+};
+
+export type ImportFactPage<T> = {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
 export type ImportFilePreviewOverride = {

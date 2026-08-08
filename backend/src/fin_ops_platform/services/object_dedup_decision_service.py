@@ -35,7 +35,12 @@ class ObjectIdentityRepository(Protocol):
     ) -> Invoice | None:
         ...
 
-    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
+    def find_bank_transaction_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> BankTransaction | None:
         ...
 
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
@@ -179,6 +184,15 @@ class ObjectDedupDecisionService:
                 linked_object_id=existing.id,
                 matched_object=existing,
             )
+        if not identity.canonical_key and identity.suspected_key and existing is not None:
+            return ObjectDedupDecision(
+                decision=ImportDecision.SUSPECTED_DUPLICATE,
+                decision_reason="Bank transaction fingerprint matched without an official bank reference.",
+                identity=identity,
+                linked_object_type="bank_transaction",
+                linked_object_id=existing.id,
+                matched_object=existing,
+            )
         return ObjectDedupDecision(
             decision=ImportDecision.CREATED,
             decision_reason="Ready to create new bank transaction.",
@@ -210,7 +224,10 @@ class ObjectDedupDecisionService:
     def _find_bank_transaction(self, identity: ObjectIdentity) -> BankTransaction | None:
         if self._repository is None:
             return None
-        return self._repository.find_bank_transaction_by_identity(canonical_key=identity.canonical_key)
+        return self._repository.find_bank_transaction_by_identity(
+            canonical_key=identity.canonical_key,
+            suspected_key=None if identity.canonical_key else identity.suspected_key,
+        )
 
     @staticmethod
     def _is_etc_invoice(normalized: dict[str, Any]) -> bool:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import re
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from contextlib import contextmanager
-from copy import deepcopy
-import re
 from typing import Any, Iterator
 
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceType, TransactionDirection
@@ -19,7 +19,6 @@ from fin_ops_platform.domain.models import (
 from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInvoiceLinkService
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -108,8 +107,16 @@ class _ImportObjectIdentityRepository:
             data_fingerprint=suspected_key,
         )
 
-    def find_bank_transaction_by_identity(self, *, canonical_key: str | None = None) -> BankTransaction | None:
-        return self._import_service._find_transaction_by_identity(source_unique_key=canonical_key)
+    def find_bank_transaction_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> BankTransaction | None:
+        return self._import_service._find_transaction_by_identity(
+            source_unique_key=canonical_key,
+            data_fingerprint=suspected_key,
+        )
 
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         return self.find_invoice_by_identity(canonical_key=canonical_key) is not None
@@ -323,6 +330,16 @@ class ImportNormalizationService:
         try:
             with self._invoice_identity_cache_for(preview.normalized_rows, enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE)):
                 for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
+                    if (
+                        preview.batch.batch_type == BatchType.BANK_TRANSACTION
+                        and row_result.decision == ImportDecision.SUSPECTED_DUPLICATE
+                    ):
+                        row_result.decision = ImportDecision.CREATED
+                        row_result.decision_reason = "User confirmed a bank transaction with only a weak fingerprint match."
+                        row_result.linked_object_type = None
+                        row_result.linked_object_id = None
+                        self._persist_created_row(preview.batch.batch_type, row_result, normalized)
+                        continue
                     self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
                     if row_result.decision == ImportDecision.CREATED:
                         self._persist_created_row(preview.batch.batch_type, row_result, normalized)
@@ -369,11 +386,15 @@ class ImportNormalizationService:
                 batch_type=batch_type,
                 normalized=normalized,
             )
-            if decision == ImportDecision.DUPLICATE_SKIPPED:
+            if decision in (ImportDecision.DUPLICATE_SKIPPED, ImportDecision.SUSPECTED_DUPLICATE):
                 row_result.decision = decision
                 row_result.linked_object_type = linked_object_type
                 row_result.linked_object_id = linked_object_id
-                row_result.decision_reason = "Bank transaction identity matched an existing transaction during confirm."
+                row_result.decision_reason = (
+                    "Bank transaction identity matched an existing transaction during confirm."
+                    if decision == ImportDecision.DUPLICATE_SKIPPED
+                    else "Bank transaction fingerprint matched during confirm; review before importing."
+                )
 
     def _refresh_invoice_row_decision_before_confirm(
         self,
@@ -714,9 +735,23 @@ class ImportNormalizationService:
             return cache.get(("suspected", str(data_fingerprint)))
         return None
 
-    def _find_transaction_by_identity(self, *, source_unique_key: str | None) -> BankTransaction | None:
+    def _find_transaction_by_identity(
+        self,
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None = None,
+    ) -> BankTransaction | None:
         if source_unique_key and source_unique_key in self._transaction_unique_index:
             return self._transactions_by_id[self._transaction_unique_index[source_unique_key]]
+        if data_fingerprint and data_fingerprint in self._transaction_fingerprint_index:
+            return self._transactions_by_id[self._transaction_fingerprint_index[data_fingerprint]]
+        identity_finder = getattr(self._fact_repository, "find_bank_transaction_by_identity", None)
+        if callable(identity_finder):
+            transaction = identity_finder(
+                canonical_key=str(source_unique_key) if source_unique_key else None,
+                suspected_key=str(data_fingerprint) if not source_unique_key and data_fingerprint else None,
+            )
+            return transaction if isinstance(transaction, BankTransaction) else None
         finder = getattr(self._fact_repository, "find_transaction_identity", None)
         if not callable(finder) or not source_unique_key:
             return None
@@ -1048,7 +1083,7 @@ class ImportNormalizationService:
         if not txn_date and identity.components.get("trade_time"):
             normalized["txn_date"] = identity.components["trade_time"][:10]
         source_unique_key = identity.canonical_key
-        data_fingerprint = None
+        data_fingerprint = identity.suspected_key
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
 
@@ -1846,7 +1881,13 @@ class ImportNormalizationService:
     def _transaction_row_result_display_fields(normalized: dict[str, Any], identity: Any) -> dict[str, str | None]:
         components = getattr(identity, "components", {}) or {}
         return {
-            "identity_kind": "stable" if getattr(identity, "canonical_key", None) else None,
+            "identity_kind": (
+                "stable"
+                if getattr(identity, "canonical_key", None)
+                else "suspected"
+                if getattr(identity, "suspected_key", None)
+                else None
+            ),
             "account_no": normalized.get("account_no"),
             "trade_time": (
                 components.get("trade_time")
