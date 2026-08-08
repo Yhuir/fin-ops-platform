@@ -396,6 +396,7 @@ describe("common platform components", () => {
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*flex-direction:\s*column/s);
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*max-height:\s*100vh/s);
     expect(appStyles).toMatch(/\.finance-drawer__body\s*\{[^}]*overflow:\s*auto/s);
+    expect(appStyles).toMatch(/\.finance-drawer__header\s*\{[^}]*flex-direction:\s*row/s);
     expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*240ms;/);
     expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*180ms;/);
     expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*transition-property:\s*translate/s);
