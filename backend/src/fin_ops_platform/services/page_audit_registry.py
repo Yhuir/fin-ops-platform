@@ -14,6 +14,7 @@ PageAuditExecutor = Literal[
     "bank_transaction_import",
     "invoice_import",
     "etc_import",
+    "operation_history",
     "system",
     "unavailable",
 ]
@@ -217,6 +218,15 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         (),
         relation_proof_required=False,
         external_source_boundary="not_applicable; dependency availability is reported separately",
+        external_evidence_keys=(),
+    ),
+    "operation-history": _ready(
+        "operation-history",
+        "操作历史",
+        "operation_history",
+        (),
+        relation_proof_required=False,
+        external_source_boundary="not_applicable; audit events are App-internal durable facts",
         external_evidence_keys=(),
     ),
     "imports.bank-transactions": _ready(

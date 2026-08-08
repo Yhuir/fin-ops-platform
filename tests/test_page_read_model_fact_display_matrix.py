@@ -72,7 +72,10 @@ DIRECT_CANONICAL_PAGE_KEYS = {
     "imports.etc-invoices",
     "settings",
 }
-ZERO_OWN_READ_MODEL_PAGE_KEYS = DIRECT_CANONICAL_PAGE_KEYS | {"app-health-operations"}
+ZERO_OWN_READ_MODEL_PAGE_KEYS = DIRECT_CANONICAL_PAGE_KEYS | {
+    "app-health-operations",
+    "operation-history",
+}
 
 def _load_matrix_rows() -> list[dict[str, Any]]:
     payload = json.loads(MATRIX_PATH.read_text(encoding="utf-8"))

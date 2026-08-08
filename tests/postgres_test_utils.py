@@ -149,10 +149,12 @@ EXPECTED_MIGRATION_FILES = [
     "0135_batch_accounting_tag_selection.sql",
     "0136_unify_in_progress_oa_workbench_relations.sql",
     "0137_oa_attachment_identity_context_index.sql",
+    "0138_operation_audit_and_financial_fact_guard.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
     "audit.events",
+    "app.financial_fact_corrections",
     "audit.app_health_alerts",
     "audit.external_control_evidence_items",
     "audit.external_control_evidence",

@@ -10145,6 +10145,49 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, operationsDashboardPayload());
     }
 
+    if (path === "/api/operations/audit-events") {
+      if (configuredSessionTier() !== "admin") {
+        return json(route, { error: "admin_only", message: "当前账号没有管理员权限。" }, 403);
+      }
+      return json(route, {
+        rows: [{
+          id: "10000000-0000-4000-8000-000000000001",
+          event_type: "operation.completed",
+          actor_id: "YNSYLP005",
+          action: "POST /api/workbench/relations",
+          page_key: "workbench",
+          operation_location: "/api/workbench/relations",
+          object_type: "http_request",
+          object_id: "audit-e2e-request",
+          occurred_at: "2026-08-09T10:00:00+08:00",
+          outcome: "success",
+          request_id: "audit-e2e-request",
+          payload: { summary: "确认关联", before: null, after: { status: "active" } },
+        }],
+        next_cursor: null,
+        limit: 50,
+      });
+    }
+
+    if (path === "/api/operations/audit-events/10000000-0000-4000-8000-000000000001") {
+      return json(route, {
+        event: {
+          id: "10000000-0000-4000-8000-000000000001",
+          event_type: "operation.completed",
+          actor_id: "YNSYLP005",
+          action: "POST /api/workbench/relations",
+          page_key: "workbench",
+          operation_location: "/api/workbench/relations",
+          object_type: "http_request",
+          object_id: "audit-e2e-request",
+          occurred_at: "2026-08-09T10:00:00+08:00",
+          outcome: "success",
+          request_id: "audit-e2e-request",
+          payload: { summary: "确认关联", before: null, after: { status: "active" } },
+        },
+      });
+    }
+
     if (
       path === "/api/operations/app-health/page-audit"
       && url.searchParams.get("page") === "app-health-operations"

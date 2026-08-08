@@ -302,7 +302,6 @@ class PostgresWorkbenchRelationRepository:
         self._save_workbench_pair_relations(
             snapshot,
             changed_case_ids=changed_case_ids,
-            replace_history=True,
         )
 
     def save_workbench_pair_relation_delta(
@@ -314,7 +313,6 @@ class PostgresWorkbenchRelationRepository:
         self._save_workbench_pair_relations(
             snapshot,
             changed_case_ids=set(text_list(changed_case_ids)),
-            replace_history=False,
         )
 
     def _save_workbench_pair_relations(
@@ -322,7 +320,6 @@ class PostgresWorkbenchRelationRepository:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: set[str] | None,
-        replace_history: bool,
     ) -> None:
         def write(connection: Any) -> None:
             relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
@@ -367,22 +364,20 @@ class PostgresWorkbenchRelationRepository:
                     ),
                 )
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
-            self._replace_workbench_pair_relation_history(
+            self._append_workbench_pair_relation_history(
                 connection,
                 history,
                 changed_case_ids=changed_ids,
-                replace_existing=replace_history,
             )
 
         run_in_transaction(self._connection, write)
 
-    def _replace_workbench_pair_relation_history(
+    def _append_workbench_pair_relation_history(
         self,
         connection: Any,
         history: Any,
         *,
         changed_case_ids: set[str] | None,
-        replace_existing: bool = True,
     ) -> None:
         if not isinstance(history, list):
             return
@@ -396,11 +391,6 @@ class PostgresWorkbenchRelationRepository:
             case_ids &= changed_case_ids
         if not case_ids:
             return
-        if replace_existing:
-            connection.execute(
-                "delete from app.workbench_pair_relation_history where case_id = any(%s::text[])",
-                (sorted(case_ids),),
-            )
         rows_by_id: dict[str, tuple[Any, ...]] = {}
         for item in history:
             if not isinstance(item, dict):
@@ -451,10 +441,7 @@ class PostgresWorkbenchRelationRepository:
                 input.raw_payload
             from input
             left join app.workbench_pair_relations relation on relation.case_id = input.case_id
-            on conflict (id) do update set
-                before_payload = excluded.before_payload,
-                after_payload = excluded.after_payload,
-                raw_payload = excluded.raw_payload
+            on conflict (id) do nothing
             """,
             tuple(value for row in rows for value in row),
         )

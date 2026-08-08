@@ -1,7 +1,7 @@
 # Phase 27 页面访问 freshness 与写入口覆盖矩阵
 
 > 状态：`planned` 表示未实施，`deployed-validation-pending` 表示代码、本地门禁和 release 激活已完成但最终生产覆盖行尚未闭合，`migrated` 表示对应 production correctness probe 已通过。本文是 Phase 27 覆盖合同，不是生产 runtime registry。
-> 最终运行代码 commit `3b44f08ef` 已作为 production release `main-3b44f08e-20260725151318` 激活；migration `0125` 与正式 Workbench rehydrate 已完成。最终 17-page/15-read-model HTTP matrix 为 52/52，scope contract violation 为 0，System Audit 16/16 pass，所有 slice 已迁移。3 秒目标只记录为性能 follow-up，不阻塞状态迁移。
+> 最终运行代码 commit `3b44f08ef` 已作为 production release `main-3b44f08e-20260725151318` 激活；migration `0125` 与正式 Workbench rehydrate 已完成。原 Phase 27 的 17-page/15-read-model HTTP matrix 为 52/52，scope contract violation 为 0，System Audit 16/16 pass，所有 slice 已迁移；后续新增的操作历史页已纳入当前页面 registry。3 秒目标只记录为性能 follow-up，不阻塞状态迁移。
 
 ## Operation classes
 
@@ -16,7 +16,7 @@
 
 ## Registered page coverage
 
-本表必须与 `web/src/app/pageRegistry.tsx` 的 17 个 `appPageDefinitions` 双向一致。`none` 表示页面直接读取 canonical/config/session 或只承载 workflow；不表示它需要新建 read model。
+本表必须与 `web/src/app/pageRegistry.tsx` 的 18 个 `appPageDefinitions` 双向一致。`none` 表示页面直接读取 canonical/config/session 或只承载 workflow；不表示它需要新建 read model。
 
 | Page key | Route | Query / read-model owner | Writes and Drawer coverage | Access-time target | Probe id |
 | --- | --- | --- | --- | --- | --- |
@@ -34,6 +34,7 @@
 | `output-invoice-collections` | `/output-invoice-collections` | `OutputInvoiceCollectionCanonicalQueryService`; `none` | canonical 详情/导出；无业务写 Drawer | canonical output invoices + active formal relations + bank facts direct query；无 read model/lifecycle/receipt gate | `p27-page-output-collection` |
 | `settings` | `/settings` | settings/account/OA credential services; `none` | settings、账户、凭据、手工 OA、reset | query canonical settings versions；仅语义消费者按访问验证 | `p27-page-settings` |
 | `app-health-operations` | `/operations/app-health` | App Status/runtime queue/audit queries; all 15 status entries | admin ack/retry；页面本身无业务 Drawer rebuild | 只读 current-effective runtime facts；运维命令显式执行 | `p27-page-app-health` |
+| `operation-history` | `/operations/history` | `audit.events` canonical append-only query；`none` | 无业务写；详情使用只读 Drawer | admin-only 直接读取上线覆盖点后的审计事实；不触发 read model/queue | `p27-page-operation-history` |
 | `imports.bank-transactions` | `/imports/bank-transactions` | import session service; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-bank` |
 | `imports.invoices` | `/imports/invoices` | import session service; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-invoice` |
 | `imports.etc-invoices` | `/imports/etc-invoices` | import + ETC session services; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-etc` |

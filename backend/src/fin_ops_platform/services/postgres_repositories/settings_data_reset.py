@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.state_store_protocol import PROTECTED_ADMIN_USERNAME
+
 
 class PostgresSettingsDataResetRepository:
     """Execute one settings data-reset action inside the caller's transaction."""
@@ -15,6 +17,7 @@ class PostgresSettingsDataResetRepository:
         self._connection = connection
 
     def reset_bank_transaction_data(self) -> dict[str, Any]:
+        self._authorize_fact_deletion("管理员重置银行流水域数据")
         file_state = self._import_file_state(self._BANK_BATCH_TYPES)
         relation_counts = self._delete_workbench_domain(
             row_types=self._BANK_ROW_TYPES,
@@ -65,6 +68,7 @@ class PostgresSettingsDataResetRepository:
         }
 
     def reset_invoice_data(self) -> dict[str, Any]:
+        self._authorize_fact_deletion("管理员重置发票域数据")
         file_state = self._import_file_state(self._INVOICE_BATCH_TYPES)
         relation_counts = self._delete_workbench_domain(
             row_types=self._INVOICE_ROW_TYPES,
@@ -154,6 +158,16 @@ class PostgresSettingsDataResetRepository:
             "workbench_pair_relation_history_preserved": history_count,
             "workbench_preserved_non_oa_pair_relations": preserved_count,
         }
+
+    def _authorize_fact_deletion(self, reason: str) -> None:
+        self._connection.execute(
+            "select set_config('fin_ops.correction_reason', %s, true)",
+            (reason,),
+        )
+        self._connection.execute(
+            "select set_config('fin_ops.actor_id', %s, true)",
+            (PROTECTED_ADMIN_USERNAME,),
+        )
 
     def _delete_matching(self) -> dict[str, int]:
         return {

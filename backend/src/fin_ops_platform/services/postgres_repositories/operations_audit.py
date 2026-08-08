@@ -4,13 +4,20 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from fin_ops_platform.services.postgres_repositories.common import jsonb, serialize_value
 from fin_ops_platform.services.postgres_repositories.bank_transaction_import_page_audit import (
     audit_bank_transaction_import_page,
 )
 from fin_ops_platform.services.postgres_repositories.app_health_system_audit import (
     audit_app_health_system_snapshot,
 )
-from fin_ops_platform.services.postgres_repositories.audit_report import AuditSnapshot, read_only_audit_snapshot
+from fin_ops_platform.services.postgres_repositories.audit_report import (
+    AuditIssue,
+    AuditSnapshot,
+    evaluate_audit_issues,
+    read_only_audit_snapshot,
+    use_audit_snapshot,
+)
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
 from fin_ops_platform.services.postgres_repositories.invoice_import_page_audit import audit_invoice_import_page
 from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit import audit_etc_tickets_page
@@ -25,6 +32,116 @@ from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY, P
 class PostgresOperationsAuditRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def append_operation_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            """
+            insert into audit.events(
+                event_type, object_type, object_id, actor_id, actor_name, scope,
+                trace_id, occurred_at, action, page_key, operation_location,
+                reason, outcome, request_id, payload, raw_payload
+            )
+            values (
+                %s, %s, %s, %s, %s, %s,
+                %s, coalesce(%s::timestamptz, now()), %s, %s, %s,
+                %s, %s, %s, %s, '{}'::jsonb
+            )
+            returning id::text as id, occurred_at
+            """,
+            (
+                event.get("event_type") or "operation.action",
+                event.get("object_type"),
+                event.get("object_id"),
+                event.get("actor_id"),
+                event.get("actor_name"),
+                event.get("scope"),
+                event.get("trace_id"),
+                event.get("occurred_at"),
+                event.get("action"),
+                event.get("page_key"),
+                event.get("operation_location"),
+                event.get("reason"),
+                event.get("outcome") or "success",
+                event.get("request_id"),
+                jsonb(serialize_value(event.get("payload") or {})),
+            ),
+        )
+        if row is None:
+            raise RuntimeError("Audit event was not persisted.")
+        return row
+
+    def list_operation_events(
+        self,
+        *,
+        limit: int,
+        cursor_occurred_at: str | None = None,
+        cursor_id: str | None = None,
+        actor_id: str | None = None,
+        action: str | None = None,
+        page_key: str | None = None,
+        object_type: str | None = None,
+        outcome: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        search: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions = [
+            "occurred_at >= coalesce((select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'), '-infinity'::timestamptz)"
+        ]
+        params: list[Any] = []
+        if cursor_occurred_at and cursor_id:
+            conditions.append("(occurred_at, id) < (%s::timestamptz, %s::uuid)")
+            params.extend((cursor_occurred_at, cursor_id))
+        for column, value in (
+            ("actor_id", actor_id),
+            ("action", action),
+            ("page_key", page_key),
+            ("object_type", object_type),
+            ("outcome", outcome),
+        ):
+            if value:
+                conditions.append(f"{column} = %s")
+                params.append(value)
+        if date_from:
+            conditions.append("occurred_at >= %s::timestamptz")
+            params.append(date_from)
+        if date_to:
+            conditions.append("occurred_at < (%s::date + interval '1 day')")
+            params.append(date_to)
+        if search:
+            conditions.append(
+                "lower(concat_ws(' ', actor_id, actor_name, event_type, action, page_key, object_type, object_id, payload->>'summary')) like %s"
+            )
+            params.append(f"%{search.lower()}%")
+        params.append(max(1, min(int(limit), 201)))
+        return self._connection.fetch_all(
+            f"""
+            select id::text as id, event_type, object_type, object_id, actor_id, actor_name,
+                   scope, trace_id, occurred_at, action, page_key, operation_location,
+                   reason, outcome, request_id, payload
+            from audit.events
+            where {' and '.join(conditions)}
+            order by occurred_at desc, id desc
+            limit %s
+            """,
+            tuple(params),
+        )
+
+    def get_operation_event(self, event_id: str) -> dict[str, Any] | None:
+        return self._connection.fetch_one(
+            """
+            select id::text as id, event_type, object_type, object_id, actor_id, actor_name,
+                   scope, trace_id, occurred_at, action, page_key, operation_location,
+                   reason, outcome, request_id, payload
+            from audit.events
+            where id = %s::uuid
+              and occurred_at >= coalesce(
+                  (select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'),
+                  '-infinity'::timestamptz
+              )
+            """,
+            (event_id,),
+        )
 
     def audit_page(
         self,
@@ -165,6 +282,13 @@ class PostgresOperationsAuditRepository:
                 example_limit=sample_limit,
                 audit_snapshot=audit_snapshot,
             )
+        elif registration.executor == "operation_history":
+            payload = audit_operation_history_page(
+                self._connection,
+                tenant_id=tenant_id,
+                example_limit=sample_limit,
+                audit_snapshot=audit_snapshot,
+            )
         else:
             raise ValueError(f"Page audit proof is unavailable for {registration.page_key}.")
         return self._registered_payload(
@@ -207,3 +331,86 @@ def _isoformat(value: Any) -> str:
         return datetime.now(UTC).isoformat()
     isoformat = getattr(value, "isoformat", None)
     return str(isoformat() if callable(isoformat) else value)
+
+
+def audit_operation_history_page(
+    connection: Any,
+    *,
+    tenant_id: str = "default",
+    example_limit: int = 50,
+    audit_snapshot: AuditSnapshot | None = None,
+) -> dict[str, Any]:
+    with use_audit_snapshot(connection, audit_snapshot) as snapshot:
+        row = snapshot.connection.fetch_one(
+            """
+            select
+                (select count(*) from audit.events where event_type = 'audit.coverage_started') as coverage_count,
+                exists (
+                    select 1 from pg_trigger
+                    where tgrelid = 'audit.events'::regclass
+                      and tgname = 'audit_events_append_only'
+                      and not tgisinternal
+                ) as audit_append_only,
+                exists (
+                    select 1 from pg_trigger
+                    where tgrelid = 'app.financial_fact_corrections'::regclass
+                      and tgname = 'financial_fact_corrections_append_only'
+                      and not tgisinternal
+                ) as correction_append_only,
+                exists (
+                    select 1 from pg_trigger
+                    where tgrelid = 'app.workbench_pair_relation_history'::regclass
+                      and tgname = 'workbench_pair_relation_history_append_only'
+                      and not tgisinternal
+                ) as relation_history_append_only
+            """
+        ) or {}
+        checks = {
+            "coverage_marker": int(row.get("coverage_count") or 0) == 1,
+            "audit_append_only": bool(row.get("audit_append_only")),
+            "correction_append_only": bool(row.get("correction_append_only")),
+            "relation_history_append_only": bool(row.get("relation_history_append_only")),
+        }
+        issues = [
+            AuditIssue(
+                "error",
+                "operation_audit_append_only_contract_missing",
+                "操作历史追加写保护未完整启用。",
+                subject_id=name,
+            )
+            for name, passed in checks.items()
+            if not passed
+        ]
+        evaluation = evaluate_audit_issues(issues, sample_limit=max(int(example_limit or 50), 1))
+        return {
+            "mode": "operation-history-page-audit",
+            "tenant_id": str(tenant_id or "default").strip() or "default",
+            "overall_status": evaluation.overall_status,
+            "audit_status": evaluation.audit_status,
+            "summary": {"checks": checks, **evaluation.summary},
+            "issues": evaluation.issue_samples,
+            "audit_contract": {
+                "source_tables": [
+                    "audit.events",
+                    "app.financial_fact_corrections",
+                    "app.workbench_pair_relation_history",
+                ],
+                "read_model_tables": [],
+                "canonical_expected_set": "post-coverage append-only operation and financial correction events",
+                "key_display_fields": [
+                    "operator and time",
+                    "page and operation location",
+                    "action and outcome",
+                    "before and after values",
+                    "reason",
+                ],
+                "relation_edge_equality": "not_applicable: this page reads audit facts only",
+                "snapshot_consistency": snapshot.consistency,
+                "database_snapshot": snapshot.database_snapshot,
+                "external_source_boundary": "not_applicable: audit events are App-internal durable facts",
+                "pass_condition": "coverage marker and all append-only database triggers exist",
+                "guarantee_boundary": "proves database append-only controls at this snapshot; later writes are not inferred",
+                "write_policy": "read_only",
+            },
+            "generated_at": datetime.now(UTC).isoformat(),
+        }

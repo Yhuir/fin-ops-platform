@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import unittest
 
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
@@ -8,6 +9,15 @@ from fin_ops_platform.services.operations_audit_service import OperationsAuditSe
 class FakeOperationsAuditRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.history_rows: list[dict[str, object]] = []
+
+    def list_operation_events(self, **kwargs: object) -> list[dict[str, object]]:
+        self.calls.append(("history", kwargs))
+        return list(self.history_rows)
+
+    def get_operation_event(self, event_id: str) -> dict[str, object] | None:
+        self.calls.append(("detail", {"event_id": event_id}))
+        return next((row for row in self.history_rows if row["id"] == event_id), None)
 
     def audit_page(self, **kwargs: object) -> dict[str, object]:
         self.calls.append(("page", kwargs))
@@ -55,6 +65,37 @@ class OperationsAuditServiceTests(unittest.TestCase):
             service.audit_page(page_key="app-health-operations", tenant_id="tenant-a")
 
         self.assertEqual(repository.calls, [])
+
+    def test_lists_operation_history_with_bounded_stable_cursor(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+        repository.history_rows = [
+            {"id": f"10000000-0000-4000-8000-{index:012d}", "occurred_at": occurred_at}
+            for index in range(1, 4)
+        ]
+        service = OperationsAuditService(repository)
+
+        payload = service.list_operation_history(limit=2, actor_id=" YNSYLP005 ", search=" 关联 ")
+
+        self.assertEqual(len(payload["rows"]), 2)
+        self.assertEqual(payload["limit"], 2)
+        self.assertEqual(
+            payload["next_cursor"],
+            "2026-08-09T12:00:00+00:00|10000000-0000-4000-8000-000000000002",
+        )
+        self.assertEqual(repository.calls[0][1]["limit"], 3)
+        self.assertEqual(repository.calls[0][1]["actor_id"], "YNSYLP005")
+        self.assertEqual(repository.calls[0][1]["search"], "关联")
+
+    def test_rejects_invalid_history_cursor_date_and_event_id(self) -> None:
+        service = OperationsAuditService(FakeOperationsAuditRepository())
+
+        with self.assertRaisesRegex(ValueError, "cursor"):
+            service.list_operation_history(cursor="not-a-cursor")
+        with self.assertRaisesRegex(ValueError, "date"):
+            service.list_operation_history(date_from="not-a-date")
+        with self.assertRaises(ValueError):
+            service.get_operation_history_event("not-an-id")
 
 
 if __name__ == "__main__":

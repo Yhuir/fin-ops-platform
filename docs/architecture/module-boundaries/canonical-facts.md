@@ -33,6 +33,8 @@
 7. `read_model.*`、Redis cache、RabbitMQ message 和前端 domain event 不得反向成为业务事实源。
 8. 同事务 writer 可以写 dirty scope/outbox，但必须承担与 07 read model closure 等价的 scope contract。本文不重新设计 read model runtime。
 9. repair、migration、audit、rollback 工具可以读取或修复 facts，但必须有 dry-run、审计、回滚策略和明确 owner，且不得成为生产主链路。
+10. `app.bank_transactions` 与 `app.invoices` 的身份、金额、日期、账户等受保护事实不得静默覆盖或删除；修正必须在同一数据库事务设置 actor/reason，并追加 `app.financial_fact_corrections` 与 `audit.events`。缺少 reason 时数据库拒绝写入。
+11. `audit.events`、`app.financial_fact_corrections` 与 `app.workbench_pair_relation_history` 是追加型历史事实，生产角色不得更新或删除；当前态关系仍由 `app.workbench_pair_relations` 的正式 command/UoW 管理。
 
 ## Ownership Matrix
 
@@ -56,6 +58,7 @@
 | OA 待付款进行中准入 | `app.oa_pending_payment_admissions` | OA integration | OA source snapshot writer | `PostgresOAWorkflowRepository`、OA pending query repository | Workbench workflow gate、OA 待付款、待找发票、进项使用 | 页面或 relation service 自造进行中 OA、把 admission 当 relation owner。 |
 | 历史 OA 待付款关系审计 | `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、`app.oa_pending_payment_bank_relation_events` | 无运行时 owner；migration `0136` 后只读审计 | 仅 migration/受控审计 | 审计查询 | 无 read model refresh | 任何运行时 create/update/cancel/promote/claim、候选排除或 source proof。completed/in-progress OA 关系统一由 `app.workbench_pair_relations` 拥有。 |
 | 设置和凭证 | `app.app_settings`、`app.oa_applicant_credentials` | `settings` / `oa-integration` | settings service、credential service | settings/OA integration APIs | affected read model dirty scopes by setting family | `state:full_state` 或旧 snapshot 作为 production 业务事实 fallback。 |
+| 操作审计与财务修正 | `audit.events`、`app.financial_fact_corrections` | `operation-history` / `permissions-and-audit` | durable audit service；财务事实数据库 guard | 005 管理员审计 API | 管理员操作历史页面；无 read model/worker | 内存审计作为生产事实源、审计表 UPDATE/DELETE、无 reason 修改受保护财务事实。 |
 
 ## 输入 I/O
 

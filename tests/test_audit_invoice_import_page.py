@@ -594,10 +594,16 @@ class InvoiceImportPageAuditPostgresTests(unittest.TestCase):
         self.assertEqual(clean["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertTrue(clean["audit_contract"]["database_snapshot"])
 
-        self.connection.execute("update app.invoices set amount = 99.00 where legacy_mongo_id = 'invoice-1'")
+        with self.connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', '审计测试构造金额偏差', true)")
+            transaction.execute("select set_config('fin_ops.actor_id', 'test-suite', true)")
+            transaction.execute("update app.invoices set amount = 99.00 where legacy_mongo_id = 'invoice-1'")
         drift = self._audit()
         self.assertIn("invoice_import_invoice_field_mismatch", drift["summary"]["issue_sample_counts_by_code"])
-        self.connection.execute("update app.invoices set amount = 100.00 where legacy_mongo_id = 'invoice-1'")
+        with self.connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', '审计测试恢复金额', true)")
+            transaction.execute("select set_config('fin_ops.actor_id', 'test-suite', true)")
+            transaction.execute("update app.invoices set amount = 100.00 where legacy_mongo_id = 'invoice-1'")
 
         self.connection.execute("update app.invoices set source_links = '[]'::jsonb where legacy_mongo_id = 'invoice-1'")
         missing_link = self._audit()

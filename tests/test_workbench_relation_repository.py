@@ -108,8 +108,9 @@ def test_relation_save_persists_only_canonical_facts_and_history() -> None:
 
     execute_sql = _normalized_sql(connection.execute_calls)
     assert any("insert into app.workbench_pair_relations" in sql for sql in execute_sql)
-    assert any("delete from app.workbench_pair_relation_history" in sql for sql in execute_sql)
+    assert not any("delete from app.workbench_pair_relation_history" in sql for sql in execute_sql)
     assert any("insert into app.workbench_pair_relation_history" in sql for sql in execute_sql)
+    assert any("on conflict (id) do nothing" in sql for sql in execute_sql)
     assert not connection.fetch_one_calls
     assert not connection.fetch_all_calls
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in execute_sql)

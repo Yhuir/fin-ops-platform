@@ -13,6 +13,8 @@ from time import sleep
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from tests.app_test_support import (
@@ -165,6 +167,53 @@ class FakeRuntimeQueueRepository:
 
     def read_model_refresh_is_active(self, **_kwargs: object) -> bool:
         return False
+
+
+class FakeOperationHistoryRepository:
+    EVENT_ID = "10000000-0000-4000-8000-000000000001"
+
+    def __init__(self) -> None:
+        self.list_calls: list[dict[str, object]] = []
+        self.detail_calls: list[str] = []
+
+    def list_operation_events(self, **kwargs: object) -> list[dict[str, object]]:
+        self.list_calls.append(dict(kwargs))
+        return [self._event()]
+
+    def get_operation_event(self, event_id: str) -> dict[str, object] | None:
+        self.detail_calls.append(event_id)
+        return self._event() if event_id == self.EVENT_ID else None
+
+    @classmethod
+    def _event(cls) -> dict[str, object]:
+        return {
+            "id": cls.EVENT_ID,
+            "event_type": "operation.completed",
+            "actor_id": "005",
+            "actor_name": "权限管理员",
+            "action": "POST /api/workbench/actions/confirm-link",
+            "page_key": "workbench",
+            "operation_location": "/api/workbench/actions/confirm-link",
+            "object_type": "http_request",
+            "object_id": "request-1",
+            "occurred_at": datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+            "outcome": "success",
+            "reason": None,
+            "request_id": "request-1",
+            "payload": {"summary": "确认关联", "before": None, "after": None},
+        }
+
+
+class FakeDurableAuditRepository:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.events: list[dict[str, object]] = []
+
+    def append_operation_event(self, event: dict[str, object]) -> dict[str, object]:
+        if self.fail:
+            raise RuntimeError("audit database unavailable")
+        self.events.append(dict(event))
+        return {"id": f"10000000-0000-4000-8000-{len(self.events):012d}"}
 
 
 def inject_oa_sync_runtime_status(
@@ -758,6 +807,92 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(import_source_keys, ["bank_transactions"])
         self.assertNotIn("oa_attachment", import_source_keys)
         self.assertNotIn("oa_records", import_source_keys)
+
+    def test_operation_history_is_visible_to_protected_admin_and_supports_detail(self) -> None:
+        with self._temporary_env(
+            FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1",
+            FIN_OPS_DEV_USERNAME="YNSYLP005",
+        ), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            repository = FakeOperationHistoryRepository()
+            app._runtime_repositories = SimpleNamespace(operations_audit_repository=repository)
+
+            list_response = app.handle_request(
+                "GET",
+                "/api/operations/audit-events?limit=25&search=%E5%85%B3%E8%81%94",
+            )
+            detail_response = app.handle_request(
+                "GET",
+                f"/api/operations/audit-events/{repository.EVENT_ID}",
+            )
+
+        list_payload = json.loads(list_response.body)
+        detail_payload = json.loads(detail_response.body)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_payload["rows"][0]["actor_id"], "005")
+        self.assertEqual(repository.list_calls[0]["limit"], 26)
+        self.assertEqual(repository.list_calls[0]["search"], "关联")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_payload["event"]["id"], repository.EVENT_ID)
+
+    def test_operation_history_rejects_non_admin_without_querying_repository(self) -> None:
+        with self._temporary_env(FIN_OPS_TEST_DEFAULT_AUTH="0"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["YNSYLP006"])
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="006",
+                username="YNSYLP006",
+                nickname="普通用户",
+                display_name="普通用户",
+            )
+            repository = FakeOperationHistoryRepository()
+            app._runtime_repositories = SimpleNamespace(operations_audit_repository=repository)
+
+            response = app.handle_request(
+                "GET",
+                "/api/operations/audit-events",
+                headers={"Authorization": "Bearer full-token"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.body)["error"], "admin_only")
+        self.assertEqual(repository.list_calls, [])
+
+    def test_mutation_records_requested_and_completed_events_with_one_request_id(self) -> None:
+        app = build_application()
+        repository = FakeDurableAuditRepository()
+        app._audit_service = AuditTrailService(repository)
+
+        response = app.handle_request("PUT", "/api/bank-details/auto-tag-rules", body="{")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([event["event_type"] for event in repository.events], [
+            "operation.requested",
+            "operation.completed",
+        ])
+        self.assertEqual(repository.events[0]["request_id"], repository.events[1]["request_id"])
+        self.assertEqual(repository.events[0]["outcome"], "pending")
+        self.assertEqual(repository.events[1]["outcome"], "failed")
+        self.assertEqual(repository.events[0]["page_key"], "bank-details")
+
+    def test_mutation_audit_normalizes_operation_routes_to_page_keys(self) -> None:
+        self.assertEqual(
+            Application._audit_page_key_for_route("/api/workbench/actions/confirm-link"),
+            "reconciliation-workbench",
+        )
+        self.assertEqual(
+            Application._audit_page_key_for_route("/imports/etc-invoices/confirm"),
+            "imports.etc-invoices",
+        )
+
+    def test_mutation_fails_closed_when_requested_event_cannot_be_persisted(self) -> None:
+        app = build_application()
+        app._audit_service = AuditTrailService(FakeDurableAuditRepository(fail=True))
+
+        response = app.handle_request("POST", "/api/unknown-write", body="{}")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body)["error"], "operation_audit_unavailable")
 
     def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
         current_time = {"value": 100.0}

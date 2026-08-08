@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
@@ -466,6 +467,7 @@ PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
 HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT = 20
+_REQUEST_AUDIT_ACTOR_ID: ContextVar[str] = ContextVar("request_audit_actor_id", default="")
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -841,7 +843,9 @@ class Application:
             if getattr(self._state_store, "_connection", None) is not None
             else oa_adapter
         )
-        self._audit_service = AuditTrailService()
+        self._audit_service = AuditTrailService(
+            getattr(self._runtime_repositories, "operations_audit_repository", None)
+        )
         self._reconciliation_service = ManualReconciliationService(
             self._import_service,
             self._matching_service,
@@ -1443,7 +1447,13 @@ class Application:
     ) -> Response:
         request_started_at = monotonic()
         route_path = self._normalize_route_path(urlparse(path).path)
+        mutation_request = requires_data_mutation(method, route_path)
+        request_audit_enabled = mutation_request and self._audit_service.is_durable
+        effective_request_id = request_id or (uuid4().hex if request_audit_enabled else None)
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
+        response: Response | None = None
+        request_error: Exception | None = None
+        actor_token = _REQUEST_AUDIT_ACTOR_ID.set("")
         with request_database_timing() as database_timing:
             try:
                 response = self._handle_request_untracked(
@@ -1451,11 +1461,46 @@ class Application:
                     path,
                     body=body,
                     headers=headers,
-                    authoritative_request_id=request_id,
+                    authoritative_request_id=effective_request_id,
                 )
                 status_code = int(response.status_code)
                 return response
+            except Exception as exc:
+                request_error = exc
+                raise
             finally:
+                actor_id = _REQUEST_AUDIT_ACTOR_ID.get()
+                if request_audit_enabled and actor_id and effective_request_id:
+                    try:
+                        self._audit_service.record_action(
+                            actor_id=actor_id,
+                            action=f"{method.upper()} {route_path}",
+                            entity_type="http_request",
+                            entity_id=effective_request_id,
+                            metadata={
+                                "event_type": "operation.completed",
+                                "page_key": self._audit_page_key_for_route(route_path),
+                                "operation_location": route_path,
+                                "outcome": "success" if request_error is None and status_code < 400 else "failed",
+                                "request_id": effective_request_id,
+                                "summary": f"{method.upper()} {route_path} · HTTP {status_code}",
+                                "status_code": status_code,
+                            },
+                        )
+                    except Exception as exc:
+                        print(
+                            json.dumps(
+                                {
+                                    "kind": "operation_audit_completion_failed",
+                                    "request_id": effective_request_id,
+                                    "route_path": route_path,
+                                    "error": str(exc),
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                _REQUEST_AUDIT_ACTOR_ID.reset(actor_token)
                 self._api_performance_recorder.record_request(
                     method=method,
                     route_path=route_path,
@@ -1517,6 +1562,41 @@ class Application:
                     status="auth_error",
                 )
             return auth_error
+        if requires_data_mutation(method, route_path):
+            if access_session is None and self._route_has_module_owned_oa_access(route_path):
+                access_session, auth_error = self._resolve_fin_ops_read_session(
+                    headers,
+                    denied_message="当前账户没有访问权限。",
+                )
+                if auth_error is not None:
+                    return auth_error
+            actor_id = actor_id_for_session(access_session) if access_session is not None else ""
+            _REQUEST_AUDIT_ACTOR_ID.set(actor_id)
+            if actor_id and request_id and self._audit_service.is_durable:
+                try:
+                    self._audit_service.record_action(
+                        actor_id=actor_id,
+                        action=f"{method.upper()} {route_path}",
+                        entity_type="http_request",
+                        entity_id=request_id,
+                        metadata={
+                            "event_type": "operation.requested",
+                            "page_key": self._audit_page_key_for_route(route_path),
+                            "operation_location": route_path,
+                            "outcome": "pending",
+                            "request_id": request_id,
+                            "summary": f"{method.upper()} {route_path}",
+                        },
+                    )
+                except Exception as exc:
+                    return self._json_response(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {
+                            "error": "operation_audit_unavailable",
+                            "message": "操作审计暂不可用，本次写入未执行。",
+                            "detail": str(exc),
+                        },
+                    )
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
             response = self._handle_api_workbench(
@@ -1665,6 +1745,13 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
+        if method == "GET" and route_path == "/api/operations/audit-events":
+            return self._handle_api_operation_history(query, headers)
+        if method == "GET" and route_path.startswith("/api/operations/audit-events/"):
+            return self._handle_api_operation_history_event(
+                unquote(route_path.rsplit("/", 1)[-1]),
+                headers,
+            )
         request_actor_id = (
             str(access_session.identity.username or actor_id_for_session(access_session))
             if access_session is not None
@@ -3529,6 +3616,70 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
+    def _handle_api_operation_history(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        service = self._operations_audit_service()
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "操作历史需要 PostgreSQL。"},
+            )
+        def value(key: str) -> str | None:
+            return (query.get(key) or [None])[0]
+        try:
+            payload = service.list_operation_history(
+                limit=int(value("limit") or 50),
+                cursor=value("cursor"),
+                actor_id=value("actor_id"),
+                action=value("action"),
+                page_key=value("page_key"),
+                object_type=value("object_type"),
+                outcome=value("outcome"),
+                date_from=value("date_from"),
+                date_to=value("date_to"),
+                search=value("search"),
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_operation_history_query", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_operation_history_event(
+        self,
+        event_id: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        service = self._operations_audit_service()
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "操作历史需要 PostgreSQL。"},
+            )
+        try:
+            event = service.get_operation_history_event(event_id)
+        except ValueError:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_audit_event_id", "message": "审计事件编号无效。"},
+            )
+        if event is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "audit_event_not_found", "message": "操作记录不存在。"},
+            )
+        return self._json_response(HTTPStatus.OK, {"event": event})
+
     def _cached_operations_app_health_dashboard_payload(self, service: OperationsDashboardService) -> dict[str, object]:
         ttl_seconds = self._app_health_dashboard_cache_ttl_seconds()
         if ttl_seconds <= 0:
@@ -4946,6 +5097,30 @@ class Application:
         return round((monotonic() - started_at) * 1000, 3)
 
     @staticmethod
+    def _audit_page_key_for_route(route_path: str) -> str:
+        route_page_prefixes = (
+            ("/api/workbench", "reconciliation-workbench"),
+            ("/reconciliation", "reconciliation-workbench"),
+            ("/api/etc/", "etc-tickets"),
+            ("/api/no-oa-bank-batches", "bank-details"),
+            ("/api/oa-sync", "oa-pending-payments"),
+            ("/api/operations/audit-events", "operation-history"),
+            ("/api/operations/app-health", "app-health-operations"),
+            ("/api/app-health", "app-health-operations"),
+            ("/imports/bank-transactions", "imports.bank-transactions"),
+            ("/imports/invoices", "imports.invoices"),
+            ("/imports/etc-invoices", "imports.etc-invoices"),
+        )
+        for prefix, page_key in route_page_prefixes:
+            normalized_prefix = prefix.rstrip("/")
+            if route_path == normalized_prefix or route_path.startswith(f"{normalized_prefix}/"):
+                return page_key
+        parts = [part for part in str(route_path or "").split("/") if part]
+        if parts and parts[0] == "api":
+            parts = parts[1:]
+        return parts[0] if parts else "application"
+
+    @staticmethod
     def _safe_list_count(value: object) -> int:
         return len(value) if isinstance(value, list) else 0
 
@@ -6121,7 +6296,7 @@ class Application:
                     HTTPStatus.FORBIDDEN,
                     {
                         "error": "admin_only",
-                        "message": "当前账号没有管理员权限，不能执行数据重置。",
+                        "message": "当前账号没有管理员权限，不能访问管理员功能。",
                     },
                 )
         except UnauthorizedOASessionError as error:

@@ -8,6 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from psycopg.errors import ObjectNotInPrerequisiteState
+
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
@@ -86,6 +88,58 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 )
                 raise RuntimeError("force rollback")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.app_settings where settings_key = 'tx-rollback';"), "0")
+
+    def test_financial_fact_changes_require_reason_and_leave_append_only_before_after_history(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                id, legacy_mongo_id, account_no, txn_direction, amount, signed_amount,
+                txn_date, txn_month, source_unique_key, data_fingerprint, status
+            ) values (
+                '00000000-0000-0000-0000-000000000901', 'guarded-bank-1', '62220001',
+                'outflow', 100.00, -100.00, '2026-08-09', '2026-08-01',
+                'guarded-bank-key-1', 'guarded-bank-fingerprint-1', 'active'
+            )
+            """
+        )
+
+        with self.assertRaisesRegex(ObjectNotInPrerequisiteState, "requires fin_ops.correction_reason"):
+            self.connection.execute(
+                "update app.bank_transactions set amount = 200.00 where legacy_mongo_id = 'guarded-bank-1'"
+            )
+
+        self.connection.execute(
+            "update app.bank_transactions set status = 'reviewed' where legacy_mongo_id = 'guarded-bank-1'"
+        )
+        with self.connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.actor_id', 'YNSYLP005', true)")
+            transaction.execute("select set_config('fin_ops.correction_reason', '银行回单修正', true)")
+            transaction.execute(
+                """
+                update app.bank_transactions
+                set amount = 200.00, signed_amount = -200.00
+                where legacy_mongo_id = 'guarded-bank-1'
+                """
+            )
+
+        correction = self.connection.fetch_one(
+            """
+            select actor_id, reason, before_value, after_value
+            from app.financial_fact_corrections
+            where entity_id = 'guarded-bank-1'
+            """
+        )
+        self.assertIsNotNone(correction)
+        assert correction is not None
+        self.assertEqual(correction["actor_id"], "YNSYLP005")
+        self.assertEqual(correction["reason"], "银行回单修正")
+        self.assertEqual(str(correction["before_value"]["amount"]), "100.00")
+        self.assertEqual(str(correction["after_value"]["amount"]), "200.00")
+
+        with self.assertRaisesRegex(ObjectNotInPrerequisiteState, "append-only"):
+            self.connection.execute(
+                "update audit.events set outcome = 'failed' where event_type = 'financial_fact.corrected'"
+            )
 
     def test_settings_acl_commit_lost_ack_reconciles_under_fresh_lock(self) -> None:
         self.store.save_app_settings({"manual_projects": []})

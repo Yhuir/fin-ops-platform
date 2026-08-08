@@ -721,7 +721,7 @@ export async function commitThroughHelper() {
         routes = _page_registry_routes()
         readable_paths = _role_matrix_readable_paths()
 
-        admin_only_paths = {"/operations/app-health"}
+        admin_only_paths = {"/operations/app-health", "/operations/history"}
         missing = sorted(
             route.path
             for route in routes
@@ -737,7 +737,7 @@ export async function commitThroughHelper() {
 
     def test_role_matrix_readable_paths_match_current_page_registry(self) -> None:
         registry_paths = {route.path for route in _page_registry_routes()}
-        admin_only_paths = {"/operations/app-health"}
+        admin_only_paths = {"/operations/app-health", "/operations/history"}
         stale_paths = sorted(
             path
             for path in _role_matrix_readable_paths()

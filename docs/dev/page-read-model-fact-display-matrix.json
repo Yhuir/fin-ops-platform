@@ -260,6 +260,22 @@
       "production_readonly_gates": ["http_slo_probe:operations_app_health_dashboard", "http_slo_probe:app_health", "http_slo_probe:background_jobs_active"]
     },
     {
+      "module": "operation-history",
+      "page_key": "operation-history",
+      "route": "/operations/history",
+      "read_model_keys": [],
+      "freshness_probe_names": ["operation_history"],
+      "fact_sources": ["audit.events", "app.financial_fact_corrections", "app.workbench_pair_relation_history"],
+      "pairing_relation_fact_sources": [],
+      "deterministic_evidence": [
+        {
+          "path": "web/e2e/app-shell.spec.ts",
+          "required_markers": ["操作历史", "operation-history.open-admin-page", "GET /api/operations/audit-events"]
+        }
+      ],
+      "production_readonly_gates": ["http_slo_probe:operation_history"]
+    },
+    {
       "module": "imports-bank-transactions",
       "page_key": "imports.bank-transactions",
       "route": "/imports/bank-transactions",

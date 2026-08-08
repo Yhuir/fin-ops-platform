@@ -1192,13 +1192,14 @@ def test_workbench_relation_repository_save_writes_only_relation_facts_and_histo
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1
     assert "insert into app.workbench_pair_relations" in executed_sql
-    assert "delete from app.workbench_pair_relation_history" in executed_sql
+    assert "delete from app.workbench_pair_relation_history" not in executed_sql
     assert "insert into app.workbench_pair_relation_history" in executed_sql
+    assert "on conflict (id) do nothing" in executed_sql
     assert "job.read_model_dirty_scopes" not in fetch_all_sql
     assert "job.outbox_events" not in fetch_all_sql
 
 
-def test_workbench_relation_repository_replaces_long_case_history_with_two_statements() -> None:
+def test_workbench_relation_repository_appends_long_case_history_in_one_statement() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
     histories = [
@@ -1233,10 +1234,11 @@ def test_workbench_relation_repository_replaces_long_case_history_with_two_state
         for sql, params in connection.executed
         if "app.workbench_pair_relation_history" in sql
     ]
-    assert len(history_statements) == 2
-    assert "delete from app.workbench_pair_relation_history" in history_statements[0][0]
-    assert "with input(" in history_statements[1][0]
-    assert len(history_statements[1][1]) == len(histories) * 8
+    assert len(history_statements) == 1
+    assert "delete from app.workbench_pair_relation_history" not in history_statements[0][0]
+    assert "with input(" in history_statements[0][0]
+    assert "on conflict (id) do nothing" in history_statements[0][0]
+    assert len(history_statements[0][1]) == len(histories) * 8
 
 
 def test_workbench_relation_repository_deduplicates_reloaded_multi_case_history() -> None:
@@ -1281,9 +1283,9 @@ def test_workbench_relation_repository_deduplicates_reloaded_multi_case_history(
         for sql, params in connection.executed
         if "app.workbench_pair_relation_history" in sql
     ]
-    assert len(history_statements) == 2
-    assert "with input(" in history_statements[1][0]
-    assert len(history_statements[1][1]) == 2 * 8
+    assert len(history_statements) == 1
+    assert "with input(" in history_statements[0][0]
+    assert len(history_statements[0][1]) == 2 * 8
 
 
 def test_workbench_relation_delta_appends_one_history_event_without_delete() -> None:

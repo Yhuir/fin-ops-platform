@@ -5184,6 +5184,34 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/operations/audit-events": () => ({
+      body: {
+        rows: [
+          {
+            id: "10000000-0000-4000-8000-000000000001",
+            event_type: "operation.completed",
+            actor_id: "005",
+            actor_name: "权限管理员",
+            action: "POST /api/workbench/actions/confirm-link",
+            page_key: "reconciliation-workbench",
+            operation_location: "/api/workbench/actions/confirm-link",
+            object_type: "reconciliation_case",
+            object_id: "case-1",
+            occurred_at: "2026-08-09T12:00:00+08:00",
+            outcome: "success",
+            reason: "确认关联",
+            request_id: "request-1",
+            payload: {
+              summary: "确认关联",
+              before: { status: "unpaired" },
+              after: { relation_id: "internal-relation-1", status: "paired" },
+            },
+          },
+        ],
+        next_cursor: null,
+        limit: 50,
+      },
+    }),
     "/api/operations/app-health/page-audit": ({ url }) => {
       const pageKey = url.searchParams.get("page") ?? "";
       if (pageKey === "app-health-operations" && options.appHealthSystemAuditStatus) {
@@ -7593,6 +7621,32 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
 
     if (url.pathname.startsWith("/api/workbench/rows/")) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
+    }
+    if (url.pathname.startsWith("/api/operations/audit-events/")) {
+      return jsonResponse({
+        body: {
+          event: {
+            id: decodeURIComponent(url.pathname.split("/").pop() ?? ""),
+            event_type: "operation.completed",
+            actor_id: "005",
+            actor_name: "权限管理员",
+            action: "POST /api/workbench/actions/confirm-link",
+            page_key: "reconciliation-workbench",
+            operation_location: "/api/workbench/actions/confirm-link",
+            object_type: "reconciliation_case",
+            object_id: "case-1",
+            occurred_at: "2026-08-09T12:00:00+08:00",
+            outcome: "success",
+            reason: "确认关联",
+            request_id: "request-1",
+            payload: {
+              summary: "确认关联",
+              before: { status: "unpaired" },
+              after: { relation_id: "internal-relation-1", status: "paired" },
+            },
+          },
+        },
+      });
     }
     if (url.pathname.startsWith("/api/cost-statistics/transactions/")) {
       if (costDetailFailuresRemaining > 0) {

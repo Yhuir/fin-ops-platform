@@ -151,6 +151,7 @@ EXPECTED_MIGRATIONS = [
     "0135_batch_accounting_tag_selection.sql",
     "0136_unify_in_progress_oa_workbench_relations.sql",
     "0137_oa_attachment_identity_context_index.sql",
+    "0138_operation_audit_and_financial_fact_guard.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -172,6 +173,7 @@ EXPECTED_TABLES = [
     "app.file_objects",
     "app.invoices",
     "app.bank_transactions",
+    "app.financial_fact_corrections",
     "app.bank_transaction_categories",
     "app.bank_transaction_category_events",
     "app.bank_transaction_category_confirmations",
@@ -306,7 +308,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 138)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 139)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -332,6 +334,22 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("gin_trgm_ops", sql)
         self.assertIn("where source_kind = 'oa'", sql)
         self.assertIn("scope_key <> 'all'", sql)
+
+    def test_operation_audit_and_financial_fact_guard_is_append_only_and_reasoned(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0138_operation_audit_and_financial_fact_guard.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("create table if not exists app.financial_fact_corrections", sql)
+        self.assertIn("audit_events_append_only", sql)
+        self.assertIn("bank_transactions_financial_fact_guard", sql)
+        self.assertIn("invoices_financial_fact_guard", sql)
+        self.assertIn("workbench_pair_relation_history_append_only", sql)
+        self.assertIn("current_setting('fin_ops.correction_reason', true)", sql)
+        self.assertIn("before_value", sql)
+        self.assertIn("after_value", sql)
+        self.assertIn("audit.coverage_started", sql)
+        self.assertIn("revoke update, delete on audit.events from fin_ops_api", sql)
 
     def test_batch_accounting_relation_count_hot_path_index_matches_query_contract(self) -> None:
         sql = (
@@ -1414,6 +1432,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             invoice_provenance_repair_sql,
             "approved_invoice_import_provenance_repair;",
         )
+        operation_audit_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR / "0138_operation_audit_and_financial_fact_guard.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(operation_audit_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            operation_audit_sql,
+            "approved_operation_audit_and_financial_fact_guard;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1470,7 +1498,11 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             match = re.search(pattern, sql, flags=re.S)
             self.assertIsNotNone(match, table)
             body = match.group(1)
-            if table in {"audit.external_control_evidence", "audit.external_control_evidence_items"}:
+            if table in {
+                "audit.external_control_evidence",
+                "audit.external_control_evidence_items",
+                "app.financial_fact_corrections",
+            }:
                 continue
             self.assertIn("id uuid primary key default gen_random_uuid()", body, table)
             if table == "app.workbench_idempotency_records":

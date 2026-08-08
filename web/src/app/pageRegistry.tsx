@@ -9,6 +9,7 @@ import {
   FileQuestion,
   FileText,
   Handshake,
+  History,
   Inbox,
   Landmark,
   ListChecks,
@@ -30,6 +31,7 @@ export type AppPageRoute = {
   component: AppPageComponent;
   preload: () => Promise<void>;
   end?: boolean;
+  requiresAdmin?: boolean;
 };
 
 export type SidebarItem = {
@@ -40,6 +42,7 @@ export type SidebarItem = {
   preload: () => Promise<void>;
   end?: boolean;
   active?: boolean;
+  requiresAdmin?: boolean;
 };
 
 export type SidebarGroup = {
@@ -79,6 +82,7 @@ const turnoverLedgerPage = lazyPage(() => import("../pages/TurnoverLedgerPage"))
 const etcTicketManagementPage = lazyPage(() => import("../pages/EtcTicketManagementPage"));
 const settingsPage = lazyPage(() => import("../pages/SettingsPage"));
 const appHealthOperationsPage = lazyPage(() => import("../pages/AppHealthOperationsPage"));
+const operationHistoryPage = lazyPage(() => import("../pages/OperationHistoryPage"));
 const importBankTransactionsPage = lazyPage(() => import("../pages/imports/ImportBankTransactionsPage"));
 const importInvoicesPage = lazyPage(() => import("../pages/imports/ImportInvoicesPage"));
 const importEtcInvoicesPage = lazyPage(() => import("../pages/imports/ImportEtcInvoicesPage"));
@@ -184,6 +188,14 @@ export const appPageDefinitions: AppPageDefinition[] = [
     sidebar: { group: "system", label: "系统状态", icon: Activity },
   },
   {
+    path: "/operations/history",
+    pageKey: "operation-history",
+    component: operationHistoryPage.component,
+    preload: operationHistoryPage.preload,
+    requiresAdmin: true,
+    sidebar: { group: "system", label: "操作历史", icon: History },
+  },
+  {
     path: "/imports/bank-transactions",
     pageKey: "imports.bank-transactions",
     component: importBankTransactionsPage.component,
@@ -230,6 +242,7 @@ export const appPageRoutes: AppPageRoute[] = appPageDefinitions.map((definition)
   component: definition.component,
   preload: definition.preload,
   end: definition.end,
+  requiresAdmin: definition.requiresAdmin,
 }));
 
 function sidebarItemFromDefinition(definition: AppPageDefinition): SidebarItem | null {
@@ -244,6 +257,7 @@ function sidebarItemFromDefinition(definition: AppPageDefinition): SidebarItem |
     preload: definition.preload,
     end: definition.end,
     active: definition.sidebar.active,
+    requiresAdmin: definition.requiresAdmin,
   };
 }
 
@@ -263,3 +277,27 @@ export const sidebarGroups: SidebarGroup[] = [
       .filter((item): item is SidebarItem => item !== null),
   },
 ];
+
+const pageLabelByKey = new Map(
+  appPageDefinitions
+    .filter((definition) => definition.sidebar)
+    .map((definition) => [definition.pageKey, definition.sidebar!.label]),
+);
+
+const auditPageAliases: Record<string, string> = {
+  application: "系统操作",
+  database: "数据保护",
+  operations: "系统状态",
+  workbench: "关联台",
+};
+
+export function pageLabelForKey(pageKey?: string | null): string {
+  const normalized = String(pageKey ?? "").trim();
+  return pageLabelByKey.get(normalized) ?? auditPageAliases[normalized] ?? "系统操作";
+}
+
+export function pageKeyForLabel(label?: string | null): string {
+  const normalized = String(label ?? "").trim();
+  const definition = appPageDefinitions.find((item) => item.sidebar?.label === normalized);
+  return definition?.pageKey ?? normalized;
+}

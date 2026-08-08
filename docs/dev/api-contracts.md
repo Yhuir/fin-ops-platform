@@ -26,7 +26,14 @@
 - `/api/operations/app-health/page-audit?page=input-invoice-usage`：管理员只读进项 canonical/shared/consumer 对账审计。
 - `/api/operations/app-health/page-audit?page=output-invoice-collections`：管理员只读销项 canonical/shared/consumer 对账审计。
 - `/api/operations/app-health/page-audit`：管理员只读页面业务 read model / relation 全量对账审计。
+- `/api/operations/audit-events`、`/api/operations/audit-events/{event_id}`：仅 005 可读的操作历史列表与详情。
 - 进项使用、销项收款和待找发票的旧 AppHealth refresh routes 已删除并返回 `404`；统一 page audit 保持只读。
+
+### 操作历史 API
+
+`GET /api/operations/audit-events` 只返回 `audit.coverage_started` 覆盖点后的记录，支持 `limit<=200`、cursor、时间、actor、page、action、outcome 和 search；响应为 `{rows,next_cursor}`。`GET /api/operations/audit-events/{event_id}` 返回单条详情。两者仅允许固定权限管理员 005，普通账号返回 `403 admin_only`。
+
+生产 unsafe HTTP 请求在业务 mutation 前追加 `operation.requested`，请求结束后追加同一 `request_id` 的 `operation.completed`。requested 持久化失败时返回 `503 operation_audit_unavailable` 且业务写不得执行；completion 失败保留 requested 事实并输出不含敏感数据的结构化错误。领域 service 继续记录业务 before/after；银行流水和发票受保护事实修正还必须在同一数据库事务提供 actor/reason，由数据库追加 correction/audit。
 
 ### 银行流水文件预览与字段映射
 

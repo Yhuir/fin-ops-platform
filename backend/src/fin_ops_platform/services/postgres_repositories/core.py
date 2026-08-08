@@ -800,6 +800,8 @@ class PostgresCoreRepository:
         transaction_factory = getattr(connection, "transaction", None)
         if callable(transaction_factory):
             with transaction_factory() as tx:
+                tx.execute("select set_config('fin_ops.correction_reason', '发票事实来源归并', true)")
+                tx.execute("select set_config('fin_ops.actor_id', 'invoice-persistence', true)")
                 for invoice in serialized_invoices:
                     self._save_invoice(tx, invoice)
         else:
@@ -821,6 +823,13 @@ class PostgresCoreRepository:
                 self._update_invoice_etc_metadata(connection, invoice)
 
     def repair_imported_invoice_totals(self, connection: Any, updates: list[dict[str, Any]]) -> None:
+        if updates:
+            connection.execute(
+                "select set_config('fin_ops.correction_reason', '修复导入发票金额事实', true)"
+            )
+            connection.execute(
+                "select set_config('fin_ops.actor_id', 'import-audit-repair', true)"
+            )
         for update in updates:
             affected = connection.execute(
                 """
@@ -1016,6 +1025,8 @@ class PostgresCoreRepository:
                 )
 
     def _save_imports_with_connection(self, connection: Any, snapshot: dict[str, Any]) -> None:
+        connection.execute("select set_config('fin_ops.correction_reason', '导入数据事实归并', true)")
+        connection.execute("select set_config('fin_ops.actor_id', 'import-persistence', true)")
         for preview in self._iter_previews(snapshot.get("batches")):
             batch = preview.get("batch") if isinstance(preview.get("batch"), dict) else preview
             if not isinstance(batch, dict):

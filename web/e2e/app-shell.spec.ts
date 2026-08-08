@@ -76,6 +76,42 @@ function createAppHealthLatencyRecorder(page: Page, testInfo: TestInfo) {
 }
 
 test.describe("app shell browser smoke", () => {
+  test("keeps operation history visible and readable only for the administrator", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    const recordLatency = createOperationLatencyRecorder(page, testInfo, {
+      route: "/operations/history",
+      pageKey: "operation-history",
+      module: "operation-history",
+    });
+
+    await recordLatency({
+      operationId: "operation-history.open-admin-page",
+      visibleLabel: "操作历史",
+      actionType: "navigate",
+    }, async (mark) => {
+      await page.goto("/operations/history");
+      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "操作历史" })).toBeVisible());
+    });
+
+    await expect(page.getByRole("link", { name: "操作历史" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("grid", { name: "操作历史" })).toContainText("确认关联");
+    expect(api.count("GET /api/operations/audit-events")).toBeGreaterThan(0);
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("hides operation history from non-admin users and redirects direct navigation", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+
+    await page.goto("/operations/history");
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("link", { name: "操作历史" })).toHaveCount(0);
+    expect(api.count("GET /api/operations/audit-events")).toBe(0);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("renders authenticated admin shell, navigation, and AppHealth dashboard", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });

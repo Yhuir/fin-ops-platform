@@ -2,6 +2,7 @@ import { Drawer, Separator } from "@heroui/react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
+import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import AppSidebarAccount from "./AppSidebarAccount";
 import AppStatusIndicator from "./AppStatusIndicator";
 import { sidebarGroups } from "./sidebarItems";
@@ -34,6 +35,7 @@ export default function AppSidebar({
   onToggleExpanded,
 }: AppSidebarProps) {
   const location = useLocation();
+  const { canAdminAccess } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
 
   const drawerContent = (
@@ -77,7 +79,7 @@ export default function AppSidebar({
               {group.title}
             </h2>
             <ul className="app-sidebar-list" aria-label={group.title}>
-              {group.items.map((item) => {
+              {group.items.filter((item) => !item.requiresAdmin || canAdminAccess).map((item) => {
                 const Icon = item.icon;
                 const active = item.active === false ? false : isSidebarItemActive(location.pathname, location.search, item.to, item.end);
                 const prefetchRoute = () => {

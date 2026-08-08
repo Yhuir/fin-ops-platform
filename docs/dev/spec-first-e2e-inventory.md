@@ -25,6 +25,7 @@
 | 15 | `etc-tickets` | `/etc-tickets` | `etc-tickets` | ETC 业务批次、发票明细、business-batches 首屏 GET 加载失败刷新恢复、未提交和已提交 business batch delete/reset 暂时失败重试、source file delete 暂时失败重试、ticket-root source upload 暂时失败重试、OA 草稿暂时失败重试、人工确认暂时失败重试、提交 bucket、delete/reset、source file、Workbench summary | `covered` | `web/e2e/etc-tickets-flow.spec.ts` |
 | 16 | `settings` | `/settings` | `settings` | 数据重置、OA 密码复核、项目状态到成本统计 active/all scope、规则配置、权限 | `covered` | `web/e2e/settings-data-reset-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
 | 17 | `app-health-operations` | `/operations/app-health` | `app-health-operations` | 系统状态、worker/read model/queue、admin gate、ready/polling/runtime closure | `covered` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
+| 18 | `operation-history` | `/operations/history` | `operation-history` | 005-only gate、追加写操作记录、筛选分页、前后值详情、财务事实修正保护 | `covered` | `web/e2e/app-shell.spec.ts`；真实 PostgreSQL append-only 与写操作记录由发布后 production smoke 验证 |
 
 ## 资源/共享模块 inventory
 

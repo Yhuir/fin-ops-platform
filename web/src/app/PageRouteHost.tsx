@@ -2,6 +2,7 @@ import { Navigate, matchPath, useLocation } from "react-router-dom";
 import { Suspense, useMemo } from "react";
 
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
+import { useOptionalSessionPermissions } from "../contexts/SessionContext";
 import type { AppPageRoute } from "./pageRegistry";
 
 function routeMatchesPath(route: AppPageRoute, pathname: string) {
@@ -22,9 +23,13 @@ function PageRouteFallback({ pageKey }: { pageKey: string }) {
 
 export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   const location = useLocation();
+  const { canAdminAccess } = useOptionalSessionPermissions();
   const matchedRoute = useMemo(() => findRoute(routes, location.pathname), [location.pathname, routes]);
 
   if (!matchedRoute) {
+    return <Navigate replace to="/" />;
+  }
+  if (matchedRoute.requiresAdmin && !canAdminAccess) {
     return <Navigate replace to="/" />;
   }
 
