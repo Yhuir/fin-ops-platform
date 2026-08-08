@@ -1,6 +1,15 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Chip } from "@heroui/react";
+import {
+  Chip,
+  ListBox,
+  ListBoxItem,
+  ListBoxSection,
+  PopoverContent,
+  PopoverDialog,
+  PopoverRoot,
+  PopoverTrigger,
+} from "@heroui/react";
 import { CalendarDays, Filter, Tags } from "lucide-react";
 
 import {
@@ -198,26 +207,6 @@ function buildCategoryTree(items: CategorySummaryItem[]): CategoryTreeGroup[] {
   return Array.from(groups.values());
 }
 
-function categoryFilterMatches(selected: BankCategoryFilter, candidate: BankCategoryFilter) {
-  if (selected.kind !== candidate.kind) {
-    return false;
-  }
-  switch (selected.kind) {
-    case "all":
-    case "uncategorized":
-      return true;
-    case "primary":
-      return candidate.kind === "primary" && selected.primaryLabel === candidate.primaryLabel;
-    case "tag":
-      return (
-        candidate.kind === "tag"
-        && selected.code === candidate.code
-        && selected.primaryLabel === candidate.primaryLabel
-        && selected.subLabel === candidate.subLabel
-      );
-  }
-}
-
 function tagCategoryFilter(option: CategorySummaryItem): BankCategoryFilter {
   return {
     kind: "tag",
@@ -324,6 +313,16 @@ function selectedCategoryFilterStillExists(filter: BankCategoryFilter, options: 
     }
     return tagDefinitionDisplayParts(option).primaryLabel === filter.primaryLabel;
   });
+}
+
+function categoryFilterKey(filter: BankCategoryFilter) {
+  if (filter.kind === "all" || filter.kind === "uncategorized") {
+    return filter.kind;
+  }
+  if (filter.kind === "primary") {
+    return `primary:${filter.primaryLabel}`;
+  }
+  return `tag:${filter.code}`;
 }
 
 type BankCategoryFilterControlProps = {
@@ -516,11 +515,29 @@ function BankCategoryFilterControl({
   selectedCategoryFilter = ALL_CATEGORY_FILTER,
   onCategoryFilterChange = () => undefined,
 }: Partial<BankCategoryFilterControlProps>) {
-  const [categoryAnchorEl, setCategoryAnchorEl] = useState<HTMLElement | null>(null);
-  const categoryPanelOpen = Boolean(categoryAnchorEl);
-  const categoryPanelId = "bank-category-filter-panel";
-  const categoryFilterRef = useRef<HTMLDivElement | null>(null);
+  const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   const categoryGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
+  const categoryFiltersByKey = useMemo(() => {
+    const filters = new Map<string, BankCategoryFilter>([
+      [categoryFilterKey(ALL_CATEGORY_FILTER), ALL_CATEGORY_FILTER],
+      [categoryFilterKey(UNCATEGORIZED_CATEGORY_FILTER), UNCATEGORIZED_CATEGORY_FILTER],
+    ]);
+    categoryGroups.forEach((group) => {
+      const primaryFilter = group.directItem && group.children.length === 0
+        ? tagCategoryFilter(group.directItem)
+        : { kind: "primary", primaryLabel: group.label } satisfies BankCategoryFilter;
+      filters.set(categoryFilterKey(primaryFilter), primaryFilter);
+      if (group.directItem && group.children.length > 0) {
+        const directFilter = tagCategoryFilter(group.directItem);
+        filters.set(categoryFilterKey(directFilter), directFilter);
+      }
+      group.children.forEach((child) => {
+        const childFilter = tagCategoryFilter(child);
+        filters.set(categoryFilterKey(childFilter), childFilter);
+      });
+    });
+    return filters;
+  }, [categoryGroups]);
   const selectedCategoryLabel = selectedCategoryFilterLabel({
     counts: categoryCounts,
     groups: categoryGroups,
@@ -529,133 +546,111 @@ function BankCategoryFilterControl({
     visibleSummary: visibleCategorySummary,
   });
 
-  const closeCategoryPanel = () => {
-    setCategoryAnchorEl(null);
-  };
-
-  const toggleCategoryPanel = (event: MouseEvent<HTMLElement>) => {
-    setCategoryAnchorEl((current) => (current ? null : event.currentTarget));
-  };
-
-  const handleCategoryPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Escape") {
-      closeCategoryPanel();
-    }
-  };
-
-  const selectCategoryFilter = (filter: BankCategoryFilter) => {
-    onCategoryFilterChange(filter);
-  };
-
-  useCloseOnOutsidePointer(categoryPanelOpen, categoryFilterRef, closeCategoryPanel);
-
-  const renderCategoryFilterButton = (
+  const renderCategoryFilterItem = (
     filter: BankCategoryFilter,
     label: string,
     count: number,
     level: "root" | "primary" | "child",
     className = "",
   ) => {
-    const selected = categoryFilterMatches(selectedCategoryFilter, filter);
     return (
-      <button
+      <ListBoxItem
         aria-label={`${label} ${count}`}
-        aria-current={selected ? "true" : "false"}
         className={`bank-category-filter-row ${className}`.trim()}
         data-level={level}
-        onClick={() => selectCategoryFilter(filter)}
-        role="menuitem"
-        type="button"
+        id={categoryFilterKey(filter)}
       >
         <span className="bank-category-filter-row-content">
           <span className="bank-category-filter-label">{label}</span>
           <span className="bank-category-filter-count">{count}</span>
         </span>
-      </button>
+      </ListBoxItem>
     );
   };
 
   return (
-    <div ref={categoryFilterRef} className="bank-category-filter-float" onKeyDown={handleCategoryPanelKeyDown}>
-      <button
-        aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
-        aria-expanded={categoryPanelOpen ? "true" : undefined}
-        aria-haspopup="menu"
-        aria-label={`标签筛选：${selectedCategoryLabel}`}
-        className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
-        onClick={toggleCategoryPanel}
-        title={selectedCategoryLabel}
-        type="button"
-      >
-        <Filter size={14} strokeWidth={2.2} />
-        {selectedCategoryFilter.kind === "all" ? null : <span className="bank-category-filter-active-dot" aria-hidden="true" />}
-      </button>
-      {categoryPanelOpen ? (
-        <div className="bank-category-filter-popper">
-          <div className="bank-category-filter-panel">
-            <div
+    <div className="bank-category-filter-float">
+      <PopoverRoot isOpen={categoryPanelOpen} onOpenChange={setCategoryPanelOpen}>
+        <PopoverTrigger
+          aria-label={`标签筛选：${selectedCategoryLabel}`}
+          className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
+          title={selectedCategoryLabel}
+        >
+          <Filter aria-hidden="true" size={18} strokeWidth={2.2} />
+          {selectedCategoryFilter.kind === "all" ? null : <span className="bank-category-filter-active-dot" aria-hidden="true" />}
+        </PopoverTrigger>
+        <PopoverContent
+          className="bank-category-filter-panel"
+          containerPadding={12}
+          maxHeight={720}
+          offset={8}
+          placement="left"
+        >
+          <PopoverDialog aria-label="银行明细标签筛选" className="bank-category-filter-dialog">
+            <ListBox
               aria-label="银行明细标签筛选"
               className="bank-category-filter-list"
-              id={categoryPanelId}
-              role="menu"
+              disallowEmptySelection
+              onSelectionChange={(keys) => {
+                const key = keys === "all" ? null : Array.from(keys)[0];
+                const nextFilter = key === null || key === undefined ? null : categoryFiltersByKey.get(String(key));
+                if (nextFilter) {
+                  onCategoryFilterChange(nextFilter);
+                }
+              }}
+              selectedKeys={new Set([categoryFilterKey(selectedCategoryFilter)])}
+              selectionMode="single"
             >
-              <div className="bank-category-filter-actions" role="group">
-                {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
-                {renderCategoryFilterButton(
+              <ListBoxSection className="bank-category-filter-actions">
+                {renderCategoryFilterItem(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
+                {renderCategoryFilterItem(
                   UNCATEGORIZED_CATEGORY_FILTER,
                   "未分类",
                   categoryCounts.uncategorized ?? 0,
                   "root",
                   "bank-category-filter-action",
                 )}
-              </div>
-              <div className="bank-category-filter-divider" aria-hidden="true" role="separator" />
-              <div className="bank-category-filter-sections" role="group">
-                {categoryGroups.map((group, groupIndex) => (
-                  <div
-                    className={`bank-category-filter-group bank-category-filter-hierarchy-group bank-category-filter-tone-${groupIndex % 6}`}
-                    key={group.key}
-                  >
-                    {renderCategoryFilterButton(
-                      group.directItem && group.children.length === 0
-                        ? tagCategoryFilter(group.directItem)
-                        : { kind: "primary", primaryLabel: group.label },
+              </ListBoxSection>
+              {categoryGroups.map((group, groupIndex) => (
+                <ListBoxSection
+                  className={`bank-category-filter-group bank-category-filter-hierarchy-group bank-category-filter-tone-${groupIndex % 6}`}
+                  key={group.key}
+                >
+                  {renderCategoryFilterItem(
+                    group.directItem && group.children.length === 0
+                      ? tagCategoryFilter(group.directItem)
+                      : { kind: "primary", primaryLabel: group.label },
+                    group.label,
+                    group.count,
+                    "primary",
+                    "bank-category-filter-primary-row",
+                  )}
+                  {group.directItem && group.children.length > 0 ? (
+                    renderCategoryFilterItem(
+                      tagCategoryFilter(group.directItem),
                       group.label,
-                      group.count,
-                      "primary",
-                      "bank-category-filter-primary-row",
-                    )}
-                    {group.directItem && group.children.length > 0 ? (
-                      renderCategoryFilterButton(
-                        tagCategoryFilter(group.directItem),
-                        group.label,
-                        group.directItem.count,
+                      group.directItem.count,
+                      "child",
+                      "bank-category-filter-child-row bank-category-filter-hierarchy-item bank-category-filter-direct-child",
+                    )
+                  ) : null}
+                  {group.children.map((child) => (
+                    <Fragment key={child.code}>
+                      {renderCategoryFilterItem(
+                        tagCategoryFilter(child),
+                        child.subLabel || child.label,
+                        child.count,
                         "child",
-                        "bank-category-filter-child-row bank-category-filter-hierarchy-item bank-category-filter-direct-child",
-                      )
-                    ) : null}
-                    {group.children.length > 0 ? (
-                      <div className="bank-category-filter-children" role="group">
-                        {group.children.map((child) => (
-                          <Fragment key={child.code}>
-                            {renderCategoryFilterButton(
-                              tagCategoryFilter(child),
-                              child.subLabel || child.label,
-                              child.count,
-                              "child",
-                              "bank-category-filter-child-row bank-category-filter-hierarchy-item",
-                            )}
-                          </Fragment>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                        "bank-category-filter-child-row bank-category-filter-hierarchy-item",
+                      )}
+                    </Fragment>
+                  ))}
+                </ListBoxSection>
+              ))}
+            </ListBox>
+          </PopoverDialog>
+        </PopoverContent>
+      </PopoverRoot>
     </div>
   );
 }

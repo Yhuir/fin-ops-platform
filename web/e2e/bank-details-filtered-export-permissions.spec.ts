@@ -31,9 +31,9 @@ test.describe("bank details filtered export and read-export permissions", () => 
 
     await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");
     await page.getByRole("button", { name: /标签筛选/ }).click();
-    const categoryMenu = page.getByRole("menu", { name: "银行明细标签筛选" });
+    const categoryMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expect(categoryMenu).toBeVisible();
-    await categoryMenu.getByRole("menuitem", { name: /设备款 1/ }).click();
+    await categoryMenu.getByRole("option", { name: /设备款 1/ }).click();
     await filteredRowsRequest;
     await page.keyboard.press("Escape");
 
@@ -100,7 +100,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await page.getByRole("button", { name: /建设银行 1138/ }).click();
     await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");
     await page.getByRole("button", { name: /标签筛选/ }).click();
-    const categoryMenu = page.getByRole("menu", { name: "银行明细标签筛选" });
+    const categoryMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expect(categoryMenu).toBeVisible();
 
     const filteredRowsRequest = page.waitForRequest((request) => {
@@ -115,7 +115,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
         && url.searchParams.get("page") === "1"
         && url.searchParams.get("page_size") === "100";
     });
-    await categoryMenu.getByRole("menuitem", { name: /设备款 1/ }).click();
+    await categoryMenu.getByRole("option", { name: /设备款 1/ }).click();
     await filteredRowsRequest;
     await page.keyboard.press("Escape");
 

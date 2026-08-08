@@ -531,6 +531,13 @@
 - 编译器继续生成相同规范化谓词、priority、sort order 和 definition payload，但执行形态改为每条规则对 materialized canonical base 做集合扫描，再按 row id 聚合。旧的 per-row `cross join lateral` matcher 已删除。
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
 - 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该设置，仅在当前 read-only transaction 关闭短查询 JIT。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描规则必需列，分类中间态只保留决策字段，精确统计/排序只处理 key，完整行仅回连首屏分页。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
+
+## 2026-08-08 - 标签筛选面板可读性放大
+
+- 目标：放大银行明细右侧标签筛选面板，解决原 8–9px 字号和紧凑行高难以阅读的问题。
+- 实施：复用已安装的 HeroUI `Popover` 与 `ListBox` 原生组件，面板最大宽度调整为 960px，标签层级字号调整为 14/13px、计数为 12px、行高至少 32px；桌面/平板/窄屏分别使用 3/2/1 列，并保持面板在视口内滚动。
+- 清理：删除旧的自定义绝对定位 popper、手工 outside-click/Escape 处理和重复响应式样式；分类筛选 API、查询参数和模块边界不变。
+- 验证：Vitest 覆盖 HeroUI 组件、层级选择和请求参数；Playwright 覆盖桌面/窄屏字号、行高、列数和视口边界。
 ## 2026-08-07 - 标签变更与正式关系要求原子闭环
 
 - 根因：银行分类事实已经更新，但既有 active relation 仍保留创建时的空标签 fail-closed requirement snapshot，关联台 fresh generation 因而正确地把过期 canonical metadata 投影为缺发票。

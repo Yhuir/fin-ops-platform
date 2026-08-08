@@ -81,7 +81,7 @@ function exactTextContent(text: string) {
 async function openCategoryFilterPanel(user: ReturnType<typeof userEvent.setup>, page: HTMLElement) {
   const trigger = getCategoryFilterTrigger(page);
   await user.click(trigger);
-  return screen.findByRole("menu", { name: "银行明细标签筛选" });
+  return screen.findByRole("listbox", { name: "银行明细标签筛选" });
 }
 
 function getCategoryFilterTrigger(page: HTMLElement) {
@@ -244,8 +244,8 @@ describe("Bank details page", () => {
     expect(within(table).getByText("项目回款")).toBeInTheDocument();
     expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
     const categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "公司暂借款 2" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "待还款 2" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "公司暂借款 2" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "待还款 2" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByText("未保存 0")).not.toBeInTheDocument();
     expect(within(page).getByText("每页行数")).toBeInTheDocument();
@@ -286,21 +286,25 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-transaction-pagination\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
-  test("uses a dense three-column grouped category filter layout", () => {
+  test("uses a readable responsive HeroUI category filter layout", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+    const pageSource = readFileSync(resolve(process.cwd(), "src/pages/BankDetailsPage.tsx"), "utf8");
 
-    expect(source).toMatch(/\.bank-category-filter-icon-button\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s);
-    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(640px,\s*calc\(100vw - 64px\)\)/s);
-    expect(source).not.toMatch(/\.bank-category-filter-panel\s*\{[^}]*max-height:/s);
-    expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*max-height:/s);
-    expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*overflow-y:\s*auto/s);
-    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).not.toMatch(/\.bank-category-filter-sections\s*\{[^}]*column-count:/s);
+    expect(pageSource).toContain("PopoverRoot");
+    expect(pageSource).toContain("PopoverContent");
+    expect(pageSource).toContain("ListBox");
+    expect(pageSource).toContain("ListBoxItem");
+    expect(pageSource).not.toContain("bank-category-filter-popper");
+    expect(source).toMatch(/\.bank-category-filter-icon-button\s*\{[^}]*width:\s*36px[^}]*height:\s*36px/s);
+    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(960px,\s*calc\(100vw - 48px\)\)[^}]*max-height:\s*min\(720px,\s*calc\(100vh - 32px\)\)/s);
+    expect(source).toMatch(/\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[^}]*overflow-y:\s*auto/s);
     expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*background:\s*var\(--bank-category-group-bg\)/s);
     expect(source).toMatch(/\.bank-category-filter-tone-0\s*\{[^}]*--bank-category-group-bg:/s);
-    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*9px/s);
-    expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*8\.5px/s);
-    expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*8px/s);
+    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*14px/s);
+    expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*13px/s);
+    expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*12px/s);
+    expect(source).toMatch(/@media \(max-width:\s*900px\)[\s\S]*?\.bank-category-filter-list\s*\{[^}]*repeat\(2,/s);
+    expect(source).toMatch(/@media \(max-width:\s*620px\)[\s\S]*?\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*1fr/s);
     expect(source).toMatch(/\.bank-category-filter-hierarchy-group::before\s*\{/);
     expect(source).toMatch(/\.bank-category-filter-hierarchy-item::after\s*\{/);
     expect(source).not.toMatch(/\.bank-category-filter-group\s*\{[^}]*border:\s*1px[^}]*background:/s);
@@ -331,11 +335,11 @@ describe("Bank details page", () => {
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
     expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
     const categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "费用 1" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "工资 1" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "内部往来款 2" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "质保金 1" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "待收款 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "费用 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "工资 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "内部往来款 2" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "质保金 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "待收款 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByText(/未保存/)).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
@@ -370,9 +374,9 @@ describe("Bank details page", () => {
     expect(within(page).queryByText(exactTextContent("费用 / 工资 1"))).not.toBeInTheDocument();
 
     let categoryPanel = await openCategoryFilterPanel(user, page);
-    const feeRoot = within(categoryPanel).getByRole("menuitem", { name: "费用 1" });
-    const salaryChild = within(categoryPanel).getByRole("menuitem", { name: "工资 1" });
-    expect(feeRoot).toHaveAttribute("aria-current", "false");
+    const feeRoot = within(categoryPanel).getByRole("option", { name: "费用 1" });
+    const salaryChild = within(categoryPanel).getByRole("option", { name: "工资 1" });
+    expect(feeRoot).toHaveAttribute("aria-selected", "false");
     expect(feeRoot).toHaveAttribute("data-level", "primary");
     expect(salaryChild).toHaveAttribute("data-level", "child");
     expect(salaryChild).toHaveClass("bank-category-filter-hierarchy-item");
@@ -393,13 +397,14 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("category_code")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
+    categoryPanel = screen.getByRole("listbox", { name: "银行明细标签筛选" });
+    const selectedFeeRoot = within(categoryPanel).getByRole("option", { name: "费用 1" });
+    expect(selectedFeeRoot).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
     expect(within(page).getByRole("button", { name: /标签筛选：费用 1/ })).toBeInTheDocument();
-    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
-    expect(categoryPanel).toBeInTheDocument();
 
-    const selectedFeeRoot = within(categoryPanel).getByRole("menuitem", { name: "费用 1" });
-    expect(selectedFeeRoot).toHaveAttribute("aria-current", "true");
-    await user.click(within(categoryPanel).getByRole("menuitem", { name: "工资 1" }));
+    categoryPanel = await openCategoryFilterPanel(user, page);
+    await user.click(within(categoryPanel).getByRole("option", { name: "工资 1" }));
 
     await waitFor(() => {
       const transactionRequest = findTransactionRequest(fetchMock, (url) => (
@@ -413,11 +418,13 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
+    categoryPanel = screen.getByRole("listbox", { name: "银行明细标签筛选" });
+    expect(within(categoryPanel).getByRole("option", { name: "工资 1" })).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
     expect(within(page).getByRole("button", { name: /标签筛选：费用 \/ 工资 1/ })).toBeInTheDocument();
-    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
-    expect(categoryPanel).toBeInTheDocument();
 
-    await user.click(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" }));
+    categoryPanel = await openCategoryFilterPanel(user, page);
+    await user.click(within(categoryPanel).getByRole("option", { name: "未分类 295" }));
 
     await waitFor(() => {
       const transactionRequest = findTransactionRequest(fetchMock, (url) => (
@@ -429,8 +436,10 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
+    categoryPanel = screen.getByRole("listbox", { name: "银行明细标签筛选" });
+    expect(within(categoryPanel).getByRole("option", { name: "未分类 295" })).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{Escape}");
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
-    expect(screen.getByRole("menu", { name: "银行明细标签筛选" })).toBeInTheDocument();
   });
 
   test("opens the fixed category filter icon by click only and keeps it open on pointer leave", async () => {
@@ -444,21 +453,21 @@ describe("Bank details page", () => {
     expect(trigger.closest(".bank-category-filter-float")).toBeInTheDocument();
 
     await user.hover(trigger);
-    expect(screen.queryByRole("menu", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
 
     await user.click(trigger);
-    const panel = await screen.findByRole("menu", { name: "银行明细标签筛选" });
+    const panel = await screen.findByRole("listbox", { name: "银行明细标签筛选" });
     expect(panel).toBeInTheDocument();
 
     await user.unhover(trigger);
     await user.hover(panel);
     await user.unhover(panel);
     await new Promise((resolve) => window.setTimeout(resolve, 200));
-    expect(screen.getByRole("menu", { name: "银行明细标签筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "银行明细标签筛选" })).toBeInTheDocument();
 
     await user.click(trigger);
     await waitFor(() => {
-      expect(screen.queryByRole("menu", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("listbox", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
     });
   });
 
@@ -471,21 +480,21 @@ describe("Bank details page", () => {
     await within(page).findByText("云南溯源科技有限公司");
 
     let categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "全部 299" })).toBeInTheDocument();
-    await user.click(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" }));
+    expect(within(categoryPanel).getByRole("option", { name: "全部 299" })).toBeInTheDocument();
+    await user.click(within(categoryPanel).getByRole("option", { name: "未分类 295" }));
 
     await waitFor(() => {
       expect(findTransactionRequest(fetchMock, (url) => (
         url.searchParams.get("category_code") === "uncategorized"
       ))).toBeDefined();
     });
+    categoryPanel = screen.getByRole("listbox", { name: "银行明细标签筛选" });
+    expect(within(categoryPanel).getByRole("option", { name: "全部 299" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "未分类 295" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "工资 1" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(within(page).getByText("1-100 / 295")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
-
-    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
-    expect(within(categoryPanel).getByRole("menuitem", { name: "全部 299" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "工资 1" })).toBeInTheDocument();
   });
 
   test("filters code-only system tags by category code without derived label constraints", async () => {
@@ -497,7 +506,7 @@ describe("Bank details page", () => {
     await within(page).findByText("云南溯源科技有限公司");
 
     const categoryPanel = await openCategoryFilterPanel(user, page);
-    await user.click(within(categoryPanel).getByRole("menuitem", { name: "内部往来款 2" }));
+    await user.click(within(categoryPanel).getByRole("option", { name: "内部往来款 2" }));
 
     await waitFor(() => {
       const transactionRequest = findTransactionRequest(fetchMock, (url) => (
@@ -511,6 +520,8 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
+    expect(screen.getByRole("listbox", { name: "银行明细标签筛选" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     expect(await within(page).findByText("云南溯源科技有限公司建设银行账户")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /标签筛选：内部往来款 2/ })).toBeInTheDocument();
   });
@@ -713,7 +724,7 @@ describe("Bank details page", () => {
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("费用 / 工资");
     let categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "未分类 295" })).toBeInTheDocument();
     expect(within(page).queryByText("无 295")).not.toBeInTheDocument();
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
@@ -752,7 +763,7 @@ describe("Bank details page", () => {
       );
     });
     categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "未分类 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
@@ -1107,8 +1118,8 @@ describe("Bank details page", () => {
     expect(await within(page).findByText("跨页目标供应商")).toBeInTheDocument();
     expect(within(page).getByText("1-1 / 1")).toBeInTheDocument();
     const categoryPanel = await openCategoryFilterPanel(user, page);
-    expect(within(categoryPanel).getByRole("menuitem", { name: "费用 1" })).toBeInTheDocument();
-    expect(within(categoryPanel).getByRole("menuitem", { name: "手续费 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "费用 1" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("option", { name: "手续费 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(within(page).queryByText("费用 / 工资 1")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /工商银行 6386.*299 条/ })).toBeInTheDocument();
@@ -1147,7 +1158,7 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("keyword")).toBe("跨页目标");
     });
     const categoryPanel = await openCategoryFilterPanel(user, page);
-    await user.click(within(categoryPanel).getByRole("menuitem", { name: "费用 1" }));
+    await user.click(within(categoryPanel).getByRole("option", { name: "费用 1" }));
     await waitFor(() => {
       const transactionRequest = findTransactionRequest(fetchMock, (url) => (
         url.searchParams.get("category_primary_label") === "费用"
@@ -1156,6 +1167,7 @@ describe("Bank details page", () => {
       expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_code")).toBeNull();
     });
+    await user.keyboard("{Escape}");
     await user.click(within(page).getByRole("button", { name: "导出" }));
     await user.click(await screen.findByRole("menuitem", { name: "导出当前账户" }));
 

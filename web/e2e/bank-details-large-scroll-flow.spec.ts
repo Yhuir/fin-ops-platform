@@ -49,6 +49,24 @@ async function scrollTableHorizontally(tableScroll: Locator) {
   expect(scrollLeft).toBeGreaterThan(0);
 }
 
+async function readCategoryMenuMetrics(menu: Locator) {
+  return menu.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const primaryLabel = element.querySelector<HTMLElement>(".bank-category-filter-primary-row .bank-category-filter-label");
+    const childLabel = element.querySelector<HTMLElement>(".bank-category-filter-child-row .bank-category-filter-label");
+    const count = element.querySelector<HTMLElement>(".bank-category-filter-count");
+    const row = element.querySelector<HTMLElement>(".bank-category-filter-row");
+    return {
+      childFontSize: childLabel ? Number.parseFloat(getComputedStyle(childLabel).fontSize) : 0,
+      columns: getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+      countFontSize: count ? Number.parseFloat(getComputedStyle(count).fontSize) : 0,
+      primaryFontSize: primaryLabel ? Number.parseFloat(getComputedStyle(primaryLabel).fontSize) : 0,
+      rowHeight: row?.getBoundingClientRect().height ?? 0,
+      withinViewport: rect.left >= 0 && rect.right <= window.innerWidth && rect.top >= 0 && rect.bottom <= window.innerHeight,
+    };
+  });
+}
+
 test.describe("bank details large table and overlay browser flow", () => {
   test("keeps long rows, horizontal scroll, filters, export menu, and category popover usable on desktop and narrow viewports", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 820 });
@@ -69,9 +87,18 @@ test.describe("bank details large table and overlay browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出" }), "desktop export button");
 
     await page.getByRole("button", { name: /标签筛选/ }).click();
-    const filterMenu = page.getByRole("menu", { name: "银行明细标签筛选" });
+    const filterMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expectVisibleAndUncovered(filterMenu, "desktop category filter menu");
-    await expect(filterMenu.getByRole("menuitem", { name: /设备款 119/ })).toBeVisible();
+    await expect(filterMenu.getByRole("option", { name: /设备款 119/ })).toBeVisible();
+    const desktopMenuMetrics = await readCategoryMenuMetrics(filterMenu);
+    expect(desktopMenuMetrics).toMatchObject({
+      childFontSize: 13,
+      columns: 3,
+      countFontSize: 12,
+      primaryFontSize: 14,
+      withinViewport: true,
+    });
+    expect(desktopMenuMetrics.rowHeight).toBeGreaterThanOrEqual(32);
     await page.keyboard.press("Escape");
 
     const firstRow = page.getByRole("row", { name: /智能工厂设备商/ });
@@ -96,8 +123,11 @@ test.describe("bank details large table and overlay browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "备注/附言/客户附言" }), "narrow rightmost table column");
 
     await page.getByRole("button", { name: /标签筛选/ }).click();
-    const narrowFilterMenu = page.getByRole("menu", { name: "银行明细标签筛选" });
+    const narrowFilterMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expectVisibleAndUncovered(narrowFilterMenu, "narrow category filter menu");
-    await expect(narrowFilterMenu.getByRole("menuitem", { name: /设备款 119/ })).toBeVisible();
+    await expect(narrowFilterMenu.getByRole("option", { name: /设备款 119/ })).toBeVisible();
+    const narrowMenuMetrics = await readCategoryMenuMetrics(narrowFilterMenu);
+    expect(narrowMenuMetrics.columns).toBe(1);
+    expect(narrowMenuMetrics.withinViewport).toBe(true);
   });
 });

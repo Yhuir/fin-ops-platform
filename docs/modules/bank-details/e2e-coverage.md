@@ -15,7 +15,7 @@
 | `BANK-E2E-007` | `covered` | `web/e2e/bank-details-category-flow.spec.ts`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_transaction_category_service.py`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已覆盖 full_access 下只能确认当前候选、确认后刷新为 `manual_confirmed`、撤销回候选状态，以及 unmatched 行外部往来三层人工补分类、请求结构化 turnover 字段、清除后回到待分类；保存和撤销/清除已记录 operation latency。 |
 | `BANK-E2E-008` | `covered` | `web/e2e/bank-details-stale-refreshing.spec.ts`、`tests/test_bank_details_routes.py`、`tests/test_bank_details_canonical_query.py`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已覆盖 direct accounts/transactions 不定时轮询、direct 空 rows 进入真实空态，以及交易请求网络失败后用户改变查询恢复；API/query tests 断言旧 status/source/job 字段不出现。 |
 | `BANK-E2E-009` | `covered` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-category-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_session_api.py`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已证明 `read_export_only` 可导出、自动标签 drawer 写入口禁用、待确认分类按钮禁用且银行明细 mutation API 零调用；`full_access` 和 `admin` 可执行分类写入；forbidden/expired session 在银行明细路由进入 session gate 且不调用任何银行明细 protected API。 |
-| `BANK-E2E-010` | `covered` | `web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已覆盖 120 行长列表、宽字段、桌面纵向滚动、窄屏导出菜单、分类筛选菜单、分类选择浮层和表格横向滚动不遮挡关键操作；真实生产超大数据性能仍按 staging/专项风险处理。 |
+| `BANK-E2E-010` | `covered` | `web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/src/test/BankDetailsPage.test.tsx` | Browser 已覆盖 120 行长列表、宽字段、桌面纵向滚动、窄屏导出菜单、分类筛选菜单、分类选择浮层和表格横向滚动不遮挡关键操作；标签筛选同时校验桌面 14/13/12px 字号、至少 32px 行高、桌面/窄屏 3/1 列和视口边界；真实生产超大数据性能仍按 staging/专项风险处理。 |
 
 ## 现有 E2E 审计结论
 
