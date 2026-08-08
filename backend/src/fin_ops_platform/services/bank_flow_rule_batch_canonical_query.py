@@ -83,6 +83,35 @@ def eligible_bank_flow_rule_batch_codes(tag_policy: dict[str, object]) -> set[st
     }
 
 
+def bank_flow_rule_batch_rule_proof(
+    tag_policy: dict[str, object],
+    tag_code: str,
+) -> dict[str, object]:
+    normalized_code = str(tag_code or "").strip()
+    active_codes = {
+        str(tag.get("code") or "").strip()
+        for tag in list(tag_policy.get("active_tags") or [])
+        if isinstance(tag, dict) and str(tag.get("code") or "").strip()
+    }
+    requirements = tag_policy.get("requirements_by_tag_code")
+    requirements = requirements if isinstance(requirements, dict) else {}
+    requirement = requirements.get(normalized_code)
+    requirement = requirement if isinstance(requirement, dict) else {}
+    requires_oa = requirement.get("requires_oa") is not False
+    requires_invoice = requirement.get("requires_invoice") is not False
+    return {
+        "tag_code": normalized_code,
+        "rule_version": int(tag_policy.get("version") or 1),
+        "requires_oa": requires_oa,
+        "requires_invoice": requires_invoice,
+        "eligible": (
+            normalized_code in active_codes
+            and not requires_oa
+            and not requires_invoice
+        ),
+    }
+
+
 def build_live_bank_flow_rule_batch_service(
     source: dict[str, object],
     *,

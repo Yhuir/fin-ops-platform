@@ -345,7 +345,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 ```json
 {
   "transaction_ids": ["bank-row-001", "bank-row-002", "bank-row-003", "bank-row-004"],
-  "expected_rule_version": 8,
+  "scope_month": "2026-07",
   "note": ""
 }
 ```
@@ -353,8 +353,9 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 提交规则：
 
 - `transaction_ids` 必填、不能为空、不能重复。
+- `scope_month` 必填且必须为 `YYYY-MM`；禁止回退到当前月份、`all` 或进程启动时快照。
 - 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
-- 提交前必须重查银行流水、标签、canonical active relation 占用和规则版本。目标行已被任一 active relation 占用时返回 `409 bank_flow_rule_batch_selection_occupied` 和结构化冲突信息；不能把领域冲突映射为 500。
+- 提交前必须在同一个 canonical source 中重查银行流水、当前有效分类、标签规则、OA/发票 requirement 和 active relation 占用；最终 `SERIALIZABLE` 写事务重新锁定并比较 selected-row proof 与 rule proof。目标行已被任一 active relation 占用时返回 `409 bank_flow_rule_batch_selection_occupied` 和结构化冲突信息；不能把领域冲突映射为 500。
 - active relation rows 必须来自 canonical PostgreSQL source bundle；提交与页面查询不得使用 Workbench relation read model 或启动时全量 relation snapshot 作为占用事实源。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
 - 关联台按 active 正式关系判断 ownership，再按该批次 relation 冻结的 OA/发票 requirement 判断 paired/unpaired；`source_row_count > 3` 时默认折叠。

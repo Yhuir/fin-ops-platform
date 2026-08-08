@@ -32,6 +32,7 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
     bank_flow_rule_batch_effective_categories,
+    bank_flow_rule_batch_rule_proof,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
@@ -883,9 +884,23 @@ class PostgresStateStore:
                 ],
                 categories_by_transaction_id,
             )
+            expected_rule_proof = candidate_guard.get("rule_proof")
+            expected_rule_proof = (
+                dict(expected_rule_proof)
+                if isinstance(expected_rule_proof, dict)
+                else {}
+            )
+            actual_rule_proof = bank_flow_rule_batch_rule_proof(
+                source.get("tag_policy")
+                if isinstance(source.get("tag_policy"), dict)
+                else {},
+                str(candidate_guard.get("batch_type") or ""),
+            )
             if (
                 active_row_ids.intersection(row_ids)
                 or actual_proofs != expected_proofs
+                or actual_rule_proof != expected_rule_proof
+                or actual_rule_proof.get("eligible") is not True
                 or {proof.get("row_id") for proof in actual_proofs} != set(row_ids)
                 or {proof.get("scope_month") for proof in actual_proofs}
                 != {str(candidate_guard.get("scope_month") or "")}
@@ -904,12 +919,24 @@ class PostgresStateStore:
                 "bank_flow_rule_batch_candidate_guard_conflict"
             ) from exc
         actual_guard = bank_flow_rule_batch_candidate_guard(candidate)
-        expected_guard = {
-            **candidate_guard,
-            "row_ids": sorted(row_ids),
-            "version": int(candidate_guard.get("version") or 1),
-        }
-        if actual_guard != expected_guard:
+        expected_guard = bank_flow_rule_batch_candidate_guard(candidate_guard)
+        expected_rule_proof = candidate_guard.get("rule_proof")
+        expected_rule_proof = (
+            dict(expected_rule_proof)
+            if isinstance(expected_rule_proof, dict)
+            else {}
+        )
+        actual_rule_proof = bank_flow_rule_batch_rule_proof(
+            source.get("tag_policy")
+            if isinstance(source.get("tag_policy"), dict)
+            else {},
+            str(candidate_guard.get("batch_type") or ""),
+        )
+        if (
+            actual_guard != expected_guard
+            or actual_rule_proof != expected_rule_proof
+            or actual_rule_proof.get("eligible") is not True
+        ):
             raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
 
     @staticmethod

@@ -1071,7 +1071,7 @@ describe("BankFlowRuleBatchPage", () => {
         "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], scope_month: "2026-05", note: "" }),
         }),
       );
     });
@@ -1209,7 +1209,7 @@ describe("BankFlowRuleBatchPage", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
-          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], scope_month: "2026-05", note: "" }),
           method: "POST",
         }),
       );
@@ -1241,7 +1241,7 @@ describe("BankFlowRuleBatchPage", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
-          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], scope_month: "2026-05", note: "" }),
           method: "POST",
         }),
       );
@@ -1340,7 +1340,7 @@ describe("BankFlowRuleBatchPage", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/bank-flow-rule-batches/submit-selection",
         expect.objectContaining({
-          body: JSON.stringify({ transaction_ids: ["bank-row-001"], note: "" }),
+          body: JSON.stringify({ transaction_ids: ["bank-row-001"], scope_month: "2026-05", note: "" }),
           method: "POST",
         }),
       );

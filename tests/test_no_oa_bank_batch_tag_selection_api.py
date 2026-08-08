@@ -17,8 +17,21 @@ def _json(response):
 def build_application(**kwargs):
     app = build_local_state_application(**kwargs)
     service = app._bank_flow_rule_batch_service
+    source_service = app._no_oa_bank_batch_application_service()
+
+    def read_page(filters=None, *, summary_filters=None, **_kwargs):
+        resolved_filters = summary_filters or filters or {}
+        month = str(resolved_filters.get("month") or "all")
+        return {
+            "candidate_rows": source_service.no_oa_bank_transaction_rows(month=month),
+            "active_relations": app._workbench_pair_relation_service.list_active_relations(),
+            "formal_items": service.list_batches(),
+            "tag_dictionary": app._bank_transaction_category_service.tag_dictionary_payload(),
+            "tag_policy": app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload(),
+        }
+
     app._bank_flow_rule_batch_canonical_query_repository = SimpleNamespace(
-        read_page=lambda *_args, **_kwargs: {},
+        read_page=read_page,
         read_batch=lambda batch_id: service.get_batch(batch_id),
         read_submitted_batches=lambda: service.list_batches({"bucket": "submitted"}),
     )
@@ -439,7 +452,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
         payload = _json(response)
@@ -493,7 +506,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
         self.assertEqual(submit_response.status_code, 200)
@@ -567,7 +580,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
         batch_id = _json(submit_response)["batch"]["batch_id"]
@@ -776,7 +789,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
         batch_id = _json(submit_response)["batch"]["batch_id"]
@@ -842,7 +855,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
-            body=json.dumps({"transaction_ids": [row_id], "note": "提交流水规则"}),
+            body=json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "提交流水规则"}),
             headers={"Content-Type": "application/json"},
         )
         batch_id = _json(submit_response)["batch"]["batch_id"]

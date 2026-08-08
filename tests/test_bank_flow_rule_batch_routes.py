@@ -87,11 +87,11 @@ class FakeBankFlowRuleBatchApplicationService:
             "affected_months": ["2026-05"],
         }
 
-    def submit_selected_rows(self, *, row_ids, actor, note, relation_mode):  # type: ignore[no-untyped-def]
+    def submit_selected_rows(self, *, row_ids, actor, note, relation_mode, scope_month):  # type: ignore[no-untyped-def]
         self.calls.append(
             (
                 "submit_selected_rows",
-                {"row_ids": list(row_ids), "actor": actor, "note": note, "relation_mode": relation_mode},
+                {"row_ids": list(row_ids), "actor": actor, "note": note, "relation_mode": relation_mode, "scope_month": scope_month},
             )
         )
         return {"affected_months": ["2026-05"]}
@@ -283,6 +283,51 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(status, HTTPStatus.CONFLICT)
         self.assertEqual(payload["error"], "bank_flow_rule_batch_candidate_conflict")
+
+    def test_submit_selection_passes_current_scope_month_to_application_service(self) -> None:
+        service = FakeBankFlowRuleBatchApplicationService()
+        routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
+
+        status, _payload = routes.submit_selection(
+            {"transaction_ids": ["bank-row-1"], "scope_month": "2026-05", "note": "提交"},
+            session=SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="oa-001")),
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(service.calls, [(
+            "submit_selected_rows",
+            {
+                "row_ids": ["bank-row-1"],
+                "actor": "finance-user",
+                "note": "提交",
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "scope_month": "2026-05",
+            },
+        )])
+
+    def test_submit_selection_rejects_missing_scope_month(self) -> None:
+        class ValidatingService(FakeBankFlowRuleBatchApplicationService):
+            def submit_selected_rows(self, **kwargs):  # type: ignore[no-untyped-def]
+                if not kwargs.get("scope_month"):
+                    raise BankBatchRelationMutationError(
+                        "invalid_bank_flow_rule_batch_month",
+                        "流水规则候选月份无效，请刷新列表后重试。",
+                    )
+                return super().submit_selected_rows(**kwargs)
+
+        routes = BankFlowRuleBatchApiRoutes(
+            application_service=ValidatingService(),  # type: ignore[arg-type]
+        )
+
+        status, payload = routes.submit_selection(
+            {"transaction_ids": ["bank-row-1"]},
+            session=SimpleNamespace(
+                identity=SimpleNamespace(username="finance-user", user_id="oa-001")
+            ),
+        )
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["error"], "invalid_bank_flow_rule_batch_month")
 
     def test_reset_route_maps_actor_and_reason(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()

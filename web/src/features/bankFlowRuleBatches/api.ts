@@ -674,6 +674,7 @@ export async function submitBankFlowRuleBatches({
 
 export async function submitBankFlowRuleBatchSelection({
   transactionIds,
+  scopeMonth,
   note,
   signal,
 }: SubmitBankFlowRuleBatchSelectionRequest): Promise<BankFlowRuleBatchMutationResult> {
@@ -682,7 +683,7 @@ export async function submitBankFlowRuleBatchSelection({
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transaction_ids: transactionIds, note: note ?? "" }),
+      body: JSON.stringify({ transaction_ids: transactionIds, scope_month: scopeMonth, note: note ?? "" }),
       signal,
     },
   );

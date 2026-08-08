@@ -574,13 +574,13 @@ describe("bank flow rule batch API", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await submitBankFlowRuleBatchSelection({ transactionIds: ["row-1", "row-2"], note: "提交选中" });
+    const result = await submitBankFlowRuleBatchSelection({ transactionIds: ["row-1", "row-2"], scopeMonth: "2026-05", note: "提交选中" });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/bank-flow-rule-batches/submit-selection",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ transaction_ids: ["row-1", "row-2"], note: "提交选中" }),
+        body: JSON.stringify({ transaction_ids: ["row-1", "row-2"], scope_month: "2026-05", note: "提交选中" }),
       }),
     );
     expect(result.batch?.batchId).toBe("batch-selected-fee");
@@ -595,7 +595,7 @@ describe("bank flow rule batch API", () => {
     }), { status: 400, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitBankFlowRuleBatchSelection({ transactionIds: ["row-1"] })).rejects.toMatchObject({
+    await expect(submitBankFlowRuleBatchSelection({ transactionIds: ["row-1"], scopeMonth: "2026-05" })).rejects.toMatchObject({
       code: "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
       message: "internal transfer selection requires a matched pair",
     });

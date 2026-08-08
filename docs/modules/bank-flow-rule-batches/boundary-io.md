@@ -42,7 +42,7 @@
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用和 submitted 可撤回；禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
-| 批量提交 | `submit-selection` / `submit` | 非空、去重、同月/账户/标签、资格与 active relation 占用重查；selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
+| 批量提交 | `submit-selection` / `submit` | `submit-selection` 必须携带 `scope_month=YYYY-MM`。流水、当前有效分类、标签规则、OA/发票 requirement 和 active relation 占用均从同一个 canonical source 读取，禁止回退到 import/category/settings 启动时快照；最终 `SERIALIZABLE` 写事务同时比较 selected-row proof 与 rule proof。selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
 | 撤回/reset | `withdraw` / `reset-submitted` | 保持一次 relation command/bulk cancel 与一次 changed-batch delta 保存；不直接改表，不同步 rebuild。 |
 | 权限/session | session / permissions | 读、规则写、提交、撤回和 reset 分别 fail closed。 |
 

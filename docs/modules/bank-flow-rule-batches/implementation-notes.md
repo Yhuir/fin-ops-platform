@@ -1,5 +1,12 @@
 # 流水规则批量处理实施记录
 
+## 2026-08-08 submit-selection canonical 事实源闭环
+
+- 生产 `submit-selection` 曾先从 `ImportNormalizationService._transactions_by_id` 和启动时 category/settings snapshot 生成 expected proof，再由 PostgreSQL `SERIALIZABLE` guard 用当前事实生成 actual proof；两套事实源导致页面刷新后仍反复返回 `bank_flow_rule_batch_candidate_conflict`。
+- 请求现在必须携带列表项 `scope_month`；application service 复用页面 canonical query，一次取得候选流水、当前有效分类、标签 policy/requirement 和 active relation。选中提交不再调用 import/category/settings 启动时快照。
+- relation metadata 使用同一 canonical rule proof 冻结 `flow_rule_version`、`requires_oa` 和 `requires_invoice`；最终写事务同时比较 selected-row proof 与 rule proof。假冲突被移除，真实流水、分类、规则或占用漂移继续 fail closed 并整体 rollback。
+- 页面仍为写后一次 normal GET；没有新增 polling、read model、worker、缓存或页面 fan-out。no-OA 等其他模块继续保留其现有读取合同。
+
 ## 2026-08-05 selected-row 时间语义与冲突恢复
 
 - 根因是 submit-selection 初读 proof 保留银行导入的空格时间，而事务内 canonical 重读把同一 `timestamptz` 输出为 ISO 8601 offset；旧 guard 直接比较字符串，误把同一时刻判为候选变化。

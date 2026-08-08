@@ -673,6 +673,7 @@ class WorkbenchSourceProofContractTests(unittest.TestCase):
                 row_ids=["bank-flow-may"],
                 actor="source-proof",
                 note="contract closure",
+                scope_month="2026-05",
             )
 
         self.assertEqual(result["batch"]["status"], "submitted")

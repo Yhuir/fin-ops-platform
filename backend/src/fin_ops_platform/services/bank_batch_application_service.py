@@ -322,16 +322,24 @@ class BankBatchApplicationService:
         actor: str,
         note: str | None,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        requirement_metadata: dict[str, object] | None = None,
     ) -> None:
         relation_command_service = self._require_relation_command_service()
         payload = self._bank_batch_service.relation_command_payload_for_batch(batch, note=note)
         special_metadata = payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {}
-        requirement_metadata = self._paired_requirement_metadata_for_relation_mode(
-            str(batch.get("batch_type") or ""),
-            relation_mode,
+        resolved_requirement_metadata = (
+            dict(requirement_metadata)
+            if isinstance(requirement_metadata, dict)
+            else self._paired_requirement_metadata_for_relation_mode(
+                str(batch.get("batch_type") or ""),
+                relation_mode,
+            )
         )
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            requirement_metadata = self._bank_flow_rule_requirement_metadata(batch, requirement_metadata)
+            resolved_requirement_metadata = self._bank_flow_rule_requirement_metadata(
+                batch,
+                resolved_requirement_metadata,
+            )
             display_tags = self._bank_flow_rule_display_tags(batch)
             payload["display_tags"] = display_tags
             if not str(note or "").strip():
@@ -344,7 +352,7 @@ class BankBatchApplicationService:
             ]
         payload["special_metadata"] = {
             **special_metadata,
-            **requirement_metadata,
+            **resolved_requirement_metadata,
             **({"display_tags": display_tags} if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE else {}),
         }
         case_id = str(payload.get("case_id") or "").strip()

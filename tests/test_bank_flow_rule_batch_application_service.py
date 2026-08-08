@@ -492,7 +492,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     "version": 7,
                     "active_tags": [{"code": "fee"}],
                     "requirements_by_tag_code": {
-                        "fee": {"requires_oa": False, "requires_invoice": False},
+                        "fee": {"requires_oa": True, "requires_invoice": True},
                     },
                 }
 
@@ -517,18 +517,37 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._mutation_result = (  # type: ignore[method-assign]
             lambda batch, **kwargs: mutation_calls.append(dict(kwargs)) or {"batch": dict(batch)}
         )
+        service._live_selected_rows = (  # type: ignore[method-assign]
+            lambda _row_ids, *, scope_month: (
+                [dict(import_service.rows["bank-row-1"]), dict(import_service.rows["bank-row-2"])],
+                {
+                    "bank-row-1": {"category_code": "fee", "effective_category_code": "fee"},
+                    "bank-row-2": {"category_code": "fee", "effective_category_code": "fee"},
+                },
+                {
+                    "active_relations": [],
+                    "tag_policy": {
+                        "version": 11,
+                        "active_tags": [{"code": "fee"}],
+                        "requirements_by_tag_code": {
+                            "fee": {"requires_oa": False, "requires_invoice": False},
+                        },
+                    },
+                },
+            )
+        )
 
         result = service.submit_selected_rows(
             row_ids=["bank-row-1", "bank-row-2"],
             actor="finance-user",
             note="提交",
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            scope_month="2026-06",
         )
 
-        self.assertEqual(import_service.get_calls, ["bank-row-1", "bank-row-2"])
+        self.assertEqual(import_service.get_calls, [])
         self.assertEqual(import_service.list_calls, [])
-        self.assertEqual(category_provider.bulk_get_calls, [["bank-row-1", "bank-row-2"]])
-        self.assertEqual(category_provider.source_proof_calls, [["bank-row-1", "bank-row-2"]])
+        self.assertEqual(category_provider.source_proof_calls, [])
         self.assertEqual(relation_facade.list_by_month_calls, [])
         self.assertEqual(relation_facade.source_version_month_calls, [])
         self.assertEqual(
@@ -538,6 +557,15 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["batch"]["status"], "submitted")
         self.assertEqual(result["batch"]["row_ids"], ["bank-row-1", "bank-row-2"])
         self.assertEqual(confirm_calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertEqual(
+            confirm_calls[0]["requirement_metadata"],
+            {
+                "paired_requires_oa": False,
+                "paired_requires_invoice": False,
+                "paired_requirement_tag_code": "fee",
+                "paired_requirement_version": 11,
+            },
+        )
         self.assertTrue(mutation_calls[0]["persist"])
         self.assertEqual(
             mutation_calls[0]["candidate_guard"]["guard_mode"],
@@ -550,7 +578,79 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             ],
             ["bank-row-1", "bank-row-2"],
         )
+        self.assertEqual(
+            mutation_calls[0]["candidate_guard"]["rule_proof"],
+            {
+                "tag_code": "fee",
+                "rule_version": 11,
+                "requires_oa": False,
+                "requires_invoice": False,
+                "eligible": True,
+            },
+        )
         self.assertNotIn("read_model_key", mutation_calls[0])
+
+    def test_live_selected_rows_reads_current_canonical_source_not_import_snapshot(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def read_page(self, filters, *, summary_filters, page, page_size):  # type: ignore[no-untyped-def]
+                self.calls.append(
+                    {
+                        "filters": dict(filters),
+                        "summary_filters": dict(summary_filters),
+                        "page": page,
+                        "page_size": page_size,
+                    }
+                )
+                return {
+                    "candidate_rows": [
+                        {
+                            "id": "bank-row-current",
+                            "trade_time": "2026-06-03 10:20:00",
+                            "account_key": "ccb:8106",
+                            "direction": "expense",
+                            "amount": "8.80",
+                            "category_code": "fee",
+                            "category_source": "manual",
+                            "category_version": 4,
+                        }
+                    ],
+                    "tag_dictionary": {},
+                    "active_relations": [],
+                    "tag_policy": {
+                        "version": 4,
+                        "active_tags": [{"code": "fee"}],
+                        "requirements_by_tag_code": {
+                            "fee": {"requires_oa": False, "requires_invoice": False},
+                        },
+                    },
+                }
+
+        class ImportSnapshot:
+            def list_transactions_by_ids(self, _row_ids):  # type: ignore[no-untyped-def]
+                raise AssertionError("bank-flow selected submit must not read the process-local import snapshot")
+
+        repository = Repository()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = repository
+        service._import_service = ImportSnapshot()
+
+        rows, categories, source = service._live_selected_rows(
+            ["bank-row-current"],
+            scope_month="2026-06",
+        )
+
+        self.assertEqual(repository.calls, [{
+            "filters": {"month": "2026-06", "bucket": "unsubmitted"},
+            "summary_filters": {"month": "2026-06"},
+            "page": 1,
+            "page_size": None,
+        }])
+        self.assertEqual(rows[0]["id"], "bank-row-current")
+        self.assertEqual(categories["bank-row-current"]["effective_category_code"], "fee")
+        self.assertEqual(source["tag_policy"]["version"], 4)
 
     def test_submit_selected_bank_flow_internal_transfer_fails_fast_without_legacy_refresh(self) -> None:
         class ImportService:
@@ -595,6 +695,29 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service._import_service = import_service
         service._effective_category_provider = CategoryProvider()
         service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {})
+        service._live_selected_rows = (  # type: ignore[method-assign]
+            lambda _row_ids, *, scope_month: (
+                [{
+                    "id": "bank-row-1",
+                    "trade_time": "2026-06-04 10:20:00",
+                    "account_key": "ccb:8106",
+                    "bank_name": "建设银行",
+                    "account_last4": "8106",
+                    "direction": "expense",
+                    "amount": "18.20",
+                }],
+                {"bank-row-1": {"category_code": "internal_transfer", "effective_category_code": "internal_transfer"}},
+                {
+                    "active_relations": [],
+                    "tag_policy": {
+                        "active_tags": [{"code": "internal_transfer"}],
+                        "requirements_by_tag_code": {
+                            "internal_transfer": {"requires_oa": False, "requires_invoice": False},
+                        },
+                    },
+                },
+            )
+        )
 
         with self.assertRaises(BankBatchRelationMutationError) as raised:
             service.submit_selected_rows(
@@ -602,6 +725,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 actor="finance-user",
                 note="提交",
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                scope_month="2026-06",
             )
 
         self.assertEqual(
@@ -609,7 +733,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
         )
         self.assertEqual(str(raised.exception), "内部往来批次请使用单批提交。")
-        self.assertEqual(import_service.get_calls, ["bank-row-1"])
+        self.assertEqual(import_service.get_calls, [])
         self.assertEqual(import_service.list_calls, [])
 
     def test_submit_selected_guard_conflict_restores_relation_and_batch(self) -> None:
@@ -656,8 +780,19 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         service._state_store = RejectingStateStore()
         service._bank_transaction_category_affected_months_provider = lambda _row_ids: []
-        service.bank_transaction_rows_by_ids = lambda _row_ids: list(rows)  # type: ignore[method-assign]
-        service.effective_categories_for_rows = lambda _rows: dict(categories)  # type: ignore[method-assign]
+        service._live_selected_rows = lambda _row_ids, *, scope_month: (  # type: ignore[method-assign]
+            list(rows),
+            dict(categories),
+            {
+                "active_relations": [],
+                "tag_policy": {
+                    "active_tags": [{"code": "fee"}],
+                    "requirements_by_tag_code": {
+                        "fee": {"requires_oa": False, "requires_invoice": False},
+                    },
+                },
+            },
+        )
         service.active_relation_source_bundle_for_bank_rows = (  # type: ignore[method-assign]
             lambda _rows, **_kwargs: {"rows": [], "source_versions": {}}
         )
@@ -681,6 +816,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 row_ids=["bank-fee-1", "bank-fee-2"],
                 actor="finance-user",
                 note="提交",
+                scope_month="2026-06",
             )
 
         self.assertEqual(
@@ -781,12 +917,19 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 service._pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(
                     pair_service
                 )
-                service.bank_transaction_rows_by_ids = lambda _row_ids, selected=row: [  # type: ignore[method-assign]
-                    dict(selected)
-                ]
-                service.effective_categories_for_rows = lambda _rows: {  # type: ignore[method-assign]
-                    "bank-fee-1": {"category_code": "fee"}
-                }
+                service._live_selected_rows = lambda _row_ids, *, scope_month, selected=row: (  # type: ignore[method-assign]
+                    [dict(selected)],
+                    {"bank-fee-1": {"category_code": "fee", "effective_category_code": "fee"}},
+                    {
+                        "active_relations": [],
+                        "tag_policy": {
+                            "active_tags": [{"code": "fee"}],
+                            "requirements_by_tag_code": {
+                                "fee": {"requires_oa": False, "requires_invoice": False},
+                            },
+                        },
+                    },
+                )
                 service.active_relation_source_bundle_for_bank_rows = (  # type: ignore[method-assign]
                     lambda _rows, **_kwargs: {"rows": [], "source_versions": {}}
                 )
@@ -808,6 +951,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         row_ids=["bank-fee-1"],
                         actor="finance-user",
                         note="提交",
+                        scope_month="2026-06",
                     )
 
                 self.assertEqual(confirm_calls, [])

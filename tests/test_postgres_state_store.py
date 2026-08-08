@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 )
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
+    bank_flow_rule_batch_rule_proof,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
@@ -750,7 +751,13 @@ class PostgresStateStoreTests(unittest.TestCase):
             ).list_batches()[0]
             PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
                 Transaction(),
-                bank_flow_rule_batch_candidate_guard(candidate),
+                {
+                    **bank_flow_rule_batch_candidate_guard(candidate),
+                    "rule_proof": bank_flow_rule_batch_rule_proof(
+                        source["tag_policy"],
+                        "internal_transfer",
+                    ),
+                },
             )
 
     def test_selected_row_guard_fails_closed_on_canonical_fact_drift(self) -> None:
@@ -818,6 +825,79 @@ class PostgresStateStoreTests(unittest.TestCase):
                             "trade_time": "2026-06-03 10:20:00",
                         }
                     ],
+                    "rule_proof": bank_flow_rule_batch_rule_proof(
+                        source["tag_policy"],
+                        "fee",
+                    ),
+                },
+            )
+
+    def test_selected_row_guard_fails_closed_when_rule_requirement_changes(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple[object, ...] = ()) -> int:
+                return 0
+
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return []
+
+        row = {
+            "id": "bank-fee-1",
+            "trade_time": "2026-06-03 10:20:00",
+            "account_key": "ccb:8106",
+            "direction": "expense",
+            "amount": "8.80",
+            "category_code": "fee",
+        }
+        initial_policy = {
+            "version": 10,
+            "active_tags": [{"code": "fee"}],
+            "requirements_by_tag_code": {
+                "fee": {"requires_oa": False, "requires_invoice": False},
+            },
+        }
+        changed_source = {
+            "candidate_rows": [row],
+            "active_relations": [],
+            "formal_items": [],
+            "tag_policy": {
+                "version": 11,
+                "active_tags": [{"code": "fee"}],
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": True},
+                },
+            },
+        }
+
+        with patch.object(
+            BankFlowRuleBatchCanonicalQueryRepository,
+            "read_candidate_guard_source",
+            return_value=changed_source,
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "bank_flow_rule_batch_candidate_guard_conflict",
+        ):
+            PostgresStateStore._assert_bank_flow_rule_batch_candidate_guard(
+                Transaction(),
+                {
+                    "batch_id": "bank_flow_rule_batch_selected",
+                    "scope_month": "2026-06",
+                    "batch_type": "fee",
+                    "row_ids": ["bank-fee-1"],
+                    "total_amount": "8.80",
+                    "version": 1,
+                    "guard_mode": "selected_rows",
+                    "selected_row_proofs": bank_flow_rule_batch_selected_row_proofs(
+                        [row],
+                        {"bank-fee-1": {"effective_category_code": "fee"}},
+                    ),
+                    "rule_proof": bank_flow_rule_batch_rule_proof(
+                        initial_policy,
+                        "fee",
+                    ),
                 },
             )
 
@@ -878,6 +958,10 @@ class PostgresStateStoreTests(unittest.TestCase):
                         [initial_row],
                         {"bank-fee-1": {"effective_category_code": "fee"}},
                     ),
+                    "rule_proof": bank_flow_rule_batch_rule_proof(
+                        source["tag_policy"],
+                        "fee",
+                    ),
                 },
             )
 
@@ -936,6 +1020,10 @@ class PostgresStateStoreTests(unittest.TestCase):
                     "selected_row_proofs": bank_flow_rule_batch_selected_row_proofs(
                         [initial_row],
                         {"bank-fee-1": {"effective_category_code": "fee"}},
+                    ),
+                    "rule_proof": bank_flow_rule_batch_rule_proof(
+                        source["tag_policy"],
+                        "fee",
                     ),
                 },
             )

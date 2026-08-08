@@ -209,6 +209,7 @@ export type SaveBankFlowRuleBatchTagSelectionRequest = {
 
 export type SubmitBankFlowRuleBatchSelectionRequest = {
   transactionIds: string[];
+  scopeMonth: string;
   note?: string;
   signal?: AbortSignal;
 };

@@ -10,6 +10,7 @@ from fin_ops_platform.services.bank_batch_application_service import (
     BankBatchApplicationService,
     BankBatchPersistenceError,
     BankBatchRelationMutationError,
+    canonical_snapshot_version,
 )
 from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_ID_PREFIX,
@@ -20,8 +21,10 @@ from fin_ops_platform.services.bank_batch_service import (
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
     bank_flow_rule_batch_effective_categories,
+    bank_flow_rule_batch_rule_proof,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
+    eligible_bank_flow_rule_batch_codes,
 )
 
 
@@ -432,7 +435,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "bank_flow_rule_batch_candidate_conflict",
                 "流水规则候选月份缺失，请刷新列表后重试。",
             )
-        candidate, _source = self._live_candidate(batch_id, scope_month)
+        candidate, source = self._live_candidate(batch_id, scope_month)
         snapshot = self._bank_batch_service.snapshot()
         batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
         self._bank_batch_service.replace_snapshot(
@@ -444,13 +447,45 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 },
             }
         )
-        return bank_flow_rule_batch_candidate_guard(candidate)
+        return {
+            **bank_flow_rule_batch_candidate_guard(candidate),
+            "rule_proof": bank_flow_rule_batch_rule_proof(
+                source.get("tag_policy") if isinstance(source.get("tag_policy"), dict) else {},
+                str(candidate.get("batch_type") or ""),
+            ),
+        }
 
     def _live_candidate(
         self,
         batch_id: str,
         scope_month: str | None,
     ) -> tuple[dict[str, object], dict[str, object]]:
+        source = self._live_candidate_source(scope_month)
+        tag_policy = source.get("tag_policy") if isinstance(source, dict) else None
+        tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
+        live_service = self._live_batch_service(
+            source if isinstance(source, dict) else {},
+            eligible_tag_codes=self._eligible_bank_flow_rule_batch_tag_codes(tag_policy),
+        )
+        try:
+            candidate = live_service.get_batch(batch_id)
+        except KeyError as exc:
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选已变化或被占用，请刷新列表后重试。",
+            ) from exc
+        normalized_month = str(scope_month or "").strip()
+        if (
+            str(candidate.get("status") or "") != "draft"
+            or str(candidate.get("scope_month") or "") != normalized_month
+        ):
+            raise BankBatchRelationMutationError(
+                "bank_flow_rule_batch_candidate_conflict",
+                "流水规则候选已变化或被占用，请刷新列表后重试。",
+            )
+        return candidate, source
+
+    def _live_candidate_source(self, scope_month: str | None) -> dict[str, object]:
         normalized_month = str(scope_month or "").strip()
         if not MONTH_SCOPE_RE.match(normalized_month):
             raise BankBatchRelationMutationError(
@@ -466,28 +501,103 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             page=1,
             page_size=None,
         )
-        tag_policy = source.get("tag_policy") if isinstance(source, dict) else None
-        tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
-        live_service = self._live_batch_service(
-            source if isinstance(source, dict) else {},
-            eligible_tag_codes=self._eligible_bank_flow_rule_batch_tag_codes(tag_policy),
+        return source if isinstance(source, dict) else {}
+
+    def _live_selected_rows(
+        self,
+        row_ids: list[str],
+        *,
+        scope_month: str | None,
+    ) -> tuple[
+        list[dict[str, object]],
+        dict[str, dict[str, object]],
+        dict[str, object],
+    ]:
+        source = self._live_candidate_source(scope_month)
+        normalized_row_ids = self._dedupe_ordered(
+            [
+                str(row_id).strip()
+                for row_id in row_ids
+                if str(row_id).strip()
+            ]
         )
-        try:
-            candidate = live_service.get_batch(batch_id)
-        except KeyError as exc:
+        rows_by_id = {
+            str(row.get("id") or row.get("transaction_id") or "").strip(): dict(row)
+            for row in list(source.get("candidate_rows") or [])
+            if isinstance(row, dict)
+        }
+        if not normalized_row_ids or any(row_id not in rows_by_id for row_id in normalized_row_ids):
             raise BankBatchRelationMutationError(
                 "bank_flow_rule_batch_candidate_conflict",
-                "流水规则候选已变化或被占用，请刷新列表后重试。",
-            ) from exc
-        if (
-            str(candidate.get("status") or "") != "draft"
-            or str(candidate.get("scope_month") or "") != normalized_month
-        ):
-            raise BankBatchRelationMutationError(
-                "bank_flow_rule_batch_candidate_conflict",
-                "流水规则候选已变化或被占用，请刷新列表后重试。",
+                "所选流水已变化或被占用，请刷新列表后重试。",
             )
-        return candidate, source
+        rows = [rows_by_id[row_id] for row_id in normalized_row_ids]
+        return rows, bank_flow_rule_batch_effective_categories(source), source
+
+    @staticmethod
+    def _requirement_metadata_from_rule_proof(
+        rule_proof: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        if not isinstance(rule_proof, dict):
+            return None
+        return {
+            "paired_requires_oa": bool(rule_proof.get("requires_oa")),
+            "paired_requires_invoice": bool(rule_proof.get("requires_invoice")),
+            "paired_requirement_tag_code": str(rule_proof.get("tag_code") or ""),
+            "paired_requirement_version": int(rule_proof.get("rule_version") or 1),
+        }
+
+    @staticmethod
+    def _canonical_selected_source_versions(
+        bank_rows: list[dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+        tag_policy: dict[str, object],
+        relation_source_versions: dict[str, object],
+    ) -> dict[str, object]:
+        category_proof_rows = [
+            {
+                "transaction_id": str(row.get("id") or row.get("transaction_id") or "").strip(),
+                "category_code": str(
+                    categories_by_transaction_id.get(
+                        str(row.get("id") or row.get("transaction_id") or "").strip(),
+                        {},
+                    ).get("effective_category_code")
+                    or ""
+                ),
+                "category_source": str(
+                    categories_by_transaction_id.get(
+                        str(row.get("id") or row.get("transaction_id") or "").strip(),
+                        {},
+                    ).get("effective_category_source")
+                    or ""
+                ),
+                "category_version": int(
+                    categories_by_transaction_id.get(
+                        str(row.get("id") or row.get("transaction_id") or "").strip(),
+                        {},
+                    ).get("category_version")
+                    or 0
+                ),
+            }
+            for row in bank_rows
+        ]
+        category_proof_rows.sort(key=lambda row: row["transaction_id"])
+        source_versions: dict[str, object] = {
+            "bank_flow_rule_batch_schema_version": BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            "bank_flow_rule_batch_eligibility_version": canonical_snapshot_version(
+                sorted(eligible_bank_flow_rule_batch_codes(tag_policy))
+            ),
+            "category_source_proof": {
+                "source": "bank_flow_rule_batch_canonical_query",
+                "row_count": len(category_proof_rows),
+                "membership_category_digest": canonical_snapshot_version(category_proof_rows),
+            },
+        }
+        if relation_source_versions:
+            source_versions["workbench_relation_source_versions"] = dict(
+                relation_source_versions
+            )
+        return source_versions
 
     def submit_batch(
         self,
@@ -528,7 +638,19 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 note=note,
             )
             if not already_submitted:
-                self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+                rule_proof = (
+                    candidate_guard.get("rule_proof")
+                    if isinstance(candidate_guard, dict)
+                    and isinstance(candidate_guard.get("rule_proof"), dict)
+                    else None
+                )
+                self._confirm_relation_for_batch(
+                    batch,
+                    actor=actor,
+                    note=note,
+                    relation_mode=relation_mode,
+                    requirement_metadata=self._requirement_metadata_from_rule_proof(rule_proof),
+                )
             return self._mutation_result(
                 batch,
                 status="submitted",
@@ -549,14 +671,17 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         actor: str,
         note: str | None,
         relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        scope_month: str | None = None,
     ) -> dict[str, object]:
         if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
             raise BankBatchRelationMutationError(
                 "invalid_bank_flow_rule_batch_relation_mode",
                 "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
             )
-        bank_rows = self.bank_transaction_rows_by_ids(row_ids)
-        categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
+        bank_rows, categories_by_transaction_id, source = self._live_selected_rows(
+            row_ids,
+            scope_month=scope_month,
+        )
         if self._selected_rows_include_internal_transfer(bank_rows, categories_by_transaction_id):
             raise BankBatchRelationMutationError(
                 "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
@@ -573,32 +698,28 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 scope_key=months[0] if len(months) == 1 else "all",
             )
             relation_source_versions = relation_bundle.get("source_versions")
-            source_versions = (
-                self.candidate_source_versions_for_scope(
-                    scope_key=months[0],
-                    relation_mode=relation_mode,
-                    relation_source_versions=(
-                        dict(relation_source_versions)
-                        if isinstance(relation_source_versions, dict)
-                        else {}
-                    ),
-                    category_source_rows=bank_rows,
-                )
-                if len(months) == 1
-                else self.bank_batch_source_versions(relation_mode=relation_mode)
+            tag_policy = source.get("tag_policy")
+            tag_policy = tag_policy if isinstance(tag_policy, dict) else {}
+            source_versions = self._canonical_selected_source_versions(
+                bank_rows,
+                categories_by_transaction_id,
+                tag_policy,
+                (
+                    dict(relation_source_versions)
+                    if isinstance(relation_source_versions, dict)
+                    else {}
+                ),
             )
-            if len(months) != 1 and isinstance(relation_source_versions, dict):
-                source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
             batch = self._bank_batch_service.submit_selected_rows(
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
                 active_relations=[
                     dict(row)
-                    for row in list(relation_bundle.get("rows") or [])
+                    for row in list(source.get("active_relations") or [])
                     if isinstance(row, dict)
                 ],
                 source_versions=source_versions,
-                eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
+                eligible_batch_types=eligible_bank_flow_rule_batch_codes(tag_policy),
                 row_ids=row_ids,
                 actor=actor,
                 note=note,
@@ -621,8 +742,20 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     bank_rows,
                     categories_by_transaction_id,
                 ),
+                "rule_proof": bank_flow_rule_batch_rule_proof(
+                    tag_policy,
+                    str(batch.get("batch_type") or ""),
+                ),
             }
-            self._confirm_relation_for_batch(batch, actor=actor, note=note, relation_mode=relation_mode)
+            self._confirm_relation_for_batch(
+                batch,
+                actor=actor,
+                note=note,
+                relation_mode=relation_mode,
+                requirement_metadata=self._requirement_metadata_from_rule_proof(
+                    candidate_guard["rule_proof"]
+                ),
+            )
             return self._mutation_result(
                 batch,
                 status="submitted",

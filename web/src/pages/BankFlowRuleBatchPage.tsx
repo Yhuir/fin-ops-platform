@@ -470,7 +470,12 @@ export default function BankFlowRuleBatchPage() {
     if (!canMutateData || selectedTransactionIds.size === 0 || mutating) {
       return;
     }
+    if (!selectedBatch?.scopeMonth) {
+      setFeedback({ severity: "error", message: "流水规则候选月份缺失，请刷新列表后重试" });
+      return;
+    }
     const transactionIds = Array.from(selectedTransactionIds);
+    const scopeMonth = selectedBatch.scopeMonth;
     const result = await runOperation({
       loadingMessage: "正在提交选中流水规则...",
       action: async ({ setMessage }) => {
@@ -478,6 +483,7 @@ export default function BankFlowRuleBatchPage() {
         try {
           const submitResult = await submitBankFlowRuleBatchSelection({
             transactionIds,
+            scopeMonth,
             note: "",
           });
           setMessage("正在加载流水规则批次最新数据...");

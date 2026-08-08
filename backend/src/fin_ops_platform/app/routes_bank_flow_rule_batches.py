@@ -203,6 +203,7 @@ class BankFlowRuleBatchApiRoutes:
                 actor=self._actor(payload, session),
                 note=str(payload.get("note") or "").strip() or None,
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                scope_month=str(payload.get("scope_month") or "").strip() or None,
             )
         except BankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)
