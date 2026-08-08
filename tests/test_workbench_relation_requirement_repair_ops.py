@@ -183,6 +183,36 @@ def _run(
 
 
 class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
+    def test_unavailable_oa_case_reuses_fixed_requirement_repair_entrypoint(self) -> None:
+        output = io.StringIO()
+        with patch.object(
+            repair_ops.workbench_unavailable_oa_relation_repair_ops,
+            "main",
+            return_value=0,
+        ) as delegated:
+            result = repair_ops.main(
+                ["--unavailable-oa-case-id", "case-1", "--dry-run"],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        delegated.assert_called_once_with(
+            ["--case-id", "case-1", "--dry-run"],
+            stdout=output,
+        )
+
+    def test_unavailable_oa_case_rejects_rollback_modes(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "only supports"):
+            repair_ops.main(
+                [
+                    "--unavailable-oa-case-id",
+                    "case-1",
+                    "--rollback-dry-run",
+                    "--expected-fingerprint",
+                    "f" * 64,
+                ]
+            )
+
     def test_turnover_legacy_sources_and_missing_canonical_fields_are_targets(self) -> None:
         canonical = {
             "paired_requirement_source": "bank_transaction_paired_policy",

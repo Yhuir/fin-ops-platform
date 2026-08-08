@@ -95,5 +95,5 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 禁止 candidate/decision service/store/table/API、隐藏 fallback 或双写重新进入调用图。
 - 禁止历史 `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、promotion service 或 pending claim 排除重新成为运行时 relation owner；migration `0136` 后它们只读审计。
 - 旧 generic `MatchingEngineService` 仅可服务其独立 legacy reconciliation/内部转账备注上下文；它的 result 不得决定 Workbench membership、zone、linked status 或正式关系写入。该隔离由 boundary guards 和 grouping tests 保护。
-- migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。失效 canonical OA 成员修复必须绑定单一 `case_id` 与 dry-run fingerprint，通过 `WorkbenchRelationCommandService.remove_rows_from_active_relations(...)` 删除成员并复用正式持久化边界；禁止直接 SQL 改 relation/read model。若仍有至少两个无附件父级冲突的成员则保留关系，否则取消关系。
+- migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。失效 canonical OA 成员修复复用固定 `workbench-requirement-repair` 控制入口，必须绑定单一 `case_id` 与 dry-run fingerprint，通过 `WorkbenchRelationCommandService.remove_rows_from_active_relations(...)` 删除成员并复用正式持久化边界；禁止直接 SQL 改 relation/read model。若仍有至少两个无附件父级冲突的成员则保留关系，否则取消关系。
 - 已删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService` 及其 CLI；禁止恢复这两条 operator-only 平行写链。历史数据补全由同一 matching worker + formal relation UoW 收敛。

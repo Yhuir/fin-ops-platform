@@ -414,26 +414,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('case "$mode" in', script)
         self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
 
-    def test_workbench_unavailable_oa_relation_repair_is_case_and_fingerprint_guarded(self) -> None:
-        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
-
-        self.assertIn(
-            "workbench-unavailable-oa-relation-repair <release-name> --case-id ID --dry-run",
-            script,
-        )
-        self.assertIn(
-            "workbench-unavailable-oa-relation-repair requires a safe --case-id",
-            script,
-        )
-        self.assertIn(
-            "workbench-unavailable-oa-relation-repair only permits dry-run or fingerprinted execute",
-            script,
-        )
-        self.assertIn(
-            "fin_ops_platform.tools.workbench_unavailable_oa_relation_repair_ops",
-            script,
-        )
-
     def test_workbench_etc_summary_repair_is_identity_and_fingerprint_guarded(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
@@ -591,9 +571,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("workbench-requirement-repair <release-name>", script)
         self.assertIn("workbench_requirement_repair()", script)
         self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
-        self.assertIn("workbench-unavailable-oa-relation-repair <release-name>", script)
-        self.assertIn("workbench_unavailable_oa_relation_repair()", script)
-        self.assertIn("fin_ops_platform.tools.workbench_unavailable_oa_relation_repair_ops", script)
         self.assertIn("--rollback-dry-run --expected-fingerprint <sha256>", script)
         self.assertIn("--rollback --expected-fingerprint <sha256>", script)
         self.assertIn("workbench-requirement-repair only permits the four fixed modes", script)

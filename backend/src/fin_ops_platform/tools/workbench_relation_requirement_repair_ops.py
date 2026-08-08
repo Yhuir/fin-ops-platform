@@ -12,6 +12,7 @@ from typing import Any, TextIO
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
+from fin_ops_platform.tools import workbench_unavailable_oa_relation_repair_ops
 from fin_ops_platform.tools.runtime_application import (
     bank_flow_rule_batch_tag_rules_payload,
     bank_transaction_category_source_proofs,
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--rollback-dry-run", action="store_true")
     mode.add_argument("--rollback", action="store_true")
     parser.add_argument("--expected-fingerprint")
+    parser.add_argument("--unavailable-oa-case-id")
     return parser
 
 
@@ -53,6 +55,22 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         raise SystemExit("--dry-run does not accept --expected-fingerprint")
     if mode != "dry_run" and not args.expected_fingerprint:
         raise SystemExit(f"--{mode.replace('_', '-')} requires --expected-fingerprint")
+    if args.unavailable_oa_case_id:
+        if mode not in {"dry_run", "execute"}:
+            raise SystemExit("unavailable OA repair only supports --dry-run or --execute")
+        forwarded_args = [
+            "--case-id",
+            str(args.unavailable_oa_case_id).strip(),
+            f"--{mode.replace('_', '-')}",
+        ]
+        if args.expected_fingerprint:
+            forwarded_args.extend(
+                ["--expected-fingerprint", str(args.expected_fingerprint).strip()]
+            )
+        return workbench_unavailable_oa_relation_repair_ops.main(
+            forwarded_args,
+            stdout=stdout,
+        )
 
     app = build_tool_runtime_application(None)
     command_service = workbench_relation_command_service(app)
