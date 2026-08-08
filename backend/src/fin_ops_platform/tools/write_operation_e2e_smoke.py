@@ -2048,6 +2048,7 @@ def _collect_system_audit(
     headers: Mapping[str, str],
     timeout_seconds: float,
     request_fn: RequestFn,
+    allow_compatible_previous_registry: bool = False,
 ) -> dict[str, Any]:
     if not checkpoint.system_audit_path:
         return {"status": "skipped", "reason": "system_audit_not_requested"}
@@ -2104,16 +2105,46 @@ def _collect_system_audit(
         registry_contract_field_count = sum(value is not None for value in registry_contract_fields)
         if registry_contract_field_count not in {0, len(registry_contract_fields)}:
             raise ValueError("system_audit_registry_contract_failed")
-        if registry_contract_field_count and (
-            registered_page_keys != expected_registered_page_keys
-            or audited_business_page_keys != expected_audited_business_page_keys
-            or system_page_key != expected_system_page_key
-        ):
-            raise ValueError("system_audit_registry_contract_failed")
+        verified_registered_page_keys = expected_registered_page_keys
+        verified_audited_business_page_keys = expected_audited_business_page_keys
+        if registry_contract_field_count:
+            contract_matches_candidate = (
+                registered_page_keys == expected_registered_page_keys
+                and audited_business_page_keys == expected_audited_business_page_keys
+                and system_page_key == expected_system_page_key
+            )
+            compatible_previous_registry = False
+            if (
+                allow_compatible_previous_registry
+                and isinstance(registered_page_keys, list)
+                and isinstance(audited_business_page_keys, list)
+                and len(registered_page_keys) < len(expected_registered_page_keys)
+                and len(registered_page_keys) == len(set(registered_page_keys))
+            ):
+                registered_page_key_set = set(registered_page_keys)
+                compatible_previous_registry = (
+                    registered_page_keys
+                    == [
+                        page_key
+                        for page_key in expected_registered_page_keys
+                        if page_key in registered_page_key_set
+                    ]
+                    and audited_business_page_keys
+                    == [
+                        page_key
+                        for page_key in expected_audited_business_page_keys
+                        if page_key in registered_page_key_set
+                    ]
+                    and system_page_key == expected_system_page_key
+                )
+            if not contract_matches_candidate and not compatible_previous_registry:
+                raise ValueError("system_audit_registry_contract_failed")
+            verified_registered_page_keys = list(registered_page_keys)
+            verified_audited_business_page_keys = list(audited_business_page_keys)
         if not isinstance(summary, dict) or (
-            summary.get("registered_page_count") != len(expected_registered_page_keys)
-            or summary.get("audited_business_page_count") != len(expected_audited_business_page_keys)
-            or summary.get("passed_business_page_count") != len(expected_audited_business_page_keys)
+            summary.get("registered_page_count") != len(verified_registered_page_keys)
+            or summary.get("audited_business_page_count") != len(verified_audited_business_page_keys)
+            or summary.get("passed_business_page_count") != len(verified_audited_business_page_keys)
         ):
             raise ValueError("system_audit_page_count_or_contract_failed")
         if (
@@ -2154,8 +2185,8 @@ def _collect_system_audit(
         )
         if (
             not isinstance(page_results, list)
-            or len(page_results) != len(expected_audited_business_page_keys)
-            or page_result_keys != expected_audited_business_page_keys
+            or len(page_results) != len(verified_audited_business_page_keys)
+            or page_result_keys != verified_audited_business_page_keys
             or any(
                 not isinstance(page, dict)
                 or page.get("overall_status") != "pass"
@@ -2203,6 +2234,7 @@ def _wait_for_system_audit(
     poll_interval_seconds: float,
     request_fn: RequestFn,
     excluded_audit_ids: set[str],
+    allow_compatible_previous_registry: bool = False,
 ) -> dict[str, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
     last_result: dict[str, Any] = {"status": "fail", "error": "system_audit_not_attempted"}
@@ -2214,6 +2246,7 @@ def _wait_for_system_audit(
             headers=headers,
             timeout_seconds=timeout_seconds,
             request_fn=request_fn,
+            allow_compatible_previous_registry=allow_compatible_previous_registry,
         )
         if result.get("status") == "pass":
             audit_id = str(result.get("system_audit_id") or "")

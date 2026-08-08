@@ -292,6 +292,7 @@ def run_closure_gate(
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
             require_auth=not allow_unauthenticated_http,
+            allow_compatible_previous_registry=profile == "preflight",
         )
     )
     status = _overall_status(checks)
@@ -690,6 +691,7 @@ def _page_canonical_audit_check(
     timeout_seconds: float,
     poll_interval_seconds: float,
     require_auth: bool,
+    allow_compatible_previous_registry: bool = False,
 ) -> ClosureCheck:
     if require_auth and not _auth_configured(headers):
         return ClosureCheck(
@@ -713,6 +715,7 @@ def _page_canonical_audit_check(
         poll_interval_seconds=poll_interval_seconds,
         request_fn=write_operation_e2e_smoke._http_request,
         excluded_audit_ids=set(),
+        allow_compatible_previous_registry=allow_compatible_previous_registry,
     )
     verification_source = "current_http_api"
     candidate_audit: dict[str, Any] | None = None

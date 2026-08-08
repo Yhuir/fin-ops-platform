@@ -410,8 +410,9 @@ python -m fin_ops_platform.app.worker \
   512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
 - `runtime`/`acl` 激活前运行 `preflight`：用候选 gate 代码检查当前 stable runtime、worker/queue/RabbitMQ 收敛、
   隔离 PostgreSQL 可逆写探针和只读页面 canonical audit，不执行业务 mutation。候选 gate 读取旧
-  stable API 时，以候选内置页面 registry 对响应 summary 与逐页 proof 做严格对账；旧响应缺少 registry
-  明细字段可以由完整逐页 proof 证明，字段只返回一部分、漏页或顺序漂移仍 fail closed
+  stable API 时，完整 registry 可作为候选 registry 的无重复保序严格子集，以覆盖候选新增页面及 migration
+  尚未激活的窗口，但响应 summary、system page 与逐页 proof 必须对该旧 registry 完全自洽；未知页面、字段
+  部分缺失、顺序漂移或 proof 不完整仍 fail closed。T+0 起恢复候选 registry exact match，不再接受子集
 - `preflight` 的 worker readiness 使用当前 stable release 的 required worker inventory；新增 required
   worker 由激活阶段的 ensure helper 安装，并从 T+0 起按候选 registry 严格校验，避免候选 registry 在
   激活前把尚未部署的新 worker 误报为旧 runtime 故障

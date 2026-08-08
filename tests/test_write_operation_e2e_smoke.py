@@ -2108,6 +2108,63 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_registry_contract_failed")
 
+    def test_system_audit_accepts_complete_previous_registry_only_when_explicitly_allowed(
+        self,
+    ) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        payload = _system_audit_payload()
+        contract = payload["audit_contract"]
+        summary = payload["summary"]
+        snapshot = payload["database_system_snapshot"]
+        assert isinstance(contract, dict)
+        assert isinstance(summary, dict)
+        assert isinstance(snapshot, dict)
+        missing_page_key = "operation-history"
+        contract["registered_page_keys"] = [
+            page_key
+            for page_key in contract["registered_page_keys"]
+            if page_key != missing_page_key
+        ]
+        contract["audited_business_page_keys"] = [
+            page_key
+            for page_key in contract["audited_business_page_keys"]
+            if page_key != missing_page_key
+        ]
+        summary["registered_page_count"] -= 1
+        summary["audited_business_page_count"] -= 1
+        summary["passed_business_page_count"] -= 1
+        snapshot["page_results"] = [
+            page
+            for page in snapshot["page_results"]
+            if page["page_key"] != missing_page_key
+        ]
+        request = lambda *args: http_slo_probe.HttpProbeResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body=json.dumps(payload).encode(),
+        )
+
+        rejected = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request,
+        )
+        accepted = write_operation_e2e_smoke._collect_system_audit(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request,
+            allow_compatible_previous_registry=True,
+        )
+
+        self.assertEqual(rejected["error"], "system_audit_registry_contract_failed")
+        self.assertEqual(accepted["status"], "pass")
+
     def test_system_audit_rejects_previous_release_missing_business_page_proof(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         payload = _system_audit_payload()

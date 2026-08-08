@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fin_ops_platform.tools import runtime_sync_closure_gate as gate
 
@@ -569,6 +569,25 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         http_slo.assert_not_called()
         write_audit.assert_not_called()
         business_write_e2e.assert_not_called()
+
+    def test_preflight_allows_compatible_previous_page_registry(self) -> None:
+        page_audit = Mock(
+            return_value=gate.ClosureCheck(
+                "page_canonical_audit",
+                gate.PASS,
+                "pass",
+                {"status": "pass", "audit_count": 1},
+            )
+        )
+        with patch.object(gate, "_page_canonical_audit_check", page_audit):
+            gate.run_closure_gate(
+                object(),
+                base_url="https://example.test",
+                profile="preflight",
+            )
+            preflight_call = page_audit.call_args
+
+        self.assertTrue(preflight_call.kwargs["allow_compatible_previous_registry"])
 
     def test_runtime_health_empty_summary_prevents_closure_pass(self) -> None:
         with patch.object(
