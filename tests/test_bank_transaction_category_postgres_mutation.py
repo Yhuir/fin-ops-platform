@@ -172,6 +172,73 @@ def test_batch_writer_can_commit_canonical_facts_without_write_time_fan_out() ->
     assert "operation_barrier_targets" not in result
 
 
+class ManualAssignReplacementTransaction:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        normalized_sql = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized_sql:
+            return {
+                "bank_transaction_id": BANK_TRANSACTION_UUID,
+                "public_transaction_id": "bank-row-1",
+                "scope_month": "2026-02",
+            }
+        if "from app.bank_transaction_categories" in normalized_sql and "status = 'active'" in normalized_sql:
+            return {
+                "id": CATEGORY_UUID,
+                "category": "fee",
+                "source": "turnover_ledger",
+                "version": 3,
+                "raw_payload": {"normalized_payload": {"category_code": "fee"}},
+            }
+        if "from app.bank_transaction_category_confirmations" in normalized_sql and "status = 'active'" in normalized_sql:
+            return {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "category_code": "fee",
+                "candidate_category_codes": ["fee", "salary"],
+                "rule_version": "rules:3",
+                "version": 4,
+                "raw_payload": {},
+            }
+        if "select coalesce(max(version), 0) as version" in normalized_sql:
+            return {"version": 4}
+        if "insert into app.bank_transaction_categories" in normalized_sql:
+            return {"id": "44444444-4444-4444-4444-444444444444"}
+        raise AssertionError(f"unexpected fetch_one SQL: {normalized_sql} {params}")
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+        self.executed.append((" ".join(sql.lower().split()), params))
+        return 1
+
+
+def test_manual_assignment_atomically_replaces_active_category_and_confirmation() -> None:
+    transaction = ManualAssignReplacementTransaction()
+    repository = PostgresBankTransactionCategoryRepository(SimpleNamespace())
+
+    result = repository.apply_mutation(
+        transaction=transaction,
+        transaction_id="bank-row-1",
+        mutation_type="manual_assign",
+        record={
+            "category_code": "salary",
+            "category_primary_label": "薪资社保福利",
+            "category_sub_label": "工资",
+        },
+        actor_id="finance-user",
+        action="bank_detail_category_manually_assigned",
+        metadata={"assignment_source": "manual"},
+    )
+
+    statements = [statement for statement, _params in transaction.executed]
+    assert result["changed"] is True
+    assert result["version"] == 5
+    assert any("set status = 'superseded'" in statement for statement in statements)
+    assert any("set status = 'revoked'" in statement for statement in statements)
+    assert any("insert into app.bank_transaction_category_events" in statement for statement in statements)
+    assert any("insert into audit.events" in statement for statement in statements)
+
+
 class SelectionProofTransaction:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []

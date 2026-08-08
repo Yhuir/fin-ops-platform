@@ -77,6 +77,16 @@ class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
                         "turnover_family": "personal",
                         "source": "turnover_ledger",
                     },
+                    "txn-manual": {
+                        "category_code": "salary",
+                        "category_label": "工资",
+                        "category_label_path": ["费用", "工资"],
+                        "category_primary_label": "费用",
+                        "category_sub_label": "工资",
+                        "source": "manual",
+                        "manual_assignment": True,
+                        "category_version": 8,
+                    },
                 }
             ),
             auto_category_service=FakeAutoCategoryService(
@@ -88,6 +98,13 @@ class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
                         "category_label_path": ["货款", "设备采购"],
                         "category_primary_label": "货款",
                         "category_sub_label": "设备采购",
+                    },
+                    "txn-manual": {
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_label_path": ["费用", "手续费"],
+                        "category_primary_label": "费用",
+                        "category_sub_label": "手续费",
                     }
                 }
             ),
@@ -109,6 +126,11 @@ class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
                     "id": "txn-turnover",
                     "txn_direction": "inflow",
                     "amount": "300.00",
+                },
+                {
+                    "id": "txn-manual",
+                    "txn_direction": "outflow",
+                    "amount": "20.00",
                 },
                 {
                     "id": "txn-empty",
@@ -144,6 +166,9 @@ class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
             categories["txn-turnover"]["turnover_action_type"],
             "borrow_in_principal",
         )
+        self.assertEqual(categories["txn-manual"]["category_code"], "salary")
+        self.assertEqual(categories["txn-manual"]["source"], "manual")
+        self.assertEqual(categories["txn-manual"]["category_version"], 8)
         self.assertIsNone(categories["txn-empty"]["category_code"])
 
     def test_provider_has_no_read_model_freshness_or_enqueue_contract(self) -> None:

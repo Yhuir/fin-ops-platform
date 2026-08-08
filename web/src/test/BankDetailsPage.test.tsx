@@ -318,7 +318,7 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-internal-transfer-tooltip-value\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   });
 
-  test("shows read-only auto category and keeps manual category controls out of bank details", async () => {
+  test("shows auto category with a reclassification control", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderBankDetailsPage();
@@ -330,7 +330,7 @@ describe("Bank details page", () => {
     expect(autoCategory).toBeInTheDocument();
     const autoCategoryRow = autoCategory.closest("tr");
     expect(autoCategoryRow).toBeInstanceOf(HTMLElement);
-    expect(within(autoCategoryRow as HTMLElement).queryByRole("button", { name: "撤销" })).not.toBeInTheDocument();
+    expect(within(autoCategoryRow as HTMLElement).getByRole("button", { name: "撤销" })).toBeInTheDocument();
     expect(within(table).queryByLabelText("bank-detail-001 类型")).not.toBeInTheDocument();
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
     expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
@@ -343,6 +343,32 @@ describe("Bank details page", () => {
     await user.keyboard("{Escape}");
     expect(within(page).queryByText(/未保存/)).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
+  });
+
+  test("reclassifies an automatic category through a durable manual assignment", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    const table = await findBankTransactionSurface(page);
+    const autoCategory = await within(table).findByText("费用 / 工资");
+    const row = autoCategory.closest("tr");
+    expect(row).toBeInstanceOf(HTMLElement);
+
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "撤销" }));
+    const primaryMenu = await screen.findByRole("menu", { name: "重新分类主标签" });
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "内部往来款" }));
+    const childMenu = await screen.findByRole("menu", { name: "内部往来款可选标签" });
+    await user.click(within(childMenu).getByRole("menuitem", { name: "内部往来款" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-001/category-assignment",
+        expect.objectContaining({ body: JSON.stringify({ category_code: "internal_transfer" }) }),
+      );
+    });
   });
 
   test("shows counterpart transaction details when hovering internal transfer tag", async () => {
@@ -742,6 +768,7 @@ describe("Bank details page", () => {
     expect(confirmationPanel?.parentElement).toHaveClass("bank-category-confirmation-popper");
     expect(confirmationPanel?.parentElement?.parentElement).toBe(document.body);
     expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
+    expect(within(primaryMenu).getByRole("menuitem", { name: "内部往来款" })).toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "银行往来款" })).not.toBeInTheDocument();
 
@@ -840,7 +867,7 @@ describe("Bank details page", () => {
     expect(within(childMenu).getByRole("menuitem", { name: "人员薪酬" })).toBeInTheDocument();
   });
 
-  test("needs-confirmation rows group only matched candidates by primary tag", async () => {
+  test("needs-confirmation rows group matched candidates and the internal transfer override", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
@@ -856,10 +883,11 @@ describe("Bank details page", () => {
 
     const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
     expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
+    expect(within(primaryMenu).getByRole("menuitem", { name: "内部往来款" })).toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
 
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "费用" }));
-    const childMenu = await screen.findByRole("menu", { name: "费用候选标签" });
+    const childMenu = await screen.findByRole("menu", { name: "费用可选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "手续费" })).toBeInTheDocument();
     expect(within(childMenu).getByRole("menuitem", { name: "工资" })).toBeInTheDocument();
     expect(within(childMenu).queryByRole("menuitem", { name: "待收款" })).not.toBeInTheDocument();
@@ -869,13 +897,13 @@ describe("Bank details page", () => {
     expect(within(row as HTMLElement).getByRole("button", { name: "费用 / 工资" })).not.toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("menu", { name: "费用候选标签" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "费用可选标签" })).not.toBeInTheDocument();
     expect(requestUrls(fetchMock, "/api/bank-details/transactions/bank-detail-needs-confirmation/category-confirmation")).toHaveLength(0);
 
     await user.click(within(row as HTMLElement).getByRole("button", { name: "待确认" }));
     const reopenedPrimaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
     await user.click(within(reopenedPrimaryMenu).getByRole("menuitem", { name: "费用" }));
-    const reopenedChildMenu = await screen.findByRole("menu", { name: "费用候选标签" });
+    const reopenedChildMenu = await screen.findByRole("menu", { name: "费用可选标签" });
     await user.click(within(reopenedChildMenu).getByRole("menuitem", { name: "工资" }));
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => {
@@ -884,6 +912,33 @@ describe("Bank details page", () => {
         expect.objectContaining({ body: JSON.stringify({ category_code: "salary" }) }),
       );
     });
+  });
+
+  test("uses manual assignment when a needs-confirmation row is changed to internal transfer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
+    const table = await findBankTransactionSurface(page);
+    const row = (await within(table).findByText("候选供应商", { exact: true })).closest("tr");
+    expect(row).toBeInstanceOf(HTMLElement);
+
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "待确认" }));
+    const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
+    await user.click(within(primaryMenu).getByRole("menuitem", { name: "内部往来款" }));
+    const childMenu = await screen.findByRole("menu", { name: "内部往来款可选标签" });
+    await user.click(within(childMenu).getByRole("menuitem", { name: "内部往来款" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-needs-confirmation/category-assignment",
+        expect.objectContaining({ body: JSON.stringify({ category_code: "internal_transfer" }) }),
+      );
+    });
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions/bank-detail-needs-confirmation/category-confirmation")).toHaveLength(0);
   });
 
   test("external turnover confirmation submits the selected third-level label", async () => {
@@ -899,20 +954,20 @@ describe("Bank details page", () => {
     await user.click(within(table).getByRole("button", { name: "待确认" }));
     const primaryMenu = await screen.findByRole("menu", { name: "待确认主标签" });
     await user.click(within(primaryMenu).getByRole("menuitem", { name: "外部往来款付款" }));
-    const childMenu = await screen.findByRole("menu", { name: "外部往来款付款候选标签" });
+    const childMenu = await screen.findByRole("menu", { name: "外部往来款付款可选标签" });
     expect(within(childMenu).getByRole("menuitem", { name: "借出款" })).toBeInTheDocument();
     expect(within(childMenu).getByRole("menuitem", { name: "归还借款" })).toBeInTheDocument();
     expect(within(childMenu).queryByRole("menuitem", { name: "借出款 / 公司往来" })).not.toBeInTheDocument();
 
     await user.click(within(childMenu).getByRole("menuitem", { name: "归还借款" }));
-    const repaymentThirdMenu = await screen.findByRole("menu", { name: "归还借款候选业务类型" });
+    const repaymentThirdMenu = await screen.findByRole("menu", { name: "归还借款可选业务类型" });
     expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "个人往来" })).toBeInTheDocument();
     expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "公司往来" })).toBeInTheDocument();
     expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "银行往来" })).toBeInTheDocument();
     expect(within(repaymentThirdMenu).getByRole("menuitem", { name: "业务往来" })).toBeInTheDocument();
 
     await user.click(within(childMenu).getByRole("menuitem", { name: "借出款" }));
-    const thirdMenu = await screen.findByRole("menu", { name: "借出款候选业务类型" });
+    const thirdMenu = await screen.findByRole("menu", { name: "借出款可选业务类型" });
     expect(within(thirdMenu).getByRole("menuitem", { name: "个人往来" })).toBeInTheDocument();
     expect(within(thirdMenu).getByRole("menuitem", { name: "公司往来" })).toBeInTheDocument();
     expect(within(thirdMenu).getByRole("menuitem", { name: "银行往来" })).toBeInTheDocument();

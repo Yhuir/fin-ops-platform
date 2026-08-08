@@ -384,21 +384,57 @@ class PostgresBankTransactionCategoryRepository:
         record: dict[str, Any],
         actor_id: str,
     ) -> dict[str, object]:
-        if cls._active_manual(
+        current = cls._active_manual(
             transaction,
             bank_transaction_id=bank_transaction_id,
             public_transaction_id=public_transaction_id,
-        ) is not None or cls._active_confirmation(
+        )
+        confirmation = cls._active_confirmation(
             transaction,
             bank_transaction_id=bank_transaction_id,
             public_transaction_id=public_transaction_id,
-        ) is not None:
-            raise BankTransactionCategoryValidationError(
-                "invalid_manual_category_assignment_target",
-                "当前流水已有人工标签或候选确认状态，不能走人工待分类入口。",
-                transaction_id=public_transaction_id,
-            )
+        )
         payload = cls._normalized_record(record, source="manual", actor_id=actor_id, manual_assignment=True)
+        current_payload = cls._normalized_payload(current)
+        semantic_fields = (
+            "category_code",
+            "category_primary_label",
+            "category_sub_label",
+            "category_third_label",
+            "category_label_path",
+            "turnover_action_type",
+            "turnover_family",
+        )
+        if (
+            isinstance(current, dict)
+            and text(current.get("source")) == "manual"
+            and bool(current_payload.get("manual_assignment"))
+            and confirmation is None
+            and all(current_payload.get(field) == payload.get(field) for field in semantic_fields)
+        ):
+            return {"changed": False, "version": int_value(current.get("version"), 1)}
+        if isinstance(current, dict):
+            transaction.execute(
+                """
+                update app.bank_transaction_categories
+                set status = 'superseded', updated_at = now()
+                where id = %s::uuid
+                """,
+                (current["id"],),
+            )
+        if isinstance(confirmation, dict):
+            transaction.execute(
+                """
+                update app.bank_transaction_category_confirmations
+                set status = 'revoked', revoked_by = %s, revoked_at = now(), version = version + 1
+                where id = %s::uuid
+                """,
+                (actor_id, confirmation["id"]),
+            )
+        payload["version"] = max(
+            int_value(current.get("version") if current else None, 0),
+            int_value(confirmation.get("version") if confirmation else None, 0),
+        ) + 1
         return cls._insert_category(
             transaction,
             bank_transaction_id=bank_transaction_id,
@@ -406,6 +442,16 @@ class PostgresBankTransactionCategoryRepository:
             payload=payload,
             event_type="manual_assignment",
         )
+
+    @staticmethod
+    def _normalized_payload(record: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(record, dict):
+            return {}
+        raw_payload = record.get("raw_payload")
+        if not isinstance(raw_payload, dict):
+            return {}
+        normalized = raw_payload.get("normalized_payload")
+        return dict(normalized) if isinstance(normalized, dict) else dict(raw_payload)
 
     @classmethod
     def _assign_turnover(

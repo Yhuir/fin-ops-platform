@@ -140,6 +140,10 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("join classified row on row.row_id = page.row_id", page_sql)
         self.assertNotIn("select *\n    from classified\n    where", page_sql)
         self.assertIn("effective_categories as (", page_sql)
+        effective_sql = page_sql.split("effective_categories as (", 1)[1].split("enriched as (", 1)[0]
+        self.assertNotIn("and internal.row_id is null", effective_sql)
+        self.assertNotIn("and auto.definition is null", effective_sql)
+        self.assertIn("auto.definition->>'code' = 'external_turnover'", effective_sql)
         self.assertIn("enriched as (", page_sql)
         self.assertIn("classified_source as (", page_sql)
         self.assertNotIn("effective_categories as materialized", page_sql)

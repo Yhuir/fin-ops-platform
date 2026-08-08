@@ -275,8 +275,7 @@
 
 ## 2026-06-19 - 权限矩阵银行明细人工待分类 opener
 
-- 本轮补齐权限矩阵中银行明细 `unmatched` 人工待分类动态入口：`web/e2e/permissions-role-matrix.spec.ts` 新增 `bank-details:manual-category-assignment` opener，在 `read_export_only` session 下进入 `/bank-details`，定位未匹配流水，断言 `待分类` 按钮禁用、`待分类主标签` 菜单不打开、`保存` 不出现，并复扫 visible enabled 写控件候选。
-- 该场景断言 `POST /api/bank-details/transactions/bk-o-202603-001/category-assignment` 零调用、durable mutation 零调用、browser error 零残留；这是测试/mock 加固，不改产品逻辑。
+- 银行明细 `category-assignment` 权限矩阵同时覆盖 `unmatched` 人工待分类和自动标签重新分类：`read_export_only` session 下 `待分类` 与自动标签“撤销”按钮均禁用，菜单不打开、`POST /api/bank-details/transactions/bk-o-202603-001/category-assignment` 零调用、browser error 零残留。
 - 文档影响：更新 `docs/modules/permissions-and-audit/e2e-coverage.md`、`docs/modules/permissions-and-audit/write-entry-inventory.md`、`docs/modules/permissions-and-audit/tests.md`、`docs/dev/testing.md` 和 `docs/dev/spec-first-e2e-inventory.md`。
 - 验证：`cd web && npx playwright test e2e/permissions-role-matrix.spec.ts --project=chromium -g "read-export users cannot trigger bank detail manual assignment controls"` 通过 1 test；`cd web && npx playwright test e2e/permissions-role-matrix.spec.ts --project=chromium` 通过 7 tests；`cd web && npm run e2e:smoke` 通过 151 tests / 151 passed；`PYTHONPATH=backend/src python3 -m unittest tests.test_permissions_write_entry_inventory -v` 通过 14 tests。
 - 当前边界：`PERM-E2E-003` 仍为 partial，因为尚未自动打开所有页面特定抽屉/弹窗；真实 OA role sync、代理下载 header 和生产审计 smoke 仍需 staging/生产 gate。

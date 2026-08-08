@@ -408,7 +408,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertIn("费用", bank_row["tags"])
         self.assertIn("手续费", bank_row["tags"])
 
-    def test_bank_rows_manual_category_history_does_not_override_auto_effective_category(self) -> None:
+    def test_bank_rows_non_assignment_manual_history_does_not_override_auto_effective_category(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,

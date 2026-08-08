@@ -252,7 +252,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect(primaryMenu).toBeVisible();
     await primaryMenu.getByRole("menuitem", { name: "成本" }).click();
 
-    const candidateMenu = page.getByRole("menu", { name: "成本候选标签" });
+    const candidateMenu = page.getByRole("menu", { name: "成本可选标签" });
     await expect(candidateMenu).toBeVisible();
     await candidateMenu.getByRole("menuitem", { name: "设备款" }).click();
     await page.getByRole("button", { name: "保存" }).click();

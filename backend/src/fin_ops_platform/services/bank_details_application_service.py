@@ -20,6 +20,7 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BankTransactionAutoCategoryService,
 )
 from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE,
     BankTransactionCategoryService,
     BankTransactionCategoryValidationError,
 )
@@ -300,18 +301,14 @@ class BankDetailsApplicationService:
                 )
                 or "unmatched"
             )
-        if previous_resolution_status != "unmatched":
-            raise BankTransactionCategoryValidationError(
-                "invalid_manual_category_assignment_target",
-                "当前流水已有自动标签或候选确认状态，不能走人工待分类入口。",
-                transaction_id=transaction_id,
-            )
-        if selected_code not in set(
-            self._active_bank_auto_tag_rule_codes()
-        ):
+        assignable_codes = {
+            *self._active_bank_auto_tag_rule_codes(),
+            BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE,
+        }
+        if selected_code not in assignable_codes:
             raise BankTransactionCategoryValidationError(
                 "invalid_manual_category_assignment_candidate",
-                "只能选择当前自动标签规则中的可用标签。",
+                "只能选择当前可用的银行明细标签。",
                 transaction_id=transaction_id,
             )
         with self._category_mutation_lock:

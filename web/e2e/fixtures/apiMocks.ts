@@ -9834,11 +9834,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           affected_months: ["2026-03"],
         });
       }
-      const primaryLabel = String(body.category_primary_label ?? "费用");
-      const subLabel = String(body.category_sub_label ?? "工资");
+      const categoryCode = String(body.category_code ?? "salary");
+      const internalTransfer = categoryCode === "internal_transfer";
+      const primaryLabel = String(body.category_primary_label ?? (internalTransfer ? "内部往来款" : "费用"));
+      const subLabel = String(body.category_sub_label ?? (internalTransfer ? "" : "工资"));
       const thirdLabel = body.category_third_label ? String(body.category_third_label) : null;
       bankDetailsCategoryOverride = {
-        categoryCode: String(body.category_code ?? "salary"),
+        categoryCode,
         primaryLabel,
         subLabel,
         thirdLabel,

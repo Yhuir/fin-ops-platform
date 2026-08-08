@@ -140,7 +140,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
 | `cost-statistics:tag-rules` | `cost-statistics` | 成本统计标签规则抽屉 | read-export 下可查看规则，但 `保存` disabled，`PUT /api/cost-statistics/tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
 | `bank-details:category-confirmation` | `bank-details` | 银行明细行内分类确认入口 | read-export 下待确认分类按钮禁用，分类菜单不打开，category-confirmation durable mutation 零调用，且复扫候选。 |
-| `bank-details:manual-category-assignment` | `bank-details` | 银行明细未匹配人工分类入口 | read-export 下待分类按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
+| `bank-details:manual-category-assignment` | `bank-details` | 银行明细待分类/待确认/自动标签人工覆盖入口 | read-export 下待分类与自动标签“撤销”按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
 | `bank-flow-rule-batches:tag-drawer` | `bank-flow-rule-batches` | 流水规则批量处理标签规则抽屉 | read-export 下提交/撤回入口不可见，标签规则 OA/发票复选框和保存禁用，且复扫候选。 |
 | `pending-invoices:expense-rules` | `pending-invoices` | 支出待找发票规则抽屉 | read-export 下选择发票禁用、规则保存禁用，且复扫候选。 |
 | `pending-invoices:income-rules` | `pending-invoices` | 收入待找发票规则抽屉 | read-export 下收入规则保存禁用、规则 PUT 零调用，且复扫候选。 |

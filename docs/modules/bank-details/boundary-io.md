@@ -17,7 +17,7 @@
 
 - 银行流水账户列表、余额、筛选、分页、统计、分类 facets、关系标签和 XLSX 导出。
 - 自动标签规则展示、CAS 保存、文件替换、reapply 审计。
-- 候选确认/撤销、人工补分类/清除的 canonical category fact、event 和 audit；有效标签变化时，同一事务通过正式 relation command/repository 重冻结受影响 active 普通关系的配对要求。
+- 候选确认/撤销、人工分类覆盖/清除的 canonical category fact、event 和 audit；人工覆盖原子替换旧 active category/confirmation，并在所有消费端优先于当前自动规则；有效标签变化时，同一事务通过正式 relation command/repository 重冻结受影响 active 普通关系的配对要求。
 - 当前页面写成功后的一次 direct GET 重新读取。
 
 ### 不负责
@@ -35,11 +35,11 @@
 | 流水查询 | `GET /api/bank-details/transactions` | `account_key`、日期、keyword、分类层级、page、page_size；page 从 1 开始，page_size 为 1..500。所有过滤、排序和分页在 SQL 完成。 |
 | 导出查询 | `GET /api/bank-details/transactions/export` | `mode=all|account` 与同一筛选合同；复用 canonical query，读取上限为 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`，超限返回业务错误。 |
 | canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、金额、余额、银行文本和时间语义。 |
-| 分类与确认事实 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、settings 标签规则 | 当前 active 事实与当前规则共同决定 effective category、候选和 facets；不读取 `read_model.bank_detail_rows`。 |
+| 分类与确认事实 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、settings 标签规则 | active confirmation 只用于候选确认；`source=manual, manual_assignment=true` 是持久人工覆盖并优先于当前自动规则，清除后才重新暴露当前自动结果；不读取 `read_model.bank_detail_rows`。 |
 | 分类写闭环 | 当前 effective category + 同一 settings snapshot + active relation | 分类事实、relation requirement metadata 与 relation history 在同一 PostgreSQL 事务提交；无标签变化或无 active relation 时短路。规则保存本身不追溯改写关系。 |
 | 正式关系事实 | `app.workbench_pair_relations` | 只读取 `status=active`；按当前可见/导出目标 legacy + canonical row IDs 做 bounded overlap；排除 `turnover_manual_closure`，不读取 `read_model.workbench_relation*`。 |
 | 账户映射 | canonical app settings | 账户 identity/display mapping 与 active tag definitions 由 PostgreSQL snapshot 读取。 |
-| 写请求 | route session + JSON body | 保持权限、CAS、候选合法性、重复/冲突、审计和幂等合同；route 不做业务组合或 SQL。 |
+| 写请求 | route session + JSON body | 候选确认只接受当前候选；人工覆盖只接受当前 active 自动标签或系统 `internal_transfer`，可替换 unmatched/auto/confirmation 状态；保持权限、重复/冲突、审计和幂等合同，route 不做业务组合或 SQL。 |
 
 ## 输出 I/O
 

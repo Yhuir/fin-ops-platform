@@ -809,6 +809,16 @@ type ConfirmationChoiceGroup = {
   choices: ConfirmationChoice[];
 };
 
+const INTERNAL_TRANSFER_MANUAL_CHOICE: ConfirmationChoice = {
+  categoryCode: "internal_transfer",
+  primaryLabel: "内部往来款",
+  subLabel: null,
+  thirdLabel: null,
+  labelPath: ["内部往来款"],
+  turnoverActionType: null,
+  turnoverFamily: null,
+};
+
 type ConfirmationChoiceSubGroup = {
   key: string;
   subLabel: string;
@@ -938,7 +948,10 @@ function activeAutoRuleChoiceKeySet(rules: BankAutoTagEditableRule[]) {
 function buildAssignmentChoiceGroups(
   activeRules: BankAutoTagEditableRule[],
 ): ConfirmationChoiceGroup[] {
-  return buildConfirmationChoiceGroupsFromChoices(activeRules.flatMap(confirmationChoicesFromAutoTagRule));
+  return buildConfirmationChoiceGroupsFromChoices([
+    ...activeRules.flatMap(confirmationChoicesFromAutoTagRule),
+    INTERNAL_TRANSFER_MANUAL_CHOICE,
+  ]);
 }
 
 function buildConfirmationChoiceGroupsFromChoices(
@@ -969,7 +982,7 @@ function buildConfirmationChoiceGroups(
   activeRules: BankAutoTagEditableRule[],
 ): ConfirmationChoiceGroup[] {
   const activeChoiceKeys = activeAutoRuleChoiceKeySet(activeRules);
-  return buildConfirmationChoiceGroupsFromChoices(candidates.map((candidate) => {
+  return buildConfirmationChoiceGroupsFromChoices([...candidates.map((candidate) => {
     const candidateChoice = confirmationChoiceFromCandidate(candidate);
     if (!candidateChoice) {
       return null;
@@ -977,7 +990,7 @@ function buildConfirmationChoiceGroups(
     return activeChoiceKeys.has(choiceKey(candidateChoice)) || activeChoiceKeys.has(`${candidateChoice.categoryCode}\u0000`)
       ? candidateChoice
       : null;
-  }));
+  }), INTERNAL_TRANSFER_MANUAL_CHOICE]);
 }
 
 function TypeCell({
@@ -1018,17 +1031,23 @@ function TypeCell({
     [autoTagRules, row.autoCandidateCategories, row.categoryResolutionStatus],
   );
   const assignmentGroups = useMemo(
-    () => (row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode
+    () => ((row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode) || row.effectiveCategorySource === "auto"
       ? buildAssignmentChoiceGroups(autoTagRules)
       : []),
-    [autoTagRules, row.categoryResolutionStatus, row.effectiveCategoryCode],
+    [autoTagRules, row.categoryResolutionStatus, row.effectiveCategoryCode, row.effectiveCategorySource],
   );
-  const isManualAssignment = assignmentGroups.length > 0;
+  const confirmationChoiceKeys = useMemo(() => new Set(
+    row.autoCandidateCategories
+      .map(confirmationChoiceFromCandidate)
+      .filter((choice): choice is ConfirmationChoice => Boolean(choice))
+      .map(choiceKey),
+  ), [row.autoCandidateCategories]);
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
-  const selectionLabel = confirmationGroups.length > 0 ? "待确认" : "待分类";
+  const autoCategoryCanBeReassigned = row.effectiveCategorySource === "auto" && Boolean(row.effectiveCategoryCode);
+  const selectionLabel = autoCategoryCanBeReassigned ? "重新分类" : confirmationGroups.length > 0 ? "待确认" : "待分类";
   const triggerLabel = stagedChoice ? choiceDisplayLabel(stagedChoice) : selectionLabel;
-  const childLabelSuffix = confirmationGroups.length > 0 ? "候选标签" : "可选标签";
-  const thirdLabelSuffix = confirmationGroups.length > 0 ? "候选业务类型" : "可选业务类型";
+  const childLabelSuffix = "可选标签";
+  const thirdLabelSuffix = "可选业务类型";
   const [selectedPrimaryKey, setSelectedPrimaryKey] = useState("");
   const [selectedSubKey, setSelectedSubKey] = useState("");
   const selectedGroup = selectionGroups.find((group) => group.key === selectedPrimaryKey) ?? selectionGroups[0] ?? null;
@@ -1129,12 +1148,75 @@ function TypeCell({
     }
     const choice = stagedChoice;
     setAnchorEl(null);
-    const request = isManualAssignment ? onAssign(row, choice) : onConfirm(row, choice);
+    const request = row.categoryResolutionStatus === "needs_confirmation" && confirmationChoiceKeys.has(choiceKey(choice))
+      ? onConfirm(row, choice)
+      : onAssign(row, choice);
     request
       .then(() => setStagedChoice(null))
       .catch(() => setStagedChoice(null));
   };
   useCloseOnOutsidePointer(Boolean(anchorEl), [confirmationRef, confirmationPanelRef], closeConfirmationPanel);
+
+  const autoCategoryDisplay = (() => {
+    if (!row.autoCategoryCode || !row.autoCategoryLabel) {
+      return <span className="bank-auto-type-empty">-</span>;
+    }
+    const structuredLabelPath = [row.autoCategoryPrimaryLabel, row.autoCategorySubLabel]
+      .map((value) => value?.trim() ?? "")
+      .filter(Boolean);
+    const effectiveStructuredLabelPath = [row.effectiveCategoryPrimaryLabel, row.effectiveCategorySubLabel]
+      .map((value) => value?.trim() ?? "")
+      .filter(Boolean);
+    const displayLabel = structuredLabelPath.length > 0
+      ? structuredLabelPath.join(" / ")
+      : row.autoCategoryLabelPath.length > 0
+      ? row.autoCategoryLabelPath.join(" / ")
+      : effectiveStructuredLabelPath.length > 0
+      ? effectiveStructuredLabelPath.join(" / ")
+      : row.autoCategoryLabel;
+    const counterpart = row.autoCategoryCode === "internal_transfer" ? row.internalTransferCounterpart : null;
+    const categoryTag = (
+      <BankCategoryTag
+        categoryCode={row.autoCategoryCode}
+        compact
+        hierarchyTooltip={!counterpart}
+        label={displayLabel}
+      />
+    );
+    if (!counterpart) {
+      return categoryTag;
+    }
+    const accountText = [counterpart.bankName, counterpart.accountLast4].filter(Boolean).join(" ") || "-";
+    const tooltipId = `bank-internal-transfer-tooltip-${row.id}`;
+    return (
+      <span
+        aria-describedby={internalTooltipOpen ? tooltipId : undefined}
+        className="bank-internal-transfer-tag-anchor"
+        onBlur={() => setInternalTooltipOpen(false)}
+        onFocus={() => setInternalTooltipOpen(true)}
+        onMouseEnter={() => setInternalTooltipOpen(true)}
+        onMouseLeave={() => setInternalTooltipOpen(false)}
+        tabIndex={0}
+      >
+        {categoryTag}
+        {internalTooltipOpen ? (
+          <span className="bank-internal-transfer-tooltip" id={tooltipId} role="tooltip">
+            <span className="bank-internal-transfer-tooltip-title">对应内部往来流水</span>
+            <span className="bank-internal-transfer-tooltip-grid">
+              <span className="bank-internal-transfer-tooltip-label">时间</span>
+              <span className="bank-internal-transfer-tooltip-value">{counterpart.tradeTime || "-"}</span>
+              <span className="bank-internal-transfer-tooltip-label">账户</span>
+              <span className="bank-internal-transfer-tooltip-value">{accountText}</span>
+              <span className="bank-internal-transfer-tooltip-label">金额</span>
+              <span className="bank-internal-transfer-tooltip-value bank-internal-transfer-tooltip-amount">{formatMoney(counterpart.amount) || "-"}</span>
+              <span className="bank-internal-transfer-tooltip-label">对方户名</span>
+              <span className="bank-internal-transfer-tooltip-value">{counterpart.counterpartyName || "-"}</span>
+            </span>
+          </span>
+        ) : null}
+      </span>
+    );
+  })();
 
   if (selectionGroups.length > 0) {
     const confirmationPanelStyle = confirmationPanelPosition ? ({
@@ -1251,6 +1333,31 @@ function TypeCell({
       </div>,
       document.body,
     ) : null;
+    const openSelection = (event: MouseEvent<HTMLButtonElement>) => {
+      if (canMutateData && !confirming) {
+        setAnchorEl(event.currentTarget);
+        updateConfirmationPanelPosition(event.currentTarget);
+      }
+    };
+    if (autoCategoryCanBeReassigned) {
+      return (
+        <span ref={confirmationRef} className="bank-manual-category-stack">
+          {autoCategoryDisplay}
+          <button
+            aria-controls={anchorEl ? `bank-category-confirmation-${row.id}` : undefined}
+            aria-expanded={anchorEl ? "true" : undefined}
+            aria-haspopup="menu"
+            className="bank-manual-category-revoke"
+            disabled={!canMutateData || confirming}
+            onClick={openSelection}
+            type="button"
+          >
+            撤销
+          </button>
+          {confirmationPanel}
+        </span>
+      );
+    }
     return (
       <span ref={confirmationRef} className="bank-category-confirmation-host">
         <button
@@ -1258,14 +1365,9 @@ function TypeCell({
           aria-expanded={anchorEl ? "true" : undefined}
           aria-haspopup="menu"
           className="bank-category-confirmation-trigger"
-          onClick={(event) => {
-            if (canMutateData && !confirming) {
-              setAnchorEl(event.currentTarget);
-              updateConfirmationPanelPosition(event.currentTarget);
-            }
-          }}
+          onClick={openSelection}
           aria-disabled={!canMutateData || confirming ? "true" : undefined}
-          data-tone={isManualAssignment ? "info" : "warning"}
+          data-tone={confirmationGroups.length > 0 ? "warning" : "info"}
           disabled={!canMutateData || confirming}
           type="button"
         >
@@ -1307,66 +1409,7 @@ function TypeCell({
       </span>
     );
   }
-  if (!row.autoCategoryCode || !row.autoCategoryLabel) {
-    return <span className="bank-auto-type-empty">-</span>;
-  }
-  const structuredLabelPath = [row.autoCategoryPrimaryLabel, row.autoCategorySubLabel]
-    .map((value) => value?.trim() ?? "")
-    .filter(Boolean);
-  const effectiveStructuredLabelPath = [row.effectiveCategoryPrimaryLabel, row.effectiveCategorySubLabel]
-    .map((value) => value?.trim() ?? "")
-    .filter(Boolean);
-  const displayLabel = structuredLabelPath.length > 0
-    ? structuredLabelPath.join(" / ")
-    : row.autoCategoryLabelPath.length > 0
-    ? row.autoCategoryLabelPath.join(" / ")
-    : effectiveStructuredLabelPath.length > 0
-    ? effectiveStructuredLabelPath.join(" / ")
-    : row.autoCategoryLabel;
-  const counterpart = row.autoCategoryCode === "internal_transfer" ? row.internalTransferCounterpart : null;
-  const categoryTag = (
-    <BankCategoryTag
-      categoryCode={row.autoCategoryCode}
-      compact
-      hierarchyTooltip={!counterpart}
-      label={displayLabel}
-    />
-  );
-  if (!counterpart) {
-    return categoryTag;
-  }
-  const accountText = [counterpart.bankName, counterpart.accountLast4].filter(Boolean).join(" ") || "-";
-  const tooltipId = `bank-internal-transfer-tooltip-${row.id}`;
-  return (
-    <span
-      aria-describedby={internalTooltipOpen ? tooltipId : undefined}
-      className="bank-internal-transfer-tag-anchor"
-      onBlur={() => setInternalTooltipOpen(false)}
-      onFocus={() => setInternalTooltipOpen(true)}
-      onMouseEnter={() => setInternalTooltipOpen(true)}
-      onMouseLeave={() => setInternalTooltipOpen(false)}
-      tabIndex={0}
-    >
-      {categoryTag}
-      {internalTooltipOpen ? (
-        <span className="bank-internal-transfer-tooltip" id={tooltipId} role="tooltip">
-          <span className="bank-internal-transfer-tooltip-title">
-            对应内部往来流水
-          </span>
-          <span className="bank-internal-transfer-tooltip-grid">
-            <span className="bank-internal-transfer-tooltip-label">时间</span>
-            <span className="bank-internal-transfer-tooltip-value">{counterpart.tradeTime || "-"}</span>
-            <span className="bank-internal-transfer-tooltip-label">账户</span>
-            <span className="bank-internal-transfer-tooltip-value">{accountText}</span>
-            <span className="bank-internal-transfer-tooltip-label">金额</span>
-            <span className="bank-internal-transfer-tooltip-value bank-internal-transfer-tooltip-amount">{formatMoney(counterpart.amount) || "-"}</span>
-            <span className="bank-internal-transfer-tooltip-label">对方户名</span>
-            <span className="bank-internal-transfer-tooltip-value">{counterpart.counterpartyName || "-"}</span>
-          </span>
-        </span>
-      ) : null}
-    </span>
-  );
+  return autoCategoryDisplay;
 }
 
 function BankTextCell({ value }: { value: string }) {

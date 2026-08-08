@@ -1435,7 +1435,6 @@ def _classification_cte(
                  manual_category_raw_payload->>'manual_assignment',
                  'false'
                ) = 'true'
-               and auto_category_code is null
                 then manual_category_code
               when manual_category_code is not null
                and (
@@ -1454,7 +1453,6 @@ def _classification_cte(
                  manual_category_raw_payload->>'manual_assignment',
                  'false'
                ) = 'true'
-               and auto_category_code is null
                 then 'manual'
               when manual_category_code is not null
                and (

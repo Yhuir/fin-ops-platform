@@ -596,8 +596,6 @@ effective_categories as (
             when b.manual_category_code is not null
                  and b.manual_category_source = 'manual'
                  and coalesce((b.manual_category_payload->>'manual_assignment')::boolean, false)
-                 and internal.row_id is null
-                 and auto.definition is null
                 then b.manual_category_code
             when b.manual_category_code is not null
                  and (
@@ -614,8 +612,6 @@ effective_categories as (
             when b.manual_category_code is not null
                  and b.manual_category_source = 'manual'
                  and coalesce((b.manual_category_payload->>'manual_assignment')::boolean, false)
-                 and internal.row_id is null
-                 and auto.definition is null
                 then 'manual'
             when b.manual_category_code is not null
                  and (

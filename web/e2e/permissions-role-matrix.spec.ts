@@ -786,6 +786,25 @@ test.describe("permissions browser role matrix", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("read-export users cannot reclassify automatic bank detail labels", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "read_export_only",
+    });
+
+    await page.goto("/bank-details");
+    await expect(page.getByTestId("bank-details-page")).toBeVisible();
+    const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
+    await expect(bankRow.getByText("成本 / 设备款")).toBeVisible();
+    await expect(bankRow.getByRole("button", { name: "撤销" })).toBeDisabled();
+    await expect(page.getByRole("menu", { name: "重新分类主标签" })).toHaveCount(0);
+    await expectNoEnabledWriteControlCandidates(page);
+
+    expect(mutationCalls(api.calls)).toEqual([]);
+    expect(api.count("POST /api/bank-details/transactions/bk-o-202603-001/category-assignment")).toBe(0);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("read-export users cannot trigger workbench recovery write controls", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

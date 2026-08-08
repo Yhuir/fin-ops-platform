@@ -188,6 +188,8 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         relation_sql, relation_params = transaction.reads[2]
         normalized_main = " ".join(main_sql.split()).lower()
         normalized_relation = " ".join(relation_sql.split()).lower()
+        self.assertNotIn("manual_assignment', 'false') = 'true' and auto_category_code is null", normalized_main)
+        self.assertIn("auto_category_code = 'external_turnover'", normalized_main)
         self.assertIn("from app.bank_transactions bank", normalized_main)
         self.assertIn("left join lateral", normalized_main)
         self.assertIn("limit %s offset %s", normalized_main)

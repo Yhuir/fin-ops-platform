@@ -44,10 +44,11 @@ test.describe("bank details category confirmation browser flow", () => {
     const primaryMenu = page.getByRole("menu", { name: "待确认主标签" });
     await expect(primaryMenu).toBeVisible();
     await expect(primaryMenu.getByRole("menuitem", { name: "成本" })).toBeVisible();
+    await expect(primaryMenu.getByRole("menuitem", { name: "内部往来款" })).toBeVisible();
     await expect(primaryMenu.getByRole("menuitem", { name: "费用" })).toHaveCount(0);
 
     await primaryMenu.getByRole("menuitem", { name: "成本" }).click();
-    const candidateMenu = page.getByRole("menu", { name: "成本候选标签" });
+    const candidateMenu = page.getByRole("menu", { name: "成本可选标签" });
     await expect(candidateMenu).toBeVisible();
     await candidateMenu.getByRole("menuitem", { name: "设备款" }).click();
 
@@ -113,6 +114,7 @@ test.describe("bank details category confirmation browser flow", () => {
     const primaryMenu = page.getByRole("menu", { name: "待分类主标签" });
     await expect(primaryMenu).toBeVisible();
     await expect(primaryMenu.getByRole("menuitem", { name: "外部往来款付款" })).toBeVisible();
+    await expect(primaryMenu.getByRole("menuitem", { name: "内部往来款" })).toBeVisible();
     await primaryMenu.getByRole("menuitem", { name: "外部往来款付款" }).click();
 
     const choiceMenu = page.getByRole("menu", { name: "外部往来款付款可选标签" });
@@ -171,6 +173,45 @@ test.describe("bank details category confirmation browser flow", () => {
     expect(api.count(categoryPath("DELETE", "category-confirmation"))).toBe(0);
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThanOrEqual(3);
     await expect(row.getByRole("button", { name: "待分类" })).toBeEnabled();
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
+  test("replaces an automatic label with a persistent internal-transfer assignment", async ({ page }, testInfo) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+    const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
+
+    await page.goto("/bank-details");
+    await expect(page.getByTestId("bank-details-page")).toBeVisible();
+
+    const row = page.getByRole("row", { name: /智能工厂设备商/ });
+    await expect(row.getByText("成本 / 设备款")).toBeVisible();
+    await row.getByRole("button", { name: "撤销" }).click();
+
+    const primaryMenu = page.getByRole("menu", { name: "重新分类主标签" });
+    await expect(primaryMenu).toBeVisible();
+    expect(api.count(categoryPath("POST", "category-assignment"))).toBe(0);
+    await primaryMenu.getByRole("menuitem", { name: "内部往来款" }).click();
+    const choiceMenu = page.getByRole("menu", { name: "内部往来款可选标签" });
+    await choiceMenu.getByRole("menuitem", { name: "内部往来款" }).click();
+
+    await recordLatency({
+      operationId: "bank-details.override-auto-category",
+      visibleLabel: "保存",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse(categoryResponse("POST", "category-assignment"));
+      await page.getByRole("button", { name: "保存" }).click();
+      await mark("apiLatencyMs", saveResponse);
+      await mark("firstVisibleResponseLatencyMs", expect(row.getByText("内部往来款")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(row.getByRole("button", { name: "撤销" })).toBeEnabled());
+    });
+
+    await expect.poll(() => api.count(categoryPath("POST", "category-assignment"))).toBe(1);
+    expect(api.lastBody(categoryPath("POST", "category-assignment"))).toEqual({ category_code: "internal_transfer" });
+    expect(api.count(categoryPath("DELETE", "category-assignment"))).toBe(0);
+    expect(api.count(categoryPath("POST", "category-confirmation"))).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

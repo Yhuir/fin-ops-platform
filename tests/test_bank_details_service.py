@@ -807,7 +807,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(rows["txn-cmbc"]["summary_text"], "")
         self.assertEqual(rows["txn-cmbc"]["note_text"], "民生客户附言")
 
-    def test_saved_manual_category_does_not_override_auto_category(self) -> None:
+    def test_saved_manual_category_overrides_auto_category(self) -> None:
         transactions = [
             self._transaction(
                 transaction_id="txn-fee",
@@ -819,8 +819,9 @@ class BankDetailsServiceTests(unittest.TestCase):
             None,
             transaction_exists=lambda transaction_id: transaction_id == "txn-fee",
         )
-        category_service.apply_updates(
-            [{"transaction_id": "txn-fee", "category_code": "bonus", "expected_version": 0}],
+        category_service.assign_manual_category(
+            transaction_id="txn-fee",
+            category_code="bonus",
             actor="YNSYLP005",
         )
         service = BankDetailsService(
@@ -834,9 +835,10 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["manual_category_code"], "bonus")
         self.assertEqual(row["manual_category_source"], "manual")
         self.assertEqual(row["auto_category_code"], "fee")
-        self.assertEqual(row["effective_category_code"], "fee")
-        self.assertEqual(row["effective_category_source"], "auto")
-        self.assertEqual(row["category_code"], "fee")
+        self.assertEqual(row["effective_category_code"], "bonus")
+        self.assertEqual(row["effective_category_source"], "manual")
+        self.assertEqual(row["category_resolution_status"], "manual_confirmed")
+        self.assertEqual(row["category_code"], "bonus")
         self.assertEqual(row["category_version"], 1)
 
     def test_manual_category_classifies_unmatched_transaction(self) -> None:

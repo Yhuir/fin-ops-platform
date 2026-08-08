@@ -971,25 +971,47 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-self-tax-out"]["counterpart_id"], "txn-self-tax-in")
         self.assertEqual({item["category_code"] for item in suggestions.values()}, {"internal_transfer"})
 
-    def test_effective_category_ignores_manual_history_when_auto_exists(self) -> None:
+    def test_effective_category_prefers_manual_assignment_when_auto_exists(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(
             None,
             transaction_exists=lambda transaction_id: transaction_id == "txn-fee",
         )
-        category_service.apply_updates(
-            [{"transaction_id": "txn-fee", "category_code": "bonus", "expected_version": 0}],
+        category_service.assign_manual_category(
+            transaction_id="txn-fee",
+            category_code="bonus",
             actor="YNSYLP005",
         )
         auto = self.service.suggest_for_rows([{"id": "txn-fee", "summary": "网银手续费"}])["txn-fee"]
 
         effective = resolve_effective_category(category_service.get("txn-fee"), auto)
 
-        self.assertEqual(effective["effective_category_code"], "fee")
-        self.assertEqual(effective["effective_category_label"], "手续费")
-        self.assertEqual(effective["effective_category_primary_label"], "费用")
-        self.assertEqual(effective["effective_category_sub_label"], "手续费")
-        self.assertEqual(effective["effective_category_label_path"], ["费用", "手续费"])
-        self.assertEqual(effective["effective_category_source"], "auto")
+        self.assertEqual(effective["effective_category_code"], "bonus")
+        self.assertEqual(effective["effective_category_label"], "奖金")
+        self.assertEqual(effective["effective_category_source"], "manual")
+
+    def test_effective_category_preserves_legacy_turnover_selection_over_external_turnover(self) -> None:
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-turnover",
+        )
+        category_service.apply_updates(
+            [
+                {
+                    "transaction_id": "txn-turnover",
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "expected_version": 0,
+                }
+            ],
+            actor="YNSYLP005",
+        )
+
+        effective = resolve_effective_category(
+            category_service.get("txn-turnover"),
+            {"category_code": "external_turnover", "category_label": "外部往来款"},
+        )
+
+        self.assertEqual(effective["effective_category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(effective["effective_category_source"], "manual")
 
     def test_effective_category_uses_manual_category_when_auto_is_missing(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(

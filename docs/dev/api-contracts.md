@@ -665,9 +665,9 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 | `auto_candidate_category_codes` | 当前自动规则命中的候选标签 code 列表；只有 `needs_confirmation` 时用于页面选择。 |
 | `auto_candidate_categories` | 候选标签展示对象列表，包含 `category_code`、`category_label`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path`、`category_path`、`turnover_role`、`turnover_action_type`、`turnover_family`、`rule_code` 和 `reason`。 |
 
-当 `category_resolution_status=needs_confirmation` 时，前端只能展示 `auto_candidate_categories` 作为确认项，不得回退到全量银行明细标签字典。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。外部往来规则命中但缺少第三层标签时，候选项为同一规则展开出的 `个人往来`、`公司往来`、`银行往来`、`业务往来` 四类第三层标签，`turnover_action_type` 来自规则。
+当 `category_resolution_status=needs_confirmation` 时，前端展示 `auto_candidate_categories` 作为候选确认项，并额外提供系统 `内部往来款` 人工覆盖项；不得回退到其它未命中的标签。选择候选调用 confirmation API，选择 `内部往来款` 调用 assignment API。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。外部往来规则命中但缺少第三层标签时，候选项为同一规则展开出的 `个人往来`、`公司往来`、`银行往来`、`业务往来` 四类第三层标签，`turnover_action_type` 来自规则。
 
-当 `category_resolution_status=unmatched` 且没有 `effective_category_code` 时，前端可展示 `待分类` 人工补分类入口。该入口使用当前响应中的 `bank_transaction_tags.definitions` 过滤 active 标签后按普通主/子标签和外部往来三层标签展示，不能调用自动候选确认接口。
+当 `category_resolution_status=unmatched` 且没有 `effective_category_code` 时，前端展示 `待分类` 人工分类入口。该入口使用当前 active 自动标签并追加系统 `内部往来款`，按普通主/子标签和外部往来三层标签展示，不能调用自动候选确认接口。`effective_category_source=auto` 时，标签旁展示“撤销”；点击后打开同一人工分类菜单，保存新标签前不写数据。
 
 列表 `bank_transaction_tags.definitions` 只返回 code/path/label/status/source 与输出/往来展示元数据；自动匹配 `rules`、account scope 和其它执行期字段不得下发。rows 以 `effective_*`、`auto_*`、candidate 和 relation 字段为展示事实，不再返回与 `effective_*` 重复的旧 `category_*`、`manual_category_*` 别名或 `auto_category_evidence`。
 
@@ -696,7 +696,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 `POST /api/bank-details/transactions/{transaction_id}/category-assignment`
 
-为当前自动规则未命中的流水补充人工分类。请求体：
+为流水保存持久人工分类，可用于待分类、自动分类、候选确认或系统内部往来结果的人工覆盖。请求体：
 
 ```json
 {
@@ -710,11 +710,11 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 }
 ```
 
-后端必须重新计算当前流水的自动标签解析状态；只有当前状态为 `unmatched` 时允许写入来源为 `manual` 的人工分类。请求标签必须存在且处于启用状态；外部往来人工补分类必须携带第三层标签和可由规则解析的动作语义。`needs_confirmation`、`auto_matched`、`internal_transfer` 等状态返回 `400 invalid_manual_category_assignment_target`，不能用该接口绕过候选确认或覆盖确定性自动结果。成功后写审计动作 `bank_detail_category_manually_assigned`，记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`；不创建页面 RM fan-out，当前页面随后重新 GET。
+请求标签必须是当前 active 自动标签或系统 `internal_transfer`；外部往来人工分类必须携带第三层标签和可由规则解析的动作语义。写入在同一事务中 supersede 旧 active category、revoke 旧 active confirmation，并写 `source=manual, manual_assignment=true` 的新 fact/event/audit；重复保存相同人工语义幂等。该人工 fact 在银行明细、共享 effective-category provider 和下游 canonical query 中优先于当前自动规则。成功审计记录 `selected_category_code`、`previous_resolution_status` 和 `assignment_source=manual`；有效标签变化时同事务重冻结受影响 active 普通关系 requirement，不创建页面 RM fan-out，当前页面随后重新 GET。
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-assignment`
 
-只清除该流水从 `unmatched` / `待分类` 状态人工补上的 `manual` 分类事实。成功后原 category fact 进入 `cleared`，不得创建 active `unknown` 标签；页面立即回到 `unmatched` / `待分类`，允许重新选标签。成功响应包含 `changed` 和精确 `affected_months`，不返回 freshness target 或 operation barrier；银行明细页面通过正常 GET 收敛，并写审计动作 `bank_detail_category_manual_assignment_cleared`。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍必须调用 `/category-confirmation` 的 DELETE，确定性自动分配标签不提供撤销入口。
+只清除该流水当前 `source=manual, manual_assignment=true` 的人工覆盖。成功后原 category fact 进入 `cleared`，不得创建 active `unknown` 标签；下一次 GET 重新计算当前自动规则，结果可能是 `unmatched`、`needs_confirmation`、`auto_matched` 或 `internal_transfer`。成功响应包含 `changed` 和精确 `affected_months`，不返回 freshness target 或 operation barrier；银行明细页面通过正常 GET 收敛，并写审计动作 `bank_detail_category_manual_assignment_cleared`。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍调用 `/category-confirmation` 的 DELETE。
 
 `GET /api/bank-details/auto-tag-rules`
 

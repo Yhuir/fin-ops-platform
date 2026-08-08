@@ -12,19 +12,18 @@
 - 关系只读 `app.workbench_pair_relations.status='active'`，不读 Workbench 页面 payload
   或 `workbench_relation` distribution。
 - GET 不返回 read-model status/version/source/scope/job/barrier，不 enqueue、不 polling。
-- 自动标签、人工分类和候选确认/撤销保留权限、CAS、审计、幂等；成功后只重新 GET
-  当前 transactions。
+- 自动标签、人工覆盖和候选确认/撤销保留权限、CAS、审计、幂等；人工覆盖必须原子 supersede/revoke 旧 active facts，并在 direct query、共享 provider 和待找发票 canonical query 中优先于自动规则；成功后只重新 GET 当前 transactions。
 - 旧 runtime code/env/worker/event/backfill 保持删除；历史 migration/表只供回滚。
 
 ## 七类测试
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 适用 | `tests/test_bank_details_service.py`：标签、分类、候选、冲突、金额和空集 |
-| 2. Service/repository | 适用 | `tests/test_bank_category_relation_closure_service.py`、`tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_export_service.py`：分类与 requirement/history 原子闭环、提交后镜像增量、snapshot、set-based SQL、active relation、导出上限 |
-| 3. API contract | 适用 | `tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`：参数、权限、response shape、retired 字段缺失 |
+| 1. 业务核心 | 适用 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_details_service.py`、`tests/test_bank_transaction_effective_category_provider.py`：人工优先、自动恢复、标签、分类、候选、金额和空集 |
+| 2. Service/repository | 适用 | `tests/test_bank_transaction_category_postgres_mutation.py`、`tests/test_bank_category_relation_closure_service.py`、`tests/test_bank_details_canonical_query.py`、`tests/test_pending_invoice_canonical_query.py`：active category/confirmation 原子替换、requirement/history 闭环、set-based SQL 和跨页分类一致性 |
+| 3. API contract | 适用 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_routes.py`、`web/src/test/BankDetailsApi.test.ts`：自动/候选覆盖、内部往来选择、参数、权限和 response shape |
 | 4. Read model/cache/worker | 适用（负向） | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py`：旧 runtime 不得回归 |
-| 5. 前端交互 | 适用 | `web/src/test/BankDetailsPage.test.tsx`：loading/empty/error、筛选/分页/排序、账户、分类和写后 refetch |
+| 5. 前端交互 | 适用 | `web/src/test/BankDetailsPage.test.tsx`：loading/empty/error、筛选/分页/排序、自动标签撤销后重新分类、待确认/待分类内部往来选择和写后 refetch |
 | 6. 端到端 | 适用 | `web/e2e/bank-details-*.spec.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts`：导入/规则/分类/导出/canonical 可见 |
 | 7. 既有功能回归 | 适用 | 全量 backend/frontend/E2E；重点保护关联台、批量账务、成本、外部往来和 no-OA |
 
