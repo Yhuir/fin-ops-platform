@@ -465,6 +465,13 @@ python -m fin_ops_platform.app.worker \
 sudo /usr/local/sbin/finops-deploy-control status
 ```
 
+API 启动失败时，使用无参数的 `api-startup-error` 读取最近 30 分钟内经过限量和过滤的
+traceback 证据；该命令不开放任意 journal 查询，也不输出请求正文或运行时 env：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control api-startup-error
+```
+
 然后通过 root-owned helper 运行受控命令：
 
 ```bash

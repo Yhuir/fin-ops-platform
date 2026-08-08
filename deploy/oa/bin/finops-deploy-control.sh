@@ -110,6 +110,7 @@ commands:
   api-request-trace <request-id>
   api-request-timing <request-id>
                                       run the fixed production relation runner; admin token is read from stdin
+  api-startup-error                   print bounded, filtered API startup failure evidence
   read-model-refresh <release-name> [args]
                                       validate or enqueue read-model refresh scopes through the durable gateway
   settings-normalize <release-name> [--dry-run|--execute]
@@ -1941,6 +1942,16 @@ api_request_timing() {
   printf '%s\n' "$matches"
 }
 
+api_startup_error() {
+  [[ "$#" -eq 0 ]] || die "api-startup-error accepts no arguments"
+  local matches
+  matches="$(journalctl -u fin-ops.service --since '30 minutes ago' -n 400 --no-pager -o cat \
+    | grep -E 'Traceback \(most recent call last\)|File ".+", line [0-9]+|Worker failed to boot|[A-Za-z_][A-Za-z0-9_.]*(Error|Exception)(:|$)' \
+    | tail -n 120 || true)"
+  [[ -n "$matches" ]] || die "API startup error not found in the bounded journal window"
+  printf '%s\n' "$matches"
+}
+
 read_model_refresh() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-refresh requires release name"
@@ -2862,6 +2873,10 @@ case "$cmd" in
   api-request-timing)
     shift
     api_request_timing "$@"
+    ;;
+  api-startup-error)
+    shift
+    api_startup_error "$@"
     ;;
   read-model-refresh)
     shift
