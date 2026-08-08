@@ -50,17 +50,39 @@ async function scrollTableHorizontally(tableScroll: Locator) {
 }
 
 async function readCategoryMenuMetrics(menu: Locator) {
-  return menu.evaluate((element) => {
+  return menu.evaluate(async (element) => {
+    const panel = element.closest(".bank-category-filter-panel");
+    await Promise.allSettled(panel?.getAnimations({ subtree: true }).map((animation) => animation.finished) ?? []);
     const rect = element.getBoundingClientRect();
+    const styles = getComputedStyle(element);
     const primaryLabel = element.querySelector<HTMLElement>(".bank-category-filter-primary-row .bank-category-filter-label");
     const childLabel = element.querySelector<HTMLElement>(".bank-category-filter-child-row .bank-category-filter-label");
     const count = element.querySelector<HTMLElement>(".bank-category-filter-count");
     const row = element.querySelector<HTMLElement>(".bank-category-filter-row");
+    const groups = Array.from(element.querySelectorAll<HTMLElement>(".bank-category-filter-group"));
     return {
       childFontSize: childLabel ? Number.parseFloat(getComputedStyle(childLabel).fontSize) : 0,
-      columns: getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+      columns: styles.columnCount,
       countFontSize: count ? Number.parseFloat(getComputedStyle(count).fontSize) : 0,
+      groupCount: groups.length,
+      groupsWithinViewport: groups.every((group) => {
+        const groupRect = group.getBoundingClientRect();
+        return groupRect.left >= 0
+          && groupRect.right <= window.innerWidth
+          && groupRect.top >= 0
+          && groupRect.bottom <= window.innerHeight;
+      }),
+      hasInternalVerticalScroll: element.scrollHeight > element.clientHeight + 1,
+      overflowY: styles.overflowY,
       primaryFontSize: primaryLabel ? Number.parseFloat(getComputedStyle(primaryLabel).fontSize) : 0,
+      rect: {
+        bottom: rect.bottom,
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        width: rect.width,
+      },
       rowHeight: row?.getBoundingClientRect().height ?? 0,
       withinViewport: rect.left >= 0 && rect.right <= window.innerWidth && rect.top >= 0 && rect.bottom <= window.innerHeight,
     };
@@ -72,6 +94,7 @@ test.describe("bank details large table and overlay browser flow", () => {
     await page.setViewportSize({ width: 1280, height: 820 });
     await installDeterministicApiMocks(page, {
       bankDetailsClassificationMode: "unmatched",
+      bankDetailsDenseCategoryMenu: true,
       bankDetailsLargeDataset: true,
       sessionMode: "full_access",
     });
@@ -86,19 +109,51 @@ test.describe("bank details large table and overlay browser flow", () => {
     await expectVisibleAndUncovered(page.getByLabel("下一页"), "desktop next-page button");
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出" }), "desktop export button");
 
+    await tableContainer.evaluate((element) => {
+      element.scrollTop = 0;
+    });
     await page.getByRole("button", { name: /标签筛选/ }).click();
     const filterMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
-    await expectVisibleAndUncovered(filterMenu, "desktop category filter menu");
+    await expect(filterMenu).toBeVisible();
     await expect(filterMenu.getByRole("option", { name: /设备款 119/ })).toBeVisible();
     const desktopMenuMetrics = await readCategoryMenuMetrics(filterMenu);
     expect(desktopMenuMetrics).toMatchObject({
       childFontSize: 13,
-      columns: 3,
+      columns: "4",
       countFontSize: 12,
+      groupsWithinViewport: true,
+      hasInternalVerticalScroll: false,
+      overflowY: "visible",
       primaryFontSize: 14,
       withinViewport: true,
     });
-    expect(desktopMenuMetrics.rowHeight).toBeGreaterThanOrEqual(32);
+    expect(desktopMenuMetrics.groupCount).toBeGreaterThanOrEqual(10);
+    expect(desktopMenuMetrics.rowHeight).toBeGreaterThanOrEqual(31.5);
+
+    const menuBox = await filterMenu.boundingBox();
+    const tableBox = await tableContainer.boundingBox();
+    expect(menuBox).not.toBeNull();
+    expect(tableBox).not.toBeNull();
+    const outsidePoint = await page.evaluate(({ menu, table }) => {
+      const candidates = [
+        { x: table.x + 4, y: table.y + table.height / 2 },
+        { x: table.x + table.width - 4, y: table.y + table.height / 2 },
+        { x: table.x + table.width / 2, y: table.y + 4 },
+        { x: table.x + table.width / 2, y: table.y + table.height - 4 },
+      ];
+      return candidates.find((point) => (
+        point.x >= 0
+          && point.x < window.innerWidth
+          && point.y >= 0
+          && point.y < window.innerHeight
+          && !(point.x >= menu.x && point.x <= menu.x + menu.width && point.y >= menu.y && point.y <= menu.y + menu.height)
+      )) ?? null;
+    }, { menu: menuBox!, table: tableBox! });
+    expect(outsidePoint).not.toBeNull();
+    await page.mouse.move(outsidePoint!.x, outsidePoint!.y);
+    await page.mouse.wheel(0, 520);
+    await expect.poll(() => tableContainer.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(filterMenu).toBeVisible();
     await page.keyboard.press("Escape");
 
     const firstRow = page.getByRole("row", { name: /智能工厂设备商/ });
@@ -124,10 +179,11 @@ test.describe("bank details large table and overlay browser flow", () => {
 
     await page.getByRole("button", { name: /标签筛选/ }).click();
     const narrowFilterMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
-    await expectVisibleAndUncovered(narrowFilterMenu, "narrow category filter menu");
+    await expect(narrowFilterMenu).toBeVisible();
     await expect(narrowFilterMenu.getByRole("option", { name: /设备款 119/ })).toBeVisible();
     const narrowMenuMetrics = await readCategoryMenuMetrics(narrowFilterMenu);
-    expect(narrowMenuMetrics.columns).toBe(1);
-    expect(narrowMenuMetrics.withinViewport).toBe(true);
+    expect(narrowMenuMetrics.columns).toBe("auto");
+    expect(narrowMenuMetrics.hasInternalVerticalScroll).toBe(true);
+    expect(narrowMenuMetrics.withinViewport, JSON.stringify(narrowMenuMetrics)).toBe(true);
   });
 });

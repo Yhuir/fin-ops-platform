@@ -22757,36 +22757,34 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-panel {
-  width: min(960px, calc(100vw - 48px));
-  max-height: min(720px, calc(100vh - 32px));
-  overflow: hidden;
+  width: min(1200px, calc(100vw - 48px));
+  overflow: visible;
+  padding: 0;
   border: 1px solid var(--bank-border);
   border-radius: 10px;
   background: #ffffff;
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.14);
 }
 
 .bank-category-filter-dialog {
-  max-height: inherit;
-  overflow: hidden;
+  overflow: visible;
+  padding: 0;
   outline: none;
 }
 
 .bank-category-filter-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
-  gap: 10px 12px;
-  max-height: min(720px, calc(100vh - 32px));
-  overflow-x: hidden;
-  overflow-y: auto;
+  box-sizing: border-box;
+  display: block;
+  column-count: 4;
+  column-fill: balance;
+  column-gap: 12px;
+  overflow: visible;
   padding: 12px;
-  scrollbar-gutter: stable;
 }
 
 .bank-category-filter-actions {
   display: grid;
-  grid-column: 1 / -1;
+  column-span: all;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
@@ -22828,9 +22826,12 @@ body.column-layout-dragging {
   --bank-category-group-line: #cfd7e3;
   display: grid;
   align-content: start;
+  break-inside: avoid;
   min-width: 0;
+  width: 100%;
   gap: 2px;
   position: relative;
+  margin: 0 0 10px;
   padding: 7px 8px 8px 9px;
   border-radius: 8px;
   background: var(--bank-category-group-bg);
@@ -22968,19 +22969,40 @@ body.column-layout-dragging {
   text-align: center;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1150px) and (min-width: 901px) {
   .bank-category-filter-panel {
-    width: calc(100vw - 92px);
+    width: calc(100vw - 48px);
   }
 
   .bank-category-filter-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-count: 3;
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 900px), (max-height: 719px) {
+  .bank-category-filter-panel {
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    overflow: hidden;
+  }
+
+  .bank-category-filter-dialog {
+    max-height: inherit;
+    overflow: hidden;
+  }
+
   .bank-category-filter-list {
-    grid-template-columns: 1fr;
+    column-count: auto;
+    max-height: inherit;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 900px) {
+  .bank-category-filter-panel {
+    width: calc(100vw - 92px);
   }
 }
 

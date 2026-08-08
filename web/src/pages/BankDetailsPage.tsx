@@ -516,6 +516,7 @@ function BankCategoryFilterControl({
   onCategoryFilterChange = () => undefined,
 }: Partial<BankCategoryFilterControlProps>) {
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
+  const categoryFilterTriggerRef = useRef<HTMLDivElement>(null);
   const categoryGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
   const categoryFiltersByKey = useMemo(() => {
     const filters = new Map<string, BankCategoryFilter>([
@@ -574,6 +575,7 @@ function BankCategoryFilterControl({
         <PopoverTrigger
           aria-label={`标签筛选：${selectedCategoryLabel}`}
           className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
+          ref={categoryFilterTriggerRef}
           title={selectedCategoryLabel}
         >
           <Filter aria-hidden="true" size={18} strokeWidth={2.2} />
@@ -582,9 +584,11 @@ function BankCategoryFilterControl({
         <PopoverContent
           className="bank-category-filter-panel"
           containerPadding={12}
+          isNonModal
           maxHeight={720}
           offset={8}
           placement="left"
+          shouldCloseOnInteractOutside={(element) => !categoryFilterTriggerRef.current?.contains(element)}
         >
           <PopoverDialog aria-label="银行明细标签筛选" className="bank-category-filter-dialog">
             <ListBox

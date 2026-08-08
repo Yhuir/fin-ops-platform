@@ -69,6 +69,7 @@ type ApiMockOptions = {
   turnoverLedgerFailuresBeforeSuccess?: number;
   turnoverLedgerTotal?: number;
   bankDetailsClassificationMode?: BankDetailClassificationMockMode;
+  bankDetailsDenseCategoryMenu?: boolean;
   bankDetailsLargeDataset?: boolean;
   bankDetailsTransactionsEmpty?: boolean;
   bankDetailsTransactionsTotal?: number;
@@ -6702,6 +6703,7 @@ function bankTransactionsPayload(
   options: {
     classificationMode?: BankDetailClassificationMockMode;
     categoryOverride?: BankDetailCategoryOverride | null;
+    denseCategoryMenu?: boolean;
     largeDataset?: boolean;
     page?: number;
     pageSize?: number;
@@ -6946,6 +6948,46 @@ function bankTransactionsPayload(
     });
   }
   const equipmentPaymentCount = rows.filter((row) => row.effective_category_code === "equipment_payment").length;
+  const denseCategoryTags = options.denseCategoryMenu
+    ? [
+      ["handling_fee", "手续费", "费用"],
+      ["etc_fee", "过路费（ETC）", "费用"],
+      ["repair_fee", "修理费", "费用"],
+      ["rent_fee", "房屋使用费", "费用"],
+      ["vehicle_insurance", "车辆保险费", "费用"],
+      ["interest_fee", "利息", "费用"],
+      ["fixed_asset", "固定资产", "费用"],
+      ["fuel_fee", "汽油费", "费用"],
+      ["management_fee", "管理", "费用"],
+      ["training_fee", "培训费", "费用"],
+      ["office_fee", "办公", "费用"],
+      ["phone_fee", "电话费", "费用"],
+      ["social_security", "社保", "薪资社保福利"],
+      ["housing_fund", "公积金", "薪资社保福利"],
+      ["holiday_fee", "过节费", "薪资社保福利"],
+      ["security_refund", "退费（社保退费）", "薪资社保福利"],
+      ["deposit_payment", "保证金", "外部往来款付款"],
+      ["loan_repayment", "归还借款", "外部往来款付款"],
+      ["pledge_payment", "押金", "外部往来款付款"],
+      ["internal_transfer", "内部往来款", "内部往来款"],
+      ["tax_payment", "税", "税款"],
+      ["material_payment", "材料费", "货款"],
+      ["external_collection", "收回借出款", "外部往来款收款"],
+      ["other_income", "利息等", "其它收入"],
+      ["engineering_income", "工程款收入", "工程款收入"],
+      ["engineering_service", "技术服务费", "工程服务费"],
+      ["project_expense", "员工报销", "项目开销"],
+      ["petty_cash_deposit", "备用金存入", "备用金存入"],
+    ].map(([code, label, primaryLabel]) => ({
+      code,
+      label,
+      path: [primaryLabel, label],
+      output_primary_label: primaryLabel,
+      output_sub_label: primaryLabel === label ? "" : label,
+      status: "active",
+      source: "system",
+    }))
+    : [];
   return {
     account_key: null,
     date_from: "2026-01-01",
@@ -6956,6 +6998,7 @@ function bankTransactionsPayload(
       salary: options.categoryOverride?.categoryCode === "salary" ? 1 : 0,
       external_payment: options.categoryOverride?.categoryCode === "external_payment" ? 1 : 0,
       uncategorized: options.classificationMode === "unmatched" && !options.rowsEmpty && !options.categoryOverride ? 1 : 0,
+      ...Object.fromEntries(denseCategoryTags.map((tag) => [tag.code, 1])),
     },
     pagination: {
       page: options.page ?? 1,
@@ -6992,6 +7035,7 @@ function bankTransactionsPayload(
           status: "active",
           source: "system",
         },
+        ...denseCategoryTags,
       ],
     },
   };
@@ -9782,6 +9826,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         {
           classificationMode: options.bankDetailsClassificationMode,
           categoryOverride: bankDetailsCategoryOverride,
+          denseCategoryMenu: options.bankDetailsDenseCategoryMenu,
           largeDataset: options.bankDetailsLargeDataset,
           page: Number.isFinite(page) ? page : 1,
           pageSize: Number.isFinite(pageSize) ? pageSize : 100,

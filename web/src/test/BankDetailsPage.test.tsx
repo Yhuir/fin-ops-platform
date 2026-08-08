@@ -292,19 +292,22 @@ describe("Bank details page", () => {
 
     expect(pageSource).toContain("PopoverRoot");
     expect(pageSource).toContain("PopoverContent");
+    expect(pageSource).toMatch(/<PopoverContent[\s\S]*?isNonModal[\s\S]*?>/);
     expect(pageSource).toContain("ListBox");
     expect(pageSource).toContain("ListBoxItem");
     expect(pageSource).not.toContain("bank-category-filter-popper");
     expect(source).toMatch(/\.bank-category-filter-icon-button\s*\{[^}]*width:\s*36px[^}]*height:\s*36px/s);
-    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(960px,\s*calc\(100vw - 48px\)\)[^}]*max-height:\s*min\(720px,\s*calc\(100vh - 32px\)\)/s);
-    expect(source).toMatch(/\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)[^}]*overflow-y:\s*auto/s);
-    expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*background:\s*var\(--bank-category-group-bg\)/s);
+    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(1200px,\s*calc\(100vw - 48px\)\)[^}]*overflow:\s*visible[^}]*padding:\s*0/s);
+    expect(source).toMatch(/\.bank-category-filter-dialog\s*\{[^}]*overflow:\s*visible[^}]*padding:\s*0/s);
+    expect(source).toMatch(/\.bank-category-filter-list\s*\{[^}]*box-sizing:\s*border-box[^}]*display:\s*block[^}]*column-count:\s*4[^}]*column-fill:\s*balance[^}]*overflow:\s*visible/s);
+    expect(source).toMatch(/\.bank-category-filter-actions\s*\{[^}]*column-span:\s*all/s);
+    expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*break-inside:\s*avoid[^}]*background:\s*var\(--bank-category-group-bg\)/s);
     expect(source).toMatch(/\.bank-category-filter-tone-0\s*\{[^}]*--bank-category-group-bg:/s);
     expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*14px/s);
     expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*13px/s);
     expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*12px/s);
-    expect(source).toMatch(/@media \(max-width:\s*900px\)[\s\S]*?\.bank-category-filter-list\s*\{[^}]*repeat\(2,/s);
-    expect(source).toMatch(/@media \(max-width:\s*620px\)[\s\S]*?\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*1fr/s);
+    expect(source).toMatch(/@media \(max-width:\s*900px\), \(max-height:\s*719px\)[\s\S]*?\.bank-category-filter-list\s*\{[^}]*column-count:\s*auto[^}]*overflow-y:\s*auto/s);
+    expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*grid-template-columns:/s);
     expect(source).toMatch(/\.bank-category-filter-hierarchy-group::before\s*\{/);
     expect(source).toMatch(/\.bank-category-filter-hierarchy-item::after\s*\{/);
     expect(source).not.toMatch(/\.bank-category-filter-group\s*\{[^}]*border:\s*1px[^}]*background:/s);
