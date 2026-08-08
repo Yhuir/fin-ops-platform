@@ -30,7 +30,6 @@ from fin_ops_platform.app.auth import (
     OARequestSession,
     UnauthorizedOASessionError,
     actor_id_for_session,
-    assert_safe_auth_runtime_configuration,
     extract_oa_token,
     get_header,
     resolve_oa_request_session,
@@ -521,7 +520,6 @@ MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 class Application:
     def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
         self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
-        assert_safe_auth_runtime_configuration()
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)

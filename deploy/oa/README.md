@@ -159,7 +159,7 @@ VITE_APP_BASE_PATH=/fin-ops/
   只允许这三个精确 retired key，以及 legacy admin 恰好为空或仅为固定 `YNSYLP005`；它们会在 current-runtime
   checkpoint 通过后、停止旧进程前按 before-image 原子清除，不能作为候选 runtime 的 APP admission。APP
   admission 只来自 Settings ACL；管理员固定为 `YNSYLP005`，不接受环境变量或普通 settings payload 覆盖
-- `FIN_OPS_TEST_DEFAULT_AUTH / FIN_OPS_DEV_ALLOW_LOCAL_SESSION / FIN_OPS_DEV_USERNAME / FIN_OPS_DEV_OA_PASSWORD` 已退休；生产 common/secrets env 必须全部不包含这些 key（即使值为 `0` 或空串）。deploy-control 会在激活前阻断，Application 也会在任何 state-store 连接前阻断。运行时不存在本地固定 token 或默认数据重置密码。
+- `FIN_OPS_TEST_DEFAULT_AUTH / FIN_OPS_DEV_ALLOW_LOCAL_SESSION / FIN_OPS_DEV_USERNAME / FIN_OPS_DEV_OA_PASSWORD` 已退休且运行时完全不读取；即使遗留配置存在，也不能创建登录态或授予管理员权限。运行时不存在本地固定 token 或默认数据重置密码。
 - `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`
   返回 `404`，配置后必须带 `Authorization: Bearer <token>`
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：
@@ -463,13 +463,6 @@ python -m fin_ops_platform.app.worker \
 
 ```bash
 sudo /usr/local/sbin/finops-deploy-control status
-```
-
-API 启动失败时，使用无参数的 `api-startup-error` 读取最近 30 分钟内经过限量和过滤的
-traceback 证据；该命令不开放任意 journal 查询，也不输出请求正文或运行时 env：
-
-```bash
-sudo /usr/local/sbin/finops-deploy-control api-startup-error
 ```
 
 然后通过 root-owned helper 运行受控命令：

@@ -5,19 +5,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import fin_ops_platform.app.auth as auth_module
+from fin_ops_platform.app.auth import resolve_oa_request_session
+from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.access_control_service import AccessControlService
+from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
 )
-from fin_ops_platform.app.auth import resolve_oa_request_session
-from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
-from fin_ops_platform.services.access_control_service import AccessControlService
 
 
 class AuthGuardTests(unittest.TestCase):
     def test_runtime_auth_and_reset_have_no_synthetic_identity_or_default_secret(self) -> None:
-        auth_source = inspect.getsource(resolve_oa_request_session)
+        auth_source = inspect.getsource(auth_module)
         reset_source = inspect.getsource(Application._verify_reset_oa_password)
 
         for retired_marker in (
@@ -25,6 +26,10 @@ class AuthGuardTests(unittest.TestCase):
             "local-dev-token",
             "test-default-token",
             "unittest",
+            "FIN_OPS_TEST_DEFAULT_AUTH",
+            "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
+            "FIN_OPS_DEV_USERNAME",
+            "FIN_OPS_DEV_OA_PASSWORD",
         ):
             self.assertNotIn(retired_marker, auth_source)
         self.assertNotIn("local-dev-password", reset_source)

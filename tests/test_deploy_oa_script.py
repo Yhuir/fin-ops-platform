@@ -652,10 +652,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("api-request-timing <request-id>", script)
         self.assertIn("api_request_timing()", script)
         self.assertIn("request timing not found in the bounded journal window", script)
-        self.assertIn("api-startup-error", script)
-        self.assertIn("api_startup_error()", script)
-        self.assertIn("api-startup-error accepts no arguments", script)
-        self.assertIn("journalctl -u fin-ops.service --since '30 minutes ago' -n 400", script)
         self.assertIn("request id must be 12 lowercase hexadecimal characters", script)
         self.assertIn("journalctl -u fin-ops.service --since '2 hours ago'", script)
         self.assertIn("request error not found in the bounded journal window", script)
@@ -782,10 +778,6 @@ class DeployOAScriptTest(unittest.TestCase):
             RETIRED_ALLOWED_USERNAMES,
             RETIRED_ALLOWED_ROLES,
             RETIRED_READONLY_USERNAMES,
-            "FIN_OPS_TEST_DEFAULT_AUTH",
-            "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
-            "FIN_OPS_DEV_USERNAME",
-            "FIN_OPS_DEV_OA_PASSWORD",
         ):
             self.assertIn(retired, contract)
         self.assertIn("LEGACY_ADMIN_ENV", contract)

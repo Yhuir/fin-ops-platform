@@ -6,7 +6,7 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| OA token/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` | cookie/header 解析、401/403、超时、过期 token；退役 dev/test auth 配置必须在任何 state-store I/O 前阻断启动 |
+| OA token/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` | cookie/header 解析、401/403、超时、过期 token；退役 dev/test auth 配置即使存在也不能创建 session |
 | Access control | `AccessControlService`、Settings ACL snapshot | fixed 005 与 denied/read_export_only/full_access 判断；单 snapshot/provider failure 必须 fail closed，OA role/permission/env/marker 不得误授权 |
 | Session frontend | `SessionContext`、`SessionGate`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`tests/test_permissions_write_entry_inventory.py`、`docs/modules/permissions-and-audit/e2e-spec.md`、`docs/modules/permissions-and-audit/e2e-coverage.md`、`docs/modules/permissions-and-audit/write-entry-inventory.md` | loading/forbidden/expired/error/retry，权限 hooks 的默认 fail-closed，真实浏览器下未授权不渲染业务页，只读/全权限/admin 角色矩阵不越权，页面写入口矩阵不伪装 covered，pageRegistry 与 inventory 必须双向一致，pageRegistry 与 role matrix readable route 必须双向一致，新增页面必须进入 role matrix，dynamic opener 必须在 inventory 与 role matrix 双向一致，`covered-browser` row 必须有 dynamic opener 或登记在页面级静态覆盖 registry，dynamic opener/static registry 只能引用当前 `covered-browser` 模块且不能重复归类，Browser E2E 证据路径必须解析到当前文件或匹配真实 glob，新增 mutating feature API client 必须映射到 write-entry inventory，写控件关键词必须在 inventory 与 role matrix DOM 扫描 pattern 双向一致，源码高风险写控件文案 sentinel 必须仍存在且已登记，read-export visible enabled 写控件和已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台统一异常抽屉处理与恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区被 DOM 候选扫描拦截，并捕获隐藏浏览器错误 |
 | API guards | `server.py`、`route_access_policy.py`、module-owned guards | read API、登记的只读 POST、默认写 API、export API、admin-only API 的校验和错误 shape；必须在 body/multipart 解析前拒绝 readonly write |
@@ -20,7 +20,7 @@
 
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
-| OA session bootstrap | `tests/test_session_api.py`、`tests/test_auth_guard.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts` | Authorization header、Admin-Token cookie、无 token 401、超时、expired、forbidden、retry；四项退役 auth env 启动失败且不连接 state store；真实 Chromium 下 forbidden/expired 不触发 protected page API |
+| OA session bootstrap | `tests/test_session_api.py`、`tests/test_auth_guard.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts` | Authorization header、Admin-Token cookie、无 token 401、超时、expired、forbidden、retry；退役 auth env 与受保护管理员用户名组合仍返回 401；真实 Chromium 下 forbidden/expired 不触发 protected page API |
 | protected API guard | `tests/test_route_access_policy.py`、`tests/test_auth_guard.py`、各 API 权限测试 | 无 token 401、无权限 403；31 条原漏检 Workbench/import/job/ETC 写入口统一 403；未知 unsafe route fail closed；只读 POST allowlist 可达；JSON/multipart body 未在拒绝前解析 |
 | access tier 判定 | `tests/test_session_api.py`、`tests/test_auth_guard.py`、`tests/test_app_settings_service.py` | 精确 005/full/read/denied、permission-present 006、单 snapshot、provider failure denied、即时撤权；`test_get_session_me_projects_access_tier_matrix_from_settings` 聚合校验 `/api/session/me` 矩阵 |
 | write/admin 权限 | `tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` | 写入、规则保存、数据重置、OA 凭据、标签规则、turnover relation 的 403 |
@@ -46,7 +46,7 @@
 
 ## 关键 smoke flows
 
-- 无 token 调 protected API -> `401 invalid_oa_session`；过期 token -> `401`；无权限用户 -> `403 forbidden`；任一退役 dev/test auth env -> Application 启动失败且 state store 未初始化。
+- 无 token 调 protected API -> `401 invalid_oa_session`；过期 token -> `401`；无权限用户 -> `403 forbidden`；退役 dev/test auth env 即使配置为启用并指定受保护管理员，也不能生成 session。
 - OA session bootstrap -> `SessionGate` loading -> authenticated/forbidden/expired/error；超时后可 retry。
 - 真实 Chromium 打开 `/operations/app-health`：admin 可见 dashboard；read_export_only、forbidden、expired 不能触发 `/api/operations/app-health-dashboard`。
 - 真实 Chromium 以 `read_export_only` 逐页打开所有非 admin 页面：页面可读且不触发 POST/PUT/PATCH/DELETE；settings/tax/import/no-OA/OA pending/batch accounting/turnover/ETC 等已知写入口禁用或隐藏。

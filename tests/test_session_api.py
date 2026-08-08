@@ -4,15 +4,13 @@ import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
 
-from fin_ops_platform.app.auth import AuthRuntimeConfigurationError
+from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
     configure_default_test_access,
 )
-from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 
 
 class SessionApiTests(unittest.TestCase):
@@ -140,31 +138,22 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(payload["allowed"])
         self.assertEqual(payload["user"]["username"], "cookie-user")
 
-    def test_startup_rejects_every_retired_development_or_test_auth_setting(self) -> None:
-        forbidden_settings = {
-            "FIN_OPS_DEV_ALLOW_LOCAL_SESSION": "0",
-            "FIN_OPS_TEST_DEFAULT_AUTH": "0",
-            "FIN_OPS_DEV_USERNAME": "YNSYLP005",
-            "FIN_OPS_DEV_OA_PASSWORD": "local-dev-password",
-        }
-        cleared = {
-            "FIN_OPS_DEV_ALLOW_LOCAL_SESSION": None,
-            "FIN_OPS_TEST_DEFAULT_AUTH": None,
-            "FIN_OPS_DEV_USERNAME": None,
-            "FIN_OPS_DEV_OA_PASSWORD": None,
-        }
+    def test_retired_development_auth_settings_cannot_create_admin_session(self) -> None:
+        with self._temporary_env(
+            FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1",
+            FIN_OPS_TEST_DEFAULT_AUTH="1",
+            FIN_OPS_DEV_USERNAME="YNSYLP005",
+            FIN_OPS_DEV_OA_PASSWORD="local-dev-password",
+        ), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(
+                data_dir=Path(temp_dir),
+                install_test_session=False,
+            )
+            response = app.handle_request("GET", "/api/session/me")
+            payload = json.loads(response.body)
 
-        for key, value in forbidden_settings.items():
-            environment = {**cleared, key: value}
-            with self.subTest(key=key), self._temporary_env(**environment):
-                with tempfile.TemporaryDirectory() as temp_dir, self.assertRaises(
-                    AuthRuntimeConfigurationError
-                ), patch("fin_ops_platform.app.server.build_state_store") as build_state_store:
-                    build_application(
-                        data_dir=Path(temp_dir),
-                        install_test_session=False,
-                    )
-                build_state_store.assert_not_called()
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(payload["error"], "invalid_oa_session")
 
     def test_get_session_me_allows_username_from_workbench_settings_even_without_permission_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

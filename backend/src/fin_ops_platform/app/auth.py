@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
-import os
 from typing import Mapping
 
 from fin_ops_platform.services.access_control_service import AccessControlService, AccessTier
@@ -13,12 +12,6 @@ AUTHORIZATION_HEADER = "authorization"
 COOKIE_HEADER = "cookie"
 OA_TOKEN_COOKIE_NAME = "Admin-Token"
 BEARER_PREFIX = "bearer "
-RETIRED_AUTH_ENV_KEYS = (
-    "FIN_OPS_TEST_DEFAULT_AUTH",
-    "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
-    "FIN_OPS_DEV_USERNAME",
-    "FIN_OPS_DEV_OA_PASSWORD",
-)
 
 
 class OAAuthError(RuntimeError):
@@ -30,10 +23,6 @@ class UnauthorizedOASessionError(OAAuthError):
 
 
 class ForbiddenOAAccessError(OAAuthError):
-    pass
-
-
-class AuthRuntimeConfigurationError(RuntimeError):
     pass
 
 
@@ -57,15 +46,6 @@ def actor_id_for_session(session: OARequestSession, *, fallback: str = "system")
 def tenant_id_for_session(_: OARequestSession, *, fallback: str = "default") -> str:
     tenant_id = str(fallback or "default").strip()
     return tenant_id or "default"
-
-
-def assert_safe_auth_runtime_configuration() -> None:
-    retired_keys = [key for key in RETIRED_AUTH_ENV_KEYS if key in os.environ]
-    if retired_keys:
-        raise AuthRuntimeConfigurationError(
-            "Retired authentication environment variables must be absent: "
-            + ", ".join(retired_keys)
-        )
 
 
 def get_header(headers: Mapping[str, str] | None, name: str) -> str | None:
