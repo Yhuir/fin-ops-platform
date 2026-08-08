@@ -116,6 +116,46 @@ def repair_unavailable_oa_relation(
     }
 
 
+def discover_unavailable_oa_relation_repairs(
+    relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        return _build_repair_summaries(connection, relations)
+    finally:
+        connection.close()
+
+
+def _build_repair_summaries(
+    connection: Any,
+    relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    oa_row_ids = list(
+        dict.fromkeys(
+            row_id
+            for relation in relations
+            for row_id, row_type in _aligned_members(relation)
+            if row_type == "oa"
+        )
+    )
+    existing_oa_row_ids = _existing_oa_row_ids(connection, oa_row_ids)
+    summaries: list[dict[str, Any]] = []
+    for relation in relations:
+        plan = _build_plan_from_existing(relation, existing_oa_row_ids)
+        if plan is None:
+            continue
+        summaries.append(
+            {
+                "case_id": plan["case_id"],
+                "fingerprint": _fingerprint(plan),
+                "missing_oa_row_ids": list(plan["missing_oa_row_ids"]),
+                "surviving_members": list(plan["surviving_members"]),
+                "result_action": plan["result_action"],
+            }
+        )
+    return sorted(summaries, key=lambda item: str(item["case_id"]))
+
+
 def _active_relation(relations: list[dict[str, Any]], case_id: str) -> dict[str, Any]:
     matches = [
         deepcopy(relation)
@@ -131,6 +171,21 @@ def _active_relation(relations: list[dict[str, Any]], case_id: str) -> dict[str,
 
 
 def _build_plan(connection: Any, relation: dict[str, Any]) -> dict[str, Any]:
+    oa_row_ids = [
+        row_id
+        for row_id, row_type in _aligned_members(relation)
+        if row_type == "oa"
+    ]
+    plan = _build_plan_from_existing(
+        relation,
+        _existing_oa_row_ids(connection, oa_row_ids),
+    )
+    if plan is None:
+        raise RuntimeError("All OA relation members still exist in canonical facts.")
+    return plan
+
+
+def _aligned_members(relation: dict[str, Any]) -> list[tuple[str, str]]:
     row_ids = [str(value or "").strip() for value in list(relation.get("row_ids") or [])]
     row_types = [
         str(value or "").strip().lower()
@@ -138,13 +193,12 @@ def _build_plan(connection: Any, relation: dict[str, Any]) -> dict[str, Any]:
     ]
     if len(row_ids) != len(row_types) or not row_ids or any(not value for value in row_ids):
         raise RuntimeError("Workbench relation row_ids/row_types are not aligned.")
-    oa_row_ids = [
-        row_id
-        for row_id, row_type in zip(row_ids, row_types, strict=True)
-        if row_type == "oa"
-    ]
+    return list(zip(row_ids, row_types, strict=True))
+
+
+def _existing_oa_row_ids(connection: Any, oa_row_ids: list[str]) -> set[str]:
     if not oa_row_ids:
-        raise RuntimeError("Workbench relation does not contain an OA member.")
+        return set()
     existing_rows = connection.fetch_all(
         """
         select row_id
@@ -154,17 +208,31 @@ def _build_plan(connection: Any, relation: dict[str, Any]) -> dict[str, Any]:
         """,
         (oa_row_ids,),
     )
-    existing_oa_row_ids = {
+    return {
         str(row.get("row_id") or "").strip()
         for row in existing_rows
         if str(row.get("row_id") or "").strip()
     }
+
+
+def _build_plan_from_existing(
+    relation: dict[str, Any],
+    existing_oa_row_ids: set[str],
+) -> dict[str, Any] | None:
+    members = _aligned_members(relation)
+    oa_row_ids = [
+        row_id
+        for row_id, row_type in members
+        if row_type == "oa"
+    ]
+    if not oa_row_ids:
+        return None
     missing_oa_row_ids = sorted(set(oa_row_ids) - existing_oa_row_ids)
     if not missing_oa_row_ids:
-        raise RuntimeError("All OA relation members still exist in canonical facts.")
+        return None
     surviving_members = [
         {"row_id": row_id, "row_type": row_type}
-        for row_id, row_type in zip(row_ids, row_types, strict=True)
+        for row_id, row_type in members
         if row_id not in missing_oa_row_ids
     ]
     metadata = relation.get("special_metadata")
@@ -184,8 +252,8 @@ def _build_plan(connection: Any, relation: dict[str, Any]) -> dict[str, Any]:
         "relation_version": relation.get("version"),
         "month_scope": str(relation.get("month_scope") or "all"),
         "relation_mode": str(relation.get("relation_mode") or ""),
-        "row_ids": row_ids,
-        "row_types": row_types,
+        "row_ids": [row_id for row_id, _row_type in members],
+        "row_types": [row_type for _row_id, row_type in members],
         "missing_oa_row_ids": missing_oa_row_ids,
         "surviving_members": surviving_members,
         "result_action": result_action,

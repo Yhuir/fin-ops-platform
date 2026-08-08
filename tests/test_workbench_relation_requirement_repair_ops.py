@@ -146,6 +146,7 @@ def _run(
     persisted_category_records: dict[str, dict[str, object]] | None = None,
     rules: object | None = None,
     persisted: list[str] | None = None,
+    unavailable_oa_repairs: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     output = io.StringIO()
     persisted = persisted if persisted is not None else []
@@ -177,41 +178,67 @@ def _run(
             "persist_workbench_pair_relations",
             side_effect=lambda _app, case_ids: persisted.extend(case_ids),
         ),
+        patch.object(
+            repair_ops.workbench_unavailable_oa_relation_repair_ops,
+            "discover_unavailable_oa_relation_repairs",
+            return_value=unavailable_oa_repairs or [],
+        ),
     ):
         repair_ops.main(argv, stdout=output)
     return json.loads(output.getvalue())
 
 
 class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
-    def test_unavailable_oa_case_reuses_fixed_requirement_repair_entrypoint(self) -> None:
+    def test_dry_run_exposes_individual_unavailable_oa_relation_fingerprints(self) -> None:
+        command = _CommandService([_relation()])
+        repairs = [
+            {
+                "case_id": "case-missing-oa",
+                "fingerprint": "a" * 64,
+                "missing_oa_row_ids": ["oa-missing"],
+                "surviving_members": [{"row_id": "bank-1", "row_type": "bank"}],
+                "result_action": "cancel_relation",
+            }
+        ]
+
+        report = _run(command, ["--dry-run"], unavailable_oa_repairs=repairs)
+
+        self.assertEqual(report["unavailable_oa_relation_repairs"], repairs)
+
+    def test_unavailable_oa_fingerprint_reuses_fixed_requirement_repair_entrypoint(self) -> None:
         output = io.StringIO()
-        with patch.object(
-            repair_ops.workbench_unavailable_oa_relation_repair_ops,
-            "main",
-            return_value=0,
-        ) as delegated:
+        fingerprint = "a" * 64
+        command = _CommandService([_relation()])
+        with (
+            patch.object(repair_ops, "build_tool_runtime_application", return_value=object()),
+            patch.object(repair_ops, "workbench_relation_command_service", return_value=command),
+            patch.object(
+                repair_ops.workbench_unavailable_oa_relation_repair_ops,
+                "discover_unavailable_oa_relation_repairs",
+                return_value=[{"case_id": "case-1", "fingerprint": fingerprint}],
+            ),
+            patch.object(
+                repair_ops.workbench_unavailable_oa_relation_repair_ops,
+                "main",
+                return_value=0,
+            ) as delegated,
+        ):
             result = repair_ops.main(
-                ["--unavailable-oa-case-id", "case-1", "--dry-run"],
+                ["--execute", "--expected-fingerprint", fingerprint],
                 stdout=output,
             )
 
         self.assertEqual(result, 0)
         delegated.assert_called_once_with(
-            ["--case-id", "case-1", "--dry-run"],
+            [
+                "--case-id",
+                "case-1",
+                "--execute",
+                "--expected-fingerprint",
+                fingerprint,
+            ],
             stdout=output,
         )
-
-    def test_unavailable_oa_case_rejects_rollback_modes(self) -> None:
-        with self.assertRaisesRegex(SystemExit, "only supports"):
-            repair_ops.main(
-                [
-                    "--unavailable-oa-case-id",
-                    "case-1",
-                    "--rollback-dry-run",
-                    "--expected-fingerprint",
-                    "f" * 64,
-                ]
-            )
 
     def test_turnover_legacy_sources_and_missing_canonical_fields_are_targets(self) -> None:
         canonical = {

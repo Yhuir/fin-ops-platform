@@ -6,12 +6,14 @@ from fin_ops_platform.tools import workbench_unavailable_oa_relation_repair_ops 
 class FakeConnection:
     def __init__(self, existing_oa_row_ids: list[str]) -> None:
         self.existing_oa_row_ids = set(existing_oa_row_ids)
+        self.fetch_count = 0
 
     def fetch_all(
         self,
         sql: str,
         params: tuple[object, ...] = (),
     ) -> list[dict[str, str]]:
+        self.fetch_count += 1
         assert "from app.oa_applications" in sql
         requested = list(params[0])
         return [
@@ -68,6 +70,20 @@ def test_plan_preserves_valid_bank_invoice_relation() -> None:
         {"row_id": "bank-1", "row_type": "bank"},
         {"row_id": "invoice-1", "row_type": "invoice"},
     ]
+
+
+def test_discovery_reads_canonical_oa_rows_once_and_returns_only_missing_cases() -> None:
+    missing = _relation()
+    existing = _relation()
+    existing["case_id"] = "case-existing"
+    existing["row_ids"] = ["oa-existing", "bank-2"]
+    connection = FakeConnection(["oa-existing"])
+
+    summaries = repair._build_repair_summaries(connection, [missing, existing])
+
+    assert connection.fetch_count == 1
+    assert [item["case_id"] for item in summaries] == ["case-1"]
+    assert summaries[0]["fingerprint"]
 
 
 def test_execute_uses_relation_command_and_persist_boundary(monkeypatch) -> None:

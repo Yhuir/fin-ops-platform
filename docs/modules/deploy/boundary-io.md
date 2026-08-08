@@ -43,7 +43,7 @@
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
 | Request traceback lookup | API `requestId` | 同一严格 ID 和两小时时间窗；从异常摘要开始最多返回 64 行，并在 traceback 终止异常行停止；不包含 locals，不开放任意 journal 参数 |
 | Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id` |
-| Workbench unavailable OA relation repair | `finops-deploy-control workbench-requirement-repair --unavailable-oa-case-id <case-id>` | 复用固定 Workbench relation repair 控制入口，只接受单一 case；execute 必须携带同一 canonical relation/OA 快照 dry-run 返回的 SHA-256 fingerprint，并只调用正式 relation command/persist adapter |
+| Workbench unavailable OA relation repair | `finops-deploy-control workbench-requirement-repair <release> --dry-run/--execute --expected-fingerprint` | 复用固定 Workbench relation repair 控制入口；dry-run 为每个失效 OA relation 输出包含 case 的独立 fingerprint，execute 只接受其中一个 fingerprint 并重验该单 case，只调用正式 relation command/persist adapter |
 | OA 附件发票恢复 | `finops-deploy-control workbench-rehydrate <release> --promote-oa-attachment-invoices` | 复用生产已批准的 exact-release 固定维护脚本；dry-run 返回候选 SHA-256 fingerprint，apply 必须同时携带该 fingerprint 和显式确认参数；不得开放任意 SQL/shell |
 
 ## 输出 I/O

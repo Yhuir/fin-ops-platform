@@ -43,7 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--rollback-dry-run", action="store_true")
     mode.add_argument("--rollback", action="store_true")
     parser.add_argument("--expected-fingerprint")
-    parser.add_argument("--unavailable-oa-case-id")
     return parser
 
 
@@ -55,23 +54,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         raise SystemExit("--dry-run does not accept --expected-fingerprint")
     if mode != "dry_run" and not args.expected_fingerprint:
         raise SystemExit(f"--{mode.replace('_', '-')} requires --expected-fingerprint")
-    if args.unavailable_oa_case_id:
-        if mode not in {"dry_run", "execute"}:
-            raise SystemExit("unavailable OA repair only supports --dry-run or --execute")
-        forwarded_args = [
-            "--case-id",
-            str(args.unavailable_oa_case_id).strip(),
-            f"--{mode.replace('_', '-')}",
-        ]
-        if args.expected_fingerprint:
-            forwarded_args.extend(
-                ["--expected-fingerprint", str(args.expected_fingerprint).strip()]
-            )
-        return workbench_unavailable_oa_relation_repair_ops.main(
-            forwarded_args,
-            stdout=stdout,
-        )
-
     app = build_tool_runtime_application(None)
     command_service = workbench_relation_command_service(app)
     relations = command_service.list_active_relations()
@@ -88,6 +70,29 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         )
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0
+
+    unavailable_oa_repairs = (
+        workbench_unavailable_oa_relation_repair_ops.discover_unavailable_oa_relation_repairs(
+            relations
+        )
+    )
+    if mode == "execute":
+        matching_repairs = [
+            repair
+            for repair in unavailable_oa_repairs
+            if repair["fingerprint"] == str(args.expected_fingerprint)
+        ]
+        if len(matching_repairs) == 1:
+            return workbench_unavailable_oa_relation_repair_ops.main(
+                [
+                    "--case-id",
+                    str(matching_repairs[0]["case_id"]),
+                    "--execute",
+                    "--expected-fingerprint",
+                    str(args.expected_fingerprint),
+                ],
+                stdout=stdout,
+            )
 
     eligible_relations = [
         relation
@@ -166,6 +171,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         original_plan_count=len(full_plan),
         manual_review=manual_review,
     )
+    report["unavailable_oa_relation_repairs"] = unavailable_oa_repairs
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
 
