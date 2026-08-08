@@ -777,7 +777,7 @@ describe("pending invoices and tag settings API mapping", () => {
     });
   });
 
-  test("maps attach-existing preview conflict objects into readable messages", async () => {
+  test("maps attach-existing preview conflict objects without exposing internal identifiers", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       preview_id: "attach_conflict_preview",
       request_key: "pending_invoice_attach_existing_batch:conflict",
@@ -815,7 +815,7 @@ describe("pending invoices and tag settings API mapping", () => {
     });
 
     expect(preview.canConfirm).toBe(false);
-    expect(preview.conflicts).toEqual(["关系 case_conflict，模式 manual_confirmed，对象 claim_001, inv_001"]);
+    expect(preview.conflicts).toEqual(["所选数据已存在其他关联关系"]);
     expect(preview.warnings).toEqual(["读模型已刷新，请确认后再提交"]);
   });
 

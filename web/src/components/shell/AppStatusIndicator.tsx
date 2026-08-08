@@ -107,7 +107,7 @@ function domainStatusLabel(status: string) {
     return "结构";
   }
   if (status === "source_mismatch") {
-    return "版本";
+    return "来源异常";
   }
   if (status === "failed") {
     return "失败";

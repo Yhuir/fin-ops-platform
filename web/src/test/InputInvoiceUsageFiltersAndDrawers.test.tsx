@@ -237,7 +237,6 @@ describe("InputInvoiceUsageDetailDrawer", () => {
   test("hides raw App fields and keeps the title beside the close control", async () => {
     const loadDetail = vi.fn(() => Promise.resolve<InputInvoiceUsageDetailPayload>({
       title: "OA详情",
-      subtitle: "OA-2026-001",
       sections: [
         {
           title: "OA主信息",
@@ -956,14 +955,14 @@ describe("Input invoice usage workflow drawers", () => {
       expect(screen.getAllByText((_content, node) => node?.textContent === "已选 1 张").length).toBeGreaterThan(0);
     });
 
-    await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "已经关联oa" }));
+    await user.click(screen.getByRole("button", { name: /筛选 OA 关联状态/ }));
+    await user.click(screen.getByRole("option", { name: "已经关联oa" }));
     expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
     expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
     expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
-    await user.click(screen.getByRole("menuitemradio", { name: "未关联oa" }));
+    await user.click(screen.getByRole("button", { name: /筛选 OA 关联状态/ }));
+    await user.click(screen.getByRole("option", { name: "未关联oa" }));
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
     expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
@@ -1230,7 +1229,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getAllByText("有 OA").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("无流水")).toBeInTheDocument();
     expect(screen.getByText("陈秀云批量反提oa")).toBeInTheDocument();
-    expect(screen.getByText("当前仅作为待处理方向标签，不影响自动分流。")).toBeInTheDocument();
+    expect(screen.queryByText("当前仅作为待处理方向标签，不影响自动分流。")).not.toBeInTheDocument();
     expect(screen.queryByText(/版本\s*\d|sheet4-v1/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /保存|确认保存/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -1283,7 +1282,8 @@ describe("Input invoice usage workflow drawers", () => {
     const ruleEditor = await screen.findByLabelText("原因文案");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "已更新规则");
-    await user.selectOptions(screen.getByLabelText("待付款 流水条件"), "any");
+    await user.click(screen.getByLabelText("待付款 流水条件"));
+    await user.click(await screen.findByRole("option", { name: "不限制" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "还原" })).toBeEnabled());
     expect(screen.getByText("1 条规则 · 1 个待处理方向 · 未保存")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存" }));

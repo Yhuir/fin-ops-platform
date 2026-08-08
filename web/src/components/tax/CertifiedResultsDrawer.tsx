@@ -31,12 +31,13 @@ function DrawerGroup({
       <div className="tax-certified-group-list">
         {rows.length === 0 ? <p className="tax-certified-empty">当前分组暂无记录</p> : null}
         {rows.map((row) => (
-          <button
+          <Button
             key={row.id}
             className="tax-certified-item"
-            type="button"
-            onClick={() => onSelect?.(row)}
             aria-label={`${buttonLabelPrefix} ${row.invoiceNo}`}
+            fullWidth
+            onPress={() => onSelect?.(row)}
+            variant="tertiary"
           >
             <span className="tax-certified-item-head">
               <strong>{row.invoiceNo}</strong>
@@ -47,7 +48,7 @@ function DrawerGroup({
               <span>{row.issueDate}</span>
               <span>{formatMoney(row.taxAmount)}</span>
             </span>
-          </button>
+          </Button>
         ))}
       </div>
     </section>

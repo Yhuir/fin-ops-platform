@@ -52,7 +52,9 @@ describe("OaDraftPrefillDrawer", () => {
     const drawer = await screen.findByRole("dialog", { name: "OA 草稿预填管理" });
     expect(within(drawer).getByDisplayValue("杨丽萍")).toBeDisabled();
     expect(within(drawer).getByDisplayValue("2026-08-05")).toBeDisabled();
-    expect(within(drawer).getByRole("option", { name: "银行转账" })).toBeInTheDocument();
+    await user.click(within(drawer).getByLabelText("支付方式"));
+    expect(await screen.findByRole("option", { name: "银行转账" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "银行转账" }));
 
     const bank = within(drawer).getByLabelText("开户行");
     await user.clear(bank);

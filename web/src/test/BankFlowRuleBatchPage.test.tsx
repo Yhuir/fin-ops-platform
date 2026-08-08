@@ -691,11 +691,11 @@ describe("BankFlowRuleBatchPage", () => {
     });
     expect(detailGet).toBeTruthy();
     expect(new URL(String(detailGet?.[0]), "http://localhost").searchParams.get("scope_month")).toBe("2026-05");
-    const bankTagGroup = within(transactionRegion).getByLabelText("银行明细标签 bank-row-001");
+    const bankTagGroup = within(transactionRegion).getByLabelText("银行明细标签 建设银行 2026-05-03 10:20:00 建设银行 8106");
     expect(within(bankTagGroup).getByText("费用")).toBeInTheDocument();
     expect(within(bankTagGroup).getByText("手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
-    expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
+    expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" })).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
   });
@@ -710,7 +710,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
     expect(rowCheckbox).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "流水规则标签管理" }));
@@ -843,7 +843,7 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "福利 1批 · 5条" }));
@@ -1063,7 +1063,7 @@ describe("BankFlowRuleBatchPage", () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderPage();
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
     await waitFor(() => {
@@ -1132,7 +1132,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     renderPage();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
     const listRequestsBeforeSubmit = listRequestCount;
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
@@ -1175,7 +1175,7 @@ describe("BankFlowRuleBatchPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
     await user.click(rowCheckbox);
     const listRequestsBeforeSubmit = listRequestCount;
     await user.click(screen.getByRole("button", { name: "提交批次" }));
@@ -1199,7 +1199,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     renderPage();
 
-    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
     expect(rowCheckbox).toBeEnabled();
 
     await user.click(rowCheckbox);
@@ -1231,7 +1231,7 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
     expect(rowCheckbox).toBeEnabled();
 
     await user.click(rowCheckbox);
@@ -1279,7 +1279,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(transactionRegion).queryByText("多账户8106")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("需复核")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("源流水或分类已变化，需要复核后处理。")).not.toBeInTheDocument();
-    expect(within(transactionRegion).queryByRole("checkbox", { name: "选择流水 bank-row-001" })).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" })).not.toBeInTheDocument();
   });
 
   test("prevents selecting rows from another bank before clearing the current bank region", async () => {
@@ -1327,13 +1327,13 @@ describe("BankFlowRuleBatchPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
     await user.click(await screen.findByRole("button", { name: "查看中国银行7001流水" }));
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-002" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" }));
 
     expect(await screen.findByText("请先清空当前选择，再选择其他流水。")).toBeInTheDocument();
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "选择流水 bank-row-002" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" })).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "提交批次" }));
     await waitFor(() => {

@@ -443,15 +443,8 @@ function issueList(value: unknown): string[] {
     }
     if (item && typeof item === "object") {
       const record = item as Record<string, unknown>;
-      const relationCaseId = String(record.relation_case_id ?? record.relationCaseId ?? "").trim();
-      const relationMode = String(record.relation_mode ?? record.relationMode ?? "").trim();
-      const rowIds = stringList(record.row_ids ?? record.rowIds);
-      const parts = [
-        relationCaseId ? `关系 ${relationCaseId}` : "",
-        relationMode ? `模式 ${relationMode}` : "",
-        rowIds.length > 0 ? `对象 ${rowIds.join(", ")}` : "",
-      ].filter(Boolean);
-      return parts.length > 0 ? parts.join("，") : JSON.stringify(record);
+      const message = String(record.message ?? record.reason ?? "").trim();
+      return message || "所选数据已存在其他关联关系";
     }
     return String(item).trim();
   }).filter(Boolean);

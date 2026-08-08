@@ -1,3 +1,4 @@
+import { Button, Checkbox, Input } from "@heroui/react";
 import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -641,41 +642,44 @@ function OaBankLinkDrawer({
       closeLabel="关闭关联支出流水抽屉"
       footer={(
         <div className="oa-pending-payments-bank-drawer__footer">
-          <button disabled={closeBlocked} onClick={onClose} type="button">取消</button>
-          <button
+          <Button isDisabled={closeBlocked} onPress={onClose} size="sm" variant="secondary">取消</Button>
+          <Button
             className="oa-pending-payments-button oa-pending-payments-button--primary"
-            disabled={loading || submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
-            onClick={submit}
-            type="button"
+            isDisabled={loading || submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}
+            isPending={submitting}
+            onPress={submit}
+            size="sm"
+            variant="primary"
           >
-            {submitting ? "关联中" : `确认关联 ${selectedBankIds.size} 条流水`}
-          </button>
+            确认关联 {selectedBankIds.size} 条流水
+          </Button>
         </div>
       )}
       onClose={onClose}
       open={open}
-      subtitle={`已选 OA ${selectedOaRowIds.length} 条`}
       title="关联支出流水"
       width="min(560px, 100vw)"
     >
+        <div className="oa-pending-payments-bank-drawer__meta">已选 OA {selectedOaRowIds.length} 条</div>
         <div className="oa-pending-payments-bank-drawer__filters">
           {(["all", "unmatched", "matched", "linked_in_progress"] as OaPendingPaymentBankCandidateRelationStatus[]).map((status) => (
-            <button
+            <Button
               className={relationStatus === status ? "oa-pending-payments-bank-drawer__filter oa-pending-payments-bank-drawer__filter--active" : "oa-pending-payments-bank-drawer__filter"}
               key={status}
-              onClick={() => {
+              onPress={() => {
                 setRelationStatus(status);
                 setPage(1);
               }}
-              type="button"
+              size="sm"
+              variant={relationStatus === status ? "primary" : "tertiary"}
             >
               {bankCandidateFilterLabel(status)}
-            </button>
+            </Button>
           ))}
         </div>
         <label className="oa-pending-payments-bank-drawer__search">
           <span>搜索</span>
-          <input
+          <Input
             placeholder="对方户名 / 摘要 / 金额"
             value={keywordDraft}
             onChange={(event) => setKeywordDraft(event.target.value)}
@@ -685,7 +689,7 @@ function OaBankLinkDrawer({
               }
             }}
           />
-          <button onClick={searchCandidates} type="button">查询</button>
+          <Button isDisabled={submitting} onPress={searchCandidates} size="sm" variant="secondary">查询</Button>
         </label>
         <div className="oa-pending-payments-bank-drawer__meta">
           {loading ? "加载中" : `显示 ${rows.length} / ${total} 条`}
@@ -698,13 +702,14 @@ function OaBankLinkDrawer({
         <div className="oa-pending-payments-bank-drawer__list">
           {rows.length === 0 && !loading ? <div className="oa-pending-payments-bank-drawer__empty">暂无支出流水</div> : null}
           {rows.map((row) => (
-            <label className="oa-pending-payments-bank-drawer__row" key={row.id}>
-              <input
-                checked={selectedBankIds.has(row.id)}
-                disabled={row.relationStatus !== "unmatched"}
-                onChange={() => toggleBank(row.id)}
-                type="checkbox"
-              />
+            <Checkbox
+              className="oa-pending-payments-bank-drawer__row"
+              isDisabled={row.relationStatus !== "unmatched"}
+              isSelected={selectedBankIds.has(row.id)}
+              key={row.id}
+              onChange={() => toggleBank(row.id)}
+            >
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
               <span className="oa-pending-payments-bank-drawer__row-main">
                 <span className="oa-pending-payments-bank-drawer__counterparty">{row.counterpartyName || "-"}</span>
                 <span className="oa-pending-payments-bank-drawer__tags">
@@ -715,28 +720,32 @@ function OaBankLinkDrawer({
                 <span className="oa-pending-payments-bank-drawer__summary">{[row.summary, row.remark].filter(Boolean).join(" / ") || "-"}</span>
               </span>
               <span className="oa-pending-payments-bank-drawer__amount">{formatMoney(row.amount, "-")}</span>
-            </label>
+            </Checkbox>
           ))}
         </div>
         <div className="oa-pending-payments-bank-drawer__pagination">
           <span>第 {page} / {pageCount} 页</span>
           <div className="oa-pending-payments-bank-drawer__pagination-actions">
-            <button
+            <Button
               aria-label="上一页"
-              disabled={loading || page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              type="button"
+              isDisabled={loading || page <= 1}
+              isIconOnly
+              onPress={() => setPage((current) => Math.max(1, current - 1))}
+              size="sm"
+              variant="tertiary"
             >
               <ChevronLeft aria-hidden="true" size={18} />
-            </button>
-            <button
+            </Button>
+            <Button
               aria-label="下一页"
-              disabled={loading || page >= pageCount}
-              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-              type="button"
+              isDisabled={loading || page >= pageCount}
+              isIconOnly
+              onPress={() => setPage((current) => Math.min(pageCount, current + 1))}
+              size="sm"
+              variant="tertiary"
             >
               <ChevronRight aria-hidden="true" size={18} />
-            </button>
+            </Button>
           </div>
         </div>
     </AppDrawer>

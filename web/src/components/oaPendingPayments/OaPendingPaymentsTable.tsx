@@ -233,7 +233,7 @@ export default function OaPendingPaymentsTable({
                         <span className="oa-pending-payments-inline-row">
                           {selectable ? (
                             <input
-                              aria-label={`选择 OA ${row.oa.applicantName || row.oa.id}`}
+                              aria-label={`选择 OA ${row.oa.applicantName || "未填写申请人"}`}
                               checked={selected}
                               className="oa-pending-payments-row-checkbox"
                               onChange={() => onToggleOaSelection?.(row)}
@@ -304,7 +304,7 @@ export default function OaPendingPaymentsTable({
                         <TableTag>{writebackLabel(row)}</TableTag>
                         {canWriteback ? (
                           <button
-                            aria-label={`写回 OA ${row.oa.applicantName || row.oa.id}`}
+                            aria-label={`写回 OA ${row.oa.applicantName || "未填写申请人"}`}
                             className="oa-pending-payments-writeback-button"
                             disabled={writingBack}
                             onClick={() => onWritebackPaid?.(row)}

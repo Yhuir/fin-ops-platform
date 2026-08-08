@@ -337,7 +337,7 @@ function buildEtcTaskOptionLabel(task: EtcReconciliationTaskSummary) {
   const period = task.periodStart && task.periodEnd ? `${task.periodStart} 至 ${task.periodEnd}` : "未设置期间";
   const plates = task.vehiclePlates.length > 0 ? ` / ${task.vehiclePlates.join("、")}` : "";
   const amount = task.oaTotalAmount ? ` / OA ${formatMoney(task.oaTotalAmount)}` : "";
-  return `${task.title || task.taskId} / ${period} / ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}${amount}${plates}`;
+  return `${task.title || "未命名任务"} / ${period} / ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}${amount}${plates}`;
 }
 
 function buildUnavailableEtcTaskReason(task: EtcUnavailableReconciliationTaskSummary) {
@@ -1398,7 +1398,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         key={task.taskId}
                         className="import-workflow-task-row"
                       >
-                        <ImportChip>{`${task.title || task.taskId} / ${task.status}`}</ImportChip>
+                        <ImportChip>{`${task.title || "未命名任务"} / ${task.status}`}</ImportChip>
                         <span className="import-workflow-muted-text">{buildUnavailableEtcTaskReason(task)}</span>
                       </div>
                     ))}
@@ -1446,7 +1446,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     {selectedEtcTask ? (
                       <div aria-label="已选ETC对账任务" className="import-workflow-chip-row">
                         <ImportChip>{`任务 ${selectedEtcTask.title || selectedEtcTask.taskId}`}</ImportChip>
-                        <ImportChip>{`版本 ${selectedEtcTask.version}`}</ImportChip>
                         <ImportChip>{`ETC票 ${selectedEtcTask.etcInvoiceCount}`}</ImportChip>
                         <ImportChip>{`补充凭证 ${selectedEtcTask.supplementCount}`}</ImportChip>
                       </div>
@@ -1600,9 +1599,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                                   <ImportChip>{formatMoney(issue.amount, "--")}</ImportChip>
                                   <ImportChip>{displayValue(issue.vehiclePlate)}</ImportChip>
                                   {issue.invoiceCount ? <ImportChip>{`${issue.invoiceCount} 张`}</ImportChip> : null}
-                                  <span className="import-workflow-muted-text">
-                                    {issue.requirementId}
-                                  </span>
                                 </div>
                               </div>
                             ))}

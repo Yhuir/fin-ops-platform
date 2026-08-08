@@ -1084,7 +1084,7 @@ describe("Turnover ledger page", () => {
     const closureCardRule = cssRule(styles, ".turnover-ledger-closure-card");
     const extraControlRule = cssRule(
       styles,
-      ".turnover-ledger-extra-control input,\n.turnover-ledger-extra-control select,\n.turnover-ledger-extra-control textarea",
+      ".turnover-ledger-extra-control input,\n.turnover-ledger-extra-control textarea",
     );
     const exportWrapRule = cssRule(styles, ".turnover-ledger-export-dialog__table-wrap");
     const exportCellRule = cssRule(
@@ -1312,8 +1312,8 @@ describe("Turnover ledger page", () => {
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
     expect(flowRows).toHaveLength(3);
-    expect(within(flowRows[0]).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" })).toBeInTheDocument();
-    expect(within(flowRows[0]).getByRole("button", { name: "编辑流水 bank-jia-income-200000" })).toBeInTheDocument();
+    expect(within(flowRows[0]).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" })).toBeInTheDocument();
+    expect(within(flowRows[0]).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" })).toBeInTheDocument();
     expect(within(table).queryByText("流水")).not.toBeInTheDocument();
     expect(within(table).queryByText("总览不应展示的还款备注")).not.toBeInTheDocument();
     expect(within(flowRows[0]).getByText("200000.00")).toBeInTheDocument();
@@ -1346,15 +1346,17 @@ describe("Turnover ledger page", () => {
     expect(openButton).toBeDisabled();
 
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     expect(openButton).toBeEnabled();
     await user.click(openButton);
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     expect(within(drawer).getByRole("heading", { name: "确认外部往来闭环" })).toBeInTheDocument();
-    expect(within(drawer).getByText("bank-company-expense-1000")).toBeInTheDocument();
-    expect(within(drawer).getByText("bank-company-income-1000")).toBeInTheDocument();
+    expect(within(drawer).getByText("借出保证金")).toBeInTheDocument();
+    expect(within(drawer).getByText("收回保证金")).toBeInTheDocument();
+    expect(within(drawer).queryByText("bank-company-expense-1000")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("bank-company-income-1000")).not.toBeInTheDocument();
     expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
@@ -1389,16 +1391,15 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
-    const pendingButton = await within(drawer).findByRole("button", { name: "确认中…" });
+    const pendingButton = await within(drawer).findByRole("button", { name: "确定" });
     expect(pendingButton).toBeDisabled();
-    expect(pendingButton).toHaveAttribute("aria-busy", "true");
 
     resolveConfirm(Response.json({
       status: "confirmed",
@@ -1427,8 +1428,8 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
@@ -1460,8 +1461,8 @@ describe("Turnover ledger page", () => {
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
 
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
@@ -1489,16 +1490,17 @@ describe("Turnover ledger page", () => {
     expect(openButton).toBeDisabled();
 
     await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 17:07:45 收入 100000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-03-04 15:24:58 支出 300000.00" }));
     expect(openButton).toBeEnabled();
     await user.click(openButton);
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
-    expect(within(drawer).getByText("bank-jia-income-200000")).toBeInTheDocument();
-    expect(within(drawer).getByText("bank-jia-income-100000")).toBeInTheDocument();
-    expect(within(drawer).getByText("bank-jia-expense-300000")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("个人暂借款：待还款")).toHaveLength(2);
+    expect(within(drawer).queryByText("bank-jia-income-200000")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("bank-jia-income-100000")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("bank-jia-expense-300000")).not.toBeInTheDocument();
     expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("300000.00");
     expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("300000.00");
     expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
@@ -1537,9 +1539,9 @@ describe("Turnover ledger page", () => {
     const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 17:07:45 收入 100000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-03-04 15:24:58 支出 300000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
@@ -1579,8 +1581,8 @@ describe("Turnover ledger page", () => {
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
 
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-borrow-expense-40000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-repayment-income-40000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-03-11 16:07:35 支出 40000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-04-03 18:00:16 收入 40000.00" }));
 
     const openButton = within(page).getByRole("button", { name: "确认闭环" });
     expect(openButton).toBeEnabled();
@@ -1619,13 +1621,13 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     expect(await screen.findByText("一次只能选择同一往来组内的流水")).toBeInTheDocument();
 
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-03-04 15:24:58 支出 300000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("100000.00");
@@ -1656,7 +1658,7 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
 
     expect(within(page).getByText("已选 1 笔")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "确认闭环" })).not.toBeInTheDocument();
@@ -1702,8 +1704,8 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[0]).queryByText("未闭环")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "撤回闭环" })).not.toBeInTheDocument();
 
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
-    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
 
     const openButton = within(page).getByRole("button", { name: "确认闭环" });
     expect(openButton).toBeEnabled();
@@ -1736,16 +1738,18 @@ describe("Turnover ledger page", () => {
 
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     expect(within(drawer).getByRole("heading", { name: "编辑流水补充信息" })).toBeInTheDocument();
-    expect(within(drawer).getByText("贾小花 / 个人往来 / 2026-02-04 13:20:48")).toBeInTheDocument();
+    expect(within(drawer).getByText("贾小花")).toBeInTheDocument();
+    expect(within(drawer).getByText("个人往来")).toBeInTheDocument();
+    expect(within(drawer).getByText("2026-02-04 13:20:48")).toBeInTheDocument();
     expect(within(drawer).queryByText(/turnover_rel_/)).not.toBeInTheDocument();
     expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
     expect(within(drawer).getByText("流水概览")).toBeInTheDocument();
     expect(within(drawer).getByText("补充信息")).toBeInTheDocument();
     expect(within(drawer).getByText("操作记录 / 关系操作")).toBeInTheDocument();
-    expect(within(drawer).getAllByText("bank-jia-income-200000").length).toBeGreaterThan(0);
+    expect(within(drawer).queryByText("bank-jia-income-200000")).not.toBeInTheDocument();
     expect(within(drawer).getAllByText("建行 8106").length).toBeGreaterThan(0);
     expect(within(drawer).getAllByText("收").length).toBeGreaterThan(0);
     expect(within(drawer).getAllByText("200000.00").length).toBeGreaterThan(0);
@@ -1804,14 +1808,14 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
 
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     expect(within(drawer).getByLabelText("备注")).toBeDisabled();
     expect(within(drawer).getByRole("button", { name: "保存补充信息" })).toBeDisabled();
 
     act(() => {
-      within(table).getByRole("button", { hidden: true, name: "编辑流水 bank-jia-income-100000" }).click();
+      within(table).getByRole("button", { hidden: true, name: "编辑流水 贾小花 2026-02-04 17:07:45 收入 100000.00" }).click();
     });
     await waitFor(() => expect(within(drawer).getByLabelText("备注")).toHaveValue("页面内维护备注"));
     expect(olderSignal?.aborted).toBe(true);
@@ -1877,10 +1881,10 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     act(() => {
-      within(table).getByRole("button", { hidden: true, name: "编辑流水 bank-jia-income-100000" }).click();
+      within(table).getByRole("button", { hidden: true, name: "编辑流水 贾小花 2026-02-04 17:07:45 收入 100000.00" }).click();
     });
 
     await act(async () => {
@@ -1928,7 +1932,7 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     await user.click(within(drawer).getByRole("button", { name: "关闭" }));
 
@@ -1961,7 +1965,7 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     const note = within(drawer).getByLabelText("备注");
     await user.clear(note);
@@ -1992,7 +1996,7 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     const note = within(drawer).getByLabelText("备注");
     await user.clear(note);
@@ -2032,7 +2036,7 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
-    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
 
     const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
     expect(await within(drawer).findByText("该流水所属往来关系已刷新或不存在，请刷新台账后再编辑。")).toBeInTheDocument();

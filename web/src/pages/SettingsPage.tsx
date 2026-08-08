@@ -301,7 +301,7 @@ export default function SettingsPage() {
         tone: "error",
         message: conflictVersion === null
           ? normalizeSettingsError(error, "访问账户保存失败，请稍后重试。")
-          : `访问账户已被其他管理员更新（当前版本 ${conflictVersion}），请保留当前编辑并刷新后重试。`,
+          : "访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。",
       });
     } finally {
       setIsAccessControlSaving(false);

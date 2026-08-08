@@ -1799,9 +1799,10 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("button", { name: "新建批次" })).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("发票 2");
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2 张 / 32.26 元");
+    const batchRow = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
+    expect(batchRow).toHaveTextContent("3月批次");
+    expect(batchRow).toHaveTextContent("发票 2");
+    expect(batchRow).toHaveTextContent("2 张 / 32.26 元");
 
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
@@ -2381,7 +2382,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("票根网-成功.pdf")).toBeInTheDocument();
     expect(within(page).getAllByText("票根网-失败.pdf").length).toBeGreaterThanOrEqual(1);
     expect(within(page).getAllByText("票根网").length).toBeGreaterThanOrEqual(2);
-    expect(within(page).getByText("blocking")).toBeInTheDocument();
+    expect(within(page).getByText("阻断")).toBeInTheDocument();
     expect(within(page).getAllByText(/票根网-失败\.pdf/).length).toBeGreaterThanOrEqual(1);
     expect(within(page).getByText(/第 2 页/)).toBeInTheDocument();
     expect(within(page).getByText(/ocr/)).toBeInTheDocument();
@@ -2955,12 +2956,12 @@ describe("ETC ticket management page", () => {
     const description = within(row).getByTestId("etc-reconciliation-description-card-item-suggested");
 
     expect(description).toHaveClass("etc-reconciliation-description--collapsed");
-    expect(within(row).getByRole("button", { name: "展开交易描述 card-item-suggested" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "展开交易描述 财付通-微信支付-贵州黔通智联" })).toBeInTheDocument();
 
-    await user.click(within(row).getByRole("button", { name: "展开交易描述 card-item-suggested" }));
+    await user.click(within(row).getByRole("button", { name: "展开交易描述 财付通-微信支付-贵州黔通智联" }));
 
     expect(description).toHaveClass("etc-reconciliation-description--expanded");
-    expect(within(row).getByRole("button", { name: "收起交易描述 card-item-suggested" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "收起交易描述 财付通-微信支付-贵州黔通智联" })).toBeInTheDocument();
   });
 
   test("selects reconciliation rows locally with all, paired-only, and clear actions", async () => {
@@ -2971,10 +2972,10 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     const table = await within(page).findByRole("table", { name: "ETC双侧核对明细" });
     const rowCheckboxes = [
-      within(table).getByRole("checkbox", { name: "选择核对行 card-item-suggested" }),
-      within(table).getByRole("checkbox", { name: "选择核对行 card-item-missing" }),
-      within(table).getByRole("checkbox", { name: "选择核对行 card-item-covered" }),
-      within(table).getByRole("checkbox", { name: "选择核对行 right-ticket-item-extra" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 财付通-微信支付-贵州黔通智联" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 高速通行费" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 停车费补充凭证" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 云A8H66Q" }),
     ];
 
     rowCheckboxes.forEach((checkbox) => expect(checkbox).not.toBeChecked());

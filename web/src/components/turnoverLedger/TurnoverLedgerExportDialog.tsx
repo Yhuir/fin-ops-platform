@@ -17,7 +17,6 @@ const FAMILY_OPTIONS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
 const PREVIEW_COLUMNS: Array<{ key: keyof TurnoverLedgerExportRow; label: string; money?: boolean }> = [
   { key: "sequenceNo", label: "序号" },
   { key: "rowType", label: "行类型" },
-  { key: "lotId", label: "批次 ID" },
   { key: "familyLabel", label: "往来大类" },
   { key: "counterpartyName", label: "对方户名" },
   { key: "pendingRepaymentAmount", label: "待还款金额", money: true },

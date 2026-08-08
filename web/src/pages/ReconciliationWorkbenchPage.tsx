@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import { Button, TextArea } from "@heroui/react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -699,7 +699,7 @@ export default function ReconciliationWorkbenchPage() {
       expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
     }
     if (expectedVersion === null) {
-      throw new Error("流水规则批次版本缺失，无法撤回。");
+      throw new Error("流水规则批次状态已变化，请刷新后重试。");
     }
 
     await withdrawBankFlowRuleBatch({
@@ -984,7 +984,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     if (!expectedReadModelVersion) {
-      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
+      setLastActionMessage("最新数据尚未就绪，请刷新后重试。");
       return;
     }
     const requestSeq = loadMoreRequestSeqRef.current[zone] + 1;
@@ -1041,7 +1041,7 @@ export default function ReconciliationWorkbenchPage() {
           includeAuxiliary: false,
           zoneQueries: zoneServerPageQueries,
         });
-        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+        setLastActionMessage("关联台数据已更新，页面已重新加载。");
       } else {
         setLoadMoreErrorByZone((current) => ({
           ...current,
@@ -1073,7 +1073,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     if (!expectedReadModelVersion) {
-      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
+      setLastActionMessage("最新数据尚未就绪，请刷新后重试。");
       throw new Error("workbench_group_detail_version_unavailable");
     }
     let group: WorkbenchRelationGroup;
@@ -1091,14 +1091,14 @@ export default function ReconciliationWorkbenchPage() {
           includeAuxiliary: false,
           zoneQueries: zoneServerPageQueries,
         });
-        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+        setLastActionMessage("关联台数据已更新，页面已重新加载。");
         throw new Error("workbench_group_detail_version_changed");
       }
       setLastActionMessage("加载完整明细失败，请稍后重试。");
       throw new Error("workbench_group_detail_load_failed");
     }
     if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
-      setLastActionMessage("关联台数据版本已更新，请重新展开明细。");
+      setLastActionMessage("关联台数据已更新，请重新展开明细。");
       throw new Error("workbench_group_detail_version_changed");
     }
     setWorkbenchData((current) => {
@@ -1479,7 +1479,7 @@ export default function ReconciliationWorkbenchPage() {
     openDetail(row);
     const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     if (!expectedReadModelVersion) {
-      setDetailError("数据版本尚未就绪，请刷新后重试。");
+      setDetailError("最新数据尚未就绪，请刷新后重试。");
       setIsDetailLoading(false);
       return;
     }
@@ -1772,7 +1772,7 @@ export default function ReconciliationWorkbenchPage() {
         includeAuxiliary: false,
         zoneQueries: zoneServerPageQueries,
       });
-      setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+      setLastActionMessage("关联台数据已更新，页面已重新加载。");
     }
     return false;
   }, [executeWorkbenchActionWithFreshness, handleCloseDetail, loadWorkbenchData, runOperation, zoneServerPageQueries]);
@@ -1786,7 +1786,7 @@ export default function ReconciliationWorkbenchPage() {
       includeAuxiliary: false,
       zoneQueries: zoneServerPageQueries,
     });
-    setLastActionMessage("关联台数据版本已更新，页面正在重新加载。");
+    setLastActionMessage("关联台数据已更新，页面正在重新加载。");
   }, [loadWorkbenchData, zoneServerPageQueries]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
@@ -2772,14 +2772,16 @@ function RelationPreviewDialog({
       closeDisabled={isBusy}
       closeLabel="关闭关联预览"
       footer={footer}
-      headerAside={headerAside}
       open
-      subtitle={subtitle}
       title={operationCopy.title}
       width="min(1080px, 100vw)"
       onClose={closePreview}
     >
       <div className="relation-preview-body">
+        <div className="relation-preview-toolbar">
+          {subtitle}
+          {headerAside}
+        </div>
         {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
         <label className="relation-preview-note">
           <span>
@@ -2789,7 +2791,7 @@ function RelationPreviewDialog({
                 ? "差额说明（必填）"
                 : "备注（可选）"}
           </span>
-          <textarea
+          <TextArea
             aria-label={preview.operation === "withdraw_link" ? "撤回说明" : noteRequired ? "差额说明" : "备注"}
             disabled={isBusy || isCommittedError || isNonRetryableError}
             value={note}

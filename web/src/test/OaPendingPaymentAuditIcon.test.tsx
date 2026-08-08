@@ -62,12 +62,15 @@ describe("OA pending payment Audit", () => {
     await user.click(screen.getByRole("button", { name: "Audit OA 待付款核对" }));
 
     const status = await screen.findByText(/Audit 未通过 · 发现 3 个一致性问题/);
-    expect(status).toHaveTextContent("来源版本不一致");
+    expect(status).toHaveTextContent("来源数据不一致");
     expect(status).toHaveTextContent("关联关系不一致");
     expect(status).toHaveTextContent("数据缺失");
     expect(status).not.toHaveTextContent("存在重复数据");
     expect(status).not.toHaveTextContent("integrity issues_found");
     expect(status).not.toHaveTextContent("blocking samples");
+    expect(status).not.toHaveTextContent("oa-1");
+    expect(status).not.toHaveTextContent("case-1");
+    expect(status).not.toHaveTextContent("source_version_mismatch");
   });
 
   test("reports the audit state once without page read-model barrier retries", async () => {

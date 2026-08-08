@@ -1,4 +1,5 @@
-import type { ChangeEvent, ReactNode } from "react";
+import { Button, Input, ListBox, Select, TextArea } from "@heroui/react";
+import type { ChangeEvent, Key, ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import type {
@@ -101,16 +102,14 @@ export default function TurnoverLedgerExtraDrawer({
   const counterpartyName = cleanText(row?.counterpartyName) || cleanText(detail?.bankRows[0]?.counterpartyName) || "-";
   const familyLabel = cleanText(row?.familyLabel) || "-";
   const dateText = flowDate(row);
-  const subtitle = [counterpartyName, familyLabel, dateText].filter(Boolean).join(" / ");
   const bankAccountLabels = row?.bankAccountLabels?.length ? row.bankAccountLabels : (
     detail?.bankRows.map((bankRow) => bankRow.bankAccountLabel).filter(Boolean) ?? []
   );
-  const primaryBankRowId = cleanText(row?.sourceBankRowId) || cleanText(row?.bankRowIds?.[0]) || cleanText(detail?.bankRows[0]?.id);
   const handleTextChange = (field: keyof TurnoverLedgerExtra) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onExtraChange({ ...extra, [field]: event.target.value });
   };
-  const handleRateTypeChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    onExtraChange({ ...extra, interestRateType: event.target.value });
+  const handleRateTypeChange = (key: Key | null) => {
+    onExtraChange({ ...extra, interestRateType: String(key) });
   };
 
   return (
@@ -120,23 +119,22 @@ export default function TurnoverLedgerExtraDrawer({
       closeDisabled={saving || mutating}
       closeLabel="关闭"
       open={open}
-      subtitle={subtitle || "未选择流水"}
       title="编辑流水补充信息"
       width={640}
       onClose={onClose}
       footer={(
         <div className="turnover-ledger-extra-footer">
           <div className="turnover-ledger-extra-footer__group">
-            <button className="turnover-ledger-button" disabled={!canConfirm || busy || Boolean(error)} onClick={onConfirm} type="button">
+            <Button className="turnover-ledger-button" isDisabled={!canConfirm || busy || Boolean(error)} onPress={onConfirm} size="sm" variant="secondary">
               确认归并
-            </button>
-            <button className="turnover-ledger-button turnover-ledger-button--warning" disabled={!canWithdraw || busy || Boolean(error)} onClick={onWithdraw} type="button">
+            </Button>
+            <Button className="turnover-ledger-button turnover-ledger-button--warning" isDisabled={!canWithdraw || busy || Boolean(error)} onPress={onWithdraw} size="sm" variant="danger">
               撤销归并
-            </button>
+            </Button>
           </div>
-          <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={!dirty || editingDisabled} onClick={onSave} type="button">
+          <Button className="turnover-ledger-button turnover-ledger-button--primary" isDisabled={!dirty || editingDisabled} isPending={saving} onPress={onSave} size="sm" variant="primary">
             保存补充信息
-          </button>
+          </Button>
         </div>
       )}
     >
@@ -163,7 +161,6 @@ export default function TurnoverLedgerExtraDrawer({
                 <div className="turnover-ledger-extra-grid">
                   <DetailField label="对方户名" value={counterpartyName} />
                   <DetailField label="往来类别" value={familyLabel} />
-                  <DetailField label="流水编号" value={primaryBankRowId} />
                   <DetailField label="流水日期" value={dateText} />
                   <DetailField label="往来发生" value={formatMoney(relation.borrowAmount)} />
                   <DetailField label="结清发生" value={formatMoney(relation.repaymentAmount)} />
@@ -175,7 +172,6 @@ export default function TurnoverLedgerExtraDrawer({
                     {detail?.bankRows.map((bankRow) => (
                       <article className="turnover-ledger-extra-bank-card" key={bankRow.id}>
                         <div className="turnover-ledger-extra-bank-card__chips">
-                          <strong>{bankRow.id}</strong>
                           <span className="turnover-ledger-chip turnover-ledger-chip--filled">{bankRow.directionLabel || "-"}</span>
                           <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--amount">{formatMoney(bankRow.amount)}</span>
                           <span className="turnover-ledger-chip turnover-ledger-chip--outline">{bankRow.bankAccountLabel || "-"}</span>
@@ -190,33 +186,38 @@ export default function TurnoverLedgerExtraDrawer({
               <section className="turnover-ledger-extra-section">
                 <SectionTitle>补充信息</SectionTitle>
                 <div className="turnover-ledger-extra-form">
-                  <label className="turnover-ledger-extra-control">
+                  <div className="turnover-ledger-extra-control">
                     <span>利率类型</span>
-                    <select disabled={editingDisabled} value={extra.interestRateType} onChange={handleRateTypeChange}>
-                      <option value="none">不计息</option>
-                      <option value="annual">年息</option>
-                      <option value="monthly">月息</option>
-                    </select>
-                  </label>
+                    <Select aria-label="利率类型" isDisabled={editingDisabled} onSelectionChange={handleRateTypeChange} selectedKey={extra.interestRateType}>
+                      <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                      <Select.Popover>
+                        <ListBox>
+                          <ListBox.Item id="none" textValue="不计息">不计息</ListBox.Item>
+                          <ListBox.Item id="annual" textValue="年息">年息</ListBox.Item>
+                          <ListBox.Item id="monthly" textValue="月息">月息</ListBox.Item>
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                  </div>
                   <label className="turnover-ledger-extra-control">
                     <span>利率值</span>
-                    <input disabled={editingDisabled} value={extra.interestRateValue} onChange={handleTextChange("interestRateValue")} type="text" />
+                    <Input disabled={editingDisabled} value={extra.interestRateValue} onChange={handleTextChange("interestRateValue")} type="text" />
                   </label>
                   <label className="turnover-ledger-extra-control">
                     <span>已还利息额</span>
-                    <input disabled={editingDisabled} value={extra.interestPaidAmount} onChange={handleTextChange("interestPaidAmount")} type="text" />
+                    <Input disabled={editingDisabled} value={extra.interestPaidAmount} onChange={handleTextChange("interestPaidAmount")} type="text" />
                   </label>
                   <label className="turnover-ledger-extra-control">
                     <span>还利息日期</span>
-                    <input disabled={editingDisabled} placeholder="YYYY-MM-DD" value={extra.interestPaidDate ?? ""} onChange={handleTextChange("interestPaidDate")} type="text" />
+                    <Input disabled={editingDisabled} placeholder="YYYY-MM-DD" value={extra.interestPaidDate ?? ""} onChange={handleTextChange("interestPaidDate")} type="date" />
                   </label>
                   <label className="turnover-ledger-extra-control">
                     <span>还利息方式</span>
-                    <input disabled={editingDisabled} value={extra.interestPaymentMethod} onChange={handleTextChange("interestPaymentMethod")} type="text" />
+                    <Input disabled={editingDisabled} value={extra.interestPaymentMethod} onChange={handleTextChange("interestPaymentMethod")} type="text" />
                   </label>
                   <label className="turnover-ledger-extra-control turnover-ledger-extra-control--wide">
                     <span>备注</span>
-                    <textarea disabled={editingDisabled} rows={2} value={extra.note} onChange={handleTextChange("note")} />
+                    <TextArea disabled={editingDisabled} rows={2} value={extra.note} onChange={handleTextChange("note")} />
                   </label>
                 </div>
               </section>

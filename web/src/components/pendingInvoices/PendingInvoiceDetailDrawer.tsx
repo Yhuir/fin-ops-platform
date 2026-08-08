@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type {
@@ -115,17 +116,18 @@ export default function PendingInvoiceDetailDrawer({
   const sections = detail && !detail.oaPrintLayout ? visibleSections(detail.sections) : [];
   const footer = target?.kind === "oa" && detail?.oaPrintLayout ? (
     <div className="pending-invoice-drawer-actions">
-      <button
+      <Button
         className="pending-invoices-button pending-invoices-button--primary"
-        onClick={() => {
+        onPress={() => {
           if (typeof window !== "undefined" && typeof window.print === "function") {
             window.print();
           }
         }}
-        type="button"
+        size="sm"
+        variant="primary"
       >
         {detail.oaPrintLayout.downloadLabel || "打印下载"}
-      </button>
+      </Button>
     </div>
   ) : undefined;
   const body = (

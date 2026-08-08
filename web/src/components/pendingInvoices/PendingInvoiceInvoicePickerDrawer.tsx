@@ -1,3 +1,4 @@
+import { Button, Checkbox, Input, ListBox, Select } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type {
@@ -33,7 +34,7 @@ function numericMoney(value: string | null | undefined) {
 }
 
 function invoiceNumber(candidate: PendingInvoiceCandidate) {
-  return candidate.digitalInvoiceNo || candidate.invoiceNo || candidate.invoiceId || "-";
+  return candidate.digitalInvoiceNo || candidate.invoiceNo || "未识别号码";
 }
 
 function candidateStatusLabel(status: PendingInvoiceCandidate["candidateStatus"]) {
@@ -229,35 +230,35 @@ export default function PendingInvoiceInvoicePickerDrawer({
   const currentPageSize = pagination?.pageSize ?? pageSize;
   const from = total === 0 ? 0 : (currentPage - 1) * currentPageSize + 1;
   const to = Math.min(total, currentPage * currentPageSize);
-  const subtitle = transactionIds.length > 1 ? `已选 ${transactionIds.length} 条流水` : transactionIds[0];
-
   return (
     <PendingInvoiceDrawerFrame
       closeLabel="关闭发票选择抽屉"
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <button className="pending-invoices-button" disabled={busy} onClick={onClose} type="button">关闭</button>
-          <button
+          <Button className="pending-invoices-button" isDisabled={busy} onPress={onClose} size="sm" variant="secondary">取消</Button>
+          <Button
             className="pending-invoices-button"
-            disabled={selectedInvoiceIdsForSubmit.length === 0 || loading || busy}
-            onClick={handlePreview}
-            type="button"
+            isDisabled={selectedInvoiceIdsForSubmit.length === 0 || loading || busy}
+            onPress={handlePreview}
+            size="sm"
+            variant="secondary"
           >
             预览关联
-          </button>
-          <button
+          </Button>
+          <Button
             className="pending-invoices-button pending-invoices-button--primary"
-            disabled={!preview?.canConfirm || busy}
-            onClick={handleConfirm}
-            type="button"
+            isDisabled={!preview?.canConfirm || busy}
+            isPending={busy}
+            onPress={handleConfirm}
+            size="sm"
+            variant="primary"
           >
             确认建立关系
-          </button>
+          </Button>
         </div>
       )}
       onClose={onClose}
       open={open}
-      subtitle={subtitle}
       title="选择已有进项发票"
       width={900}
     >
@@ -266,7 +267,6 @@ export default function PendingInvoiceInvoicePickerDrawer({
       {preview ? (
         <StatusMessage tone={preview.canConfirm ? "info" : "warning"}>
           <div className="pending-invoice-preview-message">
-            <span>{preview.requestKey}</span>
             <span>关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</span>
             {preview.conflicts.length > 0 ? <PreviewIssueList title="不可确认原因" items={preview.conflicts} /> : null}
             {preview.warnings.length > 0 ? <PreviewIssueList title="提示" items={preview.warnings} /> : null}
@@ -286,7 +286,7 @@ export default function PendingInvoiceInvoicePickerDrawer({
         <Field label="开票结束" type="date" value={issueDateTo} onChange={(value) => { setIssueDateTo(value); setPage(1); }} />
         <Field inputMode="decimal" label="最小金额" value={amountMin} onChange={(value) => { setAmountMin(value); setPage(1); }} />
         <Field inputMode="decimal" label="最大金额" value={amountMax} onChange={(value) => { setAmountMax(value); setPage(1); }} />
-        <button className="pending-invoices-button" disabled={loading || busy} onClick={() => reloadCandidates()} type="button">搜索</button>
+        <Button className="pending-invoices-button" isDisabled={loading || busy} onPress={() => reloadCandidates()} size="sm" variant="secondary">搜索</Button>
       </section>
       <section className="pending-invoice-panel">
         <table aria-label="发票候选" className="pending-invoice-simple-table">
@@ -309,14 +309,15 @@ export default function PendingInvoiceInvoicePickerDrawer({
             {payload?.rows.map((candidate) => (
               <tr key={candidate.invoiceId || candidate.id}>
                 <td>
-                  <input
+                  <Checkbox
                     aria-label={`选择发票 ${invoiceNumber(candidate)}`}
-                    checked={selectedInvoiceIds.has(candidate.invoiceId)}
                     className="pending-invoice-candidate-select"
-                    disabled={candidate.candidateStatus !== "available" || busy}
+                    isDisabled={candidate.candidateStatus !== "available" || busy}
+                    isSelected={selectedInvoiceIds.has(candidate.invoiceId)}
                     onChange={() => toggleCandidate(candidate)}
-                    type="checkbox"
-                  />
+                  >
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                  </Checkbox>
                 </td>
                 <td>
                   <span className="pending-invoice-table-stack">
@@ -352,29 +353,36 @@ export default function PendingInvoiceInvoicePickerDrawer({
           </tbody>
         </table>
         <div className="pending-invoice-picker-pagination">
-          <label>
+          <div className="pending-invoice-picker-pagination__size">
             <span>每页发票</span>
-            <select
-              value={currentPageSize}
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
+            <Select
+              aria-label="每页发票"
+              selectedKey={String(currentPageSize)}
+              onSelectionChange={(key) => {
+                setPageSize(Number(key));
                 setPage(1);
               }}
             >
-              {[10, 20, 50].map((size) => <option key={size} value={size}>{size}</option>)}
-            </select>
-          </label>
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {[10, 20, 50].map((size) => <ListBox.Item id={String(size)} key={size} textValue={String(size)}>{size}</ListBox.Item>)}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
           <span>{from}-{to} / {total}</span>
           <div className="pending-invoice-picker-pagination__actions">
-            <button className="pending-invoices-button" disabled={currentPage <= 1 || loading || busy} onClick={() => setPage(currentPage - 1)} type="button">上一页</button>
-            <button
+            <Button className="pending-invoices-button" isDisabled={currentPage <= 1 || loading || busy} onPress={() => setPage(currentPage - 1)} size="sm" variant="secondary">上一页</Button>
+            <Button
               className="pending-invoices-button"
-              disabled={to >= total || loading || busy}
-              onClick={() => setPage(currentPage + 1)}
-              type="button"
+              isDisabled={to >= total || loading || busy}
+              onPress={() => setPage(currentPage + 1)}
+              size="sm"
+              variant="secondary"
             >
               下一页
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -418,7 +426,7 @@ function Field({
   return (
     <label className="pending-invoice-form-field">
       <span>{label}</span>
-      <input inputMode={inputMode} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input inputMode={inputMode} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

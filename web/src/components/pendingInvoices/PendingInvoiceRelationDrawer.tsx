@@ -72,7 +72,6 @@ export default function PendingInvoiceRelationDrawer({
       closeLabel="关闭关系明细抽屉"
       onClose={onClose}
       open={open}
-      subtitle={detail?.transactionSummary.counterpartyName ?? transactionId ?? undefined}
       title="关系与支付明细"
     >
       {loading ? <LoadingMessage label="正在加载关系明细" text="正在加载关系明细" /> : null}
@@ -120,19 +119,17 @@ export default function PendingInvoiceRelationDrawer({
                   <th scope="col">申请人</th>
                   <th scope="col">类型</th>
                   <th scope="col">项目</th>
-                  <th scope="col">关系</th>
                   <th scope="col">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.relatedOa.length === 0 ? (
-                  <tr><td colSpan={5}>暂无关联 OA。</td></tr>
+                  <tr><td colSpan={4}>暂无关联 OA。</td></tr>
                 ) : detail.relatedOa.map((oa) => (
                   <tr key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
                     <td>{oa.applicant || "-"}</td>
                     <td>{oa.applicationType || "-"}</td>
                     <td>{oa.projectName || "-"}</td>
-                    <td>{oa.relationCaseId || "-"}</td>
                     <td><RelationStatusChip status={oa.relationStatus} /></td>
                   </tr>
                 ))}
@@ -146,21 +143,19 @@ export default function PendingInvoiceRelationDrawer({
                   <th scope="col">支付日期</th>
                   <th scope="col">对方</th>
                   <th className="pending-invoice-simple-table__amount" scope="col">金额</th>
-                  <th scope="col">关系</th>
                   <th scope="col">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.paymentRows.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>暂无历史支付。</td>
+                    <td colSpan={4}>暂无历史支付。</td>
                   </tr>
                 ) : detail.paymentRows.map((row) => (
                   <tr key={row.id || row.relationCaseId}>
                     <td>{row.tradeTime || "-"}</td>
                     <td>{row.counterpartyName || "-"}</td>
                     <td className="pending-invoice-simple-table__amount">{formatMoney(row.debitAmount)}</td>
-                    <td>{row.relationCaseId || "-"}</td>
                     <td><RelationStatusChip status={row.relationStatus} /></td>
                   </tr>
                 ))}

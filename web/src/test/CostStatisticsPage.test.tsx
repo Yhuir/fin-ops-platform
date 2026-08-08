@@ -239,8 +239,8 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).getByRole("columnheader", { name: "流水摘要" })).toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "项目名" })).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "费用类型" })).not.toBeInTheDocument();
-    expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
-    expect(within(timeGrid).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
+    expect(await within(timeGrid).findByRole("button", { name: "查看流水 云南航空 2026-03-18 17:02:09 860.00" })).toBeInTheDocument();
+    expect(within(timeGrid).queryByRole("button", { name: "查看流水 昆明运维服务商 2026-03-20 15:11:02 5200.00" })).not.toBeInTheDocument();
     expect(within(timeGrid).getByText("2026-03-10 21:27:55")).toBeInTheDocument();
     expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
@@ -251,7 +251,7 @@ describe("Cost statistics page", () => {
       Array.from(screen.getByLabelText("时间统计方向金额").children).map((node) => node.getAttribute("aria-label")),
     ).toEqual(["支出金额 13360.00", "收入金额 2000.00"]);
     expect(screen.queryByText("总金额 15360.00")).not.toBeInTheDocument();
-    expect(await within(timeGrid).findByRole("button", { name: "查看流水 cost-income-001" })).toBeInTheDocument();
+    expect(await within(timeGrid).findByRole("button", { name: "查看流水 项目客户 2026-03-22 10:30:00 2000.00" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
@@ -272,7 +272,7 @@ describe("Cost statistics page", () => {
 
     const nextTimeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
     expectProjectCostTable("按时间统计表");
-    expect(await within(nextTimeGrid).findByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
+    expect(await within(nextTimeGrid).findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50&include_statistics=false",
@@ -404,15 +404,15 @@ describe("Cost statistics page", () => {
     const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
     expectProjectCostTable("项目对应流水表");
     const projectTransactionTrigger = await within(transactionTable).findByRole("button", {
-      name: "查看流水 cost-txn-001",
+      name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00",
     });
     expect(projectTransactionTrigger).toBeInTheDocument();
     expect(within(projectTransactionTrigger).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
-    expect(await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+    expect(await within(transactionTable).findByRole("button", { name: "查看流水 昆明设备供应商 2026-03-12 08:40:12 2500.00" })).toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
 
-    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }));
 
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expectProjectCostDialog("流水详情");
@@ -449,7 +449,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
     const transactionTable = await screen.findByRole("grid", { name: "按时间统计表" });
-    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }));
 
     const drawer = screen.getByRole("dialog", { name: "流水详情" });
     expect(drawer).toHaveClass("cost-transaction-detail-drawer");
@@ -471,7 +471,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
     const transactionTable = await screen.findByRole("grid", { name: "按时间统计表" });
-    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }));
 
     const drawer = screen.getByRole("dialog", { name: "流水详情" });
     expect(await within(drawer).findByRole("alert")).toHaveTextContent("流水详情加载失败，请稍后重试。");
@@ -576,7 +576,9 @@ describe("Cost statistics page", () => {
       await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
       const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
-      expect(await within(transactionTable).findAllByRole("button", { name: "查看流水 cost-txn-001" })).toHaveLength(2);
+      expect(await within(transactionTable).findAllByRole("button", { name: /^查看流水 昆明设备供应商 2026-03-10 21:27:55/ })).toHaveLength(2);
+      expect(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" })).toBeInTheDocument();
+      expect(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 1250.00" })).toBeInTheDocument();
       expect(within(transactionTable).getByText("PLC 模块采购追加成本")).toBeInTheDocument();
       expect(
         consoleError.mock.calls.some((call) => call.join(" ").includes("Encountered two children with the same key")),
@@ -644,7 +646,7 @@ describe("Cost statistics page", () => {
     expect(within(transactionTable).getByText("项目现场往返交通")).toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
-    await user.click(await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-003" }));
+    await user.click(await within(transactionTable).findByRole("button", { name: "查看流水 云南航空 2026-03-18 17:02:09 860.00" }));
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expectProjectCostDialog("流水详情");
     expect(dialog).toBeInTheDocument();
@@ -714,15 +716,15 @@ describe("Cost statistics page", () => {
     const transactionTable = screen.getByRole("grid", { name: "流水标签对应流水表" });
     expectProjectCostTable("流水标签对应流水表");
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-001" }),
+      await within(transactionTable).findByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }),
     ).toBeInTheDocument();
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-002" }),
+      await within(transactionTable).findByRole("button", { name: "查看流水 昆明设备供应商 2026-03-12 08:40:12 2500.00" }),
     ).toBeInTheDocument();
     expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
 
-    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
+    await user.click(within(transactionTable).getByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }));
 
     expect(await screen.findByRole("dialog", { name: "流水详情" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -806,10 +808,10 @@ describe("Cost statistics page", () => {
     const transactionTable = screen.getByRole("grid", { name: "银行对应流水表" });
     expectProjectCostTable("银行对应流水表");
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-001" }),
+      await within(transactionTable).findByRole("button", { name: "查看流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }),
     ).toBeInTheDocument();
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-002" }),
+      await within(transactionTable).findByRole("button", { name: "查看流水 昆明设备供应商 2026-03-12 08:40:12 2500.00" }),
     ).toBeInTheDocument();
     expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
@@ -844,7 +846,7 @@ describe("Cost statistics page", () => {
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
     expect(await screen.findByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
     expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
     await chooseScopeOption(user, "OA费用类型统计时间范围：2026年3月", "2026年");
@@ -853,7 +855,7 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "按时间" }));
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
   });
 
   test("scope picker floats under the range button instead of taking layout height", async () => {

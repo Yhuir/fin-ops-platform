@@ -1,3 +1,4 @@
+import { Button, Input, Radio, RadioGroup, TextArea } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
@@ -269,19 +270,19 @@ export default function WorkbenchExceptionModal({
   const footer = (
     <div className="detail-modal-footer workbench-exception-drawer-actions">
       {isCommittedError ? (
-        <button className="secondary-button" type="button" onClick={closeIfIdle}>
+        <Button className="secondary-button" onPress={closeIfIdle} size="sm" variant="secondary">
           关闭
-        </button>
+        </Button>
       ) : (
         <>
-          <button className="secondary-button" disabled={isBusy} type="button" onClick={closeIfIdle}>
+          <Button className="secondary-button" isDisabled={isBusy} onPress={closeIfIdle} size="sm" variant="secondary">
             取消
-          </button>
+          </Button>
           {preview && !preview.canApply ? <span className="state-panel">当前预览不可提交。</span> : null}
           {preview && submitActions.length > 0 ? (
-            <button className="primary-button" disabled={!canSubmit} type="button" onClick={handleSubmit}>
-              {isSubmitting ? "提交中..." : "提交处理"}
-            </button>
+            <Button className="primary-button" isDisabled={!canSubmit} isPending={isSubmitting} onPress={handleSubmit} size="sm" variant="primary">
+              提交处理
+            </Button>
           ) : null}
         </>
       )}
@@ -296,12 +297,12 @@ export default function WorkbenchExceptionModal({
       closeLabel="关闭统一异常处理"
       footer={footer}
       open
-      subtitle={subtitle}
       title="统一异常处理"
       width="min(760px, 100vw)"
       onClose={closeIfIdle}
     >
       <div className="detail-modal-body workbench-exception-drawer-body">
+        {subtitle}
         {isPreviewLoading ? <div className="state-panel">正在加载异常预览</div> : null}
         {previewError ? (
           <div className="state-panel error">
@@ -364,46 +365,38 @@ export default function WorkbenchExceptionModal({
               </section>
             ) : null}
 
-            <ActionSection
-              actions={automaticActions}
-              selectedActionCode={selectedAction?.actionCode ?? ""}
-              title="系统自动动作"
-              tone="automatic"
-              disabled={isBusy || isCommittedError}
-              onSelect={(actionCode) => updateDraft({ actionCode })}
-            />
+            <RadioGroup
+              aria-label="异常处理动作"
+              isDisabled={isBusy || isCommittedError}
+              onChange={(actionCode) => updateDraft({ actionCode })}
+              value={draft.actionCode}
+            >
+              <ActionSection actions={automaticActions} title="系统自动动作" tone="automatic" />
 
-            <section className="oa-bank-equation-card">
-              <h3>人工可选动作</h3>
-              {availableActions.length === 0 ? (
-                <div className="state-panel">暂无可执行人工动作。</div>
-              ) : (
-                <div className="exception-action-list">
-                  {availableActions.map((action) => {
-                    const actionLabel = actionDisplayLabel(action);
-                    const actionDescription = cleanInternalDisplayText(action.description);
-                    return (
-                      <label key={action.actionCode} className="exception-action-option manual">
-                        <input
-                          aria-label={`${actionLabel} ${resultStatusLabel(action.resultStatus)}`}
-                          checked={draft.actionCode === action.actionCode}
-                          disabled={isBusy || isCommittedError}
-                          name="workbench-exception-action"
-                          type="radio"
-                          value={action.actionCode}
-                          onChange={() => updateDraft({ actionCode: action.actionCode })}
-                        />
+              <section className="oa-bank-equation-card">
+                <h3>人工可选动作</h3>
+                {availableActions.length === 0 ? (
+                  <div className="state-panel">暂无可执行人工动作。</div>
+                ) : (
+                  <div className="exception-action-list">
+                    {availableActions.map((action) => {
+                      const actionLabel = actionDisplayLabel(action);
+                      const actionDescription = cleanInternalDisplayText(action.description);
+                      return (
+                        <Radio key={action.actionCode} className="exception-action-option manual" value={action.actionCode}>
+                          <Radio.Control><Radio.Indicator /></Radio.Control>
                         <span>
                           <strong>{actionLabel}</strong>
                           <span>{resultStatusLabel(action.resultStatus)}</span>
                           {actionDescription ? <small>{actionDescription}</small> : null}
                         </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+                        </Radio>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </RadioGroup>
 
             {selectedAction ? (
               <section className="oa-bank-equation-card">
@@ -489,18 +482,12 @@ function uniqueActions(actions: WorkbenchExceptionAction[]) {
 
 function ActionSection({
   actions,
-  selectedActionCode,
   title,
   tone,
-  disabled = false,
-  onSelect,
 }: {
   actions: WorkbenchExceptionAction[];
-  selectedActionCode?: string;
   title: string;
   tone: "automatic" | "manual";
-  disabled?: boolean;
-  onSelect?: (actionCode: string) => void;
 }) {
   if (actions.length === 0) {
     return null;
@@ -513,25 +500,20 @@ function ActionSection({
           const actionLabel = actionDisplayLabel(action);
           const actionDescription = cleanInternalDisplayText(action.description);
           return (
-            <label key={action.actionCode} className={`exception-action-option ${tone}`}>
-              {onSelect ? (
-                <input
-                  aria-label={`${actionLabel} ${resultStatusLabel(action.resultStatus)}`}
-                  checked={selectedActionCode === action.actionCode}
-                  disabled={disabled}
-                  name="workbench-exception-action"
-                  type="radio"
-                  value={action.actionCode}
-                  onChange={() => onSelect(action.actionCode)}
-                />
-              ) : null}
+            <Radio
+              aria-label={`${actionLabel} ${resultStatusLabel(action.resultStatus)}`}
+              className={`exception-action-option ${tone}`}
+              key={action.actionCode}
+              value={action.actionCode}
+            >
+              <Radio.Control><Radio.Indicator /></Radio.Control>
               <span className="exception-action-source">{tone === "automatic" ? "自动识别" : "人工确认"}</span>
               <span>
                 <strong>{actionLabel}</strong>
                 <span>{resultStatusLabel(action.resultStatus)}</span>
                 {actionDescription ? <small>{actionDescription}</small> : null}
               </span>
-            </label>
+            </Radio>
           );
         })}
       </div>
@@ -555,7 +537,7 @@ function RequiredField({
     return (
       <label className="field-block">
         <span className="field-label">{label}</span>
-        <textarea
+        <TextArea
           aria-label={label}
           className="field-textarea"
           disabled={disabled}
@@ -569,7 +551,7 @@ function RequiredField({
   return (
     <label className="field-block">
       <span className="field-label">{label}</span>
-      <input
+      <Input
         aria-label={label}
         className="field-input"
         disabled={disabled}

@@ -273,6 +273,10 @@ function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: s
   );
 }
 
+function costTransactionActionLabel(row: CostTimeRow) {
+  return `查看流水 ${row.counterpartyName || "未知对方"} ${formatCostTradeTime(row.tradeTime) || "时间未知"} ${formatCostAmount(row.amount)}`;
+}
+
 function buildMonthDateBounds(month: string) {
   const [yearText, monthText] = month.split("-");
   const year = Number(yearText);
@@ -1949,7 +1953,7 @@ export default function CostStatisticsPage() {
                       getRowKey={getCostTimeRowRenderKey}
                       emptyLabel="当前时间范围没有收入或支出流水。"
                       onRowClick={(row) => void openTransactionDetail(row, "time")}
-                      getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                      getRowActionLabel={costTransactionActionLabel}
                       {...autoLoadTableProps}
                     />
                   )}
@@ -2049,7 +2053,7 @@ export default function CostStatisticsPage() {
                         rows={selectedProjectTransactionRows}
                         getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "project")}
-                        getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                        getRowActionLabel={costTransactionActionLabel}
                         emptyLabel="该费用类型下暂无流水。"
                         {...autoLoadTableProps}
                       />
@@ -2150,7 +2154,7 @@ export default function CostStatisticsPage() {
                         rows={selectedBankProjectRows}
                         getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "bank")}
-                        getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                        getRowActionLabel={costTransactionActionLabel}
                         emptyLabel="该项目下暂无流水。"
                         {...autoLoadTableProps}
                       />
@@ -2228,7 +2232,7 @@ export default function CostStatisticsPage() {
                         rows={selectedExpenseTypeRows}
                         getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "expenseType")}
-                        getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                        getRowActionLabel={costTransactionActionLabel}
                         emptyLabel="该费用类型下暂无流水。"
                         {...autoLoadTableProps}
                       />
@@ -2343,7 +2347,7 @@ export default function CostStatisticsPage() {
                         rows={selectedBankTagSubRows}
                         getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "bankTag")}
-                        getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
+                        getRowActionLabel={costTransactionActionLabel}
                         emptyLabel="该流水标签下暂无流水。"
                         {...autoLoadTableProps}
                       />

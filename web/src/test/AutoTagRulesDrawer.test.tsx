@@ -59,13 +59,13 @@ function buttonByName(container: HTMLElement, name: string) {
   return button;
 }
 
-function matchFieldCombobox(row: HTMLElement) {
-  const combobox = Array.from(row.querySelectorAll('[role="combobox"]'))
+function matchFieldSelect(row: HTMLElement) {
+  const trigger = within(row).getAllByRole("button")
     .find((item) => item.getAttribute("aria-label")?.includes("查询项"));
-  if (!(combobox instanceof HTMLElement)) {
-    throw new Error("match field combobox not found");
+  if (!(trigger instanceof HTMLElement)) {
+    throw new Error("match field select not found");
   }
-  return combobox;
+  return trigger;
 }
 
 async function findAutoTagRuleSurface(drawer: HTMLElement) {
@@ -268,13 +268,11 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(feeRow).queryByLabelText(/台账动作类型/)).not.toBeInTheDocument();
 
     const externalRow = rowForDisplayValue(drawer, "借出款");
-    const thirdLabelSelect = within(externalRow).getAllByLabelText(/子子标签/)
-      .find((element) => element.getAttribute("role") === "combobox");
+    const thirdLabelSelect = within(externalRow).getByRole("button", { name: /子子标签/ });
     expect(thirdLabelSelect).toBeDefined();
-    expect(thirdLabelSelect).toHaveAttribute("aria-disabled", "true");
+    expect(thirdLabelSelect).toBeDisabled();
     expect(screen.queryByRole("option", { name: "公司往来" })).not.toBeInTheDocument();
-    const actionTypeSelect = within(externalRow).getAllByLabelText(/台账动作类型/)
-      .find((element) => element.getAttribute("role") === "combobox");
+    const actionTypeSelect = within(externalRow).getByRole("button", { name: /台账动作类型/ });
     expect(actionTypeSelect).toBeDefined();
     await user.click(actionTypeSelect as HTMLElement);
     await user.click(await screen.findByRole("option", { name: "已收款" }));
@@ -306,21 +304,21 @@ describe("AutoTagRulesDrawer", () => {
     await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
     const editedRow = rowForDisplayValue(drawer, "外部往来候选");
 
-    await user.click(matchFieldCombobox(editedRow));
+    await user.click(matchFieldSelect(editedRow));
     let listbox = await screen.findByRole("listbox");
-    expect(within(listbox).getByRole("button", { name: "全选" })).toBeInTheDocument();
-    expect(within(listbox).getByRole("button", { name: "清空" })).toBeInTheDocument();
-    await user.click(within(listbox).getByRole("button", { name: "清空" }));
+    expect(screen.getByRole("button", { name: "全选" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清空" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清空" }));
     await user.keyboard("{Escape}");
     await user.click(buttonByName(drawer, "保存"));
 
     expect(await within(drawer).findByText("往来款 至少选择一个匹配字段。")).toBeInTheDocument();
     expect(requestPayload(fetchMock, "/api/bank-details/auto-tag-rules", "PUT")).toBeNull();
 
-    await user.click(matchFieldCombobox(editedRow));
+    await user.click(matchFieldSelect(editedRow));
     listbox = await screen.findByRole("listbox");
     expect(within(listbox).queryByRole("option", { name: /全部文本/ })).not.toBeInTheDocument();
-    await user.click(within(listbox).getByRole("button", { name: "全选" }));
+    await user.click(screen.getByRole("button", { name: "全选" }));
     await user.keyboard("{Escape}");
     await user.click(buttonByName(drawer, "保存"));
 
@@ -353,7 +351,7 @@ describe("AutoTagRulesDrawer", () => {
     const row = lastEditableRow(drawer);
     await editRuleLabel(user, row, "往来款", "外部往来候选");
     const editedRow = rowForDisplayValue(drawer, "外部往来候选");
-    await user.click(within(editedRow).getByText("不限"));
+    await user.click(within(editedRow).getByRole("button", { name: /流水类型/ }));
     await user.click(await screen.findByRole("option", { name: "支出" }));
     await editCondition(user, drawer, "往来款 / 外部往来候选", "包含", "借据号");
     await editCondition(user, drawer, "往来款 / 外部往来候选", "必须同时包含", "还款");

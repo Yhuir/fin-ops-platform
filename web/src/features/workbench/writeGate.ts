@@ -64,7 +64,7 @@ export function resolveWorkbenchWriteGate({
     return {
       allowed: false,
       reason: "read_model_version_missing",
-      message: "关联台数据版本尚未就绪，刷新完成后将自动恢复写操作。",
+      message: "关联台最新数据尚未就绪，刷新完成后将自动恢复写操作。",
     };
   }
   return { allowed: true, reason: null, message: null };

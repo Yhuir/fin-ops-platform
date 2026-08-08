@@ -1,3 +1,4 @@
+import { Button, Checkbox } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { PendingInvoiceRuleGroup, PendingInvoiceRuleTag, PendingInvoiceRulesPayload } from "../../features/pendingInvoices/types";
@@ -153,19 +154,20 @@ export default function PendingInvoiceRulesDrawer({
       title={title}
       closeLabel="关闭规则抽屉"
       width={1280}
-      contentSx={{ p: 2 }}
       onClose={onClose}
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <button className="pending-invoices-button" disabled={saving} onClick={onClose} type="button">关闭</button>
-          <button
+          <Button className="pending-invoices-button" isDisabled={saving} onPress={onClose} size="sm" variant="secondary">取消</Button>
+          <Button
             className="pending-invoices-button pending-invoices-button--primary"
-            disabled={!payload?.permissions.canSave || loading || saving}
-            onClick={handleSave}
-            type="button"
+            isDisabled={!payload?.permissions.canSave || loading || saving}
+            isPending={saving}
+            onPress={handleSave}
+            size="sm"
+            variant="primary"
           >
             保存规则
-          </button>
+          </Button>
         </div>
       )}
     >
@@ -439,18 +441,16 @@ function HierarchicalRuleBlock({
                     );
                   }
                   return (
-                    <label
+                    <Checkbox
                       className="pending-invoice-rule-checkbox"
+                      isDisabled={disabled || (!checked && assignedElsewhere.has(tag.code))}
+                      isSelected={checked}
                       key={tag.code}
+                      onChange={() => onToggle?.(tag.code)}
                     >
-                      <input
-                        checked={checked}
-                        disabled={disabled || (!checked && assignedElsewhere.has(tag.code))}
-                        onChange={() => onToggle?.(tag.code)}
-                        type="checkbox"
-                      />
+                      <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                       <span>{childLabel}</span>
-                    </label>
+                    </Checkbox>
                   );
                 })}
               </div>

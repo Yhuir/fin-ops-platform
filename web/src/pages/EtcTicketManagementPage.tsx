@@ -665,7 +665,7 @@ function ReconciliationDescriptionCell({
         <button
           type="button"
           className="etc-reconciliation-description-toggle"
-          aria-label={`${expanded ? "收起" : "展开"}交易描述 ${cardId}`}
+          aria-label={`${expanded ? "收起" : "展开"}交易描述 ${text}`}
           onClick={(event) => {
             event.stopPropagation();
             onToggle();
@@ -2153,7 +2153,6 @@ export default function EtcTicketManagementPage() {
                           {rowExternalBatchId ? <span>批次号 {rowExternalBatchId}</span> : null}
                           <span>{rowCountText}</span>
                           <span>{rowAmountText}</span>
-                          {batch.oaRowId ? <span>OA {batch.oaRowId}</span> : null}
                         </span>
                       </div>
                       <button
@@ -2200,14 +2199,9 @@ export default function EtcTicketManagementPage() {
                         </StatusChip>
                       ) : null}
                     </div>
-                    {selectedBatch ? (
-                      <p>
-                        {selectedTask ? `流程 ${selectedTask.taskId}` : `批次 ${selectedBatch.businessBatchId}`}
-                        {selectedBatch.oaRowId ? ` · OA ${selectedBatch.oaRowId}` : ""}
-                      </p>
-                    ) : (
+                    {!selectedBatch ? (
                       <p>从左侧列表选择批次，或新建一个批次开始处理。</p>
-                    )}
+                    ) : null}
                   </div>
                   {activeStatus === "unsubmitted" ? (
                     <div className="etc-section-actions" aria-label="当前批次操作">
@@ -2408,7 +2402,7 @@ export default function EtcTicketManagementPage() {
                                         >
                                           <div className="etc-source-file-main">
                                             <div className="etc-source-file-title">
-                                              <strong>{sourceFile.originalName || sourceFile.fileId}</strong>
+                                              <strong>{sourceFile.originalName || "未命名文件"}</strong>
                                               <span className="etc-status-tag">{sourceKindLabel(sourceFile.sourceKind)}</span>
                                               {sourceSummary ? (
                                                 <>
@@ -2417,7 +2411,7 @@ export default function EtcTicketManagementPage() {
                                                   <span className="etc-status-tag">日期 {sourceSummary.dateRange}</span>
                                                 </>
                                               ) : null}
-                                              {sourceFile.hasBlockingIssue ? <span className="etc-status-tag etc-status-tag--error">blocking</span> : null}
+                                              {sourceFile.hasBlockingIssue ? <span className="etc-status-tag etc-status-tag--error">阻断</span> : null}
                                             </div>
                                             {sourceSummary ? (
                                               <span className="etc-source-file-id">{sourceSummary.dateRange}</span>
@@ -2545,7 +2539,7 @@ export default function EtcTicketManagementPage() {
                                     className={`etc-source-issue etc-source-issue--${issue.severity === "blocking" ? "error" : "warning"}`}
                                   >
                                     <div className="etc-source-issue__header">
-                                      <strong>{issue.originalName || issue.fileId || "未知文件"}</strong>
+                                      <strong>{issue.originalName || "未知文件"}</strong>
                                       <span className="etc-status-tag">{sourceKindLabel(issue.sourceKind)}</span>
                                       {parseIssueContextLabel(issue) ? (
                                         <span>{parseIssueContextLabel(issue)}</span>
@@ -2643,7 +2637,7 @@ export default function EtcTicketManagementPage() {
                                             checked={selectedReconciliationRowIds.has(row.id)}
                                             onChange={() => handleToggleReconciliationRow(row.id)}
                                             onClick={(event) => event.stopPropagation()}
-                                            aria-label={`选择核对行 ${row.id}`}
+                                            aria-label={`选择核对行 ${row.card?.description || row.evidence?.plateOrMerchant || "未命名记录"}`}
                                           />
                                         </td>
                                         <td
@@ -2775,7 +2769,7 @@ export default function EtcTicketManagementPage() {
                           <div className="etc-import-attempt-list">
                             {businessBatchDetail.importAttempts.map((attempt, index) => (
                               <div key={attempt.attemptId || `${attempt.importBatchId}-${index}`} className="etc-import-attempt-row">
-                                <strong>{attempt.importBatchId || `第 ${index + 1} 次导入`}</strong>
+                                <strong>第 {index + 1} 次导入</strong>
                                 <span>
                                   导入 {attempt.imported}，重复 {attempt.duplicatesSkipped}，补齐 {attempt.attachmentsCompleted}，失败 {attempt.failed}
                                 </span>
@@ -2874,7 +2868,7 @@ export default function EtcTicketManagementPage() {
         >
           {deleteTarget?.kind === "sourceFile" ? (
             <div className="etc-dialog-detail-list">
-              <p>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</p>
+              <p>文件：{deleteTarget.item.originalName || "未命名文件"}</p>
               <p>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</p>
               <p>批次：{formatTaskTitle(deleteTarget.task)}</p>
             </div>

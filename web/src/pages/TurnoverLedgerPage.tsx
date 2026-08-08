@@ -1,3 +1,4 @@
+import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { Download, RefreshCw } from "lucide-react";
 
@@ -604,14 +605,14 @@ export default function TurnoverLedgerPage() {
   const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
     const rowId = flowBankRowId(row);
     if (!rowId) {
-      setToast({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
+      setToast({ severity: "error", message: "这条流水缺少必要数据，无法选择。" });
       return;
     }
     setClosureSelection((current) => {
       const nextIsCashClosure = isCashClosureLinkedRow(row);
       const nextCashClosureCaseId = cashClosureCaseIdForRow(row);
       if (nextIsCashClosure && !nextCashClosureCaseId) {
-        setToast({ severity: "error", message: "这组闭环缺少关联台 case ID，请刷新后重试" });
+        setToast({ severity: "error", message: "这组闭环缺少必要数据，请刷新后重试。" });
         return current;
       }
       if (!current) {
@@ -1150,15 +1151,14 @@ export default function TurnoverLedgerPage() {
         closeLabel="关闭外部往来款标签设置"
         open={tagDrawerOpen}
         onClose={() => setTagDrawerOpen(false)}
-        subtitle={`版本 ${tagSelection.version}`}
         title="外部往来款标签设置"
         width={520}
       >
         <div className="turnover-ledger-drawer__content">
           <div className="turnover-ledger-drawer__actions">
-            <button className="turnover-ledger-button" disabled={!canMutateData || tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} type="button">全选</button>
-            <button className="turnover-ledger-button" disabled={!canMutateData || tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} type="button">清空</button>
-            <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={!canMutateData || tagSaving} onClick={() => void handleSaveTagSelection()} type="button">保存</button>
+            <Button className="turnover-ledger-button" isDisabled={!canMutateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="sm" variant="secondary">全选</Button>
+            <Button className="turnover-ledger-button" isDisabled={!canMutateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set())} size="sm" variant="secondary">清空</Button>
+            <Button className="turnover-ledger-button turnover-ledger-button--primary" isDisabled={!canMutateData || tagSaving} isPending={tagSaving} onPress={() => void handleSaveTagSelection()} size="sm" variant="primary">保存</Button>
           </div>
           {!canMutateData ? (
             <div className="turnover-ledger-drawer__notice" role="status">
@@ -1179,53 +1179,56 @@ export default function TurnoverLedgerPage() {
               const allChecked = checkedCount === codes.length && codes.length > 0;
               return (
                 <fieldset className="turnover-ledger-tag-group" key={group.primaryLabel}>
-                  <label className="turnover-ledger-checkbox-row turnover-ledger-checkbox-row--primary">
-                    <input
-                      aria-checked={checkedCount > 0 && !allChecked ? "mixed" : allChecked}
-                      checked={allChecked}
+                  <Checkbox
+                    className="turnover-ledger-checkbox-row turnover-ledger-checkbox-row--primary"
+                    isIndeterminate={checkedCount > 0 && !allChecked}
+                    isSelected={allChecked}
+                    isDisabled={!canMutateData || tagSaving}
+                    onChange={(selected) => {
+                      setDraftSelectedTagCodes((current) => {
+                        const next = new Set(current);
+                        codes.forEach((code) => {
+                          if (selected) {
+                            next.add(code);
+                          } else {
+                            next.delete(code);
+                          }
+                        });
+                        return next;
+                      });
+                    }}
+                  >
+                    <Checkbox.Control
                       className="turnover-ledger-checkbox"
-                      disabled={!canMutateData || tagSaving}
-                      type="checkbox"
-                        onChange={(event) => {
-                          setDraftSelectedTagCodes((current) => {
-                            const next = new Set(current);
-                            codes.forEach((code) => {
-                              if (event.target.checked) {
-                                next.add(code);
-                              } else {
-                                next.delete(code);
-                              }
-                            });
-                            return next;
-                          });
-                        }}
-                    />
+                    ><Checkbox.Indicator /></Checkbox.Control>
                     <span>{group.primaryLabel}</span>
-                  </label>
+                  </Checkbox>
                   <div className="turnover-ledger-tag-group__children">
                     {group.tags.map((tag) => {
                       const label = tagSubLabel(tag) || SELF_SUB_LABEL;
                       return (
-                        <label className="turnover-ledger-checkbox-row" key={tag.code}>
-                          <input
-                            checked={draftSelectedTagCodes.has(tag.code)}
+                        <Checkbox
+                          className="turnover-ledger-checkbox-row"
+                          isDisabled={!canMutateData || tagSaving}
+                          isSelected={draftSelectedTagCodes.has(tag.code)}
+                          key={tag.code}
+                          onChange={(selected) => {
+                            setDraftSelectedTagCodes((current) => {
+                              const next = new Set(current);
+                              if (selected) {
+                                next.add(tag.code);
+                              } else {
+                                next.delete(tag.code);
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          <Checkbox.Control
                             className="turnover-ledger-checkbox"
-                            disabled={!canMutateData || tagSaving}
-                            type="checkbox"
-                              onChange={(event) => {
-                                setDraftSelectedTagCodes((current) => {
-                                  const next = new Set(current);
-                                  if (event.target.checked) {
-                                    next.add(tag.code);
-                                  } else {
-                                    next.delete(tag.code);
-                                  }
-                                  return next;
-                                });
-                              }}
-                          />
+                          ><Checkbox.Indicator /></Checkbox.Control>
                           <span>{label}</span>
-                        </label>
+                        </Checkbox>
                       );
                     })}
                   </div>
@@ -1241,11 +1244,13 @@ export default function TurnoverLedgerPage() {
         closeLabel="关闭确认外部往来闭环"
         open={closureDrawerOpen}
         onClose={() => setClosureDrawerOpen(false)}
-        subtitle={closureSelection?.groupLabel || "未选择往来组"}
         title="确认外部往来闭环"
         width={520}
       >
         <div className="turnover-ledger-drawer__content">
+          {closureSelection?.groupLabel ? (
+            <div className="turnover-ledger-drawer__notice" role="status">{closureSelection.groupLabel}</div>
+          ) : null}
           <div className="turnover-ledger-closure-list">
             {closurePreview.items.map((item) => {
               const { row } = item;
@@ -1256,7 +1261,6 @@ export default function TurnoverLedgerPage() {
                     <span>{formatMoney(String(item.amount.toFixed(2)))}</span>
                   </div>
                   <span>{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</span>
-                  <span className="turnover-ledger-closure-card__muted">{item.bankRowId}</span>
                   <span className="turnover-ledger-closure-card__muted">{formatNullable(row.repaymentRemark || row.summaryText)}</span>
                 </div>
               );
@@ -1280,16 +1284,17 @@ export default function TurnoverLedgerPage() {
             ) : null}
           </div>
           <div className="turnover-ledger-drawer__footer">
-            <button className="turnover-ledger-button" disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} type="button">取消</button>
-            <button
-              aria-busy={closureSubmitting}
+            <Button className="turnover-ledger-button" isDisabled={closureSubmitting} onPress={() => setClosureDrawerOpen(false)} size="sm" variant="secondary">取消</Button>
+            <Button
               className="turnover-ledger-button turnover-ledger-button--primary"
-              disabled={!closurePreview.canConfirm || closureSubmitting}
-              onClick={() => void handleConfirmClosure()}
-              type="button"
+              isDisabled={!closurePreview.canConfirm || closureSubmitting}
+              isPending={closureSubmitting}
+              onPress={() => void handleConfirmClosure()}
+              size="sm"
+              variant="primary"
             >
-              {closureSubmitting ? "确认中…" : "确定"}
-            </button>
+              确定
+            </Button>
           </div>
         </div>
       </AppDrawer>

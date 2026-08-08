@@ -1,3 +1,4 @@
+import { Button, Checkbox, Input, ListBox, Select, TextArea } from "@heroui/react";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import AppDrawer from "../common/AppDrawer";
@@ -157,33 +158,32 @@ export default function PaymentStatusRulesDrawer({
       .finally(() => setSaving(false));
   };
 
-  const subtitle = canSave
-    ? "编辑后保存会校验版本冲突"
-    : "按后端权限展示规则和待处理方向";
-
   const footer = payload && canSave ? (
     <div className="input-invoice-usage-rules-actions input-invoice-usage-payment-rules-footer">
-      <button
+      <Button
         className="input-invoice-usage-button"
-        disabled={saving || loading || !dirty}
-        onClick={() => {
+        isDisabled={saving || loading || !dirty}
+        onPress={() => {
           setDraftRules(cloneRules(payload.rules));
           setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
           setError(null);
           setFeedback(null);
         }}
-        type="button"
+        size="sm"
+        variant="secondary"
       >
         还原
-      </button>
-      <button
+      </Button>
+      <Button
         className="input-invoice-usage-button input-invoice-usage-button--primary"
-        disabled={saving || loading || !dirty}
-        onClick={handleSave}
-        type="button"
+        isDisabled={saving || loading || !dirty}
+        isPending={saving}
+        onPress={handleSave}
+        size="sm"
+        variant="primary"
       >
-        {saving ? "保存中..." : "保存"}
-      </button>
+        保存
+      </Button>
     </div>
   ) : null;
 
@@ -194,7 +194,6 @@ export default function PaymentStatusRulesDrawer({
       footer={footer}
       onClose={onClose}
       open={open}
-      subtitle={subtitle}
       title="发票与支付状态规则设置"
       width="min(880px, 100vw)"
     >
@@ -223,14 +222,7 @@ export default function PaymentStatusRulesDrawer({
               {payload.readOnly === false && !canSave ? (
                 <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning">无保存权限</span>
               ) : null}
-              <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info">保存只更新规则，当前页面按访问状态刷新</span>
             </div>
-            <section className="input-invoice-usage-rules-section">
-              <h3>影响预览</h3>
-              <p className="input-invoice-usage-rules-empty">
-                当前暂未提供命中统计，保存后以刷新后的列表状态为准。
-              </p>
-            </section>
             <section className="input-invoice-usage-payment-rules-panel">
               <div className="input-invoice-usage-payment-rules-panel__header">
                 <h3>支付状态规则</h3>
@@ -243,14 +235,14 @@ export default function PaymentStatusRulesDrawer({
                   <article className="input-invoice-usage-payment-rule-row" key={rule.id || rule.code || rule.label} role="listitem">
                     <div className="input-invoice-usage-payment-rule-row__state">
                       {canSave ? (
-                        <label className="input-invoice-usage-rules-toggle">
-                          <input
-                            checked={rule.enabled !== false}
-                            onChange={(event) => updateRule(index, { enabled: event.target.checked }, setDraftRules)}
-                            type="checkbox"
-                          />
+                        <Checkbox
+                          className="input-invoice-usage-rules-toggle"
+                          isSelected={rule.enabled !== false}
+                          onChange={(selected) => updateRule(index, { enabled: selected }, setDraftRules)}
+                        >
+                          <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                           <span>{rule.enabled === false ? "停用" : "启用"}</span>
-                        </label>
+                        </Checkbox>
                       ) : (
                         <span className={rule.enabled === false ? "input-invoice-usage-rules-tag" : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"}>
                           {rule.enabled === false ? "停用" : "启用"}
@@ -259,7 +251,7 @@ export default function PaymentStatusRulesDrawer({
                       {canSave ? (
                         <label className="input-invoice-usage-rules-field input-invoice-usage-payment-rule-priority">
                           <span>优先级</span>
-                          <input
+                          <Input
                             min={1}
                             onChange={(event) => updateRule(index, { priority: Number(event.target.value) }, setDraftRules)}
                             type="number"
@@ -276,7 +268,7 @@ export default function PaymentStatusRulesDrawer({
                       {canSave ? (
                         <label className="input-invoice-usage-rules-field">
                           <span>支付状态</span>
-                          <input
+                          <Input
                             onChange={(event) => updateRule(index, { label: event.target.value }, setDraftRules)}
                             value={rule.label}
                           />
@@ -305,7 +297,7 @@ export default function PaymentStatusRulesDrawer({
                       {canSave ? (
                         <label className="input-invoice-usage-rules-field">
                           <span>原因文案</span>
-                          <textarea
+                          <TextArea
                             onChange={(event) => updateRule(index, { reason: event.target.value, description: event.target.value }, setDraftRules)}
                             rows={2}
                             value={rule.reason ?? rule.description}
@@ -327,9 +319,6 @@ export default function PaymentStatusRulesDrawer({
             </section>
             <section className="input-invoice-usage-rules-section">
               <h3>待处理发票处理方向</h3>
-              <p className="input-invoice-usage-rules-empty">
-                当前仅作为待处理方向标签，不影响自动分流。
-              </p>
               <div className="input-invoice-usage-rules-directions">
                 {draftPendingDirections.length === 0 ? (
                   <span className="input-invoice-usage-rules-empty">暂无待处理方向。</span>
@@ -338,7 +327,7 @@ export default function PaymentStatusRulesDrawer({
                   canSave ? (
                     <label className="input-invoice-usage-rules-field input-invoice-usage-rules-field--direction" key={option.code || index}>
                       <span>{option.code || `方向 ${index + 1}`}</span>
-                      <input
+                      <Input
                         onChange={(event) => updatePendingDirection(index, event.target.value, setDraftPendingDirections)}
                         value={option.label}
                       />
@@ -435,18 +424,23 @@ function RuleConditionEditor({
         <span className="input-invoice-usage-rules-tag">申请人={applicantName}</span>
       ) : null}
       {CONDITION_FIELDS.map((field) => (
-        <label className="input-invoice-usage-payment-rule-condition" key={field.key}>
+        <div className="input-invoice-usage-payment-rule-condition" key={field.key}>
           <span>{field.label}</span>
-          <select
+          <Select
             aria-label={`${rule.label || "规则"} ${field.label}条件`}
-            onChange={(event) => onChange(field.key, event.target.value as "any" | "true" | "false")}
-            value={conditionSelectValue(conditions, field.key)}
+            onSelectionChange={(key) => onChange(field.key, String(key) as "any" | "true" | "false")}
+            selectedKey={conditionSelectValue(conditions, field.key)}
           >
-            <option value="any">不限制</option>
-            <option value="true">{field.trueLabel}</option>
-            <option value="false">{field.falseLabel}</option>
-          </select>
-        </label>
+            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                <ListBox.Item id="any" textValue="不限制">不限制</ListBox.Item>
+                <ListBox.Item id="true" textValue={field.trueLabel}>{field.trueLabel}</ListBox.Item>
+                <ListBox.Item id="false" textValue={field.falseLabel}>{field.falseLabel}</ListBox.Item>
+              </ListBox>
+            </Select.Popover>
+          </Select>
+        </div>
       ))}
     </div>
   );

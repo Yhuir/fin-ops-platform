@@ -21,7 +21,6 @@ export type InputInvoiceUsageDetailSection = {
 
 export type InputInvoiceUsageDetailPayload = {
   title?: string;
-  subtitle?: string;
   detailAvailable?: boolean;
   unavailableReason?: string;
   sections: InputInvoiceUsageDetailSection[];
@@ -89,7 +88,6 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
   }, [loadDetail, open, target]);
 
   const title = detail?.title ?? (target ? fallbackTitles[target.kind] : "详情");
-  const subtitle = detail?.subtitle;
   const sections = detail ? visibleSections(detail.sections) : [];
 
   return (
@@ -97,7 +95,6 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
       className="input-invoice-usage-detail-drawer"
       closeLabel="关闭详情抽屉"
       open={open}
-      subtitle={subtitle}
       title={title}
       width="min(720px, 100vw)"
       onClose={onClose}
@@ -196,7 +193,7 @@ function isVisibleField(field: InputInvoiceUsageDetailField) {
   if (/^OA\s+\d+$/i.test(label)) {
     return true;
   }
-  if (!label || /[A-Za-z_]/.test(label) || /\bID\b/i.test(label)) {
+  if (!label || /[A-Za-z_]/.test(label) || /\bID\b/i.test(label) || /内部|文档ID|实例ID|请求ID|UUID|记录编号/.test(label)) {
     return false;
   }
   return !looksLikeRawData(field.value);

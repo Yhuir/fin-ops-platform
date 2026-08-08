@@ -12,6 +12,13 @@ type CostExplorerBrowserPayload = {
   };
 };
 
+const costTransactionLabels = {
+  expense: "查看流水 浏览器设备供应商 2026-03-10 21:27:55 10000.00",
+  income: "查看流水 浏览器回款客户 2026-03-18 10:08:00 8888.00",
+  office: "查看流水 浏览器办公室出租方 2026-04-02 09:15:08 4800.00",
+  travel: "查看流水 浏览器航空 2026-03-18 17:02:09 860.00",
+} as const;
+
 function requestPath(requestUrl: string) {
   return new URL(requestUrl).pathname;
 }
@@ -227,7 +234,7 @@ test.describe("cost statistics browser flow", () => {
 
     await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible();
+    await expect(page.getByRole("button", { name: costTransactionLabels.expense })).toBeVisible();
     await expect(page.getByRole("gridcell", { name: "PLC 模块采购", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "导出中心" })).toBeEnabled();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(3);
@@ -359,8 +366,8 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByLabel("时间统计方向金额")).toContainText("支出金额");
     await expect(page.getByLabel("收入金额 8888.00")).toBeVisible();
     await expect(page.locator(".cost-direction-amount--income").first()).toHaveCSS("color", /rgb\(/);
-    await expect(page.getByRole("button", { name: "查看流水 cost-income-e2e-001" })).toBeVisible();
-    await page.getByRole("button", { name: "查看流水 cost-income-e2e-001" }).click();
+    await expect(page.getByRole("button", { name: costTransactionLabels.income })).toBeVisible();
+    await page.getByRole("button", { name: costTransactionLabels.income }).click();
     const incomeDetailDialog = page.getByRole("dialog", { name: "流水详情" });
     await expect(incomeDetailDialog).toContainText("收入");
     await expect(incomeDetailDialog).toContainText("8888.00");
@@ -375,7 +382,7 @@ test.describe("cost statistics browser flow", () => {
       await page.getByRole("button", { name: "刷新成本统计" }).click();
       await mark("apiLatencyMs", refreshResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: costTransactionLabels.expense })).toBeVisible());
     });
     expect((await refreshResponse).status()).toBe(200);
 
@@ -391,7 +398,7 @@ test.describe("cost statistics browser flow", () => {
       await timePicker.getByRole("button", { name: "四月" }).click();
       await mark("apiLatencyMs", aprilResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-101" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: costTransactionLabels.office })).toBeVisible());
     });
     expect((await aprilResponse).status()).toBe(200);
 
@@ -520,7 +527,7 @@ test.describe("cost statistics browser flow", () => {
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "查看流水 cost-txn-e2e-003" })).toBeVisible();
+    await expect(page.getByRole("button", { name: costTransactionLabels.travel })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(1);
 
     await recordLatency({
@@ -545,7 +552,7 @@ test.describe("cost statistics browser flow", () => {
       await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
       await page.getByRole("button", { name: /设备货款及材料费/ }).click();
       await mark("firstVisibleResponseLatencyMs", expect(projectRows).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(projectRows.getByRole("button", { name: costTransactionLabels.expense })).toBeVisible());
     });
 
     const detailRequest = page.waitForRequest((request) =>
@@ -555,10 +562,10 @@ test.describe("cost statistics browser flow", () => {
     const detailDialog = page.getByRole("dialog", { name: "流水详情" });
     await recordLatency({
       operationId: "cost-statistics.open-project-transaction-detail",
-      visibleLabel: "查看流水 cost-txn-e2e-001",
+      visibleLabel: costTransactionLabels.expense,
       actionType: "click",
     }, async (mark) => {
-      await projectRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+      await projectRows.getByRole("button", { name: costTransactionLabels.expense }).click();
       await mark("apiLatencyMs", detailResponse);
       await mark("firstVisibleResponseLatencyMs", expect(detailDialog).toBeVisible());
       await mark("finalSettledLatencyMs", expect(detailDialog.getByText("浏览器成本统计明细").first()).toBeVisible());
@@ -650,7 +657,7 @@ test.describe("cost statistics browser flow", () => {
     const bankDetailRequest = page.waitForRequest((request) =>
       requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
     );
-    await bankRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+    await bankRows.getByRole("button", { name: costTransactionLabels.expense }).click();
     const bankDetailUrl = new URL((await bankDetailRequest).url());
     expect(bankDetailUrl.searchParams.get("project_scope")).toBe("active");
     const bankDetailDialog = page.getByRole("dialog", { name: "流水详情" });
@@ -672,7 +679,7 @@ test.describe("cost statistics browser flow", () => {
     const expenseDetailRequest = page.waitForRequest((request) =>
       requestPath(request.url()).endsWith("/api/cost-statistics/transactions/cost-txn-e2e-001"),
     );
-    await expenseRows.getByRole("button", { name: "查看流水 cost-txn-e2e-001" }).click();
+    await expenseRows.getByRole("button", { name: costTransactionLabels.expense }).click();
     const expenseDetailUrl = new URL((await expenseDetailRequest).url());
     expect(expenseDetailUrl.searchParams.get("project_scope")).toBe("active");
     const expenseDetailDialog = page.getByRole("dialog", { name: "流水详情" });

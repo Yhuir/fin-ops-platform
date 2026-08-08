@@ -143,7 +143,7 @@ describe("Settings page", () => {
     });
     const forbiddenLegacySurfaces = settingsSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /<(?:Alert|Box|Button|Card|Checkbox|Chip|CircularProgress|Collapse|DataGrid|Dialog|DialogActions|DialogContent|DialogTitle|FormControl|FormControlLabel|FormGroup|FormLabel|IconButton|InputLabel|LinearProgress|List|ListItem|ListItemButton|ListItemText|Menu|MenuItem|Select|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TablePagination|TableRow|TextField|Tooltip|Typography)\b|ThemeProvider|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsSectionSx|settingsTokens|DeleteOutlined|KeyboardArrowDownIcon|KeyboardArrowRightIcon|RefreshIcon|UndoIcon|CheckCircleOutlineIcon/.test(source)
+      return /ThemeProvider|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsSectionSx|settingsTokens|DeleteOutlined|KeyboardArrowDownIcon|KeyboardArrowRightIcon|RefreshIcon|UndoIcon|CheckCircleOutlineIcon/.test(source)
         ? [path]
         : [];
     });
@@ -402,7 +402,8 @@ describe("Settings page", () => {
     await user.click(within(region).getByRole("button", { name: "新增账户" }));
     await user.click(within(region).getByRole("button", { name: "保存访问账户" }));
 
-    expect(await within(region).findByText(/当前版本 7/)).toBeInTheDocument();
+    expect(await within(region).findByText("访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。")).toBeInTheDocument();
+    expect(within(region).queryByText(/当前版本 7/)).not.toBeInTheDocument();
     expect(within(region).getByRole("textbox", { name: "CONFLICT001 账户" })).toHaveValue("CONFLICT001");
   });
 

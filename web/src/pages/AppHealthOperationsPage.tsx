@@ -339,7 +339,6 @@ function AppHealthSystemAuditPanel({
             <FinanceStatusTag tone={externalTone}>
               {`外部证据 ${externalStatus}`}
             </FinanceStatusTag>
-            <span>{payload.database_system_snapshot?.system_audit_id ?? "system audit id unavailable"}</span>
             <span>仅证明该只读数据库快照内的已登记 App 内部合同；后续写入会使本结果失效。</span>
             {(payload.external_evidence?.domains ?? []).map((domain) => (
               <FinanceStatusTag
@@ -358,7 +357,7 @@ function AppHealthSystemAuditPanel({
               <FinanceStatusTag key={code} tone={state.tone === "danger" ? "danger" : "warning"}>{`${code}: ${formatNumber(count)}`}</FinanceStatusTag>
             ))}
             {visibleIssues.map((issue, index) => (
-              <span key={`${issue.code || "issue"}:${index}`}>{[issue.code, issue.scope_key, issue.subject_id].filter(Boolean).join(" / ") || issue.message || "issue"}</span>
+              <span key={`${issue.code || "issue"}:${index}`}>{issue.message || issue.code || "检测到问题"}</span>
             ))}
           </div>
         ) : null}

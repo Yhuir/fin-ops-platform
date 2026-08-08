@@ -493,7 +493,7 @@ test.describe("input invoice usage browser flow", () => {
     });
     await expect(rulesDrawer).toBeVisible();
     await expect(rulesDrawer.getByText(/版本\s*1/)).toHaveCount(0);
-    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeDisabled();
+    await expect(rulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 
     await recordLatency({
       operationId: "input-invoice-usage.edit-payment-rule-label",
@@ -501,9 +501,9 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "fill",
     }, async (mark) => {
       await rulesDrawer.getByRole("textbox", { name: "支付状态" }).first().fill("待付款（规则保存后刷新）");
-      await mark("finalSettledLatencyMs", expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeEnabled());
+      await mark("finalSettledLatencyMs", expect(rulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled());
     });
-    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeEnabled();
+    await expect(rulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
 
     await recordLatency({
       operationId: "input-invoice-usage.save-payment-rules",
@@ -512,7 +512,7 @@ test.describe("input invoice usage browser flow", () => {
     }, async (mark) => {
       const saveResponsePromise = waitForInputInvoiceUsagePaymentRulesSave(page);
       const refreshedRowsPromise = waitForInputInvoiceUsageRows(page);
-      await rulesDrawer.getByRole("button", { name: "保存" }).click();
+      await rulesDrawer.getByRole("button", { name: "保存", exact: true }).click();
       expect((await mark("apiLatencyMs", saveResponsePromise)).status()).toBe(200);
       expect((await refreshedRowsPromise).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(row).toContainText("待付款（规则保存后刷新）"));

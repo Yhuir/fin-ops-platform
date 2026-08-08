@@ -602,7 +602,7 @@ function PendingInvoiceTableRow({
           <span className="pending-invoices-row-select-slot">
             {transactionSelectable ? (
               <input
-                aria-label={`选择流水 ${row.bankTransaction.counterpartyName || row.id}`}
+                aria-label={`选择流水 ${row.bankTransaction.counterpartyName || "未知对方"}`}
                 checked={transactionSelected}
                 className="pending-invoices-row-select"
                 onChange={() => onToggleTransactionSelection?.(row)}

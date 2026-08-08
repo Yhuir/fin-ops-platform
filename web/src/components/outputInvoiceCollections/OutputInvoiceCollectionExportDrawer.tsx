@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type {
@@ -81,21 +82,22 @@ export default function OutputInvoiceCollectionExportDrawer({
       closeLabel="关闭销项发票收款情况导出"
       footer={(
         <>
-          <button className="output-invoice-collections-button" disabled={downloading} onClick={onClose} type="button">
-            关闭
-          </button>
-          <button
+          <Button className="output-invoice-collections-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">
+            取消
+          </Button>
+          <Button
             className="output-invoice-collections-button output-invoice-collections-button--primary"
-            disabled={!preview || loading || downloading}
-            onClick={handleDownload}
-            type="button"
+            isDisabled={!preview || loading || downloading}
+            isPending={downloading}
+            onPress={handleDownload}
+            size="sm"
+            variant="primary"
           >
-            {downloading ? "下载中..." : "下载导出"}
-          </button>
+            下载导出
+          </Button>
         </>
       )}
       open={open}
-      subtitle={preview?.scopeLabel || "当前筛选"}
       title="筛选内容导出"
       width="min(840px, 100vw)"
       onClose={onClose}

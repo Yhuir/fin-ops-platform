@@ -263,7 +263,9 @@ describe("WorkbenchExceptionModal", () => {
     act(() => {
       fireEvent.click(within(dialog).getByRole("button", { name: "提交处理" }));
     });
-    expect(within(dialog).getByRole("button", { name: "提交中..." })).toBeDisabled();
+    const pendingButton = within(dialog).getByRole("button", { name: "提交处理" });
+    expect(pendingButton).toBeDisabled();
+    expect(pendingButton).toHaveAttribute("data-pending", "true");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(12_000);

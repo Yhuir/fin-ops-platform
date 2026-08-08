@@ -1318,7 +1318,7 @@ describe("Pending invoices page", () => {
     expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
     expect(screen.getByText("王五")).toBeInTheDocument();
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
-    expect(screen.getAllByText("case-old").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("case-old")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
     expect(pendingInvoiceRelationRequests(fetchMock).map((url) => url.searchParams.get("kind"))).toEqual(["invoice", "bank", "oa"]);
 
@@ -1580,8 +1580,8 @@ describe("Pending invoices page", () => {
     });
     await user.click(screen.getByRole("checkbox", { name: "选择发票 DIG-CAND-001" }));
     await user.click(screen.getByRole("button", { name: "预览关联" }));
-    expect(await screen.findByText(/pending_invoice_attach_existing/)).toBeInTheDocument();
-    expect(screen.getByText("关联后待付 0.00")).toBeInTheDocument();
+    expect(await screen.findByText("关联后待付 0.00")).toBeInTheDocument();
+    expect(screen.queryByText(/pending_invoice_attach_existing/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "确认建立关系" }));
 
     await waitFor(() => {
@@ -1647,7 +1647,8 @@ describe("Pending invoices page", () => {
     await user.click(screen.getByRole("button", { name: "预览关联" }));
 
     expect(await screen.findByText("不可确认原因")).toBeInTheDocument();
-    expect(screen.getByText("关系 case-conflict，模式 manual_confirmed，对象 claim-001, inv-candidate")).toBeInTheDocument();
+    expect(screen.getByText("所选数据已存在其他关联关系")).toBeInTheDocument();
+    expect(screen.queryByText(/case-conflict|claim-001|inv-candidate|manual_confirmed/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "确认建立关系" })).toBeDisabled();
   }, 45_000);
 
@@ -1677,8 +1678,8 @@ describe("Pending invoices page", () => {
     expect(screen.getByText("0.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "预览关联" }));
-    expect(await screen.findByText("pending_invoice_attach_existing_batch:multi")).toBeInTheDocument();
-    expect(screen.getByText("关联后待付")).toBeInTheDocument();
+    expect(await screen.findByText("关联后待付")).toBeInTheDocument();
+    expect(screen.queryByText("pending_invoice_attach_existing_batch:multi")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "确认建立关系" }));
 
     await waitFor(() => {

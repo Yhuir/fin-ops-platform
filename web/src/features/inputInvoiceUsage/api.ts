@@ -419,7 +419,6 @@ function mapInvoiceDetailResponse(payload: unknown): InputInvoiceUsageDetailResp
 
   return {
     title: "发票详情",
-    subtitle: invoiceNo,
     sections,
   };
 }
@@ -451,7 +450,6 @@ function mapBankDetailResponse(payload: unknown): InputInvoiceUsageDetailRespons
   }
   return {
     title: "银行流水详情",
-    subtitle: stringValue(camelOrSnake(raw, "counterpartyName", "counterparty_name") ?? raw.id),
     sections,
   };
 }
@@ -461,7 +459,6 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
   if (camelOrSnake(raw, "detailAvailable", "detail_available") === false) {
     return {
       title: "OA详情",
-      subtitle: stringValue(camelOrSnake(raw, "oaId", "oa_id")),
       detailAvailable: false,
       unavailableReason: "后端未提供可稳定展示的 OA 完整详情。",
       sections: [],
@@ -487,7 +484,6 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
   }
   return {
     title: "OA详情",
-    subtitle: stringValue(camelOrSnake(raw, "workflowNo", "workflow_no") ?? camelOrSnake(raw, "oaId", "oa_id")),
     detailAvailable: true,
     sections,
   };
@@ -501,7 +497,6 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   const summaries = arrayValue(raw.summaries);
   const sections: InputInvoiceUsageDetailResponse["sections"] = [
     detailSection("关联概况", [
-      detailField("发票行 ID", camelOrSnake(raw, "invoiceId", "invoice_id")),
       detailField("关系类型", kind),
       detailField("关系数量", camelOrSnake(raw, "relationCount", "relation_count")),
       detailField("是否多条", camelOrSnake(raw, "hasMultiple", "has_multiple") ? "是" : "否"),
@@ -518,7 +513,6 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
   }
   return {
     title: stringValue(raw.title) || `${kind}关联明细`,
-    subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
     detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
     sections,
   };

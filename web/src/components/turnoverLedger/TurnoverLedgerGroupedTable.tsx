@@ -1,3 +1,4 @@
+import { Button, Checkbox } from "@heroui/react";
 import { useState, type MutableRefObject } from "react";
 
 import type {
@@ -13,6 +14,7 @@ type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
   lotId?: string;
   balanceAmount?: string;
+  flowAmount?: string;
 };
 
 type RuntimeGroup = TurnoverLedgerGroup & {
@@ -139,8 +141,11 @@ function runtimeRow(row: TurnoverLedgerGroupedRow) {
   return row as RuntimeGroupedRow;
 }
 
-function flowDisplayId(row: TurnoverLedgerGroupedRow) {
-  return runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || row.bankRowIds[0] || row.relationId || "未知流水";
+function flowAccessibleName(row: TurnoverLedgerGroupedRow) {
+  const direction = flowDirectionKey(row);
+  const date = row.borrowDate || row.repaymentDate || "时间未知";
+  const amount = runtimeRow(row).flowAmount || (direction === "income" ? row.borrowAmount : row.repaymentAmount);
+  return `${row.counterpartyName || "未知对方"} ${date} ${direction === "income" ? "收入" : direction === "expense" ? "支出" : "流水"} ${formatMoney(amount)}`;
 }
 
 function resolveRows(group: TurnoverLedgerGroup) {
@@ -404,7 +409,6 @@ function RowCells({
             <span
               className={`turnover-ledger-chip turnover-ledger-chip--compact ${chip.tone === "closure" ? "turnover-ledger-chip--closure" : "turnover-ledger-chip--outline"}`}
               key={chip.label}
-              title={[row.cashClosureCaseId, ...row.workbenchRelationCaseIds].filter(Boolean).join("、")}
             >
               {chip.label}
             </span>
@@ -434,15 +438,16 @@ function RowCells({
       <td>{formatNullable(row.note)}</td>
       <td>
         {isFlow ? (
-          <button
+          <Button
             className="turnover-ledger-table-button"
-            disabled={actionsDisabled}
-            onClick={() => onEdit(row)}
-            aria-label={`编辑流水 ${flowDisplayId(row)}`}
-            type="button"
+            isDisabled={actionsDisabled}
+            onPress={() => onEdit(row)}
+            aria-label={`编辑流水 ${flowAccessibleName(row)}`}
+            size="sm"
+            variant="tertiary"
           >
             编辑
-          </button>
+          </Button>
         ) : null}
       </td>
     </>
@@ -558,14 +563,16 @@ export default function TurnoverLedgerGroupedTable({
                       className={`turnover-row-${rowTone} turnover-flow-row`}
                     >
                       <td className="turnover-ledger-table__check">
-                        <input
-                          className="turnover-ledger-checkbox"
-                          checked={checked}
-                          disabled={actionsDisabled}
+                        <Checkbox
+                          aria-label={`选择流水 ${flowAccessibleName({ ...row, counterpartyName: group.counterpartyName })}`}
+                          isDisabled={actionsDisabled}
+                          isSelected={checked}
                           onChange={() => onToggleFlowSelection?.(group, row)}
-                          aria-label={`选择流水 ${rowId}`}
-                          type="checkbox"
-                        />
+                        >
+                          <Checkbox.Control className="turnover-ledger-checkbox">
+                            <Checkbox.Indicator />
+                          </Checkbox.Control>
+                        </Checkbox>
                       </td>
                       <RowCells
                         row={{ ...row, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}

@@ -217,19 +217,19 @@ describe("OaManualSearchImportTable", () => {
 
     const completedRow = await screen.findByRole("row", { name: /1981.*陈雄兵/ });
     const inProgressRow = screen.getByRole("row", { name: /2001.*吴云江/ });
-    expect(within(inProgressRow).getByLabelText("选择 OA oa-pay-2001")).toBeDisabled();
+    expect(within(inProgressRow).getByLabelText("选择 OA 2001")).toBeDisabled();
     expect(inProgressRow).toHaveTextContent("流程未完成");
 
-    await user.click(within(completedRow).getByLabelText("选择 OA oa-exp-1981"));
+    await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
     expect(screen.getByText("已选 1 个OA")).toBeInTheDocument();
     expect(screen.getByText("金额合计 ¥135.00")).toBeInTheDocument();
     expect(screen.getByText("预计发票 1 张")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "展开 OA oa-exp-1981 明细" }));
+    await user.click(screen.getByRole("button", { name: "展开 OA 1981 明细" }));
     expect(await screen.findByText("餐费")).toBeInTheDocument();
     expect(screen.getByText("明细可识别发票")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "刷新 OA oa-exp-1981 附件解析" }));
+    await user.click(screen.getByRole("button", { name: "刷新 OA 1981 附件解析" }));
     expect(await screen.findByText("预计发票 2 张")).toBeInTheDocument();
     expect(completedRow).toHaveTextContent("2");
     expect(completedRow).toHaveTextContent("0");
@@ -259,7 +259,7 @@ describe("OaManualSearchImportTable", () => {
 
     await user.click(screen.getByRole("button", { name: "搜索" }));
     const completedRow = await screen.findByRole("row", { name: /1981.*陈雄兵/ });
-    await user.click(within(completedRow).getByLabelText("选择 OA oa-exp-1981"));
+    await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
 
     await waitFor(() => {
@@ -290,7 +290,7 @@ describe("OaManualSearchImportTable", () => {
     await user.click(await screen.findByLabelText("选择当前页可导入OA"));
 
     expect(screen.getByText("已选 1 个OA")).toBeInTheDocument();
-    expect(within(screen.getByRole("row", { name: /2001.*吴云江/ })).getByLabelText("选择 OA oa-pay-2001")).not.toBeChecked();
+    expect(within(screen.getByRole("row", { name: /2001.*吴云江/ })).getByLabelText("选择 OA 2001")).not.toBeChecked();
   });
 
   test("does not broaden search when all status filters are cleared", async () => {

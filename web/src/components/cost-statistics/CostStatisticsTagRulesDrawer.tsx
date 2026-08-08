@@ -1,3 +1,5 @@
+import { Button, Checkbox } from "@heroui/react";
+
 import AppDrawer from "../common/AppDrawer";
 import type { CostStatisticsTagRuleTag, CostStatisticsTagRules } from "../../features/cost-statistics/types";
 
@@ -75,23 +77,24 @@ export default function CostStatisticsTagRulesDrawer({
             {rules ? `已选 ${selectedCount} / ${tagCount}` : ""}
           </div>
           <div className="cost-tag-rules-footer-actions">
-            <button className="cost-drawer-secondary-button" disabled={saving || interactionLocked} onClick={onClose} type="button">
+            <Button className="cost-drawer-secondary-button" isDisabled={saving || interactionLocked} onPress={onClose} size="sm" variant="secondary">
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               className="cost-drawer-primary-button"
-              disabled={!rules || loading || saving || interactionLocked || !canSave}
-              onClick={onSave}
-              type="button"
+              isDisabled={!rules || loading || saving || interactionLocked || !canSave}
+              isPending={saving}
+              onPress={onSave}
+              size="sm"
+              variant="primary"
             >
-              {saving ? "保存中" : "保存"}
-            </button>
+              保存
+            </Button>
           </div>
         </div>
       )}
       onClose={onClose}
       open={open}
-      subtitle={rules ? `银行标签版本 ${rules.bankAutoTagRulesVersion}` : "读取银行标签中"}
       title="成本统计标签规则"
       width={460}
     >
@@ -107,28 +110,29 @@ export default function CostStatisticsTagRulesDrawer({
               const indeterminate = checkedCount > 0 && checkedCount < codes.length;
               return (
                 <section className="cost-tag-rules-group" key={group.key}>
-                  <label className="cost-tag-rules-main">
-                    <input
-                      checked={checked}
-                      data-indeterminate={indeterminate ? "true" : undefined}
-                      disabled={saving || interactionLocked}
-                      onChange={(event) => onToggleGroup(codes, event.currentTarget.checked)}
-                      type="checkbox"
-                    />
+                  <Checkbox
+                    className="cost-tag-rules-main"
+                    isDisabled={saving || interactionLocked}
+                    isIndeterminate={indeterminate}
+                    isSelected={checked}
+                    onChange={(selected) => onToggleGroup(codes, selected)}
+                  >
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                     <span>{group.label}</span>
                     <em>{checkedCount}/{codes.length}</em>
-                  </label>
+                  </Checkbox>
                   <div className="cost-tag-rules-children">
                     {group.tags.map((tag) => (
-                      <label className="cost-tag-rules-child" key={tag.code}>
-                        <input
-                          checked={selectedSet.has(tag.code)}
-                          disabled={saving || interactionLocked}
-                          onChange={() => onToggleCode(tag.code)}
-                          type="checkbox"
-                        />
+                      <Checkbox
+                        className="cost-tag-rules-child"
+                        isDisabled={saving || interactionLocked}
+                        isSelected={selectedSet.has(tag.code)}
+                        key={tag.code}
+                        onChange={() => onToggleCode(tag.code)}
+                      >
+                        <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                         <span>{tagLeafLabel(tag)}</span>
-                      </label>
+                      </Checkbox>
                     ))}
                   </div>
                 </section>

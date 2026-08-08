@@ -299,8 +299,10 @@ Use project primitives instead of ad hoc nested spans.
 - **Use:** Detail panels, export setup, rule editing, relation detail, receipt preview.
 - **Equivalence:** Old right-side drawers remain right-side drawers after migration. Do not replace them with modals, inline cards, accordion panels, route changes, or page-level sidebars.
 - **Width:** Use stable widths by task complexity: compact `420px`, standard `560px`, wide `720px`.
-- **Structure:** Header, body, footer actions. Footer actions remain visible for forms and destructive flows.
-- **Close:** Escape and close button supported. Unsaved changes require confirmation if the old UI protected them.
+- **Structure:** One compact header row with the title at top left and the close button at top right, followed by a border-separated body and an optional sticky action footer. Do not add header subtitles, status sidecars, large summary cards, or poster-style sections.
+- **Content:** Use concise field labels and business values only. Explanatory paragraphs, release/version text, storage keys, relation/request/row IDs, and other implementation metadata are not user-facing content. Preserve genuine business identifiers such as invoice numbers, OA form numbers, bank references, plates, and account suffixes.
+- **Controls:** Drawer actions, inputs, selects, tabs, radios, and checkboxes use HeroUI primitives. Keep form validation and accessible labels intact.
+- **Close:** Use the shared HeroUI close control and support Escape. Unsaved changes require confirmation if the old UI protected them.
 
 ### Dialogs
 

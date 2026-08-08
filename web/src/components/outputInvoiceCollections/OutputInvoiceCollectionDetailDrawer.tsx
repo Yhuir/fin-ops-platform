@@ -121,7 +121,7 @@ function visibleSections(sections: OutputInvoiceCollectionDetailResponse["sectio
 
 function isVisibleField(field: OutputInvoiceCollectionDetailResponse["sections"][number]["fields"][number]) {
   const label = field.label.trim();
-  if (!label || /[A-Za-z_]/.test(label)) {
+  if (!label || /[A-Za-z_]/.test(label) || /\bID\b/i.test(label) || /内部|文档ID|实例ID|请求ID|UUID|记录编号/.test(label)) {
     return false;
   }
   return !looksLikeRawData(field.value);

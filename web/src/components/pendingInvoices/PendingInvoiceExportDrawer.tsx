@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type { PendingInvoiceExportDownload, PendingInvoiceExportPreview } from "../../features/pendingInvoices/types";
@@ -77,20 +78,21 @@ export default function PendingInvoiceExportDrawer({
       closeLabel="关闭导出抽屉"
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <button className="pending-invoices-button" disabled={downloading} onClick={onClose} type="button">关闭</button>
-          <button
+          <Button className="pending-invoices-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">取消</Button>
+          <Button
             className="pending-invoices-button pending-invoices-button--primary"
-            disabled={!preview || loading || downloading}
-            onClick={handleDownload}
-            type="button"
+            isDisabled={!preview || loading || downloading}
+            isPending={downloading}
+            onPress={handleDownload}
+            size="sm"
+            variant="primary"
           >
             下载导出
-          </button>
+          </Button>
         </div>
       )}
       onClose={onClose}
       open={open}
-      subtitle={preview?.scopeLabel}
       title="导出预览"
     >
       {loading ? <LoadingMessage label="正在加载导出预览" text="正在计算导出范围" /> : null}

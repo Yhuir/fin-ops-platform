@@ -1,3 +1,4 @@
+import { Button, Checkbox, Input, ListBox, Select } from "@heroui/react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
@@ -53,6 +54,10 @@ function importStatusTone(row: OaManualSearchRow) {
     return "warning";
   }
   return "neutral";
+}
+
+function oaDisplayLabel(row: OaManualSearchRow) {
+  return row.oaNo || [row.applicant, row.applicationDate].filter(Boolean).join(" ") || "未命名 OA";
 }
 
 function nextToggledList(value: string, current: string[]) {
@@ -298,15 +303,15 @@ export default function OaManualSearchImportTable() {
       <div className="oa-manual-import__filters">
         <label className="settings-field">
           <span>搜索关键字</span>
-          <input value={query} type="search" onChange={(event) => setQuery(event.currentTarget.value)} />
+          <Input value={query} type="search" onChange={(event) => setQuery(event.currentTarget.value)} />
         </label>
         <label className="settings-field settings-field--date">
           <span>开始日期</span>
-          <input value={dateFrom} type="date" onChange={(event) => setDateFrom(event.currentTarget.value)} />
+          <Input value={dateFrom} type="date" onChange={(event) => setDateFrom(event.currentTarget.value)} />
         </label>
         <label className="settings-field settings-field--date">
           <span>结束日期</span>
-          <input value={dateTo} type="date" onChange={(event) => setDateTo(event.currentTarget.value)} />
+          <Input value={dateTo} type="date" onChange={(event) => setDateTo(event.currentTarget.value)} />
         </label>
       </div>
 
@@ -315,14 +320,15 @@ export default function OaManualSearchImportTable() {
           <legend>搜索表单类型</legend>
           <div className="settings-checkbox-list settings-checkbox-list--inline">
             {formTypeOptions.map((option) => (
-              <label className="settings-checkbox-row" key={option.value}>
-                <input
-                  checked={formTypes.includes(option.value)}
-                  type="checkbox"
-                  onChange={() => setFormTypes((current) => nextToggledList(option.value, current))}
-                />
+              <Checkbox
+                className="settings-checkbox-row"
+                isSelected={formTypes.includes(option.value)}
+                key={option.value}
+                onChange={() => setFormTypes((current) => nextToggledList(option.value, current))}
+              >
+                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                 <span>搜索{option.label}</span>
-              </label>
+              </Checkbox>
             ))}
           </div>
         </fieldset>
@@ -330,27 +336,27 @@ export default function OaManualSearchImportTable() {
           <legend>搜索流程状态</legend>
           <div className="settings-checkbox-list settings-checkbox-list--inline">
             {statusOptions.map((option) => (
-              <label className="settings-checkbox-row" key={option.value}>
-                <input
-                  checked={statuses.includes(option.value)}
-                  type="checkbox"
-                  onChange={() => setStatuses((current) => nextToggledList(option.value, current))}
-                />
+              <Checkbox
+                className="settings-checkbox-row"
+                isSelected={statuses.includes(option.value)}
+                key={option.value}
+                onChange={() => setStatuses((current) => nextToggledList(option.value, current))}
+              >
+                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                 <span>搜索{option.label}</span>
-              </label>
+              </Checkbox>
             ))}
           </div>
         </fieldset>
       </div>
 
       <div className="oa-manual-import__actions">
-        <button className="settings-primary-button" disabled={isLoading} type="button" onClick={() => void runSearch(0, pageSize)}>
+        <Button className="settings-primary-button" isDisabled={isLoading} onPress={() => void runSearch(0, pageSize)} size="sm" variant="primary">
           搜索
-        </button>
-        <button
+        </Button>
+        <Button
           className="settings-secondary-button"
-          type="button"
-          onClick={() => {
+          onPress={() => {
             setQuery("");
             setDateFrom("");
             setDateTo("");
@@ -364,20 +370,23 @@ export default function OaManualSearchImportTable() {
             setHasSearched(false);
             setError("");
           }}
+          size="sm"
+          variant="secondary"
         >
           清空
-        </button>
-        <button className="settings-secondary-button" type="button" onClick={() => setSelectedRows({})}>
+        </Button>
+        <Button className="settings-secondary-button" onPress={() => setSelectedRows({})} size="sm" variant="secondary">
           清空选择
-        </button>
-        <button
+        </Button>
+        <Button
           className="settings-primary-button"
-          disabled={selectedImportableRows.length === 0 || isImporting}
-          type="button"
-          onClick={() => void handleImportSelected()}
+          isDisabled={selectedImportableRows.length === 0 || isImporting}
+          onPress={() => void handleImportSelected()}
+          size="sm"
+          variant="primary"
         >
           {isImporting ? "正在导入" : "导入已选OA项"}
-        </button>
+        </Button>
       </div>
 
       {error ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{error}</div> : null}
@@ -387,18 +396,15 @@ export default function OaManualSearchImportTable() {
           <thead>
             <tr>
               <th scope="col">
-                <input
+                <Checkbox
                   aria-label="选择当前页可导入OA"
-                  checked={allCurrentPageImportableSelected}
-                  disabled={importablePageRows.length === 0}
-                  type="checkbox"
-                  ref={(element) => {
-                    if (element) {
-                      element.indeterminate = someCurrentPageImportableSelected;
-                    }
-                  }}
+                  isDisabled={importablePageRows.length === 0}
+                  isIndeterminate={someCurrentPageImportableSelected}
+                  isSelected={allCurrentPageImportableSelected}
                   onChange={toggleCurrentPageImportable}
-                />
+                >
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                </Checkbox>
               </th>
               <th scope="col" aria-label="展开明细" />
               <th scope="col">OA编号</th>
@@ -433,26 +439,30 @@ export default function OaManualSearchImportTable() {
                 <Fragment key={row.rowId}>
                   <tr className={selectedRows[row.rowId] ? "settings-native-table-row--selected" : undefined}>
                     <td>
-                      <input
-                        aria-label={`选择 OA ${row.rowId}`}
-                        checked={Boolean(selectedRows[row.rowId])}
-                        disabled={!row.canImport}
-                        title={row.canImport ? undefined : row.disabledReason || "不可导入"}
-                        type="checkbox"
+                      <Checkbox
+                        aria-label={`选择 OA ${oaDisplayLabel(row)}`}
+                        isSelected={Boolean(selectedRows[row.rowId])}
+                        isDisabled={!row.canImport}
                         onChange={() => toggleRow(row)}
-                      />
+                      >
+                        <Checkbox.Control>
+                          <Checkbox.Indicator />
+                        </Checkbox.Control>
+                      </Checkbox>
                     </td>
                     <td>
-                      <button
-                        aria-label={`${expanded ? "收起" : "展开"} OA ${row.rowId} 明细`}
+                      <Button
+                        aria-label={`${expanded ? "收起" : "展开"} OA ${oaDisplayLabel(row)} 明细`}
                         className="settings-icon-button"
-                        type="button"
-                        onClick={() => setExpandedRows((current) => ({ ...current, [row.rowId]: !expanded }))}
+                        isIconOnly
+                        onPress={() => setExpandedRows((current) => ({ ...current, [row.rowId]: !expanded }))}
+                        size="sm"
+                        variant="tertiary"
                       >
                         {expanded ? <ChevronDown aria-hidden="true" size={16} /> : <ChevronRight aria-hidden="true" size={16} />}
-                      </button>
+                      </Button>
                     </td>
-                    <td>{row.oaNo || row.rowId}</td>
+                    <td>{row.oaNo || "-"}</td>
                     <td>{row.applicant}</td>
                     <td>{row.applicationDate}</td>
                     <td>{row.formTypeLabel}</td>
@@ -476,22 +486,23 @@ export default function OaManualSearchImportTable() {
                     </td>
                     <td>{row.canImport ? "" : row.disabledReason || "不可导入"}</td>
                     <td>
-                      <button
-                        aria-label={`刷新 OA ${row.rowId} 附件解析`}
+                      <Button
+                        aria-label={`刷新 OA ${oaDisplayLabel(row)} 附件解析`}
                         className="settings-icon-button"
-                        disabled={busyRowId === row.rowId}
-                        title="刷新附件解析"
-                        type="button"
-                        onClick={() => void handleRefresh(row)}
+                        isDisabled={busyRowId === row.rowId}
+                        isIconOnly
+                        onPress={() => void handleRefresh(row)}
+                        size="sm"
+                        variant="tertiary"
                       >
                         <RefreshCw aria-hidden="true" size={16} />
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                   {expanded ? (
                     <tr>
                       <td className="oa-manual-import__detail-cell" colSpan={15}>
-                        <table className="settings-native-table oa-manual-import__detail-table" aria-label={`OA ${row.rowId} 明细`}>
+                        <table className="settings-native-table oa-manual-import__detail-table" aria-label={`OA ${oaDisplayLabel(row)} 明细`}>
                           <thead>
                             <tr>
                               <th scope="col">明细日期</th>
@@ -533,12 +544,13 @@ export default function OaManualSearchImportTable() {
 
       <div className="settings-table-pagination">
         <span>{currentFrom}-{currentTo} / {total}</span>
-        <label>
-          每页行数
-          <select
-            value={pageSize}
-            onChange={(event) => {
-              const nextPageSize = Number.parseInt(event.currentTarget.value, 10);
+        <div>
+          <span>每页行数</span>
+          <Select
+            aria-label="每页行数"
+            selectedKey={String(pageSize)}
+            onSelectionChange={(key) => {
+              const nextPageSize = Number.parseInt(String(key), 10);
               if (hasSearched) {
                 void runSearch(0, nextPageSize);
               } else {
@@ -547,17 +559,19 @@ export default function OaManualSearchImportTable() {
               }
             }}
           >
-            {[10, 20, 50, 100].map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
+            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                {[10, 20, 50, 100].map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}
+              </ListBox>
+            </Select.Popover>
+          </Select>
+        </div>
         <div className="settings-table-pagination__actions">
-          <button
+          <Button
             className="settings-secondary-button"
-            disabled={page <= 0}
-            type="button"
-            onClick={() => {
+            isDisabled={page <= 0}
+            onPress={() => {
               const nextPage = Math.max(0, page - 1);
               if (hasSearched) {
                 void runSearch(nextPage, pageSize);
@@ -565,14 +579,15 @@ export default function OaManualSearchImportTable() {
                 setPage(nextPage);
               }
             }}
+            size="sm"
+            variant="secondary"
           >
             上一页
-          </button>
-          <button
+          </Button>
+          <Button
             className="settings-secondary-button"
-            disabled={page + 1 >= totalPages}
-            type="button"
-            onClick={() => {
+            isDisabled={page + 1 >= totalPages}
+            onPress={() => {
               const nextPage = Math.min(totalPages - 1, page + 1);
               if (hasSearched) {
                 void runSearch(nextPage, pageSize);
@@ -580,9 +595,11 @@ export default function OaManualSearchImportTable() {
                 setPage(nextPage);
               }
             }}
+            size="sm"
+            variant="secondary"
           >
             下一页
-          </button>
+          </Button>
         </div>
       </div>
     </section>

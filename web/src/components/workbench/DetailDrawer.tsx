@@ -37,7 +37,6 @@ export default function DetailDrawer({ row, loading, error, onClose }: DetailDra
       className="workbench-detail-drawer"
       closeLabel="关闭详情抽屉"
       open={open}
-      subtitle={row?.status}
       title={title}
       width="min(720px, 100vw)"
       onClose={onClose}

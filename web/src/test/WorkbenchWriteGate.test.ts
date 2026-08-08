@@ -25,7 +25,7 @@ describe("resolveWorkbenchWriteGate", () => {
     [{ oaSyncWriteBlocked: true }, "oa_syncing", "OA 正在同步，完成后将自动恢复关联操作"],
     [{ readModelStatus: "refreshing" }, "read_model_not_fresh", "关联台正在刷新"],
     [{ readModelStatus: "stale" }, "read_model_not_fresh", "关联台数据已过期"],
-    [{ readModelVersion: null }, "read_model_version_missing", "关联台数据版本尚未就绪"],
+    [{ readModelVersion: null }, "read_model_version_missing", "关联台最新数据尚未就绪"],
   ] as const)("returns the first blocking reason for %o", (overrides, reason, message) => {
     expect(resolveWorkbenchWriteGate({ ...writableInput, ...overrides })).toMatchObject({
       allowed: false,

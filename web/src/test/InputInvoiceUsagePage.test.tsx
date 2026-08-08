@@ -480,8 +480,8 @@ describe("Input invoice usage page", () => {
     expect(button).toContain("var(--ease-out-quart)");
     expect(tableAction).toContain("var(--motion-fast)");
     expect(drawerBody).toContain("gap: var(--fp-space-3)");
-    expect(detailSection).toContain("border-radius: var(--fp-radius-sm)");
-    expect(detailSection).toContain("padding: var(--fp-space-3)");
+    expect(detailSection).toContain("border-top: 1px solid var(--fp-border)");
+    expect(detailSection).toContain("background: transparent");
     expect(filterTrigger).toContain("var(--motion-fast)");
     expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
     expect(groupPayment).toContain("color-mix(in srgb, var(--fp-warning-soft)");

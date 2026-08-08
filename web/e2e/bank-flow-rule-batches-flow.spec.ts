@@ -1,6 +1,6 @@
 import { lstat, readFile } from "node:fs/promises";
 
-import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
+import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import {
@@ -69,48 +69,55 @@ function putResponse(pathname: string) {
     response.request().method() === "PUT" && responsePathMatches(response.url(), pathname);
 }
 
+async function clickCheckbox(checkbox: Locator) {
+  const control = checkbox
+    .locator("xpath=ancestor::*[descendant::*[@data-slot='checkbox-control']][1]")
+    .locator("[data-slot='checkbox-control']");
+  await (await control.count() ? control : checkbox).click();
+}
+
 const ordinaryBankFlowRuleCheckboxCases = [
   {
     primaryButton: "费用 1批 · 1条",
     subButton: "手续费 1批 · 1条",
     tableName: "建设银行8106流水",
-    transactionId: "bank-flow-rule-e2e-fee",
+    accessibleName: "选择流水 建设银行 2026-05-03 10:20:00 1.00 建设银行 8106",
   },
   {
     primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "工资 1批 · 1条",
     tableName: "工商银行6386流水",
-    transactionId: "bank-flow-rule-e2e-salary",
+    accessibleName: "选择流水 工商银行 2026-05-03 10:20:00 2.00 工商银行 6386",
   },
   {
     primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "过节费 1批 · 1条",
     tableName: "中国银行7001流水",
-    transactionId: "bank-flow-rule-e2e-holiday_bonus",
+    accessibleName: "选择流水 中国银行 2026-05-03 10:20:00 3.00 中国银行 7001",
   },
   {
     primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "奖金 1批 · 1条",
     tableName: "招商银行9988流水",
-    transactionId: "bank-flow-rule-e2e-bonus",
+    accessibleName: "选择流水 招商银行 2026-05-03 10:20:00 4.00 招商银行 9988",
   },
   {
     primaryButton: "税款 2批 · 2条",
     subButton: "税款 1批 · 1条",
     tableName: "农业银行2211流水",
-    transactionId: "bank-flow-rule-e2e-tax_payment",
+    accessibleName: "选择流水 农业银行 2026-05-03 10:20:00 5.00 农业银行 2211",
   },
   {
     primaryButton: "税款 2批 · 2条",
     subButton: "国库税款 1批 · 1条",
     tableName: "交通银行3344流水",
-    transactionId: "bank-flow-rule-e2e-treasury_tax_collection",
+    accessibleName: "选择流水 交通银行 2026-05-03 10:20:00 6.00 交通银行 3344",
   },
   {
     primaryButton: "薪资社保福利 4批 · 4条",
     subButton: "社保 1批 · 1条",
     tableName: "民生银行5566流水",
-    transactionId: "bank-flow-rule-e2e-social_security",
+    accessibleName: "选择流水 民生银行 2026-05-03 10:20:00 7.00 民生银行 5566",
   },
 ];
 
@@ -372,16 +379,16 @@ test.describe("bank flow rule batches browser flow", () => {
 
       const table = page.getByRole("table", { name: item.tableName });
       await expect(table).toBeVisible();
-      const checkbox = table.getByRole("checkbox", { name: `选择流水 ${item.transactionId}` });
+      const checkbox = table.getByRole("checkbox", { name: item.accessibleName });
       await expect(checkbox).toBeVisible();
       await expect(checkbox).toBeEnabled();
       if (index === 0) {
-        await checkbox.check();
+        await clickCheckbox(checkbox);
         await expect(checkbox).toBeChecked();
         const refreshedCheckbox = page
           .getByRole("table", { name: item.tableName })
-          .getByRole("checkbox", { name: `选择流水 ${item.transactionId}` });
-        await refreshedCheckbox.uncheck();
+          .getByRole("checkbox", { name: item.accessibleName });
+        await clickCheckbox(refreshedCheckbox);
         await expect(refreshedCheckbox).not.toBeChecked();
       }
     }
@@ -422,7 +429,7 @@ test.describe("bank flow rule batches browser flow", () => {
       actionType: "check",
     }, async (mark) => {
       const checkbox = tagDrawer.getByRole("checkbox", { name: "人工成本 / 工资 需要OA" });
-      await checkbox.check();
+      await clickCheckbox(checkbox);
       await mark("firstVisibleResponseLatencyMs", expect(checkbox).toBeChecked());
       await mark("finalSettledLatencyMs", expect(checkbox).toBeChecked());
     });
@@ -510,7 +517,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
-    await draftTable.getByLabel("选择流水 bank-flow-rule-e2e-001").check();
+    await clickCheckbox(draftTable.getByLabel("选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106"));
     await recordLatency({
       operationId: "bank-flow-rule-batches.submit-selected-before-reset",
       visibleLabel: "提交批次",
@@ -634,7 +641,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
-    await draftTable.getByLabel("选择流水 bank-flow-rule-e2e-001").check();
+    await clickCheckbox(draftTable.getByLabel("选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106"));
     await expect(page.getByText("已选 1 条")).toBeVisible();
 
     const submitRequest = page.waitForRequest((request) =>

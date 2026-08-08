@@ -63,15 +63,11 @@ function auditIssueSamples(issues: PageAuditIssue[]) {
   const seen = new Set<string>();
   for (const issue of issues) {
     const code = normalize(issue.code) || "unknown";
-    const scope = normalize(issue.scope_key);
-    const subject = normalize(issue.subject_id);
-    const key = `${code}|${scope}|${subject}`;
-    if (seen.has(key)) {
+    if (seen.has(code)) {
       continue;
     }
-    seen.add(key);
-    const location = [scope ? `范围 ${scope}` : "", subject ? `对象 ${subject}` : ""].filter(Boolean).join("，");
-    samples.push(`${auditIssueLabel(code)}${location ? `（${location}）` : ""} [${code}]`);
+    seen.add(code);
+    samples.push(auditIssueLabel(code));
     if (samples.length === 3) {
       break;
     }
@@ -81,7 +77,7 @@ function auditIssueSamples(issues: PageAuditIssue[]) {
 
 function auditIssueLabel(code: string) {
   if (code.includes("source_version") || code.includes("fresh")) {
-    return "来源版本不一致";
+    return "来源数据不一致";
   }
   if (code.includes("missing")) {
     return "数据缺失";

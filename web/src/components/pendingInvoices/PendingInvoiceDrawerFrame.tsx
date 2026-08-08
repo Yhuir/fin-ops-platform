@@ -5,19 +5,16 @@ import AppDrawer from "../common/AppDrawer";
 type PendingInvoiceDrawerFrameProps = {
   open: boolean;
   title: string;
-  subtitle?: string;
   closeLabel: string;
   width?: number;
   children: ReactNode;
   footer?: ReactNode;
-  contentSx?: unknown;
   onClose: () => void;
 };
 
 export default function PendingInvoiceDrawerFrame({
   open,
   title,
-  subtitle,
   closeLabel,
   width = 720,
   children,
@@ -31,7 +28,6 @@ export default function PendingInvoiceDrawerFrame({
       footer={footer}
       onClose={onClose}
       open={open}
-      subtitle={subtitle}
       title={title}
       width={width}
     >

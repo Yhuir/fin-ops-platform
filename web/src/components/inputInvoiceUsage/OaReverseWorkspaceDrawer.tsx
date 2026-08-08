@@ -1,4 +1,4 @@
-import { Button, Checkbox, Chip } from "@heroui/react";
+import { Button, Checkbox, Chip, Input, ListBox, Select, Tabs } from "@heroui/react";
 import { Filter, Search, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -128,9 +128,7 @@ export default function OaReverseWorkspaceDrawer({
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [targetApplicantCode, setTargetApplicantCode] = useState<string | null>(null);
-  const [targetApplicantMenuOpen, setTargetApplicantMenuOpen] = useState(false);
   const [oaRelationFilter, setOaRelationFilter] = useState<OaRelationFilter>("all");
-  const [oaRelationFilterMenuOpen, setOaRelationFilterMenuOpen] = useState(false);
   const [candidateSearch, setCandidateSearch] = useState("");
   const confirmationOpenRef = useRef(false);
   const previewRequestIdRef = useRef(0);
@@ -167,9 +165,7 @@ export default function OaReverseWorkspaceDrawer({
       setHistoryLoading(false);
       setSelectedCandidateIds([]);
       setTargetApplicantCode(null);
-      setTargetApplicantMenuOpen(false);
       setOaRelationFilter("all");
-      setOaRelationFilterMenuOpen(false);
       setCandidateSearch("");
       return undefined;
     }
@@ -426,22 +422,25 @@ export default function OaReverseWorkspaceDrawer({
       onClose={onClose}
       open={open}
       title="以发票反提 OA"
-      headerAside={headerNotices.length > 0 ? <OaReverseHeaderNotices notices={headerNotices} /> : undefined}
       modal={false}
       width="min(920px, 100vw)"
     >
       <div aria-label="以发票反提 OA 工作流" className="input-invoice-usage-drawer-body">
-        <div aria-label="反提 OA 状态" className="input-invoice-usage-oa-tabs" role="tablist">
-          <TabButton active={activeTab === "pending"} onClick={() => setActiveTab("pending")}>
-            待处理
-          </TabButton>
-          <TabButton active={activeTab === "staged"} onClick={() => setActiveTab("staged")}>
-            暂存
-          </TabButton>
-          <TabButton active={activeTab === "submitted"} onClick={() => setActiveTab("submitted")}>
-            已提交
-          </TabButton>
-        </div>
+        {headerNotices.length > 0 ? <OaReverseHeaderNotices notices={headerNotices} /> : null}
+        <Tabs
+          onSelectionChange={(key) => {
+            if (key === "pending" || key === "staged" || key === "submitted") {
+              setActiveTab(key);
+            }
+          }}
+          selectedKey={activeTab}
+        >
+          <Tabs.List aria-label="反提 OA 状态" className="input-invoice-usage-oa-tabs">
+            <Tabs.Tab className="input-invoice-usage-oa-tab" id="pending">待处理</Tabs.Tab>
+            <Tabs.Tab className="input-invoice-usage-oa-tab" id="staged">暂存</Tabs.Tab>
+            <Tabs.Tab className="input-invoice-usage-oa-tab" id="submitted">已提交</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
         {activeTab === "submitted" ? (
           <SubmittedHistoryPanel
             error={historyError}
@@ -470,37 +469,21 @@ export default function OaReverseWorkspaceDrawer({
                   {targetApplicants.length > 0 ? (
                     <div className="input-invoice-usage-rules-field input-invoice-usage-oa-target input-invoice-usage-oa-target-card">
                       <span id={targetApplicantLabelId}>目标 OA 申请人</span>
-                      <button
-                        aria-expanded={targetApplicantMenuOpen}
-                        aria-haspopup="listbox"
+                      <Select
                         aria-labelledby={targetApplicantLabelId}
                         className="input-invoice-usage-oa-select"
-                        onClick={() => setTargetApplicantMenuOpen((current) => !current)}
-                        type="button"
+                        onSelectionChange={(key) => setTargetApplicantCode(String(key))}
+                        selectedKey={selectedTargetApplicantCode}
                       >
-                        {targetApplicants.find((applicant) => applicant.code === selectedTargetApplicantCode)?.name
-                          ?? preview.targetApplicantName
-                          ?? "请选择"}
-                      </button>
-                      {targetApplicantMenuOpen ? (
-                        <div aria-labelledby={targetApplicantLabelId} className="input-invoice-usage-oa-options" role="listbox">
-                          {targetApplicants.map((applicant) => (
-                            <button
-                              aria-selected={applicant.code === selectedTargetApplicantCode}
-                              className="input-invoice-usage-oa-option"
-                              key={applicant.code}
-                              onClick={() => {
-                                setTargetApplicantCode(applicant.code);
-                                setTargetApplicantMenuOpen(false);
-                              }}
-                              role="option"
-                              type="button"
-                            >
-                              {applicant.name}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
+                        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                        <Select.Popover>
+                          <ListBox>
+                            {targetApplicants.map((applicant) => (
+                              <ListBox.Item id={applicant.code} key={applicant.code} textValue={applicant.name}>{applicant.name}</ListBox.Item>
+                            ))}
+                          </ListBox>
+                        </Select.Popover>
+                      </Select>
                     </div>
                   ) : (
                     <SummaryMetric label="目标 OA 申请人" value={preview.targetApplicantName ?? "-"} />
@@ -537,7 +520,7 @@ export default function OaReverseWorkspaceDrawer({
                         <span>搜索</span>
                         <span className="input-invoice-usage-oa-search-control">
                           <Search aria-hidden="true" size={14} />
-                          <input
+                          <Input
                             aria-label="搜索候选发票"
                             onChange={(event) => setCandidateSearch(event.target.value)}
                             placeholder="发票号码、销方、金额"
@@ -558,39 +541,25 @@ export default function OaReverseWorkspaceDrawer({
                             <div className="input-invoice-usage-oa-filter-header">
                               <span>OA 关联</span>
                               <div className="input-invoice-usage-oa-filter-menu">
-                                <button
-                                  aria-expanded={oaRelationFilterMenuOpen}
-                                  aria-haspopup="menu"
+                                <Select
                                   aria-label="筛选 OA 关联状态"
                                   className="input-invoice-usage-oa-filter-trigger"
-                                  onClick={() => setOaRelationFilterMenuOpen((current) => !current)}
-                                  type="button"
+                                  onSelectionChange={(key) => setOaRelationFilter(String(key) as OaRelationFilter)}
+                                  selectedKey={oaRelationFilter}
                                 >
-                                  <Filter aria-hidden="true" size={14} />
-                                  <span>{oaRelationFilterLabel(oaRelationFilter)}</span>
-                                </button>
-                                {oaRelationFilterMenuOpen ? (
-                                  <div className="input-invoice-usage-oa-filter-panel" role="menu">
-                                    {OA_RELATION_FILTER_OPTIONS.map((option) => (
-                                      <button
-                                        aria-checked={oaRelationFilter === option.value}
-                                        className="input-invoice-usage-oa-filter-item"
-                                        key={option.value}
-                                        onClick={() => {
-                                          setOaRelationFilter(option.value);
-                                          setOaRelationFilterMenuOpen(false);
-                                        }}
-                                        role="menuitemradio"
-                                        type="button"
-                                      >
-                                        <span aria-hidden="true" className="input-invoice-usage-oa-filter-mark">
-                                          {oaRelationFilter === option.value ? "●" : ""}
-                                        </span>
-                                        <span>{option.label}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                ) : null}
+                                  <Select.Trigger>
+                                    <Filter aria-hidden="true" size={14} />
+                                    <Select.Value />
+                                    <Select.Indicator />
+                                  </Select.Trigger>
+                                  <Select.Popover>
+                                    <ListBox>
+                                      {OA_RELATION_FILTER_OPTIONS.map((option) => (
+                                        <ListBox.Item id={option.value} key={option.value} textValue={option.label}>{option.label}</ListBox.Item>
+                                      ))}
+                                    </ListBox>
+                                  </Select.Popover>
+                                </Select>
                               </div>
                             </div>
                       </FinanceTableColumn>
@@ -606,7 +575,7 @@ export default function OaReverseWorkspaceDrawer({
                         </FinanceTableRow>
                       ) : null}
                       {visibleCandidateInvoices.map((invoice) => {
-                        const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
+                        const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || "未识别号码";
                         return (
                           <FinanceTableRow
                             id={invoice.invoiceId}
@@ -706,10 +675,6 @@ const OA_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string
   { value: "unlinked", label: "未关联oa" },
 ];
 
-function oaRelationFilterLabel(value: OaRelationFilter) {
-  return OA_RELATION_FILTER_OPTIONS.find((option) => option.value === value)?.label ?? "全部";
-}
-
 function oaRelationChipLabel(value: OaRelationStatus) {
   if (value === "linked") {
     return "已关联oa";
@@ -800,12 +765,12 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
     });
   };
   const putNonSelectableRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
-    const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
+    const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || "未识别号码";
     const relationStatus = normalizeOaRelationStatus(invoice.oaRelationStatus || "linked");
     byId.set(invoice.invoiceId, {
       invoiceId: invoice.invoiceId,
       invoiceNumber: String(invoice.invoiceNumber || invoiceNumber || ""),
-      displayNo: String(invoice.displayNo || invoiceNumber || invoice.invoiceId),
+      displayNo: String(invoice.displayNo || invoiceNumber),
       sellerName: String(invoice.sellerName || ""),
       issueDate: String(invoice.issueDate || ""),
       totalWithTax: String(invoice.totalWithTax || ""),
@@ -839,20 +804,6 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
         ...invoice,
         targetApplicantName: invoice.targetApplicantName || group.targetApplicantName,
       });
-    }
-    for (const invoiceId of group.candidateInvoiceIds ?? []) {
-      if (!byId.has(invoiceId)) {
-        putSelectable({
-          invoiceId,
-          invoiceNumber: invoiceId,
-          displayNo: invoiceId,
-          sellerName: "",
-          issueDate: "",
-          totalWithTax: "",
-          paymentStatusLabel: "候选",
-          targetApplicantName: group.targetApplicantName,
-        });
-      }
     }
     for (const invoice of group.rejectedInvoices ?? []) {
       if (invoice.reasonCode !== "already_has_active_oa") {
@@ -929,20 +880,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function TabButton({ active, children, onClick }: { active: boolean; children: ReactNode; onClick: () => void }) {
-  return (
-    <button
-      aria-selected={active}
-      className={active ? "input-invoice-usage-oa-tab input-invoice-usage-oa-tab--active" : "input-invoice-usage-oa-tab"}
-      onClick={onClick}
-      role="tab"
-      type="button"
-    >
-      {children}
-    </button>
-  );
-}
-
 function DraftConfirmationDialog({
   actionLoading,
   draftUrl,
@@ -959,26 +896,29 @@ function DraftConfirmationDialog({
       <div aria-label="OA 草稿提交确认" aria-modal="true" className="input-invoice-usage-oa-confirmation" role="dialog">
         <div className="input-invoice-usage-oa-confirmation__header">
           <h3>OA 草稿提交确认</h3>
-          <button
+          <Button
             aria-label="关闭确认弹窗"
             className="input-invoice-usage-oa-confirmation__close"
-            disabled={Boolean(actionLoading)}
-            onClick={onCancel}
-            type="button"
+            isDisabled={Boolean(actionLoading)}
+            isIconOnly
+            onPress={onCancel}
+            size="sm"
+            variant="tertiary"
           >
             <X aria-hidden="true" size={16} />
-          </button>
+          </Button>
         </div>
-        <p>请在 OA 页面手动提交草稿后，再选择本次处理结果。</p>
         <div className="input-invoice-usage-oa-actions">
           <a className="input-invoice-usage-button" href={draftUrl} rel="noreferrer" target="_blank">
             打开 OA 草稿
           </a>
-          <button
+          <Button
             className="input-invoice-usage-button input-invoice-usage-button--primary"
-            disabled={Boolean(actionLoading)}
-            onClick={() => onDecision("submitted")}
-            type="button"
+            isDisabled={Boolean(actionLoading)}
+            isPending={actionLoading === "submissionDecision:submitted"}
+            onPress={() => onDecision("submitted")}
+            size="sm"
+            variant="primary"
           >
             {actionLoading === "submissionDecision:submitted" ? "记录中..." : (
               <DecisionLabel
@@ -986,12 +926,14 @@ function DraftConfirmationDialog({
                 secondary="OA正在进行中"
               />
             )}
-          </button>
-          <button
+          </Button>
+          <Button
             className="input-invoice-usage-button"
-            disabled={Boolean(actionLoading)}
-            onClick={() => onDecision("not_submitted")}
-            type="button"
+            isDisabled={Boolean(actionLoading)}
+            isPending={actionLoading === "submissionDecision:not_submitted"}
+            onPress={() => onDecision("not_submitted")}
+            size="sm"
+            variant="secondary"
           >
             {actionLoading === "submissionDecision:not_submitted" ? "清除中..." : (
               <DecisionLabel
@@ -999,7 +941,7 @@ function DraftConfirmationDialog({
                 secondary="删除本次提交内容"
               />
             )}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1051,7 +993,7 @@ function StagedDraftsPanel({
       {items.map((item) => (
         <article className="input-invoice-usage-oa-history-item" key={item.batchId}>
           <div className="input-invoice-usage-oa-history-item__header">
-            <strong>{item.targetApplicantName || item.targetApplicantCode || "目标申请人"}</strong>
+            <strong>{item.targetApplicantName || "目标申请人"}</strong>
             <span className="input-invoice-usage-rules-tag">{item.invoiceIds.length || item.invoiceRows.length} 张</span>
             <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{formatMoney(item.totalWithTax, "-")}</span>
           </div>
@@ -1068,7 +1010,7 @@ function StagedDraftsPanel({
               <tbody>
                 {item.invoiceRows.map((invoice) => (
                   <tr key={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`}>
-                    <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
+                    <td>{invoice.displayNo || invoice.invoiceNumber || "未识别号码"}</td>
                     <td>{invoice.sellerName || "-"}</td>
                     <td>{invoice.issueDate || "-"}</td>
                     <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
@@ -1078,11 +1020,13 @@ function StagedDraftsPanel({
             </table>
           </div>
           <div className="input-invoice-usage-oa-actions">
-            <button
+            <Button
               className="input-invoice-usage-button input-invoice-usage-button--primary"
-              disabled={Boolean(actionLoading)}
-              onClick={() => onDecision("submitted", item)}
-              type="button"
+              isDisabled={Boolean(actionLoading)}
+              isPending={actionLoading === "submissionDecision:submitted"}
+              onPress={() => onDecision("submitted", item)}
+              size="sm"
+              variant="primary"
             >
               {actionLoading === "submissionDecision:submitted" ? "记录中..." : (
                 <DecisionLabel
@@ -1090,12 +1034,14 @@ function StagedDraftsPanel({
                   secondary="OA正在进行中"
                 />
               )}
-            </button>
-            <button
+            </Button>
+            <Button
               className="input-invoice-usage-button"
-              disabled={Boolean(actionLoading)}
-              onClick={() => onDecision("not_submitted", item)}
-              type="button"
+              isDisabled={Boolean(actionLoading)}
+              isPending={actionLoading === "submissionDecision:not_submitted"}
+              onPress={() => onDecision("not_submitted", item)}
+              size="sm"
+              variant="secondary"
             >
               {actionLoading === "submissionDecision:not_submitted" ? "清除中..." : (
                 <DecisionLabel
@@ -1103,7 +1049,7 @@ function StagedDraftsPanel({
                   secondary="删除本次提交内容"
                 />
               )}
-            </button>
+            </Button>
           </div>
         </article>
       ))}

@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import { Button, Input, ListBox, Select, TextArea } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -151,7 +151,7 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
             <TextField label="开户账号" value={draft.bank_account} onChange={(value) => update("bank_account", value)} />
             <label className="oa-prefill-field oa-prefill-field--wide">
               <span>申请事由</span>
-              <textarea
+              <TextArea
                 maxLength={500}
                 onChange={(event) => update("reason_template", event.target.value)}
                 rows={3}
@@ -169,7 +169,7 @@ function ReadonlyField({ label, value }: { label: string; value: string }) {
   return (
     <label className="oa-prefill-field">
       <span>{label}</span>
-      <input disabled value={value || "生成时自动填充"} readOnly />
+      <Input disabled value={value || "生成时自动填充"} readOnly />
     </label>
   );
 }
@@ -188,7 +188,7 @@ function TextField({
   return (
     <label className="oa-prefill-field">
       <span>{label}</span>
-      <input maxLength={128} onChange={(event) => onChange(event.target.value)} required={required} value={value} />
+      <Input maxLength={128} onChange={(event) => onChange(event.target.value)} required={required} value={value} />
     </label>
   );
 }
@@ -205,11 +205,16 @@ function SelectField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="oa-prefill-field">
+    <div className="oa-prefill-field">
       <span>{label}</span>
-      <select onChange={(event) => onChange(event.target.value)} value={value}>
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
+      <Select aria-label={label} onSelectionChange={(key) => onChange(String(key))} selectedKey={value}>
+        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {options.map((option) => <ListBox.Item id={option.value} key={option.value} textValue={option.label}>{option.label}</ListBox.Item>)}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+    </div>
   );
 }

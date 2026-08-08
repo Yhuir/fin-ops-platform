@@ -1,3 +1,4 @@
+import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
@@ -1007,7 +1008,7 @@ export default function BankFlowRuleBatchPage() {
                                   {rowSelectionEnabled ? (
                                     <td className="bank-flow-rule-batches-table__check">
                                       <input
-                                        aria-label={`选择流水 ${row.transactionId}`}
+                                        aria-label={`选择流水 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${formatMoney(row.amount)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`}
                                         checked={selectedTransactionIds.has(row.transactionId)}
                                         className="bank-flow-rule-batches-checkbox"
                                         disabled={!canMutateData}
@@ -1036,7 +1037,7 @@ export default function BankFlowRuleBatchPage() {
                                       <span className="bank-flow-rule-batches-summary-cell__summary">{row.summary || "-"}</span>
                                       <span className="bank-flow-rule-batches-summary-cell__memo">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
                                       {rowTagLabels.length > 0 ? (
-                                        <div aria-label={`银行明细标签 ${row.transactionId}`} className="bank-flow-rule-batches-bank-tags">
+                                        <div aria-label={`银行明细标签 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`} className="bank-flow-rule-batches-bank-tags">
                                           {rowTagLabels.map((label) => (
                                             <span className="bank-flow-rule-batches-tag bank-flow-rule-batches-tag--bank-detail" key={label}>{label}</span>
                                           ))}
@@ -1073,14 +1074,16 @@ export default function BankFlowRuleBatchPage() {
         closeLabel="关闭流水规则标签管理"
         footer={(
           <div className="bank-flow-rule-batches-drawer__actions">
-            <button
+            <Button
               className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-              disabled={!canMutateData || tagLoading || mutating}
-              onClick={saveTagSelection}
-              type="button"
+              isDisabled={!canMutateData || tagLoading || mutating}
+              isPending={mutating}
+              onPress={saveTagSelection}
+              size="sm"
+              variant="primary"
             >
               保存
-            </button>
+            </Button>
           </div>
         )}
         onClose={() => setTagDrawerOpen(false)}
@@ -1150,24 +1153,26 @@ export default function BankFlowRuleBatchPage() {
                           ) : null}
                           <td>{subLabel}</td>
                           <td className="bank-flow-rule-batches-drawer__check-col">
-                            <input
+                            <Checkbox
                               aria-label={`${rowLabel} 需要OA`}
-                              checked={rule.requiresOa}
                               className="bank-flow-rule-batches-checkbox"
-                              disabled={!canMutateData || tagLoading}
-                              onChange={(event) => updateDraftRequirement(tag.code, "requiresOa", event.target.checked)}
-                              type="checkbox"
-                            />
+                              isDisabled={!canMutateData || tagLoading}
+                              isSelected={rule.requiresOa}
+                              onChange={(selected) => updateDraftRequirement(tag.code, "requiresOa", selected)}
+                            >
+                              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                            </Checkbox>
                           </td>
                           <td className="bank-flow-rule-batches-drawer__check-col">
-                            <input
+                            <Checkbox
                               aria-label={`${rowLabel} 需要发票`}
-                              checked={rule.requiresInvoice}
                               className="bank-flow-rule-batches-checkbox"
-                              disabled={!canMutateData || tagLoading}
-                              onChange={(event) => updateDraftRequirement(tag.code, "requiresInvoice", event.target.checked)}
-                              type="checkbox"
-                            />
+                              isDisabled={!canMutateData || tagLoading}
+                              isSelected={rule.requiresInvoice}
+                              onChange={(selected) => updateDraftRequirement(tag.code, "requiresInvoice", selected)}
+                            >
+                              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                            </Checkbox>
                           </td>
                         </tr>
                       );

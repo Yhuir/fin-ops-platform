@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type { InputInvoiceUsageExportDownload, InputInvoiceUsageExportPreview } from "../../features/inputInvoiceUsage/types";
@@ -78,21 +79,22 @@ export default function InputInvoiceUsageExportDrawer({
       closeLabel="关闭进项发票使用情况导出"
       footer={(
         <>
-          <button className="input-invoice-usage-button" disabled={downloading} onClick={onClose} type="button">
-            关闭
-          </button>
-          <button
+          <Button className="input-invoice-usage-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">
+            取消
+          </Button>
+          <Button
             className="input-invoice-usage-button input-invoice-usage-button--primary"
-            disabled={!preview || loading || downloading}
-            onClick={handleDownload}
-            type="button"
+            isDisabled={!preview || loading || downloading}
+            isPending={downloading}
+            onPress={handleDownload}
+            size="sm"
+            variant="primary"
           >
-            {downloading ? "下载中..." : "下载导出"}
-          </button>
+            下载导出
+          </Button>
         </>
       )}
       open={open}
-      subtitle={preview?.scopeLabel || "当前筛选"}
       title="筛选内容导出"
       width="min(840px, 100vw)"
       onClose={onClose}
