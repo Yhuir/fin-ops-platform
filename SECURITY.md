@@ -9,6 +9,7 @@
 - 后端通过 OA 会话接口识别当前用户，不信任前端菜单可见性。
 - OA 身份中的 roles、permissions（包括 `finops:app:view`）仅是信息字段，不授予 APP 访问。历史 `FIN_OPS_ALLOWED_*` / `FIN_OPS_READONLY_EXPORT_*` admission 环境名单已退役，也不构成 fallback。
 - 未登录或 token 失效返回 `401`；已登录但无权限返回 `403`。
+- 运行时不提供 synthetic dev/test identity。本地开发同样必须携带真实 OA token；`FIN_OPS_TEST_DEFAULT_AUTH`、`FIN_OPS_DEV_ALLOW_LOCAL_SESSION`、`FIN_OPS_DEV_USERNAME`、`FIN_OPS_DEV_OA_PASSWORD` 任一 key 存在都会在状态存储连接前阻断启动，生产发布也会阻断。
 - 受保护 API 在请求体解析和业务 route 之前统一执行写权限策略：`GET/HEAD/OPTIONS` 与登记的纯计算/preview POST 可读，其余 `POST/PUT/PATCH/DELETE` 默认视为写入并要求 `can_mutate_data=true`；未知新写 route 同样 fail closed。
 
 ## 权限分层
@@ -35,6 +36,7 @@
 - 不在日志中输出 OA token、数据库密码、导入文件敏感内容或完整附件正文。
 - 导入文件和附件应存储在受控存储中，生产环境优先使用独立对象存储或受控 GridFS。
 - 数据重置、权限修改、批量撤回等高风险操作必须记录操作者、时间、参数摘要和结果。
+- 数据重置必须由真实 OA admin session 并通过当前 OA 密码复核；应用不存在固定 token 或默认重置密码。
 
 ## 相关文档
 

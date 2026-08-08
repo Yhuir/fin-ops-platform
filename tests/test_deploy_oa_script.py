@@ -778,6 +778,10 @@ class DeployOAScriptTest(unittest.TestCase):
             RETIRED_ALLOWED_USERNAMES,
             RETIRED_ALLOWED_ROLES,
             RETIRED_READONLY_USERNAMES,
+            "FIN_OPS_TEST_DEFAULT_AUTH",
+            "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
+            "FIN_OPS_DEV_USERNAME",
+            "FIN_OPS_DEV_OA_PASSWORD",
         ):
             self.assertIn(retired, contract)
         self.assertIn("LEGACY_ADMIN_ENV", contract)

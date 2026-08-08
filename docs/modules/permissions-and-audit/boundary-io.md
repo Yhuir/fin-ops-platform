@@ -1,6 +1,6 @@
 # 权限与审计模块边界与 I/O
 
-日期：2026-08-02
+日期：2026-08-09
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：权限与审计模块负责 session/access-control/audit，不承载业务判断；所有写 API 必须通过权限和审计边界。
 - 当前缺口：部分 route 仍在 `server.py`，权限矩阵和 route owner 拆分需持续同步；生产 OA/proxy 行为仍需发布后 smoke。
-- 旧代码删除状态：共享 `route_access_policy.py` 已在 body 解析前覆盖受保护 API；旧 fail-open background owner fallback 与 legacy OA/project/ledger/reminder/matching HTTP families 已删除并由回归测试保护。
+- 旧代码删除状态：共享 `route_access_policy.py` 已在 body 解析前覆盖受保护 API；旧 fail-open background owner fallback、运行时 synthetic dev/test session、默认重置密码与 legacy OA/project/ledger/reminder/matching HTTP families 已删除并由回归测试保护。
 
 ## 职责边界
 
@@ -29,7 +29,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Session/auth request | `auth.py`、session API | OA 只解析 identity；roles/permissions 保留为信息字段，不参与 APP tier |
+| Session/auth request | `auth.py`、session API | 运行时必须提供真实 OA Bearer/cookie token；OA 只解析 identity；roles/permissions 保留为信息字段，不参与 APP tier。任何退役 dev/test auth 环境变量在 Application 初始化、状态存储连接前 fail closed。 |
 | Canonical ACL snapshot | Settings snapshot provider | 非管理员每次判断最多读取一次同一 `access_control_version`；完整 full/read memberships 决定 tier，缺席/非法/provider failure 一律 denied |
 | Permission check | `server.py` + `route_access_policy.py` + module-owned guard | 受保护 unsafe method 默认要求 mutation；只有登记的只读 POST 可豁免；module-owned OA pending guard 保持独立且必须等价 fail closed |
 | ACL audit event | Settings repository critical section | actor 来自后端 admin session，request id 来自受信 HTTP adapter；与 canonical version 同事务，no-op/失败无 success audit |
@@ -73,7 +73,7 @@
 
 - 允许依赖：OA identity source、Settings ACL snapshot provider、access control service、audit service。
 - 必须通过：一次 canonical evaluator + explicit global/module route permission check；ACL command/audit 必须回到 Settings owner。
-- 禁止绕过：permission/role/env/fixed marker grant；access-decision cache；write endpoint without permission owner；frontend-only authorization；logging secrets；Audit route 触发 refresh/repair；把 system Audit 的 admin access decision 当作 integrity 结论。
+- 禁止绕过：permission/role/env/fixed marker grant；运行时 synthetic dev/test identity；access-decision cache；write endpoint without permission owner；frontend-only authorization；logging secrets；Audit route 触发 refresh/repair；把 system Audit 的 admin access decision 当作 integrity 结论。
 
 ## 测试与验证
 
@@ -86,6 +86,7 @@
 
 - 新增写 API 必须更新 permissions inventory tests 和模块 boundary docs。
 - 动态管理员 provider、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和本地 auth clone 已删除；不得以兼容路径恢复。
+- `FIN_OPS_TEST_DEFAULT_AUTH`、`FIN_OPS_DEV_ALLOW_LOCAL_SESSION`、`FIN_OPS_DEV_USERNAME`、`FIN_OPS_DEV_OA_PASSWORD` 已退役；任一 key 即使值为 `0` 或空串也必须阻断启动/发布。测试身份只能由 `tests/app_test_support.py` 显式注入，不能进入 runtime package。
 - permission/role/三项退役 env admission branch 已删除；`finops:app:view` 只允许出现在 OA selector、部署/测试/文档的明确路径中，唯一 whole-repo inventory owner 负责机械阻止恢复。
 - Settings 专用 ACL route 复用 admin session resolver；generic mutation resolver 仍服务 full-access 普通写，不能整体升级为 admin-only。
 - Audit owner 接收 settings transaction 提交的 session actor、版本摘要、changed username hashes、mutation id 和 server request id；不接收 token、密码或完整 ACL payload。

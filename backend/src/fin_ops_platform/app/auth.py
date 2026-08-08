@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
 import os
-import sys
 from typing import Mapping
 
 from fin_ops_platform.services.access_control_service import AccessControlService, AccessTier
@@ -14,6 +13,12 @@ AUTHORIZATION_HEADER = "authorization"
 COOKIE_HEADER = "cookie"
 OA_TOKEN_COOKIE_NAME = "Admin-Token"
 BEARER_PREFIX = "bearer "
+RETIRED_AUTH_ENV_KEYS = (
+    "FIN_OPS_TEST_DEFAULT_AUTH",
+    "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
+    "FIN_OPS_DEV_USERNAME",
+    "FIN_OPS_DEV_OA_PASSWORD",
+)
 
 
 class OAAuthError(RuntimeError):
@@ -25,6 +30,10 @@ class UnauthorizedOASessionError(OAAuthError):
 
 
 class ForbiddenOAAccessError(OAAuthError):
+    pass
+
+
+class AuthRuntimeConfigurationError(RuntimeError):
     pass
 
 
@@ -50,16 +59,13 @@ def tenant_id_for_session(_: OARequestSession, *, fallback: str = "default") -> 
     return tenant_id or "default"
 
 
-def _should_enable_default_test_auth() -> bool:
-    override = os.getenv("FIN_OPS_TEST_DEFAULT_AUTH")
-    if override is not None:
-        return override.strip() == "1"
-    return "unittest" in sys.modules
-
-
-def _should_enable_local_dev_auth() -> bool:
-    override = os.getenv("FIN_OPS_DEV_ALLOW_LOCAL_SESSION")
-    return override is not None and override.strip() == "1"
+def assert_safe_auth_runtime_configuration() -> None:
+    retired_keys = [key for key in RETIRED_AUTH_ENV_KEYS if key in os.environ]
+    if retired_keys:
+        raise AuthRuntimeConfigurationError(
+            "Retired authentication environment variables must be absent: "
+            + ", ".join(retired_keys)
+        )
 
 
 def get_header(headers: Mapping[str, str] | None, name: str) -> str | None:
@@ -102,45 +108,6 @@ def resolve_oa_request_session(
 ) -> OARequestSession:
     token = extract_oa_token(headers)
     if token is None:
-        if _should_enable_local_dev_auth():
-            dev_username = os.getenv("FIN_OPS_DEV_USERNAME", "local_finops_admin").strip() or "local_finops_admin"
-            synthetic_identity = OAUserIdentity(
-                user_id="local-dev-user-id",
-                username=dev_username,
-                nickname="本地开发用户",
-                display_name="本地开发用户",
-                roles=[],
-                permissions=[],
-            )
-            decision = access_control_service.evaluate(synthetic_identity)
-            return OARequestSession(
-                token="local-dev-token",
-                identity=synthetic_identity,
-                allowed=decision.allowed,
-                access_tier=decision.access_tier,
-                can_access_app=decision.can_access_app,
-                can_mutate_data=decision.can_mutate_data,
-                can_admin_access=decision.can_admin_access,
-            )
-        if _should_enable_default_test_auth():
-            synthetic_identity = OAUserIdentity(
-                user_id="test-user-id",
-                username="test_finops_user",
-                nickname="测试用户",
-                display_name="测试用户",
-                roles=[],
-                permissions=[],
-            )
-            decision = access_control_service.evaluate(synthetic_identity)
-            return OARequestSession(
-                token="test-default-token",
-                identity=synthetic_identity,
-                allowed=decision.allowed,
-                access_tier=decision.access_tier,
-                can_access_app=decision.can_access_app,
-                can_mutate_data=decision.can_mutate_data,
-                can_admin_access=decision.can_admin_access,
-            )
         raise UnauthorizedOASessionError("缺少 OA 登录态，请从 OA 系统进入。")
 
     identity = identity_service.resolve_identity(token)

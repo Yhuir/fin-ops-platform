@@ -191,6 +191,7 @@ class WorkbenchObjectIdentityArbitrationTests(unittest.TestCase):
             "txn_direction": "outflow",
             "amount": "300.00",
             "counterparty_name": "云南元大工程咨询有限责任公司",
+            "account_detail_no": "DETAIL-001",
         }
 
 

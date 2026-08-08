@@ -59,7 +59,6 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
     def test_put_rules_handler_saves_and_enqueues_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._oa_identity_service = None
             queue = QueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)

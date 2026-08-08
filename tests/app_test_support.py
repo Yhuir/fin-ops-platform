@@ -10,6 +10,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.state_store_protocol import (
@@ -22,14 +23,22 @@ from fin_ops_platform.services.workbench_object_identity_arbitration import (
 from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
+DEFAULT_TEST_OA_TOKEN = "test-suite-oa-token"
+DEFAULT_TEST_USERNAME = "test_finops_user"
+
 
 def build_local_state_application(*args, **kwargs):
+    install_test_session = kwargs.pop("install_test_session", True)
+    test_username = kwargs.pop("test_username", DEFAULT_TEST_USERNAME)
     data_dir = kwargs.get("data_dir")
     if data_dir is None and args:
         data_dir = args[0]
     if data_dir is None:
         application = _build_application(*args, **kwargs)
-        _install_default_test_access_provider(application)
+        if install_test_session:
+            install_default_test_session(application, username=test_username)
+        else:
+            _install_default_test_access_provider(application)
         return application
     def build_local_store(requested_data_dir: Path | None):
         if requested_data_dir is None:
@@ -46,19 +55,22 @@ def build_local_state_application(*args, **kwargs):
         patch.object(Application, "_runtime_bootstrap_state", load_local_bootstrap_state),
     ):
         application = _build_application(*args, **kwargs)
-    _install_default_test_access_provider(application)
+    if install_test_session:
+        install_default_test_session(application, username=test_username)
+    else:
+        _install_default_test_access_provider(application)
     return application
 
 
 def _install_default_test_access_provider(application: Application) -> None:
-    """Admit the synthetic local test identity through the canonical ACL contract."""
+    """Admit the explicit test identity through the canonical ACL contract."""
 
     service = application._access_control_service  # noqa: SLF001
     canonical_provider = service.access_control_snapshot_provider
 
     def test_snapshot_provider() -> dict[str, object]:
         snapshot = settings_access_control_from_payload(canonical_provider())
-        default_username = "test_finops_user"
+        default_username = DEFAULT_TEST_USERNAME
         default_key = settings_username_comparison_key(default_username)
         if any(
             settings_username_comparison_key(username) == default_key
@@ -77,6 +89,46 @@ def _install_default_test_access_provider(application: Application) -> None:
         )
 
     service.access_control_snapshot_provider = test_snapshot_provider
+
+
+def install_default_test_session(
+    application: Application,
+    *,
+    username: str = DEFAULT_TEST_USERNAME,
+) -> None:
+    """Inject an explicit fake OA session at the test boundary, never in production code."""
+
+    _install_default_test_access_provider(application)
+    original_resolve_identity = application._oa_identity_service.resolve_identity  # noqa: SLF001
+    original_resolve_request_session = application._resolve_request_session  # noqa: SLF001
+
+    def resolve_identity(token: str) -> OAUserIdentity:
+        if token != DEFAULT_TEST_OA_TOKEN:
+            return original_resolve_identity(token)
+        is_admin = username.upper() == "YNSYLP005"
+        return OAUserIdentity(
+            user_id="005" if is_admin else "test-user-id",
+            username=username,
+            nickname="测试用户",
+            display_name="测试用户",
+            roles=[],
+            permissions=[],
+        )
+
+    def resolve_request_session(
+        headers: dict[str, str] | None = None,
+    ):
+        effective_headers = dict(headers or {})
+        has_explicit_auth = any(
+            str(key).lower() in {"authorization", "cookie"}
+            for key in effective_headers
+        )
+        if not has_explicit_auth:
+            effective_headers["Authorization"] = f"Bearer {DEFAULT_TEST_OA_TOKEN}"
+        return original_resolve_request_session(effective_headers)
+
+    application._oa_identity_service.resolve_identity = resolve_identity  # noqa: SLF001
+    application._resolve_request_session = resolve_request_session  # type: ignore[method-assign]  # noqa: SLF001
 
 
 def configure_access_control(

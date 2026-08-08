@@ -29,7 +29,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Reset request | Settings page/API | 必须权限校验和确认；一次用户意图生成稳定 `idempotency_key`，缺失时 API fail closed。 |
+| Reset request | Settings page/API | 必须由真实 OA admin session 授权并用当前 OA 密码复核；不存在本地固定 token/默认密码；一次用户意图生成稳定 `idempotency_key`，缺失时 API fail closed。 |
 | Reset job poll | frontend/app health | 只读 job 状态 |
 | Script invocation | `scripts/reset_demo_db.sh` | 仅符合运维边界 |
 
@@ -66,7 +66,7 @@
 
 - 允许依赖：`BackgroundJobService`、`RuntimeQueueRepository`、`ReadModelRefreshGateway`、state store 的显式 save/load ports。
 - 必须通过：`SettingsDataResetService`、durable queue 和 `settings-maintenance` worker。
-- 禁止绕过：直接数据库清理；绕过权限/审计执行 reset；恢复旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state；调用 Workbench 全页 builder、同步读取页面 projection 或重复登记 matching dirty scope 来伪造重建完成。
+- 禁止绕过：直接数据库清理；绕过真实 OA admin session/当前 OA 密码/审计执行 reset；恢复本地固定 token、默认密码或旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state；调用 Workbench 全页 builder、同步读取页面 projection 或重复登记 matching dirty scope 来伪造重建完成。
 
 ## 测试与验证
 

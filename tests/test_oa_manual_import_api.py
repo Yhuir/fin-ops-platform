@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -173,7 +172,7 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
 
     def test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
-        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}):
+        with self.subTest("explicit readonly OA session"):
             store = MemoryManualImportStore()
             store.add_manual_oa_imports(["oa-exp-1981"], "tester", {})
             app = self._build_app_with_service(

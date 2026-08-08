@@ -6,7 +6,7 @@
 
 | 影响面 | 当前入口 | 必测原因 |
 | --- | --- | --- |
-| 管理员权限/OA 密码 | `server.py` data reset routes、`OAIdentityService` | 防止非管理员或失效密码触发危险删除；响应不能泄露密码 |
+| 管理员权限/OA 密码 | `server.py` data reset routes、`OAIdentityService`、`tests/test_session_api.py` | 防止非管理员、无真实 OA token、失效密码或退役本地 auth 配置触发危险删除；响应不能泄露密码，应用不得保留默认重置密码 |
 | 重置 service | `SettingsDataResetService` | 删除目标、保留目标、文件清理、状态写入必须稳定 |
 | protected targets | `SettingsDataResetService.protected_targets()` | 防止误删 OA 源表、app settings、metadata、import metadata |
 | 后台 job | `BackgroundJobService` + `/data-reset/jobs*` | 页面离开后可恢复进度；并发提交必须互斥；失败要可诊断 |

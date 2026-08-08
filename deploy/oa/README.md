@@ -159,6 +159,7 @@ VITE_APP_BASE_PATH=/fin-ops/
   只允许这三个精确 retired key，以及 legacy admin 恰好为空或仅为固定 `YNSYLP005`；它们会在 current-runtime
   checkpoint 通过后、停止旧进程前按 before-image 原子清除，不能作为候选 runtime 的 APP admission。APP
   admission 只来自 Settings ACL；管理员固定为 `YNSYLP005`，不接受环境变量或普通 settings payload 覆盖
+- `FIN_OPS_TEST_DEFAULT_AUTH / FIN_OPS_DEV_ALLOW_LOCAL_SESSION / FIN_OPS_DEV_USERNAME / FIN_OPS_DEV_OA_PASSWORD` 已退休；生产 common/secrets env 必须全部不包含这些 key（即使值为 `0` 或空串）。deploy-control 会在激活前阻断，Application 也会在任何 state-store 连接前阻断。运行时不存在本地固定 token 或默认数据重置密码。
 - `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`
   返回 `404`，配置后必须带 `Authorization: Bearer <token>`
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：

@@ -151,6 +151,7 @@ EXPECTED_MIGRATION_FILES = [
     "0137_oa_attachment_identity_context_index.sql",
     "0138_operation_audit_and_financial_fact_guard.sql",
     "0139_idempotency_and_worker_attempt_history.sql",
+    "0140_bank_transaction_identity_strength.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

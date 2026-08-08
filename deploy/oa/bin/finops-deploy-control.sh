@@ -800,6 +800,10 @@ assert_runtime_env_contract() {
     FIN_OPS_ALLOWED_USERNAMES \
     FIN_OPS_ALLOWED_ROLES \
     FIN_OPS_READONLY_EXPORT_USERNAMES \
+    FIN_OPS_TEST_DEFAULT_AUTH \
+    FIN_OPS_DEV_ALLOW_LOCAL_SESSION \
+    FIN_OPS_DEV_USERNAME \
+    FIN_OPS_DEV_OA_PASSWORD \
     "$LEGACY_ADMIN_ENV"; do
     if grep -hE "^${retired_key}=" "$COMMON_ENV" "$SECRETS_ENV" >/dev/null; then
       die "retired APP admission env must be absent: $retired_key"

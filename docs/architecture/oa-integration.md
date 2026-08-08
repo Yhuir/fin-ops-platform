@@ -16,6 +16,8 @@
 
 OA identity adapter 只认证 token 对应的 canonical username，并保留 display name、department、roles 和 permissions 作为信息字段。APP 不自建登录页，也不信任前端自报 username；OA roles/permissions 不参与 APP tier 决策。
 
+应用运行时不包含 synthetic dev/test session。本地开发与生产均必须提供真实 OA token；测试身份只由测试夹具显式注入。四项历史 dev/test auth 环境变量已退役，任一 key 存在即在 state-store I/O 前阻断 Application 启动，并由 deploy-control 再次阻断发布。
+
 ## 四个独立责任层
 
 | 层 | Owner | 事实与责任 | 明确不负责 |

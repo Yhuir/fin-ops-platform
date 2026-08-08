@@ -30,6 +30,7 @@ from fin_ops_platform.app.auth import (
     OARequestSession,
     UnauthorizedOASessionError,
     actor_id_for_session,
+    assert_safe_auth_runtime_configuration,
     extract_oa_token,
     get_header,
     resolve_oa_request_session,
@@ -520,6 +521,7 @@ MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 class Application:
     def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
         self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
+        assert_safe_auth_runtime_configuration()
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
@@ -547,6 +549,13 @@ class Application:
         if raw_value not in {"production", "legacy", "lightweight"}:
             raise ValueError("bootstrap_mode must be production, legacy, or lightweight.")
         return raw_value
+
+    def _resolve_request_session(self, headers: dict[str, str] | None) -> OARequestSession:
+        return resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
 
     def _runtime_bootstrap_state(self) -> dict[str, object]:
         return {}
@@ -3736,11 +3745,7 @@ class Application:
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
         except UnauthorizedOASessionError as error:
@@ -4715,11 +4720,7 @@ class Application:
 
     def _etc_business_session(self, headers: dict[str, str] | None, *, require_mutation: bool) -> OARequestSession | Response:
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
         except OAAuthError as exc:
             return self._etc_business_response(HTTPStatus.UNAUTHORIZED, None, code="unauthorized", message=str(exc))
         if require_mutation and not session.can_mutate_data:
@@ -4917,11 +4918,7 @@ class Application:
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def _etc_business_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
+        session = self._resolve_request_session(headers)
         if not session.can_mutate_data:
             return self._etc_business_response(
                 HTTPStatus.FORBIDDEN,
@@ -5025,11 +5022,7 @@ class Application:
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
         except OASessionExpiredError as error:
             return self._json_response(
                 HTTPStatus.UNAUTHORIZED,
@@ -5256,11 +5249,7 @@ class Application:
             return None, None
         auth_started_at = monotonic()
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
         except UnauthorizedOASessionError as error:
@@ -5326,11 +5315,7 @@ class Application:
     ) -> tuple[str, str] | Response:
         try:
             if session is None:
-                session = resolve_oa_request_session(
-                    headers,
-                    identity_service=self._oa_identity_service,
-                    access_control_service=self._access_control_service,
-                )
+                session = self._resolve_request_session(headers)
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
             if not session.can_mutate_data:
@@ -6036,11 +6021,7 @@ class Application:
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
         except UnauthorizedOASessionError as exc:
             return None, self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
         except ForbiddenOAAccessError as exc:
@@ -6120,11 +6101,7 @@ class Application:
         if identity_service is None or access_control_service is None:
             return None, None
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=identity_service,
-                access_control_service=access_control_service,
-            )
+            session = self._resolve_request_session(headers)
         except OASessionExpiredError as error:
             return None, self._json_response(
                 HTTPStatus.UNAUTHORIZED,
@@ -6317,11 +6294,7 @@ class Application:
         self, headers: dict[str, str] | None
     ) -> tuple[OARequestSession | None, Response | None]:
         try:
-            session = resolve_oa_request_session(
-                headers,
-                identity_service=self._oa_identity_service,
-                access_control_service=self._access_control_service,
-            )
+            session = self._resolve_request_session(headers)
             if not session.can_admin_access:
                 return None, self._json_response(
                     HTTPStatus.FORBIDDEN,
@@ -6374,11 +6347,6 @@ class Application:
 
     def _verify_reset_oa_password(self, session: OARequestSession | None, oa_password: str) -> Response | None:
         if session is None:
-            return self._oa_password_verification_failed_response()
-        if session.token == "local-dev-token" and os.getenv("FIN_OPS_DEV_ALLOW_LOCAL_SESSION", "").strip() == "1":
-            expected_password = os.getenv("FIN_OPS_DEV_OA_PASSWORD", "local-dev-password")
-            if oa_password == expected_password:
-                return None
             return self._oa_password_verification_failed_response()
         try:
             if self._oa_identity_service.verify_current_user_password(session.token, oa_password):
@@ -7178,11 +7146,7 @@ class Application:
         *,
         access_session: OARequestSession | None = None,
     ) -> Response:
-        session = access_session or resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
+        session = access_session or self._resolve_request_session(headers)
         status_code, result = self._batch_accounting_routes().tag_rules(
             can_save=session.can_mutate_data,
         )
@@ -7230,11 +7194,7 @@ class Application:
         *,
         session: OARequestSession | None = None,
     ) -> OARequestSession | Response:
-        session = session or resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
+        session = session or self._resolve_request_session(headers)
         if not session.can_mutate_data:
             return self._json_response(
                 HTTPStatus.FORBIDDEN,
@@ -7268,11 +7228,7 @@ class Application:
         )
 
     def _no_oa_bank_batch_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
+        session = self._resolve_request_session(headers)
         if not session.can_mutate_data:
             return self._json_response(
                 HTTPStatus.FORBIDDEN,
@@ -7383,11 +7339,7 @@ class Application:
         return payload
 
     def _turnover_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
+        session = self._resolve_request_session(headers)
         if not session.can_mutate_data:
             return self._json_response(
                 HTTPStatus.FORBIDDEN,

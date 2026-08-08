@@ -1,5 +1,4 @@
 import json
-import os
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -226,7 +225,13 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                 body=json.dumps({"expected_version": 2, "accounts": []}),
                 headers={"Authorization": "Bearer admin"},
             )
-            generic_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
+            generic_payload = json.loads(
+                app.handle_request(
+                    "GET",
+                    "/api/workbench/settings",
+                    headers={"Authorization": "Bearer full"},
+                ).body
+            )
             audit_events = json.loads((Path(temp_dir) / "app_settings.json").read_text(encoding="utf-8"))[
                 "_settings_acl_audit_events"
             ]
@@ -343,10 +348,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(settings_payload["projects"]["active"][0]["project_name"], "本地测试项目")
 
     def test_project_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
-        with (
-            patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}),
-            tempfile.TemporaryDirectory() as temp_dir,
-        ):
+        with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             configure_access_control(app, read_export_only=["READONLY001"])
             created_payload = app._app_settings_service.create_manual_project(

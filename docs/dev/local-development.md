@@ -67,6 +67,8 @@ bash scripts/verify.sh runtime-check
 FIN_OPS_BACKEND_ENV_FILE=/path/to/local.env ./scripts/start-backend.sh
 ```
 
+本地后端不再创建 synthetic 登录态。访问受保护 API 时必须使用真实 OA `Admin-Token`；不要在本地 env 中配置已退役的 `FIN_OPS_TEST_DEFAULT_AUTH`、`FIN_OPS_DEV_ALLOW_LOCAL_SESSION`、`FIN_OPS_DEV_USERNAME` 或 `FIN_OPS_DEV_OA_PASSWORD`，任一 key 存在都会阻断启动。自动化测试通过 `tests/app_test_support.py` 显式注入测试 identity，不影响运行时二进制。
+
 如果非交互 shell 解析到的 `python3` 不是当前开发环境，可以在本地 env 文件中设置 `FIN_OPS_PYTHON_BIN=/path/to/python3`。
 
 需要让本地和服务器都启用 Redis runtime helper 时，服务器 systemd env 和本地私有 env 都应配置 `FIN_OPS_REDIS_URL`。本地通常使用 SSH tunnel，例如 `redis://:password@127.0.0.1:16379/0`。

@@ -35,7 +35,11 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
                 "/api/workbench/settings/oa-applicant-credentials",
                 headers=self._admin_headers(),
             )
-            settings_response = app.handle_request("GET", "/api/workbench/settings")
+            settings_response = app.handle_request(
+                "GET",
+                "/api/workbench/settings",
+                headers=self._admin_headers(),
+            )
             delete_response = app.handle_request(
                 "DELETE",
                 "/api/workbench/settings/oa-applicant-credentials/chen_xiuyun",

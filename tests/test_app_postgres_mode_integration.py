@@ -18,7 +18,7 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
 )
 
 from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
-from tests.app_test_support import seed_confirmed_import
+from tests.app_test_support import install_default_test_session, seed_confirmed_import
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN
 
 
@@ -27,7 +27,6 @@ def postgres_app_env(database_url: str):
     updates = {
         "FIN_OPS_APP_STORAGE_BACKEND": "postgres",
         "FIN_OPS_POSTGRES_DATABASE_URL": database_url,
-        "FIN_OPS_TEST_DEFAULT_AUTH": "1",
         "FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR": "1",
         "FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED": "0",
         "FIN_OPS_POSTGRES_POOL_ENABLED": "0",
@@ -69,7 +68,9 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
     def _build_app(self):
         with postgres_app_env(self.database_url):
-            return build_application(data_dir=Path(self._temp_dir.name))
+            app = build_application(data_dir=Path(self._temp_dir.name))
+        install_default_test_session(app)
+        return app
 
     def test_readiness_session_and_app_health_are_secret_safe(self) -> None:
         app = self._build_app()

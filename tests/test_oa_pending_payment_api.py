@@ -5,12 +5,10 @@ from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
 import json
-import os
 from pathlib import Path
 import tempfile
 from typing import Any, Callable
 import unittest
-from unittest.mock import patch
 from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
@@ -352,8 +350,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             ),
             ("POST", "/api/oa-pending-payments/writeback-paid", {"oa_row_ids": ["oa-api"]}),
         ]
-        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             responses = [
                 app.handle_request(method, route, body=json.dumps(body) if body is not None else None)
                 for method, route, body in requests

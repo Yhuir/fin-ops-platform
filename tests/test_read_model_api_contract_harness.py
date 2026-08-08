@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 import json
-import os
 import tempfile
 from types import SimpleNamespace
 import unittest
 from pathlib import Path
-from typing import Iterator
 
 from fin_ops_platform.app.server import Response
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
@@ -62,18 +60,6 @@ RETIRED_READ_MODEL_FIELDS = frozenset(
 
 
 class ReadModelApiContractHarnessTests(unittest.TestCase):
-    @contextmanager
-    def _default_test_auth(self, enabled: bool) -> Iterator[None]:
-        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
-        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "1" if enabled else "0"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
-            else:
-                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
-
     def _json(self, response: Response) -> dict[str, object]:
         self.assertIn(
             response.headers.get("Content-Type", ""),
@@ -97,7 +83,7 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
         self.assertIn("message", payload)
 
     def test_default_api_probes_expose_sanitized_local_envelopes(self) -> None:
-        with self._default_test_auth(enabled=True), tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._workbench_canonical_query_repository = SimpleNamespace(  # noqa: SLF001
                 get_workbench_initial_page=lambda **_kwargs: {
@@ -207,8 +193,8 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
                     self.assertNotIn(payload.get("error"), {"invalid_oa_session", "forbidden"})
 
     def test_contract_harness_keeps_auth_guard_explicit(self) -> None:
-        with self._default_test_auth(enabled=False), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
 
             for path in (
                 "/api/workbench/settings",

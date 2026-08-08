@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -61,7 +60,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
         self.assertEqual(constructed_with, ["first", "second"])
 
     def test_api_enqueues_durable_reset_without_persisting_password(self) -> None:
-        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
@@ -96,7 +95,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
         self.assertNotIn("oa_password", encoded)
 
     def test_api_rejects_non_admin_without_enqueuing_reset(self) -> None:
-        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
             configure_access_control(app, full_access=["YNSYLP006"])
@@ -126,7 +125,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
         self.assertEqual(queue.events, [])
 
     def test_api_rejects_wrong_password_without_enqueuing_or_echoing_secret(self) -> None:
-        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(

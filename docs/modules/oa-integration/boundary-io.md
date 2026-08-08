@@ -70,7 +70,7 @@
 
 | 层 | 文件或目录 |
 | --- | --- |
-| Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` |
+| Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts`；runtime 只接受真实 OA token，不提供 synthetic dev/test identity |
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Deployment verification | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh` |
 | Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |

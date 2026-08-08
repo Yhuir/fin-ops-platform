@@ -31,7 +31,7 @@
 | Release-gate credential | 本机 `scripts/with-production-admin-token.sh` | 所有标准发布只读取 005 Admin Token 并通过 stdin 交给 root helper，不写入 release、证据、命令行或日志；任何 profile 都不读取 006，也不依赖双身份 artifact |
 | Automatic release profile | exact candidate + current unique active release | 比较包内 ACL boundary、非前端 runtime 与 `web/dist` digest，自动输出 `acl` / `runtime` / `frontend`；不提供手工 profile/skip。ACL 优先级最高，runtime 或 no-op/unknown 次之，只有 runtime digest 相同且 dist 不同时才是 frontend。frontend 在 stop 前捕获 preflight 已验证的 active worker 集合，激活和回退精确重启该集合 |
 | ACL release profile | exact uploaded ACL release + 005 token + root runtime env/PG facts | 只由直接鉴权/权限、OA role sync 或 ACL migration 路径触发；标准激活验证 005 admin、strict env、migration/CHECK、数据库 guard 与完整 runtime closure，不读取 006。通用 Settings service/store/repository 变更归入 `runtime` |
-| ACL env contract | `/etc/fin-ops/*.env` | prerequisite 检查 root-owned/non-writable env、DSN、fixed OA selector 与 role-sync config；strict contract要求三 retired admission key 和 legacy admin key 全部缺席。发布只读断言，不再在每次激活中重写 env |
+| Auth/ACL env contract | `/etc/fin-ops/*.env` | prerequisite 检查 root-owned/non-writable env、DSN、fixed OA selector 与 role-sync config；strict contract 要求三项旧 admission key、legacy admin key，以及四项 dev/test auth key 全部缺席。发布只读断言，不再在每次激活中重写 env |
 | Manual-root helper candidate | 已上传 exact release 的 `finops-deploy-control.sh` + approved SHA-256 | 只允许 root 以同文件系统 temp、`root:root 0755`、syntax/hash check 和 atomic `mv` bootstrap；release/activate 不得 self-update，也不得触碰 runtime-worker helper、service、DB/OA/ACL |
 | Release-gate RabbitMQ env | `/etc/fin-ops/fin-ops.rabbitmq-topology.env`、`/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` | topology apply 与 runtime health/closure 分别加载自己的 systemd 运维边界；缺失或不可读必须 fail closed，不得读取 worker consumer 凭据代替 |
 | Pre-activation canonical audit | 当前 runtime 鉴权 HTTP system audit + 候选 release 审计代码 + 同一生产 PostgreSQL | 当前 HTTP 必须成功鉴权、返回 200 且提供完整 repeatable-read snapshot/contract。只有旧 runtime 返回已识别的内部页面完整性失败时，候选 gate 才以候选代码直接执行同一只读系统审计并复用同一严格 validator；transport/auth/payload contract 失败和候选审计失败不得 fallback。激活后的 T+0/T+60/T+300 必须由候选 HTTP 审计直接通过 |
@@ -100,7 +100,7 @@
 - 禁止恢复 `--mode legacy-current`、`build_legacy_remote_deploy_script`、`create_legacy_release_archive` 或 `deploy/oa/fin_ops.env.example`。
 - 禁止在 systemd examples 或发布脚本中恢复 `/opt/fin-ops/current/backend` 作为运行目录。
 - `finops-deploy-control` 对 legacy current 的归档只用于 release 激活前清理历史 runtime，不得重新变成覆盖式发布入口。
-- 禁止恢复公开 `activate`、helper `self-update`、手工 profile/skip、每次发布的 env cleanup 或 OA binding cleanup。strict env 漂移直接 fail closed；历史 cleanup SQL 不得恢复。
+- 禁止恢复公开 `activate`、helper `self-update`、手工 profile/skip、每次发布的 env cleanup、OA binding cleanup 或 synthetic dev/test auth。strict env 漂移直接 fail closed；历史 cleanup SQL 不得恢复。
 - 自动 `acl` profile 失败后保持 maintenance 并 forward repair；`frontend`/`runtime` 只可恢复 fingerprint 有效的 previous release。
 
 ## Production-equivalent Release Gate（2026-07-31）

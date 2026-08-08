@@ -33,7 +33,7 @@
 
 权限与审计是横切安全边界，不属于单个页面，也不走 read model 分发。当前边界包括：
 
-- OA 会话：前端从 `Admin-Token` cookie 读取 token 并发送 `Authorization: Bearer ...`；后端只信任 OA identity service 和 access control 判断。
+- OA 会话：前端从 `Admin-Token` cookie 读取 token 并发送 `Authorization: Bearer ...`；后端只信任 OA identity service 和 access control 判断。应用运行时不存在 synthetic dev/test session；本地开发也使用真实 OA token，假身份仅存在于测试夹具。
 - 访问层级：精确 `YNSYLP005` 固定为 `admin`；其他账号每次只从一份 canonical Settings ACL snapshot 得到 `read_export_only` / `full_access`，列表缺席或 provider 缺失/非法/失败均为 `denied`。OA role/permission、三项退役 env 和 `finops:app:view` 不授予 APP tier。
 - 后端 guard：所有 protected API 必须先解析 OA session；写入 API 必须二次判断 `can_mutate_data`；高风险 admin API 必须判断 `can_admin_access`。
 - 前端权限：页面按钮、drawer、导入、数据重置、运维入口按 session 权限隐藏或禁用，但不能替代后端校验。

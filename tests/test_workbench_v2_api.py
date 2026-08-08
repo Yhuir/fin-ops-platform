@@ -1,5 +1,4 @@
 import json
-import os
 import pickle
 import tempfile
 import unittest
@@ -784,18 +783,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row["category_source"], "auto")
         self.assertEqual(list_payload["category_counts"]["fee"], 1)
         self.assertEqual(list_payload["category_counts"]["uncategorized"], 0)
-
-    @contextmanager
-    def _without_default_test_auth(self):
-        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
-        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
-            else:
-                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
     def test_import_file_confirm_returns_preview_stale_when_existing_records_change(self) -> None:
         app = build_application()

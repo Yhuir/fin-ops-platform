@@ -113,6 +113,13 @@ const readablePages: PageExpectation[] = [
     },
   },
   {
+    path: "/imports",
+    label: "导入中心",
+    assertReady: async (page) => {
+      await expect(page.getByRole("heading", { name: "导入中心" })).toBeVisible();
+    },
+  },
+  {
     path: "/imports/bank-transactions",
     label: "银行流水导入",
     assertReady: async (page) => {

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,18 +24,6 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 yield app
             finally:
                 app.close()
-
-    @contextmanager
-    def _without_default_test_auth(self):
-        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
-        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
-            else:
-                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
     def _import_bank_rows(
         self,
@@ -812,13 +799,13 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["error"], "turnover_closure_amount_mismatch")
 
     def test_manual_closure_requires_mutation_permission(self) -> None:
-        with self._without_default_test_auth():
-            with self._temporary_app() as app:
-                response = app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/closures/confirm",
-                    body=json.dumps({"bank_row_ids": ["bank-1", "bank-2"]}),
-                )
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": ["bank-1", "bank-2"]}),
+            )
 
         self.assertEqual(response.status_code, 401)
 

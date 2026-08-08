@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pickle
 import inspect
 from io import BytesIO
@@ -340,18 +339,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertFalse(hasattr(module, "TurnoverLedgerDirtyOutboxWriter"))
         self.assertFalse(hasattr(module, "TurnoverLedgerLocalDirtyOutboxWriter"))
-
-    @contextmanager
-    def _without_default_test_auth(self):
-        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
-        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
-            else:
-                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
     def _import_bank_rows(self, app: Application) -> list[str]:
         preview = app._import_service.preview_import(
@@ -3381,8 +3368,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_turnover_ledger_extra")
 
     def test_relation_extra_put_rejects_readonly_user(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(
                 app,
                 full_access=["FULL001"],
@@ -3515,8 +3502,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(export_payload["details"], expected_details)
 
     def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(
                 app,
                 full_access=["FULL001"],

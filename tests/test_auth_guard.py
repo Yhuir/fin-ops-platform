@@ -1,8 +1,7 @@
+import inspect
 import json
-import os
 import tempfile
 import unittest
-from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,11 +9,27 @@ from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
 )
+from fin_ops_platform.app.auth import resolve_oa_request_session
+from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
 from fin_ops_platform.services.access_control_service import AccessControlService
 
 
 class AuthGuardTests(unittest.TestCase):
+    def test_runtime_auth_and_reset_have_no_synthetic_identity_or_default_secret(self) -> None:
+        auth_source = inspect.getsource(resolve_oa_request_session)
+        reset_source = inspect.getsource(Application._verify_reset_oa_password)
+
+        for retired_marker in (
+            "synthetic_identity",
+            "local-dev-token",
+            "test-default-token",
+            "unittest",
+        ):
+            self.assertNotIn(retired_marker, auth_source)
+        self.assertNotIn("local-dev-password", reset_source)
+        self.assertNotIn("FIN_OPS_DEV_OA_PASSWORD", reset_source)
+
     def test_access_control_uses_one_snapshot_and_cannot_create_second_admin(self) -> None:
         snapshot_reads = 0
 
@@ -83,21 +98,9 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(outsider_decision.access_tier, "denied")
         self.assertEqual(persisted_acl["accounts"], [])
 
-    @contextmanager
-    def _without_default_test_auth(self):
-        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
-        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
-            else:
-                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
-
     def test_protected_api_returns_unauthorized_without_oa_token(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
 
             response = app.handle_request("GET", "/api/workbench?month=2026-03")
             payload = json.loads(response.body)
@@ -106,8 +109,8 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_oa_session")
 
     def test_permission_present_006_is_denied_by_direct_read_and_write_apis(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="006",
                 username="YNSYLP006",
@@ -137,8 +140,8 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(json.loads(write_response.body)["error"], "forbidden")
 
     def test_import_endpoints_are_also_protected(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
 
             def raise_expired(_: str) -> OAUserIdentity:
                 raise OASessionExpiredError("登录状态已过期")
@@ -156,8 +159,8 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_oa_session")
 
     def test_readonly_export_user_can_export_but_cannot_mutate_or_admin(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="401",
@@ -265,8 +268,8 @@ class AuthGuardTests(unittest.TestCase):
             ("POST", "/api/etc/reconciliation-tasks/task-1/refresh-matches"),
             ("DELETE", "/api/etc/reconciliation-tasks/task-1/imported-invoices"),
         )
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="401",
@@ -296,8 +299,8 @@ class AuthGuardTests(unittest.TestCase):
             "/api/input-invoice-usage/oa-reverse/preview",
             "/api/tax-offset/calculate",
         )
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="401",
@@ -317,8 +320,8 @@ class AuthGuardTests(unittest.TestCase):
                     self.assertNotEqual(payload.get("error"), "permission_denied")
 
     def test_readonly_write_rejection_happens_before_request_body_parsing(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, read_export_only=["READONLY001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="401",
@@ -349,8 +352,8 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(multipart_response.status_code, 403)
 
     def test_unknown_protected_post_fails_closed_for_readonly_but_reaches_not_found_for_full_access(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, full_access=["FULL001"], read_export_only=["READONLY001"])
             identities = {
                 "readonly-user": OAUserIdentity(
@@ -385,8 +388,8 @@ class AuthGuardTests(unittest.TestCase):
         self.assertEqual(full_response.status_code, 404)
 
     def test_etc_reconciliation_actor_comes_from_authenticated_session(self) -> None:
-        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(app, full_access=["FULL001"])
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                 user_id="trusted-user-id",
