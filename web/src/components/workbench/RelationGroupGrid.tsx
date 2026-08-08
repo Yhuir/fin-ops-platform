@@ -13,8 +13,6 @@ import {
 
 import {
   buildWorkbenchGroupDisplayLayout,
-  collectWorkbenchFilterOptions,
-  collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
@@ -25,6 +23,7 @@ import type {
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchRecordType,
+  WorkbenchFilterOptionsLoader,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
@@ -58,6 +57,7 @@ type RelationGroupGridProps = {
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
+  loadFilterOptions?: WorkbenchFilterOptionsLoader;
   onColumnFilterChange?: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -146,6 +146,7 @@ function RelationGroupGrid({
   onEnsureGroupDetail,
   canRequestNextPage = false,
   onRequestNextPage,
+  loadFilterOptions,
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
   onPaneTimeFilterChange = () => undefined,
@@ -181,6 +182,13 @@ function RelationGroupGrid({
     invoice: { left: 0, ratio: null },
   });
   const normalizedSearchQuery = displayState.searchQuery.trim();
+  const loadBankTimeYears = useMemo(() => loadFilterOptions
+    ? (page: number, signal?: AbortSignal) => loadFilterOptions(zoneId, {
+      pane: "bank",
+      facet: "time_year",
+      page,
+    }, signal)
+    : undefined, [loadFilterOptions, zoneId]);
 
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
@@ -285,37 +293,13 @@ function RelationGroupGrid({
     [columnLayouts, paneHasActionColumn],
   );
 
-  const filterOptionsByPane = useMemo(() => {
-    return {
-      oa: Object.fromEntries(
-        columnsByPane.oa.map((column) => [column.key, collectWorkbenchFilterOptions(sourceGroups ?? groups, "oa", column.key)]),
-      ),
-      bank: Object.fromEntries(
-        columnsByPane.bank.map((column) => [column.key, collectWorkbenchFilterOptions(sourceGroups ?? groups, "bank", column.key)]),
-      ),
-      invoice: Object.fromEntries(
-        columnsByPane.invoice.map((column) => [column.key, collectWorkbenchFilterOptions(sourceGroups ?? groups, "invoice", column.key)]),
-      ),
-    } satisfies Record<WorkbenchRecordType, Record<string, string[]>>;
-  }, [columnsByPane, groups, sourceGroups]);
-
-  const timeFilterYearsByPane = useMemo(() => {
-    const filterSourceGroups = sourceGroups ?? groups;
-    return {
-      oa: collectWorkbenchTimeFilterYears(filterSourceGroups, "oa"),
-      bank: collectWorkbenchTimeFilterYears(filterSourceGroups, "bank"),
-      invoice: collectWorkbenchTimeFilterYears(filterSourceGroups, "invoice"),
-    } satisfies Record<WorkbenchRecordType, string[]>;
-  }, [groups, sourceGroups]);
   const sourceGroupById = useMemo(
     () => new Map((sourceGroups ?? groups).map((group) => [group.id, group])),
     [groups, sourceGroups],
   );
 
-  const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
-    setOpenFilterMenu((current) => (
-      current?.paneId === paneId && current.columnKey === columnKey ? null : { paneId, columnKey }
-    ));
+  const handleOpenFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
+    setOpenFilterMenu({ paneId, columnKey });
   }, []);
 
   const setPaneGroupExpanded = useCallback((groupId: string, paneId: WorkbenchRecordType, expanded: boolean) => {
@@ -769,8 +753,8 @@ function RelationGroupGrid({
                 <div className="pane-header-tools">
                   {pane.id === "bank" ? (
                     <WorkbenchPaneTimeFilter
-                      availableYears={timeFilterYearsByPane.bank}
                       filter={displayState.timeFilterByPane.bank}
+                      loadYears={loadBankTimeYears}
                       paneTitle={pane.title}
                       onChange={(filter) => onPaneTimeFilterChange(zoneId, "bank", filter)}
                     />
@@ -841,12 +825,15 @@ function RelationGroupGrid({
                       </span>
                       {column.filterable === false ? null : (
                         <WorkbenchColumnFilterMenu
+                          columnKey={column.key}
                           label={column.label}
+                          loadFilterOptions={loadFilterOptions}
                           open={openFilterMenu?.paneId === pane.id && openFilterMenu.columnKey === column.key}
-                          options={filterOptionsByPane[pane.id][column.key] ?? []}
+                          paneId={pane.id}
                           selectedValues={displayState.filtersByPaneAndColumn[pane.id][column.key] ?? []}
+                          zoneId={zoneId}
                           onClose={() => setOpenFilterMenu(null)}
-                          onToggle={() => handleToggleFilterMenu(pane.id, column.key)}
+                          onOpen={() => handleOpenFilterMenu(pane.id, column.key)}
                           onChange={(selectedValues) => onColumnFilterChange(zoneId, pane.id, column.key, selectedValues)}
                         />
                       )}

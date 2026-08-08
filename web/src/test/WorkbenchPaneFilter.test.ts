@@ -1,7 +1,6 @@
 import {
   buildWorkbenchDisplayGroups,
   buildWorkbenchPaneRows,
-  collectWorkbenchFilterOptions,
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
@@ -255,8 +254,8 @@ describe("Workbench pane display model", () => {
     }, { timeout: 3_000 });
   });
 
-  test("supports multi-select column filtering with select-all and clear actions", async () => {
-    installMockApiFetch();
+  test("loads complete column options from the workbench facet API and clears the active filter", async () => {
+    const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("陈涛");
 
@@ -265,22 +264,24 @@ describe("Workbench pane display model", () => {
 
     fireEvent.click(within(openOaPane).getByRole("button", { name: "筛选 申请人" }));
 
-    const menu = screen.getByRole("dialog", { name: "筛选 申请人" });
-    fireEvent.click(within(menu).getByLabelText("陈涛"));
+    const menu = await screen.findByRole("dialog", { name: "筛选 申请人" });
+    const chenOption = await within(menu).findByRole("checkbox", { name: "陈涛" });
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/workbench/filter-options"
+        && url.searchParams.get("zone") === "unpaired"
+        && url.searchParams.get("pane") === "oa"
+        && url.searchParams.get("column") === "applicant"
+        && url.searchParams.get("expected_read_model_version") === "mock-workbench-generation-1";
+    })).toBe(true);
+    fireEvent.click(chenOption);
 
     await waitFor(() => {
       expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
       expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
     });
 
-    fireEvent.click(within(menu).getByRole("button", { name: "全选" }));
-    await waitFor(() => {
-      expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-      within(menu).getAllByRole("checkbox").forEach((checkbox) => {
-        expect(checkbox).toBeChecked();
-      });
-    });
-
+    expect(within(menu).queryByRole("button", { name: "全选" })).not.toBeInTheDocument();
     fireEvent.click(within(menu).getByRole("button", { name: "清空" }));
     await waitFor(() => {
       expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
@@ -304,7 +305,17 @@ describe("Workbench pane display model", () => {
       target: { value: "智能工厂" },
     });
     fireEvent.click(within(openBankPane).getByRole("button", { name: "筛选 金额" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "筛选 金额" })).getByLabelText("建设银行 1138"));
+    fireEvent.click(
+      await within(screen.getByRole("dialog", { name: "筛选 金额" })).findByLabelText(
+        "建设银行 1138",
+        {},
+        { timeout: 3_000 },
+      ),
+    );
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "筛选 金额" }), { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "筛选 金额" })).not.toBeInTheDocument();
+    });
 
     await waitFor(() => {
       expect(within(unpairedZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
@@ -320,42 +331,6 @@ describe("Workbench pane display model", () => {
           && !("search_mode" in unpairedQuery);
       })).toBe(true);
     }, { timeout: 3000 });
-  });
-
-  test("uses direction and payment account options for the bank amount filter instead of raw amounts", () => {
-    const groups: WorkbenchRelationGroup[] = [
-      {
-        id: "group-1",
-        groupType: "unpaired",
-        matchConfidence: "medium",
-        reason: "test",
-        rows: {
-          oa: [],
-          bank: [
-            buildRow("bank-1", "bank", {
-              counterparty: "中科视拓",
-              amount: "500.00",
-              direction: "支出",
-              paymentAccount: "建行 8106",
-            }),
-            buildRow("bank-2", "bank", {
-              counterparty: "云南溯源",
-              amount: "800.00",
-              direction: "收入",
-              paymentAccount: "民生 9486",
-            }),
-          ],
-          invoice: [],
-        },
-      },
-    ];
-
-    expect(collectWorkbenchFilterOptions(groups, "bank", "amount")).toEqual([
-      "支出",
-      "收入",
-      "建行 8106",
-      "民生 9486",
-    ]);
   });
 
   test("combines linked search with bank dropdown filters without forcing the same row", () => {

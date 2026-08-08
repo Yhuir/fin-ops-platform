@@ -1538,6 +1538,32 @@ class Application:
                 group_id=query.get("group_id", [None])[0],
                 expected_read_model_version=query.get("expected_read_model_version", [None])[0],
             )
+        if method == "GET" and route_path == "/api/workbench/filter-options":
+            month = query.get("month", [None])[0]
+            response = self._handle_api_workbench_filter_options(
+                month,
+                zone=query.get("zone", [None])[0],
+                pane=query.get("pane", [None])[0],
+                facet=query.get("facet", [None])[0],
+                column=query.get("column", [None])[0],
+                option_search=query.get("option_search", [None])[0],
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+                status=query.get("status", [None])[0],
+                source_kind=query.get("source_kind", [None])[0],
+                search=query.get("search", [None])[0],
+                column_filters=query.get("column_filters", [None])[0],
+                time_filters=query.get("time_filters", [None])[0],
+                exception_bucket=query.get("exception_bucket", [None])[0],
+                expected_read_model_version=query.get("expected_read_model_version", [None])[0],
+            )
+            self._emit_workbench_api_metric(
+                endpoint="/api/workbench/filter-options",
+                scope_key=self._workbench_scope_key(month or "all"),
+                status_code=response.status_code,
+                duration_ms=self._duration_ms(request_started_at),
+            )
+            return response
         if method == "GET" and route_path == "/api/workbench/groups":
             month = query.get("month", [None])[0]
             response = self._handle_api_workbench_groups(
@@ -3070,6 +3096,44 @@ class Application:
             search=search,
             sort=sort,
             detail_level=detail_level,
+            column_filters=column_filters,
+            time_filters=time_filters,
+            exception_bucket=exception_bucket,
+            expected_read_model_version=expected_read_model_version,
+        )
+        return self._json_response(status_code, payload)
+
+    def _handle_api_workbench_filter_options(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        pane: str | None,
+        facet: str | None = None,
+        column: str | None = None,
+        option_search: str | None = None,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        column_filters: str | None = None,
+        time_filters: str | None = None,
+        exception_bucket: str | None = None,
+        expected_read_model_version: str | None = None,
+    ) -> Response:
+        status_code, payload = self._workbench_read_routes().filter_options(
+            month,
+            zone=zone,
+            pane=pane,
+            facet=facet,
+            column=column,
+            option_search=option_search,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
             column_filters=column_filters,
             time_filters=time_filters,
             exception_bucket=exception_bucket,

@@ -25,6 +25,7 @@ import {
   fetchWorkbenchExceptionGroups,
   fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
+  fetchWorkbenchFilterOptions,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRefreshStatus,
@@ -492,6 +493,19 @@ export default function ReconciliationWorkbenchPage() {
   );
   const lastZoneServerPageQueryKeyRef = useRef(zoneServerPageQueryKey);
   const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
+
+  const loadFilterOptions = useCallback((
+    zone: "paired" | "unpaired",
+    request: Parameters<typeof fetchWorkbenchFilterOptions>[2],
+    signal?: AbortSignal,
+  ) => fetchWorkbenchFilterOptions(
+    WORKBENCH_VIEW_MONTH,
+    zone,
+    request,
+    zoneServerPageQueries[zone],
+    activeWorkbenchReadModelVersion,
+    signal,
+  ), [activeWorkbenchReadModelVersion, zoneServerPageQueries]);
 
   const updateZoneDisplayState = useCallback((
     zoneId: "paired" | "unpaired",
@@ -2315,6 +2329,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
+      loadFilterOptions={loadFilterOptions}
       invoiceInventory={workbenchData?.invoiceInventory}
       loadingMore={loadingMoreByZone.paired}
       loadMoreError={loadMoreErrorByZone.paired}
@@ -2365,6 +2380,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
+      loadFilterOptions={loadFilterOptions}
       invoiceInventory={workbenchData?.invoiceInventory}
       loadingMore={loadingMoreByZone.unpaired}
       loadMoreError={loadMoreErrorByZone.unpaired}

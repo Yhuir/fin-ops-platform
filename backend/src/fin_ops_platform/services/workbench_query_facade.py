@@ -668,6 +668,189 @@ class WorkbenchQueryFacade:
             set_cached(cache_key, {"payload": payload}, ttl_seconds=self._groups_redis_ttl_seconds())
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
 
+    def filter_options(
+        self,
+        month: str | None,
+        *,
+        zone: str,
+        pane: str,
+        facet: str,
+        column: str | None,
+        option_search: str,
+        page: int,
+        page_size: int,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        column_filters: dict[str, object] | None = None,
+        time_filters: dict[str, object] | None = None,
+        exception_bucket: str | None = None,
+        expected_read_model_version: str | None = None,
+    ) -> WorkbenchQueryResult:
+        current_month = month or "all"
+        scope_key = self._scope_key_for_month(current_month)
+        endpoint = "/api/workbench/filter-options"
+        get_filter_options = getattr(self._repository, "get_workbench_filter_options", None)
+        if not callable(get_filter_options):
+            self._emit_status_metric(
+                endpoint=endpoint,
+                scope_key=scope_key,
+                read_model_status="unavailable",
+                reason="repository_unavailable",
+            )
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench filter options repository is not configured.",
+                },
+            )
+        try:
+            refresh_status_payload = self._groups_refresh_status_payload(scope_key)
+        except Exception as error:
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint=endpoint,
+                    scope_key=scope_key,
+                )
+            raise
+        expected_version = str(expected_read_model_version or "").strip()
+        current_version = (
+            str(
+                refresh_status_payload.get("read_model_version")
+                or refresh_status_payload.get("active_generation_id")
+                or ""
+            ).strip()
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        if expected_version and current_version and expected_version != current_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_read_model_version_conflict",
+                    "scope_key": scope_key,
+                    "zone": zone,
+                    "expected_read_model_version": expected_version,
+                    "read_model_version": current_version,
+                },
+            )
+        repository_kwargs: dict[str, object] = {
+            "scope_key": scope_key,
+            "zone": zone,
+            "pane": pane,
+            "facet": facet,
+            "column": column,
+            "option_search": option_search,
+            "page": page,
+            "page_size": page_size,
+            "status": status,
+            "source_kind": source_kind,
+            "search": search,
+            "column_filters": column_filters,
+            "time_filters": time_filters,
+            "exception_bucket": exception_bucket,
+        }
+        if expected_version:
+            repository_kwargs["expected_read_model_version"] = expected_version
+        try:
+            payload = get_filter_options(**repository_kwargs)
+        except Exception as error:
+            if isinstance(error, WorkbenchReadModelVersionConflictError):
+                return WorkbenchQueryResult(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "workbench_read_model_version_conflict",
+                        "scope_key": scope_key,
+                        "zone": zone,
+                        "expected_read_model_version": error.expected,
+                        "read_model_version": error.current,
+                    },
+                )
+            if self._missing_read_model_error(error):
+                self._emit_status_metric(
+                    endpoint=endpoint,
+                    scope_key=scope_key,
+                    read_model_status="unavailable",
+                    reason="migration_missing",
+                )
+                return WorkbenchQueryResult(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "read_model_unavailable",
+                        "read_model_status": "unavailable",
+                        "scope_key": scope_key,
+                        "message": "Workbench filter options read model table is not migrated.",
+                    },
+                )
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint=endpoint,
+                    scope_key=scope_key,
+                )
+            raise
+        if not isinstance(payload, dict):
+            self._emit_status_metric(
+                endpoint=endpoint,
+                scope_key=scope_key,
+                read_model_status="refreshing",
+                reason="generation_changed",
+            )
+            return WorkbenchQueryResult(
+                HTTPStatus.ACCEPTED,
+                {
+                    "month": current_month,
+                    "scope_key": scope_key,
+                    "zone": zone,
+                    "pane": pane,
+                    "facet": facet,
+                    "column": column,
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": False,
+                    "options": [],
+                    "read_model_status": "refreshing",
+                    "read_model_version": current_version or None,
+                },
+            )
+        payload = dict(payload)
+        payload["read_model_scope_key"] = scope_key
+        source_freshness_already_checked = bool(
+            isinstance(refresh_status_payload, dict)
+            and callable(self._refresh_status_with_source_freshness)
+        )
+        stale_reasons = (
+            []
+            if source_freshness_already_checked
+            else self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        )
+        if stale_reasons:
+            payload["read_model_status"] = "stale"
+            payload["read_model_stale_reasons"] = stale_reasons
+        refresh_status_value = (
+            str(refresh_status_payload.get("read_model_status") or "")
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        if refresh_status_value and refresh_status_value != "fresh":
+            payload["read_model_status"] = refresh_status_value
+            if current_version:
+                payload["read_model_version"] = current_version
+            refresh_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
+            if isinstance(refresh_stale_reasons, list) and refresh_stale_reasons:
+                payload["read_model_stale_reasons"] = refresh_stale_reasons
+        options_status = str(payload.get("read_model_status") or "fresh")
+        if options_status != "fresh":
+            self._emit_status_metric(
+                endpoint=endpoint,
+                scope_key=scope_key,
+                read_model_status=options_status,
+                reason="sql_status",
+            )
+        return WorkbenchQueryResult(HTTPStatus.OK, payload)
+
     def group_detail(
         self,
         month: str | None,

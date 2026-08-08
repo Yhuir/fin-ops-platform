@@ -11,6 +11,7 @@ import type {
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchZonePageInfo,
+  WorkbenchFilterOptionsLoader,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
@@ -67,6 +68,7 @@ type WorkbenchZoneProps = {
   loadingMore?: boolean;
   loadMoreError?: string | null;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
+  loadFilterOptions?: WorkbenchFilterOptionsLoader;
   auxiliaryHeaderActions?: Array<{
     label: string;
     onClick: () => void;
@@ -136,6 +138,7 @@ function WorkbenchZone({
   loadingMore = false,
   loadMoreError,
   onRequestNextPage,
+  loadFilterOptions,
   auxiliaryHeaderActions,
   searchQuery,
   searchPending = false,
@@ -388,6 +391,7 @@ function WorkbenchZone({
         groups={groups}
         highlightedRowId={highlightedRowId}
         invoiceInventory={invoiceInventory}
+        loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}

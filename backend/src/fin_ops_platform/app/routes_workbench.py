@@ -9,6 +9,9 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
     normalize_workbench_group_detail_level,
     stable_json_value,
 )
+from fin_ops_platform.services.workbench_filter_options import (
+    normalize_workbench_filter_option_target,
+)
 
 WORKBENCH_SEARCH_QUERY_MAX_LENGTH = 200
 
@@ -163,6 +166,73 @@ class WorkbenchReadApiRoutes:
         result = self._query_facade_provider().groups(current_month, **kwargs)
         return result.status_code, result.payload
 
+    def filter_options(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        pane: str | None,
+        facet: str | None = None,
+        column: str | None = None,
+        option_search: str | None = None,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        column_filters: str | None = None,
+        time_filters: str | None = None,
+        exception_bucket: str | None = None,
+        expected_read_model_version: str | None = None,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        current_month = month or "all"
+        normalized_zone = str(zone or "").strip()
+        if normalized_zone not in {"unpaired", "paired"}:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."},
+            )
+        try:
+            normalized_pane, normalized_facet, normalized_column = normalize_workbench_filter_option_target(
+                pane=pane,
+                facet=facet,
+                column=column,
+            )
+            normalized_column_filters = self._normalize_json_query_param(column_filters, "column_filters")
+            normalized_time_filters = self._normalize_json_query_param(time_filters, "time_filters")
+            normalized_search = self._normalize_search_query(search, "search")
+            normalized_option_search = str(option_search or "").strip()
+            if len(normalized_option_search) > 100:
+                raise ValueError("option_search must not exceed 100 characters.")
+            normalized_page = self._normalize_positive_int(page, "page", default=1)
+            normalized_page_size = self._normalize_positive_int(page_size, "page_size", default=100, maximum=200)
+            normalized_exception_bucket = str(exception_bucket or "").strip() or None
+            if normalized_exception_bucket not in {None, "active", "processed"}:
+                raise ValueError("exception_bucket must be active or processed.")
+        except ValueError as error:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_filter_options_query", "message": str(error)},
+            )
+        result = self._query_facade_provider().filter_options(
+            current_month,
+            zone=normalized_zone,
+            pane=normalized_pane,
+            facet=normalized_facet,
+            column=normalized_column,
+            option_search=normalized_option_search,
+            page=normalized_page,
+            page_size=normalized_page_size,
+            status=status,
+            source_kind=source_kind,
+            search=normalized_search,
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+            exception_bucket=normalized_exception_bucket,
+            expected_read_model_version=str(expected_read_model_version or "").strip() or None,
+        )
+        return result.status_code, result.payload
+
     @staticmethod
     def _normalize_initial_query_param(value: str | None, name: str) -> dict[str, object]:
         normalized = WorkbenchReadApiRoutes._normalize_json_query_param(value, name)
@@ -191,6 +261,26 @@ class WorkbenchReadApiRoutes:
         normalized = canonicalize_money_search_query(value)
         if len(normalized) > WORKBENCH_SEARCH_QUERY_MAX_LENGTH:
             raise ValueError(f"{name} must be at most {WORKBENCH_SEARCH_QUERY_MAX_LENGTH} characters.")
+        return normalized
+
+    @staticmethod
+    def _normalize_positive_int(
+        value: object,
+        name: str,
+        *,
+        default: int,
+        maximum: int | None = None,
+    ) -> int:
+        if value is None or str(value).strip() == "":
+            return default
+        try:
+            normalized = int(str(value).strip())
+        except ValueError as error:
+            raise ValueError(f"{name} must be an integer.") from error
+        if normalized < 1:
+            raise ValueError(f"{name} must be at least 1.")
+        if maximum is not None and normalized > maximum:
+            raise ValueError(f"{name} must not exceed {maximum}.")
         return normalized
 
     @staticmethod

@@ -35,6 +35,8 @@ import type {
   WorkbenchSourceKind,
   WorkbenchGroupType,
   WorkbenchGroupsPageQuery,
+  WorkbenchFilterOptionsPage,
+  WorkbenchFilterOptionsRequest,
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
   WorkbenchReadModelStatus,
@@ -252,6 +254,19 @@ type ApiWorkbenchGroupsPayload = {
   read_model_status?: WorkbenchReadModelStatus;
   read_model_version?: string | null;
   groups: ApiWorkbenchGroup[];
+};
+
+type ApiWorkbenchFilterOptionsPayload = {
+  page: number;
+  page_size: number;
+  has_more: boolean;
+  read_model_status?: WorkbenchReadModelStatus;
+  read_model_version?: string | null;
+  options?: Array<{
+    value?: string | null;
+    label?: string | null;
+    missing?: boolean | null;
+  }>;
 };
 
 type ApiWorkbenchInitialPayload = ApiWorkbenchSummaryPayload & {
@@ -2582,6 +2597,55 @@ export async function fetchWorkbenchGroupsPage(
     zone: payload.zone,
     groups: payload.groups.map((group) => mapGroup(group, payload.zone)),
     page: mapWorkbenchZonePage(payload),
+  };
+}
+
+export async function fetchWorkbenchFilterOptions(
+  month: string,
+  zone: WorkbenchZoneId,
+  request: WorkbenchFilterOptionsRequest,
+  query: WorkbenchGroupsPageQuery = {},
+  expectedReadModelVersion?: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchFilterOptionsPage> {
+  const params = new URLSearchParams({
+    month,
+    zone,
+    pane: request.pane,
+    facet: request.facet,
+    page: String(request.page ?? 1),
+    page_size: "100",
+  });
+  if (request.column) params.set("column", request.column);
+  if (request.optionSearch?.trim()) params.set("option_search", request.optionSearch.trim());
+  if (query.search?.trim()) params.set("search", query.search.trim());
+  if (query.status?.trim()) params.set("status", query.status.trim());
+  if (query.sourceKind?.trim()) params.set("source_kind", query.sourceKind.trim());
+  if (query.exceptionBucket) params.set("exception_bucket", query.exceptionBucket);
+  const columnFilters = stableJsonQueryParam(query.filtersByPaneAndColumn);
+  const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
+  if (columnFilters) params.set("column_filters", columnFilters);
+  if (timeFilters) params.set("time_filters", timeFilters);
+  if (expectedReadModelVersion?.trim()) {
+    params.set("expected_read_model_version", expectedReadModelVersion.trim());
+  }
+  const payload = await requestJson<ApiWorkbenchFilterOptionsPayload>(
+    `/api/workbench/filter-options?${params.toString()}`,
+    { method: "GET", signal },
+  );
+  return {
+    options: (payload.options ?? [])
+      .map((option) => ({
+        value: String(option.value ?? "").trim(),
+        label: String(option.label ?? option.value ?? "").trim(),
+        missing: option.missing === true,
+      }))
+      .filter((option) => option.value && option.label),
+    page: Math.max(1, Number(payload.page) || 1),
+    pageSize: Math.max(1, Number(payload.page_size) || 100),
+    hasMore: payload.has_more === true,
+    readModelStatus: payload.read_model_status ?? "refreshing",
+    readModelVersion: payload.read_model_version ?? null,
   };
 }
 

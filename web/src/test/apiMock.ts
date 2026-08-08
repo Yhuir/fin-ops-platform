@@ -4853,6 +4853,69 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/workbench/filter-options": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "";
+      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
+      const pane = MOCK_WORKBENCH_PANES.includes(url.searchParams.get("pane") as RawWorkbenchPaneKey)
+        ? url.searchParams.get("pane") as RawWorkbenchPaneKey
+        : "oa";
+      const facet = url.searchParams.get("facet") === "time_year" ? "time_year" : "column";
+      const column = String(url.searchParams.get("column") ?? "").trim();
+      const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+      const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "100") || 100);
+      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
+      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
+        return { status: 409, body: { error: "workbench_read_model_version_conflict" } };
+      }
+      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
+      const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
+      if (facet === "column") {
+        const paneFilters = objectValue(columnFilters[pane]);
+        delete paneFilters[column];
+        if (Object.keys(paneFilters).length > 0) columnFilters[pane] = paneFilters;
+        else delete columnFilters[pane];
+      } else {
+        delete timeFilters[pane];
+      }
+      const groups = payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(
+        group,
+        String(url.searchParams.get("search") ?? "").trim(),
+        columnFilters,
+        timeFilters,
+      ));
+      const values = new Map<string, { value: string; label: string; missing: boolean }>();
+      groups.forEach((group) => {
+        groupRowsForMockPane(group, pane)
+          .filter((row) => mockWorkbenchRowMatchesPaneFilters(row, pane, columnFilters[pane], timeFilters[pane]))
+          .forEach((row) => {
+            const rawValues = facet === "time_year"
+              ? [String(mockWorkbenchTimeValue(row, pane) ?? "").slice(0, 4)].filter((value) => /^\d{4}$/.test(value))
+              : mockWorkbenchColumnValues(row, pane, column);
+            const normalizedValues = rawValues.length > 0 ? rawValues : ["__workbench_missing__"];
+            normalizedValues.forEach((value) => values.set(value, {
+              value,
+              label: value === "__workbench_missing__" ? "未填写" : value,
+              missing: value === "__workbench_missing__",
+            }));
+          });
+      });
+      const optionSearch = normalizeMockWorkbenchText(url.searchParams.get("option_search") ?? "");
+      const optionsList = Array.from(values.values())
+        .filter((option) => !optionSearch || normalizeMockWorkbenchText(option.label).includes(optionSearch))
+        .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+      const offset = (page - 1) * pageSize;
+      return {
+        body: {
+          page,
+          page_size: pageSize,
+          has_more: offset + pageSize < optionsList.length,
+          options: optionsList.slice(offset, offset + pageSize),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
+        },
+      };
+    },
     "/api/workbench/refresh-status": ({ url }) => {
       const month = url.searchParams.get("month") ?? "all";
       const statusSequence = options.workbenchRefreshStatusSequence ?? [];
@@ -7847,6 +7910,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     const isWorkbenchReadPath =
       url.pathname === "/api/workbench"
       || url.pathname === "/api/workbench/groups"
+      || url.pathname === "/api/workbench/filter-options"
       || url.pathname === "/api/workbench/ignored"
       || url.pathname === "/api/workbench/settings";
     const workbenchSpecificDelay =

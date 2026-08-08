@@ -136,8 +136,9 @@ describe("AppSidebar shell contract", () => {
     expect(appSource).toContain("function StatefulAppSidebar");
     expect(appSource).not.toMatch(/style=\{shellStyle\}|const sidebarWidth/);
     expect(appStyles).not.toContain("--sidebar-width");
-    expect(workbenchFilterSource).toContain('querySelector<HTMLElement>(".app-sidebar")');
-    expect(workbenchFilterSource).not.toContain("--sidebar-width");
+    expect(workbenchFilterSource).toContain("PopoverRoot");
+    expect(workbenchFilterSource).toContain("SearchField");
+    expect(workbenchFilterSource).not.toContain("createPortal");
   });
 
   test("does not render the OA embedded layout explanation card", () => {

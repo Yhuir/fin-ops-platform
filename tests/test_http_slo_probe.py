@@ -303,6 +303,7 @@ class HttpSloProbeTests(unittest.TestCase):
 
         for name in (
             "workbench_groups_all_paired",
+            "workbench_filter_options_all_paired",
             "operations_app_health_dashboard",
             "pending_invoices_rows",
             "input_invoice_usage_rows",
@@ -329,6 +330,8 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])
         self.assertIn("page_size=50", probe_paths["workbench_groups_all_paired"])
         self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_paired"])
+        self.assertIn("column=applicant", probe_paths["workbench_filter_options_all_paired"])
+        self.assertIn("page_size=100", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page=1", probe_paths["pending_invoices_rows"])
         self.assertIn("page_size=50", probe_paths["pending_invoices_rows"])
         self.assertIn("include_statistics=false", probe_paths["pending_invoices_rows"])

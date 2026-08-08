@@ -56,6 +56,13 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(openZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
     expect(api.count("GET /api/workbench/groups")).toBe(0);
 
+    await openZone.getByRole("button", { name: "筛选 申请人" }).click();
+    const applicantFilter = page.getByRole("dialog", { name: "筛选 申请人" });
+    await expect(applicantFilter.getByRole("checkbox", { name: "大数据申请人064" })).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toHaveCount(0);
+    expect(api.count("GET /api/workbench/filter-options")).toBe(1);
+    await page.keyboard.press("Escape");
+
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));

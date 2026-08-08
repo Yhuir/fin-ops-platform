@@ -358,6 +358,35 @@ export type WorkbenchGroupsPageQuery = {
   exceptionBucket?: "active" | "processed";
 };
 
+export type WorkbenchFilterOption = {
+  value: string;
+  label: string;
+  missing: boolean;
+};
+
+export type WorkbenchFilterOptionsPage = {
+  options: WorkbenchFilterOption[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  readModelStatus: WorkbenchReadModelStatus;
+  readModelVersion: string | null;
+};
+
+export type WorkbenchFilterOptionsRequest = {
+  pane: WorkbenchRecordType;
+  facet: "column" | "time_year";
+  column?: string;
+  optionSearch?: string;
+  page?: number;
+};
+
+export type WorkbenchFilterOptionsLoader = (
+  zone: WorkbenchZoneId,
+  request: WorkbenchFilterOptionsRequest,
+  signal?: AbortSignal,
+) => Promise<WorkbenchFilterOptionsPage>;
+
 export type WorkbenchZonePageInfo = {
   zone: WorkbenchZoneId;
   page: number;

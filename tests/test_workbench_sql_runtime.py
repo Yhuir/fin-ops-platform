@@ -30,6 +30,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.workbench_free_matching_engine import (
     RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
 )
+from fin_ops_platform.services.workbench_filter_options import WORKBENCH_FILTER_MISSING_VALUE
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
     WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION,
@@ -635,6 +636,19 @@ class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
                     "group_count": 20,
                     "build_metadata": {},
                 }
+            ]
+        return super().fetch_all(sql, params)
+
+
+class WorkbenchFilterOptionsConnection(ActiveWorkbenchGenerationConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "normalized_facet_values" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {"facet_value": "陈雄兵", "facet_label": "陈雄兵"},
+                {"facet_value": "杨丽萍", "facet_label": "杨丽萍"},
+                {"facet_value": "赵敏", "facet_label": "赵敏"},
             ]
         return super().fetch_all(sql, params)
 
@@ -3751,6 +3765,108 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("active_workbench_members as not materialized", filtered_page_query[0])
         self.assertIn("column_values @> %s::jsonb", filtered_page_query[0])
         self.assertEqual(filtered_page_query[1][-3:], ("unpaired", 26, 0))
+
+    def test_repository_filter_options_are_complete_active_member_facets_not_page_rows(self) -> None:
+        connection = WorkbenchFilterOptionsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_filter_options(
+            scope_key="all",
+            zone="unpaired",
+            pane="oa",
+            facet="column",
+            column="applicant",
+            page=1,
+            page_size=2,
+            search="1320",
+            column_filters={
+                "oa": {
+                    "applicant": ["杨丽萍"],
+                    "projectName": ["大理项目"],
+                }
+            },
+            expected_read_model_version=COMPOSED_ALL_VERSION,
+        )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual([option["value"] for option in payload["options"]], ["陈雄兵", "杨丽萍"])
+        self.assertTrue(payload["has_more"])
+        self.assertEqual(payload["read_model_version"], COMPOSED_ALL_VERSION)
+        sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "normalized_facet_values" in sql
+        )
+        self.assertIn("active_workbench_members as not materialized", sql)
+        self.assertIn("from active_workbench_members r", sql)
+        self.assertIn("r.column_values->>'applicant'", sql)
+        self.assertIn('"projectName": "大理项目"', str(params))
+        self.assertNotIn('"applicant": "杨丽萍"', str(params))
+        self.assertIn("%132%", params)
+        self.assertEqual(params[-2:], (3, 0))
+
+    def test_repository_filter_options_use_bank_direction_and_account_values(self) -> None:
+        connection = WorkbenchFilterOptionsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_filter_options(
+            scope_key="all",
+            zone="paired",
+            pane="bank",
+            facet="column",
+            column="amount",
+            page=1,
+            page_size=100,
+        )
+
+        sql = next(sql for sql, _params in connection.fetch_all_calls if "normalized_facet_values" in sql)
+        self.assertIn("r.column_values->>'direction'", sql)
+        self.assertIn("r.column_values->>'paymentaccount'", sql)
+        self.assertIn("cross join lateral", sql)
+        self.assertNotIn("select g.payload", sql)
+
+    def test_repository_time_year_facet_removes_own_time_filter_but_keeps_other_columns(self) -> None:
+        connection = WorkbenchFilterOptionsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_filter_options(
+            scope_key="all",
+            zone="unpaired",
+            pane="invoice",
+            facet="time_year",
+            page=1,
+            page_size=100,
+            column_filters={"invoice": {"sellerName": ["供应商A"]}},
+            time_filters={"invoice": {"mode": "year", "year": "2026"}},
+        )
+
+        sql, params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "normalized_facet_values" in sql
+        )
+        self.assertIn("to_char(r.time_date, 'yyyy')", sql)
+        self.assertIn('"sellerName": "供应商A"', str(params))
+        self.assertNotIn("2026-01-01", params)
+
+    def test_missing_filter_option_matches_empty_preview_value(self) -> None:
+        self.assertTrue(
+            _workbench_payload_row_matches_preview_criteria(
+                {"type": "oa", "applicant": "—"},
+                pane="oa",
+                column_filters={"oa": {"applicant": [WORKBENCH_FILTER_MISSING_VALUE]}},
+                time_filters={},
+            )
+        )
+        self.assertFalse(
+            _workbench_payload_row_matches_preview_criteria(
+                {"type": "oa", "applicant": "杨丽萍"},
+                pane="oa",
+                column_filters={"oa": {"applicant": [WORKBENCH_FILTER_MISSING_VALUE]}},
+                time_filters={},
+            )
+        )
 
     def test_repository_search_uses_active_structured_rows_without_payload_aggregation(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()

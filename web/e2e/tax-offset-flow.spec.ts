@@ -338,7 +338,7 @@ test.describe("tax offset browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await counterpartyFilterDialog
-        .getByRole("checkbox", { name: "进项超长供应商-003-筛选滚动验证", exact: true })
+        .getByText("进项超长供应商-003-筛选滚动验证", { exact: true })
         .click();
       await mark("finalSettledLatencyMs", expect(inputPanel.getByRole("row", { name: /1129900003/ })).toBeVisible());
     });

@@ -4,6 +4,7 @@ import {
   applyWorkbenchException,
   confirmWorkbenchLink,
   fetchWorkbenchGroupDetail,
+  fetchWorkbenchFilterOptions,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchRowDetail,
@@ -897,6 +898,56 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(JSON.parse(url.searchParams.get("time_filters") ?? "{}")).toEqual({
       bank: { mode: "month", month: "2026-04" },
+    });
+  });
+
+  test("serializes the active-generation filter facet query and maps missing labels", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        page: 2,
+        page_size: 100,
+        has_more: true,
+        read_model_status: "fresh",
+        read_model_version: "generation-set-1",
+        options: [
+          { value: "杨丽萍", label: "杨丽萍", missing: false },
+          { value: "__workbench_missing__", label: "未填写", missing: true },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const result = await fetchWorkbenchFilterOptions("all", "unpaired", {
+      pane: "oa",
+      facet: "column",
+      column: "applicant",
+      optionSearch: "杨",
+      page: 2,
+    }, {
+      search: "1320",
+      filtersByPaneAndColumn: { oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] } },
+      timeFilterByPane: { bank: { mode: "year", year: "2026" } },
+    }, "generation-set-1");
+
+    const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/workbench/filter-options");
+    expect(url.searchParams.get("pane")).toBe("oa");
+    expect(url.searchParams.get("facet")).toBe("column");
+    expect(url.searchParams.get("column")).toBe("applicant");
+    expect(url.searchParams.get("option_search")).toBe("杨");
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.get("page_size")).toBe("100");
+    expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
+    expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
+      oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] },
+    });
+    expect(result).toMatchObject({
+      hasMore: true,
+      readModelStatus: "fresh",
+      readModelVersion: "generation-set-1",
+      options: [
+        { value: "杨丽萍", label: "杨丽萍", missing: false },
+        { value: "__workbench_missing__", label: "未填写", missing: true },
+      ],
     });
   });
 

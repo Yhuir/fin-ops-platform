@@ -1498,6 +1498,55 @@ function workbenchGroupsPayload(
   };
 }
 
+function workbenchFilterOptionsPayload(
+  url: URL,
+  relationConfirmed: boolean,
+  exceptionApplied = false,
+  rowIgnored = false,
+  largeDataset = false,
+) {
+  const zone: WorkbenchZone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
+  const pane = url.searchParams.get("pane") ?? "oa";
+  const facet = url.searchParams.get("facet") ?? "column";
+  const column = url.searchParams.get("column") ?? "";
+  const fieldByTarget: Record<string, string> = {
+    "oa:applicant": "applicant",
+    "oa:projectName": "project_name",
+    "oa:counterparty": "counterparty_name",
+    "bank:counterparty": "counterparty_name",
+    "bank:loanRepaymentDate": "loan_repayment_date",
+    "invoice:sellerName": "seller_name",
+    "invoice:buyerName": "buyer_name",
+  };
+  const rowKey = `${pane}_rows`;
+  const rows = workbenchGroups(zone, relationConfirmed, exceptionApplied, rowIgnored, largeDataset)
+    .flatMap((group) => (group as Record<string, unknown>)[rowKey] as Array<Record<string, unknown>> ?? []);
+  const values = facet === "time_year"
+    ? rows.map((row) => String(row.trade_time ?? row.pay_receive_time ?? "").slice(0, 4))
+    : pane === "bank" && column === "amount"
+      ? rows.map((row) => String(row.debit_amount ?? row.credit_amount ?? row.amount ?? ""))
+      : rows.map((row) => String(row[fieldByTarget[`${pane}:${column}`] ?? column] ?? ""));
+  const search = (url.searchParams.get("option_search") ?? "").trim().toLocaleLowerCase("zh-CN");
+  const options = Array.from(new Set(values))
+    .filter(Boolean)
+    .filter((value) => !search || value.toLocaleLowerCase("zh-CN").includes(search))
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
+  const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") ?? "100", 10) || 100);
+  const start = (page - 1) * pageSize;
+  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
+  return {
+    options: options.slice(start, start + pageSize).map((value) => ({ value, label: value, missing: false })),
+    page,
+    page_size: pageSize,
+    has_more: start + pageSize < options.length,
+    read_model_status: "fresh",
+    read_model_version: readModelVersion,
+  };
+}
+
 function bankFlowRuleWorkbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
@@ -9429,6 +9478,16 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         ...turnoverClosureMutationPayload(),
         status: "withdrawn",
       });
+    }
+
+    if (path === "/api/workbench/filter-options") {
+      return json(route, workbenchFilterOptionsPayload(
+        url,
+        relationConfirmed,
+        workbenchExceptionApplied,
+        workbenchRowIgnored,
+        options.workbenchLargeDataset === true,
+      ));
     }
 
     if (path === "/api/workbench/groups") {

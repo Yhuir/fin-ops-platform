@@ -866,6 +866,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 - summary 与两区 groups 必须共用同一 generation-set version；缺失或混合 version 必须 fail closed。
 - 默认无筛选首屏固定 `page=1`、`page_size=50`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。paired/unpaired 的剩余数据继续使用既有 `/api/workbench/groups` 分页接口。
 - 搜索、筛选、后续分页和详情使用已有窄接口，并必须携带 `expected_read_model_version`。
+- `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填受支持的 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page` 从 1 开始，`page_size` 默认 100、最大 200；响应包含 `options[{value,label,missing}]`、`has_more`、`read_model_status` 和 `read_model_version`。接口与 `/groups` 使用同一 active-generation/freshness/version gate，候选来自完整 generation，而非当前页 groups；目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。GET 不建立独立 read model、表、Redis cache、worker 或逐菜单 refresh。
 - 旧独立 summary HTTP 不是公开 API；内部 summary repository I/O 仅用于组合上述同快照响应。
 
 关系分区只允许 `paired` / `unpaired`：

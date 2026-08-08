@@ -1723,6 +1723,169 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/refresh-status")
         self.assertEqual(metrics.calls[0]["reason"], "query_timeout")
 
+    def test_filter_options_reads_stable_generation_without_redis_cache(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-7",
+                }
+
+            @staticmethod
+            def get_workbench_filter_options(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {
+                    "scope_key": "all",
+                    "zone": "unpaired",
+                    "pane": "oa",
+                    "facet": "column",
+                    "column": "applicant",
+                    "options": [{"value": "杨丽萍", "label": "杨丽萍", "missing": False}],
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-7",
+                    "source_versions": {"builder": "v1"},
+                }
+
+        redis = RedisRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=redis,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.filter_options(
+            "all",
+            zone="unpaired",
+            pane="oa",
+            facet="column",
+            column="applicant",
+            option_search="杨",
+            page=1,
+            page_size=100,
+            column_filters={"oa": {"projectName": ["大理项目"]}},
+            expected_read_model_version="generation-set-7",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["options"][0]["value"], "杨丽萍")
+        self.assertEqual(calls[0]["scope_key"], "all")
+        self.assertEqual(calls[0]["column_filters"], {"oa": {"projectName": ["大理项目"]}})
+        self.assertEqual(calls[0]["expected_read_model_version"], "generation-set-7")
+        self.assertEqual(redis.get_json_calls, [])
+        self.assertEqual(redis.set_json_calls, [])
+
+    def test_filter_options_stale_all_scope_enqueues_only_exact_refresh_scopes_once(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-7",
+                }
+
+            @staticmethod
+            def get_workbench_filter_options(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "scope_key": "all",
+                    "zone": "paired",
+                    "pane": "invoice",
+                    "facet": "column",
+                    "column": "sellerName",
+                    "options": [{"value": "供应商A", "label": "供应商A", "missing": False}],
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-7",
+                }
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            refresh_status_with_source_freshness=lambda payload, **_kwargs: {
+                **payload,
+                "read_model_status": "stale",
+                "refresh_scope_keys": ["2026-05", "2026-06"],
+            },
+        )
+
+        result = facade.filter_options(
+            "all",
+            zone="paired",
+            pane="invoice",
+            facet="column",
+            column="sellerName",
+            option_search="",
+            page=1,
+            page_size=100,
+            expected_read_model_version="generation-set-7",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "stale")
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("2026-05", "api_groups_source_versions_stale"),
+                ("2026-06", "api_groups_source_versions_stale"),
+            ],
+        )
+
+    def test_filter_options_rejects_version_conflict_before_repository_read(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-8",
+                }
+
+            @staticmethod
+            def get_workbench_filter_options(**kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                return {}
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.filter_options(
+            "all",
+            zone="unpaired",
+            pane="oa",
+            facet="column",
+            column="applicant",
+            option_search="",
+            page=1,
+            page_size=100,
+            expected_read_model_version="generation-set-7",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(result.payload["read_model_version"], "generation-set-8")
+        self.assertEqual(calls, [])
+
 
 
 if __name__ == "__main__":

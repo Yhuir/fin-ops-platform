@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-08 - 三栏下拉候选脱离主表分页
+
+- 根因：`RelationGroupGrid` 从 `sourceGroups ?? groups` 收集候选；该集合只包含 combined initial 与滚动加载过的主表页，因此菜单选项随着用户滚动才逐步变多，和服务端全量筛选口径不一致。
+- 修复：复用现有 active-generation group/member SQL 与 freshness/version gate，新增一个只读、分页的 filter-options 窄接口；目标列自筛选排除，其余区域条件保留。前端菜单打开后惰性读取，使用 HeroUI 原生 Popover/SearchField/Checkbox/Button；主表分页不变。
+- 删除旧的 loaded-row candidate collectors 及其测试，不保留 Workbench fallback。没有新增表、migration、read model、worker、queue、Redis cache 或依赖；性能探针新增一个 applicant facet 样本。
+
 ## 2026-08-07 - 标签变更后的 canonical requirement 闭环
 
 - 关联台 1 秒 refresh-status/generation 链路不变，也不接收普通页面写后通知。修复位于上游 canonical write：银行 effective category 变化与既有 active 普通 relation requirement/history 原子提交。

@@ -44,6 +44,10 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WorkbenchRelationPreviewSelectionError,
     WorkbenchRowDetailInvariantError,
 )
+from fin_ops_platform.services.workbench_filter_options import (
+    WORKBENCH_FILTER_MISSING_VALUE,
+    normalize_workbench_filter_option_target,
+)
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -4748,6 +4752,290 @@ class PostgresReadModelRepository:
             "read_model_version": active_generation_id,
         }
 
+    def get_workbench_filter_options(
+        self,
+        *,
+        scope_key: str,
+        zone: str,
+        pane: str,
+        facet: str = "column",
+        column: str | None = None,
+        option_search: str | None = None,
+        page: int | str | None = None,
+        page_size: int | str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        column_filters: Any = None,
+        time_filters: Any = None,
+        exception_bucket: str | None = None,
+        expected_read_model_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        normalized_zone = str(zone or "").strip()
+        normalized_pane, normalized_facet, normalized_column = normalize_workbench_filter_option_target(
+            pane=pane,
+            facet=facet,
+            column=column,
+        )
+        normalized_page = max(1, int_value(page, 1))
+        normalized_page_size = min(200, max(1, int_value(page_size, 100)))
+        offset = (normalized_page - 1) * normalized_page_size
+        normalized_option_search = str(option_search or "").strip()[:100]
+        normalized_column_filters = _normalize_workbench_column_filters(column_filters)
+        normalized_time_filters = _normalize_workbench_time_filters(time_filters)
+        if normalized_facet == "column" and normalized_column is not None:
+            pane_filters = dict(normalized_column_filters.get(normalized_pane, {}))
+            pane_filters.pop(normalized_column, None)
+            normalized_column_filters = dict(normalized_column_filters)
+            if pane_filters:
+                normalized_column_filters[normalized_pane] = pane_filters
+            else:
+                normalized_column_filters.pop(normalized_pane, None)
+        elif normalized_facet == "time_year":
+            normalized_time_filters = dict(normalized_time_filters)
+            normalized_time_filters.pop(normalized_pane, None)
+
+        composed_all_scope = normalized_scope_key == "all"
+        if composed_all_scope:
+            scope_params: list[Any] = []
+            active_generation_id = text(
+                self._workbench_active_month_generation_version(self._connection).get("version")
+            )
+            active_source_versions = self._workbench_all_active_source_versions()
+            groups_from_sql = _workbench_active_month_groups_sql(include_aggregated_metadata=False)
+        else:
+            groups_from_sql = "read_model.workbench_groups g"
+            scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
+            active_generation_id = self._active_workbench_generation_id(
+                self._connection,
+                scope_key=normalized_scope_key,
+            )
+            active_source_versions = self._workbench_generation_source_versions(
+                self._connection,
+                scope_key=normalized_scope_key,
+                generation_id=active_generation_id,
+            )
+        if not active_generation_id:
+            return None
+        expected_version = text(expected_read_model_version)
+        if expected_version and expected_version != active_generation_id:
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=active_generation_id)
+
+        group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
+        normalized_search = canonicalize_money_search_query(search)[:200]
+        normalized_exception_bucket = text(exception_bucket)
+        if normalized_exception_bucket not in {None, "active", "processed"}:
+            raise ValueError("exception_bucket must be active or processed.")
+        clauses = ["g.zone = %s"] if composed_all_scope else [f"g.{scope_where}", "g.zone = %s"]
+        params: list[Any] = [*scope_params, normalized_zone]
+        active_member_filter_joins: list[str] = []
+        active_member_filter_params: list[Any] = []
+        if not composed_all_scope:
+            clauses.append("g.generation_id = %s")
+            params.append(active_generation_id)
+        if normalized := text(status):
+            clauses.append("g.status = %s")
+            params.append(normalized)
+        if normalized := text(source_kind):
+            if composed_all_scope:
+                active_member_filter_joins.append(
+                    _workbench_all_active_member_filter_join_sql(
+                        "r_source.source_kind = %s",
+                        row_alias="r_source",
+                        match_alias="source_match",
+                    )
+                )
+                active_member_filter_params.append(normalized)
+            else:
+                clauses.append("%s = any(g.source_kinds)")
+                params.append(normalized)
+        if normalized_search:
+            pattern = _workbench_literal_ilike_pattern(normalized_search)
+            if composed_all_scope:
+                active_member_filter_joins.append(
+                    _workbench_all_active_member_filter_join_sql(
+                        "r_zone_search.searchable_text ilike %s escape E'\\\\'",
+                        row_alias="r_zone_search",
+                        match_alias="zone_search_match",
+                    )
+                )
+                active_member_filter_params.append(pattern)
+            else:
+                clauses.append(_workbench_zone_search_exists_sql(group_id_sql=group_row_join_id_sql))
+                params.append(pattern)
+        if normalized_exception_bucket == "active":
+            clauses.append("g.payload#>>'{oa_invoice_anomaly,state}' = 'active'")
+        elif normalized_exception_bucket == "processed":
+            clauses.append("g.payload#>>'{oa_invoice_anomaly,state}' = 'ignored'")
+        if composed_all_scope:
+            row_filter_joins, row_filter_params = _workbench_all_group_row_filter_joins_sql(
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
+            )
+            active_member_filter_joins.extend(row_filter_joins)
+            active_member_filter_params.extend(row_filter_params)
+        else:
+            row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
+                group_id_sql=group_row_join_id_sql,
+            )
+            if row_filter_sql:
+                clauses.append(row_filter_sql)
+                params.extend(row_filter_params)
+        where_sql = " and ".join(clauses)
+        active_member_filter_join_sql = "\n".join(active_member_filter_joins)
+        target_row_filter_sql, target_row_filter_params = _workbench_group_row_count_filter_sql(
+            normalized_pane,
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+        )
+
+        lateral_sql = ""
+        if normalized_facet == "time_year":
+            value_sql = "to_char(r.time_date, 'YYYY')"
+            keep_value_sql = "facet_value is not null"
+        elif normalized_pane == "bank" and normalized_column == "amount":
+            lateral_sql = """
+                cross join lateral (
+                    values
+                        (nullif(btrim(r.column_values->>'direction'), '')),
+                        (nullif(btrim(r.column_values->>'paymentAccount'), ''))
+                ) facet_source(facet_value)
+            """
+            value_sql = "facet_source.facet_value"
+            keep_value_sql = "facet_value is not null and facet_value not in ('--', '—')"
+        else:
+            assert normalized_column is not None
+            raw_value_sql = f"btrim(r.column_values->>'{normalized_column}')"
+            value_sql = (
+                f"case when coalesce(nullif({raw_value_sql}, ''), '') in ('', '--', '—') "
+                f"then '{WORKBENCH_FILTER_MISSING_VALUE}' else {raw_value_sql} end"
+            )
+            keep_value_sql = "facet_value is not null"
+
+        target_row_where = [
+            "r.pane = %s",
+            "coalesce(r.row_role, '') <> 'summary'",
+        ]
+        target_row_params: list[Any] = [normalized_pane]
+        if normalized_pane == "bank":
+            target_row_where.append("coalesce(r.source_kind, '') <> 'bank_flow_rule_batch_summary'")
+        if target_row_filter_sql:
+            target_row_where.append(target_row_filter_sql.removeprefix("and "))
+            target_row_params.extend(target_row_filter_params)
+        option_search_sql = ""
+        option_search_params: list[Any] = []
+        if normalized_option_search:
+            option_search_sql = "and facet_label ilike %s escape E'\\\\'"
+            option_search_params.append(_workbench_literal_ilike_pattern(normalized_option_search))
+
+        if composed_all_scope:
+            cte_sql = f"""
+                with {_workbench_active_month_members_cte_sql()},
+                canonical_workbench_groups as materialized (
+                    select * from {groups_from_sql}
+                ), filtered_workbench_groups as materialized (
+                    select g.group_id, g.zone
+                    from canonical_workbench_groups g
+                    {active_member_filter_join_sql}
+                    where {where_sql}
+                ), facet_values as materialized (
+                    select {value_sql} as facet_value
+                    from active_workbench_members r
+                    join filtered_workbench_groups g
+                      on g.zone = r.zone
+                     and g.group_id = r.all_scope_group_id
+                    {lateral_sql}
+                    where {' and '.join(target_row_where)}
+                )
+            """
+            query_params = [
+                *active_member_filter_params,
+                *params,
+                *target_row_params,
+            ]
+        else:
+            cte_sql = f"""
+                with filtered_workbench_groups as materialized (
+                    select g.group_id, g.zone, g.scope_key, g.generation_id
+                    from {groups_from_sql}
+                    where {where_sql}
+                ), facet_values as materialized (
+                    select {value_sql} as facet_value
+                    from read_model.workbench_group_rows r
+                    join filtered_workbench_groups g
+                      on g.scope_key = r.scope_key
+                     and g.generation_id = r.generation_id
+                     and g.zone = r.zone
+                     and g.group_id = r.group_id
+                    {lateral_sql}
+                    where {' and '.join(target_row_where)}
+                )
+            """
+            query_params = [*params, *target_row_params]
+        rows = self._connection.fetch_all(
+            f"""
+            {cte_sql}, normalized_facet_values as (
+                select distinct
+                    facet_value,
+                    case when facet_value = %s then '未填写' else facet_value end as facet_label
+                from facet_values
+                where {keep_value_sql}
+            )
+            select facet_value, facet_label
+            from normalized_facet_values
+            where true {option_search_sql}
+            order by facet_label, facet_value
+            limit %s offset %s
+            """,
+            tuple(
+                [
+                    *query_params,
+                    WORKBENCH_FILTER_MISSING_VALUE,
+                    *option_search_params,
+                    normalized_page_size + 1,
+                    offset,
+                ]
+            ),
+        )
+        current_generation_id = (
+            text(self._workbench_active_month_generation_version(self._connection).get("version"))
+            if composed_all_scope
+            else self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        )
+        if current_generation_id != active_generation_id:
+            return None
+        visible_rows = rows[:normalized_page_size]
+        options = [
+            {
+                "value": text(row.get("facet_value")) or "",
+                "label": text(row.get("facet_label")) or "",
+                "missing": text(row.get("facet_value")) == WORKBENCH_FILTER_MISSING_VALUE,
+            }
+            for row in visible_rows
+            if text(row.get("facet_value")) is not None
+        ]
+        return {
+            "month": normalized_scope_key,
+            "scope_key": normalized_scope_key,
+            "zone": normalized_zone,
+            "pane": normalized_pane,
+            "facet": normalized_facet,
+            "column": normalized_column,
+            "page": normalized_page,
+            "page_size": normalized_page_size,
+            "has_more": len(rows) > normalized_page_size,
+            "options": options,
+            "read_model_status": self._workbench_read_model_status_for_groups_page(
+                scope_key=normalized_scope_key
+            ),
+            "source_versions": active_source_versions,
+            "active_generation_id": active_generation_id,
+            "read_model_version": active_generation_id,
+        }
+
     def get_workbench_group_detail(
         self,
         *,
@@ -6556,6 +6844,10 @@ def _workbench_payload_row_matches_preview_criteria(
                 return False
         else:
             current_value = column_values.get(column_key)
+            if WORKBENCH_FILTER_MISSING_VALUE in selected_values:
+                normalized_current = text(current_value)
+                if normalized_current is None or normalized_current in WORKBENCH_FILTER_PLACEHOLDERS:
+                    continue
             if not any(value == current_value for value in selected_values):
                 return False
 
@@ -7435,8 +7727,14 @@ def _workbench_group_row_match_sql(
                 value_match_clauses.append("(" + " or ".join(value_clauses) + ")")
         else:
             for value in values:
-                value_match_clauses.append("r.column_values @> %s::jsonb")
-                row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
+                if value == WORKBENCH_FILTER_MISSING_VALUE:
+                    value_match_clauses.append(
+                        "coalesce(nullif(btrim(r.column_values->>%s), ''), '') in ('', '--', '—')"
+                    )
+                    row_params.append(column_key)
+                else:
+                    value_match_clauses.append("r.column_values @> %s::jsonb")
+                    row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
         if value_match_clauses:
             operator = " and " if pane == "bank" and column_key == "amount" else " or "
             row_clauses.append("(" + operator.join(value_match_clauses) + ")")

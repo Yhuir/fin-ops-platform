@@ -7,6 +7,7 @@ import type {
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchRecordType,
+  WorkbenchFilterOptionsLoader,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import RelationGroupGrid from "./RelationGroupGrid";
@@ -41,6 +42,7 @@ type ResizableTriPaneProps = {
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
+  loadFilterOptions?: WorkbenchFilterOptionsLoader;
   onColumnFilterChange: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -81,6 +83,7 @@ function ResizableTriPane({
   onEnsureGroupDetail,
   canRequestNextPage = false,
   onRequestNextPage,
+  loadFilterOptions,
   onColumnFilterChange,
   onTogglePaneSort,
   onPaneTimeFilterChange = () => undefined,
@@ -145,6 +148,7 @@ function ResizableTriPane({
         groups={effectiveGroups}
         highlightedRowId={highlightedRowId}
         invoiceInventory={invoiceInventory}
+        loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}

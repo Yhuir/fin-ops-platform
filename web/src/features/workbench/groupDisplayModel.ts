@@ -605,49 +605,6 @@ export function countWorkbenchGroupsRows(groups: WorkbenchRelationGroup[]): numb
   return groups.reduce((total, group) => total + countWorkbenchGroupRows(group), 0);
 }
 
-export function collectWorkbenchFilterOptions(
-  groups: WorkbenchRelationGroup[],
-  paneId: WorkbenchRecordType,
-  columnKey: string,
-): string[] {
-  if (paneId === "bank" && columnKey === "amount") {
-    return collectBankAmountFilterOptions(groups);
-  }
-
-  const values = new Set<string>();
-
-  groups.forEach((group) => {
-    getWorkbenchGroupPaneRowsForCriteria(group, paneId).forEach((row) => {
-      const value = row.tableValues[columnKey];
-      if (!value || value === "--" || value === "—") {
-        return;
-      }
-      values.add(value);
-    });
-  });
-
-  return Array.from(values).sort((left, right) => left.localeCompare(right, "zh-CN"));
-}
-
-export function collectWorkbenchTimeFilterYears(
-  groups: WorkbenchRelationGroup[],
-  paneId: WorkbenchRecordType,
-): string[] {
-  const years = new Set<string>();
-
-  groups.forEach((group) => {
-    getWorkbenchGroupPaneRowsForCriteria(group, paneId).forEach((row) => {
-      const timeValue = resolveWorkbenchRowSortValue(row, paneId);
-      if (!timeValue || timeValue.length < 4) {
-        return;
-      }
-      years.add(timeValue.slice(0, 4));
-    });
-  });
-
-  return Array.from(years).sort((left, right) => right.localeCompare(left, "zh-CN"));
-}
-
 export function resolveWorkbenchActivePane(
   state: WorkbenchZoneDisplayState,
   preferredPaneId?: WorkbenchRecordType | null,
@@ -746,28 +703,6 @@ function matchesWorkbenchRow(
     const currentValue = row.tableValues[columnKey] ?? "";
     return selectedValues.some((value) => value === currentValue);
   });
-}
-
-function collectBankAmountFilterOptions(groups: WorkbenchRelationGroup[]) {
-  const directionValues = new Set<string>();
-  const accountValues = new Set<string>();
-
-  groups.forEach((group) => {
-    getWorkbenchGroupPaneRowsForCriteria(group, "bank").forEach((row) => {
-      const direction = row.tableValues.direction;
-      if (direction && direction !== "--" && direction !== "—") {
-        directionValues.add(direction);
-      }
-      const paymentAccount = row.tableValues.paymentAccount;
-      if (paymentAccount && paymentAccount !== "--" && paymentAccount !== "—") {
-        accountValues.add(paymentAccount);
-      }
-    });
-  });
-
-  const orderedDirections = ["支出", "收入"].filter((value) => directionValues.has(value));
-  const orderedAccounts = Array.from(accountValues).sort((left, right) => left.localeCompare(right, "zh-CN"));
-  return [...orderedDirections, ...orderedAccounts];
 }
 
 function getWorkbenchGroupPaneRowsForCriteria(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {

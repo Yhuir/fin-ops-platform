@@ -132,6 +132,11 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("workbench_initial_all", "/api/workbench?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_refresh_status_all", "/api/workbench/refresh-status?month=all"),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),
+    HttpProbe(
+        "workbench_filter_options_all_paired",
+        "/api/workbench/filter-options?month=all&zone=paired&pane=oa&facet=column&column=applicant&page=1&page_size=100",
+        expected_statuses=(200, 202),
+    ),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe(
         "bank_details_accounts",

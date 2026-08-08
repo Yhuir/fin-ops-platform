@@ -62,6 +62,13 @@ class FakeWorkbenchQueryFacade:
         self.calls.append({"endpoint": "groups", "month": month, **kwargs})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "groups": [], "read_model_status": "fresh"})
 
+    def filter_options(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "filter_options", "month": month, **kwargs})
+        return WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {"month": month, "options": [{"value": "杨丽萍", "label": "杨丽萍"}], "read_model_status": "fresh"},
+        )
+
     def row_detail(self, month: str | None, *, row_id: str, **kwargs: object) -> WorkbenchQueryResult:
         self.calls.append({"endpoint": "row_detail", "month": month, "row_id": row_id, **kwargs})
         return WorkbenchQueryResult(
@@ -322,6 +329,85 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
 
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(facade.calls[0]["expected_read_model_version"], "generation-set-7")
+
+    def test_filter_options_normalizes_query_and_delegates_to_facade(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, payload = routes.filter_options(
+            "all",
+            zone=" unpaired ",
+            pane="oa",
+            facet="column",
+            column="applicant",
+            option_search=" 杨 ",
+            page="2",
+            page_size="100",
+            search=" 1320 ",
+            column_filters='{"oa":{"applicant":["杨丽萍"],"projectName":["大理项目"]}}',
+            time_filters='{"oa":{"mode":"year","year":"2026"}}',
+            expected_read_model_version=" generation-set-7 ",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["options"][0]["value"], "杨丽萍")
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "endpoint": "filter_options",
+                    "month": "all",
+                    "zone": "unpaired",
+                    "pane": "oa",
+                    "facet": "column",
+                    "column": "applicant",
+                    "option_search": "杨",
+                    "page": 2,
+                    "page_size": 100,
+                    "status": None,
+                    "source_kind": None,
+                    "search": "132",
+                    "column_filters": {
+                        "oa": {"applicant": ["杨丽萍"], "projectName": ["大理项目"]}
+                    },
+                    "time_filters": {"oa": {"mode": "year", "year": "2026"}},
+                    "exception_bucket": None,
+                    "expected_read_model_version": "generation-set-7",
+                }
+            ],
+        )
+
+    def test_filter_options_accepts_time_year_without_column(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, _payload = routes.filter_options(
+            "all",
+            zone="paired",
+            pane="invoice",
+            facet="time_year",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertIsNone(facade.calls[0]["column"])
+
+    def test_filter_options_rejects_unknown_target_and_unbounded_page_size(self) -> None:
+        cases = (
+            {"pane": "unknown", "facet": "column", "column": "applicant"},
+            {"pane": "oa", "facet": "column", "column": "reason"},
+            {"pane": "oa", "facet": "column", "column": "applicant", "page_size": "201"},
+            {"pane": "oa", "facet": "column", "column": "applicant", "option_search": "x" * 101},
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                facade = FakeWorkbenchQueryFacade()
+                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+                status, payload = routes.filter_options("all", zone="unpaired", **kwargs)
+
+                self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(payload["error"], "invalid_workbench_filter_options_query")
+                self.assertEqual(facade.calls, [])
 
 
 class WorkbenchActionGenerationGateTests(unittest.TestCase):
