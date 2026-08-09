@@ -35,7 +35,6 @@
 | `settings` | `/settings` | settings/account/OA credential services; `none` | settings、账户、凭据、手工 OA、reset | query canonical settings versions；仅语义消费者按访问验证 | `p27-page-settings` |
 | `app-health-operations` | `/operations/app-health` | App Status/runtime queue/audit queries; all 15 status entries | admin ack/retry；页面本身无业务 Drawer rebuild | 只读 current-effective runtime facts；运维命令显式执行 | `p27-page-app-health` |
 | `operation-history` | `/operations/history` | `audit.events` canonical append-only query；`none` | 无业务写；详情使用只读 Drawer | admin-only 直接读取上线覆盖点后的审计事实；不触发 read model/queue | `p27-page-operation-history` |
-| `imports.center` | `/imports` | import batch/file canonical query；`none` | 只读任务概览与进入具体导入页 | 直接查询导入批次和文件事实；不触发 mutation/read model | `p27-page-import-center` |
 | `imports.bank-transactions` | `/imports/bank-transactions` | import session service; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-bank` |
 | `imports.invoices` | `/imports/invoices` | import session service; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-invoice` |
 | `imports.etc-invoices` | `/imports/etc-invoices` | import + ETC session services; `none` | preview/retry/confirm import | preview read-like；confirm explicit batch，受影响页面访问时精确收敛 | `p27-page-import-etc` |

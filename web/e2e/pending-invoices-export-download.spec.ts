@@ -91,6 +91,7 @@ test.describe("pending invoices export browser download", () => {
           && url.searchParams.get("page") === "1";
       });
       await page.getByRole("searchbox", { name: "搜索流水" }).fill("智能工厂");
+      await page.getByRole("button", { name: "查询", exact: true }).click();
       await mark("apiLatencyMs", filteredRowsRequest);
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible());
     });

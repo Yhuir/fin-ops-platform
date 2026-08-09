@@ -202,23 +202,7 @@ async function expectNoEnabledWriteControlCandidates(page: Page, allowed: RegExp
 }
 
 async function expectWorkbenchColumnDragDisabled(page: Page) {
-  const dragHandles = page.getByRole("button", { name: /^拖动 .* 列$/ });
-  await expect(dragHandles.first()).toBeVisible();
-  expect(await dragHandles.count()).toBeGreaterThanOrEqual(3);
-  expect(await dragHandles.evaluateAll((elements) =>
-    elements.every((element) => element instanceof HTMLButtonElement && element.disabled)
-  )).toBe(true);
-
-  const firstHandleBox = await dragHandles.first().boundingBox();
-  const secondHandleBox = await dragHandles.nth(1).boundingBox();
-  expect(firstHandleBox).not.toBeNull();
-  expect(secondHandleBox).not.toBeNull();
-  if (firstHandleBox && secondHandleBox) {
-    await page.mouse.move(firstHandleBox.x + firstHandleBox.width / 2, firstHandleBox.y + firstHandleBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(secondHandleBox.x + secondHandleBox.width / 2, secondHandleBox.y + secondHandleBox.height / 2);
-    await page.mouse.up();
-  }
+  await expect(page.getByRole("button", { name: /^拖动 .* 列$/ })).toHaveCount(0);
   await expect(page.locator("body")).not.toHaveClass(/column-layout-dragging/);
 }
 
@@ -234,7 +218,11 @@ async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired")
 
   await zoneLocator.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await zoneLocator.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await zoneLocator.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await zoneLocator
+    .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+    .getByRole("cell")
+    .first()
+    .click();
   await expect(zoneLocator.getByText("已选 3")).toBeVisible();
 
   return { zoneLocator, group };
@@ -439,7 +427,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     verify: async (page) => {
       await page.goto("/oa-pending-payments");
       await expect(page.getByRole("heading", { name: "OA 待付款核对" })).toBeVisible();
-      await page.getByRole("button", { name: /进行中 OA/ }).click();
+      await page.getByRole("radio", { name: /进行中 OA/ }).click();
       await expect(page.getByText("当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。")).toBeVisible();
       await expect(page.getByRole("button", { name: "关联支出流水" })).toBeDisabled();
       await expect(page.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
@@ -530,8 +518,12 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
       await expect(page.getByText("当前账号为只读权限，可查看台账与详情，不能确认或撤销归并。")).toBeVisible();
       await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-      await expect(page.getByRole("checkbox", { name: "选择流水 turnover-bank-expense-1000" })).toBeDisabled();
-      await expect(page.getByRole("button", { name: "编辑流水 turnover-bank-expense-1000" })).toBeDisabled();
+      await expect(page.getByRole("checkbox", {
+        name: "选择流水 云南建设有限公司 2026-05-03 支出 1000.00",
+      })).toBeDisabled();
+      await expect(page.getByRole("button", {
+        name: "编辑流水 云南建设有限公司 2026-05-03 支出 1000.00",
+      })).toBeDisabled();
       await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },

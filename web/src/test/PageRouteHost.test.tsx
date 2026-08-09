@@ -53,6 +53,25 @@ describe("PageRouteHost", () => {
     expect(source).not.toMatch(/transitionend/i);
   });
 
+  test("updates the page title and moves route focus to the main region", async () => {
+    function CostPage() {
+      return <p>成本页面</p>;
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/cost-statistics"]}>
+        <main id="main-content" tabIndex={-1}>
+          <PageRouteHost routes={[createRoute("/cost-statistics", "cost-statistics", CostPage)]} />
+        </main>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(document.title).toBe("成本统计 · 财务运营平台");
+      expect(document.activeElement).toBe(screen.getByRole("main"));
+    });
+  });
+
   test("unmounts the previous page and mounts the next route immediately", async () => {
     const user = userEvent.setup();
     const mountCounts = { a: 0, b: 0 };

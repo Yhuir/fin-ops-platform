@@ -15,6 +15,7 @@ import { vi } from "vitest";
 
 import App from "../app/App";
 import { isSidebarDisclosureItem, sidebarGroups } from "../components/shell/sidebarItems";
+import { currentBusinessMonth } from "../features/dateTime";
 import { installMockApiFetch } from "./apiMock";
 
 const WORKBENCH_RENDER_TIMEOUT = 3000;
@@ -124,6 +125,8 @@ describe("Finance operations shell", () => {
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {
+    const defaultMonth = currentBusinessMonth();
+    const [defaultYear, defaultMonthNumber] = defaultMonth.split("-");
     window.history.pushState({}, "", "/");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -157,11 +160,14 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", "2026");
-    expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute("aria-valuenow", "3");
+    expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", defaultYear);
+    expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute(
+      "aria-valuenow",
+      String(Number(defaultMonthNumber)),
+    );
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", expect.any(Object));
     expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?"))).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/tax-offset?month=2026-03", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tax-offset?month=${defaultMonth}`, expect.any(Object));
   });
 
   test("keeps the shell sidebar controls stable on cost statistics", async () => {

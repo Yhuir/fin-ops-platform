@@ -212,6 +212,9 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(file_map[INVOICE_JAN.name]["template_code"], "invoice_export")
         self.assertEqual(file_map[INVOICE_JAN.name]["batch_type"], "input_invoice")
         self.assertGreater(file_map[INVOICE_JAN.name]["row_count"], 0)
+        self.assertNotIn("row_results", file_map[INVOICE_JAN.name])
+        self.assertNotIn("normalized_rows", file_map[INVOICE_JAN.name])
+        self.assertEqual(payload["duplicate_groups"], [])
 
         self.assertEqual(file_map[ICBC_JAN.name]["template_code"], "bank_statement")
         self.assertEqual(file_map[ICBC_JAN.name]["batch_type"], "bank_transaction")
@@ -223,6 +226,24 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(file_map[UNSUPPORTED.name]["status"], "unrecognized_template")
         self.assertIn("无法识别", file_map[UNSUPPORTED.name]["message"])
+
+        session_id = payload["session"]["id"]
+        review_response = app.handle_request(
+            "GET",
+            f"/imports/files/sessions/{session_id}/review-rows?kind=unimported&offset=0&limit=999",
+        )
+        self.assertEqual(review_response.status_code, 200)
+        review_payload = json.loads(review_response.body)
+        self.assertEqual(review_payload["limit"], 100)
+        self.assertEqual(review_payload["offset"], 0)
+        self.assertLessEqual(len(review_payload["rows"]), 100)
+
+        invalid_review_response = app.handle_request(
+            "GET",
+            f"/imports/files/sessions/{session_id}/review-rows?kind=unimported&limit=bad",
+        )
+        self.assertEqual(invalid_review_response.status_code, 400)
+        self.assertEqual(json.loads(invalid_review_response.body)["error"], "invalid_import_review_rows_request")
 
     def test_preview_files_recognizes_bank_statement_templates(self) -> None:
         app = build_application()

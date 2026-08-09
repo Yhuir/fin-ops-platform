@@ -33,6 +33,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 账户日期范围 | `GET /api/bank-details/accounts` | ISO 日期；`date_from <= date_to`。只影响账户 `transaction_count`，不改变账户最新余额。 |
+| 页面默认年份 | `BankDetailsPage` | 首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务年；用户已有选择继续按既有 session 合同恢复。 |
 | 流水查询 | `GET /api/bank-details/transactions` | `account_key`、日期、keyword、分类层级、page、page_size；page 从 1 开始，page_size 为 1..500。所有过滤、排序和分页在 SQL 完成。 |
 | 导出查询 | `GET /api/bank-details/transactions/export` | `mode=all|account` 与同一筛选合同；复用 canonical query，读取上限为 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`，超限返回业务错误。 |
 | canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、金额、余额、银行文本和时间语义。 |

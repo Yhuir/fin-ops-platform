@@ -224,7 +224,7 @@ test.describe("right drawer motion", () => {
       await route.fallback();
     });
     await page.goto("/oa-pending-payments");
-    await page.getByRole("button", { name: /进行中 OA/ }).click();
+    await page.getByRole("radio", { name: /进行中 OA/ }).click();
     const row = page.getByRole("row", { name: /进行中关联申请人/ });
     await expect(row).toBeVisible();
     await row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }).check();

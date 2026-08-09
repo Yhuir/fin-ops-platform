@@ -559,6 +559,15 @@ describe("Workbench candidate grouping layout", () => {
     );
   }
 
+  test("exposes the three-pane workbench as one named grid", () => {
+    renderNoOaGrid();
+
+    const grid = screen.getByRole("grid", { name: "已配对三栏关联表" });
+    expect(within(grid).getAllByRole("rowgroup")).toHaveLength(2);
+    expect(within(grid).getAllByRole("columnheader").length).toBeGreaterThan(0);
+    expect(within(grid).getAllByRole("row").length).toBeGreaterThan(0);
+  });
+
   test("shows server total pane counts instead of the currently loaded page row count", () => {
     const group = createNoOaCollapsedGroup();
     render(

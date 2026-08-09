@@ -514,7 +514,7 @@ export default function CostStatisticsPage() {
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
     stateKey: "explorerState",
-    version: 2,
+    version: 3,
     initialValue: {
       viewMode: "time",
       timeScopeMode: "month",

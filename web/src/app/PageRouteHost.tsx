@@ -1,9 +1,9 @@
 import { Navigate, matchPath, useLocation } from "react-router-dom";
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import { useOptionalSessionPermissions } from "../contexts/SessionContext";
-import type { AppPageRoute } from "./pageRegistry";
+import { pageLabelForKey, type AppPageRoute } from "./pageRegistry";
 
 function routeMatchesPath(route: AppPageRoute, pathname: string) {
   return Boolean(matchPath({ path: route.path, end: route.end ?? true }, pathname));
@@ -25,6 +25,14 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   const location = useLocation();
   const { canAdminAccess } = useOptionalSessionPermissions();
   const matchedRoute = useMemo(() => findRoute(routes, location.pathname), [location.pathname, routes]);
+
+  useEffect(() => {
+    if (!matchedRoute) {
+      return;
+    }
+    document.title = `${pageLabelForKey(matchedRoute.pageKey)} · 财务运营平台`;
+    document.getElementById("main-content")?.focus({ preventScroll: true });
+  }, [matchedRoute]);
 
   if (!matchedRoute) {
     return <Navigate replace to="/" />;

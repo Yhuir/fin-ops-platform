@@ -55,6 +55,27 @@ export type ImportPreviewDetailRow = {
   direction?: string | null;
   amount?: string | null;
   counterpartyName?: string | null;
+  invoiceNo?: string | null;
+  invoiceDate?: string | null;
+  sellerName?: string | null;
+  buyerName?: string | null;
+  taxAmount?: string | null;
+  totalWithTax?: string | null;
+};
+
+export type ImportReviewRowsPage = {
+  rows: Array<ImportPreviewDetailRow & {
+    id: string;
+    fileId: string;
+    fileName: string;
+    rowNo: number;
+    duplicateType?: string;
+    recordType?: string;
+  }>;
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
 };
 
 export type ImportPreviewDuplicateGroup = {

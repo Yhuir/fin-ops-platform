@@ -29,7 +29,16 @@ test.describe("bank details filtered export and read-export permissions", () => 
         && url.searchParams.get("category_code") === "equipment_payment";
     });
 
-    await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");
+    const keywordRowsRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return request.method() === "GET"
+        && url.pathname.endsWith("/api/bank-details/transactions")
+        && url.searchParams.get("keyword") === "智能工厂"
+        && !url.searchParams.get("category_code");
+    });
+    await page.getByRole("searchbox", { name: "搜索流水" }).fill("智能工厂");
+    await page.getByRole("button", { name: "查询", exact: true }).click();
+    await keywordRowsRequest;
     await page.getByRole("button", { name: /标签筛选/ }).click();
     const categoryMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expect(categoryMenu).toBeVisible();
@@ -37,7 +46,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await filteredRowsRequest;
     await page.keyboard.press("Escape");
 
-    await page.getByRole("button", { name: "导出" }).click();
+    await page.getByRole("button", { name: "导出", exact: true }).click();
     const exportMenu = page.getByRole("menu", { name: "导出银行明细" });
     await expect(exportMenu).toBeVisible();
     await expect(exportMenu.getByRole("menuitem", { name: "导出当前账户" })).toBeEnabled();
@@ -98,7 +107,16 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect(page.getByRole("button", { name: /时间选择 2026年3月/ })).toBeVisible();
 
     await page.getByRole("button", { name: /建设银行 1138/ }).click();
-    await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");
+    const keywordRowsRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return request.method() === "GET"
+        && url.pathname.endsWith("/api/bank-details/transactions")
+        && url.searchParams.get("keyword") === "智能工厂"
+        && !url.searchParams.get("category_code");
+    });
+    await page.getByRole("searchbox", { name: "搜索流水" }).fill("智能工厂");
+    await page.getByRole("button", { name: "查询", exact: true }).click();
+    await keywordRowsRequest;
     await page.getByRole("button", { name: /标签筛选/ }).click();
     const categoryMenu = page.getByRole("listbox", { name: "银行明细标签筛选" });
     await expect(categoryMenu).toBeVisible();
@@ -143,7 +161,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await secondPageRequest;
     await expect(page.getByText("26-50 / 299")).toBeVisible();
 
-    await page.getByRole("button", { name: "导出" }).click();
+    await page.getByRole("button", { name: "导出", exact: true }).click();
     const exportMenu = page.getByRole("menu", { name: "导出银行明细" });
     await expect(exportMenu).toBeVisible();
 
@@ -193,7 +211,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRow.getByRole("button", { name: "待确认" })).toBeDisabled();
 
-    await page.getByRole("button", { name: "导出" }).click();
+    await page.getByRole("button", { name: "导出", exact: true }).click();
     const exportMenu = page.getByRole("menu", { name: "导出银行明细" });
     await expect(exportMenu).toBeVisible();
     const download = page.waitForEvent("download");

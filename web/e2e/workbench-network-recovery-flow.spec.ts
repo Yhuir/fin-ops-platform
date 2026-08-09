@@ -30,7 +30,11 @@ async function selectAllOpenRows(page: Page) {
 
   await openZone.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await openZone.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await openZone
+    .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+    .getByRole("cell")
+    .first()
+    .click();
   await expect(openZone.getByText("已选 3")).toBeVisible();
 
   return { openZone, openGroup };
@@ -54,7 +58,11 @@ async function openWithdrawRelationPreview(page: Page) {
 
   await pairedGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await pairedGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await pairedGroup
+    .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+    .getByRole("cell")
+    .first()
+    .click();
   await expect(pairedZone.getByText("已选 3")).toBeVisible();
 
   await pairedZone.getByRole("button", { name: "撤回关联" }).click();

@@ -53,7 +53,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
         && url.searchParams.get("view_mode") === "in_progress";
     });
-    await page.getByRole("button", { name: /进行中 OA/ }).click();
+    await page.getByRole("radio", { name: /进行中 OA/ }).click();
     await mark("apiLatencyMs", inProgressRequest);
     await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
     await mark("finalSettledLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
@@ -64,7 +64,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
         && url.searchParams.get("view_mode") === "in_progress";
     });
-    await page.getByRole("button", { name: /进行中 OA/ }).click();
+    await page.getByRole("radio", { name: /进行中 OA/ }).click();
     await inProgressRequest;
   }
 }
@@ -159,7 +159,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "进行中关联供应商",
       actionType: "check",
     }, async (mark) => {
-      await drawer.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
+      await drawer.getByText("进行中关联供应商", { exact: true }).click();
       await mark("firstVisibleResponseLatencyMs", expect(drawer.getByRole("button", { name: "确认关联 1 条流水" })).toBeEnabled());
       await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "确认关联 1 条流水" })).toBeEnabled());
     });
@@ -171,7 +171,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       const linkResponse = page.waitForResponse(responseFor("POST", "/api/oa-pending-payments/link-bank-transactions"));
       const rowsResponse = page.waitForResponse(responseFor("GET", "/api/oa-pending-payments/rows"));
       await drawer.getByRole("button", { name: "确认关联 1 条流水" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(drawer.getByRole("button", { name: "关联中" })).toBeDisabled());
+      await mark("firstVisibleResponseLatencyMs", expect(drawer.getByRole("button", { name: "确认关联 1 条流水" })).toBeDisabled());
       await mark("apiLatencyMs", linkResponse);
       await mark("finalSettledLatencyMs", rowsResponse);
     });
@@ -235,7 +235,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "进行中关联供应商",
       actionType: "check",
     }, async (mark) => {
-      await drawer.getByRole("checkbox", { name: /进行中关联供应商/ }).check();
+      await drawer.getByText("进行中关联供应商", { exact: true }).click();
       await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "确认关联 1 条流水" })).toBeEnabled());
     });
     await recordLatency({

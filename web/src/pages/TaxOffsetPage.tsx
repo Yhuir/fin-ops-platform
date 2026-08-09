@@ -67,7 +67,7 @@ export default function TaxOffsetPage() {
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
     stateKey: "currentMonth",
-    version: 1,
+    version: 2,
     initialValue: DEFAULT_MONTH,
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",

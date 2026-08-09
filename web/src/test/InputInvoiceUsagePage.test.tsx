@@ -920,6 +920,7 @@ describe("Input invoice usage page", () => {
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/page");
 
+    await user.click(within(confirmDialog).getByRole("button", { name: "关闭确认弹窗" }));
     await user.click(screen.getByRole("tab", { name: "已提交" }));
     expect(await screen.findByText("陈秀云")).toBeInTheDocument();
     expect(screen.getAllByText("SD-INV-2026-0001").length).toBeGreaterThanOrEqual(2);

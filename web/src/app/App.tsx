@@ -134,6 +134,9 @@ function AppShell() {
 
   return (
     <div className={`app-shell${embedded ? " embedded-shell" : ""}${isBankDetailsRoute ? " app-shell--bank-details" : ""}`}>
+      <a className="app-skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <StatefulAppSidebar
         embedded={embedded}
         isCompact={isCompact}
@@ -182,7 +185,7 @@ function AppShell() {
             ) : null}
           </div>
         ) : null}
-        <main className={`page-body${embedded ? " embedded" : ""}`}>
+        <main className={`page-body${embedded ? " embedded" : ""}`} id="main-content" tabIndex={-1}>
           <SessionGate>
             <AppRouter />
           </SessionGate>

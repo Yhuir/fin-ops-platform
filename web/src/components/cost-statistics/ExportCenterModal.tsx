@@ -1,3 +1,6 @@
+import { Button } from "@heroui/react";
+
+import AppDialog from "../common/AppDialog";
 import MonthPicker from "../MonthPicker";
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
@@ -162,19 +165,27 @@ export default function ExportCenterModal({
   onExport,
 }: ExportCenterModalProps) {
   return (
-    <div className="export-center-modal-layer" role="presentation">
-      <button aria-label="关闭导出中心" className="export-center-modal-backdrop" type="button" onClick={onClose} />
-      <section aria-labelledby="export-center-modal-title" aria-modal="true" className="export-center-modal" role="dialog">
-        <header className="export-center-modal-header">
-          <div>
-            <h2 id="export-center-modal-title">导出中心</h2>
-            <p>统一配置按时间、按标签、按项目和按费用类型的成本统计导出，并在下载前先查看预览范围。</p>
-          </div>
-          <button className="secondary-button" type="button" onClick={onClose} disabled={isBusy}>
-            关闭
-          </button>
-        </header>
-
+    <AppDialog
+      actions={(
+        <>
+          {feedback ? <div className={`action-feedback ${feedback.tone}`}>{feedback.message}</div> : null}
+          <Button isDisabled={isBusy} onPress={onPreview} variant="secondary">
+            仅预览
+          </Button>
+          <Button isDisabled={isBusy} isPending={isExporting} onPress={onExport} variant="primary">
+            {isExporting ? "正在导出..." : "导出"}
+          </Button>
+        </>
+      )}
+      className="export-center-modal"
+      closeLabel="关闭导出中心"
+      disableEscapeClose={isBusy}
+      isDismissable={!isBusy}
+      maxWidth="xl"
+      onClose={onClose}
+      open
+      title="导出中心"
+    >
         <div className="export-center-modal-body">
           <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
             <button
@@ -402,17 +413,6 @@ export default function ExportCenterModal({
             )}
           </section>
         </div>
-
-        <footer className="export-center-modal-footer">
-          {feedback ? <div className={`action-feedback ${feedback.tone}`}>{feedback.message}</div> : null}
-          <button className="secondary-button" type="button" onClick={onPreview} disabled={isBusy}>
-            仅预览
-          </button>
-          <button className="cost-export-button" type="button" onClick={onExport} disabled={isBusy}>
-            {isExporting ? "正在导出..." : "导出"}
-          </button>
-        </footer>
-      </section>
-    </div>
+    </AppDialog>
   );
 }

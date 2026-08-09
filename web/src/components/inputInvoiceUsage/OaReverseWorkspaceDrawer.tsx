@@ -3,6 +3,7 @@ import { Filter, Search, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
+import AppDialog from "../common/AppDialog";
 import {
   EmptyValue,
   FinanceTable,
@@ -892,23 +893,17 @@ function DraftConfirmationDialog({
   onDecision: (decision: "submitted" | "not_submitted") => void;
 }) {
   return (
-    <div className="input-invoice-usage-oa-confirmation-backdrop">
-      <div aria-label="OA 草稿提交确认" aria-modal="true" className="input-invoice-usage-oa-confirmation" role="dialog">
-        <div className="input-invoice-usage-oa-confirmation__header">
-          <h3>OA 草稿提交确认</h3>
-          <Button
-            aria-label="关闭确认弹窗"
-            className="input-invoice-usage-oa-confirmation__close"
-            isDisabled={Boolean(actionLoading)}
-            isIconOnly
-            onPress={onCancel}
-            size="sm"
-            variant="tertiary"
-          >
-            <X aria-hidden="true" size={16} />
-          </Button>
-        </div>
-        <div className="input-invoice-usage-oa-actions">
+    <AppDialog
+      className="input-invoice-usage-oa-confirmation"
+      closeLabel="关闭确认弹窗"
+      disableEscapeClose={Boolean(actionLoading)}
+      isDismissable={!actionLoading}
+      maxWidth="md"
+      onClose={onCancel}
+      open
+      title="OA 草稿提交确认"
+    >
+      <div className="input-invoice-usage-oa-actions">
           <a className="input-invoice-usage-button" href={draftUrl} rel="noreferrer" target="_blank">
             打开 OA 草稿
           </a>
@@ -942,9 +937,8 @@ function DraftConfirmationDialog({
               />
             )}
           </Button>
-        </div>
       </div>
-    </div>
+    </AppDialog>
   );
 }
 

@@ -13,6 +13,10 @@ export type OperationHistoryItem = {
 
 export type OperationHistoryOperation = {
   operation_key: string;
+  event_id?: string | null;
+  request_id?: string | null;
+  trace_id?: string | null;
+  object_id?: string | null;
   actor_id?: string | null;
   actor_name?: string | null;
   actor_account?: string | null;

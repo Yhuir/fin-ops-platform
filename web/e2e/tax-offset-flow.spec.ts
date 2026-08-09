@@ -5,6 +5,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+import { currentBusinessMonth } from "../src/features/dateTime";
 
 function statCard(page: Page, label: string) {
   return page.locator(".stat-card").filter({ hasText: label });
@@ -476,9 +477,9 @@ test.describe("tax offset browser flow", () => {
         mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         buffer: Buffer.from("tax-certified-import-e2e"),
       });
-      await mark("finalSettledLatencyMs", expect(dialog.getByText("已选择 1 个文件，当前页面月份为 2026-03。确认导入后会刷新当前税金抵扣页。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(dialog.getByText(`已选择 1 个文件，当前页面月份为 ${currentBusinessMonth()}。确认导入后会刷新当前税金抵扣页。`)).toBeVisible());
     });
-    await expect(dialog.getByText("已选择 1 个文件，当前页面月份为 2026-03。确认导入后会刷新当前税金抵扣页。")).toBeVisible();
+    await expect(dialog.getByText(`已选择 1 个文件，当前页面月份为 ${currentBusinessMonth()}。确认导入后会刷新当前税金抵扣页。`)).toBeVisible();
 
     await recordLatency({
       operationId: "tax-offset.preview-certified-import",

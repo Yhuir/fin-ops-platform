@@ -6,6 +6,12 @@ import { afterEach, vi } from "vitest";
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
 
+vi.mock("../features/dateTime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../features/dateTime")>()),
+  currentBusinessMonth: () => "2026-03",
+  currentBusinessYear: () => "2026",
+}));
+
 const ROUTE_RENDER_TIMEOUT = 5000;
 
 afterEach(() => {

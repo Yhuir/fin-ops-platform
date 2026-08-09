@@ -226,6 +226,10 @@ class OperationsAuditService:
         return serialize_value(
             {
                 "operation_key": row.get("operation_key"),
+                "event_id": row.get("latest_event_id") or row.get("id"),
+                "request_id": row.get("request_id"),
+                "trace_id": row.get("trace_id"),
+                "object_id": row.get("object_id"),
                 "actor_id": row.get("actor_id"),
                 "actor_name": row.get("actor_name"),
                 "actor_account": row.get("actor_account"),

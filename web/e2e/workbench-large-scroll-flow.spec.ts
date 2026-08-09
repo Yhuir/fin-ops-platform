@@ -31,16 +31,39 @@ async function expectVisibleAndUncovered(locator: Locator, label: string) {
 
 async function scrollPaneHorizontally(scrollbar: Locator) {
   await expect(scrollbar).toBeVisible();
-  const scrollLeft = await scrollbar.evaluate((element) => {
+  const scrollState = await scrollbar.evaluate((element) => {
     element.scrollLeft = element.scrollWidth;
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    return element.scrollLeft;
+    return {
+      clientWidth: element.clientWidth,
+      scrollLeft: element.scrollLeft,
+      scrollWidth: element.scrollWidth,
+    };
   });
-  expect(scrollLeft).toBeGreaterThan(0);
-  return scrollLeft;
+  expect(scrollState.scrollWidth).toBeGreaterThanOrEqual(scrollState.clientWidth);
+  return scrollState.scrollLeft;
 }
 
 test.describe("workbench large dataset browser flow", () => {
+  test("keeps narrow-screen overflow inside the workbench panes", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchLargeDataset: true,
+    });
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "关联台" })).toBeVisible();
+    await expect(page.getByTestId("zone-unpaired")).toBeVisible();
+
+    const documentSize = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(documentSize.scrollWidth).toBeLessThanOrEqual(documentSize.clientWidth + 1);
+    await expect(page.getByTestId("pane-scrollbar-unpaired-bank")).toBeVisible();
+  });
+
   test("keeps automatic pagination, full search, tri-pane scroll, detail drawer, and selection controls usable", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, {
@@ -101,8 +124,8 @@ test.describe("workbench large dataset browser flow", () => {
     });
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(2);
-    await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("row").click();
-    await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("row").click();
+    await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("cell").first().click();
+    await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("cell").first().click();
     await expect(openZone.getByText("已选 3")).toBeVisible();
     const confirmButton = openZone.getByRole("button", { name: "确认关联" });
     await expect(confirmButton).toBeEnabled();

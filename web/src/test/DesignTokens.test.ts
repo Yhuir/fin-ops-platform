@@ -14,7 +14,7 @@ describe("Ledger Calm design tokens", () => {
     expect(css).toMatch(/--fp-primary:\s*#1d4ed8\b/);
     expect(css).toMatch(/--fp-primary-hover:\s*#1e40af\b/);
     expect(css).toMatch(/--fp-success:\s*#16803c\b/);
-    expect(css).toMatch(/--fp-warning:\s*#b76e00\b/);
+    expect(css).toMatch(/--fp-warning:\s*#8a4b00\b/);
     expect(css).toMatch(/--fp-danger:\s*#c2412d\b/);
   });
 

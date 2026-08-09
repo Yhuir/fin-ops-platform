@@ -7598,6 +7598,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           operation: {
             operation_key: decodeURIComponent(url.pathname.split("/").pop() ?? ""),
+            event_id: "event-1",
+            request_id: "request-1",
+            trace_id: "trace-1",
+            object_id: "internal-relation-1",
             actor_id: "005",
             actor_name: "权限管理员",
             actor_account: "YNSYLP005",

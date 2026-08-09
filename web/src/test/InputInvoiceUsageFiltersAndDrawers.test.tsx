@@ -968,8 +968,10 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
 
     await user.type(screen.getByRole("searchbox", { name: "搜索候选发票" }), "候选供应商");
-    expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
+      expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
+    });
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {

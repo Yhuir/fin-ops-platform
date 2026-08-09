@@ -782,7 +782,7 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const candidateCheckbox = workflow.getByRole("checkbox", { name: "选择候选发票 SD-INV-E2E-002" });
-      await candidateCheckbox.uncheck({ force: true });
+      await candidateCheckbox.locator("xpath=ancestor::label").click();
       await expect(candidateCheckbox).not.toBeChecked();
       await mark("finalSettledLatencyMs", expect(workflow.getByText("已选 1 张", { exact: true }).last()).toBeVisible());
     });

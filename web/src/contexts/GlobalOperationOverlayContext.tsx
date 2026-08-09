@@ -1,5 +1,7 @@
+import { Button } from "@heroui/react";
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+
+import AppDialog from "../components/common/AppDialog";
 
 type GlobalOperationOverlayState =
   | {
@@ -124,30 +126,34 @@ export function GlobalOperationOverlayProvider({ children }: { children: ReactNo
   );
 
   const overlay = state ? (
-    <div aria-label="全局操作进度" aria-modal="true" className="global-operation-overlay" role="dialog">
-      <div className="global-operation-overlay__panel">
-        <div className="global-operation-overlay__title">{state.title}</div>
-        <div className="global-operation-overlay__body">
-          {state.phase === "loading" ? (
-            <span aria-hidden="true" className="global-operation-overlay__spinner" />
-          ) : null}
-          <span>{state.message}</span>
-        </div>
-        {state.phase === "error" ? (
-          <div className="global-operation-overlay__actions">
-            <button className="primary-button" type="button" onClick={acknowledgeError}>
-              确定
-            </button>
-          </div>
+    <AppDialog
+      actions={state.phase === "error" ? (
+        <Button onPress={acknowledgeError} variant="primary">
+          确定
+        </Button>
+      ) : undefined}
+      ariaLabel="全局操作进度"
+      className="global-operation-overlay__panel"
+      disableEscapeClose
+      isDismissable={false}
+      maxWidth="sm"
+      onClose={acknowledgeError}
+      open
+      title={state.title}
+    >
+      <div className="global-operation-overlay__body">
+        {state.phase === "loading" ? (
+          <span aria-hidden="true" className="global-operation-overlay__spinner" />
         ) : null}
+        <span>{state.message}</span>
       </div>
-    </div>
+    </AppDialog>
   ) : null;
 
   return (
     <GlobalOperationOverlayContext.Provider value={value}>
       {children}
-      {overlay && typeof document !== "undefined" ? createPortal(overlay, document.body) : overlay}
+      {overlay}
     </GlobalOperationOverlayContext.Provider>
   );
 }

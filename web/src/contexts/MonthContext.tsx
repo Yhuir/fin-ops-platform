@@ -1,11 +1,13 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
+import { currentBusinessMonth } from "../features/dateTime";
+
 type MonthContextValue = {
   currentMonth: string;
   setCurrentMonth: (month: string) => void;
 };
 
-export const DEFAULT_MONTH = "2026-03";
+export const DEFAULT_MONTH = currentBusinessMonth();
 
 const MonthContext = createContext<MonthContextValue | null>(null);
 

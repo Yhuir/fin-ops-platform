@@ -15,6 +15,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 月份查询 | `GET /api/tax-offset?month=YYYY-MM` | repository 在同一 snapshot 内批量读取发票、认证记录和最新计划；非法月份返回 400 |
+| 页面默认月份 | `MonthContext` | 首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务月；用户已有选择继续按既有 session 合同恢复。 |
 | 摘要查询 | `GET /api/tax-offset/summary?month=YYYY-MM` | 返回同一 canonical 口径的 month、summary、statistics 和 canonical token |
 | 试算 | `POST /api/tax-offset/calculate` | 从一次 canonical snapshot 读取 rows，再由 `TaxOffsetService` 按选择计算；不返回 202 |
 | 计划保存 | `POST /api/tax-offset/plans` | 必须携带 `expected_canonical_snapshot_version`；校验后使用同一已读 payload 计算并保存，重复 idempotency key 返回原计划 |

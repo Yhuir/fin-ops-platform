@@ -12,6 +12,12 @@ import type { SessionPayload } from "../features/session/api";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import { installMockApiFetch } from "./apiMock";
 
+vi.mock("../features/dateTime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../features/dateTime")>()),
+  currentBusinessMonth: () => "2026-03",
+  currentBusinessYear: () => "2026",
+}));
+
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
 const PAGE_RENDER_TIMEOUT = 3000;

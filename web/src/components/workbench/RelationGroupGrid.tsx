@@ -451,7 +451,7 @@ function RelationGroupGrid({
   }, [canMutateData, clearDragClasses, onReorderPaneColumns]);
 
   const gridBody = useMemo(() => (
-    <div ref={gridBodyRef} className="candidate-grid-body">
+    <div ref={gridBodyRef} className="candidate-grid-body" role="rowgroup">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
         const paneIsCollapsed = (paneId: WorkbenchRecordType) => (
@@ -633,7 +633,6 @@ function RelationGroupGrid({
                 <div
                   key={`${group.id}-trailing-${column.key}`}
                   className={`candidate-group-trailing-cell${column.className ? ` ${column.className}` : ""}`}
-                  role="cell"
                   style={{
                     gridColumn: panes.length * 2 + columnIndex + 1,
                     gridRow: `1 / span ${segmentCount}`,
@@ -699,7 +698,6 @@ function RelationGroupGrid({
               <div
                 key={`${group.id}-trailing-${column.key}`}
                 className={`candidate-group-trailing-cell${column.className ? ` ${column.className}` : ""}`}
-                role="cell"
               >
                 {column.renderGroup(group)}
               </div>
@@ -748,8 +746,13 @@ function RelationGroupGrid({
   ]);
 
   return (
-    <div ref={gridRef} className="candidate-grid">
-      {!hidePaneHeaders ? <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
+    <div
+      ref={gridRef}
+      aria-label={`${zoneId === "paired" ? "已配对" : "未配对"}三栏关联表`}
+      className="candidate-grid"
+      role="grid"
+    >
+      {!hidePaneHeaders ? <div className="candidate-grid-head" role="rowgroup" style={{ gridTemplateColumns: rowTemplateColumns }}>
         {panes.map((pane, paneIndex) => (
           <Fragment key={pane.id}>
             <section className="candidate-pane-head pane-card" data-testid={`pane-${pane.id}`}>
@@ -868,7 +871,6 @@ function RelationGroupGrid({
             aria-label={column.label}
             key={`head-trailing-${column.key}`}
             className={`candidate-columnheader candidate-trailing-columnheader${column.className ? ` ${column.className}` : ""}`}
-            role="columnheader"
           >
             <span className="candidate-columnheader-label">{column.label}</span>
           </div>

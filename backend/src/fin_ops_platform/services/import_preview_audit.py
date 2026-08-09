@@ -72,6 +72,12 @@ class ImportPreviewAuditRow:
     direction: str | None = None
     amount: str | None = None
     counterparty_name: str | None = None
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    seller_name: str | None = None
+    buyer_name: str | None = None
+    tax_amount: str | None = None
+    total_with_tax: str | None = None
 
 
 @dataclass(slots=True)
@@ -246,6 +252,12 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
                             "direction": row.direction,
                             "amount": row.amount,
                             "counterparty_name": row.counterparty_name,
+                            "invoice_no": row.invoice_no,
+                            "invoice_date": row.invoice_date,
+                            "seller_name": row.seller_name,
+                            "buyer_name": row.buyer_name,
+                            "tax_amount": row.tax_amount,
+                            "total_with_tax": row.total_with_tax,
                         }
                         for row in sorted_rows
                     ],

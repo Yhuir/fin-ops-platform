@@ -43,6 +43,7 @@ test.describe("app shell responsive browser smoke", () => {
     });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("link", { name: "设置" })).toBeVisible();
+    await drawer.getByRole("button", { name: "导入" }).click();
     await expect(drawer.getByRole("link", { name: "银行流水导入" })).toBeVisible();
 
     const sessionRequestsBeforeAccount = api.count("GET /api/session/me");

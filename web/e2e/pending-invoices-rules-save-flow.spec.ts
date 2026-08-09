@@ -89,7 +89,7 @@ test.describe("pending invoices rules save browser flow", () => {
       visibleLabel: "设备款",
       actionType: "check",
     }, async (mark) => {
-      await statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" }).check();
+      await statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" }).locator("xpath=ancestor::label").click();
       await mark("finalSettledLatencyMs", expect(statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" })).toBeChecked());
     });
     await recordLatency({
@@ -160,7 +160,7 @@ test.describe("pending invoices rules save browser flow", () => {
       visibleLabel: "设备款",
       actionType: "check",
     }, async (mark) => {
-      await statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" }).check();
+      await statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" }).locator("xpath=ancestor::label").click();
       await mark("finalSettledLatencyMs", expect(statementAsInvoiceGroup.getByRole("checkbox", { name: "设备款" })).toBeChecked());
     });
 

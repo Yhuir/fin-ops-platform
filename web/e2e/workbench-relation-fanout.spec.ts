@@ -75,7 +75,7 @@ test.describe("workbench relation browser flow", () => {
       - (compositeInvoiceBox?.height ?? 0),
     )).toBeLessThanOrEqual(4);
 
-    await projectItem.click();
+    await itemBand.getByRole("row", { name: /云南溯源科技 200/ }).getByRole("cell").first().click();
     await expect(page.getByText("OA 1 / 324.80")).toBeVisible();
   });
 

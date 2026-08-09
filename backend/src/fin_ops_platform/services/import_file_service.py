@@ -384,6 +384,59 @@ class FileImportService:
     def get_session(self, session_id: str) -> FileImportSession:
         return self._sessions[session_id]
 
+    def review_rows(
+        self,
+        *,
+        session_id: str,
+        kind: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        session = self._sessions[session_id]
+        if kind == "duplicates":
+            rows = [
+                {
+                    **dict(row),
+                    "record_type": group.record_type,
+                    "duplicate_type": group.duplicate_type,
+                }
+                for group in session.duplicate_groups
+                for row in group.rows
+            ]
+        elif kind == "unimported":
+            rows = []
+            for item in session.files:
+                for row_result, normalized in zip(item.row_results, item.normalized_rows, strict=True):
+                    decision = (
+                        row_result.decision.value
+                        if isinstance(row_result.decision, ImportDecision)
+                        else str(row_result.decision)
+                    )
+                    if decision not in {"duplicate_skipped", "suspected_duplicate", "error"}:
+                        continue
+                    rows.append(
+                        {
+                            "file_id": item.id,
+                            "file_name": item.file_name,
+                            "row_no": row_result.row_no,
+                            "record_type": row_result.source_record_type,
+                            "decision": decision,
+                            "decision_reason": row_result.decision_reason,
+                            "identity_kind": row_result.identity_kind,
+                            **self._audit_row_display_fields(row_result.source_record_type, normalized),
+                        }
+                    )
+        else:
+            raise ValueError("kind must be duplicates or unimported")
+        page_rows = rows[offset : offset + limit]
+        return {
+            "rows": page_rows,
+            "total": len(rows),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + len(page_rows) < len(rows),
+        }
+
     def confirm_session(
         self,
         *,
@@ -785,14 +838,33 @@ class FileImportService:
 
     @staticmethod
     def _audit_row_display_fields(record_type: str, normalized: dict[str, Any]) -> dict[str, str | None]:
-        if record_type != "bank_transaction":
-            return {}
+        def text(value: Any) -> str | None:
+            return None if value in (None, "") else str(value)
+
+        if record_type == "bank_transaction":
+            return {
+                "account_no": text(normalized.get("account_no")),
+                "trade_time": text(
+                    normalized.get("trade_time") or normalized.get("pay_receive_time") or normalized.get("txn_date")
+                ),
+                "direction": text(normalized.get("txn_direction") or normalized.get("direction")),
+                "amount": text(normalized.get("amount")),
+                "counterparty_name": text(
+                    normalized.get("counterparty_name_raw") or normalized.get("counterparty_name")
+                ),
+            }
+        invoice_code = text(normalized.get("invoice_code"))
+        invoice_no = text(normalized.get("digital_invoice_no") or normalized.get("invoice_no"))
+        if invoice_code and invoice_no and not normalized.get("digital_invoice_no"):
+            invoice_no = f"{invoice_code}-{invoice_no}"
         return {
-            "account_no": normalized.get("account_no"),
-            "trade_time": normalized.get("trade_time") or normalized.get("pay_receive_time") or normalized.get("txn_date"),
-            "direction": normalized.get("txn_direction") or normalized.get("direction"),
-            "amount": normalized.get("amount"),
-            "counterparty_name": normalized.get("counterparty_name_raw") or normalized.get("counterparty_name"),
+            "invoice_no": invoice_no,
+            "invoice_date": text(normalized.get("invoice_date")),
+            "seller_name": text(normalized.get("seller_name")),
+            "buyer_name": text(normalized.get("buyer_name")),
+            "amount": text(normalized.get("amount")),
+            "tax_amount": text(normalized.get("tax_amount")),
+            "total_with_tax": text(normalized.get("total_with_tax")),
         }
 
     @staticmethod

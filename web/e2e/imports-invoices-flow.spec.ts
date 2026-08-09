@@ -182,7 +182,7 @@ test.describe("invoice import browser flow", () => {
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
     await previewInvoiceFiles(page, { recordLatency });
-    await expect(page.getByRole("tab", { name: /重复项 1/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /重复项 2/ })).toBeVisible();
     await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("同文件重复");
     await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("浏览器销项客户");
     expect(api.count("POST /imports/files/preview")).toBe(1);
@@ -430,13 +430,13 @@ test.describe("invoice import browser flow", () => {
     await expect(previewGrid).toContainText("文件损坏，无法读取发票明细。");
     await expect(previewGrid).toContainText("二月发票.xlsx");
     await expect(previewGrid).toContainText("待确认");
-    await expect(page.getByRole("tab", { name: /未导入项 1/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /未导入项 3/ })).toBeVisible();
     await recordLatency({
       operationId: "imports-invoices.open-skipped-files-tab",
-      visibleLabel: "未导入项 1",
+      visibleLabel: "未导入项 3",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("tab", { name: /未导入项 1/ }).click();
+      await page.getByRole("tab", { name: /未导入项 3/ }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "未导入项明细" })).toContainText("文件损坏，无法读取发票明细。"));
     });
     await expect(page.getByRole("grid", { name: "未导入项明细" })).toContainText("文件损坏，无法读取发票明细。");

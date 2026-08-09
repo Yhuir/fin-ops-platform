@@ -2,6 +2,7 @@ import { Button, TextArea } from "@heroui/react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
+import AppDialog from "../components/common/AppDialog";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
@@ -2571,18 +2572,38 @@ function CashTicketPurchaseModal({
   const canSubmit = Number(normalizedAmountForInput(ticketCostAmount)) > 0 && projectName.trim().length > 0;
 
   return (
-    <div className="detail-modal-backdrop">
-      <button aria-label="关闭买票确认" className="detail-modal-backdrop-foreground" type="button" onClick={onClose} />
-      <section aria-label="确认买票成本" aria-modal="true" className="detail-modal" role="dialog">
-        <header className="detail-modal-header">
-          <div>
-            <div className="modal-eyebrow">现金往来</div>
-            <h2>确认买票情况</h2>
-          </div>
-          <button aria-label="关闭买票确认" className="detail-close-btn" type="button" onClick={onClose}>
-            ×
-          </button>
-        </header>
+    <AppDialog
+      actions={(
+        <>
+          <Button onPress={onClose} variant="secondary">
+            取消
+          </Button>
+          <Button
+            isDisabled={!canSubmit}
+            onPress={() =>
+              onSubmit({
+                cashAmount: normalizedAmountForInput(cashAmount),
+                ticketCostAmount: normalizedAmountForInput(ticketCostAmount),
+                projectName: projectName.trim(),
+                expenseType: expenseType.trim(),
+                expenseContent: expenseContent.trim(),
+                note: note.trim(),
+              })
+            }
+            variant="primary"
+          >
+            确认买票
+          </Button>
+        </>
+      )}
+      ariaLabel="确认买票成本"
+      className="detail-modal"
+      closeLabel="关闭买票确认"
+      maxWidth="md"
+      onClose={onClose}
+      open
+      title="确认买票情况"
+    >
         <div className="relation-preview-message">
           此操作只把买票成本计入成本统计，流水全额不会作为成本入账。
         </div>
@@ -2610,29 +2631,7 @@ function CashTicketPurchaseModal({
           <span>备注</span>
           <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
         </label>
-        <footer className="detail-modal-actions">
-          <button className="secondary-btn" type="button" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="primary-action-btn"
-            disabled={!canSubmit}
-            type="button"
-            onClick={() =>
-              onSubmit({
-                cashAmount: normalizedAmountForInput(cashAmount),
-                ticketCostAmount: normalizedAmountForInput(ticketCostAmount),
-                projectName: projectName.trim(),
-                expenseType: expenseType.trim(),
-                expenseContent: expenseContent.trim(),
-                note: note.trim(),
-              })}
-          >
-            确认买票
-          </button>
-        </footer>
-      </section>
-    </div>
+    </AppDialog>
   );
 }
 

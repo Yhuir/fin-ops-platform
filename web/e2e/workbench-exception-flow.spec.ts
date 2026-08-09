@@ -17,7 +17,11 @@ async function selectOpenWorkbenchGroup(page: Page) {
 
   await openZone.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await openZone.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await openZone
+    .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+    .getByRole("cell")
+    .first()
+    .click();
   await expect(openZone.getByText("已选 3")).toBeVisible();
 
   return { openZone, openGroup };
@@ -38,14 +42,17 @@ test.describe("workbench exception browser flow", () => {
     await expect(exceptionDialog.getByText("命中候选分组")).toBeVisible();
     await expect(exceptionDialog.getByText("CASE-202603-101")).toHaveCount(0);
 
-    await exceptionDialog.getByRole("radio", { name: /追进项发票/ }).click();
+    await exceptionDialog
+      .getByRole("radio", { name: /追进项发票/ })
+      .locator("xpath=ancestor::label")
+      .click();
     await exceptionDialog.getByRole("textbox", { name: "备注" }).fill("浏览器异常备注");
 
     const workbenchLoadsBeforeApply = api.count("GET /api/workbench");
     await exceptionDialog.getByRole("button", { name: "提交处理" }).click();
 
     await expect(exceptionDialog).toHaveAttribute("aria-busy", "true");
-    await expect(exceptionDialog.getByRole("button", { name: "提交中..." })).toBeDisabled();
+    await expect(exceptionDialog.getByRole("button", { name: "提交处理" })).toBeDisabled();
     await expect(exceptionDialog.getByRole("button", { name: "取消" })).toBeDisabled();
     await expect(exceptionDialog.getByRole("button", { name: "关闭统一异常处理" })).toBeDisabled();
     await expect(exceptionDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
@@ -99,7 +106,8 @@ test.describe("workbench exception browser flow", () => {
     await expect(invoiceRow).toBeVisible();
 
     const workbenchLoadsBeforeIgnore = api.count("GET /api/workbench");
-    await invoiceRow.getByRole("button", { name: "忽略" }).click();
+    await invoiceRow.getByRole("button", { name: "更多操作" }).click();
+    await page.getByRole("menuitem", { name: "忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveCount(0);
     await expect(openZone.getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ })).toBeVisible();

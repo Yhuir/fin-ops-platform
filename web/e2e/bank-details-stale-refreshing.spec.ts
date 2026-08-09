@@ -39,13 +39,15 @@ test.describe("bank details direct canonical query browser behavior", () => {
     const stableTransactionRequests = api.count("GET /api/bank-details/transactions");
 
     api.failNextBankDetailsTransactions();
-    await page.getByRole("textbox", { name: "搜索流水" }).fill("设备尾款");
+    await page.getByRole("searchbox", { name: "搜索流水" }).fill("设备尾款");
+    await page.getByRole("button", { name: "查询", exact: true }).click();
 
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThan(stableTransactionRequests);
     await expect(page.getByRole("alert")).toContainText("银行流水暂时无法加载，请稍后重试。");
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
 
-    await page.getByRole("textbox", { name: "搜索流水" }).fill("智能工厂");
+    await page.getByRole("searchbox", { name: "搜索流水" }).fill("智能工厂");
+    await page.getByRole("button", { name: "查询", exact: true }).click();
 
     await expect.poll(() => api.count("GET /api/bank-details/transactions")).toBeGreaterThan(stableTransactionRequests + 1);
     await expect(page.getByRole("alert")).toHaveCount(0);

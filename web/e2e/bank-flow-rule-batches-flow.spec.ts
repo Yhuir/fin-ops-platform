@@ -408,7 +408,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
     const monthReload = waitForBankFlowRuleBatches(page);
-    await page.getByLabel("月份").fill("2026-05");
+    await page.getByRole("textbox", { name: "选择月份" }).fill("2026-05");
     await monthReload;
 
     const tagDrawer = page.getByRole("dialog", { name: "流水规则标签管理" });
@@ -786,8 +786,8 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(openZone.getByText("BFR-INV-E2E-001")).toBeVisible();
     await expect(pairedZone.getByText("需要发票后才进入已配对")).toHaveCount(0);
 
-    await invoiceRequiredGroup.getByRole("row", { name: /需要发票后才进入已配对/ }).click();
-    await invoiceRequiredGroup.getByRole("row", { name: /BFR-INV-E2E-001/ }).click();
+    await invoiceRequiredGroup.getByRole("row", { name: /需要发票后才进入已配对/ }).getByRole("cell").first().click();
+    await invoiceRequiredGroup.getByRole("row", { name: /BFR-INV-E2E-001/ }).getByRole("cell").first().click();
     await expect(openZone.getByText("已选 2")).toBeVisible();
 
     const previewResponse = page.waitForResponse((response) =>

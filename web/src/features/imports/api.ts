@@ -3,6 +3,7 @@ import type {
   ImportBatchType,
   ImportPreviewAuditCounts,
   ImportPreviewDuplicateGroup,
+  ImportReviewRowsPage,
   ImportSessionPayload,
   ImportTemplate,
   MatchingRunSummary,
@@ -72,6 +73,12 @@ type ApiImportFile = {
     amount?: string | number | null;
     counterparty_name?: string | null;
     counterparty_name_raw?: string | null;
+    invoice_no?: string | null;
+    invoice_date?: string | null;
+    seller_name?: string | null;
+    buyer_name?: string | null;
+    tax_amount?: string | number | null;
+    total_with_tax?: string | number | null;
   }>;
 };
 
@@ -114,6 +121,12 @@ type ApiImportPreviewDuplicateGroup = {
     amount?: string | number | null;
     counterparty_name?: string | null;
     counterparty_name_raw?: string | null;
+    invoice_no?: string | null;
+    invoice_date?: string | null;
+    seller_name?: string | null;
+    buyer_name?: string | null;
+    tax_amount?: string | number | null;
+    total_with_tax?: string | number | null;
   }>;
 };
 
@@ -216,6 +229,12 @@ function mapPreviewDetailFields(row: {
   amount?: string | number | null;
   counterparty_name?: string | null;
   counterparty_name_raw?: string | null;
+  invoice_no?: string | null;
+  invoice_date?: string | null;
+  seller_name?: string | null;
+  buyer_name?: string | null;
+  tax_amount?: string | number | null;
+  total_with_tax?: string | number | null;
 }) {
   return {
     decision: row.decision ?? null,
@@ -228,6 +247,14 @@ function mapPreviewDetailFields(row: {
     direction: row.direction ?? row.txn_direction ?? null,
     amount: row.amount === null || row.amount === undefined ? null : stringOrEmpty(row.amount),
     counterpartyName: row.counterparty_name ?? row.counterparty_name_raw ?? null,
+    invoiceNo: row.invoice_no ?? null,
+    invoiceDate: row.invoice_date ?? null,
+    sellerName: row.seller_name ?? null,
+    buyerName: row.buyer_name ?? null,
+    taxAmount: row.tax_amount === null || row.tax_amount === undefined ? null : stringOrEmpty(row.tax_amount),
+    totalWithTax: row.total_with_tax === null || row.total_with_tax === undefined
+      ? null
+      : stringOrEmpty(row.total_with_tax),
   };
 }
 
@@ -474,6 +501,64 @@ export async function fetchImportSession(sessionId: string): Promise<ImportSessi
     method: "GET",
   });
   return mapImportPayload(payload);
+}
+
+type ApiImportReviewRowsPage = {
+  rows?: Array<{
+    file_id?: string;
+    file_name?: string;
+    row_no?: number;
+    duplicate_type?: string;
+    record_type?: string;
+    decision?: string | null;
+    decision_reason?: string | null;
+    identity_kind?: string | null;
+    account_no?: string | null;
+    trade_time?: string | null;
+    direction?: string | null;
+    amount?: string | number | null;
+    counterparty_name?: string | null;
+    invoice_no?: string | null;
+    invoice_date?: string | null;
+    seller_name?: string | null;
+    buyer_name?: string | null;
+    tax_amount?: string | number | null;
+    total_with_tax?: string | number | null;
+  }>;
+  total?: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
+};
+
+export async function fetchImportReviewRows(
+  sessionId: string,
+  kind: "duplicates" | "unimported",
+  offset: number,
+  signal?: AbortSignal,
+): Promise<ImportReviewRowsPage> {
+  const limit = 100;
+  const query = new URLSearchParams({ kind, offset: String(offset), limit: String(limit) });
+  const payload = await requestJson<ApiImportReviewRowsPage>(
+    `/imports/files/sessions/${encodeURIComponent(sessionId)}/review-rows?${query}`,
+    { method: "GET", signal },
+  );
+  const rows = (payload.rows ?? []).map((row, index) => ({
+    ...mapPreviewDetailFields(row),
+    id: `${row.file_id ?? "file"}-${row.row_no ?? offset + index}-${index}`,
+    fileId: row.file_id ?? "",
+    fileName: row.file_name ?? "",
+    rowNo: numberOrZero(row.row_no),
+    duplicateType: row.duplicate_type,
+    recordType: row.record_type,
+  }));
+  return {
+    rows,
+    total: numberOrZero(payload.total),
+    offset: numberOrZero(payload.offset),
+    limit: numberOrZero(payload.limit) || limit,
+    hasMore: payload.has_more ?? false,
+  };
 }
 
 export async function fetchImportTemplates(): Promise<ImportTemplate[]> {

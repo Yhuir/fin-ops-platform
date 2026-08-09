@@ -13,6 +13,7 @@ import {
   FinanceTableCell,
   FinanceTableColumn,
   FinanceTableHeader,
+  FinanceTablePagination,
   FinanceTableRow,
   TruncatedCellText,
 } from "../common/FinanceTable";
@@ -20,6 +21,7 @@ import PageScaffold from "../common/PageScaffold";
 import PageBusinessAuditIcon from "../common/PageBusinessAuditIcon";
 import {
   confirmImportFiles,
+  fetchImportReviewRows,
   fetchImportSession,
   previewImportFiles,
   retryImportFiles,
@@ -33,9 +35,8 @@ import type {
   ImportFilePreview,
   ImportFilePreviewOverride,
   ImportPreviewAuditCounts,
-  ImportPreviewDuplicateGroup,
   ImportPreviewDetailRow,
-  ImportRowDecision,
+  ImportReviewRowsPage,
   ImportSessionPayload,
 } from "../../features/imports/types";
 import type {
@@ -486,56 +487,6 @@ function formatConfirmAuditMessage(audit: ImportPreviewAuditCounts | null) {
   return `将导入 ${audit.confirmableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
 }
 
-function isUnimportedDecision(decision: ImportRowDecision | string | null | undefined) {
-  return decision === "duplicate_skipped" || decision === "suspected_duplicate" || decision === "error";
-}
-
-function buildDuplicateDetailRows(groups: ImportPreviewDuplicateGroup[]): ImportPreviewDetailGridRow[] {
-  return groups.flatMap((group, groupIndex) => group.rows.map((row, rowIndex) => ({
-    id: `${group.identityKey || groupIndex}-${row.fileId}-${row.rowNo}-${rowIndex}`,
-    fileId: row.fileId,
-    fileName: row.fileName,
-    rowNo: row.rowNo,
-    duplicateType: group.duplicateType,
-    recordType: group.recordType,
-    decision: row.decision,
-    decisionReason: row.decisionReason,
-    linkedObjectType: row.linkedObjectType,
-    linkedObjectId: row.linkedObjectId,
-    identityKind: row.identityKind,
-    accountNo: row.accountNo,
-    tradeTime: row.tradeTime,
-    direction: row.direction,
-    amount: row.amount,
-    counterpartyName: row.counterpartyName,
-  })));
-}
-
-function buildUnimportedDetailRows(payload: ImportSessionPayload | null): ImportPreviewDetailGridRow[] {
-  if (!payload) {
-    return [];
-  }
-  return payload.files.flatMap((file) => file.rowResults
-    .filter((row) => isUnimportedDecision(row.decision))
-    .map((row) => ({
-      id: `${file.id}-${row.id || row.rowNo}`,
-      fileId: file.id,
-      fileName: file.fileName,
-      rowNo: row.rowNo,
-      recordType: row.sourceRecordType,
-      decision: row.decision,
-      decisionReason: row.decisionReason,
-      linkedObjectType: row.linkedObjectType,
-      linkedObjectId: row.linkedObjectId,
-      identityKind: row.identityKind,
-      accountNo: row.accountNo,
-      tradeTime: row.tradeTime,
-      direction: row.direction,
-      amount: row.amount,
-      counterpartyName: row.counterpartyName,
-    })));
-}
-
 function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }) {
   if (!audit) {
     return null;
@@ -655,13 +606,13 @@ function ImportPreviewTable({ rows, loading }: { rows: ImportFilePreviewRow[]; l
   );
 }
 
-function DetailTableEmptyRow({ message }: { message: string }) {
+function DetailTableEmptyRow({ message, columnCount }: { message: string; columnCount: number }) {
   return (
     <FinanceTableRow id="empty" textValue={message}>
       <FinanceTableCell columnRole="description" textValue={message}>
         <EmptyValue value={message} />
       </FinanceTableCell>
-      {Array.from({ length: 9 }, (_, index) => (
+      {Array.from({ length: columnCount - 1 }, (_, index) => (
         <FinanceTableCell key={index} columnRole="description" textValue="--">
           <EmptyValue value="--" />
         </FinanceTableCell>
@@ -674,30 +625,68 @@ function ImportPreviewDetailTable({
   ariaLabel,
   rows,
   loading,
+  invoiceMode,
+  page,
+  pageSize,
+  total,
+  onPageChange,
 }: {
   ariaLabel: "重复项明细" | "未导入项明细";
   rows: ImportPreviewDetailGridRow[];
   loading: boolean;
+  invoiceMode: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
 }) {
   const emptyMessage = loading ? "正在加载..." : "--";
+  const columnCount = invoiceMode ? 12 : 10;
 
   return (
-    <FinanceTable ariaLabel={ariaLabel} minWidth={1240}>
+    <FinanceTable
+      ariaLabel={ariaLabel}
+      footer={total > pageSize ? (
+        <FinanceTablePagination
+          compact
+          isDisabled={loading}
+          onPageChange={onPageChange}
+          page={page}
+          pageSize={pageSize}
+          total={total}
+        />
+      ) : null}
+      minWidth={invoiceMode ? 1520 : 1240}
+    >
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" id="fileName" isRowHeader>文件</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity" id="rowNo">行号</FinanceTableColumn>
-        <FinanceTableColumn columnRole="account" id="accountNo">账户</FinanceTableColumn>
-        <FinanceTableColumn columnRole="date" id="tradeTime">交易时间</FinanceTableColumn>
-        <FinanceTableColumn columnRole="direction" id="direction">方向</FinanceTableColumn>
-        <FinanceTableColumn columnRole="amount" id="amount">金额</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description" id="counterpartyName">对方户名</FinanceTableColumn>
+        {invoiceMode ? (
+          <>
+            <FinanceTableColumn columnRole="identity" id="invoiceNo">发票号码</FinanceTableColumn>
+            <FinanceTableColumn columnRole="date" id="invoiceDate">开票日期</FinanceTableColumn>
+            <FinanceTableColumn columnRole="description" id="sellerName">销方名称</FinanceTableColumn>
+            <FinanceTableColumn columnRole="description" id="buyerName">购方名称</FinanceTableColumn>
+            <FinanceTableColumn columnRole="amount" id="amount">金额</FinanceTableColumn>
+            <FinanceTableColumn columnRole="amount" id="taxAmount">税额</FinanceTableColumn>
+            <FinanceTableColumn columnRole="amount" id="totalWithTax">价税合计</FinanceTableColumn>
+          </>
+        ) : (
+          <>
+            <FinanceTableColumn columnRole="account" id="accountNo">账户</FinanceTableColumn>
+            <FinanceTableColumn columnRole="date" id="tradeTime">交易时间</FinanceTableColumn>
+            <FinanceTableColumn columnRole="direction" id="direction">方向</FinanceTableColumn>
+            <FinanceTableColumn columnRole="amount" id="amount">金额</FinanceTableColumn>
+            <FinanceTableColumn columnRole="description" id="counterpartyName">对方户名</FinanceTableColumn>
+          </>
+        )}
         <FinanceTableColumn columnRole="status" id="duplicateType">类型</FinanceTableColumn>
         <FinanceTableColumn columnRole="status" id="decision">决策</FinanceTableColumn>
         <FinanceTableColumn columnRole="description" id="decisionReason">原因</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody>
         {rows.length === 0 ? (
-          <DetailTableEmptyRow message={emptyMessage} />
+          <DetailTableEmptyRow columnCount={columnCount} message={emptyMessage} />
         ) : rows.map((row) => {
           const direction = directionLabel(row.direction);
           return (
@@ -706,17 +695,37 @@ function ImportPreviewDetailTable({
                 <TruncatedCellText value={row.fileName} />
               </FinanceTableCell>
               <FinanceTableCell columnRole="quantity" textValue={String(row.rowNo)}>{row.rowNo}</FinanceTableCell>
-              <FinanceTableCell columnRole="account" textValue={displayValue(row.accountNo)}>
-                <TruncatedCellText value={displayValue(row.accountNo)} />
-              </FinanceTableCell>
-              <FinanceTableCell columnRole="date" textValue={displayValue(row.tradeTime)}>{displayValue(row.tradeTime)}</FinanceTableCell>
-              <FinanceTableCell columnRole="direction" textValue={direction}>
-                {direction === "--" ? <EmptyValue value="--" /> : <FinanceDirectionTag direction={direction}>{direction}</FinanceDirectionTag>}
-              </FinanceTableCell>
-              <FinanceTableCell columnRole="amount" textValue={formatMoney(row.amount, "--")}>{formatMoney(row.amount, "--")}</FinanceTableCell>
-              <FinanceTableCell columnRole="description" textValue={displayValue(row.counterpartyName)}>
-                <TruncatedCellText value={displayValue(row.counterpartyName)} />
-              </FinanceTableCell>
+              {invoiceMode ? (
+                <>
+                  <FinanceTableCell columnRole="identity" textValue={displayValue(row.invoiceNo)}>
+                    <TruncatedCellText value={displayValue(row.invoiceNo)} />
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="date" textValue={displayValue(row.invoiceDate)}>{displayValue(row.invoiceDate)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue={displayValue(row.sellerName)}>
+                    <TruncatedCellText value={displayValue(row.sellerName)} />
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue={displayValue(row.buyerName)}>
+                    <TruncatedCellText value={displayValue(row.buyerName)} />
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="amount" textValue={formatMoney(row.amount, "--")}>{formatMoney(row.amount, "--")}</FinanceTableCell>
+                  <FinanceTableCell columnRole="amount" textValue={formatMoney(row.taxAmount, "--")}>{formatMoney(row.taxAmount, "--")}</FinanceTableCell>
+                  <FinanceTableCell columnRole="amount" textValue={formatMoney(row.totalWithTax, "--")}>{formatMoney(row.totalWithTax, "--")}</FinanceTableCell>
+                </>
+              ) : (
+                <>
+                  <FinanceTableCell columnRole="account" textValue={displayValue(row.accountNo)}>
+                    <TruncatedCellText value={displayValue(row.accountNo)} />
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="date" textValue={displayValue(row.tradeTime)}>{displayValue(row.tradeTime)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="direction" textValue={direction}>
+                    {direction === "--" ? <EmptyValue value="--" /> : <FinanceDirectionTag direction={direction}>{direction}</FinanceDirectionTag>}
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="amount" textValue={formatMoney(row.amount, "--")}>{formatMoney(row.amount, "--")}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue={displayValue(row.counterpartyName)}>
+                    <TruncatedCellText value={displayValue(row.counterpartyName)} />
+                  </FinanceTableCell>
+                </>
+              )}
               <FinanceTableCell columnRole="status" textValue={duplicateTypeLabel(row.duplicateType)}>
                 {duplicateTypeLabel(row.duplicateType)}
               </FinanceTableCell>
@@ -834,6 +843,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
+  const [previewDetailOffset, setPreviewDetailOffset] = useState(0);
+  const [previewDetailPage, setPreviewDetailPage] = useState<ImportReviewRowsPage | null>(null);
+  const [previewDetailLoading, setPreviewDetailLoading] = useState(false);
+  const [previewDetailError, setPreviewDetailError] = useState<string | null>(null);
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
   const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
@@ -970,6 +983,32 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setPreviewPayload,
   ]);
 
+  useEffect(() => {
+    const sessionId = previewPayload?.session.id;
+    if (!pageActive || mode === "etc_invoice" || !sessionId) {
+      setPreviewDetailPage(null);
+      setPreviewDetailLoading(false);
+      setPreviewDetailError(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setPreviewDetailLoading(true);
+    setPreviewDetailError(null);
+    fetchImportReviewRows(sessionId, previewDetailTab, previewDetailOffset, controller.signal)
+      .then((payload) => {
+        if (!controller.signal.aborted) setPreviewDetailPage(payload);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setPreviewDetailError(resolveImportApiErrorMessage(error, "导入复核明细加载失败。"));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPreviewDetailLoading(false);
+      });
+    return () => controller.abort();
+  }, [mode, pageActive, previewDetailOffset, previewDetailTab, previewPayload]);
+
   const bankOptionMap = useMemo(
     () => new Map(bankOptions.map((item) => [item.id, item])),
     [bankOptions],
@@ -1067,14 +1106,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     }) ?? []
   ), [previewPayload]);
 
-  const duplicateDetailRows = useMemo(
-    () => buildDuplicateDetailRows(previewPayload?.duplicateGroups ?? []),
-    [previewPayload],
-  );
-  const unimportedDetailRows = useMemo(
-    () => buildUnimportedDetailRows(previewPayload),
-    [previewPayload],
-  );
+  const previewDetailRows = previewDetailPage?.rows ?? [];
+  const previewDetailPageSize = previewDetailPage?.limit ?? 100;
+  const previewDetailTotal = previewDetailPage?.total ?? (
+    previewDetailTab === "duplicates" ? previewAudit?.duplicateCount : previewAudit?.skippedCount
+  ) ?? 0;
 
   const etcRows = useMemo<EtcPreviewRow[]>(() => (
     etcPreviewPayload?.items.map((item, index) => ({
@@ -1094,6 +1130,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setMappingRetryingFileId(null);
     setFeedbackMessage(null);
     setErrorMessage(null);
+    setPreviewDetailOffset(0);
+    setPreviewDetailPage(null);
+    setPreviewDetailError(null);
     clearPersistedSession();
   }
 
@@ -1770,28 +1809,38 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     <div className="import-workflow-detail-shell">
                       <Tabs
                         className="import-workflow-detail-tabs-root"
-                        onSelectionChange={(key) => setPreviewDetailTab(key as "duplicates" | "unimported")}
+                        onSelectionChange={(key) => {
+                          setPreviewDetailTab(key as "duplicates" | "unimported");
+                          setPreviewDetailOffset(0);
+                          setPreviewDetailPage(null);
+                        }}
                         selectedKey={previewDetailTab}
                         variant="secondary"
                       >
                         <Tabs.ListContainer className="import-workflow-detail-tabs-container">
                           <Tabs.List aria-label="导入预览明细" className="import-workflow-detail-tabs">
                             <Tabs.Tab id="duplicates">
-                              重复项 {duplicateDetailRows.length}
+                              重复项 {previewAudit?.duplicateCount ?? 0}
                               <Tabs.Indicator />
                             </Tabs.Tab>
                             <Tabs.Tab id="unimported">
-                              未导入项 {unimportedDetailRows.length}
+                              未导入项 {previewAudit?.skippedCount ?? 0}
                               <Tabs.Indicator />
                             </Tabs.Tab>
                           </Tabs.List>
                         </Tabs.ListContainer>
                       </Tabs>
+                      {previewDetailError ? <ImportNotice tone="danger">{previewDetailError}</ImportNotice> : null}
                       <div className="import-workflow-grid-shell import-workflow-grid-shell--detail">
                         <ImportPreviewDetailTable
                           ariaLabel={previewDetailTab === "duplicates" ? "重复项明细" : "未导入项明细"}
-                          loading={isPreviewing}
-                          rows={previewDetailTab === "duplicates" ? duplicateDetailRows : unimportedDetailRows}
+                          invoiceMode={mode === "invoice"}
+                          loading={previewDetailLoading}
+                          onPageChange={(page) => setPreviewDetailOffset((page - 1) * previewDetailPageSize)}
+                          page={Math.floor(previewDetailOffset / previewDetailPageSize) + 1}
+                          pageSize={previewDetailPageSize}
+                          rows={previewDetailRows}
+                          total={previewDetailTotal}
                         />
                       </div>
                     </div>

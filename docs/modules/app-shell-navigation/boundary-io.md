@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：App shell 只负责页面注册、路由、导航、session/runtime context 和全局操作状态，不承载业务页面逻辑。
 - 当前缺口：页面业务 freshness 由各模块自己的 query owner 实现；shell 不提供跨页刷新信号。
-- 旧代码删除状态：PageRouteHost 的 focus/visibility/pageshow activation listener、`useActivePageEvent`、业务 domain-event 协调和独立导入汇总页均已删除。
+- 旧代码删除状态：PageRouteHost 的 visibility/pageshow 业务 activation listener、`useActivePageEvent`、业务 domain-event 协调和独立导入汇总页均已删除；路由后的标题更新与主内容一次性聚焦仅属于无障碍导航，不产生业务 reload。
 
 ## 职责边界
 
@@ -43,6 +43,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Route rendering | `PageRouteHost` | 根据 registry 渲染页面 |
+| Accessible route transition | document/main content | route 变化时按 registry 页面名更新 `document.title`，并把键盘/读屏焦点移到主内容；App 根提供跳过导航入口。不得借此触发业务 load 或 generation 变化。 |
 | Navigation | sidebar/topbar | 不硬编码业务查询；“导入”父项只展开 registry 派生的三个子路由，不产生 API I/O |
 | Legacy import route | `router.tsx` | 精确 `/imports` 使用 replace 重定向到 `/imports/bank-transactions`，不挂载旧页面 |
 | Current OA identity | sidebar account footer | 只展示 `displayName/username/deptName`；弹层开关不产生 API、图片或业务 I/O |

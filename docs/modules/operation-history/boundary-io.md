@@ -13,7 +13,7 @@
 | 财务事实修正 | 数据库 transaction-local actor/reason | `app.financial_fact_corrections` + `audit.events` 同事务追加；无 reason 拒绝关键字段更新/删除 |
 | 列表 API `GET /api/operations/history` | 005 session、日期/人员/页面/搜索/cursor | 在数据库内先按 `request_id` 合并 requested/completed，再筛选和翻页；最多 200 条，稳定时间+operation key 游标；只返回覆盖点之后的数据 |
 | 操作人 API `GET /api/operations/history/actors` | 005 session | 返回审计事实中完整、去重的操作人 id/name/account 选项 |
-| 详情 API `GET /api/operations/history/{operation_key}` | 005 session、request/event operation key | 返回一个逻辑操作及用户可读的对象、选择项和前后状态；不返回内部 ID、raw payload 或 secret；不存在返回 404 |
+| 详情 API `GET /api/operations/history/{operation_key}` | 005 session、request/event operation key | 返回一个逻辑操作及用户可读的对象、选择项、前后状态，以及管理员追踪所需的 event/request/trace/object 标识；不返回 raw payload 或 secret；不存在返回 404。前端列表与详情请求分别采用 latest-request/abort 约束，旧响应不得覆盖新筛选或新选择。 |
 
 Own read model：无。Redis/RabbitMQ/后台 worker：无。事实源为 PostgreSQL `audit.events`。
 

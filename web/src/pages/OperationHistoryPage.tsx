@@ -1,6 +1,6 @@
 import { Button, Chip, Input, ListBox, SearchField, Select } from "@heroui/react";
 import { ArrowRight, RefreshCw, Search } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import {
@@ -81,31 +81,46 @@ export default function OperationHistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OperationHistoryOperation | null>(null);
+  const listRequest = useRef<AbortController | null>(null);
+  const detailRequest = useRef<AbortController | null>(null);
 
   const load = useCallback(async (cursor?: string | null) => {
     if (!active || !canAdminAccess) return;
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
     cursor ? setLoadingMore(true) : setLoading(true);
     setError(null);
     try {
-      const result = await fetchOperationHistory(filters, cursor);
+      const result = await fetchOperationHistory(filters, cursor, controller.signal);
+      if (listRequest.current !== controller) return;
       setRows((current) => cursor ? [...current, ...result.rows] : result.rows);
       setNextCursor(result.next_cursor);
     } catch (loadError) {
+      if (controller.signal.aborted || listRequest.current !== controller) return;
       setError(loadError instanceof Error ? loadError.message : "操作历史加载失败。");
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (listRequest.current === controller) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [active, canAdminAccess, filters]);
 
   useEffect(() => {
     void load();
+    return () => listRequest.current?.abort();
   }, [activationGeneration, load]);
 
   useEffect(() => {
-    if (active && canAdminAccess) {
-      void fetchOperationHistoryActors().then((result) => setActors(result.rows)).catch(() => setActors([]));
-    }
+    if (!active || !canAdminAccess) return undefined;
+    const controller = new AbortController();
+    void fetchOperationHistoryActors(controller.signal)
+      .then((result) => setActors(result.rows))
+      .catch(() => {
+        if (!controller.signal.aborted) setActors([]);
+      });
+    return () => controller.abort();
   }, [activationGeneration, active, canAdminAccess]);
 
   const submitFilters = (event: FormEvent) => {
@@ -120,13 +135,21 @@ export default function OperationHistoryPage() {
   };
 
   const openDetail = async (operation: OperationHistoryOperation) => {
+    detailRequest.current?.abort();
+    const controller = new AbortController();
+    detailRequest.current = controller;
     setSelected(operation);
     try {
-      const detail = await fetchOperationHistoryDetail(operation.operation_key);
-      setSelected(detail.operation);
+      const detail = await fetchOperationHistoryDetail(operation.operation_key, controller.signal);
+      if (detailRequest.current === controller) setSelected(detail.operation);
     } catch {
       // The logical operation row remains useful if the detail request is interrupted.
     }
+  };
+
+  const closeDetail = () => {
+    detailRequest.current?.abort();
+    setSelected(null);
   };
 
   return (
@@ -222,7 +245,7 @@ export default function OperationHistoryPage() {
 
       {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
 
-      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={() => setSelected(null)}>
+      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={closeDetail}>
         {selected ? (
           <div className="operation-history-detail">
             <dl>
@@ -233,6 +256,16 @@ export default function OperationHistoryPage() {
               <div><dt>开始</dt><dd>{formatTime(selected.started_at)}</dd></div>
               <div><dt>完成</dt><dd>{formatTime(selected.completed_at)}</dd></div>
             </dl>
+            <section>
+              <h3>审计追踪</h3>
+              <dl>
+                <div><dt>操作标识</dt><dd>{selected.operation_key}</dd></div>
+                {selected.request_id ? <div><dt>请求标识</dt><dd>{selected.request_id}</dd></div> : null}
+                {selected.event_id ? <div><dt>事件标识</dt><dd>{selected.event_id}</dd></div> : null}
+                {selected.object_id ? <div><dt>对象标识</dt><dd>{selected.object_id}</dd></div> : null}
+                {selected.trace_id ? <div><dt>链路标识</dt><dd>{selected.trace_id}</dd></div> : null}
+              </dl>
+            </section>
             <section>
               <h3>本次选择与状态变化</h3>
               {selected.items?.length ? (

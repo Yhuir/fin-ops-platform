@@ -9,7 +9,11 @@ async function openConfirmRelationPreview(page: Page) {
   await expect(openGroup).toBeVisible();
   await openZone.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await openZone.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await openZone
+    .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+    .getByRole("cell")
+    .first()
+    .click();
   await expect(openZone.getByText("已选 3")).toBeVisible();
   await openZone.getByRole("button", { name: "确认关联" }).click();
   const previewDialog = page.getByRole("dialog", { name: "确认关联" });
@@ -32,7 +36,7 @@ test.describe("workbench stale and error browser flow", () => {
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
 
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).getByRole("cell").first().click();
     await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeEnabled();
@@ -55,7 +59,7 @@ test.describe("workbench stale and error browser flow", () => {
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).getByRole("cell").first().click();
     await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
 
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
@@ -98,9 +102,6 @@ test.describe("workbench stale and error browser flow", () => {
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-    await expect(openZone.getByRole("status", {
-      name: "OA 正在同步，完成后将自动恢复关联操作。",
-    })).toBeVisible();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
@@ -123,9 +124,6 @@ test.describe("workbench stale and error browser flow", () => {
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-    await expect(openZone.getByRole("status", {
-      name: "OA 正在同步，完成后将自动恢复关联操作。",
-    })).toBeVisible();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);

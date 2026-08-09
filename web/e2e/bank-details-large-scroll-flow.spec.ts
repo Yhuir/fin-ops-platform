@@ -172,6 +172,7 @@ test.describe("bank details large table and overlay browser flow", () => {
     await expectVisibleAndUncovered(exportMenu, "narrow export menu");
     await expect(exportMenu.getByRole("menuitem", { name: "导出全部银行" })).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(exportMenu).toBeHidden();
 
     const tableScroll = page.locator(".bank-transaction-table .finance-table__scroll");
     await scrollTableHorizontally(tableScroll);

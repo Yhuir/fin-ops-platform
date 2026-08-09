@@ -1971,8 +1971,11 @@ class Application:
         if method == "POST" and route_path == "/imports/files/retry":
             return self._handle_import_file_retry(body)
         if method == "GET" and route_path.startswith("/imports/files/sessions/"):
-            session_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_import_file_session(session_id)
+            session_path = route_path.removeprefix("/imports/files/sessions/")
+            if session_path.endswith("/review-rows"):
+                session_id = session_path.removesuffix("/review-rows").strip("/")
+                return self._handle_import_file_review_rows(session_id, query)
+            return self._handle_import_file_session(session_path)
         return self._json_response(
             HTTPStatus.NOT_FOUND,
             {
@@ -7694,11 +7697,31 @@ class Application:
             )
         output = StringIO()
         writer = csv.writer(output)
-        writer.writerow(["行号", "数据类型", "处理结果", "原因", "银行账户", "交易时间", "收支方向", "金额", "对方名称"])
+        writer.writerow(
+            [
+                "行号",
+                "数据类型",
+                "处理结果",
+                "原因",
+                "银行账户",
+                "交易时间",
+                "收支方向",
+                "金额",
+                "对方名称",
+                "发票号码",
+                "开票日期",
+                "销方名称",
+                "购方名称",
+                "税额",
+                "价税合计",
+            ]
+        )
         for row in preview.row_results:
             decision = row.decision.value if isinstance(row.decision, Enum) else str(row.decision)
             if decision not in {"error", "suspected_duplicate"}:
                 continue
+            raw_payload = dict(getattr(row, "raw_payload", {}) or {})
+            invoice_no = raw_payload.get("digital_invoice_no") or raw_payload.get("invoice_no")
             writer.writerow(
                 [
                     row.row_no,
@@ -7710,6 +7733,12 @@ class Application:
                     row.direction or "",
                     row.amount or "",
                     row.counterparty_name or "",
+                    invoice_no or "",
+                    raw_payload.get("invoice_date") or "",
+                    raw_payload.get("seller_name") or "",
+                    raw_payload.get("buyer_name") or "",
+                    raw_payload.get("tax_amount") or "",
+                    raw_payload.get("total_with_tax") or "",
                 ]
             )
         body = "\ufeff" + output.getvalue()
@@ -7936,6 +7965,40 @@ class Application:
                 {"error": "import_file_session_not_found", "session_id": session_id},
             )
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+
+    def _handle_import_file_review_rows(
+        self,
+        session_id: str,
+        query: dict[str, list[str]],
+    ) -> Response:
+        kind = str((query.get("kind") or [""])[0] or "").strip()
+        try:
+            offset = max(int((query.get("offset") or ["0"])[0] or 0), 0)
+            limit = min(max(int((query.get("limit") or ["100"])[0] or 100), 1), 100)
+        except ValueError:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_review_rows_request", "message": "offset and limit must be integers."},
+            )
+        self._reload_file_import_runtime_state()
+        try:
+            payload = self._file_import_service.review_rows(
+                session_id=session_id,
+                kind=kind,
+                offset=offset,
+                limit=limit,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "import_file_session_not_found", "session_id": session_id},
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_review_rows_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, self._serialize_value(payload))
 
     def _reload_file_import_runtime_state(self) -> None:
         if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
@@ -8654,6 +8717,12 @@ class Application:
         self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
 
     def _serialize_file_session(self, session: object) -> dict[str, object]:
+        files = []
+        for item in list(getattr(session, "files", []) or []):
+            payload = self._serialize_value(item)
+            payload.pop("row_results", None)
+            payload.pop("normalized_rows", None)
+            files.append(payload)
         return {
             "session": {
                 "id": session.id,
@@ -8663,8 +8732,8 @@ class Application:
                 "created_at": self._serialize_value(session.created_at),
                 "audit": self._serialize_value(getattr(session, "audit", None)),
             },
-            "files": self._serialize_value(session.files),
-            "duplicate_groups": self._serialize_value(getattr(session, "duplicate_groups", [])),
+            "files": files,
+            "duplicate_groups": [],
         }
 
     def _serialize_sync_run(self, run: object) -> dict[str, object]:

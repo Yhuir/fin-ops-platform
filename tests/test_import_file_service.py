@@ -643,6 +643,23 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(len(duplicate_group.rows), 240)
         self.assertEqual(duplicate_group.rows[-1]["row_no"], 240)
 
+        review = service.review_rows(
+            session_id=session.id,
+            kind="duplicates",
+            offset=20,
+            limit=25,
+        )
+        self.assertEqual(review["total"], 240)
+        self.assertEqual(len(review["rows"]), 25)
+        self.assertEqual(review["offset"], 20)
+        self.assertTrue(review["has_more"])
+        self.assertEqual(review["rows"][0]["record_type"], "invoice")
+        self.assertTrue(review["rows"][0]["invoice_no"])
+        self.assertTrue(review["rows"][0]["invoice_date"])
+        self.assertTrue(review["rows"][0]["seller_name"])
+        self.assertTrue(review["rows"][0]["buyer_name"])
+        self.assertTrue(review["rows"][0]["total_with_tax"])
+
     def test_preview_files_audit_counts_cross_file_bank_transaction_identity_duplicates(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)

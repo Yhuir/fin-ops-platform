@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "../app/App";
@@ -30,7 +30,11 @@ describe("OperationHistoryPage", () => {
     expect(drawer).toHaveTextContent("云南昂超商贸有限公司");
     expect(drawer).toHaveTextContent("未配对");
     expect(drawer).toHaveTextContent("已配对");
-    expect(drawer).not.toHaveTextContent("internal-relation-1");
+    expect(drawer).toHaveTextContent("request:request-1");
+    expect(drawer).toHaveTextContent("request-1");
+    expect(drawer).toHaveTextContent("event-1");
+    expect(drawer).toHaveTextContent("internal-relation-1");
+    expect(drawer).toHaveTextContent("trace-1");
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/history/request%3Arequest-1"))).toBe(true);
     });
@@ -47,5 +51,64 @@ describe("OperationHistoryPage", () => {
     expect(await screen.findByRole("heading", { name: "关联台" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "操作历史" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/history"))).toBe(false);
+  });
+
+  test("keeps the newest filter result when an older request finishes later", async () => {
+    window.history.pushState({}, "", "/operations/history");
+    const baseFetch = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "权限管理员",
+    });
+    let resolveOlder: ((response: Response) => void) | undefined;
+    const olderResponse = new Promise<Response>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const rowResponse = (label: string) => new Response(JSON.stringify({
+      rows: [{
+        operation_key: `request:${label}`,
+        actor_id: "005",
+        actor_name: "权限管理员",
+        actor_account: "YNSYLP005",
+        page_key: "reconciliation-workbench",
+        action_label: label,
+        object_type: "reconciliation_case",
+        started_at: "2026-08-09T12:00:00+08:00",
+        occurred_at: "2026-08-09T12:00:00+08:00",
+        outcome: "success",
+      }],
+      next_cursor: null,
+      limit: 50,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    global.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === "/api/operations/history" && url.searchParams.get("search") === "较早请求") {
+        return olderResponse;
+      }
+      if (url.pathname === "/api/operations/history" && url.searchParams.get("search") === "最新请求") {
+        return Promise.resolve(rowResponse("最新结果"));
+      }
+      return baseFetch(input, init);
+    });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "操作历史" })).toBeInTheDocument();
+    const search = screen.getByRole("searchbox", { name: "搜索操作历史" });
+    const query = screen.getByRole("button", { name: "查询" });
+    await userEvent.clear(search);
+    await userEvent.type(search, "较早请求");
+    await userEvent.click(query);
+    await userEvent.clear(search);
+    await userEvent.type(search, "最新请求");
+    await userEvent.click(query);
+
+    const table = await screen.findByRole("grid", { name: "操作历史" });
+    expect(await within(table).findByText("最新结果")).toBeInTheDocument();
+    await act(async () => {
+      resolveOlder?.(rowResponse("过期结果"));
+      await olderResponse;
+    });
+    expect(table).toHaveTextContent("最新结果");
+    expect(table).not.toHaveTextContent("过期结果");
   });
 });

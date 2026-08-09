@@ -45,7 +45,7 @@ test.describe("销项发票收款情况", () => {
     const rowsBeforeSearch = api.count("GET /api/output-invoice-collections/rows");
     await page.getByRole("searchbox", { name: "搜索销项发票收款情况" }).fill("XSFP-E2E-0002");
     const searchResponse = page.waitForResponse(rowsResponse);
-    await page.getByRole("button", { name: "查询" }).click();
+    await page.getByRole("button", { name: "查询", exact: true }).click();
     expect((await searchResponse).status()).toBe(200);
     await expect(page.getByRole("row", { name: /XSFP-E2E-0002/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toHaveCount(0);

@@ -35,6 +35,7 @@ HTTP GET
 ```
 
 - 页面首次访问和浏览器刷新走同一条链。
+- 页面首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务月；用户选择与“全部时间”继续走既有 query/session 合同，不使用硬编码历史月份。
 - 首次 explorer 内容请求发送 `include_statistics=false`，优先返回当前 scope 的表格/分组；内容可用后再以 `page_size=1` 非阻塞读取全局 `statistics`。统计失败不重新锁住已可用内容；手动刷新会重试两条职责分离的读链。
 - `include_statistics=false` 且范围不是 `all` 时，repository 用 `bank_transactions.txn_month` 下推范围。`time|bank_tag` 不读取 OA 配对关系；`project|bank|expense_type` 只读取命中银行流水的 active relation，并扩展该 relation 的全部银行/OA 成员，保证跨月份配对分配语义不变。
 - 流水详情把当前 `scope`、`view` 和 `include_statistics=false` 原样下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。成本视图仍扩展命中关系成员，银行事实视图仍跳过 OA/关系 I/O。

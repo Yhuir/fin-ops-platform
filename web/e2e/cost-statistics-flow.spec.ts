@@ -46,6 +46,35 @@ function waitForCostStatisticsExplorer(page: Page, month = "2026-03", projectSco
   });
 }
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    const now = Date.now();
+    sessionStorage.setItem("finops:pageSession:v1:e2e-user:cost-statistics:explorerState", JSON.stringify({
+      version: 3,
+      updatedAt: now,
+      expiresAt: now + 60 * 60 * 1000,
+      value: {
+        viewMode: "time",
+        timeScopeMode: "month",
+        timeScopeYear: "2026",
+        timeScopeMonth: "2026-03",
+        projectScopeMode: "all",
+        projectScopeYear: "2026",
+        projectScopeMonth: "2026-03",
+        bankScopeMode: "all",
+        bankScopeYear: "2026",
+        bankScopeMonth: "2026-03",
+        expenseTypeScopeMode: "month",
+        expenseTypeScopeYear: "2026",
+        expenseTypeScopeMonth: "2026-03",
+        bankTagScopeMode: "month",
+        bankTagScopeYear: "2026",
+        bankTagScopeMonth: "2026-03",
+      },
+    }));
+  });
+});
+
 function collectBrowserErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -274,9 +303,9 @@ test.describe("cost statistics browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "导出中心" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(exportDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(exportDialog.getByRole("button", { name: "导出" })).toBeEnabled());
+      await mark("finalSettledLatencyMs", expect(exportDialog.getByRole("button", { name: "导出", exact: true })).toBeEnabled());
     });
-    await expect(exportDialog.getByRole("button", { name: "导出" })).toBeEnabled();
+    await expect(exportDialog.getByRole("button", { name: "导出", exact: true })).toBeEnabled();
 
     const previewResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -316,7 +345,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "导出",
       actionType: "click",
     }, async (mark) => {
-      await exportDialog.getByRole("button", { name: "导出" }).click();
+      await exportDialog.getByRole("button", { name: "导出", exact: true }).click();
       await mark("apiLatencyMs", exportResponsePromise);
       await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByText("已导出 成本统计_全部期间_按时间统计.xlsx")).toBeVisible());
       await mark("finalSettledLatencyMs", downloadPromise.then(() => undefined));
@@ -624,7 +653,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "导出",
       actionType: "click",
     }, async (mark) => {
-      await exportDialog.getByRole("button", { name: "导出" }).click();
+      await exportDialog.getByRole("button", { name: "导出", exact: true }).click();
       await mark("apiLatencyMs", exportResponse);
       await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(exportDialog.getByText("导出结果超过 20000 行，请缩小筛选范围后重试。")).toBeVisible());

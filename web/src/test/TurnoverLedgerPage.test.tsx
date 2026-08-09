@@ -1398,8 +1398,8 @@ describe("Turnover ledger page", () => {
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
-    const pendingButton = await within(drawer).findByRole("button", { name: "确定" });
-    expect(pendingButton).toBeDisabled();
+    const progressDialog = await screen.findByRole("dialog", { name: "全局操作进度" });
+    expect(within(progressDialog).getByText("正在确认外部往来闭环...")).toBeInTheDocument();
 
     resolveConfirm(Response.json({
       status: "confirmed",
@@ -1974,6 +1974,8 @@ describe("Turnover ledger page", () => {
 
     expect((await screen.findAllByText("补充信息已被其他会话更新，请重新打开后再保存。")).length).toBeGreaterThan(0);
     expect(note).toHaveValue("发生版本冲突时保留");
+    const errorDialog = await screen.findByRole("dialog", { name: "全局操作进度" });
+    await user.click(within(errorDialog).getByRole("button", { name: "确定" }));
     await waitFor(() => expect(within(drawer).getByRole("button", { name: "保存补充信息" })).toBeEnabled());
     expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(1);
   });
@@ -2004,8 +2006,11 @@ describe("Turnover ledger page", () => {
     await user.click(within(drawer).getByRole("button", { name: "保存补充信息" }));
 
     await waitFor(() => expect(note).toBeDisabled());
-    expect(within(drawer).getByRole("button", { name: "关闭" })).toBeDisabled();
-    expect(within(drawer).getByRole("button", { name: "保存补充信息" })).toBeDisabled();
+    const progressDialog = await screen.findByRole("dialog", { name: "全局操作进度" });
+    expect(within(progressDialog).getByText("正在保存往来关系补充信息...")).toBeInTheDocument();
+    expect(drawer.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')).toBeDisabled();
+    expect(Array.from(drawer.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "保存补充信息")).toBeDisabled();
 
     await act(async () => {
       pendingSave.resolve(Response.json({

@@ -2067,7 +2067,10 @@ function importPreviewFile(
   };
 }
 
-function importDuplicateGroups(scenario: ImportScenario) {
+function importDuplicateGroups(
+  scenario: ImportScenario,
+  options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean } = {},
+) {
   if (scenario === "invoice") {
     return [
       {
@@ -2085,7 +2088,30 @@ function importDuplicateGroups(scenario: ImportScenario) {
             direction: "output_invoice",
             amount: "65540.00",
             counterparty_name: "浏览器销项客户",
+            invoice_no: "INV-E2E-DUP-001",
+            invoice_date: "2026-05-20",
+            seller_name: "浏览器销项客户",
+            buyer_name: "云南溯源科技有限公司",
+            tax_amount: "3710.75",
+            total_with_tax: "65540.00",
           },
+          ...(!options.corruptInvoiceFile ? [{
+            file_id: "invoice_import_file_e2e_2",
+            file_name: importFiles.invoice[1],
+            row_no: 4,
+            decision: "duplicate_skipped",
+            decision_reason: "跨文件重复。",
+            trade_time: "2026-05-21",
+            direction: "input_invoice",
+            amount: "18320.00",
+            counterparty_name: "浏览器进项供应商",
+            invoice_no: "INV-E2E-DUP-002",
+            invoice_date: "2026-05-21",
+            seller_name: "浏览器进项供应商",
+            buyer_name: "云南溯源科技有限公司",
+            tax_amount: "1036.98",
+            total_with_tax: "18320.00",
+          }] : []),
         ],
       },
     ];
@@ -2108,6 +2134,18 @@ function importDuplicateGroups(scenario: ImportScenario) {
           amount: "1688.00",
           counterparty_name: "导入浏览器测试客户",
         },
+        ...(!options.corruptBankFile ? [{
+          file_id: "import_file_e2e_2",
+          file_name: importFiles.bank[1],
+          row_no: 4,
+          decision: "duplicate_skipped",
+          decision_reason: "跨文件重复。",
+          account_no: "6222********8826",
+          trade_time: "2026-05-19 10:45:00",
+          direction: "expense",
+          amount: "488.00",
+          counterparty_name: "导入浏览器测试供应商",
+        }] : []),
       ],
     },
   ];
@@ -2129,7 +2167,7 @@ function importSessionPayload(
       audit: importAudit(scenario, imported, options),
     },
     files: importFiles[scenario].map((fileName, index) => importPreviewFile(scenario, fileName, index, imported, options)),
-    duplicate_groups: importDuplicateGroups(scenario),
+    duplicate_groups: importDuplicateGroups(scenario, options),
     matching_run: imported
       ? {
         id: `match_run_import_${scenario}_e2e_001`,
@@ -2140,6 +2178,87 @@ function importSessionPayload(
         manual_review_count: 0,
       }
       : undefined,
+  };
+}
+
+function importReviewRowsPayload(
+  scenario: ImportScenario,
+  kind: "duplicates" | "unimported",
+  offset: number,
+  limit: number,
+  options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
+) {
+  const payload = importSessionPayload(scenario, false, options);
+  const duplicateRows = payload.duplicate_groups.flatMap((group) => group.rows.map((row) => ({
+      ...row,
+      record_type: group.record_type,
+      duplicate_type: group.duplicate_type,
+    })));
+  const failedRows = payload.files.flatMap((file) => file.row_results
+      .filter((row) => ["duplicate_skipped", "suspected_duplicate", "error"].includes(row.decision))
+      .map((row) => ({
+        ...row,
+        file_id: file.id,
+        file_name: file.file_name,
+        record_type: row.source_record_type,
+      })));
+  const reviewOnlyRows = scenario === "invoice"
+    ? [
+      {
+        id: "invoice_import_suspected_row_e2e_1",
+        file_id: "invoice_import_file_e2e_2",
+        file_name: importFiles.invoice[1],
+        row_no: 5,
+        record_type: "invoice",
+        decision: "suspected_duplicate",
+        decision_reason: "关键字段相似，需人工复核。",
+        direction: "input_invoice",
+        amount: "3200.00",
+        counterparty_name: "浏览器待复核供应商",
+        invoice_no: "INV-E2E-REVIEW-001",
+        invoice_date: "2026-05-21",
+        seller_name: "浏览器待复核供应商",
+        buyer_name: "云南溯源科技有限公司",
+        tax_amount: "181.13",
+        total_with_tax: "3200.00",
+      },
+      ...(!options.corruptInvoiceFile ? [{
+        id: "invoice_import_error_row_e2e_1",
+        file_id: "invoice_import_file_e2e_1",
+        file_name: importFiles.invoice[0],
+        row_no: 6,
+        record_type: "invoice",
+        decision: "error",
+        decision_reason: "发票号码缺失。",
+        direction: "output_invoice",
+        amount: null,
+        counterparty_name: "浏览器销项客户",
+      }] : []),
+    ]
+    : options.corruptBankFile
+      ? []
+      : [1, 2].map((index) => ({
+        id: `bank_import_existing_duplicate_row_e2e_${index}`,
+        file_id: "import_file_e2e_1",
+        file_name: importFiles.bank[0],
+        row_no: 4 + index,
+        record_type: "bank_transaction",
+        decision: "duplicate_skipped",
+        decision_reason: "系统中已存在相同流水。",
+        account_no: "6222********4080",
+        trade_time: `2026-05-18 09:${40 + index}:00`,
+        direction: "income",
+        amount: "1688.00",
+        counterparty_name: "导入浏览器测试客户",
+      }));
+  const rows = kind === "duplicates" ? duplicateRows : [...duplicateRows, ...reviewOnlyRows, ...failedRows];
+  const pageRows = rows.slice(offset, offset + limit);
+  return {
+    rows: pageRows,
+    total: rows.length,
+    offset,
+    limit,
+    has_more: offset + pageRows.length < rows.length,
   };
 }
 
@@ -9407,6 +9526,19 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, importSessionPayload(latestImportScenario, true, {
         corruptBankFile: latestImportScenario === "bank" && options.bankImportIncludeCorruptFile === true,
         corruptInvoiceFile: latestImportScenario === "invoice" && options.invoiceImportIncludeCorruptFile === true,
+        noBankAccountConflict: options.bankImportNoAccountConflict,
+      }));
+    }
+
+    const importReviewMatch = path.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);
+    if (importReviewMatch) {
+      const scenario = importReviewMatch[1] === importSessionIds.invoice ? "invoice" : "bank";
+      const kind = url.searchParams.get("kind") === "unimported" ? "unimported" : "duplicates";
+      const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+      return json(route, importReviewRowsPayload(scenario, kind, offset, limit, {
+        corruptBankFile: scenario === "bank" && options.bankImportIncludeCorruptFile,
+        corruptInvoiceFile: scenario === "invoice" && options.invoiceImportIncludeCorruptFile,
         noBankAccountConflict: options.bankImportNoAccountConflict,
       }));
     }

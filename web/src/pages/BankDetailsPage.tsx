@@ -29,6 +29,7 @@ import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayCon
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { currentBusinessMonth, currentBusinessYear } from "../features/dateTime";
 import { formatMoney } from "../features/money";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
@@ -60,8 +61,8 @@ import type {
 } from "../features/bankDetails/types";
 import type { BankTransactionTagDefinition } from "../features/pendingInvoices/types";
 
-const DEFAULT_BANK_YEAR = "2026";
-const DEFAULT_BANK_MONTH = "2026-05";
+const DEFAULT_BANK_YEAR = currentBusinessYear();
+const DEFAULT_BANK_MONTH = currentBusinessMonth();
 const DEFAULT_PAGE_SIZE = 100;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
@@ -591,7 +592,7 @@ function BankCategoryFilterControl({
           isNonModal
           maxHeight={720}
           offset={8}
-          placement="left"
+          placement="bottom start"
           shouldCloseOnInteractOutside={(element) => !categoryFilterTriggerRef.current?.contains(element)}
         >
           <PopoverDialog aria-label="银行明细标签筛选" className="bank-category-filter-dialog">
@@ -694,7 +695,14 @@ function BankDetailsTableToolbar({
               {exportFeedback}
             </span>
           ) : null}
-          <div className="bank-export-menu-host">
+          <div
+            className="bank-export-menu-host"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                onCloseExportMenu();
+              }
+            }}
+          >
             <button
               aria-controls={exportMenuOpen ? "bank-detail-export-menu" : undefined}
               aria-expanded={exportMenuOpen ? "true" : undefined}
@@ -711,11 +719,6 @@ function BankDetailsTableToolbar({
                 aria-label="导出银行明细"
                 className="bank-export-menu"
                 id="bank-detail-export-menu"
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    onCloseExportMenu();
-                  }
-                }}
                 role="menu"
               >
                 <button disabled={isExporting} onClick={() => onExport("all")} role="menuitem" type="button">
@@ -1448,7 +1451,7 @@ export default function BankDetailsPage() {
   const dateFilterSession = usePageSessionState<BankDateFilter>({
     pageKey: "bank-details",
     stateKey: "dateFilter",
-    version: 3,
+    version: 4,
     initialValue: createDateFilter("year", DEFAULT_BANK_YEAR),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -1457,7 +1460,7 @@ export default function BankDetailsPage() {
   const datePickerYearSession = usePageSessionState<string>({
     pageKey: "bank-details",
     stateKey: "datePickerYear",
-    version: 1,
+    version: 2,
     initialValue: DEFAULT_BANK_YEAR,
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",

@@ -136,7 +136,7 @@ test.describe("OA pending payments browser flow", () => {
       visibleLabel: "查询",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "查询" }).click();
+      await page.getByRole("button", { name: "查询", exact: true }).click();
       await mark("apiLatencyMs", searchRequest);
       await mark("finalSettledLatencyMs", expect(row).toBeVisible());
     });

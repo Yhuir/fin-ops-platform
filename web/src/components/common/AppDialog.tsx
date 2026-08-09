@@ -1,14 +1,19 @@
-import { Modal } from "@heroui/react";
+import { Button, Modal } from "@heroui/react";
+import { X } from "lucide-react";
 import { useId, type ReactNode } from "react";
 
 type AppDialogProps = {
   open: boolean;
   title: string;
+  ariaLabel?: string;
+  className?: string;
+  closeLabel?: string;
   description?: ReactNode;
   children?: ReactNode;
   actions?: ReactNode;
   maxWidth?: "xs" | "sm" | "md" | "lg" | "xl";
   disableEscapeClose?: boolean;
+  isDismissable?: boolean;
   onClose: () => void;
 };
 
@@ -25,11 +30,15 @@ function sizeFromMaxWidth(maxWidth: AppDialogMaxWidth): ModalSize {
 export default function AppDialog({
   open,
   title,
+  ariaLabel,
+  className,
+  closeLabel,
   description,
   children,
   actions,
   maxWidth = "sm",
   disableEscapeClose = false,
+  isDismissable = true,
   onClose,
 }: AppDialogProps) {
   const titleId = useId();
@@ -37,6 +46,7 @@ export default function AppDialog({
 
   return (
     <Modal.Backdrop
+      isDismissable={isDismissable}
       isKeyboardDismissDisabled={disableEscapeClose}
       isOpen={open}
       onOpenChange={(isOpen) => {
@@ -47,14 +57,27 @@ export default function AppDialog({
     >
       <Modal.Container placement="center" scroll="inside" size={sizeFromMaxWidth(maxWidth)}>
         <Modal.Dialog
+          aria-label={ariaLabel}
           aria-describedby={description ? descriptionId : undefined}
-          aria-labelledby={titleId}
-          className="finance-dialog"
+          aria-labelledby={ariaLabel ? undefined : titleId}
+          className={["finance-dialog", className].filter(Boolean).join(" ")}
         >
           <Modal.Header className="finance-dialog__header">
             <Modal.Heading className="finance-dialog__title" id={titleId}>
               {title}
             </Modal.Heading>
+            {closeLabel ? (
+              <Button
+                aria-label={closeLabel}
+                isDisabled={!isDismissable}
+                isIconOnly
+                onPress={onClose}
+                size="sm"
+                variant="tertiary"
+              >
+                <X aria-hidden="true" size={16} />
+              </Button>
+            ) : null}
           </Modal.Header>
           <Modal.Body className="finance-dialog__body">
             {description ? (

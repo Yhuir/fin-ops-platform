@@ -886,6 +886,7 @@ describe("Workbench row selection and detail drawer", () => {
       within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。 · requestId req-preview-safe"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
+    await user.click(within(errorDialog).getByRole("button", { name: "确定" }));
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
   });
 
@@ -909,6 +910,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
     expect(within(errorDialog).getByText("操作失败，请稍后重试。")).toBeInTheDocument();
     expect(screen.queryByText(/PARSER EXCEPTION SENTINEL/)).not.toBeInTheDocument();
+    await user.click(within(errorDialog).getByRole("button", { name: "确定" }));
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
   });
 
@@ -3152,8 +3154,9 @@ describe("Workbench row selection and detail drawer", () => {
       expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)).length)
         .toBeGreaterThanOrEqual(4);
     });
-    await user.click(within(exceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
-    expect((await within(exceptionDrawer).findAllByRole("button", { name: "撤回忽略" })).length)
+    const refreshedExceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(refreshedExceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
+    expect((await within(refreshedExceptionDrawer).findAllByRole("button", { name: "撤回忽略" })).length)
       .toBeGreaterThan(0);
     expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)))
       .toHaveLength(4);

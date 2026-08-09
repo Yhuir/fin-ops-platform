@@ -1176,6 +1176,7 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
     expect((await screen.findAllByText("候选已更新，请重新选择。")).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "确定" }));
     await waitFor(() => {
       expect(listRequestCount).toBe(listRequestsBeforeSubmit + 1);
       expect(submitRequestCount).toBe(1);

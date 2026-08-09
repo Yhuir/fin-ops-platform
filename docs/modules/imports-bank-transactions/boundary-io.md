@@ -36,6 +36,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
+| 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Job event | runtime worker handlers | 后台处理必须可恢复；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；活跃 processing lease 不得被并发 worker 接管。 |
@@ -60,7 +61,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。 |
+| 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。复核表按服务端分页读取银行专属字段，不一次性映射全部结果。 |
 | 来源控制证据 | 前端导入页面 | `source_control.status` 只允许 `verified/mismatch/unavailable/not_applicable`；mismatch 文件不可确认。 |
 | 错误明细 | `/imports/batches/{batch_id}/errors.csv` | 仅输出用户可读字段，不输出内部对象 ID。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
