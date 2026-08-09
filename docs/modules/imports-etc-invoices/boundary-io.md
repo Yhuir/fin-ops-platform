@@ -47,7 +47,6 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 | ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；import worker 必须用与 API 相同的对象存储环境配置构造 state store，才能跨进程重载 `minio://` / S3 archive ref |
 | Worker 完成后的 ETC 查询 | PostgreSQL state store -> reconciliation/business batch/invoice query services | 独立 worker 持久化 task、business batch 和 invoice 后，常驻 API 的只读查询入口必须先重载 PostgreSQL snapshot；不得继续返回进程启动时的旧内存状态，也不得依赖重启 API 才可见 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
-| 导入中心摘要 | `/imports` | 只读展示既有 ETC 文件/批次摘要并导航到正式 ETC 导入页；不接管 ZIP preview/confirm 状态 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
 | Existing canonical metadata delta | `ImportNormalizationService.upsert_etc_invoice(...)` -> `EtcExistingInvoiceLinkService` | 返回 `{invoice, changed}`；只有字段或 source link 真正变化的 invoice 才持久化并贡献 affected month。无 canonical match 或幂等重放必须返回空月份、零 refresh I/O |

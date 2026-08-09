@@ -20,7 +20,6 @@
 
 | 页面域 | 前端入口 | API / 后端 owner | 主要事实来源 | 刷新来源 |
 | --- | --- | --- | --- | --- |
-| 导入中心 | `web/src/pages/ImportCenterPage.tsx` | import facts routes/repository | `app.import_files`、`app.import_batches` 的分页摘要；不含 preview 明细 | route 进入、tab/分页变化、手动刷新 |
 | 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | route 进入/重进、页面查询变化、当前页写后 reconcile、手动重试 |
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、`BankDetailsCanonicalQueryService` | canonical 银行流水、分类/标签、账户映射、active Workbench pair relations | route 进入/重进、查询变化、当前页写后一次 GET、用户重试 |
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
@@ -40,7 +39,7 @@
 - `/settings` 的“访问账户权限”是唯一 ACL UI，仅固定 `YNSYLP005` 加载和保存专用 API。full-access 用户仍可保存普通设置，但无法查询/写入 ACL；read-export 用户只读；denied 用户无法进入 router。
 - APP tier 不写入 OA identity cache。账号从 ACL 删除后，同一 OA 身份的下一次 session/direct API 判断立即 denied。OA 菜单可见性由 canonical ACL 到三个专用角色的投影决定，以投影后的新 OA router/session 为验收边界，不承诺旧 DOM 无刷新消失。
 - `finops:app:view` 只定位 OA 菜单。runtime Settings command 只验证严格三角色投影并更新其 members；历史 non-dedicated menu binding cleanup 已退休，部署只读验证 exact topology，不由页面、运行时或发布链宽删。
-- 当前 19-route registry 由 `web/src/test/PageRouteHost.test.tsx`、`App.test.tsx` 和权限回归保护；App Health、操作历史、OA 申请人凭据和 data reset 的 admin-only 合同保持不变。这是本地自动化证据，不表示生产已发布。
+- 当前 18-route registry 由 `web/src/test/PageRouteHost.test.tsx`、`App.test.tsx` 和权限回归保护；App Health、操作历史、OA 申请人凭据和 data reset 的 admin-only 合同保持不变。这是本地自动化证据，不表示生产已发布。
 - 该权限收敛没有新增或改变任何页面 response shape、read model、worker、dirty scope、outbox、Redis 或 cache key。
 
 ## Global Runtime Status Plane 页面域
@@ -56,7 +55,6 @@ freshness gate。
 | domain key | route | 当前数据/任务来源 |
 | --- | --- | --- |
 | `workbench` | `/` | `workbench`、`workbench_relation`、workbench workers、workbench matching/rebuild jobs |
-| `imports_center` | `/imports` | import facts canonical 摘要、import worker 健康；无页面 read model |
 | `imports_bank_transactions` | `/imports/bank-transactions` | import worker、银行流水导入任务 |
 | `imports_invoices` | `/imports/invoices` | import worker、发票导入任务 |
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |

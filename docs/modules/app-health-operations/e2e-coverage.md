@@ -18,7 +18,7 @@
 
 ## Operation latency baseline
 
-`web/e2e/app-shell.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的系统状态操作覆盖：admin 打开 `/operations/app-health` 并等待 dashboard API/标题/请求区、点击 `刷新` 并等待 dashboard API 和后台区稳定、只读运行 19 页同快照 System Audit 并同时展示 App 内部结论与 external unknown、后续 dashboard refresh 清除旧 Audit 状态、`read_export_only` 进入 admin-only gate、forbidden session gate，以及 expired session gate。真实生产 admin dashboard、外部 control evidence、RabbitMQ/Redis/systemd 和 controlled write-operation 仍归 `APP-HEALTH-E2E-010` 的 external-risk。
+`web/e2e/app-shell.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的系统状态操作覆盖：admin 打开 `/operations/app-health` 并等待 dashboard API/标题/请求区、点击 `刷新` 并等待 dashboard API 和后台区稳定、只读运行 18 页同快照 System Audit 并同时展示 App 内部结论与 external unknown、后续 dashboard refresh 清除旧 Audit 状态、`read_export_only` 进入 admin-only gate、forbidden session gate，以及 expired session gate。真实生产 admin dashboard、外部 control evidence、RabbitMQ/Redis/systemd 和 controlled write-operation 仍归 `APP-HEALTH-E2E-010` 的 external-risk。
 
 ## 下一轮补测建议
 

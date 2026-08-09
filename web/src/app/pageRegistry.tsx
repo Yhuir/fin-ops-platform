@@ -45,10 +45,23 @@ export type SidebarItem = {
   requiresAdmin?: boolean;
 };
 
+export type SidebarDisclosureItem = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  children: SidebarItem[];
+};
+
 export type SidebarGroup = {
   title: string;
-  items: SidebarItem[];
+  items: Array<SidebarItem | SidebarDisclosureItem>;
 };
+
+export function isSidebarDisclosureItem(
+  item: SidebarItem | SidebarDisclosureItem,
+): item is SidebarDisclosureItem {
+  return "children" in item;
+}
 
 type AppPageDefinition = AppPageRoute & {
   sidebar?: {
@@ -84,7 +97,6 @@ const settingsPage = lazyPage(() => import("../pages/SettingsPage"));
 const appHealthOperationsPage = lazyPage(() => import("../pages/AppHealthOperationsPage"));
 const operationHistoryPage = lazyPage(() => import("../pages/OperationHistoryPage"));
 const importBankTransactionsPage = lazyPage(() => import("../pages/imports/ImportBankTransactionsPage"));
-const importCenterPage = lazyPage(() => import("../pages/ImportCenterPage"));
 const importInvoicesPage = lazyPage(() => import("../pages/imports/ImportInvoicesPage"));
 const importEtcInvoicesPage = lazyPage(() => import("../pages/imports/ImportEtcInvoicesPage"));
 
@@ -197,14 +209,6 @@ export const appPageDefinitions: AppPageDefinition[] = [
     sidebar: { group: "system", label: "操作历史", icon: History },
   },
   {
-    path: "/imports",
-    pageKey: "imports.center",
-    component: importCenterPage.component,
-    preload: importCenterPage.preload,
-    end: true,
-    sidebar: { group: "system", label: "导入中心", icon: Inbox },
-  },
-  {
     path: "/imports/bank-transactions",
     pageKey: "imports.bank-transactions",
     component: importBankTransactionsPage.component,
@@ -214,7 +218,6 @@ export const appPageDefinitions: AppPageDefinition[] = [
       id: "workbench-bank-import",
       label: "银行流水导入",
       icon: Inbox,
-      active: false,
     },
   },
   {
@@ -227,7 +230,6 @@ export const appPageDefinitions: AppPageDefinition[] = [
       id: "workbench-invoice-import",
       label: "发票导入",
       icon: FileText,
-      active: false,
     },
   },
   {
@@ -240,7 +242,6 @@ export const appPageDefinitions: AppPageDefinition[] = [
       id: "workbench-etc-import",
       label: "ETC发票导入",
       icon: Car,
-      active: false,
     },
   },
 ];
@@ -280,10 +281,17 @@ export const sidebarGroups: SidebarGroup[] = [
   },
   {
     title: "系统操作",
-    items: appPageDefinitions
-      .filter((definition) => definition.sidebar?.group === "system")
-      .map(sidebarItemFromDefinition)
-      .filter((item): item is SidebarItem => item !== null),
+    items: (() => {
+      const links = appPageDefinitions
+        .filter((definition) => definition.sidebar?.group === "system")
+        .map(sidebarItemFromDefinition)
+        .filter((item): item is SidebarItem => item !== null);
+      const importLinks = links.filter((item) => item.to.startsWith("/imports/"));
+      return [
+        ...links.filter((item) => !item.to.startsWith("/imports/")),
+        { id: "imports", label: "导入", icon: Inbox, children: importLinks },
+      ];
+    })(),
   },
 ];
 

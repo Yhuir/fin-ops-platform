@@ -124,43 +124,6 @@ export type ImportSourceControlEvidence = {
   mismatchFields: string[];
 };
 
-export type ImportFactFile = {
-  id: string;
-  fileName: string;
-  batchType?: ImportBatchType | null;
-  status: string;
-  rowCount: number;
-  successCount: number;
-  errorCount: number;
-  duplicateCount: number;
-  suspectedDuplicateCount: number;
-  previewBatchId?: string | null;
-  batchId?: string | null;
-  uploadedBy?: string | null;
-  uploadedAt?: string | null;
-};
-
-export type ImportFactBatch = {
-  id: string;
-  batchType: ImportBatchType;
-  sourceName: string;
-  importedBy: string;
-  rowCount: number;
-  successCount: number;
-  errorCount: number;
-  duplicateCount: number;
-  suspectedDuplicateCount: number;
-  status: string;
-  importedAt: string;
-};
-
-export type ImportFactPage<T> = {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-};
-
 export type ImportFilePreviewOverride = {
   fileName?: string;
   templateCode?: string | null;

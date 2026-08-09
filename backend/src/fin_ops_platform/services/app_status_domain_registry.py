@@ -25,12 +25,6 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         dependencies=("oa_sync",),
     ),
     AppStatusDomainDefinition(
-        key="imports_center",
-        label="导入中心",
-        route="/imports",
-        worker_instances=("import",),
-    ),
-    AppStatusDomainDefinition(
         key="imports_bank_transactions",
         label="银行流水导入",
         route="/imports/bank-transactions",

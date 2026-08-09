@@ -23,7 +23,6 @@ from fin_ops_platform.services.runtime_worker_registry import registration_by_in
 
 FRONTEND_ROUTES = {
     "/",
-    "/imports",
     "/imports/bank-transactions",
     "/imports/invoices",
     "/imports/etc-invoices",

@@ -34,13 +34,13 @@ class PageAuditRegistryTests(unittest.TestCase):
 
         self.assertEqual(len(frontend_page_keys), len(set(frontend_page_keys)))
         self.assertEqual(set(PAGE_AUDIT_REGISTRY), set(frontend_page_keys))
-        self.assertEqual(len(PAGE_AUDIT_REGISTRY), 19)
+        self.assertEqual(len(PAGE_AUDIT_REGISTRY), 18)
 
     def test_ready_and_unavailable_pages_are_explicit_and_fail_closed(self) -> None:
         ready = [item for item in PAGE_AUDIT_REGISTRY.values() if item.availability == "ready"]
         unavailable = [item for item in PAGE_AUDIT_REGISTRY.values() if item.availability == "unavailable"]
 
-        self.assertEqual(len(ready), 19)
+        self.assertEqual(len(ready), 18)
         self.assertEqual(len(unavailable), 0)
         self.assertEqual(PAGE_AUDIT_REGISTRY["tax-offset"].executor, "tax_offset")
         self.assertFalse(PAGE_AUDIT_REGISTRY["tax-offset"].relation_proof_required)
@@ -64,7 +64,6 @@ class PageAuditRegistryTests(unittest.TestCase):
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].external_evidence_keys, ())
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].executor, "operation_history")
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].external_evidence_keys, ())
-        self.assertEqual(PAGE_AUDIT_REGISTRY["imports.center"].executor, "imports_center")
         direct_page_keys = {
             "cost-statistics",
             "bank-details",

@@ -47,7 +47,6 @@
 | `settings` | 设置 | 页面模块 | `/settings` | `settings/README.md` |
 | `app-health-operations` | 系统状态 | 页面模块 | `/operations/app-health` | `app-health-operations/README.md` |
 | `operation-history` | 操作历史 | 页面模块 | `/operations/history` | `operation-history/README.md` |
-| `import-center` | 导入中心 | 页面模块 | `/imports` | `import-center/README.md` |
 | `imports-bank-transactions` | 银行流水导入 | 页面模块 | `/imports/bank-transactions` | `imports-bank-transactions/README.md` |
 | `imports-invoices` | 发票导入 | 页面模块 | `/imports/invoices` | `imports-invoices/README.md` |
 | `imports-etc-invoices` | ETC发票导入 | 页面模块 | `/imports/etc-invoices` | `imports-etc-invoices/README.md` |

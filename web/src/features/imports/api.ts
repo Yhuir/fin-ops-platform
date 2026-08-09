@@ -5,9 +5,6 @@ import type {
   ImportPreviewDuplicateGroup,
   ImportSessionPayload,
   ImportTemplate,
-  ImportFactBatch,
-  ImportFactFile,
-  ImportFactPage,
   MatchingRunSummary,
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
@@ -484,58 +481,4 @@ export async function fetchImportTemplates(): Promise<ImportTemplate[]> {
     method: "GET",
   });
   return mapImportTemplates(payload);
-}
-
-type ApiImportFactPage<T> = {
-  items: T[];
-  pagination: { page: number; page_size: number; total: number };
-};
-
-function mapFactPage<TApi, T>(payload: ApiImportFactPage<TApi>, mapItem: (item: TApi) => T): ImportFactPage<T> {
-  return {
-    items: payload.items.map(mapItem),
-    page: payload.pagination.page,
-    pageSize: payload.pagination.page_size,
-    total: payload.pagination.total,
-  };
-}
-
-export async function fetchImportFactFiles(page = 1, pageSize = 50): Promise<ImportFactPage<ImportFactFile>> {
-  const payload = await requestJson<ApiImportFactPage<Record<string, unknown>>>(
-    `/api/import-facts/files?page=${page}&page_size=${pageSize}`,
-  );
-  return mapFactPage(payload, (item) => ({
-    id: stringOrEmpty(item.id),
-    fileName: stringOrEmpty(item.file_name),
-    batchType: (item.batch_type as ImportBatchType | null | undefined) ?? null,
-    status: stringOrEmpty(item.status),
-    rowCount: numberOrZero(item.row_count),
-    successCount: numberOrZero(item.success_count),
-    errorCount: numberOrZero(item.error_count),
-    duplicateCount: numberOrZero(item.duplicate_count),
-    suspectedDuplicateCount: numberOrZero(item.suspected_duplicate_count),
-    previewBatchId: item.preview_batch_id ? stringOrEmpty(item.preview_batch_id) : null,
-    batchId: item.batch_id ? stringOrEmpty(item.batch_id) : null,
-    uploadedBy: item.uploaded_by ? stringOrEmpty(item.uploaded_by) : null,
-    uploadedAt: item.uploaded_at ? stringOrEmpty(item.uploaded_at) : null,
-  }));
-}
-
-export async function fetchImportFactBatches(page = 1, pageSize = 50): Promise<ImportFactPage<ImportFactBatch>> {
-  const payload = await requestJson<ApiImportFactPage<Record<string, unknown>>>(
-    `/api/import-facts/batches?page=${page}&page_size=${pageSize}`,
-  );
-  return mapFactPage(payload, (item) => ({
-    id: stringOrEmpty(item.id),
-    batchType: item.batch_type as ImportBatchType,
-    sourceName: stringOrEmpty(item.source_name),
-    importedBy: stringOrEmpty(item.imported_by),
-    rowCount: numberOrZero(item.row_count),
-    successCount: numberOrZero(item.success_count),
-    errorCount: numberOrZero(item.error_count),
-    duplicateCount: numberOrZero(item.duplicate_count),
-    suspectedDuplicateCount: numberOrZero(item.suspected_duplicate_count),
-    status: stringOrEmpty(item.status),
-    importedAt: stringOrEmpty(item.imported_at),
-  }));
 }

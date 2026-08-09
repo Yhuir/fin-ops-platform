@@ -1082,7 +1082,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v27")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v28")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
         self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
         self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
@@ -1245,7 +1245,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["page_key"], "app-health-operations")
         self.assertEqual(payload["mode"], "app-health-system-audit")
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v27")
+        self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v28")
         self.assertEqual(payload["external_evidence"]["end_to_end_source_truth"], "unproven")
 
     def test_operations_page_audit_returns_unified_workbench_proof(self) -> None:

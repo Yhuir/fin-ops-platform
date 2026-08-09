@@ -19,9 +19,9 @@
 - `web/src/app/App.tsx`：provider 组合、BrowserRouter、shell layout、compact sidebar、本地 sidebar 展开状态。
 - `web/src/contexts/GlobalOperationOverlayContext.tsx`：写操作级全屏 overlay provider；页面通过 hook 包裹 mutating action。
 - `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
-- `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`。
+- `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`；旧 `/imports` 精确入口无请求重定向到银行流水导入。
 - `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
-- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、桌面可见 paper 在 `232px/72px` 间平滑展开收起、收缩态仅保留居中 toggle、hover/focus/touch preload。
+- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、HeroUI Disclosure 导入分组、桌面可见 paper 在 `232px/72px` 间平滑展开收起、收缩态仅保留居中 toggle、hover/focus/touch preload。
 - `web/src/components/shell/AppSidebarAccount.tsx`：只消费现有 SessionContext 的当前 OA 用户入口与身份详情弹层，不发起独立请求。
 - `web/src/components/shell/AppStatusIndicator.tsx`：静态品牌图标、静态运行状态点和全局运行状态弹层入口。
 - `web/src/components/shell/sidebarItems.ts`：只重导出 `pageRegistry` 的 `sidebarGroups`，不能维护第二份导航事实。
@@ -43,7 +43,7 @@
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
 - 侧栏账号区只消费 SessionContext 已归一化的 `displayName/username/deptName`，不加载 OA 头像、不重取 session、不提供业务写操作。
 - `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
-- import pages 是独立 route，但其侧栏入口设置 `active: false`，避免进入导入页时误把导入入口高亮为当前业务页面。
+- 三个 import page 是独立 route，并从 page registry 组成单层 HeroUI Disclosure“导入”分组；父项不发业务请求，当前子项按 route 高亮并自动展开。
 
 ## 影响面
 
@@ -51,7 +51,7 @@
 | --- | --- |
 | `pageRegistry.tsx` 新增/删除/改 route | 页面入口、侧栏分组、App Status domain registry、测试里 route/sidebar 数量、未知路由 redirect |
 | `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、旧页面 API 请求和 toast、lazy fallback、浏览器生命周期零业务 I/O |
-| `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入页 active 行为 |
+| `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入分组展开与子路由 active 行为 |
 | `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
 | `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
 | `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
@@ -74,7 +74,7 @@
 
 ## ACL 证据边界
 
-- 本地自动化由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和权限矩阵保护 admin/full/read/denied、direct route、19-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
+- 本地自动化由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和权限矩阵保护 admin/full/read/denied、direct route、18-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
 - backend direct API denial 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 和 `tests/test_route_access_policy.py` 独立证明，不能用 sidebar/menu 隐藏替代。
 - 生产 fresh token、fresh `/system/menu/getRouters`、三专用 role exact set 与 finally restore 只接受 root-owned post-deploy artifact/hash；当前文档只记录已实现 release-prep 合同，不声称生产已部署或证据已采集。
 

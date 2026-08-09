@@ -369,13 +369,6 @@ class PostgresOperationsAuditRepository:
                 example_limit=sample_limit,
                 audit_snapshot=audit_snapshot,
             )
-        elif registration.executor == "imports_center":
-            payload = audit_import_center_page(
-                self._connection,
-                tenant_id=tenant_id,
-                example_limit=sample_limit,
-                audit_snapshot=audit_snapshot,
-            )
         elif registration.executor == "bank_transaction_import":
             payload = audit_bank_transaction_import_page(
                 self._connection,
@@ -433,78 +426,6 @@ class PostgresOperationsAuditRepository:
             "audit_contract": audit_contract,
         }
 
-
-def audit_import_center_page(
-    connection: Any,
-    *,
-    tenant_id: str = "default",
-    example_limit: int = 50,
-    audit_snapshot: AuditSnapshot | None = None,
-) -> dict[str, Any]:
-    with use_audit_snapshot(connection, audit_snapshot) as snapshot:
-        reports = (
-            audit_bank_transaction_import_page(
-                connection,
-                tenant_id=tenant_id,
-                example_limit=example_limit,
-                audit_snapshot=snapshot,
-            ),
-            audit_invoice_import_page(
-                connection,
-                tenant_id=tenant_id,
-                example_limit=example_limit,
-                audit_snapshot=snapshot,
-            ),
-            audit_etc_import_page(
-                connection,
-                tenant_id=tenant_id,
-                example_limit=example_limit,
-                audit_snapshot=snapshot,
-            ),
-        )
-        integrity = "issues_found" if any(report["audit_status"]["integrity"] != "pass" for report in reports) else "pass"
-        freshness = "not_fresh" if any(report["audit_status"]["freshness"] != "fresh" for report in reports) else "fresh"
-        queue = "backlog" if any(report["audit_status"]["queue"] != "drained" for report in reports) else "drained"
-        issues = [issue for report in reports for issue in report.get("issues", [])]
-        return {
-            "mode": "import-center-page-audit",
-            "tenant_id": tenant_id,
-            "overall_status": "issues_found" if any(report["overall_status"] != "pass" for report in reports) else "pass",
-            "audit_status": {"integrity": integrity, "freshness": freshness, "queue": queue},
-            "summary": {
-                "component_count": len(reports),
-                "blocking_component_count": sum(report["overall_status"] != "pass" for report in reports),
-                "issue_sample_count": len(issues),
-            },
-            "issues": issues[: max(int(example_limit or 50), 1)],
-            "audit_contract": {
-                "source_tables": [
-                    "app.import_files",
-                    "app.file_objects",
-                    "app.import_batches",
-                    "app.import_batch_rows",
-                    "app.etc_import_sessions",
-                    "app.etc_import_session_files",
-                    "job.import_jobs",
-                    "job.outbox_events",
-                ],
-                "read_model_tables": [],
-                "canonical_expected_set": "all registered bank, invoice, and ETC import file/session/batch facts",
-                "key_display_fields": ["file, batch type, status, row counts, operator, and time"],
-                "relation_edge_equality": "delegated to the three canonical import page proofs in the same snapshot",
-                "proof_checks": ["bank_import_page_proof", "invoice_import_page_proof", "etc_import_page_proof"],
-                "snapshot_consistency": snapshot.consistency,
-                "database_snapshot": snapshot.database_snapshot,
-                "external_source_boundary": "external bank, invoice, and ETC source completeness before upload",
-                "downstream_impact_targets": [],
-                "pass_condition": (
-                    "all three import page proofs pass integrity, freshness, and queue checks in one read-only snapshot"
-                ),
-                "guarantee_boundary": "the center is a read-only summary and does not own a second import fact model",
-                "write_policy": "read_only",
-            },
-            "generated_at": datetime.now(UTC).isoformat(),
-        }
 
 def _isoformat(value: Any) -> str:
     if value is None:

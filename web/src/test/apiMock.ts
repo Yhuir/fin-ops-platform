@@ -7298,48 +7298,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       latestImportSession = buildImportPreviewPayload(fileNames, overrides);
       return { body: latestImportSession };
     },
-    "/api/import-facts/files": () => ({
-      body: {
-        items: [
-          {
-            id: "file-1",
-            file_name: "建行流水.xlsx",
-            batch_type: "bank_transaction",
-            status: "confirmed",
-            row_count: 24,
-            success_count: 23,
-            error_count: 1,
-            duplicate_count: 0,
-            suspected_duplicate_count: 0,
-            preview_batch_id: "batch-1",
-            batch_id: "batch-1",
-            uploaded_by: "财务用户",
-            uploaded_at: "2026-08-09T10:00:00+08:00",
-          },
-        ],
-        pagination: { page: 1, page_size: 50, total: 1 },
-      },
-    }),
-    "/api/import-facts/batches": () => ({
-      body: {
-        items: [
-          {
-            id: "batch-1",
-            batch_type: "bank_transaction",
-            source_name: "建行流水.xlsx",
-            imported_by: "财务用户",
-            row_count: 24,
-            success_count: 23,
-            error_count: 1,
-            duplicate_count: 0,
-            suspected_duplicate_count: 0,
-            status: "completed",
-            imported_at: "2026-08-09T10:00:00+08:00",
-          },
-        ],
-        pagination: { page: 1, page_size: 50, total: 1 },
-      },
-    }),
     "/imports/files/confirm": ({ jsonBody }) => {
       if (options.importConfirmPreviewStale) {
         return {

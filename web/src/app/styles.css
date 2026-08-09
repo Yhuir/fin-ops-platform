@@ -4946,16 +4946,6 @@ textarea {
   gap: 12px;
 }
 
-.import-center-page {
-  min-width: 0;
-}
-
-.import-center-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .operation-history-filters {
   display: grid;
   grid-template-columns: minmax(220px, 1.8fr) repeat(2, minmax(150px, 1fr)) repeat(2, 150px) auto;
@@ -11621,6 +11611,52 @@ body.workbench-focus-mode .global-header {
   width: 34px;
 }
 
+.app-sidebar-disclosure,
+.app-sidebar-disclosure-heading,
+.app-sidebar-disclosure-trigger {
+  width: 100%;
+}
+
+.app-sidebar-disclosure-heading {
+  margin: 0;
+}
+
+.app-sidebar-disclosure-trigger {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.app-sidebar-disclosure-indicator {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin-left: 4px;
+}
+
+.app-sidebar-disclosure [data-slot="disclosure-body"] {
+  padding: 0;
+}
+
+.app-sidebar-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 3px 0 0;
+  padding: 0 0 0 26px;
+  list-style: none;
+}
+
+.app-sidebar-subitem,
+.app-sidebar-sublink {
+  min-height: 32px;
+}
+
+.app-sidebar-sublink {
+  font-size: 13px;
+}
+
 .app-sidebar-link {
   display: flex;
   min-width: 0;
@@ -11715,6 +11751,13 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-dialog .app-sidebar-item,
 .app-sidebar-dialog .app-sidebar-link {
   min-height: 44px;
+}
+
+.app-sidebar-content.collapsed .app-sidebar-disclosure-item,
+.app-sidebar-content.collapsed .app-sidebar-disclosure,
+.app-sidebar-content.collapsed .app-sidebar-disclosure-heading,
+.app-sidebar-content.collapsed .app-sidebar-disclosure-trigger {
+  width: 34px;
 }
 
 .app-sidebar-account-footer {

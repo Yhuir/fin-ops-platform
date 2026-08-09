@@ -394,7 +394,6 @@ describe("Tax offset workbench", () => {
     expect(modal).toBeInTheDocument();
     expectProjectDialogContract(modal);
     expect(window.location.pathname).toBe("/tax-offset");
-    expect(screen.queryByRole("heading", { name: "导入中心" })).not.toBeInTheDocument();
 
     const certifiedFile = new File(["mock-xlsx"], "2026年3月 进项认证结果  用途确认信息.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

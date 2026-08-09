@@ -292,7 +292,7 @@ describe("AppSidebar shell contract", () => {
     }
   });
 
-  test("derives active route state from the current path while import shortcuts stay inactive", () => {
+  test("expands the import group and marks the current import page active", () => {
     const { unmount } = renderSidebarAt("/bank-details/transactions");
 
     expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("aria-current", "page");
@@ -300,7 +300,33 @@ describe("AppSidebar shell contract", () => {
     unmount();
     renderSidebarAt("/imports/bank-transactions");
 
-    expect(screen.getByRole("link", { name: "银行流水导入" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("opens the import group without preloading every child route", () => {
+    const importGroup = sidebarGroups
+      .find((group) => group.title === "系统操作")
+      ?.items.find((item) => item.label === "导入");
+    expect(importGroup && "children" in importGroup).toBe(true);
+    const children = importGroup && "children" in importGroup ? importGroup.children : [];
+    const originals = children.map((item) => item.preload);
+    const preloads = children.map(() => vi.fn(() => Promise.resolve()));
+    children.forEach((item, index) => {
+      item.preload = preloads[index];
+    });
+
+    try {
+      renderSidebarAt("/cost-statistics");
+      fireEvent.click(screen.getByRole("button", { name: "导入" }));
+
+      expect(screen.getByRole("link", { name: "银行流水导入" })).toBeInTheDocument();
+      expect(preloads.every((preload) => preload.mock.calls.length === 0)).toBe(true);
+    } finally {
+      children.forEach((item, index) => {
+        item.preload = originals[index];
+      });
+    }
   });
 
   test("closes the compact drawer after selecting a navigation item", () => {

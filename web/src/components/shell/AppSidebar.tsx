@@ -1,11 +1,12 @@
-import { Drawer, Separator } from "@heroui/react";
+import { Disclosure, Drawer, Separator } from "@heroui/react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import AppSidebarAccount from "./AppSidebarAccount";
 import AppStatusIndicator from "./AppStatusIndicator";
-import { sidebarGroups } from "./sidebarItems";
+import { isSidebarDisclosureItem, sidebarGroups, type SidebarItem } from "./sidebarItems";
 
 type AppSidebarProps = {
   embedded: boolean;
@@ -27,6 +28,49 @@ function isSidebarItemActive(pathname: string, search: string, to: string, end?:
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`);
 }
 
+function SidebarLink({
+  item,
+  pathname,
+  search,
+  showExpandedContent,
+  nested = false,
+  onSelect,
+}: {
+  item: SidebarItem;
+  pathname: string;
+  search: string;
+  showExpandedContent: boolean;
+  nested?: boolean;
+  onSelect?: () => void;
+}) {
+  const Icon = item.icon;
+  const active = item.active === false ? false : isSidebarItemActive(pathname, search, item.to, item.end);
+  const prefetchRoute = () => {
+    item.preload().catch(() => undefined);
+  };
+
+  return (
+    <Link
+      to={item.to}
+      aria-current={active ? "page" : undefined}
+      aria-label={item.label}
+      className={`app-sidebar-link${nested ? " app-sidebar-sublink" : ""}${active ? " active" : ""}`}
+      title={showExpandedContent ? undefined : item.label}
+      onClick={onSelect}
+      onFocus={prefetchRoute}
+      onPointerEnter={prefetchRoute}
+      onTouchStart={prefetchRoute}
+    >
+      <span className="app-sidebar-link-icon">
+        <Icon aria-hidden="true" size={16} strokeWidth={2} />
+      </span>
+      <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
+        <span className="app-sidebar-link-label-text">{item.label}</span>
+      </span>
+    </Link>
+  );
+}
+
 export default function AppSidebar({
   isCompact,
   mobileOpen,
@@ -37,6 +81,7 @@ export default function AppSidebar({
   const location = useLocation();
   const { canAdminAccess } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
+  const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports/"));
 
   const drawerContent = (
     <div className={`app-sidebar-content${showExpandedContent ? " expanded" : " collapsed"}`}>
@@ -79,36 +124,75 @@ export default function AppSidebar({
               {group.title}
             </h2>
             <ul className="app-sidebar-list" aria-label={group.title}>
-              {group.items.filter((item) => !item.requiresAdmin || canAdminAccess).map((item) => {
-                const Icon = item.icon;
-                const active = item.active === false ? false : isSidebarItemActive(location.pathname, location.search, item.to, item.end);
-                const prefetchRoute = () => {
-                  item.preload().catch(() => undefined);
-                };
-                const link = (
-                  <Link
-                    to={item.to}
-                    aria-current={active ? "page" : undefined}
-                    aria-label={item.label}
-                    className={`app-sidebar-link${active ? " active" : ""}`}
-                    title={showExpandedContent ? undefined : item.label}
-                    onClick={isCompact ? onCloseMobile : undefined}
-                    onFocus={prefetchRoute}
-                    onPointerEnter={prefetchRoute}
-                    onTouchStart={prefetchRoute}
-                  >
-                    <span className="app-sidebar-link-icon">
-                      <Icon aria-hidden="true" size={16} strokeWidth={2} />
-                    </span>
-                    <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
-                      <span className="app-sidebar-link-label-text">{item.label}</span>
-                    </span>
-                  </Link>
-                );
-
+              {group.items.map((item) => {
+                if (isSidebarDisclosureItem(item)) {
+                  const visibleChildren = item.children.filter((child) => !child.requiresAdmin || canAdminAccess);
+                  const routeActive = visibleChildren.some((child) => (
+                    isSidebarItemActive(location.pathname, location.search, child.to, child.end)
+                  ));
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.id} className="app-sidebar-item app-sidebar-disclosure-item">
+                      <Disclosure
+                        className="app-sidebar-disclosure"
+                        isExpanded={showExpandedContent && (importsExpanded || routeActive)}
+                        onExpandedChange={(isExpanded) => {
+                          setImportsExpanded(isExpanded);
+                          if (isExpanded && !showExpandedContent) {
+                            onToggleExpanded();
+                          }
+                        }}
+                      >
+                        <Disclosure.Heading className="app-sidebar-disclosure-heading">
+                          <Disclosure.Trigger
+                            aria-label={item.label}
+                            className={`app-sidebar-link app-sidebar-disclosure-trigger${routeActive ? " active" : ""}`}
+                          >
+                            <span className="app-sidebar-link-icon">
+                              <Icon aria-hidden="true" size={16} strokeWidth={2} />
+                            </span>
+                            <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
+                              <span className="app-sidebar-link-label-text">{item.label}</span>
+                            </span>
+                            {showExpandedContent ? (
+                              <Disclosure.Indicator className="app-sidebar-disclosure-indicator" />
+                            ) : null}
+                          </Disclosure.Trigger>
+                        </Disclosure.Heading>
+                        <Disclosure.Content className="app-sidebar-disclosure-content">
+                          <Disclosure.Body className="app-sidebar-disclosure-body">
+                            <ul className="app-sidebar-sublist" aria-label={`${item.label}子菜单`}>
+                              {visibleChildren.map((child) => (
+                                <li key={child.id ?? child.to} className="app-sidebar-item app-sidebar-subitem">
+                                  <SidebarLink
+                                    item={child}
+                                    pathname={location.pathname}
+                                    search={location.search}
+                                    showExpandedContent={showExpandedContent}
+                                    nested
+                                    onSelect={isCompact ? onCloseMobile : undefined}
+                                  />
+                                </li>
+                              ))}
+                            </ul>
+                          </Disclosure.Body>
+                        </Disclosure.Content>
+                      </Disclosure>
+                    </li>
+                  );
+                }
+                if (item.requiresAdmin && !canAdminAccess) {
+                  return null;
+                }
                 return (
                   <li key={item.id ?? item.to} className="app-sidebar-item">
-                    {link}
+                    <SidebarLink
+                      item={item}
+                      pathname={location.pathname}
+                      search={location.search}
+                      showExpandedContent={showExpandedContent}
+                      onSelect={isCompact ? onCloseMobile : undefined}
+                    />
                   </li>
                 );
               })}

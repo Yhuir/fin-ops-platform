@@ -10,7 +10,6 @@ PageAuditExecutor = Literal[
     "tax_offset",
     "etc_tickets",
     "settings",
-    "imports_center",
     "bank_transaction_import",
     "invoice_import",
     "etc_import",
@@ -21,7 +20,7 @@ PageAuditExecutor = Literal[
 PageAuditAvailability = Literal["ready", "unavailable"]
 ExternalEvidenceDomain = Literal["bank", "oa", "invoice", "etc"]
 
-PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v27"
+PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v28"
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,15 +227,6 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         relation_proof_required=False,
         external_source_boundary="not_applicable; audit events are App-internal durable facts",
         external_evidence_keys=(),
-    ),
-    "imports.center": _ready(
-        "imports.center",
-        "导入中心",
-        "imports_center",
-        (),
-        relation_proof_required=False,
-        external_source_boundary="original bank, invoice, and ETC file evidence before App registration",
-        external_evidence_keys=("bank", "invoice", "etc"),
     ),
     "imports.bank-transactions": _ready(
         "imports.bank-transactions",

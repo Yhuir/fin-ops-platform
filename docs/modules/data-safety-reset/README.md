@@ -61,7 +61,7 @@
 - Read model/cache：重置后不能把旧 read model 或 Redis cache 显示为 fresh。
 - Worker/job：后台 job 必须可恢复进度、可查询 active、失败进入 App Health attention。
 - 派生生命周期：`settings_reset_completed` 必须 fan-out 到受影响 read model/worker。
-- 旧页面：银行明细、关联台、待找发票、税金、进项使用、销项收款、OA 待付款、成本统计、往来款、ETC、导入中心和 App Health 都可能被影响。
+- 页面：银行明细、关联台、待找发票、税金、进项使用、销项收款、OA 待付款、成本统计、往来款、ETC、三个导入流程和 App Health 都可能被影响。
 
 ## 维护触发器
 

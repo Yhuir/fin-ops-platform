@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：App shell 只负责页面注册、路由、导航、session/runtime context 和全局操作状态，不承载业务页面逻辑。
 - 当前缺口：页面业务 freshness 由各模块自己的 query owner 实现；shell 不提供跨页刷新信号。
-- 旧代码删除状态：PageRouteHost 的 focus/visibility/pageshow activation listener、`useActivePageEvent` 与业务 domain-event 协调已删除。
+- 旧代码删除状态：PageRouteHost 的 focus/visibility/pageshow activation listener、`useActivePageEvent`、业务 domain-event 协调和独立导入汇总页均已删除。
 
 ## 职责边界
 
@@ -43,7 +43,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Route rendering | `PageRouteHost` | 根据 registry 渲染页面 |
-| Navigation | sidebar/topbar | 不硬编码业务查询 |
+| Navigation | sidebar/topbar | 不硬编码业务查询；“导入”父项只展开 registry 派生的三个子路由，不产生 API I/O |
+| Legacy import route | `router.tsx` | 精确 `/imports` 使用 replace 重定向到 `/imports/bank-transactions`，不挂载旧页面 |
 | Current OA identity | sidebar account footer | 只展示 `displayName/username/deptName`；弹层开关不产生 API、图片或业务 I/O |
 | Global runtime status entry | static local brand mark | 桌面展开态和 compact drawer 展示静态状态点并复用既有 App Status 弹层；桌面收缩态隐藏且退出交互；不使用无限动画 |
 | Runtime context | pages/components | 提供 `{pageKey, active, activationGeneration}` 兼容 shape；load 由页面 mount/query/retry owner 触发，shell 不改变 generation |
@@ -76,7 +77,7 @@
 ## 测试与验证
 
 - `web/src/test/App.test.tsx`
-- `web/src/test/PageRouteHost.test.tsx`（19 route owner 注册、route mount 单次加载、focus/visibility/BFCache 零业务 reload、旧刷新模块静态删除守卫）
+- `web/src/test/PageRouteHost.test.tsx`（18 route owner 注册、route mount 单次加载、focus/visibility/BFCache 零业务 reload、旧刷新模块静态删除守卫）
 - `web/src/test/AppSidebar.test.tsx`
 - `web/e2e/app-shell.spec.ts`
 - `web/e2e/permissions-role-matrix.spec.ts`
@@ -85,4 +86,5 @@
 ## 当前缺口和删除条件
 
 - 新增页面必须同步 page registry、docs/modules、权限和 e2e routing smoke。
+- 导入分组只能从三个正式 import route 派生；不得恢复第二份子路由清单或独立导入汇总页。
 - ACL/menu 发布验收必须同时有 fresh APP session/direct API 与 fresh OA router/shell 两类证据；任一缺失都不能由另一类推断。

@@ -14,7 +14,7 @@ import {
 import { vi } from "vitest";
 
 import App from "../app/App";
-import { sidebarGroups } from "../components/shell/sidebarItems";
+import { isSidebarDisclosureItem, sidebarGroups } from "../components/shell/sidebarItems";
 import { installMockApiFetch } from "./apiMock";
 
 const WORKBENCH_RENDER_TIMEOUT = 3000;
@@ -94,7 +94,9 @@ describe("Finance operations shell", () => {
   });
 
   test("assigns sidebar icons from each page's business facts", () => {
-    const sidebarItems = sidebarGroups.flatMap((group) => group.items);
+    const sidebarItems = sidebarGroups.flatMap((group) => group.items.flatMap((item) => (
+      isSidebarDisclosureItem(item) ? [item, ...item.children] : [item]
+    )));
     const iconByLabel = new Map(sidebarItems.map((item) => [item.label, item.icon]));
 
     expect(iconByLabel.get("待找发票")).toBe(FileQuestion);
@@ -139,9 +141,8 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "年月选择" })).not.toBeInTheDocument();
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
+    await user.click(screen.getByRole("button", { name: "导入" }));
     expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("href", "/imports/bank-transactions");
     expect(screen.getByRole("link", { name: "发票导入" })).toHaveAttribute("href", "/imports/invoices");
     expect(screen.getByRole("link", { name: "ETC发票导入" })).toHaveAttribute("href", "/imports/etc-invoices");
@@ -153,9 +154,8 @@ describe("Finance operations shell", () => {
     ).toBeInTheDocument();
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
+    expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", "2026");
     expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute("aria-valuenow", "3");
@@ -174,7 +174,7 @@ describe("Finance operations shell", () => {
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
+    expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "成本统计" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -314,7 +314,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
+    expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
   });
 
   test("navigates to the standalone bank transaction import page from the shell sidebar", async () => {
@@ -326,10 +326,22 @@ describe("Finance operations shell", () => {
 
     expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "导入" }));
     await user.click(screen.getByRole("link", { name: "银行流水导入" }));
 
     expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/imports/bank-transactions");
     expect(window.location.search).toBe("");
+  });
+
+  test("redirects the retired import summary route without mounting a second import page", async () => {
+    window.history.pushState({}, "", "/imports");
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/imports/bank-transactions");
+    expect(screen.queryByRole("heading", { name: "导入中心" })).not.toBeInTheDocument();
   });
 });

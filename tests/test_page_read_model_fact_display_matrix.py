@@ -67,7 +67,6 @@ DIRECT_CANONICAL_PAGE_KEYS = {
     "pending-invoices",
     "input-invoice-usage",
     "output-invoice-collections",
-    "imports.center",
     "imports.bank-transactions",
     "imports.invoices",
     "imports.etc-invoices",

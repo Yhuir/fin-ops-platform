@@ -125,6 +125,6 @@ PYTHONPATH=backend/src python3 -m unittest \
 
 ## 2026-07-25 Phase 27 页面 load 回归
 
-- `web/src/test/PageRouteHost.test.tsx` 锁定全部 19 个 route owner、route mount 单次加载，以及 focus、hidden→visible 与 BFCache 恢复零业务 reload。
+- `web/src/test/PageRouteHost.test.tsx` 锁定全部 18 个 route owner、route mount 单次加载，以及 focus、hidden→visible 与 BFCache 恢复零业务 reload。
 - 静态 source guard 禁止受影响业务页恢复 `domainEvents`、`useActiveFinanceDomainEvent`、银行标签 window event 或业务 `BroadcastChannel`。
 - 排序、分页、筛选只属于当前页面查询状态；它们可以重跑当前页查询，但不能触发跨页面 rebuild。
