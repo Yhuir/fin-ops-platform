@@ -171,18 +171,25 @@ class FakeRuntimeQueueRepository:
 
 class FakeOperationHistoryRepository:
     EVENT_ID = "10000000-0000-4000-8000-000000000001"
+    OPERATION_KEY = "request:request-1"
 
     def __init__(self) -> None:
         self.list_calls: list[dict[str, object]] = []
         self.detail_calls: list[str] = []
 
-    def list_operation_events(self, **kwargs: object) -> list[dict[str, object]]:
+    def list_logical_operations(self, **kwargs: object) -> list[dict[str, object]]:
         self.list_calls.append(dict(kwargs))
-        return [self._event()]
+        return [{**self._event(), "operation_key": self.OPERATION_KEY, "started_at": self._event()["occurred_at"]}]
 
-    def get_operation_event(self, event_id: str) -> dict[str, object] | None:
-        self.detail_calls.append(event_id)
-        return self._event() if event_id == self.EVENT_ID else None
+    def list_operation_actors(self) -> list[dict[str, object]]:
+        return [{"actor_id": "005", "actor_name": "权限管理员", "actor_account": "YNSYLP005"}]
+
+    def list_operation_events_for_key(self, operation_key: str) -> list[dict[str, object]]:
+        self.detail_calls.append(operation_key)
+        return [self._event()] if operation_key == self.OPERATION_KEY else []
+
+    def list_workbench_relation_history_for_request(self, _request_id: str) -> list[dict[str, object]]:
+        return []
 
     @classmethod
     def _event(cls) -> dict[str, object]:
@@ -191,8 +198,9 @@ class FakeOperationHistoryRepository:
             "event_type": "operation.completed",
             "actor_id": "005",
             "actor_name": "权限管理员",
+            "actor_account": "YNSYLP005",
             "action": "POST /api/workbench/actions/confirm-link",
-            "page_key": "workbench",
+            "page_key": "reconciliation-workbench",
             "operation_location": "/api/workbench/actions/confirm-link",
             "object_type": "http_request",
             "object_id": "request-1",
@@ -820,12 +828,13 @@ class AppHealthApiTests(unittest.TestCase):
 
             list_response = app.handle_request(
                 "GET",
-                "/api/operations/audit-events?limit=25&search=%E5%85%B3%E8%81%94",
+                "/api/operations/history?limit=25&search=%E5%85%B3%E8%81%94",
             )
             detail_response = app.handle_request(
                 "GET",
-                f"/api/operations/audit-events/{repository.EVENT_ID}",
+                f"/api/operations/history/{repository.OPERATION_KEY}",
             )
+            actors_response = app.handle_request("GET", "/api/operations/history/actors")
 
         list_payload = json.loads(list_response.body)
         detail_payload = json.loads(detail_response.body)
@@ -834,7 +843,8 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(repository.list_calls[0]["limit"], 26)
         self.assertEqual(repository.list_calls[0]["search"], "关联")
         self.assertEqual(detail_response.status_code, 200)
-        self.assertEqual(detail_payload["event"]["id"], repository.EVENT_ID)
+        self.assertEqual(detail_payload["operation"]["operation_key"], repository.OPERATION_KEY)
+        self.assertEqual(json.loads(actors_response.body)["rows"][0]["actor_account"], "YNSYLP005")
 
     def test_operation_history_rejects_non_admin_without_querying_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -851,7 +861,7 @@ class AppHealthApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/operations/audit-events",
+                "/api/operations/history",
                 headers={"Authorization": "Bearer full-token"},
             )
 
@@ -875,6 +885,10 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(repository.events[0]["outcome"], "pending")
         self.assertEqual(repository.events[1]["outcome"], "failed")
         self.assertEqual(repository.events[0]["page_key"], "bank-details")
+        self.assertEqual(repository.events[0]["actor_name"], repository.events[1]["actor_name"])
+        self.assertEqual(repository.events[0]["actor_account"], repository.events[1]["actor_account"])
+        self.assertTrue(repository.events[0]["actor_name"])
+        self.assertTrue(repository.events[0]["actor_account"])
 
     def test_mutation_audit_normalizes_operation_routes_to_page_keys(self) -> None:
         self.assertEqual(

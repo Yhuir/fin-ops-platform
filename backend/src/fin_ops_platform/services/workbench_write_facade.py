@@ -562,16 +562,17 @@ class WorkbenchWriteFacade:
             selected_rows=selected_rows,
             amount_check=amount_check,
         )
+        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         operation_projection = self._confirm_link_operation_projection(
             case_id=resolved_case_id,
             row_ids=row_ids,
             row_types=row_types,
             selected_rows=selected_rows,
+            before_relations=before_relations,
             month=month,
             amount_check=amount_check,
             paired_policy_metadata=paired_policy_metadata,
         )
-        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
         internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
             row_ids=row_ids,
             row_types=row_types,
@@ -649,6 +650,8 @@ class WorkbenchWriteFacade:
                     idempotency_key=self._idempotency_key_from_payload(payload),
                     selected_rows=selected_rows,
                     paired_policy_metadata=paired_policy_metadata,
+                    request_id=request_id,
+                    operation_projection=operation_projection,
                 )
             except WorkbenchRelationCommandError as exc:
                 return self._relation_command_error_result(exc)
@@ -807,6 +810,8 @@ class WorkbenchWriteFacade:
                 idempotency_key=None,
                 selected_rows=selected_rows,
                 paired_policy_metadata=transaction_metadata,
+                request_id=request_id,
+                operation_projection=operation_projection,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -878,6 +883,8 @@ class WorkbenchWriteFacade:
         idempotency_key: str | None,
         selected_rows: list[dict[str, object]],
         paired_policy_metadata: dict[str, object],
+        request_id: str | None,
+        operation_projection: dict[str, object],
     ) -> dict[str, object]:
         confirm_relation = getattr(relation_command, "confirm_relation", None)
         if not callable(confirm_relation):
@@ -896,6 +903,8 @@ class WorkbenchWriteFacade:
             before_relations=list(history_before_relations),
             replace_existing=True,
             history_operation_type="confirm_link",
+            request_id=request_id,
+            operation_projection=dict(operation_projection),
         )
 
     def _bank_only_internal_transfer_confirm_status(
@@ -1015,6 +1024,7 @@ class WorkbenchWriteFacade:
         row_ids: list[str],
         row_types: list[str],
         selected_rows: list[dict[str, object]],
+        before_relations: list[dict[str, object]],
         month: str,
         amount_check: dict[str, object],
         paired_policy_metadata: dict[str, object],
@@ -1029,10 +1039,19 @@ class WorkbenchWriteFacade:
             "amount_check": dict(amount_check or {}),
             "special_metadata": dict(paired_policy_metadata or {}),
         }
+        before_groups = self._relation_groups(
+            before_relations,
+            selected_rows=selected_rows,
+            ungrouped_selected_rows="separate",
+        )
         after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
         paired_groups = [group for group in after_groups if group.get("zone") == "paired"]
         unpaired_groups = [group for group in after_groups if group.get("zone") != "paired"]
         return {
+            "before": {
+                "paired_groups": [group for group in before_groups if group.get("zone") == "paired"],
+                "unpaired_groups": [group for group in before_groups if group.get("zone") != "paired"],
+            },
             "after": {
                 "paired_groups": paired_groups,
                 "unpaired_groups": unpaired_groups,

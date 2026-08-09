@@ -270,7 +270,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/app-shell.spec.ts",
-          "required_markers": ["操作历史", "operation-history.open-admin-page", "GET /api/operations/audit-events"]
+          "required_markers": ["操作历史", "operation-history.open-admin-page", "GET /api/operations/history"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:operation_history"]

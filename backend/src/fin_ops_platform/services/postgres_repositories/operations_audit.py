@@ -41,12 +41,12 @@ class PostgresOperationsAuditRepository:
         row = self._connection.fetch_one(
             """
             insert into audit.events(
-                event_type, object_type, object_id, actor_id, actor_name, scope,
+                event_type, object_type, object_id, actor_id, actor_name, actor_account, scope,
                 trace_id, occurred_at, action, page_key, operation_location,
                 reason, outcome, request_id, payload, raw_payload
             )
             values (
-                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
                 %s, coalesce(%s::timestamptz, now()), %s, %s, %s,
                 %s, %s, %s, %s, '{}'::jsonb
             )
@@ -58,6 +58,7 @@ class PostgresOperationsAuditRepository:
                 event.get("object_id"),
                 event.get("actor_id"),
                 event.get("actor_name"),
+                event.get("actor_account"),
                 event.get("scope"),
                 event.get("trace_id"),
                 event.get("occurred_at"),
@@ -74,12 +75,12 @@ class PostgresOperationsAuditRepository:
             raise RuntimeError("Audit event was not persisted.")
         return row
 
-    def list_operation_events(
+    def list_logical_operations(
         self,
         *,
         limit: int,
         cursor_occurred_at: str | None = None,
-        cursor_id: str | None = None,
+        cursor_key: str | None = None,
         actor_id: str | None = None,
         action: str | None = None,
         page_key: str | None = None,
@@ -89,13 +90,11 @@ class PostgresOperationsAuditRepository:
         date_to: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
-        conditions = [
-            "occurred_at >= coalesce((select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'), '-infinity'::timestamptz)"
-        ]
+        conditions = ["true"]
         params: list[Any] = []
-        if cursor_occurred_at and cursor_id:
-            conditions.append("(occurred_at, id) < (%s::timestamptz, %s::uuid)")
-            params.extend((cursor_occurred_at, cursor_id))
+        if cursor_occurred_at and cursor_key:
+            conditions.append("(logical.occurred_at, logical.operation_key) < (%s::timestamptz, %s)")
+            params.extend((cursor_occurred_at, cursor_key))
         for column, value in (
             ("actor_id", actor_id),
             ("action", action),
@@ -104,47 +103,145 @@ class PostgresOperationsAuditRepository:
             ("outcome", outcome),
         ):
             if value:
-                conditions.append(f"{column} = %s")
+                conditions.append(f"logical.{column} = %s")
                 params.append(value)
         if date_from:
-            conditions.append("occurred_at >= %s::timestamptz")
+            conditions.append("logical.occurred_at >= %s::timestamptz")
             params.append(date_from)
         if date_to:
-            conditions.append("occurred_at < (%s::date + interval '1 day')")
+            conditions.append("logical.occurred_at < (%s::date + interval '1 day')")
             params.append(date_to)
         if search:
             conditions.append(
-                "lower(concat_ws(' ', actor_id, actor_name, event_type, action, page_key, object_type, object_id, payload->>'summary')) like %s"
+                "lower(concat_ws(' ', logical.actor_id, logical.actor_name, logical.actor_account, "
+                "logical.event_type, logical.action, logical.page_key, logical.object_type, "
+                "logical.payload->>'summary')) like %s"
             )
             params.append(f"%{search.lower()}%")
         params.append(max(1, min(int(limit), 201)))
         return self._connection.fetch_all(
             f"""
-            select id::text as id, event_type, object_type, object_id, actor_id, actor_name,
-                   scope, trace_id, occurred_at, action, page_key, operation_location,
-                   reason, outcome, request_id, payload
-            from audit.events
+            with covered as (
+                select
+                    event.*,
+                    case
+                        when event.request_id is not null then 'request:' || event.request_id
+                        else 'event:' || event.id::text
+                    end as operation_key
+                from audit.events event
+                where event.occurred_at >= coalesce(
+                    (select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'),
+                    '-infinity'::timestamptz
+                )
+            ),
+            grouped as (
+                select operation_key, min(occurred_at) as started_at
+                from covered
+                group by operation_key
+            ),
+            latest as (
+                select distinct on (operation_key) covered.*
+                from covered
+                order by operation_key, occurred_at desc, id desc
+            ),
+            terminal as (
+                select distinct on (operation_key)
+                    operation_key, occurred_at as completed_at, outcome as completed_outcome
+                from covered
+                where event_type = 'operation.completed'
+                order by operation_key, occurred_at desc, id desc
+            ),
+            logical as (
+                select
+                    latest.operation_key,
+                    latest.id::text as latest_event_id,
+                    latest.event_type,
+                    latest.object_type,
+                    latest.object_id,
+                    latest.actor_id,
+                    latest.actor_name,
+                    latest.actor_account,
+                    latest.scope,
+                    latest.trace_id,
+                    grouped.started_at,
+                    latest.occurred_at,
+                    terminal.completed_at,
+                    latest.action,
+                    latest.page_key,
+                    latest.operation_location,
+                    latest.reason,
+                    case
+                        when latest.request_id is null then latest.outcome
+                        when terminal.completed_at is not null then terminal.completed_outcome
+                        when grouped.started_at < now() - interval '5 minutes' then 'incomplete'
+                        else 'pending'
+                    end as outcome,
+                    latest.request_id,
+                    latest.payload
+                from latest
+                join grouped using (operation_key)
+                left join terminal using (operation_key)
+            )
+            select *
+            from logical
             where {' and '.join(conditions)}
-            order by occurred_at desc, id desc
+            order by logical.occurred_at desc, logical.operation_key desc
             limit %s
             """,
             tuple(params),
         )
 
-    def get_operation_event(self, event_id: str) -> dict[str, Any] | None:
-        return self._connection.fetch_one(
+    def list_operation_actors(self) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(
             """
+            select actor_id, actor_name, actor_account
+            from (
+                select distinct on (actor_id)
+                    actor_id, actor_name, actor_account, occurred_at, id
+                from audit.events
+                where nullif(actor_id, '') is not null
+                  and occurred_at >= coalesce(
+                      (select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'),
+                      '-infinity'::timestamptz
+                  )
+                order by actor_id, occurred_at desc, id desc
+            ) actors
+            order by coalesce(nullif(actor_name, ''), nullif(actor_account, ''), actor_id)
+            """
+        )
+
+    def list_operation_events_for_key(self, operation_key: str) -> list[dict[str, Any]]:
+        if operation_key.startswith("request:"):
+            condition = "request_id = %s"
+            value = operation_key.removeprefix("request:")
+        else:
+            condition = "id = %s::uuid"
+            value = operation_key.removeprefix("event:")
+        return self._connection.fetch_all(
+            f"""
             select id::text as id, event_type, object_type, object_id, actor_id, actor_name,
-                   scope, trace_id, occurred_at, action, page_key, operation_location,
-                   reason, outcome, request_id, payload
+                   actor_account, scope, trace_id, occurred_at, action, page_key,
+                   operation_location, reason, outcome, request_id, payload
             from audit.events
-            where id = %s::uuid
+            where {condition}
               and occurred_at >= coalesce(
                   (select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'),
                   '-infinity'::timestamptz
               )
+            order by occurred_at, id
             """,
-            (event_id,),
+            (value,),
+        )
+
+    def list_workbench_relation_history_for_request(self, request_id: str) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(
+            """
+            select occurred_at, event_type, before_payload, after_payload, raw_payload
+            from app.workbench_pair_relation_history
+            where request_id = %s
+            order by occurred_at, id
+            """,
+            (request_id,),
         )
 
     def audit_page(

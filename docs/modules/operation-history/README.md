@@ -6,6 +6,6 @@
 
 - 后端：`services/audit.py`、`services/operations_audit_service.py`、`postgres_repositories/operations_audit.py`、`app/server.py`。
 - 前端：`pages/OperationHistoryPage.tsx`、`features/operationHistory/api.ts`。
-- 数据库：`postgres/migrations/0138_operation_audit_and_financial_fact_guard.sql`。
+- 数据库：`postgres/migrations/0138_operation_audit_and_financial_fact_guard.sql`、`0142_operation_history_logical_operations.sql`。
 
 修改前同时读取 `boundary-io.md`、`tests.md` 与 `../permissions-and-audit/boundary-io.md`。

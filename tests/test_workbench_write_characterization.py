@@ -390,6 +390,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         payload = _json_response(response)
         self.assertEqual(payload["case_id"], "CASE-UOW-CONFIRM")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
+        self.assertTrue(payload["operation_projection"]["before"]["unpaired_groups"])
         self.assertTrue(payload["operation_projection"]["after"]["paired_groups"])
         self.assertEqual(payload["outbox_event_ids"], [call["event_id"] for call in writer.calls])
         self.assertEqual(pair_relation_persist.call_count, 0)
@@ -399,6 +400,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(len(persisted), 1)
         self.assertIs(persisted[0]["transaction"], connection.transaction_obj)
         self.assertIn("CASE-UOW-CONFIRM", persisted[0]["changed_case_ids"])
+        history = persisted[0]["snapshot"]["pair_relation_history"][0]
+        self.assertTrue(str(history["request_id"]))
+        self.assertTrue(history["operation_projection"]["before"]["unpaired_groups"])
+        self.assertTrue(history["operation_projection"]["after"]["paired_groups"])
         self.assertEqual(writer.calls, [])
         self.assertEqual(repository_factory.created_for_transactions, [connection.transaction_obj])
 

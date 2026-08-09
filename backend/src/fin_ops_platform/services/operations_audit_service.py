@@ -10,9 +10,13 @@ from fin_ops_platform.services.postgres_repositories.common import serialize_val
 
 
 class OperationsAuditRepository(Protocol):
-    def list_operation_events(self, **kwargs: Any) -> list[dict[str, Any]]: ...
+    def list_logical_operations(self, **kwargs: Any) -> list[dict[str, Any]]: ...
 
-    def get_operation_event(self, event_id: str) -> dict[str, Any] | None: ...
+    def list_operation_actors(self) -> list[dict[str, Any]]: ...
+
+    def list_operation_events_for_key(self, operation_key: str) -> list[dict[str, Any]]: ...
+
+    def list_workbench_relation_history_for_request(self, request_id: str) -> list[dict[str, Any]]: ...
 
     def audit_page(
         self,
@@ -58,13 +62,14 @@ class OperationsAuditService:
         date_from: str | None = None,
         date_to: str | None = None,
         search: str | None = None,
+        known_actor: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         page_size = max(1, min(int(limit), 200))
-        cursor_time, cursor_id = self._parse_cursor(cursor)
-        rows = self._repository.list_operation_events(
+        cursor_time, cursor_key = self._parse_cursor(cursor)
+        rows = self._repository.list_logical_operations(
             limit=page_size + 1,
             cursor_occurred_at=cursor_time,
-            cursor_id=cursor_id,
+            cursor_key=cursor_key,
             actor_id=self._text(actor_id),
             action=self._text(action),
             page_key=self._text(page_key),
@@ -78,17 +83,59 @@ class OperationsAuditService:
         next_cursor = None
         if len(rows) > page_size and visible:
             last = visible[-1]
-            next_cursor = f"{self._iso(last.get('occurred_at'))}|{last.get('id')}"
+            next_cursor = f"{self._iso(last.get('occurred_at'))}|{last.get('operation_key')}"
         return {
-            "rows": [serialize_value(row) for row in visible],
+            "rows": [self._operation_summary(self._with_known_actor(row, known_actor)) for row in visible],
             "next_cursor": next_cursor,
             "limit": page_size,
         }
 
-    def get_operation_history_event(self, event_id: str) -> dict[str, Any] | None:
-        normalized = str(UUID(str(event_id or "").strip()))
-        row = self._repository.get_operation_event(normalized)
-        return serialize_value(row) if row is not None else None
+    def list_operation_history_actors(self, *, known_actor: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "rows": [
+                {
+                    "actor_id": str(enriched.get("actor_id") or ""),
+                    "actor_name": self._text(enriched.get("actor_name")),
+                    "actor_account": self._text(enriched.get("actor_account")),
+                }
+                for row in self._repository.list_operation_actors()
+                for enriched in [self._with_known_actor(row, known_actor)]
+            ]
+        }
+
+    def get_operation_history(
+        self,
+        operation_key: str,
+        *,
+        known_actor: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        normalized = self._operation_key(operation_key)
+        events = self._repository.list_operation_events_for_key(normalized)
+        if not events:
+            return None
+        latest = self._with_known_actor(events[-1], known_actor)
+        completed = next(
+            (event for event in reversed(events) if event.get("event_type") == "operation.completed"),
+            None,
+        )
+        request_id = self._text(latest.get("request_id"))
+        histories = (
+            self._repository.list_workbench_relation_history_for_request(request_id)
+            if request_id and latest.get("page_key") == "reconciliation-workbench"
+            else []
+        )
+        operation = self._operation_summary(
+            {
+                **latest,
+                "operation_key": normalized,
+                "started_at": events[0].get("occurred_at"),
+                "completed_at": completed.get("occurred_at") if completed else None,
+                "outcome": completed.get("outcome") if completed else latest.get("outcome"),
+            }
+        )
+        operation["items"] = self._workbench_items(histories)
+        operation["reason"] = self._text(latest.get("reason"))
+        return operation
 
     def audit_page(
         self,
@@ -122,12 +169,12 @@ class OperationsAuditService:
         if not normalized:
             return None, None
         try:
-            occurred_at, event_id = normalized.rsplit("|", 1)
+            occurred_at, operation_key = normalized.rsplit("|", 1)
             datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
-            UUID(event_id)
+            OperationsAuditService._operation_key(operation_key)
         except (ValueError, TypeError) as exc:
             raise ValueError("Invalid operation history cursor.") from exc
-        return occurred_at, event_id
+        return occurred_at, operation_key
 
     @staticmethod
     def _date(value: str | None) -> str | None:
@@ -143,6 +190,130 @@ class OperationsAuditService:
     @staticmethod
     def _text(value: str | None) -> str | None:
         return str(value or "").strip() or None
+
+    @staticmethod
+    def _with_known_actor(row: dict[str, Any], known_actor: dict[str, Any] | None) -> dict[str, Any]:
+        if not known_actor or str(row.get("actor_id") or "") != str(known_actor.get("actor_id") or ""):
+            return row
+        return {
+            **row,
+            "actor_name": row.get("actor_name") or known_actor.get("actor_name"),
+            "actor_account": row.get("actor_account") or known_actor.get("actor_account"),
+        }
+
+    @staticmethod
+    def _operation_key(value: str | None) -> str:
+        normalized = str(value or "").strip()
+        prefix, separator, identifier = normalized.partition(":")
+        if separator != ":" or prefix not in {"request", "event"} or not identifier:
+            raise ValueError("Invalid operation history key.")
+        if prefix == "event":
+            UUID(identifier)
+        return normalized
+
+    @classmethod
+    def _operation_summary(cls, row: dict[str, Any]) -> dict[str, Any]:
+        action = str(row.get("action") or "")
+        action_labels = {
+            "POST /api/workbench/actions/confirm-link": "确认关联",
+            "POST /api/workbench/actions/cancel-link": "取消关联",
+            "POST /api/workbench/actions/withdraw-link": "撤回关联",
+        }
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        summary = str(payload.get("summary") or "").strip()
+        if summary.startswith(("GET /api/", "POST /api/", "PUT /api/", "PATCH /api/", "DELETE /api/")):
+            summary = ""
+        return serialize_value(
+            {
+                "operation_key": row.get("operation_key"),
+                "actor_id": row.get("actor_id"),
+                "actor_name": row.get("actor_name"),
+                "actor_account": row.get("actor_account"),
+                "page_key": row.get("page_key"),
+                "action_label": action_labels.get(action) or summary or "业务操作",
+                "object_type": row.get("object_type"),
+                "started_at": row.get("started_at") or row.get("occurred_at"),
+                "completed_at": row.get("completed_at"),
+                "occurred_at": row.get("occurred_at"),
+                "outcome": row.get("outcome") or "success",
+            }
+        )
+
+    @classmethod
+    def _workbench_items(cls, histories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        projection: dict[str, Any] = {}
+        for history in histories:
+            raw = history.get("raw_payload") if isinstance(history.get("raw_payload"), dict) else {}
+            normalized = raw.get("normalized_payload") if isinstance(raw.get("normalized_payload"), dict) else {}
+            candidate = normalized.get("operation_projection")
+            if isinstance(candidate, dict):
+                projection = candidate
+        before = cls._projection_rows(projection.get("before"))
+        after = cls._projection_rows(projection.get("after"))
+        items: list[dict[str, Any]] = []
+        for row_id in dict.fromkeys([*before, *after]):
+            before_row = before.get(row_id)
+            after_row = after.get(row_id)
+            row = (after_row or before_row or {}).get("row")
+            if not isinstance(row, dict):
+                continue
+            items.append(
+                {
+                    "item_key": f"item-{len(items) + 1}",
+                    **cls._display_row(row),
+                    "before_status": (before_row or {}).get("status") or "未关联",
+                    "after_status": (after_row or {}).get("status") or "未关联",
+                }
+            )
+        return items
+
+    @staticmethod
+    def _projection_rows(value: Any) -> dict[str, dict[str, Any]]:
+        section = value if isinstance(value, dict) else {}
+        groups = [
+            *list(section.get("paired_groups") or []),
+            *list(section.get("unpaired_groups") or []),
+        ]
+        rows: dict[str, dict[str, Any]] = {}
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            status = "已配对" if group.get("zone") == "paired" else "未配对"
+            for collection in ("oa_rows", "bank_rows", "invoice_rows"):
+                for row in list(group.get(collection) or []):
+                    if not isinstance(row, dict):
+                        continue
+                    row_id = str(row.get("id") or row.get("row_id") or "").strip()
+                    if row_id:
+                        rows[row_id] = {"row": row, "status": status}
+        return rows
+
+    @staticmethod
+    def _display_row(row: dict[str, Any]) -> dict[str, Any]:
+        row_type = str(row.get("type") or row.get("source_kind") or "")
+        if row_type == "oa":
+            return {
+                "type": "OA",
+                "title": str(row.get("applicant") or row.get("applicant_name") or "OA申请"),
+                "secondary": str(row.get("project_name") or row.get("reason") or row.get("apply_type") or ""),
+                "amount": row.get("amount"),
+                "date": row.get("application_date") or row.get("apply_date"),
+            }
+        if row_type == "bank":
+            return {
+                "type": "银行流水",
+                "title": str(row.get("counterparty_name") or "未知对手方"),
+                "secondary": str(row.get("category_label") or row.get("summary") or row.get("payment_account_label") or ""),
+                "amount": row.get("amount"),
+                "date": row.get("trade_time") or row.get("txn_date"),
+            }
+        return {
+            "type": "进项发票",
+            "title": str(row.get("seller_name") or "发票"),
+            "secondary": str(row.get("invoice_no") or row.get("digital_invoice_no") or ""),
+            "amount": row.get("total_with_tax") or row.get("amount"),
+            "date": row.get("issue_date") or row.get("invoice_date"),
+        }
 
     @staticmethod
     def _iso(value: Any) -> str:

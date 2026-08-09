@@ -655,6 +655,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
     def test_confirm_link_two_pane_operation_projection_uses_group_zone(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
+            if not relations:
+                return []
             relation = relations[0]
             return [
                 {
@@ -694,6 +696,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
     def test_confirm_link_three_pane_operation_projection_uses_paired_groups(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
+            if not relations:
+                return []
             relation = relations[0]
             return [
                 {

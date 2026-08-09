@@ -476,7 +476,10 @@ PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
 HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT = 20
-_REQUEST_AUDIT_ACTOR_ID: ContextVar[str] = ContextVar("request_audit_actor_id", default="")
+_REQUEST_AUDIT_ACTOR: ContextVar[tuple[str, str, str]] = ContextVar(
+    "request_audit_actor",
+    default=("", "", ""),
+)
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1469,7 +1472,7 @@ class Application:
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
         response: Response | None = None
         request_error: Exception | None = None
-        actor_token = _REQUEST_AUDIT_ACTOR_ID.set("")
+        actor_token = _REQUEST_AUDIT_ACTOR.set(("", "", ""))
         with request_database_timing() as database_timing:
             try:
                 response = self._handle_request_untracked(
@@ -1485,7 +1488,7 @@ class Application:
                 request_error = exc
                 raise
             finally:
-                actor_id = _REQUEST_AUDIT_ACTOR_ID.get()
+                actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
                 if request_audit_enabled and actor_id and effective_request_id:
                     try:
                         self._audit_service.record_action(
@@ -1495,6 +1498,8 @@ class Application:
                             entity_id=effective_request_id,
                             metadata={
                                 "event_type": "operation.completed",
+                                "actor_name": actor_name,
+                                "actor_account": actor_account,
                                 "page_key": self._audit_page_key_for_route(route_path),
                                 "operation_location": route_path,
                                 "outcome": "success" if request_error is None and status_code < 400 else "failed",
@@ -1516,7 +1521,7 @@ class Application:
                             ),
                             flush=True,
                         )
-                _REQUEST_AUDIT_ACTOR_ID.reset(actor_token)
+                _REQUEST_AUDIT_ACTOR.reset(actor_token)
                 self._api_performance_recorder.record_request(
                     method=method,
                     route_path=route_path,
@@ -1588,7 +1593,15 @@ class Application:
                 if auth_error is not None:
                     return auth_error
             actor_id = actor_id_for_session(access_session) if access_session is not None else ""
-            _REQUEST_AUDIT_ACTOR_ID.set(actor_id)
+            identity = access_session.identity if access_session is not None else None
+            actor_name = str(
+                getattr(identity, "display_name", "")
+                or getattr(identity, "nickname", "")
+                or getattr(identity, "username", "")
+                or ""
+            ).strip()
+            actor_account = str(getattr(identity, "username", "") or "").strip()
+            _REQUEST_AUDIT_ACTOR.set((actor_id, actor_name, actor_account))
             if actor_id and request_id and self._audit_service.is_durable:
                 try:
                     self._audit_service.record_action(
@@ -1598,6 +1611,8 @@ class Application:
                         entity_id=request_id,
                         metadata={
                             "event_type": "operation.requested",
+                            "actor_name": actor_name,
+                            "actor_account": actor_account,
                             "page_key": self._audit_page_key_for_route(route_path),
                             "operation_location": route_path,
                             "outcome": "pending",
@@ -1762,10 +1777,12 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
-        if method == "GET" and route_path == "/api/operations/audit-events":
+        if method == "GET" and route_path == "/api/operations/history":
             return self._handle_api_operation_history(query, headers)
-        if method == "GET" and route_path.startswith("/api/operations/audit-events/"):
-            return self._handle_api_operation_history_event(
+        if method == "GET" and route_path == "/api/operations/history/actors":
+            return self._handle_api_operation_history_actors(headers)
+        if method == "GET" and route_path.startswith("/api/operations/history/"):
+            return self._handle_api_operation_history_detail(
                 unquote(route_path.rsplit("/", 1)[-1]),
                 headers,
             )
@@ -3650,7 +3667,7 @@ class Application:
         query: dict[str, list[str]],
         headers: dict[str, str] | None,
     ) -> Response:
-        _, admin_error = self._resolve_admin_session(headers)
+        admin_session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
         service = self._operations_audit_service()
@@ -3673,6 +3690,7 @@ class Application:
                 date_from=value("date_from"),
                 date_to=value("date_to"),
                 search=value("search"),
+                known_actor=self._operation_history_actor(admin_session),
             )
         except (TypeError, ValueError) as exc:
             return self._json_response(
@@ -3681,12 +3699,27 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_operation_history_event(
+    def _handle_api_operation_history_actors(self, headers: dict[str, str] | None) -> Response:
+        admin_session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        service = self._operations_audit_service()
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "操作历史需要 PostgreSQL。"},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            service.list_operation_history_actors(known_actor=self._operation_history_actor(admin_session)),
+        )
+
+    def _handle_api_operation_history_detail(
         self,
-        event_id: str,
+        operation_key: str,
         headers: dict[str, str] | None,
     ) -> Response:
-        _, admin_error = self._resolve_admin_session(headers)
+        admin_session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
         service = self._operations_audit_service()
@@ -3696,18 +3729,37 @@ class Application:
                 {"error": "postgres_required", "message": "操作历史需要 PostgreSQL。"},
             )
         try:
-            event = service.get_operation_history_event(event_id)
+            operation = service.get_operation_history(
+                operation_key,
+                known_actor=self._operation_history_actor(admin_session),
+            )
         except ValueError:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_audit_event_id", "message": "审计事件编号无效。"},
+                {"error": "invalid_operation_history_key", "message": "操作记录编号无效。"},
             )
-        if event is None:
+        if operation is None:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "audit_event_not_found", "message": "操作记录不存在。"},
             )
-        return self._json_response(HTTPStatus.OK, {"event": event})
+        return self._json_response(HTTPStatus.OK, {"operation": operation})
+
+    @staticmethod
+    def _operation_history_actor(session: object | None) -> dict[str, str] | None:
+        if session is None:
+            return None
+        identity = getattr(session, "identity", None)
+        return {
+            "actor_id": actor_id_for_session(session),
+            "actor_name": str(
+                getattr(identity, "display_name", "")
+                or getattr(identity, "nickname", "")
+                or getattr(identity, "username", "")
+                or ""
+            ).strip(),
+            "actor_account": str(getattr(identity, "username", "") or "").strip(),
+        }
 
     def _cached_operations_app_health_dashboard_payload(self, service: OperationsDashboardService) -> dict[str, object]:
         ttl_seconds = self._app_health_dashboard_cache_ttl_seconds()
@@ -5120,12 +5172,13 @@ class Application:
     @staticmethod
     def _audit_page_key_for_route(route_path: str) -> str:
         route_page_prefixes = (
+            ("/api/workbench/settings/data-reset", "settings"),
             ("/api/workbench", "reconciliation-workbench"),
             ("/reconciliation", "reconciliation-workbench"),
             ("/api/etc/", "etc-tickets"),
             ("/api/no-oa-bank-batches", "bank-details"),
             ("/api/oa-sync", "oa-pending-payments"),
-            ("/api/operations/audit-events", "operation-history"),
+            ("/api/operations/history", "operation-history"),
             ("/api/operations/app-health", "app-health-operations"),
             ("/api/app-health", "app-health-operations"),
             ("/imports/bank-transactions", "imports.bank-transactions"),

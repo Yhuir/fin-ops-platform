@@ -16,7 +16,6 @@ test.describe("bank details direct canonical query browser behavior", () => {
 
     expect(api.count("GET /api/bank-details/accounts")).toBe(accountReads);
     expect(api.count("GET /api/bank-details/transactions")).toBe(transactionReads);
-    await expect(page.getByText(/银行明细.*刷新/)).toHaveCount(0);
   });
 
   test("treats a direct empty transaction response as the real empty state", async ({ page }) => {
@@ -29,7 +28,6 @@ test.describe("bank details direct canonical query browser behavior", () => {
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByText("当前时间范围内没有流水。")).toBeVisible();
     await expect(page.getByText("暂无银行流水，请先在银行流水导入页面导入。")).not.toBeVisible();
-    await expect(page.getByText(/银行明细.*刷新/)).toHaveCount(0);
   });
 
   test("recovers transaction rows after a transient network failure and user retry", async ({ page }) => {

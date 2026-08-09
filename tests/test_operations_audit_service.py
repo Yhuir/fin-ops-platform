@@ -10,14 +10,23 @@ class FakeOperationsAuditRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.history_rows: list[dict[str, object]] = []
+        self.events_by_key: dict[str, list[dict[str, object]]] = {}
+        self.relation_history: list[dict[str, object]] = []
 
-    def list_operation_events(self, **kwargs: object) -> list[dict[str, object]]:
+    def list_logical_operations(self, **kwargs: object) -> list[dict[str, object]]:
         self.calls.append(("history", kwargs))
         return list(self.history_rows)
 
-    def get_operation_event(self, event_id: str) -> dict[str, object] | None:
-        self.calls.append(("detail", {"event_id": event_id}))
-        return next((row for row in self.history_rows if row["id"] == event_id), None)
+    def list_operation_actors(self) -> list[dict[str, object]]:
+        return [{"actor_id": "6", "actor_name": "刘汉金", "actor_account": "YNSYLP006"}]
+
+    def list_operation_events_for_key(self, operation_key: str) -> list[dict[str, object]]:
+        self.calls.append(("detail", {"operation_key": operation_key}))
+        return list(self.events_by_key.get(operation_key) or [])
+
+    def list_workbench_relation_history_for_request(self, request_id: str) -> list[dict[str, object]]:
+        self.calls.append(("relation_history", {"request_id": request_id}))
+        return list(self.relation_history)
 
     def audit_page(self, **kwargs: object) -> dict[str, object]:
         self.calls.append(("page", kwargs))
@@ -70,7 +79,7 @@ class OperationsAuditServiceTests(unittest.TestCase):
         repository = FakeOperationsAuditRepository()
         occurred_at = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
         repository.history_rows = [
-            {"id": f"10000000-0000-4000-8000-{index:012d}", "occurred_at": occurred_at}
+            {"operation_key": f"request:request-{index}", "occurred_at": occurred_at}
             for index in range(1, 4)
         ]
         service = OperationsAuditService(repository)
@@ -81,7 +90,7 @@ class OperationsAuditServiceTests(unittest.TestCase):
         self.assertEqual(payload["limit"], 2)
         self.assertEqual(
             payload["next_cursor"],
-            "2026-08-09T12:00:00+00:00|10000000-0000-4000-8000-000000000002",
+            "2026-08-09T12:00:00+00:00|request:request-2",
         )
         self.assertEqual(repository.calls[0][1]["limit"], 3)
         self.assertEqual(repository.calls[0][1]["actor_id"], "YNSYLP005")
@@ -95,7 +104,122 @@ class OperationsAuditServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "date"):
             service.list_operation_history(date_from="not-a-date")
         with self.assertRaises(ValueError):
-            service.get_operation_history_event("not-an-id")
+            service.get_operation_history("not-an-id")
+
+    def test_returns_actor_facets_with_name_and_account(self) -> None:
+        service = OperationsAuditService(FakeOperationsAuditRepository())
+
+        self.assertEqual(
+            service.list_operation_history_actors(),
+            {"rows": [{"actor_id": "6", "actor_name": "刘汉金", "actor_account": "YNSYLP006"}]},
+        )
+
+    def test_enriches_only_matching_legacy_actor_from_authenticated_identity(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 8, 9, 10, 6, tzinfo=UTC)
+        repository.history_rows = [
+            {
+                "operation_key": "request:request-1",
+                "actor_id": "6",
+                "actor_name": None,
+                "actor_account": None,
+                "occurred_at": occurred_at,
+            }
+        ]
+
+        payload = OperationsAuditService(repository).list_operation_history(
+            known_actor={"actor_id": "6", "actor_name": "刘涵静", "actor_account": "YNSYLP005"},
+        )
+
+        self.assertEqual(payload["rows"][0]["actor_name"], "刘涵静")
+        self.assertEqual(payload["rows"][0]["actor_account"], "YNSYLP005")
+
+    def test_returns_sanitized_workbench_selection_and_status_change(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 8, 9, 10, 6, tzinfo=UTC)
+        repository.events_by_key["request:request-1"] = [
+            {
+                "event_type": "operation.requested",
+                "request_id": "request-1",
+                "actor_id": "6",
+                "actor_name": "刘汉金",
+                "actor_account": "YNSYLP006",
+                "action": "POST /api/workbench/actions/confirm-link",
+                "page_key": "reconciliation-workbench",
+                "object_type": "http_request",
+                "occurred_at": occurred_at,
+                "outcome": "pending",
+                "payload": {},
+            },
+            {
+                "event_type": "operation.completed",
+                "request_id": "request-1",
+                "actor_id": "6",
+                "actor_name": "刘汉金",
+                "actor_account": "YNSYLP006",
+                "action": "POST /api/workbench/actions/confirm-link",
+                "page_key": "reconciliation-workbench",
+                "object_type": "http_request",
+                "occurred_at": occurred_at,
+                "outcome": "success",
+                "payload": {},
+            },
+        ]
+        repository.relation_history = [
+            {
+                "raw_payload": {
+                    "normalized_payload": {
+                        "operation_projection": {
+                            "before": {
+                                "paired_groups": [],
+                                "unpaired_groups": [
+                                    {
+                                        "zone": "unpaired",
+                                        "oa_rows": [{"id": "oa-internal", "type": "oa", "applicant": "樊祖芳", "project_name": "大理卷烟厂", "amount": "2200"}],
+                                        "bank_rows": [],
+                                        "invoice_rows": [],
+                                    }
+                                ],
+                            },
+                            "after": {
+                                "paired_groups": [
+                                    {
+                                        "zone": "paired",
+                                        "oa_rows": [{"id": "oa-internal", "type": "oa", "applicant": "樊祖芳", "project_name": "大理卷烟厂", "amount": "2200"}],
+                                        "bank_rows": [],
+                                        "invoice_rows": [],
+                                    }
+                                ],
+                                "unpaired_groups": [],
+                            },
+                        }
+                    }
+                }
+            }
+        ]
+
+        operation = OperationsAuditService(repository).get_operation_history("request:request-1")
+
+        self.assertIsNotNone(operation)
+        assert operation is not None
+        self.assertEqual(operation["action_label"], "确认关联")
+        self.assertEqual(operation["actor_name"], "刘汉金")
+        self.assertEqual(
+            operation["items"],
+            [
+                {
+                    "item_key": "item-1",
+                    "type": "OA",
+                    "title": "樊祖芳",
+                    "secondary": "大理卷烟厂",
+                    "amount": "2200",
+                    "date": None,
+                    "before_status": "未配对",
+                    "after_status": "已配对",
+                }
+            ],
+        )
+        self.assertNotIn("oa-internal", str(operation))
 
 
 if __name__ == "__main__":

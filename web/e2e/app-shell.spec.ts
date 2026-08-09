@@ -96,7 +96,8 @@ test.describe("app shell browser smoke", () => {
 
     await expect(page.getByRole("link", { name: "操作历史" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("grid", { name: "操作历史" })).toContainText("确认关联");
-    expect(api.count("GET /api/operations/audit-events")).toBeGreaterThan(0);
+    expect(api.count("GET /api/operations/history")).toBeGreaterThan(0);
+    expect(api.count("GET /api/operations/history/actors")).toBeGreaterThan(0);
     expect(browserErrors).toEqual([]);
   });
 
@@ -108,7 +109,8 @@ test.describe("app shell browser smoke", () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("link", { name: "操作历史" })).toHaveCount(0);
-    expect(api.count("GET /api/operations/audit-events")).toBe(0);
+    expect(api.count("GET /api/operations/history")).toBe(0);
+    expect(api.count("GET /api/operations/history/actors")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
 

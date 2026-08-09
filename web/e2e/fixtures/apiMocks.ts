@@ -10167,45 +10167,61 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, operationsDashboardPayload());
     }
 
-    if (path === "/api/operations/audit-events") {
+    if (path === "/api/operations/history") {
       if (configuredSessionTier() !== "admin") {
         return json(route, { error: "admin_only", message: "当前账号没有管理员权限。" }, 403);
       }
       return json(route, {
         rows: [{
-          id: "10000000-0000-4000-8000-000000000001",
-          event_type: "operation.completed",
+          operation_key: "request:audit-e2e-request",
           actor_id: "YNSYLP005",
-          action: "POST /api/workbench/relations",
+          actor_name: "权限管理员",
+          actor_account: "YNSYLP005",
+          action_label: "确认关联",
           page_key: "workbench",
-          operation_location: "/api/workbench/relations",
           object_type: "http_request",
-          object_id: "audit-e2e-request",
+          started_at: "2026-08-09T09:59:59+08:00",
+          completed_at: "2026-08-09T10:00:00+08:00",
           occurred_at: "2026-08-09T10:00:00+08:00",
           outcome: "success",
-          request_id: "audit-e2e-request",
-          payload: { summary: "确认关联", before: null, after: { status: "active" } },
         }],
         next_cursor: null,
         limit: 50,
       });
     }
 
-    if (path === "/api/operations/audit-events/10000000-0000-4000-8000-000000000001") {
+    if (path === "/api/operations/history/actors") {
       return json(route, {
-        event: {
-          id: "10000000-0000-4000-8000-000000000001",
-          event_type: "operation.completed",
+        rows: [{
           actor_id: "YNSYLP005",
-          action: "POST /api/workbench/relations",
+          actor_name: "权限管理员",
+          actor_account: "YNSYLP005",
+        }],
+      });
+    }
+
+    if (path === "/api/operations/history/request%3Aaudit-e2e-request") {
+      return json(route, {
+        operation: {
+          operation_key: "request:audit-e2e-request",
+          actor_id: "YNSYLP005",
+          actor_name: "权限管理员",
+          actor_account: "YNSYLP005",
+          action_label: "确认关联",
           page_key: "workbench",
-          operation_location: "/api/workbench/relations",
           object_type: "http_request",
-          object_id: "audit-e2e-request",
+          started_at: "2026-08-09T09:59:59+08:00",
+          completed_at: "2026-08-09T10:00:00+08:00",
           occurred_at: "2026-08-09T10:00:00+08:00",
           outcome: "success",
-          request_id: "audit-e2e-request",
-          payload: { summary: "确认关联", before: null, after: { status: "active" } },
+          items: [{
+            item_key: "bank-1",
+            type: "银行流水",
+            title: "云南昂超商贸有限公司",
+            amount: "2200.00",
+            before_status: "未配对",
+            after_status: "已配对",
+          }],
         },
       });
     }

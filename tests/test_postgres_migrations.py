@@ -154,6 +154,7 @@ EXPECTED_MIGRATIONS = [
     "0139_idempotency_and_worker_attempt_history.sql",
     "0140_bank_transaction_identity_strength.sql",
     "0141_settings_data_reset_recovery_guard.sql",
+    "0142_operation_history_logical_operations.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -312,7 +313,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 142)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 143)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -354,6 +355,16 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("after_value", sql)
         self.assertIn("audit.coverage_started", sql)
         self.assertIn("revoke update, delete on audit.events from fin_ops_api", sql)
+
+    def test_operation_history_logical_operation_indexes_and_actor_snapshot(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0142_operation_history_logical_operations.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("add column if not exists actor_account text", sql)
+        self.assertIn("audit_events_request_time_idx", sql)
+        self.assertIn("add column if not exists request_id text", sql)
+        self.assertIn("workbench_pair_relation_history_request_time_idx", sql)
 
     def test_batch_accounting_relation_count_hot_path_index_matches_query_contract(self) -> None:
         sql = (

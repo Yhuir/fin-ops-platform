@@ -1,25 +1,36 @@
 import { apiRequestJson } from "../apiClient";
 
-export type OperationHistoryEvent = {
-  id: string;
-  event_type: string;
+export type OperationHistoryItem = {
+  item_key: string;
+  type: string;
+  title: string;
+  secondary?: string | null;
+  amount?: string | number | null;
+  date?: string | null;
+  before_status: string;
+  after_status: string;
+};
+
+export type OperationHistoryOperation = {
+  operation_key: string;
   actor_id?: string | null;
   actor_name?: string | null;
-  action?: string | null;
+  actor_account?: string | null;
   page_key?: string | null;
-  operation_location?: string | null;
+  action_label: string;
   object_type?: string | null;
-  object_id?: string | null;
+  started_at: string;
+  completed_at?: string | null;
   occurred_at: string;
   outcome: string;
   reason?: string | null;
-  request_id?: string | null;
-  payload: {
-    before?: unknown;
-    after?: unknown;
-    metadata?: Record<string, unknown>;
-    summary?: string;
-  };
+  items?: OperationHistoryItem[];
+};
+
+export type OperationHistoryActor = {
+  actor_id: string;
+  actor_name?: string | null;
+  actor_account?: string | null;
 };
 
 export type OperationHistoryFilters = {
@@ -42,15 +53,22 @@ export async function fetchOperationHistory(
   if (filters.dateFrom) query.set("date_from", filters.dateFrom);
   if (filters.dateTo) query.set("date_to", filters.dateTo);
   if (cursor) query.set("cursor", cursor);
-  return apiRequestJson<{ rows: OperationHistoryEvent[]; next_cursor: string | null; limit: number }>(
-    `/api/operations/audit-events?${query.toString()}`,
+  return apiRequestJson<{ rows: OperationHistoryOperation[]; next_cursor: string | null; limit: number }>(
+    `/api/operations/history?${query.toString()}`,
     { method: "GET", signal },
   );
 }
 
-export async function fetchOperationHistoryEvent(eventId: string, signal?: AbortSignal) {
-  return apiRequestJson<{ event: OperationHistoryEvent }>(
-    `/api/operations/audit-events/${encodeURIComponent(eventId)}`,
+export async function fetchOperationHistoryActors(signal?: AbortSignal) {
+  return apiRequestJson<{ rows: OperationHistoryActor[] }>(
+    "/api/operations/history/actors",
+    { method: "GET", signal },
+  );
+}
+
+export async function fetchOperationHistoryDetail(operationKey: string, signal?: AbortSignal) {
+  return apiRequestJson<{ operation: OperationHistoryOperation }>(
+    `/api/operations/history/${encodeURIComponent(operationKey)}`,
     { method: "GET", signal },
   );
 }

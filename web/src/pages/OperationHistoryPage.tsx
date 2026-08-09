@@ -1,5 +1,5 @@
-import { Button, Chip, Input } from "@heroui/react";
-import { RefreshCw, Search } from "lucide-react";
+import { Button, Chip, Input, ListBox, Select } from "@heroui/react";
+import { ArrowRight, RefreshCw, Search } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -13,36 +13,34 @@ import {
 } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { pageKeyForLabel, pageLabelForKey } from "../app/pageRegistry";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { pageKeyForLabel, pageLabelForKey } from "../app/pageRegistry";
 import {
   fetchOperationHistory,
-  fetchOperationHistoryEvent,
-  type OperationHistoryEvent,
+  fetchOperationHistoryActors,
+  fetchOperationHistoryDetail,
+  type OperationHistoryActor,
   type OperationHistoryFilters,
+  type OperationHistoryOperation,
 } from "../features/operationHistory/api";
 
 const EMPTY_FILTERS: OperationHistoryFilters = {};
 
-function formatTime(value: string) {
+function formatTime(value?: string | null) {
+  if (!value) return "—";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function eventSummary(event: OperationHistoryEvent) {
-  const summary = String(event.payload?.summary || event.action || event.event_type || "操作");
-  return /^(GET|POST|PUT|PATCH|DELETE) \/api\//.test(summary)
-    ? `${pageLabelForKey(event.page_key)}操作`
-    : summary;
-}
-
-function actorLabel(event: OperationHistoryEvent) {
-  if (event.actor_name) return event.actor_name;
-  const actorId = String(event.actor_id ?? "");
-  return !actorId || actorId === "system" || actorId === "database" || actorId.includes("-persistence") || actorId.includes("-repair")
-    ? "系统"
-    : actorId;
+function actorLabel(actor: Pick<OperationHistoryOperation, "actor_id" | "actor_name" | "actor_account">) {
+  const actorId = String(actor.actor_id ?? "");
+  if (!actorId || actorId === "system" || actorId === "database" || actorId.includes("-persistence") || actorId.includes("-repair")) {
+    return "系统";
+  }
+  const name = String(actor.actor_name || "").trim();
+  const account = String(actor.actor_account || "").trim();
+  return name && account ? `${name} · ${account}` : name || account || actorId;
 }
 
 function objectLabel(objectType?: string | null) {
@@ -56,18 +54,19 @@ function objectLabel(objectType?: string | null) {
   return labels[String(objectType ?? "")] ?? "业务数据";
 }
 
-function locationLabel(event: OperationHistoryEvent) {
-  const location = String(event.operation_location ?? "");
-  if (location === "database_trigger") return "数据保护";
-  if (location === "service") return "后台处理";
-  return pageLabelForKey(event.page_key);
+function outcomeView(outcome: string) {
+  if (outcome === "success") return { color: "success" as const, label: "成功" };
+  if (outcome === "failed") return { color: "danger" as const, label: "失败" };
+  if (outcome === "incomplete") return { color: "danger" as const, label: "执行未完成" };
+  return { color: "warning" as const, label: "进行中" };
 }
 
-function displayJson(value: unknown) {
-  if (value === null || value === undefined) return "—";
-  return JSON.stringify(value, (key, item) => (
-    /(^id$|_id$|fingerprint|raw_payload|source_links|legacy_mongo_id)/i.test(key) ? undefined : item
-  ), 2);
+function formatAmount(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") return "—";
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : String(value);
 }
 
 export default function OperationHistoryPage() {
@@ -75,12 +74,13 @@ export default function OperationHistoryPage() {
   const { canAdminAccess } = useSessionPermissions();
   const [draft, setDraft] = useState<OperationHistoryFilters>(EMPTY_FILTERS);
   const [filters, setFilters] = useState<OperationHistoryFilters>(EMPTY_FILTERS);
-  const [rows, setRows] = useState<OperationHistoryEvent[]>([]);
+  const [actors, setActors] = useState<OperationHistoryActor[]>([]);
+  const [rows, setRows] = useState<OperationHistoryOperation[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<OperationHistoryEvent | null>(null);
+  const [selected, setSelected] = useState<OperationHistoryOperation | null>(null);
 
   const load = useCallback(async (cursor?: string | null) => {
     if (!active || !canAdminAccess) return;
@@ -102,24 +102,30 @@ export default function OperationHistoryPage() {
     void load();
   }, [activationGeneration, load]);
 
+  useEffect(() => {
+    if (active && canAdminAccess) {
+      void fetchOperationHistoryActors().then((result) => setActors(result.rows)).catch(() => setActors([]));
+    }
+  }, [activationGeneration, active, canAdminAccess]);
+
   const submitFilters = (event: FormEvent) => {
     event.preventDefault();
     setFilters({
       search: draft.search?.trim() || undefined,
-      actorId: draft.actorId?.trim() || undefined,
+      actorId: draft.actorId || undefined,
       pageKey: pageKeyForLabel(draft.pageKey) || undefined,
       dateFrom: draft.dateFrom || undefined,
       dateTo: draft.dateTo || undefined,
     });
   };
 
-  const openDetail = async (event: OperationHistoryEvent) => {
-    setSelected(event);
+  const openDetail = async (operation: OperationHistoryOperation) => {
+    setSelected(operation);
     try {
-      const detail = await fetchOperationHistoryEvent(event.id);
-      setSelected(detail.event);
+      const detail = await fetchOperationHistoryDetail(operation.operation_key);
+      setSelected(detail.operation);
     } catch {
-      // The list payload already contains the safe detail fields.
+      // The logical operation row remains useful if the detail request is interrupted.
     }
   };
 
@@ -141,41 +147,39 @@ export default function OperationHistoryPage() {
           value={draft.search ?? ""}
           onChange={(event) => setDraft((value) => ({ ...value, search: event.target.value }))}
         />
-        <Input
+        <Select
           aria-label="操作人"
-          placeholder="操作人"
-          value={draft.actorId ?? ""}
-          onChange={(event) => setDraft((value) => ({ ...value, actorId: event.target.value }))}
-        />
+          selectedKey={draft.actorId || "all"}
+          onSelectionChange={(key) => setDraft((value) => ({ ...value, actorId: String(key) === "all" ? undefined : String(key) }))}
+        >
+          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              <ListBox.Item id="all" textValue="全部操作人">全部操作人</ListBox.Item>
+              {actors.map((actor) => (
+                <ListBox.Item id={actor.actor_id} key={actor.actor_id} textValue={actorLabel(actor)}>
+                  {actorLabel(actor)}
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
         <Input
           aria-label="页面"
           placeholder="页面名称"
           value={draft.pageKey ?? ""}
           onChange={(event) => setDraft((value) => ({ ...value, pageKey: event.target.value }))}
         />
-        <Input
-          aria-label="开始日期"
-          type="date"
-          value={draft.dateFrom ?? ""}
-          onChange={(event) => setDraft((value) => ({ ...value, dateFrom: event.target.value }))}
-        />
-        <Input
-          aria-label="结束日期"
-          type="date"
-          value={draft.dateTo ?? ""}
-          onChange={(event) => setDraft((value) => ({ ...value, dateTo: event.target.value }))}
-        />
-        <Button type="submit" variant="primary">
-          <Search aria-hidden="true" size={16} />
-          查询
-        </Button>
+        <Input aria-label="开始日期" type="date" value={draft.dateFrom ?? ""} onChange={(event) => setDraft((value) => ({ ...value, dateFrom: event.target.value }))} />
+        <Input aria-label="结束日期" type="date" value={draft.dateTo ?? ""} onChange={(event) => setDraft((value) => ({ ...value, dateTo: event.target.value }))} />
+        <Button type="submit" variant="primary"><Search aria-hidden="true" size={16} />查询</Button>
       </form>
 
       {error ? <StatePanel tone="error" title="操作历史加载失败">{error}</StatePanel> : null}
       {!error && loading ? <StatePanel tone="loading" title="正在加载操作历史" /> : null}
       {!error && !loading && rows.length === 0 ? <StatePanel tone="empty" title="暂无操作记录" /> : null}
       {!error && !loading && rows.length > 0 ? (
-        <FinanceTable ariaLabel="操作历史" minWidth={980}>
+        <FinanceTable ariaLabel="操作历史" minWidth={1040}>
           <FinanceTableHeader>
             <FinanceTableColumn id="time" columnRole="date" isRowHeader>时间</FinanceTableColumn>
             <FinanceTableColumn id="actor" columnRole="identity">操作人</FinanceTableColumn>
@@ -183,54 +187,65 @@ export default function OperationHistoryPage() {
             <FinanceTableColumn id="action" columnRole="description">操作内容</FinanceTableColumn>
             <FinanceTableColumn id="object" columnRole="identity">对象</FinanceTableColumn>
             <FinanceTableColumn id="outcome" columnRole="status">结果</FinanceTableColumn>
+            <FinanceTableColumn id="detail" columnRole="action">详情</FinanceTableColumn>
           </FinanceTableHeader>
           <FinanceTableBody items={rows}>
-            {(row) => (
-              <FinanceTableRow id={row.id} textValue={eventSummary(row)}>
-                <FinanceTableCell columnRole="date">{formatTime(row.occurred_at)}</FinanceTableCell>
-                <FinanceTableCell columnRole="identity">{actorLabel(row)}</FinanceTableCell>
-                <FinanceTableCell columnRole="account">{pageLabelForKey(row.page_key)}</FinanceTableCell>
-                <FinanceTableCell columnRole="description">
-                  <Button
-                    aria-label={`查看${eventSummary(row)}`}
-                    className="operation-history-action"
-                    onPress={() => void openDetail(row)}
-                    variant="tertiary"
-                  >
-                    {eventSummary(row)}
-                  </Button>
-                </FinanceTableCell>
-                <FinanceTableCell columnRole="identity">{objectLabel(row.object_type)}</FinanceTableCell>
-                <FinanceTableCell columnRole="status">
-                  <Chip color={row.outcome === "success" ? "success" : row.outcome === "failed" ? "danger" : "warning"} size="sm">
-                    {row.outcome === "success" ? "成功" : row.outcome === "failed" ? "失败" : "进行中"}
-                  </Chip>
-                </FinanceTableCell>
-              </FinanceTableRow>
-            )}
+            {(row) => {
+              const outcome = outcomeView(row.outcome);
+              return (
+                <FinanceTableRow id={row.operation_key} textValue={row.action_label}>
+                  <FinanceTableCell columnRole="date">{formatTime(row.started_at)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="identity">{actorLabel(row)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="account">{pageLabelForKey(row.page_key)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description">{row.action_label}</FinanceTableCell>
+                  <FinanceTableCell columnRole="identity">{objectLabel(row.object_type)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="status"><Chip color={outcome.color} size="sm">{outcome.label}</Chip></FinanceTableCell>
+                  <FinanceTableCell columnRole="action">
+                    <Button aria-label={`查看${row.action_label}详情`} size="sm" variant="tertiary" onPress={() => void openDetail(row)}>详情</Button>
+                  </FinanceTableCell>
+                </FinanceTableRow>
+              );
+            }}
           </FinanceTableBody>
         </FinanceTable>
       ) : null}
 
-      {nextCursor ? (
-        <div className="operation-history-more">
-          <Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button>
-        </div>
-      ) : null}
+      {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
 
-      <AppDrawer open={selected !== null} title="操作详情" width={560} onClose={() => setSelected(null)}>
+      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={() => setSelected(null)}>
         {selected ? (
           <div className="operation-history-detail">
             <dl>
-              <div><dt>时间</dt><dd>{formatTime(selected.occurred_at)}</dd></div>
+              <div><dt>操作</dt><dd>{selected.action_label}</dd></div>
+              <div><dt>结果</dt><dd><Chip color={outcomeView(selected.outcome).color} size="sm">{outcomeView(selected.outcome).label}</Chip></dd></div>
               <div><dt>操作人</dt><dd>{actorLabel(selected)}</dd></div>
               <div><dt>页面</dt><dd>{pageLabelForKey(selected.page_key)}</dd></div>
-              <div><dt>位置</dt><dd>{locationLabel(selected)}</dd></div>
-              <div><dt>内容</dt><dd>{eventSummary(selected)}</dd></div>
-              <div><dt>原因</dt><dd>{selected.reason || "—"}</dd></div>
+              <div><dt>开始</dt><dd>{formatTime(selected.started_at)}</dd></div>
+              <div><dt>完成</dt><dd>{formatTime(selected.completed_at)}</dd></div>
             </dl>
-            <section><h3>操作前</h3><pre>{displayJson(selected.payload?.before)}</pre></section>
-            <section><h3>操作后</h3><pre>{displayJson(selected.payload?.after)}</pre></section>
+            <section>
+              <h3>本次选择与状态变化</h3>
+              {selected.items?.length ? (
+                <FinanceTable ariaLabel="操作明细" minWidth={680}>
+                  <FinanceTableHeader>
+                    <FinanceTableColumn id="type" columnRole="status" isRowHeader>类型</FinanceTableColumn>
+                    <FinanceTableColumn id="item" columnRole="description">内容</FinanceTableColumn>
+                    <FinanceTableColumn id="amount" columnRole="amount">金额</FinanceTableColumn>
+                    <FinanceTableColumn id="change" columnRole="status">状态变化</FinanceTableColumn>
+                  </FinanceTableHeader>
+                  <FinanceTableBody items={selected.items}>
+                    {(item) => (
+                      <FinanceTableRow id={item.item_key} textValue={`${item.type}${item.title}`}>
+                        <FinanceTableCell columnRole="status">{item.type}</FinanceTableCell>
+                        <FinanceTableCell columnRole="description"><span className="operation-history-item-title">{item.title}</span>{item.secondary ? <span className="operation-history-item-secondary">{item.secondary}</span> : null}</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount">{formatAmount(item.amount)}</FinanceTableCell>
+                        <FinanceTableCell columnRole="status"><span className="operation-history-status-change">{item.before_status}<ArrowRight aria-hidden="true" size={14} />{item.after_status}</span></FinanceTableCell>
+                      </FinanceTableRow>
+                    )}
+                  </FinanceTableBody>
+                </FinanceTable>
+              ) : <p className="operation-history-empty-detail">该历史操作没有可展示的业务明细。</p>}
+            </section>
           </div>
         ) : null}
       </AppDrawer>

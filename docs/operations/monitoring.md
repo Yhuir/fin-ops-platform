@@ -82,7 +82,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 
 ## 操作历史与财务事实保护
 
-- 005 管理员通过 `/operations/history` 或 `GET /api/operations/audit-events` 查询上线覆盖点后的 durable 操作历史；普通账号不得看到菜单或读取 API。
+- 005 管理员通过 `/operations/history` 或 `GET /api/operations/history` 查询上线覆盖点后的 durable 逻辑操作历史；普通账号不得看到菜单或读取 API。
 - 每个生产写请求至少先有 `operation.requested`。审计库不可写时业务 mutation fail closed；同一 `request_id` 的 `operation.completed` 用于核对 HTTP outcome。只有 requested 且长期没有 completed 的记录需要结合应用结构化日志排查进程中断或审计 completion 失败。
 - `GET /api/operations/app-health/page-audit?page=operation-history` 必须证明 coverage marker、审计/修正/history append-only trigger 存在且启用。
 - 银行流水、发票受保护字段只能经带 transaction-local actor/reason 的正式入口修正；缺少 reason 的直接 UPDATE/DELETE 会被数据库拒绝。禁止通过停用 trigger、直接改审计表或重写 relation history 处理生产问题。

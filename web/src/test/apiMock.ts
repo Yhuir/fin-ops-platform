@@ -5184,33 +5184,29 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/operations/audit-events": () => ({
+    "/api/operations/history": () => ({
       body: {
         rows: [
           {
-            id: "10000000-0000-4000-8000-000000000001",
-            event_type: "operation.completed",
+            operation_key: "request:request-1",
             actor_id: "005",
             actor_name: "权限管理员",
-            action: "POST /api/workbench/actions/confirm-link",
+            actor_account: "YNSYLP005",
             page_key: "reconciliation-workbench",
-            operation_location: "/api/workbench/actions/confirm-link",
+            action_label: "确认关联",
             object_type: "reconciliation_case",
-            object_id: "case-1",
+            started_at: "2026-08-09T12:00:00+08:00",
+            completed_at: "2026-08-09T12:00:01+08:00",
             occurred_at: "2026-08-09T12:00:00+08:00",
             outcome: "success",
-            reason: "确认关联",
-            request_id: "request-1",
-            payload: {
-              summary: "确认关联",
-              before: { status: "unpaired" },
-              after: { relation_id: "internal-relation-1", status: "paired" },
-            },
           },
         ],
         next_cursor: null,
         limit: 50,
       },
+    }),
+    "/api/operations/history/actors": () => ({
+      body: { rows: [{ actor_id: "005", actor_name: "权限管理员", actor_account: "YNSYLP005" }] },
     }),
     "/api/operations/app-health/page-audit": ({ url }) => {
       const pageKey = url.searchParams.get("page") ?? "";
@@ -7639,28 +7635,32 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     if (url.pathname.startsWith("/api/workbench/rows/")) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
     }
-    if (url.pathname.startsWith("/api/operations/audit-events/")) {
+    if (url.pathname.startsWith("/api/operations/history/") && url.pathname !== "/api/operations/history/actors") {
       return jsonResponse({
         body: {
-          event: {
-            id: decodeURIComponent(url.pathname.split("/").pop() ?? ""),
-            event_type: "operation.completed",
+          operation: {
+            operation_key: decodeURIComponent(url.pathname.split("/").pop() ?? ""),
             actor_id: "005",
             actor_name: "权限管理员",
-            action: "POST /api/workbench/actions/confirm-link",
+            actor_account: "YNSYLP005",
             page_key: "reconciliation-workbench",
-            operation_location: "/api/workbench/actions/confirm-link",
+            action_label: "确认关联",
             object_type: "reconciliation_case",
-            object_id: "case-1",
+            started_at: "2026-08-09T12:00:00+08:00",
+            completed_at: "2026-08-09T12:00:01+08:00",
             occurred_at: "2026-08-09T12:00:00+08:00",
             outcome: "success",
             reason: "确认关联",
-            request_id: "request-1",
-            payload: {
-              summary: "确认关联",
-              before: { status: "unpaired" },
-              after: { relation_id: "internal-relation-1", status: "paired" },
-            },
+            items: [{
+              item_key: "item-1",
+              type: "银行流水",
+              title: "云南昂超商贸有限公司",
+              secondary: "设备采购",
+              amount: "2200.00",
+              date: "2026-06-08T10:14:33+08:00",
+              before_status: "未配对",
+              after_status: "已配对",
+            }],
           },
         },
       });

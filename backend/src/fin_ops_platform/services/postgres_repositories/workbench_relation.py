@@ -406,6 +406,7 @@ class PostgresWorkbenchRelationRepository:
                     text(item.get("operation_type") or item.get("event_type") or "unknown"),
                     text(item.get("created_by") or item.get("actor_id")),
                     text(item.get("created_at") or item.get("occurred_at")),
+                    text(item.get("request_id")),
                     jsonb(item.get("before_relations") if isinstance(item.get("before_relations"), list) else item.get("before_payload") or {}),
                     jsonb(item.get("after_relations") if isinstance(item.get("after_relations"), list) else item.get("after_payload") or {}),
                     jsonb({"normalized_payload": item}),
@@ -414,20 +415,20 @@ class PostgresWorkbenchRelationRepository:
         if not rows:
             return
         value_sql = ", ".join(
-            ["(%s::uuid, %s::text, %s::text, %s::text, %s::text, %s::jsonb, %s::jsonb, %s::jsonb)"]
+            ["(%s::uuid, %s::text, %s::text, %s::text, %s::text, %s::text, %s::jsonb, %s::jsonb, %s::jsonb)"]
             * len(rows)
         )
         connection.execute(
             f"""
             with input(
-                id, case_id, event_type, actor_id, occurred_at,
+                id, case_id, event_type, actor_id, occurred_at, request_id,
                 before_payload, after_payload, raw_payload
             ) as (
                 values {value_sql}
             )
             insert into app.workbench_pair_relation_history(
                 id, relation_id, case_id, event_type, actor_id, occurred_at,
-                before_payload, after_payload, raw_payload
+                request_id, before_payload, after_payload, raw_payload
             )
             select
                 input.id,
@@ -436,6 +437,7 @@ class PostgresWorkbenchRelationRepository:
                 input.event_type,
                 input.actor_id,
                 coalesce(input.occurred_at::timestamptz, now()),
+                nullif(input.request_id, ''),
                 input.before_payload,
                 input.after_payload,
                 input.raw_payload

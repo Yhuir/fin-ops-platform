@@ -130,7 +130,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("app_health", "/api/app-health"),
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
-    HttpProbe("operation_history", "/api/operations/audit-events?limit=50", auth_scope="admin"),
+    HttpProbe("operation_history", "/api/operations/history?limit=50", auth_scope="admin"),
     HttpProbe("workbench_initial_all", "/api/workbench?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_refresh_status_all", "/api/workbench/refresh-status?month=all"),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),

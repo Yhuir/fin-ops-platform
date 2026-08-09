@@ -153,6 +153,7 @@ EXPECTED_MIGRATION_FILES = [
     "0139_idempotency_and_worker_attempt_history.sql",
     "0140_bank_transaction_identity_strength.sql",
     "0141_settings_data_reset_recovery_guard.sql",
+    "0142_operation_history_logical_operations.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

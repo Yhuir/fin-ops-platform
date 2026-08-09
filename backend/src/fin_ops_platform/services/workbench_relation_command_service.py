@@ -308,6 +308,8 @@ class WorkbenchRelationCommandService:
         replace_existing: bool = False,
         history_operation_type: str = "confirm_relation",
         preparation: WorkbenchRelationConfirmPreparation | None = None,
+        request_id: str | None = None,
+        operation_projection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         mode = self._validated_relation_mode(relation_mode)
         fingerprint = self._request_fingerprint(
@@ -451,6 +453,12 @@ class WorkbenchRelationCommandService:
                 amount_check=amount_check,
                 created_at=occurred_at,
             )
+        if request_id or operation_projection:
+            history = {
+                **history,
+                "request_id": str(request_id or "").strip(),
+                "operation_projection": deepcopy(operation_projection or {}),
+            }
         changed_case_ids = self._changed_case_ids(
             [
                 *active_relations,

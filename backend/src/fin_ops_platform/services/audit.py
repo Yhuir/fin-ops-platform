@@ -50,6 +50,7 @@ class AuditTrailService:
                     "object_id": entity_id,
                     "actor_id": actor_id,
                     "actor_name": sanitized_metadata.get("actor_name"),
+                    "actor_account": sanitized_metadata.get("actor_account"),
                     "scope": sanitized_metadata.get("scope"),
                     "trace_id": sanitized_metadata.get("trace_id"),
                     "occurred_at": created_at,
