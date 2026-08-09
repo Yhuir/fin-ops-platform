@@ -15,6 +15,8 @@ from types import SimpleNamespace
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import fitz
+
 from tests.app_test_support import (
     build_local_state_application as _build_application,
     configure_access_control,
@@ -170,6 +172,18 @@ def real_etc_xml() -> bytes:
 
 def fake_pdf(invoice_number: str) -> bytes:
     return f"%PDF-1.4\n% fake ETC invoice {invoice_number}\n%%EOF\n".encode("ascii")
+
+
+def valid_document_pdf() -> bytes:
+    document = fitz.open()
+    try:
+        document.new_page(width=100, height=100)
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+VALID_DOCUMENT_PDF = valid_document_pdf()
 
 
 def zip_bytes(entries: dict[str, bytes]) -> bytes:
@@ -2983,7 +2997,7 @@ class EtcApiTests(unittest.TestCase):
             )
             task = app._etc_reconciliation_task_service.get_task(task.task_id)
             body, headers = multipart(
-                {"ticket.pdf": b"%PDF-1.4\n%%EOF\n"},
+                {"ticket.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 
@@ -3015,7 +3029,7 @@ class EtcApiTests(unittest.TestCase):
             )
             task = app._etc_reconciliation_task_service.get_task(task.task_id)
             body, headers = multipart(
-                {"ticket.pdf": b"%PDF-1.4\n%%EOF\n"},
+                {"ticket.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 
@@ -3126,7 +3140,7 @@ class EtcApiTests(unittest.TestCase):
                 json.dumps({"title": "ETC"}),
             ).body)
             body, headers = multipart(
-                {"statement.pdf": b"%PDF-1.4\n%%EOF\n"},
+                {"statement.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(created["version"])},
             )
 
@@ -4660,7 +4674,7 @@ class EtcApiTests(unittest.TestCase):
             task_id = self._create_ready_reconciliation_task(app)
             task = app._etc_reconciliation_task_service.get_task(task_id)
             card_id = task.credit_card_items[0].item_id
-            body, headers = multipart({"statement.pdf": b"%PDF-1.4\n"})
+            body, headers = multipart({"statement.pdf": VALID_DOCUMENT_PDF})
 
             missing_version_patch = app.handle_request(
                 "PATCH",
@@ -4681,8 +4695,8 @@ class EtcApiTests(unittest.TestCase):
             ready_upload = app.handle_request(
                 "POST",
                 f"/api/etc/reconciliation-tasks/{task_id}/credit-card-statement",
-                body=multipart({"statement.pdf": b"%PDF-1.4\n"}, fields={"expectedVersion": str(task.version)})[0],
-                headers=multipart({"statement.pdf": b"%PDF-1.4\n"}, fields={"expectedVersion": str(task.version)})[1],
+                body=multipart({"statement.pdf": VALID_DOCUMENT_PDF}, fields={"expectedVersion": str(task.version)})[0],
+                headers=multipart({"statement.pdf": VALID_DOCUMENT_PDF}, fields={"expectedVersion": str(task.version)})[1],
             )
 
         self.assertEqual(missing_version_patch.status_code, 400)
@@ -4704,7 +4718,7 @@ class EtcApiTests(unittest.TestCase):
 
             app._state_store.store_etc_reconciliation_file = fail_store
             body, headers = multipart(
-                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                {"statement.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 
@@ -4722,12 +4736,34 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("文件存储", payload["message"])
         self.assertEqual(stored_task.source_files, [])
 
+    def test_ticket_root_upload_rejects_unknown_binary_before_storage(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
+            body, headers = multipart(
+                {"payload.jpg": b"8BPS\x00\x01malicious"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/ticket-root-files",
+                body=body,
+                headers=headers,
+            )
+            stored_task = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "invalid_document_upload")
+        self.assertEqual(stored_task.source_files, [])
+
     def test_credit_card_statement_upload_parses_pdf_and_returns_items(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
             body, headers = multipart(
-                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                {"statement.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 
@@ -4754,12 +4790,12 @@ class EtcApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
             body, headers = multipart(
-                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                {"statement.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 
-            def parse_after_source_delete(*, file_id: str, content: bytes) -> FileParseResult:
-                _ = content
+            def parse_after_source_delete(*, file_id: str, document: object) -> FileParseResult:
+                _ = document
                 current = app._etc_reconciliation_task_service.get_task(task.task_id)
                 app._etc_reconciliation_task_service.delete_source_file(
                     task_id=task.task_id,
@@ -4796,7 +4832,7 @@ class EtcApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC OCR upload", created_by="alice")
             body, headers = multipart(
-                {"scan.pdf": b"%PDF-1.4\n%%EOF"},
+                {"scan.pdf": VALID_DOCUMENT_PDF},
                 fields={"expectedVersion": str(task.version)},
             )
 

@@ -22,17 +22,17 @@ except Exception:  # pragma: no cover - optional dependency fallback
     pdfplumber = None
 
 try:
-    from PIL import Image, ImageOps
-except Exception:  # pragma: no cover - optional dependency fallback
-    Image = None
-    ImageOps = None
-
-try:
     from rapidocr_onnxruntime import RapidOCR
 except Exception:  # pragma: no cover - optional dependency fallback
     RapidOCR = None
 
 from fin_ops_platform.services.imports import clean_string
+from fin_ops_platform.services.untrusted_document_policy import (
+    OA_ATTACHMENT_LIMITS,
+    UntrustedDocumentError,
+    ValidatedDocument,
+    inspect_untrusted_document,
+)
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
@@ -61,7 +61,7 @@ OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-05-28-attachment-status-v1"
+    PARSER_VERSION = "2026-08-09-strict-document-boundary-v1"
 
     def __init__(
         self,
@@ -128,7 +128,15 @@ class OAAttachmentInvoiceService:
             return base_result
 
         try:
-            extracted_segments = self._extract_text_segments(content, suffix)
+            extracted_segments = self._extract_text_segments(
+                content,
+                suffix,
+                file_name or Path(file_path).name,
+            )
+        except UntrustedDocumentError as exc:
+            base_result["parse_status"] = "parse_failed"
+            base_result["parse_error"] = exc.code
+            return base_result
         except Exception as exc:
             base_result["parse_status"] = "parse_failed"
             base_result["parse_error"] = type(exc).__name__
@@ -214,12 +222,19 @@ class OAAttachmentInvoiceService:
             return []
         return [self._invoice_to_evidence(parsed_invoice)]
 
-    def _extract_text_segments(self, content: bytes, suffix: str) -> list[str]:
-        if suffix == "pdf":
-            return self._extract_pdf_text_segments(content)
-        if suffix == "docx":
-            return self._extract_docx_text_segments(content)
-        return [self._extract_image_text(content)]
+    def _extract_text_segments(self, content: bytes, suffix: str, file_name: str) -> list[str]:
+        expected_kind = "jpeg" if suffix in {"jpg", "jpeg"} else suffix
+        document = inspect_untrusted_document(
+            file_name=file_name,
+            content=content,
+            allowed_kinds=frozenset({expected_kind}),
+            limits=OA_ATTACHMENT_LIMITS,
+        )
+        if document.kind == "pdf":
+            return self._extract_pdf_text_segments(document)
+        if document.kind == "docx":
+            return self._extract_docx_text_segments(document)
+        return [self._extract_image_text(document)]
 
     @staticmethod
     def _evidence_dedupe_key(evidence: dict[str, str]) -> str:
@@ -259,26 +274,29 @@ class OAAttachmentInvoiceService:
         return content
 
     def _extract_pdf_text(self, content: bytes) -> str:
-        return "\n".join(self._extract_pdf_text_segments(content)).strip()
+        document = inspect_untrusted_document(
+            file_name="attachment.pdf",
+            content=content,
+            allowed_kinds=frozenset({"pdf"}),
+            limits=OA_ATTACHMENT_LIMITS,
+        )
+        return "\n".join(self._extract_pdf_text_segments(document)).strip()
 
-    def _extract_pdf_text_segments(self, content: bytes) -> list[str]:
-        segments = self._extract_pdf_text_segments_with_pdfplumber(content)
+    def _extract_pdf_text_segments(self, document: ValidatedDocument) -> list[str]:
+        segments = self._extract_pdf_text_segments_with_pdfplumber(document)
         if segments:
             return segments
-        return self._extract_pdf_text_segments_with_fitz(content)
+        return self._extract_pdf_text_segments_with_fitz(document)
 
-    def _extract_image_text(self, content: bytes) -> str:
-        for image_content in self._iter_image_ocr_inputs(content):
-            lines = self._run_image_ocr(image_content)
-            if lines:
-                return "\n".join(lines).strip()
-        return ""
+    def _extract_image_text(self, document: ValidatedDocument) -> str:
+        lines = self._run_image_ocr(document.ocr_content or b"")
+        return "\n".join(lines).strip() if lines else ""
 
-    def _extract_docx_text_segments(self, content: bytes) -> list[str]:
+    def _extract_docx_text_segments(self, document: ValidatedDocument) -> list[str]:
         try:
-            with ZipFile(BytesIO(content)) as document:
-                segments = self._extract_docx_xml_text_segments(document)
-                segments.extend(self._extract_docx_media_text_segments(document))
+            with ZipFile(BytesIO(document.content)) as archive:
+                segments = self._extract_docx_xml_text_segments(archive)
+                segments.extend(self._extract_docx_media_text_segments(archive))
                 return [segment for segment in segments if clean_string(segment)]
         except (BadZipFile, KeyError, OSError, ET.ParseError, ValueError):
             return []
@@ -313,24 +331,38 @@ class OAAttachmentInvoiceService:
         ]
         segments: list[str] = []
         for image_name in image_names:
-            image_text = self._extract_image_text(document.read(image_name))
+            image_document = inspect_untrusted_document(
+                file_name=image_name,
+                content=document.read(image_name),
+                allowed_kinds=frozenset({"jpeg", "png"}),
+                limits=OA_ATTACHMENT_LIMITS,
+            )
+            image_text = self._extract_image_text(image_document)
             if image_text:
                 segments.append(image_text)
         return segments
 
     @staticmethod
     def _extract_pdf_text_with_pdfplumber(content: bytes) -> str:
-        return "\n".join(OAAttachmentInvoiceService._extract_pdf_text_segments_with_pdfplumber(content)).strip()
+        document = inspect_untrusted_document(
+            file_name="attachment.pdf",
+            content=content,
+            allowed_kinds=frozenset({"pdf"}),
+            limits=OA_ATTACHMENT_LIMITS,
+        )
+        return "\n".join(
+            OAAttachmentInvoiceService._extract_pdf_text_segments_with_pdfplumber(document)
+        ).strip()
 
     @staticmethod
-    def _extract_pdf_text_segments_with_pdfplumber(content: bytes) -> list[str]:
+    def _extract_pdf_text_segments_with_pdfplumber(document: ValidatedDocument) -> list[str]:
         if pdfplumber is None:
             return []
         try:
-            with pdfplumber.open(BytesIO(content)) as pdf:
+            with pdfplumber.open(BytesIO(document.content)) as pdf:
                 return [
                     text
-                    for page in pdf.pages
+                    for page in pdf.pages[: document.pdf_page_count]
                     if (text := clean_string(page.extract_text() or ""))
                 ]
         except Exception:
@@ -338,24 +370,32 @@ class OAAttachmentInvoiceService:
 
     @staticmethod
     def _extract_pdf_text_with_fitz(content: bytes) -> str:
-        return "\n".join(OAAttachmentInvoiceService._extract_pdf_text_segments_with_fitz(content)).strip()
+        document = inspect_untrusted_document(
+            file_name="attachment.pdf",
+            content=content,
+            allowed_kinds=frozenset({"pdf"}),
+            limits=OA_ATTACHMENT_LIMITS,
+        )
+        return "\n".join(
+            OAAttachmentInvoiceService._extract_pdf_text_segments_with_fitz(document)
+        ).strip()
 
     @staticmethod
-    def _extract_pdf_text_segments_with_fitz(content: bytes) -> list[str]:
+    def _extract_pdf_text_segments_with_fitz(document: ValidatedDocument) -> list[str]:
         if fitz is None:
             return []
         try:
-            document = fitz.open(stream=content, filetype="pdf")
+            pdf = fitz.open(stream=document.content, filetype="pdf")
         except Exception:
             return []
         try:
             return [
                 text
-                for page in document
+                for page in pdf
                 if (text := clean_string(page.get_text() or ""))
             ]
         finally:
-            document.close()
+            pdf.close()
 
     def _run_image_ocr(self, content: bytes) -> list[str]:
         engine = self._get_ocr_engine()
@@ -387,32 +427,6 @@ class OAAttachmentInvoiceService:
             self._ocr_engine_unavailable = True
             return None
         return self._ocr_engine
-
-    def _iter_image_ocr_inputs(self, content: bytes) -> list[bytes]:
-        candidates = [content]
-        preprocessed = self._preprocess_image_for_ocr(content)
-        if preprocessed and preprocessed != content:
-            candidates.append(preprocessed)
-        return candidates
-
-    @staticmethod
-    def _preprocess_image_for_ocr(content: bytes) -> bytes:
-        if Image is None or ImageOps is None:
-            return b""
-        try:
-            with Image.open(BytesIO(content)) as image:
-                normalized = ImageOps.exif_transpose(image).convert("RGB")
-                width, height = normalized.size
-                if max(width, height) < 1600:
-                    scale_ratio = 2
-                    normalized = normalized.resize((width * scale_ratio, height * scale_ratio))
-                grayscale = ImageOps.grayscale(normalized)
-                enhanced = ImageOps.autocontrast(grayscale)
-                output = BytesIO()
-                enhanced.save(output, format="PNG")
-                return output.getvalue()
-        except Exception:
-            return b""
 
     def _invoice_to_evidence(self, invoice: dict[str, str]) -> dict[str, str]:
         evidence = dict(invoice)

@@ -143,6 +143,7 @@ release_src() {
   [[ -d "$src" ]] || die "release src directory not found: $src"
   [[ -d "$src/backend/src/fin_ops_platform" ]] || die "backend package not found in release: $src"
   [[ -f "$src/backend/requirements.txt" ]] || die "backend requirements not found in release: $src"
+  [[ -f "$src/backend/requirements-audit.txt" ]] || die "backend audit requirements not found in release: $src"
   [[ -f "$src/web/dist/index.html" ]] || die "frontend dist not found in release: $src"
   printf '%s\n' "$src"
 }
@@ -817,6 +818,20 @@ sync_python_envs() {
   if [[ "$WORKER_PYTHON" != "$API_PYTHON" ]]; then
     "$WORKER_PYTHON" -m pip install -r "$src/backend/requirements.txt" >/dev/null
   fi
+}
+
+audit_python_dependencies() {
+  local src="$1"
+  local audit_env
+  audit_env="$(mktemp -d /tmp/fin-ops-dependency-audit.XXXXXX)"
+  trap 'rm -rf "$audit_env"' RETURN
+  "$API_PYTHON" -m venv "$audit_env"
+  "$audit_env/bin/python" -m pip install -q -r "$src/backend/requirements-audit.txt"
+  "$audit_env/bin/python" -m pip_audit \
+    -r "$src/backend/requirements.txt" \
+    --progress-spinner off
+  rm -rf "$audit_env"
+  trap - RETURN
 }
 
 run_schema_migrations() {
@@ -2792,6 +2807,7 @@ cmd="${1:-}"
 case "$cmd" in
   check-release)
     src="$(release_src "${2:-}")"
+    audit_python_dependencies "$src"
     assert_runtime_env_prerequisites
     echo "$src"
     ;;

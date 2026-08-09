@@ -5,9 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/verify.sh [lint|backend|frontend|e2e|docs|runtime-check|infra-smoke|settings-acl-postgres|all]
+Usage: scripts/verify.sh [lint|dependency-audit|backend|frontend|e2e|docs|runtime-check|infra-smoke|settings-acl-postgres|all]
 
 lint      Run Ruff lint checks for backend Python code, tests, and scripts.
+dependency-audit
+          Fail when pinned backend dependencies contain known vulnerabilities.
 backend   Run clean backend check and full backend unittest discovery.
 frontend  Run frontend Vitest and production build.
 e2e       Run deterministic Playwright browser smoke tests.
@@ -87,6 +89,11 @@ run_backend() {
 run_lint() {
   cd "$ROOT_DIR"
   python3 -m ruff check backend/src tests scripts
+}
+
+run_dependency_audit() {
+  cd "$ROOT_DIR"
+  python3 -m pip_audit -r backend/requirements.txt --progress-spinner off
 }
 
 run_frontend() {
@@ -253,6 +260,9 @@ case "$target" in
   lint)
     run_lint
     ;;
+  dependency-audit)
+    run_dependency_audit
+    ;;
   backend)
     run_backend
     ;;
@@ -275,6 +285,7 @@ case "$target" in
     run_settings_acl_postgres
     ;;
   all)
+    run_dependency_audit
     run_backend
     run_frontend
     run_e2e

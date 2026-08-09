@@ -4390,6 +4390,14 @@ class Application:
 
     def _reconciliation_error_response(self, error: ValueError) -> Response:
         code = str(error) or "invalid_reconciliation_request"
+        if code.startswith("document_"):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_document_upload",
+                    "message": "文件格式、签名或资源大小不符合上传要求，请上传有效的 TXT、PDF、JPG 或 PNG 文件。",
+                },
+            )
         status = HTTPStatus.CONFLICT if code in {
             "task_version_conflict",
             "stale_reconciliation_task_preview",

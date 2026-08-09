@@ -18,6 +18,11 @@ from fin_ops_platform.services.etc_reconciliation_models import (
     ParseIssueSeverity,
     SourceFileKind,
 )
+from fin_ops_platform.services.untrusted_document_policy import (
+    ETC_DOCUMENT_LIMITS,
+    ValidatedDocument,
+    inspect_untrusted_document,
+)
 
 
 @dataclass(frozen=True)
@@ -51,12 +56,18 @@ class EtcReconciliationSourceUploadService:
         task = self._task_service.get_task(task_id)
         if task.version != expected_version:
             raise ValueError("task_version_conflict")
+        validated_documents = self._validated_documents(source_kind=source_kind, uploads=uploads)
         ticket_root_upload_modes = self._ticket_root_upload_modes(
             task=task,
             source_kind=source_kind,
-            uploads=uploads,
+            documents=validated_documents,
         )
         for upload_index, upload in enumerate(uploads):
+            validated_document = (
+                validated_documents[upload_index]
+                if upload_index < len(validated_documents)
+                else None
+            )
             ticket_root_upload_mode = (
                 ticket_root_upload_modes[upload_index]
                 if source_kind == SourceFileKind.TICKET_ROOT and upload_index < len(ticket_root_upload_modes)
@@ -65,7 +76,9 @@ class EtcReconciliationSourceUploadService:
             content_type = (
                 f"text/plain; charset={ticket_root_text_encoding(upload.content) or 'utf-8'}"
                 if source_kind == SourceFileKind.TICKET_ROOT and ticket_root_upload_mode == "text_file"
-                else "application/octet-stream"
+                else validated_document.content_type
+                if validated_document is not None
+                else "text/plain; charset=utf-8"
             )
             source_file = self._task_service.store_uploaded_source_file(
                 task_id=task.task_id,
@@ -79,6 +92,7 @@ class EtcReconciliationSourceUploadService:
                 source_kind=source_kind,
                 source_file=source_file,
                 upload=upload,
+                validated_document=validated_document,
                 ticket_root_upload_mode=ticket_root_upload_mode,
                 evidence_kind_override=evidence_kind_override,
             )
@@ -89,6 +103,32 @@ class EtcReconciliationSourceUploadService:
                 require_source_file=True,
             )
         return task
+
+    @staticmethod
+    def _validated_documents(
+        *,
+        source_kind: SourceFileKind,
+        uploads: list[EtcReconciliationSourceUpload],
+    ) -> list[ValidatedDocument]:
+        if source_kind not in {
+            SourceFileKind.CREDIT_CARD_STATEMENT,
+            SourceFileKind.TICKET_ROOT,
+        }:
+            return []
+        allowed_kinds = (
+            frozenset({"pdf"})
+            if source_kind == SourceFileKind.CREDIT_CARD_STATEMENT
+            else frozenset({"jpeg", "pdf", "png", "text"})
+        )
+        return [
+            inspect_untrusted_document(
+                file_name=upload.file_name,
+                content=upload.content,
+                allowed_kinds=allowed_kinds,
+                limits=ETC_DOCUMENT_LIMITS,
+            )
+            for upload in uploads
+        ]
 
     def submit_ticket_root_texts(
         self,
@@ -129,19 +169,19 @@ class EtcReconciliationSourceUploadService:
         *,
         task: Any,
         source_kind: SourceFileKind,
-        uploads: list[EtcReconciliationSourceUpload],
+        documents: list[ValidatedDocument],
     ) -> list[str]:
         if source_kind != SourceFileKind.TICKET_ROOT:
             return []
         upload_modes: list[str] = []
-        for upload in uploads:
+        for document in documents:
             wrong_slot_message = reconciliation_wrong_slot_message(
                 expected_source_kind=source_kind,
-                content=upload.content,
+                document=document,
             )
             if wrong_slot_message:
                 raise EtcReconciliationWrongSourceSlotError(wrong_slot_message)
-            upload_modes.append(ticket_root_upload_source_mode(upload))
+            upload_modes.append(ticket_root_upload_source_mode(document))
         validate_ticket_root_upload_source_mode(task=task, upload_modes=upload_modes)
         return upload_modes
 
@@ -151,15 +191,20 @@ class EtcReconciliationSourceUploadService:
         source_kind: SourceFileKind,
         source_file: Any,
         upload: EtcReconciliationSourceUpload,
+        validated_document: ValidatedDocument | None,
         ticket_root_upload_mode: str,
         evidence_kind_override: str | None,
     ) -> FileParseResult:
         if source_kind == SourceFileKind.CREDIT_CARD_STATEMENT:
+            if validated_document is None:
+                raise ValueError("invalid_reconciliation_upload")
             return CcbCreditCardStatementParser().parse_pdf_bytes(
                 file_id=source_file.file_id,
-                content=upload.content,
+                document=validated_document,
             )
         if source_kind == SourceFileKind.TICKET_ROOT:
+            if validated_document is None:
+                raise ValueError("invalid_reconciliation_upload")
             if ticket_root_upload_mode == "text_file":
                 decoded_text = decode_ticket_root_text(upload.content) or ""
                 return (
@@ -167,7 +212,10 @@ class EtcReconciliationSourceUploadService:
                     if looks_like_ticket_root_clipboard_text(decoded_text)
                     else ticket_root_text_file_not_trip_result(source_file.file_id)
                 )
-            return TicketRootDocumentParser().parse_file(file_id=source_file.file_id, content=upload.content)
+            return TicketRootDocumentParser().parse_file(
+                file_id=source_file.file_id,
+                document=validated_document,
+            )
         return SupplementEvidenceParser().parse_text(
             file_id=source_file.file_id,
             text=upload.content.decode("utf-8", errors="ignore"),
@@ -193,10 +241,14 @@ def validate_ticket_root_upload_source_mode(*, task: object, upload_modes: list[
             raise ValueError("ticket_root_source_mode_conflict_text_file")
 
 
-def reconciliation_wrong_slot_message(*, expected_source_kind: SourceFileKind, content: bytes) -> str | None:
-    text = content.decode("utf-8", errors="ignore")
-    if content.lstrip().startswith(b"%PDF"):
-        extracted_text = etc_document_parsers._extract_pdf_text(content)
+def reconciliation_wrong_slot_message(
+    *,
+    expected_source_kind: SourceFileKind,
+    document: ValidatedDocument,
+) -> str | None:
+    text = document.content.decode("utf-8", errors="ignore") if document.kind == "text" else ""
+    if document.kind == "pdf":
+        extracted_text = etc_document_parsers._extract_pdf_text(document)
         if extracted_text.strip():
             text = f"{text}\n{extracted_text}"
     if not text.strip():
@@ -275,16 +327,8 @@ def has_ticket_root_document_source(task: object) -> bool:
     return any(is_ticket_root_document_source(source_file) for source_file in getattr(task, "source_files", []) or [])
 
 
-def ticket_root_upload_source_mode(upload: EtcReconciliationSourceUpload) -> str:
-    decoded_text = decode_ticket_root_text(upload.content)
-    if decoded_text is None:
-        return "document"
-    lower_name = str(upload.file_name or "").strip().lower()
-    if lower_name.endswith((".txt", ".text")):
-        return "text_file"
-    if looks_like_ticket_root_clipboard_text(decoded_text):
-        return "text_file"
-    return "document"
+def ticket_root_upload_source_mode(document: ValidatedDocument) -> str:
+    return "text_file" if document.kind == "text" else "document"
 
 
 TEXT_FILE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "gbk")

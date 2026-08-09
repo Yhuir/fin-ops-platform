@@ -382,6 +382,7 @@ python -m fin_ops_platform.app.worker \
 - 调用服务器 root-owned helper：
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
+- `check-release` 会在隔离临时 venv 中安装锁定的 `backend/requirements-audit.txt`，审计候选 `backend/requirements.txt`；存在已知漏洞或审计失败时停止发布，审计工具不进入 API/worker runtime venv。
 - `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。helper 比较 exact candidate 与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`，没有手工 profile/skip。所有 profile 的标准激活都只读取 005，不读取 006，也不依赖双身份 artifact。`runtime`/`acl` 先对当前 release
   执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
   停止旧 API 和 runtime workers，执行 PostgreSQL schema migration/validated CHECK，

@@ -3,6 +3,8 @@ import unittest
 from zipfile import ZipFile
 from unittest.mock import patch
 
+from PIL import Image
+
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -256,9 +258,21 @@ NON_TAX_PAYMENT_RECEIPT_TEXT = """
 """
 
 
+def _build_image(*, format_name: str) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (10, 10), "white").save(output, format=format_name)
+    return output.getvalue()
+
+
+VALID_PNG = _build_image(format_name="PNG")
+VALID_JPEG = _build_image(format_name="JPEG")
+VALID_PDF = _build_image(format_name="PDF")
+
+
 def _build_docx_with_media(*media_contents: bytes) -> bytes:
     output = BytesIO()
     with ZipFile(output, "w") as document:
+        document.writestr("[Content_Types].xml", "<Types xmlns=\"urn:test\"></Types>")
         document.writestr("word/document.xml", "<w:document xmlns:w=\"urn:test\"><w:t></w:t></w:document>")
         for index, content in enumerate(media_contents, start=1):
             document.writestr(f"word/media/image{index}.png", content)
@@ -302,7 +316,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         }
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-png-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_PNG),
             patch.object(service, "_extract_image_text", return_value=PNG_INVOICE_TEXT),
         ):
             invoices = service.parse_files([file_entry])
@@ -325,7 +339,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         }
 
         with (
-            patch.object(service, "_download_content", return_value=_build_docx_with_media(b"image-one")),
+            patch.object(service, "_download_content", return_value=_build_docx_with_media(VALID_PNG)),
             patch.object(service, "_run_image_ocr", return_value=PNG_INVOICE_TEXT.splitlines()),
         ):
             invoices = service.parse_files([file_entry])
@@ -344,7 +358,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         second_invoice_text = PNG_INVOICE_TEXT.replace("40512344", "40512345")
 
         with (
-            patch.object(service, "_download_content", return_value=_build_docx_with_media(b"image-one", b"image-two")),
+            patch.object(service, "_download_content", return_value=_build_docx_with_media(VALID_PNG, VALID_PNG)),
             patch.object(
                 service,
                 "_run_image_ocr",
@@ -369,7 +383,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         )
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-pdf-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_PDF),
             patch.object(
                 service,
                 "_extract_pdf_text_segments",
@@ -393,7 +407,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         }
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_JPEG),
             patch.object(service, "_extract_image_text", return_value=""),
         ):
             invoices = service.parse_files([file_entry])
@@ -409,7 +423,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         }
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_JPEG),
             patch.object(service, "_extract_image_text", return_value=""),
         ):
             result = service.parse_file_result(file_entry)
@@ -548,7 +562,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         file_entry = {"fileName": "toll.jpg", "filePath": "/toll.jpg", "suffix": "jpg"}
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_JPEG),
             patch.object(service, "_extract_image_text", return_value=MACHINE_PRINTED_TOLL_INVOICE_TEXT),
         ):
             evidences = service.parse_evidences([file_entry])
@@ -565,7 +579,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         file_entry = {"fileName": "toll-pair.jpg", "filePath": "/toll-pair.jpg", "suffix": "jpg"}
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_JPEG),
             patch.object(service, "_extract_image_text", return_value=MACHINE_PRINTED_TOLL_INVOICE_PAIR_TEXT),
         ):
             evidences = service.parse_evidences([file_entry])
@@ -617,7 +631,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         file_entry = {"fileName": "wechat-payment.png", "filePath": "/wechat-payment.png", "suffix": "png"}
 
         with (
-            patch.object(service, "_download_content", return_value=b"fake-png-bytes"),
+            patch.object(service, "_download_content", return_value=VALID_PNG),
             patch.object(service, "_extract_image_text", return_value=WECHAT_ETC_PAYMENT_25_TEXT),
         ):
             invoices = service.parse_files([file_entry])

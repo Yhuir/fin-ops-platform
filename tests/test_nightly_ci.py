@@ -31,6 +31,7 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("uses: actions/setup-node@v4", workflow)
         self.assertIn("node-version: \"20\"", workflow)
         self.assertIn("python -m pip install -r backend/requirements.txt", workflow)
+        self.assertIn("python -m pip install -r backend/requirements-audit.txt", workflow)
         self.assertIn("npm ci", workflow)
         self.assertIn("npx playwright install --with-deps chromium", workflow)
         self.assertIn("bash scripts/verify.sh all", workflow)
@@ -40,6 +41,7 @@ class NightlyCITests(unittest.TestCase):
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("run_clean_app_check", script)
+        self.assertIn("python3 -m pip_audit -r backend/requirements.txt", script)
         self.assertIn("PYTHONPATH=backend/src python3 -m unittest discover -s tests -v", script)
         self.assertIn("npm test -- --run", script)
         self.assertIn("npm run build", script)
@@ -53,7 +55,10 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("e2e-coverage.md", script)
         self.assertRegex(
             script,
-            re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
+            re.compile(
+                r"all\)\s+run_dependency_audit\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;",
+                re.MULTILINE,
+            ),
         )
 
     def test_docs_verification_falls_back_when_ripgrep_is_unavailable(self) -> None:
@@ -163,7 +168,10 @@ class NightlyCITests(unittest.TestCase):
         self.assertRegex(script, re.compile(r"infra-smoke\)\s+run_infra_smoke\s+;;", re.MULTILINE))
         self.assertRegex(
             script,
-            re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
+            re.compile(
+                r"all\)\s+run_dependency_audit\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;",
+                re.MULTILINE,
+            ),
         )
 
 

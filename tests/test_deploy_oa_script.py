@@ -43,6 +43,18 @@ class DeployOAScriptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_deploy_module()
 
+    def test_check_release_runs_isolated_dependency_audit_before_runtime_checks(self) -> None:
+        source = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        check_release = source[source.index("  check-release)") : source.index("  contract-version)")]
+
+        self.assertIn("audit_python_dependencies", check_release)
+        self.assertLess(
+            check_release.index("audit_python_dependencies"),
+            check_release.index("assert_runtime_env_prerequisites"),
+        )
+        self.assertIn("requirements-audit.txt", source)
+        self.assertIn("pip_audit", source)
+
     def _deployment_config(self, root_dir: Path):
         return self.module.DeploymentConfig(
             host="finops-prod",
@@ -812,6 +824,9 @@ class DeployOAScriptTest(unittest.TestCase):
                 src = releases / name / "src"
                 (src / "backend/src/fin_ops_platform").mkdir(parents=True)
                 (src / "backend/requirements.txt").write_text("same\n", encoding="utf-8")
+                (src / "backend/requirements-audit.txt").write_text(
+                    "pip-audit==2.10.1\n", encoding="utf-8"
+                )
                 (src / "web/dist/assets").mkdir(parents=True)
                 (src / "web/dist/assets/app.js").write_text("same\n", encoding="utf-8")
                 (src / "web/dist/index.html").write_text(

@@ -4,9 +4,6 @@ from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
-import shutil
-import subprocess
-import tempfile
 from typing import Any, Callable
 from uuid import uuid5, NAMESPACE_URL
 
@@ -21,12 +18,6 @@ except Exception:  # pragma: no cover - optional dependency fallback
     pdfplumber = None
 
 try:
-    from PIL import Image, ImageOps
-except Exception:  # pragma: no cover - optional dependency fallback
-    Image = None
-    ImageOps = None
-
-try:
     from rapidocr_onnxruntime import RapidOCR
 except Exception:  # pragma: no cover - optional dependency fallback
     RapidOCR = None
@@ -39,6 +30,7 @@ from fin_ops_platform.services.etc_reconciliation_models import (
     SupplementEvidence,
     TicketRootItem,
 )
+from fin_ops_platform.services.untrusted_document_policy import ValidatedDocument
 
 
 CCB_ROW_RE = re.compile(
@@ -125,11 +117,8 @@ class CcbCreditCardStatementParser:
         pdf_text_extractor: Callable[[bytes], str] | None = None,
         ocr_text_extractor: Callable[[bytes], list[str]] | None = None,
     ) -> None:
-        self._pdf_text_extractor = pdf_text_extractor or _extract_pdf_text
-        self._ocr_text_extractor = ocr_text_extractor or TicketRootOcrTextExtractor(
-            render_scale=3,
-            group_by_row=True,
-        )
+        self._pdf_text_extractor = pdf_text_extractor
+        self._ocr_text_extractor = ocr_text_extractor
 
     def parse_text(self, *, file_id: str, text: str, task_id: str = "") -> FileParseResult:
         if not text.strip():
@@ -194,15 +183,32 @@ class CcbCreditCardStatementParser:
             )
         return FileParseResult(file_id=file_id, parser_code=self.parser_code, credit_card_items=items)
 
-    def parse_pdf_bytes(self, *, file_id: str, content: bytes, task_id: str = "") -> FileParseResult:
+    def parse_pdf_bytes(
+        self,
+        *,
+        file_id: str,
+        document: ValidatedDocument,
+        task_id: str = "",
+    ) -> FileParseResult:
+        if document.kind != "pdf":
+            raise ValueError("credit_card_statement_requires_pdf")
         text_result = self.parse_text(
             file_id=file_id,
-            text=self._pdf_text_extractor(content),
+            text=(
+                self._pdf_text_extractor(document.content)
+                if self._pdf_text_extractor is not None
+                else _extract_pdf_text(document)
+            ),
             task_id=task_id,
         )
         if text_result.credit_card_items:
             return text_result
-        ocr_text = "\n".join(page_text for page_text in self._ocr_text_extractor(content) if page_text.strip())
+        page_texts = (
+            self._ocr_text_extractor(document.content)
+            if self._ocr_text_extractor is not None
+            else TicketRootOcrTextExtractor(render_scale=3, group_by_row=True)(document)
+        )
+        ocr_text = "\n".join(page_text for page_text in page_texts if page_text.strip())
         if not ocr_text:
             return text_result
         ocr_text = _normalize_credit_card_ocr_text(ocr_text)
@@ -395,12 +401,24 @@ class TicketRootDocumentParser:
         pdf_text_extractor: Callable[[bytes], str] | None = None,
         ocr_text_extractor: Callable[[bytes], list[str]] | None = None,
     ) -> None:
-        self._pdf_text_extractor = pdf_text_extractor or _extract_pdf_text
-        self._ocr_text_extractor = ocr_text_extractor or TicketRootOcrTextExtractor()
+        self._pdf_text_extractor = pdf_text_extractor
+        self._ocr_text_extractor = ocr_text_extractor
         self._text_parser = TicketRootPdfTextParser()
 
-    def parse_file(self, *, file_id: str, content: bytes, task_id: str = "") -> FileParseResult:
-        pdf_text = self._pdf_text_extractor(content)
+    def parse_file(
+        self,
+        *,
+        file_id: str,
+        document: ValidatedDocument,
+        task_id: str = "",
+    ) -> FileParseResult:
+        pdf_text = ""
+        if document.kind == "pdf":
+            pdf_text = (
+                self._pdf_text_extractor(document.content)
+                if self._pdf_text_extractor is not None
+                else _extract_pdf_text(document)
+            )
         has_invoice_application_only_page = _is_invoice_application_without_ticket_details(pdf_text)
         pdf_text_result = self._text_parser.parse_text(
             file_id=file_id,
@@ -415,7 +433,12 @@ class TicketRootDocumentParser:
         combined = FileParseResult(file_id=file_id, parser_code=self.parser_code)
         document_plate_match = PLATE_RE.search(pdf_text)
         document_plate = document_plate_match.group(0) if document_plate_match is not None else None
-        for page_index, page_text in enumerate(self._ocr_text_extractor(content), start=1):
+        page_texts = (
+            self._ocr_text_extractor(document.content)
+            if self._ocr_text_extractor is not None
+            else TicketRootOcrTextExtractor()(document)
+        )
+        for page_index, page_text in enumerate(page_texts, start=1):
             if _is_invoice_application_without_ticket_details(page_text):
                 has_invoice_application_only_page = True
             page_plate_match = PLATE_RE.search(page_text)
@@ -458,38 +481,34 @@ class TicketRootOcrTextExtractor:
         self._ocr_engine: Any | None = None
         self._ocr_engine_unavailable = False
 
-    def __call__(self, content: bytes) -> list[str]:
-        pdf_pages = self._render_pdf_pages_for_ocr(content)
-        if pdf_pages:
-            return [self._extract_image_text(page_content) for page_content in pdf_pages]
-        image_text = self._extract_image_text(content)
+    def __call__(self, document: ValidatedDocument) -> list[str]:
+        if document.kind == "pdf":
+            return self._extract_pdf_page_texts(document.content)
+        image_text = self._extract_image_text(document.ocr_content or b"")
         return [image_text] if image_text else []
 
-    def _render_pdf_pages_for_ocr(self, content: bytes) -> list[bytes]:
-        if fitz is None or not content.lstrip().startswith(b"%PDF"):
+    def _extract_pdf_page_texts(self, content: bytes) -> list[str]:
+        if fitz is None:
             return []
         try:
             document = fitz.open(stream=content, filetype="pdf")
         except Exception:
             return []
         try:
-            page_images: list[bytes] = []
+            page_texts: list[str] = []
             matrix = fitz.Matrix(self._render_scale, self._render_scale)
             for page in document:
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-                page_images.append(pixmap.tobytes("png"))
-            return page_images
+                page_texts.append(self._extract_image_text(pixmap.tobytes("png")))
+            return page_texts
         except Exception:
             return []
         finally:
             document.close()
 
     def _extract_image_text(self, content: bytes) -> str:
-        for image_content in self._iter_image_ocr_inputs(content):
-            lines = self._run_image_ocr(image_content)
-            if lines:
-                return _normalize_ocr_text("\n".join(lines))
-        return ""
+        lines = self._run_image_ocr(content) if content else []
+        return _normalize_ocr_text("\n".join(lines)) if lines else ""
 
     def _run_image_ocr(self, content: bytes) -> list[str]:
         engine = self._get_ocr_engine()
@@ -524,32 +543,6 @@ class TicketRootOcrTextExtractor:
             self._ocr_engine_unavailable = True
             return None
         return self._ocr_engine
-
-    def _iter_image_ocr_inputs(self, content: bytes) -> list[bytes]:
-        candidates = [content]
-        preprocessed = self._preprocess_image_for_ocr(content)
-        if preprocessed and preprocessed != content:
-            candidates.append(preprocessed)
-        return candidates
-
-    @staticmethod
-    def _preprocess_image_for_ocr(content: bytes) -> bytes:
-        if Image is None or ImageOps is None:
-            return b""
-        try:
-            with Image.open(BytesIO(content)) as image:
-                normalized = ImageOps.exif_transpose(image).convert("RGB")
-                width, height = normalized.size
-                if max(width, height) < 1600:
-                    normalized = normalized.resize((width * 2, height * 2))
-                grayscale = ImageOps.grayscale(normalized)
-                enhanced = ImageOps.autocontrast(grayscale)
-                output = BytesIO()
-                enhanced.save(output, format="PNG")
-                return output.getvalue()
-        except Exception:
-            return b""
-
 
 class SupplementEvidenceParser:
     parser_code = "supplement_evidence_v1"
@@ -885,11 +878,15 @@ def _normalize_chinese_datetime(value: str) -> str:
     return f"{int(year):04d}-{int(month):02d}-{int(day):02d} {time_part.strip()}"
 
 
-def _extract_pdf_text(content: bytes) -> str:
+def _extract_pdf_text(document: ValidatedDocument) -> str:
+    content = document.content
     if pdfplumber is not None:
         try:
-            with pdfplumber.open(BytesIO(content)) as document:
-                text = "\n".join(page.extract_text() or "" for page in document.pages).strip()
+            with pdfplumber.open(BytesIO(content)) as pdf:
+                text = "\n".join(
+                    page.extract_text() or ""
+                    for page in pdf.pages[: document.pdf_page_count]
+                ).strip()
                 if text:
                     return text
         except Exception:
@@ -908,28 +905,7 @@ def _extract_pdf_text(content: bytes) -> str:
                 pass
             finally:
                 document.close()
-    return _extract_pdf_text_with_pdftotext(content)
-
-
-def _extract_pdf_text_with_pdftotext(content: bytes) -> str:
-    executable = shutil.which("pdftotext")
-    if not executable:
-        return ""
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as pdf_file:
-            pdf_file.write(content)
-            pdf_file.flush()
-            result = subprocess.run(
-                [executable, "-layout", pdf_file.name, "-"],
-                timeout=10,
-                capture_output=True,
-                check=False,
-            )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return result.stdout.decode("utf-8", errors="ignore").strip()
+    return ""
 
 
 def with_task_id(parse_result: FileParseResult, task_id: str) -> FileParseResult:

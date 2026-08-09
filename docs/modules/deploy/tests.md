@@ -21,7 +21,7 @@
 | 场景 | 覆盖入口 | 状态 |
 | --- | --- | --- |
 | nightly 支持手动、定时、main push，并运行 `bash scripts/verify.sh all` | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
-| `verify.sh all` 运行 clean app check、全量 unittest、前端 Vitest/build、Playwright browser smoke、docs check，且 clean app check 不读取本地 legacy app Mongo | `tests/test_nightly_ci.py` | 2026-06-17 更新 |
+| `verify.sh all` 先运行锁定生产依赖安全审计，再运行 clean app check、全量 unittest、前端 Vitest/build、Playwright browser smoke、docs check；`check-release` 在隔离 venv 重跑审计，且 clean app check 不读取本地 legacy app Mongo | `tests/test_nightly_ci.py`、`tests/test_deploy_oa_script.py` | 2026-08-09 更新 |
 | `verify.sh docs` 检查 Spec-first E2E 全局文档和每个模块的 `e2e-spec.md` / `e2e-coverage.md`；backend unittest 检查模块索引、inventory 和 Spec ID 映射 | `tests/test_nightly_ci.py`、`tests/test_spec_first_e2e_docs.py` | 2026-06-19 新增 |
 | 当前配置 runtime app check 必须显式使用 `verify.sh runtime-check`，避免把 legacy app Mongo 数据问题混入 clean CI 门禁 | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
 | release remote script 使用 versioned release、deploy-control、worker ensure、storage preflight、cleanup | `tests/test_deploy_oa_script.py` | 已覆盖 |

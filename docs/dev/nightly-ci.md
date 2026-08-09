@@ -32,6 +32,7 @@ bash scripts/verify.sh all
 该命令包括：
 
 ```bash
+python3 -m pip_audit --requirement backend/requirements.txt --progress-spinner off
 FIN_OPS_DATA_DIR="$(mktemp -d)" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 cd web && npm test -- --run
@@ -42,6 +43,7 @@ cd web && npm run e2e:smoke
 GitHub Actions 在运行统一入口前会执行：
 
 ```bash
+python -m pip install -r backend/requirements-audit.txt
 cd web && npx playwright install --with-deps chromium
 ```
 

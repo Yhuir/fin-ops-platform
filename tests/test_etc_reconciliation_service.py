@@ -37,6 +37,11 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
 )
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.untrusted_document_policy import (
+    ETC_DOCUMENT_LIMITS,
+    ValidatedDocument,
+    inspect_untrusted_document,
+)
 
 
 REAL_TICKET_ROOT_TXT_SAMPLES = {
@@ -56,6 +61,26 @@ REAL_TICKET_ROOT_TXT_SAMPLES = {
         2,
     ),
 }
+
+
+def _validated_pdf(content: bytes = b"%PDF-1.4\n%%EOF") -> ValidatedDocument:
+    return ValidatedDocument(
+        file_name="document.pdf",
+        kind="pdf",
+        content=content,
+        content_type="application/pdf",
+        content_sha256="test",
+        pdf_page_count=1,
+    )
+
+
+def _validated_image(content: bytes, file_name: str = "document.png") -> ValidatedDocument:
+    return inspect_untrusted_document(
+        file_name=file_name,
+        content=content,
+        allowed_kinds=frozenset({"jpeg", "png"}),
+        limits=ETC_DOCUMENT_LIMITS,
+    )
 
 CCB_STATEMENT_TEXT = """
 中国建设银行信用卡账单
@@ -3029,7 +3054,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             failed = TicketRootDocumentParser(
                 pdf_text_extractor=lambda _content: "",
                 ocr_text_extractor=lambda _content: [],
-            ).parse_file(file_id="FILE-1", content=b"%PDF-1.4")
+            ).parse_file(file_id="FILE-1", document=_validated_pdf())
 
             updated = service.apply_parse_result(task_id=task.task_id, parse_result=failed, actor="alice")
             restored = EtcReconciliationTaskService.from_snapshot(service.snapshot(), data_dir=Path(temp_dir))
@@ -3291,7 +3316,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             parsers.RapidOCR = FakeRapidOCR
             result = TicketRootDocumentParser(
                 pdf_text_extractor=lambda _content: "",
-            ).parse_file(file_id="FILE-1", content=buffer.getvalue())
+            ).parse_file(file_id="FILE-1", document=_validated_image(buffer.getvalue()))
         finally:
             parsers.RapidOCR = original_rapid_ocr
 
@@ -3346,83 +3371,13 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         try:
             parsers.pdfplumber = EmptyPdfplumber
             parsers.fitz = FakeFitz
-            text = parsers._extract_pdf_text(b"%PDF-1.4")
+            text = parsers._extract_pdf_text(_validated_pdf(b"%PDF-1.4"))
         finally:
             parsers.pdfplumber = original_pdfplumber
             parsers.fitz = original_fitz
 
         self.assertIn("车牌号 云ADA0381", text)
         self.assertTrue(fake_document.closed)
-
-    def test_pdf_text_extraction_uses_pdftotext_when_python_pdf_libraries_are_unavailable(self) -> None:
-        import fin_ops_platform.services.etc_document_parsers as parsers
-
-        calls: list[tuple[list[str], int | float | None, bool, bool]] = []
-
-        def fake_run(command: list[str], *, timeout: int | float | None, capture_output: bool, check: bool) -> SimpleNamespace:
-            calls.append((command, timeout, capture_output, check))
-            return SimpleNamespace(returncode=0, stdout=f"{APRIL_STATEMENT_TEXT}\n交易明细".encode("utf-8"), stderr=b"")
-
-        originals = {
-            "pdfplumber": (hasattr(parsers, "pdfplumber"), getattr(parsers, "pdfplumber", None)),
-            "fitz": (hasattr(parsers, "fitz"), getattr(parsers, "fitz", None)),
-            "shutil": (hasattr(parsers, "shutil"), getattr(parsers, "shutil", None)),
-            "subprocess": (hasattr(parsers, "subprocess"), getattr(parsers, "subprocess", None)),
-        }
-        try:
-            parsers.pdfplumber = None
-            parsers.fitz = None
-            parsers.shutil = SimpleNamespace(which=lambda name: "/usr/bin/pdftotext" if name == "pdftotext" else None)
-            parsers.subprocess = SimpleNamespace(run=fake_run)
-            text = parsers._extract_pdf_text(b"%PDF-1.4\n%%EOF")
-        finally:
-            for name, (existed, value) in originals.items():
-                if existed:
-                    setattr(parsers, name, value)
-                elif hasattr(parsers, name):
-                    delattr(parsers, name)
-
-        self.assertIn("交易明细", text)
-        self.assertEqual(len(calls), 1)
-        command, timeout, capture_output, check = calls[0]
-        self.assertEqual(command[0], "/usr/bin/pdftotext")
-        self.assertIn("-layout", command)
-        self.assertEqual(command[-1], "-")
-        self.assertLessEqual(timeout or 999, 10)
-        self.assertTrue(capture_output)
-        self.assertFalse(check)
-
-    def test_credit_card_statement_pdf_parse_uses_pdftotext_when_python_pdf_libraries_are_unavailable(self) -> None:
-        import fin_ops_platform.services.etc_document_parsers as parsers
-
-        def fake_run(command: list[str], *, timeout: int | float | None, capture_output: bool, check: bool) -> SimpleNamespace:
-            self.assertIn("-layout", command)
-            self.assertEqual(command[-1], "-")
-            return SimpleNamespace(returncode=0, stdout=APRIL_STATEMENT_TEXT.encode("utf-8"), stderr=b"")
-
-        originals = {
-            "pdfplumber": (hasattr(parsers, "pdfplumber"), getattr(parsers, "pdfplumber", None)),
-            "fitz": (hasattr(parsers, "fitz"), getattr(parsers, "fitz", None)),
-            "shutil": (hasattr(parsers, "shutil"), getattr(parsers, "shutil", None)),
-            "subprocess": (hasattr(parsers, "subprocess"), getattr(parsers, "subprocess", None)),
-        }
-        try:
-            parsers.pdfplumber = None
-            parsers.fitz = None
-            parsers.shutil = SimpleNamespace(which=lambda name: "/usr/bin/pdftotext" if name == "pdftotext" else None)
-            parsers.subprocess = SimpleNamespace(run=fake_run)
-            result = CcbCreditCardStatementParser().parse_pdf_bytes(file_id="CARD-APRIL", content=b"%PDF-1.4\n%%EOF")
-        finally:
-            for name, (existed, value) in originals.items():
-                if existed:
-                    setattr(parsers, name, value)
-                elif hasattr(parsers, name):
-                    delattr(parsers, name)
-
-        self.assertTrue(result.ok)
-        self.assertEqual(result.issues, [])
-        self.assertGreater(len(result.credit_card_items), 0)
-        self.assertEqual(result.credit_card_items[0].description, "财付通-贵州黔通智联高速通行费")
 
     def test_credit_card_statement_pdf_prefers_selectable_text_without_ocr(self) -> None:
         def unexpected_ocr(_content: bytes) -> list[str]:
@@ -3431,7 +3386,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         result = CcbCreditCardStatementParser(
             pdf_text_extractor=lambda _content: APRIL_STATEMENT_TEXT,
             ocr_text_extractor=unexpected_ocr,
-        ).parse_pdf_bytes(file_id="CARD-TEXT", content=b"%PDF-1.4\n%%EOF")
+        ).parse_pdf_bytes(file_id="CARD-TEXT", document=_validated_pdf())
 
         self.assertTrue(result.ok)
         self.assertEqual(result.issues, [])
@@ -3473,7 +3428,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             parsers.RapidOCR = FakeRapidOCR
             result = CcbCreditCardStatementParser().parse_pdf_bytes(
                 file_id="CARD-IMAGE",
-                content=buffer.getvalue(),
+                document=_validated_pdf(buffer.getvalue()),
             )
         finally:
             parsers.RapidOCR = original_rapid_ocr
@@ -3487,30 +3442,21 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(result.issues[0].severity, ParseIssueSeverity.WARNING)
         self.assertEqual(result.issues[0].extraction_method, "ocr")
 
-    def test_pdf_text_extraction_returns_empty_string_when_pdftotext_is_unavailable_or_fails(self) -> None:
+    def test_pdf_text_extraction_has_no_external_process_fallback(self) -> None:
         import fin_ops_platform.services.etc_document_parsers as parsers
 
-        originals = {
-            "pdfplumber": (hasattr(parsers, "pdfplumber"), getattr(parsers, "pdfplumber", None)),
-            "fitz": (hasattr(parsers, "fitz"), getattr(parsers, "fitz", None)),
-            "shutil": (hasattr(parsers, "shutil"), getattr(parsers, "shutil", None)),
-            "subprocess": (hasattr(parsers, "subprocess"), getattr(parsers, "subprocess", None)),
-        }
+        original_pdfplumber = parsers.pdfplumber
+        original_fitz = parsers.fitz
         try:
             parsers.pdfplumber = None
             parsers.fitz = None
-            parsers.shutil = SimpleNamespace(which=lambda _name: None)
-            parsers.subprocess = SimpleNamespace(run=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-            self.assertEqual(parsers._extract_pdf_text(b"%PDF-1.4\n%%EOF"), "")
-
-            parsers.shutil = SimpleNamespace(which=lambda name: "/usr/bin/pdftotext" if name == "pdftotext" else None)
-            self.assertEqual(parsers._extract_pdf_text(b"%PDF-1.4\n%%EOF"), "")
+            self.assertEqual(parsers._extract_pdf_text(_validated_pdf()), "")
         finally:
-            for name, (existed, value) in originals.items():
-                if existed:
-                    setattr(parsers, name, value)
-                elif hasattr(parsers, name):
-                    delattr(parsers, name)
+            parsers.pdfplumber = original_pdfplumber
+            parsers.fitz = original_fitz
+
+        self.assertFalse(hasattr(parsers, "shutil"))
+        self.assertFalse(hasattr(parsers, "subprocess"))
 
     def test_ticket_root_parser_falls_back_to_ocr_when_pdf_text_has_no_items(self) -> None:
         parser = TicketRootDocumentParser(
@@ -3518,7 +3464,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             ocr_text_extractor=lambda _content: [TICKET_ROOT_TEXT],
         )
 
-        result = parser.parse_file(file_id="FILE-1", content=b"%PDF-1.4")
+        result = parser.parse_file(file_id="FILE-1", document=_validated_pdf())
 
         self.assertTrue(result.ok)
         self.assertEqual(len(result.ticket_root_items), 1)
@@ -3530,7 +3476,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             ocr_text_extractor=lambda _content: [TICKET_ROOT_TEXT],
         )
 
-        result = parser.parse_file(file_id="FILE-1", content=b"%PDF-1.4")
+        result = parser.parse_file(file_id="FILE-1", document=_validated_pdf())
 
         self.assertTrue(result.ok)
         self.assertEqual(len(result.ticket_root_items), 1)
@@ -3567,7 +3513,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             ],
         )
 
-        result = parser.parse_file(file_id="FILE-1", content=b"%PDF-1.4")
+        result = parser.parse_file(file_id="FILE-1", document=_validated_pdf())
 
         self.assertTrue(result.ok)
         self.assertEqual(result.issues, [])
@@ -3594,7 +3540,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         result = TicketRootDocumentParser(
             pdf_text_extractor=lambda _content: "",
             ocr_text_extractor=lambda _content: [],
-        ).parse_file(file_id="FILE-1", content=b"%PDF-1.4")
+        ).parse_file(file_id="FILE-1", document=_validated_pdf())
 
         self.assertFalse(result.ok)
         self.assertEqual(result.ticket_root_items, [])

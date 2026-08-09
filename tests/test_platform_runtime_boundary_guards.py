@@ -3536,6 +3536,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_untrusted_document_parsing_stays_behind_strict_shared_boundary(self) -> None:
+        policy_path = SERVICES_ROOT / "untrusted_document_policy.py"
+        policy_source = policy_path.read_text(encoding="utf-8")
+        source_upload_source = (SERVICES_ROOT / "etc_reconciliation_source_upload_service.py").read_text(
+            encoding="utf-8"
+        )
+        oa_attachment_source = (SERVICES_ROOT / "oa_attachment_invoice_service.py").read_text(encoding="utf-8")
+        requirements = (REPO_ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+        deploy_control = (REPO_ROOT / "deploy" / "oa" / "bin" / "finops-deploy-control.sh").read_text(
+            encoding="utf-8"
+        )
+
+        image_open_owners = [
+            path
+            for path in _python_files(SOURCE_ROOT)
+            if "Image.open(" in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(image_open_owners, [policy_path])
+        self.assertIn('formats=("JPEG", "PNG")', policy_source)
+        self.assertIn("inspect_untrusted_document(", source_upload_source)
+        self.assertIn("inspect_untrusted_document(", oa_attachment_source)
+        self.assertNotIn("_iter_image_ocr_inputs", oa_attachment_source)
+        self.assertNotIn("pdftotext", (SERVICES_ROOT / "etc_document_parsers.py").read_text(encoding="utf-8"))
+        self.assertIn("pillow==12.3.0", requirements)
+        self.assertIn("pdfplumber==0.11.10", requirements)
+        self.assertIn("pip_audit", deploy_control)
+
     def test_etc_import_routes_delegate_to_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
