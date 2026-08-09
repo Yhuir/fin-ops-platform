@@ -540,13 +540,13 @@ API release drop-in 必须声明 `RuntimeDirectory=fin-ops`，保证 Gunicorn pi
 `finops-deploy-control repair-active-api-runtime` 不接受 release 参数，只允许修复当前唯一 active release，
 并在返回前等待 API/required worker readiness，禁止将它作为绕过 release gate 的激活入口。
 
-入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0 执行
-`full` checkpoint，并分别在 T+60s、T+300s 执行只读 `stability` checkpoint。所有 profile 都使用
+入口先对当前 release 执行 production-equivalent `preflight` checkpoint；候选激活后在 T+0、T+60s、T+300s
+执行只读 `stability` checkpoint。所有 profile 都使用
 `pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并在 runtime 收敛后执行只读页面 canonical
 audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
-RabbitMQ dead letter、domain audit 和 API/health 性能；critical read-model enqueue-to-fresh 只在 T+0 `full`
-生成一次真实任务证据，T+60/T+300 不重复制造刷新任务。HTTP 三样本窗口仅在所有请求成功、fresh、p99
+RabbitMQ dead letter、domain audit、真实页面 read-model freshness 和 API/health 性能；自动发布门禁不 enqueue
+synthetic read-model refresh，避免局部 scope 改写 workbench 全局 active generation。HTTP 三样本窗口仅在所有请求成功、fresh、p99
 合格而 p95 单窗超标时允许一次重采样，连续两窗超标仍 fail closed。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 `preflight` 由候选 gate 代码执行，但 worker readiness 的 required instance 集合必须显式取自当前 stable

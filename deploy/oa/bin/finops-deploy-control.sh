@@ -2332,9 +2332,6 @@ release_gate_checkpoint() {
       --timeout-seconds 120
       --output "$closure_report"
     )
-    if [[ "$profile" == "full" ]]; then
-      closure_args+=(--apply-read-model-smoke)
-    fi
     if [[ "$profile" == "preflight" ]]; then
       for required_worker_instance in $(required_worker_instances "$src"); do
         closure_args+=(--required-worker-instance "$required_worker_instance")
@@ -2737,7 +2734,7 @@ PY
         "$release" "$previous_release" "$admin_token" "$evidence_dir" t0 "$release_profile"
     fi
   else
-    if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" full; then
+    if ! release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" stability; then
       rollback_release_gate \
         "$release" "$previous_release" "$admin_token" "$evidence_dir" t0 "$release_profile"
     fi

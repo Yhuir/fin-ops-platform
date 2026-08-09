@@ -418,11 +418,12 @@ python -m fin_ops_platform.app.worker \
 - `preflight` 的 worker readiness 使用当前 stable release 的 required worker inventory；新增 required
   worker 由激活阶段的 ensure helper 安装，并从 T+0 起按候选 registry 严格校验，避免候选 registry 在
   激活前把尚未部署的新 worker 误报为旧 runtime 故障
-- `runtime`/`acl` 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
-  queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
-  audit 及 API/health 性能
-- `runtime`/`acl` 在 T+60s、T+300s 运行只读 `stability`：重跑性能、domain audit 和 runtime 收敛检查，
-  不再重复 enqueue T+0 已证明的 critical read-model smoke，也不执行 confirm/withdraw；单个无错误、fresh、p99
+- `runtime`/`acl` 候选激活后 T+0 运行只读 `stability`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
+  queue/dirty/dead-letter 收敛、真实页面 read-model freshness、隔离事务写入能力、domain/page canonical
+  audit 及 API/health 性能。自动发布门禁不 enqueue synthetic read-model refresh；workbench 的 active generation
+  是全局原子发布边界，局部 smoke scope 不能污染 `month=all` 等真实页面 scope
+- `runtime`/`acl` 在 T+60s、T+300s 继续运行只读 `stability`：重跑性能、domain audit 和 runtime 收敛检查，
+  不 enqueue read-model smoke，也不执行 confirm/withdraw；单个无错误、fresh、p99
   合格但 p95 超标的三样本窗口只允许重采样一次，第二个窗口仍超标即失败。最终证据以 T+300 证明异步拓扑持续稳定
 - `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/首个 hashed asset；不执行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 等待
 - 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
@@ -436,7 +437,7 @@ python -m fin_ops_platform.app.worker \
   `sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>`。
   helper 使用候选 release 的严格合同校验后原子安装 root-owned `0600` 文件，并保留一份 `.previous`；
   不允许直接覆盖标准 scenario、跟随符号链接或绕过候选代码校验
-- runtime health 在 canonical audit 之前完成收敛；`full`/`stability` 还要在所有可能产生队列活动的探针
+- runtime health 在 canonical audit 之前完成收敛；`stability` 还要在所有检查完成后
   之后再次采样。canonical audit 始终作为每个 checkpoint 的最终只读证明，保证它看到的是 durable
   queue、dirty scope、worker 与 dead-letter 已收敛的状态。closure gate 允许幂等收敛一次已完成的
   durable publish 终态，但必须记录
