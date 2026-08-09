@@ -103,7 +103,7 @@ class TurnoverLedgerQueryService:
             def relation_source_rows(row_ids: list[str]) -> list[dict[str, Any]]:
                 if not row_ids:
                     return []
-                snapshot = state_store.load_workbench_pair_relations_for_row_ids(
+                snapshot = state_store.load_active_workbench_pair_relations_for_row_ids(
                     row_ids,
                 )
                 if not isinstance(snapshot, dict):

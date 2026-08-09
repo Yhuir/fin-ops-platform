@@ -1080,6 +1080,35 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertEqual(snapshot["pair_relations"]["case-1"]["row_ids"], ["bank-row-1", "bank-row-2"])
         self.assertEqual(snapshot["pair_relation_history"][0]["request_id"], "request-1")
 
+    def test_active_workbench_pair_relation_loader_skips_history(self) -> None:
+        class RelationRepository:
+            def __init__(self) -> None:
+                self.calls: list[list[str]] = []
+
+            def load_active_workbench_pair_relations_for_row_ids(
+                self,
+                row_ids: list[str],
+            ) -> dict[str, object]:
+                self.calls.append(list(row_ids))
+                return {
+                    "pair_relations": {
+                        "case-1": {
+                            "case_id": "case-1",
+                            "row_ids": ["bank-row-1"],
+                            "status": "active",
+                        }
+                    }
+                }
+
+        repository = RelationRepository()
+        store = object.__new__(PostgresStateStore)
+        store._workbench_relation_repository = repository
+
+        snapshot = store.load_active_workbench_pair_relations_for_row_ids(["bank-row-1"])
+
+        self.assertEqual(repository.calls, [["bank-row-1"]])
+        self.assertEqual(list(snapshot["pair_relations"]), ["case-1"])
+
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:
         with TemporaryDirectory() as temp_dir:
             connection = FakePostgresConnection()

@@ -175,6 +175,12 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(len(transaction.reads), 3)
         main_sql, main_params = transaction.reads[1]
         self.assertIn("canonical_rule_banks as materialized", main_sql)
+        self.assertIn("internal_outgoing_rows as materialized", main_sql)
+        self.assertIn("internal_incoming_rows as materialized", main_sql)
+        self.assertIn(
+            "outgoing.internal_match_amount = incoming.internal_match_amount",
+            main_sql,
+        )
         self.assertIn("query_target_rows as materialized", main_sql)
         self.assertIn("join query_target_rows target", main_sql)
         self.assertIn("from canonical_rule_banks base", main_sql)

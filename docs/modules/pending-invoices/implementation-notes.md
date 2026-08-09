@@ -541,6 +541,12 @@
 - 查询现在一次生成 legacy/canonical 两种发票身份，再以等值连接聚合；页面 API、金额、关系、精确 total、分页和直接事实源边界不变。生产规模本地 A/B 的 warm 耗时由约 `185–308ms` 降至 `104–107ms`，未新增索引、缓存、read model、worker 或依赖。
 - PostgreSQL 集成测试同时覆盖 relation 使用 legacy ID 和 canonical UUID 两条历史身份路径，防止性能修复丢失旧关系。
 
+## 2026-08-10 - 分类身份与关联流水聚合线性化
+
+- 生产执行计划显示人工分类/确认通过 OR 条件连接银行身份，分别移除约 5.5 万和 18.9 万候选行；现复用 canonical/legacy 双身份集合并改为等值连接。
+- 同一 active relation 的流水摘要原来按每个 owner bank 重复构造；现先按 case 聚合一次，再映射到该 case 的 owner bank。生产事实源只读 A/B 的主 SQL 约从 `416ms` 降至 `264ms`。
+- 页面行、金额、发票/OA/流水关系、精确 total、排序、分页和 direct-canonical API 合同不变；未新增表、索引、缓存、read model、worker、依赖或第二事实源。
+
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

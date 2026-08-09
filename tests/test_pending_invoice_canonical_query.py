@@ -124,6 +124,11 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         page_sql, page_params = commands[4]
         self.assertIn("from app.bank_transactions", page_sql)
         self.assertIn("from app.bank_transaction_categories", page_sql)
+        self.assertIn("bank_legacy_identities as materialized", page_sql)
+        self.assertIn("manual_category_candidates as materialized", page_sql)
+        self.assertIn("confirmed_category_candidates as materialized", page_sql)
+        self.assertNotIn("category.bank_transaction_id = bank.canonical_id\n      or", page_sql)
+        self.assertNotIn("confirmation.bank_transaction_id = bank.canonical_id\n      or", page_sql)
         self.assertIn("app.invoices", page_sql)
         rule_source_sql = page_sql.split("rule_banks as materialized", 1)[1].split(
             "compiled_rule_matches as materialized", 1
@@ -131,6 +136,9 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("bank.*", rule_source_sql)
         self.assertIn("app.oa_applications", page_sql)
         self.assertIn("from app.workbench_pair_relations", page_sql)
+        self.assertIn("relation_case_bank_facts as materialized", page_sql)
+        self.assertIn("jsonb_path_query_array", page_sql)
+        self.assertNotIn("from bank_case_members member", page_sql)
         self.assertIn("r.status = 'active'", page_sql)
         self.assertIn("r.relation_mode <> 'turnover_manual_closure'", page_sql)
         self.assertIn("as rule_counterparty_name", page_sql)

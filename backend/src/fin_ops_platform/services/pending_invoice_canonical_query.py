@@ -165,6 +165,25 @@ bank_source as materialized (
     where b.status <> 'deleted'
       and b.txn_direction in ('outflow', 'inflow')
 ),
+bank_legacy_identities as materialized (
+    select bank.row_id, bank.row_id as identity
+    from bank_source bank
+    union all
+    select bank.row_id, bank.canonical_id::text
+    from bank_source bank
+    where bank.row_id <> bank.canonical_id::text
+),
+manual_category_candidates as materialized (
+    select bank.row_id, category.*
+    from app.bank_transaction_categories category
+    join bank_source bank on bank.canonical_id = category.bank_transaction_id
+    where category.status = 'active'
+    union all
+    select identity.row_id, category.*
+    from app.bank_transaction_categories category
+    join bank_legacy_identities identity on identity.identity = category.legacy_transaction_id
+    where category.status = 'active'
+),
 manual_categories as materialized (
     select distinct on (bank.row_id)
         bank.row_id,
@@ -179,23 +198,29 @@ manual_categories as materialized (
             category.source
         ) as category_source,
         coalesce(category.raw_payload->'normalized_payload', category.raw_payload) as category_payload
-    from app.bank_transaction_categories category
-    join bank_source bank
-      on category.bank_transaction_id = bank.canonical_id
-      or category.legacy_transaction_id in (bank.row_id, bank.canonical_id::text)
-    where category.status = 'active'
+    from manual_category_candidates category
+    join bank_source bank on bank.row_id = category.row_id
     order by bank.row_id, category.updated_at desc, category.id desc
+),
+confirmed_category_candidates as materialized (
+    select bank.row_id, confirmation.*
+    from app.bank_transaction_category_confirmations confirmation
+    join bank_source bank on bank.canonical_id = confirmation.bank_transaction_id
+    where confirmation.tenant_id = 'default'
+      and confirmation.status = 'active'
+    union all
+    select identity.row_id, confirmation.*
+    from app.bank_transaction_category_confirmations confirmation
+    join bank_legacy_identities identity on identity.identity = confirmation.legacy_transaction_id
+    where confirmation.tenant_id = 'default'
+      and confirmation.status = 'active'
 ),
 confirmed_categories as materialized (
     select distinct on (bank.row_id)
         bank.row_id,
         confirmation.category_code
-    from app.bank_transaction_category_confirmations confirmation
-    join bank_source bank
-      on confirmation.bank_transaction_id = bank.canonical_id
-      or confirmation.legacy_transaction_id in (bank.row_id, bank.canonical_id::text)
-    where confirmation.tenant_id = 'default'
-      and confirmation.status = 'active'
+    from confirmed_category_candidates confirmation
+    join bank_source bank on bank.row_id = confirmation.row_id
     order by bank.row_id, confirmation.confirmed_at desc, confirmation.id desc
 ),
 income_override_rows as materialized (
@@ -268,16 +293,17 @@ bank_cases as materialized (
           or owner_bank.direction = config.payload->>'scan_direction'
       )
 ),
-bank_case_members as materialized (
-    select distinct owner.bank_id, member.row_id as member_bank_id
-    from bank_cases owner
-    join relation_members member on member.case_id = owner.case_id and member.row_type = 'bank'
+case_bank_members as materialized (
+    select distinct member.case_id, member.row_id as member_bank_id
+    from relation_members member
+    where member.row_type = 'bank'
 ),
-relation_bank_facts as materialized (
+relation_case_bank_facts as materialized (
     select
-        member.bank_id,
+        member.case_id,
         coalesce(sum(bank.amount), 0) as paid_total,
         count(*)::integer as payment_transaction_count,
+        max(bank.trade_time) as latest_trade_time,
         jsonb_agg(
             jsonb_build_object(
                 'id', bank.row_id,
@@ -295,9 +321,22 @@ relation_bank_facts as materialized (
             )
             order by bank.trade_time desc nulls last, bank.row_id
         ) as bank_summaries
-    from bank_case_members member
+    from case_bank_members member
     join banks bank on bank.row_id = member.member_bank_id
-    group by member.bank_id
+    group by member.case_id
+),
+relation_bank_facts as materialized (
+    select
+        owner.bank_id,
+        coalesce(sum(facts.paid_total), 0) as paid_total,
+        coalesce(sum(facts.payment_transaction_count), 0)::integer as payment_transaction_count,
+        jsonb_path_query_array(
+            jsonb_agg(facts.bank_summaries order by facts.latest_trade_time desc nulls last),
+            '$[*][*]'
+        ) as bank_summaries
+    from bank_cases owner
+    join relation_case_bank_facts facts on facts.case_id = owner.case_id
+    group by owner.bank_id
 ),
 case_invoice_members as materialized (
     select distinct owner.bank_id, member.row_id as invoice_id

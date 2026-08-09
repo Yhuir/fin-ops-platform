@@ -679,6 +679,14 @@ class PostgresStateStore:
             )
         return {}
 
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+    ) -> dict[str, Any]:
+        return self._workbench_relation_repository.load_active_workbench_pair_relations_for_row_ids(
+            list(row_ids or []),
+        )
+
     def save_workbench_pair_relations(self, snapshot: dict[str, Any], *, changed_case_ids: set[str] | None = None) -> None:
         self._workbench_relation_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
 

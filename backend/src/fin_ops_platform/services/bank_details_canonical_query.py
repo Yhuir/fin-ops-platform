@@ -1286,6 +1286,7 @@ def _classification_cte(
         base as materialized (
           select
             display.*,
+            round(abs(display.amount), 2) as internal_match_amount,
             case
               when normalized_account_no is not null and normalized_account_no <> ''
                 then 'acct:' || substring(
@@ -1316,11 +1317,21 @@ def _classification_cte(
           from base
           {query_target_join_sql}
         ),
+        internal_outgoing_rows as materialized (
+          select *
+          from base
+          where direction = 'expense' and amount > 0
+        ),
+        internal_incoming_rows as materialized (
+          select *
+          from base
+          where direction = 'income' and amount > 0
+        ),
         internal_pair_candidates as materialized (
           select
             outgoing.row_id as outgoing_id,
             incoming.row_id as incoming_id,
-            round(abs(outgoing.amount), 2) as matched_amount,
+            outgoing.internal_match_amount as matched_amount,
             abs(extract(epoch from (
               incoming.trade_time_sort - outgoing.trade_time_sort
             )))::integer as delta_seconds,
@@ -1344,19 +1355,15 @@ def _classification_cte(
                 incoming.detail_text
               ) ilike any(%s::text[])
             ) as incoming_explicit
-          from base outgoing
-          join base incoming
-            on outgoing.direction = 'expense'
-           and incoming.direction = 'income'
-           and outgoing.account_key <> incoming.account_key
-           and round(abs(outgoing.amount), 2) = round(abs(incoming.amount), 2)
+          from internal_outgoing_rows outgoing
+          join internal_incoming_rows incoming
+            on outgoing.account_key <> incoming.account_key
+           and outgoing.internal_match_amount = incoming.internal_match_amount
            and abs(extract(epoch from (
              incoming.trade_time_sort - outgoing.trade_time_sort
            ))) <= 172800
           where outgoing.counterparty_name_raw ilike any(%s::text[])
             and incoming.counterparty_name_raw ilike any(%s::text[])
-            and outgoing.amount > 0
-            and incoming.amount > 0
         ),
         internal_pair_degrees as (
           select row_id, count(*)::integer as degree

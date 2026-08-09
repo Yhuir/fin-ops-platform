@@ -801,3 +801,8 @@ git diff --check
 - grouped 查询在稳定窗口的 App Health 数据库 p95 已降至 `564.388ms`，但 HTTP 并发 4 尾延迟仍有抖动；该路径由多个固定查询与动态分类 SQL组成，当前生产数据量不足以摊销 PostgreSQL JIT 编译成本。
 - canonical snapshot 仅在本次 `REPEATABLE READ READ ONLY` transaction 内执行 `SET LOCAL jit = off`，不更改全局设置、连接池、业务 SQL、事实源或 API。
 - 保持现有 Bank Details classifier、relation/FIFO/金额/分页合同；没有新增缓存、read model、worker、索引或第二查询链。
+
+## 2026-08-10 - 页面关系读取只取 active facts
+
+- grouped 页面只消费当前 active `pair_relations`，旧链却同时加载并规范化完整 relation history。现复用 workbench relation repository 已有 active-only scoped loader，删除页面热路径的一次历史查询。
+- 生产事实源经只读 SSH 隧道测量约从 `892–1053ms` 降至 `705–735ms`；业务分组、FIFO、金额、关系状态和 API DTO 不变。未新增缓存、read model、worker、表、依赖或并行查询路径。
