@@ -604,7 +604,7 @@ describe("Input invoice usage page", () => {
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();
     expect(await within(page).findByRole("table", { name: "进项发票使用情况表" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("input-invoice-usage-button--accent");
+    expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("button--primary");
     const refreshButton = within(page).getByRole("button", { name: "刷新" });
     expect(refreshButton).toBeInTheDocument();
     expect(Array.from((within(page).getByLabelText("每页行数") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);

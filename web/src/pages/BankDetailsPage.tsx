@@ -23,6 +23,7 @@ import {
 } from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
+import QuerySearch from "../components/common/QuerySearch";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -337,6 +338,8 @@ type BankCategoryFilterControlProps = {
 type BankDetailsTableToolbarProps = {
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
+  onSearchSubmit: () => void;
+  onSearchClear: () => void;
   exportMenuOpen: boolean;
   exportFeedback: string | null;
   isExporting: boolean;
@@ -663,6 +666,8 @@ function BankCategoryFilterControl({
 function BankDetailsTableToolbar({
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
+  onSearchSubmit = () => undefined,
+  onSearchClear = () => undefined,
   exportMenuOpen = false,
   exportFeedback = null,
   isExporting = false,
@@ -675,6 +680,15 @@ function BankDetailsTableToolbar({
     <div className="bank-grid-toolbar">
       <div className="bank-grid-toolbar-content">
         <div className="bank-grid-toolbar-actions">
+          <QuerySearch
+            ariaLabel="搜索流水"
+            className="bank-grid-search"
+            onChange={onSearchKeywordChange}
+            onClear={onSearchClear}
+            onSubmit={onSearchSubmit}
+            placeholder="搜索流水"
+            value={searchKeyword}
+          />
           {exportFeedback ? (
             <span className="bank-export-feedback">
               {exportFeedback}
@@ -713,13 +727,6 @@ function BankDetailsTableToolbar({
               </div>
             ) : null}
           </div>
-          <input
-            aria-label="搜索流水"
-            className="bank-grid-search-field"
-            placeholder="搜索流水"
-            value={searchKeyword}
-            onChange={(event) => onSearchKeywordChange(event.target.value)}
-          />
         </div>
       </div>
     </div>
@@ -1611,13 +1618,6 @@ export default function BankDetailsPage() {
   }, [active, activationGeneration, refreshToken]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSearchKeyword(searchInput.trim());
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
-
-  useEffect(() => {
     if (!active) {
       return undefined;
     }
@@ -1776,8 +1776,18 @@ export default function BankDetailsPage() {
   };
 
   const handleSearchKeywordChange = (value: string) => {
-    resetToFirstPage();
     setSearchInput(value);
+  };
+
+  const handleSearchSubmit = () => {
+    resetToFirstPage();
+    setSearchKeyword(searchInput.trim());
+  };
+
+  const handleSearchClear = () => {
+    resetToFirstPage();
+    setSearchInput("");
+    setSearchKeyword("");
   };
 
   const applyOptimisticCategoryChoice = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
@@ -2330,6 +2340,8 @@ export default function BankDetailsPage() {
               <BankDetailsTableToolbar
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}
+                onSearchSubmit={handleSearchSubmit}
+                onSearchClear={handleSearchClear}
                 exportMenuOpen={exportMenuOpen}
                 exportFeedback={exportFeedback}
                 isExporting={isExporting}

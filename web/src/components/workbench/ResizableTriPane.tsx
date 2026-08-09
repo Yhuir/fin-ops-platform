@@ -13,6 +13,7 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import RelationGroupGrid from "./RelationGroupGrid";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
+import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 
 const COLLAPSE_EPSILON = 0.0001;
 
@@ -62,6 +63,7 @@ type ResizableTriPaneProps = {
     position: WorkbenchColumnDropPosition,
   ) => void;
   canMutateData: boolean;
+  layoutMode?: WorkbenchLayoutMode;
 };
 
 function ResizableTriPane({
@@ -89,6 +91,7 @@ function ResizableTriPane({
   onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns,
   canMutateData,
+  layoutMode = "classic",
 }: ResizableTriPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -163,6 +166,7 @@ function ResizableTriPane({
         rowTemplateColumns={rowTemplateColumns}
         sourceGroups={sourceGroups ?? effectiveGroups}
         canMutateData={canMutateData}
+        layoutMode={layoutMode}
         zoneId={zoneId}
       />
     </div>

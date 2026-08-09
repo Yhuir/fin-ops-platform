@@ -26,7 +26,11 @@ import type {
   WorkbenchFilterOptionsLoader,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
-import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
+import {
+  getWorkbenchColumns,
+  getWorkbenchPaneGridStyle,
+  type WorkbenchLayoutMode,
+} from "../../features/workbench/tableConfig";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchPane } from "./ResizableTriPane";
 import RelationGroupCell from "./RelationGroupCell";
@@ -79,6 +83,7 @@ type RelationGroupGridProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   hidePaneHeaders?: boolean;
+  layoutMode?: WorkbenchLayoutMode;
 };
 
 type CollapsedSummaryCopy = {
@@ -154,6 +159,7 @@ function RelationGroupGrid({
   canMutateData,
   readOnly = false,
   hidePaneHeaders = false,
+  layoutMode = "classic",
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const gridBodyRef = useRef<HTMLDivElement | null>(null);
@@ -266,31 +272,34 @@ function RelationGroupGrid({
   };
 
   const paneHasActionColumn = useCallback((paneId: WorkbenchRecordType) => {
+    if (layoutMode === "compact") {
+      return false;
+    }
     if (paneId === "oa") {
       return false;
     }
     return groups.some((group) => group.rows[paneId].some(hasDefaultRowActions));
-  }, [groups]);
+  }, [groups, layoutMode]);
   const paneLayoutClass = (paneId: WorkbenchRecordType) =>
     paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
   const hasTrailingColumns = trailingColumns.length > 0;
 
   const columnsByPane = useMemo(
     () => ({
-      oa: getWorkbenchColumns("oa", columnLayouts),
-      bank: getWorkbenchColumns("bank", columnLayouts),
-      invoice: getWorkbenchColumns("invoice", columnLayouts),
+      oa: getWorkbenchColumns("oa", columnLayouts, layoutMode),
+      bank: getWorkbenchColumns("bank", columnLayouts, layoutMode),
+      invoice: getWorkbenchColumns("invoice", columnLayouts, layoutMode),
     }),
-    [columnLayouts],
+    [columnLayouts, layoutMode],
   );
 
   const paneGridStyleByPane = useMemo(
     () => ({
-      oa: getWorkbenchPaneGridStyle("oa", columnLayouts, paneHasActionColumn("oa")),
-      bank: getWorkbenchPaneGridStyle("bank", columnLayouts, paneHasActionColumn("bank")),
-      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts, paneHasActionColumn("invoice")),
+      oa: getWorkbenchPaneGridStyle("oa", columnLayouts, paneHasActionColumn("oa"), layoutMode),
+      bank: getWorkbenchPaneGridStyle("bank", columnLayouts, paneHasActionColumn("bank"), layoutMode),
+      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts, paneHasActionColumn("invoice"), layoutMode),
     }),
-    [columnLayouts, paneHasActionColumn],
+    [columnLayouts, layoutMode, paneHasActionColumn],
   );
 
   const sourceGroupById = useMemo(
@@ -552,6 +561,7 @@ function RelationGroupGrid({
                           showActionColumn={paneHasActionColumn(paneId)}
                           showWorkflowActions={zoneId !== "unpaired"}
                           canMutateData={canMutateData}
+                          layoutMode={layoutMode}
                           readOnly={readOnly}
                           zoneId={zoneId}
                         />
@@ -591,6 +601,7 @@ function RelationGroupGrid({
                       showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
+                      layoutMode={layoutMode}
                       readOnly={readOnly}
                       zoneId={zoneId}
                     />
@@ -674,6 +685,7 @@ function RelationGroupGrid({
                       showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
+                      layoutMode={layoutMode}
                       readOnly={readOnly}
                       zoneId={zoneId}
                     />

@@ -1,4 +1,4 @@
-import { Button, Chip, Input, ListBox, Select } from "@heroui/react";
+import { Button, Chip, Input, ListBox, SearchField, Select } from "@heroui/react";
 import { ArrowRight, RefreshCw, Search } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
@@ -141,12 +141,22 @@ export default function OperationHistoryPage() {
       )}
     >
       <form className="operation-history-filters" onSubmit={submitFilters}>
-        <Input
+        <SearchField
           aria-label="搜索操作历史"
-          placeholder="搜索操作、对象或内容"
+          onChange={(search) => setDraft((value) => ({ ...value, search }))}
           value={draft.search ?? ""}
-          onChange={(event) => setDraft((value) => ({ ...value, search: event.target.value }))}
-        />
+        >
+          <SearchField.Group>
+            <SearchField.SearchIcon />
+            <SearchField.Input placeholder="搜索操作、对象或内容" />
+            {draft.search ? (
+              <SearchField.ClearButton
+                aria-label="清除操作历史查询"
+                onPress={() => setDraft((value) => ({ ...value, search: undefined }))}
+              />
+            ) : null}
+          </SearchField.Group>
+        </SearchField>
         <Select
           aria-label="操作人"
           selectedKey={draft.actorId || "all"}

@@ -1102,10 +1102,10 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
 
-    expect(within(page).getByRole("button", { name: /已完成 OA 51条/ })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: /进行中 OA 23条/ })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: /已完成 OA 51条/ })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: /进行中 OA 23条/ })).toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
@@ -1151,7 +1151,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
@@ -1196,7 +1196,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
@@ -1248,7 +1248,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     await user.click(within(candidateRow).getByRole("checkbox", { name: /候选付款人/ }));
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
@@ -1305,7 +1305,7 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
     const rowsBeforeViewSwitch = rowsRequests(fetchMock).length;
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeViewSwitch));
     await waitFor(() => expect(within(page).queryByLabelText("OA待付款核对加载中")).not.toBeInTheDocument());
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
@@ -1339,7 +1339,7 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(screen.queryByLabelText("关联支出流水抽屉")).not.toBeInTheDocument());
     expect(screen.queryByText("候选查询暂时失败")).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: /已完成 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /已完成 OA/ }));
     await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("completed"));
     await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
     await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
@@ -1459,7 +1459,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-    await user.click(within(page).getByRole("button", { name: /进行中 OA/ }));
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });

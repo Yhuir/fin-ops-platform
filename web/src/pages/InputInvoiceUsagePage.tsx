@@ -1,10 +1,12 @@
-import { Download, X } from "lucide-react";
+import { Button } from "@heroui/react";
+import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
+import QuerySearch from "../components/common/QuerySearch";
 import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
@@ -376,43 +378,41 @@ export default function InputInvoiceUsagePage() {
   const loadExportPreview = useCallback(() => fetchInputInvoiceUsageExportPreview(exportRequest), [exportRequest]);
   const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
   const exportDisabled = Boolean(error);
-  const hasKeyword = keywordDraft.trim().length > 0 || query.keyword.trim().length > 0;
-
   const actions = useMemo(() => (
     <PageToolbar className="input-invoice-usage-actions">
-      <button
-        className="input-invoice-usage-button"
-        disabled={loading || refreshing}
-        onClick={() => loadRows("refresh")}
-        type="button"
+      <Button
+        isDisabled={loading || refreshing}
+        onPress={() => loadRows("refresh")}
+        size="sm"
+        variant="secondary"
       >
         刷新
-      </button>
-      <button
-        className="input-invoice-usage-button"
-        onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
-        type="button"
+      </Button>
+      <Button
+        onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
+        size="sm"
+        variant="secondary"
       >
         发票与支付状态规则设置
-      </button>
+      </Button>
       {canAdminAccess ? (
-        <button
-          className="input-invoice-usage-button"
-          onClick={() => setOaPrefillOpen(true)}
-          type="button"
+        <Button
+          onPress={() => setOaPrefillOpen(true)}
+          size="sm"
+          variant="secondary"
         >
           OA 草稿预填管理
-        </button>
+        </Button>
       ) : null}
-      <button
-        className="input-invoice-usage-button"
-        disabled={exportDisabled}
-        onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
-        type="button"
+      <Button
+        isDisabled={exportDisabled}
+        onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
+        size="sm"
+        variant="secondary"
       >
         <Download aria-hidden="true" size={16} />
         筛选内容导出
-      </button>
+      </Button>
     </PageToolbar>
   ), [canAdminAccess, exportDisabled, loadRows, loading, refreshing, setQuery]);
   const visibleStatistics = statistics;
@@ -460,41 +460,22 @@ export default function InputInvoiceUsagePage() {
               className="input-invoice-usage-query-toolbar"
               right={(
                 <div className="input-invoice-usage-query-actions">
-                  <button
-                    className="input-invoice-usage-button input-invoice-usage-button--accent"
-                    onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
-                    type="button"
+                  <Button
+                    onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
+                    size="sm"
+                    variant="primary"
                   >
                     以发票反提 OA
-                  </button>
-                  <label className="input-invoice-usage-search">
-                    <input
-                      aria-label="进项发票使用情况搜索"
-                      placeholder="搜索发票、销方、OA、流水"
-                      value={keywordDraft}
-                      onChange={(event) => setKeywordDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          handleKeywordSubmit();
-                        }
-                      }}
-                      type="text"
-                    />
-                  </label>
-                  {hasKeyword ? (
-                    <button
-                      aria-label="清除查询"
-                      className="input-invoice-usage-button input-invoice-usage-button--icon"
-                      onClick={handleKeywordClear}
-                      title="清除查询"
-                      type="button"
-                    >
-                      <X aria-hidden="true" size={16} />
-                    </button>
-                  ) : null}
-                  <button className="input-invoice-usage-button" onClick={handleKeywordSubmit} type="button">
-                    查询
-                  </button>
+                  </Button>
+                  <QuerySearch
+                    ariaLabel="进项发票使用情况搜索"
+                    className="input-invoice-usage-search"
+                    onChange={setKeywordDraft}
+                    onClear={handleKeywordClear}
+                    onSubmit={handleKeywordSubmit}
+                    placeholder="搜索发票、销方、OA、流水"
+                    value={keywordDraft}
+                  />
                 </div>
               )}
             />

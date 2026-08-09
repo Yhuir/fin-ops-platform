@@ -213,13 +213,12 @@ describe("WorkbenchZone", () => {
     );
 
     const button = screen.getByRole("button", { name: "正在准备确认预览" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-busy", "true");
     expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("data-pending", "true");
     expect(within(button).getByRole("status", { name: "正在准备确认预览" })).toBeInTheDocument();
   });
 
-  test("keeps pane toggles pressed state and expand callback accessible", async () => {
+  test("keeps layout and pane controls in one accessible menu", async () => {
     const user = userEvent.setup();
     const onToggleExpand = vi.fn();
 
@@ -242,24 +241,52 @@ describe("WorkbenchZone", () => {
     );
 
     const zone = screen.getByTestId("zone-paired");
-    const oaToggle = within(zone).getByRole("button", { name: "OA" });
-    const bankToggle = within(zone).getByRole("button", { name: "银行流水" });
-    const invoiceToggle = within(zone).getByRole("button", { name: "进销项发票" });
+    const menuTrigger = within(zone).getByRole("button", { name: "已配对布局与栏显示" });
+    expect(zone).toHaveAttribute("data-layout", "compact");
 
-    expect(oaToggle).toHaveAttribute("aria-pressed", "true");
-    expect(bankToggle).toHaveAttribute("aria-pressed", "true");
-    expect(invoiceToggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "经典三栏" }));
+    expect(zone).toHaveAttribute("data-layout", "classic");
 
-    await user.click(bankToggle);
-    expect(bankToggle).toHaveAttribute("aria-pressed", "false");
-    expect(oaToggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "✓ 银行流水" }));
+    expect(screen.queryByTestId("pane-bank")).not.toBeInTheDocument();
 
-    await user.click(invoiceToggle);
-    expect(invoiceToggle).toHaveAttribute("aria-pressed", "false");
-    expect(oaToggle).toBeDisabled();
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "✓ 进销项发票" }));
+    expect(screen.queryByTestId("pane-invoice")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pane-oa")).toBeInTheDocument();
 
-    await user.click(within(zone).getByRole("button", { name: "放大 已配对" }));
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: "放大 已配对" }));
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
+  });
+
+  test("reveals full compact cell content on hover", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={panes}
+        zoneId="paired"
+      />,
+    );
+
+    const trigger = screen.getByLabelText("查看完整内容：华东改造项目");
+    await user.hover(trigger);
+
+    expect(await screen.findByText("华东改造项目", { selector: ".workbench-compact-cell-dialog" })).toBeVisible();
   });
 
   test("renders one HeroUI search field inside the zone header", async () => {
@@ -619,7 +646,8 @@ describe("WorkbenchZone", () => {
     expect(screen.queryByLabelText("查看金额不一致差额说明")).not.toBeInTheDocument();
   });
 
-  test("collapses and restores panes per zone without affecting splitter count rules", () => {
+  test("collapses and restores panes per zone without affecting splitter count rules", async () => {
+    const user = userEvent.setup();
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
@@ -639,17 +667,21 @@ describe("WorkbenchZone", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(2);
     expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "银行流水" }));
+    const menuTrigger = screen.getByRole("button", { name: "已配对布局与栏显示" });
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: /银行流水/ }));
 
     expect(screen.queryByTestId("pane-bank")).not.toBeInTheDocument();
     expect(screen.getAllByRole("separator")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "OA" }));
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: /OA/ }));
 
     expect(screen.queryByTestId("pane-oa")).not.toBeInTheDocument();
     expect(screen.queryAllByRole("separator")).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "银行流水" }));
+    await user.click(menuTrigger);
+    await user.click(screen.getByRole("menuitem", { name: /银行流水/ }));
 
     expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
     expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
@@ -693,7 +725,8 @@ describe("WorkbenchZone", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(1);
   });
 
-  test("shows an expand toggle in the zone header", () => {
+  test("shows the combined view menu in the zone header", async () => {
+    const user = userEvent.setup();
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
@@ -711,6 +744,7 @@ describe("WorkbenchZone", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "放大 未配对" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "未配对布局与栏显示" }));
+    expect(screen.getByRole("menuitem", { name: "放大 未配对" })).toBeInTheDocument();
   });
 });

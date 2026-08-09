@@ -76,7 +76,7 @@ describe("Finance operations shell", () => {
 
     expect(await screen.findByRole("heading", { name: "无权访问财务运营平台" })).toBeInTheDocument();
     expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /放大 未配对/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /未配对.*布局与栏显示/ })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
   });
 
@@ -240,11 +240,13 @@ describe("Finance operations shell", () => {
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
     expect(screen.getByText("财务运营平台")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /放大 未配对/ }));
+    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^放大 未配对/ }));
 
     expect(document.body.classList.contains("workbench-focus-mode")).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: /恢复 未配对/ }));
+    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^恢复 未配对/ }));
 
     expect(document.body.classList.contains("workbench-focus-mode")).toBe(false);
     expect(screen.getByText("财务运营平台")).toBeInTheDocument();

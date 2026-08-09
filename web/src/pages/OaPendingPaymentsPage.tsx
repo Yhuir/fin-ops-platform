@@ -1,4 +1,4 @@
-import { Button, Checkbox, Input } from "@heroui/react";
+import { Button, Checkbox, Input, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -154,6 +154,11 @@ export default function OaPendingPaymentsPage() {
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
   }, [keywordDraft]);
+
+  const handleKeywordClear = useCallback(() => {
+    setKeywordDraft("");
+    setQuery((current) => ({ ...current, page: 1, keyword: "" }));
+  }, []);
 
   const handleSortChange = useCallback((field: string, direction?: OaPendingPaymentSortDirection) => {
     setQuery((current) => ({
@@ -324,45 +329,43 @@ export default function OaPendingPaymentsPage() {
               className="oa-pending-payments-query"
               left={(
                 <div className="oa-pending-payments-query__grid">
-                  <div className="oa-pending-payments-view-toggle" aria-label="OA流程状态视图">
-                    <button
-                      className={query.viewMode === "completed" ? "oa-pending-payments-view-toggle__button oa-pending-payments-view-toggle__button--active" : "oa-pending-payments-view-toggle__button"}
-                      onClick={() => handleViewModeChange("completed")}
-                      type="button"
-                    >
+                  <ToggleButtonGroup
+                    aria-label="OA流程状态视图"
+                    className="oa-pending-payments-view-toggle"
+                    disallowEmptySelection
+                    onSelectionChange={(keys) => {
+                      const [next] = Array.from(keys);
+                      if (next === "completed" || next === "in_progress") handleViewModeChange(next);
+                    }}
+                    selectedKeys={new Set([query.viewMode])}
+                    selectionMode="single"
+                    size="sm"
+                  >
+                    <ToggleButton id="completed">
                       已完成 OA
                       {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
-                    </button>
-                    <button
-                      className={query.viewMode === "in_progress" ? "oa-pending-payments-view-toggle__button oa-pending-payments-view-toggle__button--active" : "oa-pending-payments-view-toggle__button"}
-                      onClick={() => handleViewModeChange("in_progress")}
-                      type="button"
-                    >
+                    </ToggleButton>
+                    <ToggleButton id="in_progress">
+                      <ToggleButtonGroup.Separator />
                       进行中 OA
                       {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
-                    </button>
-                  </div>
-                  <div className="oa-pending-payments-field">
-                    <span
-                      aria-label="OA月份筛选"
-                      className="oa-pending-payments-month-picker"
-                      role="group"
+                    </ToggleButton>
+                  </ToggleButtonGroup>
+                  <div aria-label="OA月份筛选" className="oa-pending-payments-month-picker" role="group">
+                    <Button
+                      aria-pressed={query.month === ""}
+                      onPress={() => setQuery((current) => ({ ...current, page: 1, month: "" }))}
+                      size="sm"
+                      variant={query.month === "" ? "primary" : "secondary"}
                     >
-                      <button
-                        aria-pressed={query.month === ""}
-                        className={query.month === "" ? "oa-pending-payments-month-picker__all oa-pending-payments-month-picker__all--active" : "oa-pending-payments-month-picker__all"}
-                        onClick={() => setQuery((current) => ({ ...current, page: 1, month: "" }))}
-                        type="button"
-                      >
-                        全部
-                      </button>
-                      <input
-                        aria-label="选择月份"
-                        type="month"
-                        value={query.month}
-                        onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
-                      />
-                    </span>
+                      全部
+                    </Button>
+                    <Input
+                      aria-label="选择月份"
+                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+                      type="month"
+                      value={query.month}
+                    />
                   </div>
                 </div>
               )}
@@ -401,6 +404,7 @@ export default function OaPendingPaymentsPage() {
                   filterOptions={filterOptions}
                   filters={query.filters}
                   onKeywordDraftChange={setKeywordDraft}
+                  onKeywordClear={handleKeywordClear}
                   onKeywordSubmit={handleKeywordSubmit}
                   onFilterApply={handleFilterApply}
                   onFilterClear={handleFilterClear}

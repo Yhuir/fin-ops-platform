@@ -5,6 +5,7 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import WorkbenchRecordCard from "./WorkbenchRecordCard";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
+import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 
 type RelationGroupCellProps = {
   zoneId: "paired" | "unpaired";
@@ -28,6 +29,7 @@ type RelationGroupCellProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   leadingControl?: ReactNode;
+  layoutMode?: WorkbenchLayoutMode;
 };
 
 function RelationGroupCell({
@@ -49,6 +51,7 @@ function RelationGroupCell({
   canMutateData,
   readOnly = false,
   leadingControl,
+  layoutMode = "classic",
 }: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -92,6 +95,7 @@ function RelationGroupCell({
             showActionColumn={showActionColumn}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
+            layoutMode={layoutMode}
             readOnly={readOnly}
             zoneId={zoneId}
           />

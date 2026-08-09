@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 
 import { reorderWorkbenchColumnLayout } from "../features/workbench/columnLayout";
-import { getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
+import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
 import { fetchWorkbenchSettings, saveWorkbenchSettings } from "../features/workbench/api";
 import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
@@ -40,6 +40,17 @@ describe("Workbench column layout", () => {
     expect(gridStyle.minWidth).toBe("596px");
   });
 
+  test("uses a zero-minimum compact grid and removes the repayment-date column", () => {
+    const columns = getWorkbenchColumns("bank", undefined, "compact");
+    const gridStyle = getWorkbenchPaneGridStyle("bank", undefined, true, "compact");
+
+    expect(columns.map((column) => column.key)).toEqual(["counterparty", "amount", "note"]);
+    expect(gridStyle.minWidth).toBe("0px");
+    expect(gridStyle.gridTemplateColumns).toBe(
+      "minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1.35fr)",
+    );
+  });
+
   test("renders drag handles for pane column headers", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
@@ -76,7 +87,7 @@ describe("Workbench column layout", () => {
       .getAllByRole("columnheader")
       .map((header) => header.textContent?.replace(/\s+/g, "") ?? "");
 
-    expect(headerNames.slice(0, 4)).toEqual(["金额", "对方户名", "还借款日期", "备注"]);
+    expect(headerNames.slice(0, 3)).toEqual(["金额", "对方户名", "备注"]);
   });
 
   test("saveWorkbenchSettings keeps column layouts across a fresh settings fetch", async () => {

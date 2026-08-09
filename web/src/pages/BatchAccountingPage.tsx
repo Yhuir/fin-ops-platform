@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
-import { Button, Chip } from "@heroui/react";
-import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
+import { Button, Chip, Input } from "@heroui/react";
+import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 
 import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
+import QuerySearch from "../components/common/QuerySearch";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -224,6 +225,7 @@ export default function BatchAccountingPage() {
   const [error, setError] = useState<string | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState("");
+  const [oaSearchDraft, setOaSearchDraft] = useState("");
   const [oaSearchQuery, setOaSearchQuery] = useState("");
   const [differenceNote, setDifferenceNote] = useState("");
   const [feedback, setFeedback] = useState<{ severity: "success" | "error"; message: string } | null>(null);
@@ -663,22 +665,24 @@ export default function BatchAccountingPage() {
     >
       <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
         <div aria-label="批量账务状态" className="batch-accounting-segment" role="group">
-          <button
+          <Button
             aria-pressed={bucket === "unsubmitted"}
             className={cx("batch-accounting-segment__button", bucket === "unsubmitted" && "batch-accounting-segment__button--active")}
-            onClick={() => handleBucketChange("unsubmitted")}
-            type="button"
+            onPress={() => handleBucketChange("unsubmitted")}
+            size="sm"
+            variant={bucket === "unsubmitted" ? "primary" : "secondary"}
           >
             未提交 {payload.summary.unsubmittedCount}
-          </button>
-          <button
+          </Button>
+          <Button
             aria-pressed={bucket === "submitted"}
             className={cx("batch-accounting-segment__button", bucket === "submitted" && "batch-accounting-segment__button--active")}
-            onClick={() => handleBucketChange("submitted")}
-            type="button"
+            onPress={() => handleBucketChange("submitted")}
+            size="sm"
+            variant={bucket === "submitted" ? "primary" : "secondary"}
           >
             已提交 {payload.summary.submittedCount}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -696,17 +700,16 @@ export default function BatchAccountingPage() {
               <h2 className="batch-accounting-bank-panel__title">批量账务流水</h2>
               <p className="batch-accounting-bank-panel__subtitle">对方户名精确匹配批量账务集中处理</p>
             </div>
-            <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-bank-year">
-              <span>流水年份</span>
-              <input
-                id="batch-accounting-bank-year"
+            <div className="batch-accounting-field batch-accounting-field--year">
+              <Input
+                aria-label="流水年份"
                 max={2100}
                 min={2000}
                 onChange={(event) => handleBankYearChange(event.target.value)}
                 type="number"
                 value={bankYear}
               />
-            </label>
+            </div>
             <PageControls
               disabled={loading}
               label="批量账务流水分页"
@@ -797,35 +800,22 @@ export default function BatchAccountingPage() {
                   <small id="batch-accounting-difference-note-help">金额不一致时必须填写，提交后视为人工差额闭环。</small>
                 </div>
               ) : null}
-              <div className="batch-accounting-field batch-accounting-field--search">
-                <label htmlFor="batch-accounting-oa-search">搜索OA内容</label>
-                <div className="batch-accounting-search">
-                  <Search aria-hidden="true" size={15} strokeWidth={2.2} />
-                  <input
-                    id="batch-accounting-oa-search"
-                    onChange={(event) => {
-                      setOaSearchQuery(event.target.value);
-                      setOaPage(1);
-                    }}
-                    placeholder="申请人、项目、金额、事由"
-                    type="search"
-                    value={oaSearchQuery}
-                  />
-                  {oaSearchQuery ? (
-                    <button
-                      aria-label="清空搜索"
-                      className="batch-accounting-search__clear"
-                      onClick={() => {
-                        setOaSearchQuery("");
-                        setOaPage(1);
-                      }}
-                      type="button"
-                    >
-                      <X aria-hidden="true" size={14} strokeWidth={2.4} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
+              <QuerySearch
+                ariaLabel="搜索OA内容"
+                className="batch-accounting-query-search"
+                onChange={setOaSearchDraft}
+                onClear={() => {
+                  setOaSearchDraft("");
+                  setOaSearchQuery("");
+                  setOaPage(1);
+                }}
+                onSubmit={() => {
+                  setOaSearchQuery(oaSearchDraft.trim());
+                  setOaPage(1);
+                }}
+                placeholder="申请人、项目、金额、事由"
+                value={oaSearchDraft}
+              />
               {bucket === "unsubmitted" ? (
                 <PageControls
                   disabled={loading}

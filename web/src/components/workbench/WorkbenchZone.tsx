@@ -1,6 +1,6 @@
-import { memo } from "react";
-import { Button, SearchField, Spinner, Tooltip } from "@heroui/react";
-import { RefreshCw } from "lucide-react";
+import { memo, useState } from "react";
+import { Button, Dropdown, SearchField, Spinner, Tooltip } from "@heroui/react";
+import { Ellipsis, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
@@ -17,6 +17,7 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 import { formatMoney } from "../../features/money";
+import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 
 type WorkbenchZoneProps = {
   zoneId: "paired" | "unpaired";
@@ -151,6 +152,7 @@ function WorkbenchZone({
   onReorderPaneColumns,
 }: WorkbenchZoneProps) {
   const { widths, visibleIndices, visibleCount, togglePane, startDrag } = useResizablePanes();
+  const [layoutMode, setLayoutMode] = useState<WorkbenchLayoutMode>("compact");
   const expandLabel = `${isExpanded ? "恢复" : "放大"} ${title}`;
   const shouldShowSelectionToolbar = Boolean(selectionSummary);
   const explicitSelectionTotal = selectionSummary?.explicitTotal ?? selectionSummary?.total ?? 0;
@@ -171,6 +173,7 @@ function WorkbenchZone({
     <section
       aria-hidden={!isVisible}
       className={`zone zone-${tone}${isExpanded ? " zone-expanded" : ""}${isVisible ? "" : " zone-hidden"}`}
+      data-layout={layoutMode}
       data-testid={`zone-${zoneId}`}
     >
       <header className={`zone-header ${tone}`}>
@@ -240,21 +243,22 @@ function WorkbenchZone({
                 <span className="zone-selection-pill">{`发票 ${selectionSummary?.invoice ?? 0} / ${formatMoney(selectionSummary?.amounts.invoice)}`}</span>
               </div>
               <div className="zone-selection-actions">
-                <button
+                <Button
                   className="zone-selection-btn"
-                  type="button"
-                  onClick={onClearSelection}
+                  onPress={onClearSelection}
+                  size="sm"
+                  variant="tertiary"
                 >
                   清空选择
-                </button>
-                <button
-                  aria-busy={primarySelectionActionPending || undefined}
-                  aria-disabled={primarySelectionActionPending || primarySelectionActionDisabled || undefined}
+                </Button>
+                <Button
                   aria-label={primarySelectionActionPending ? primarySelectionActionBusyLabel : undefined}
                   className="zone-selection-btn primary"
-                  disabled={primarySelectionActionPending || primarySelectionActionDisabled}
-                  type="button"
-                  onClick={onPrimarySelectionAction}
+                  isDisabled={primarySelectionActionDisabled}
+                  isPending={primarySelectionActionPending}
+                  onPress={onPrimarySelectionAction}
+                  size="sm"
+                  variant="primary"
                 >
                   {primarySelectionActionPending ? (
                     <>
@@ -264,26 +268,28 @@ function WorkbenchZone({
                       {primarySelectionActionBusyLabel}
                     </>
                   ) : primarySelectionActionLabel}
-                </button>
+                </Button>
                 {secondarySelectionActionLabel ? (
-                  <button
+                  <Button
                     className="zone-selection-btn warning"
-                    disabled={secondarySelectionActionDisabled}
-                    type="button"
-                    onClick={onSecondarySelectionAction}
+                    isDisabled={secondarySelectionActionDisabled}
+                    onPress={onSecondarySelectionAction}
+                    size="sm"
+                    variant="tertiary"
                   >
                     {secondarySelectionActionLabel}
-                  </button>
+                  </Button>
                 ) : null}
                 {tertiarySelectionActionLabel ? (
-                  <button
+                  <Button
                     className="zone-selection-btn"
-                    disabled={tertiarySelectionActionDisabled}
-                    type="button"
-                    onClick={onTertiarySelectionAction}
+                    isDisabled={tertiarySelectionActionDisabled}
+                    onPress={onTertiarySelectionAction}
+                    size="sm"
+                    variant="tertiary"
                   >
                     {tertiarySelectionActionLabel}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
               {selectionActionNotice ? (
@@ -303,85 +309,64 @@ function WorkbenchZone({
           {auxiliaryHeaderActions?.length ? (
             <div className="zone-aux-action-group">
               {auxiliaryHeaderActions.map((action) => (
-                <button
+                <Button
                   key={action.label}
                   className={`zone-toggle zone-aux-action${action.tone === "danger" ? " danger" : ""}`}
-                  type="button"
-                  onClick={action.onClick}
+                  onPress={action.onClick}
+                  size="sm"
+                  variant="tertiary"
                 >
                   {action.label}
-                </button>
+                </Button>
               ))}
             </div>
           ) : null}
-          <div
-            aria-label={`${title}栏显示切换`}
-            className="zone-toggle-group"
-            role="group"
-          >
-            {panes.map((pane, index) => {
-              const active = widths[index] > 0.0001;
-              return (
-                <button
-                  key={pane.id}
-                  aria-pressed={active}
-                  className={`zone-toggle${active ? " active" : ""}`}
-                  disabled={active && visibleCount === 1}
-                  type="button"
-                  onClick={() => togglePane(index)}
-                >
-                  {pane.title}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            aria-label={expandLabel}
-            className={`zone-expand-icon-btn${isExpanded ? " active" : ""}`}
-            title={expandLabel}
-            type="button"
-            onClick={onToggleExpand}
-          >
-            {isExpanded ? (
-              <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
-                <path
-                  d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                />
-                <path
-                  d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                />
-              </svg>
-            ) : (
-              <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
-                <path
-                  d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                />
-                <path
-                  d="M7 7 3 3M13 7l4-4M13 13l4 4M7 13l-4 4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                />
-              </svg>
-            )}
-          </button>
+          <Dropdown>
+            <Dropdown.Trigger
+              aria-label={`${title}布局与栏显示`}
+              className="zone-view-menu-trigger"
+            >
+              <Ellipsis aria-hidden="true" size={18} />
+            </Dropdown.Trigger>
+            <Dropdown.Popover placement="bottom end">
+              <Dropdown.Menu
+                aria-label={`${title}布局与栏显示`}
+                onAction={(key) => {
+                  const action = String(key);
+                  if (action === "layout-compact" || action === "layout-classic") {
+                    setLayoutMode(action === "layout-compact" ? "compact" : "classic");
+                    return;
+                  }
+                  if (action === "expand") {
+                    onToggleExpand();
+                    return;
+                  }
+                  const paneIndex = panes.findIndex((pane) => `pane-${pane.id}` === action);
+                  if (paneIndex >= 0 && !(widths[paneIndex] > 0.0001 && visibleCount === 1)) {
+                    togglePane(paneIndex);
+                  }
+                }}
+              >
+                <Dropdown.Item id="layout-compact" key="layout-compact">
+                  {layoutMode === "compact" ? "✓ 紧凑三栏" : "紧凑三栏"}
+                </Dropdown.Item>
+                <Dropdown.Item id="layout-classic" key="layout-classic">
+                  {layoutMode === "classic" ? "✓ 经典三栏" : "经典三栏"}
+                </Dropdown.Item>
+                {panes.map((pane, index) => (
+                  <Dropdown.Item id={`pane-${pane.id}`} key={`pane-${pane.id}`}>
+                    {widths[index] > 0.0001 ? `✓ ${pane.title}` : pane.title}
+                  </Dropdown.Item>
+                ))}
+                <Dropdown.Item id="expand" key="expand">
+                  <span className="zone-view-menu-item">
+                    {isExpanded ? <Minimize2 aria-hidden="true" size={15} /> : <Maximize2 aria-hidden="true" size={15} />}
+                    {expandLabel}
+                  </span>
+                </Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
         </div>
       </header>
       <ResizableTriPane
@@ -391,6 +376,7 @@ function WorkbenchZone({
         groups={groups}
         highlightedRowId={highlightedRowId}
         invoiceInventory={invoiceInventory}
+        layoutMode={layoutMode}
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}

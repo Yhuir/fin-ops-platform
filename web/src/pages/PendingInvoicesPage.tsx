@@ -1,4 +1,4 @@
-import { Button, SearchField, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import type { Key } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
@@ -7,6 +7,7 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
+import QuerySearch from "../components/common/QuerySearch";
 import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
 import PendingInvoiceInvoicePickerDrawer from "../components/pendingInvoices/PendingInvoiceInvoicePickerDrawer";
@@ -189,6 +190,7 @@ export default function PendingInvoicesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeyword] = useState("");
+  const [keywordDraft, setKeywordDraft] = useState("");
   const [columnFilters, setColumnFilters] = useState<PendingInvoiceColumnFilter[]>([]);
   const [columnFilterFields, setColumnFilterFields] = useState<PendingInvoiceFilterField[]>([]);
   const [sortField, setSortField] = useState<PendingInvoiceSortField>("trade_date");
@@ -723,49 +725,51 @@ export default function PendingInvoicesPage() {
                   <span>流水合计 {formatMoney(selectedBankTotal)}</span>
                   {direction === "income" ? (
                     <>
-                      <button
-                        className="pending-invoices-button pending-invoices-button--primary"
-                        disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
-                        onClick={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
-                        type="button"
+                      <Button
+                        isDisabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        onPress={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
+                        size="sm"
+                        variant="primary"
                       >
                         标记无需开票
-                      </button>
-                      <button
-                        className="pending-invoices-button pending-invoices-button--primary"
-                        disabled={!canMutateData || pendingIncomeStatusRows.size > 0}
-                        onClick={() => handleMarkSelectedIncomeStatus("cash_income")}
-                        type="button"
+                      </Button>
+                      <Button
+                        isDisabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        onPress={() => handleMarkSelectedIncomeStatus("cash_income")}
+                        size="sm"
+                        variant="primary"
                       >
                         标记现金收入
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button className="pending-invoices-button pending-invoices-button--primary" disabled={!canMutateData} onClick={handleOpenSelectedInvoicePicker} type="button">
+                    <Button isDisabled={!canMutateData} onPress={handleOpenSelectedInvoicePicker} size="sm" variant="primary">
                       选择发票
-                    </button>
+                    </Button>
                   )}
-                  <button className="pending-invoices-button" onClick={clearSelectedTransactions} type="button">
+                  <Button onPress={clearSelectedTransactions} size="sm" variant="secondary">
                     清除选择
-                  </button>
+                  </Button>
                 </div>
               ) : null}
-              <SearchField
-                aria-label="搜索流水"
+              <QuerySearch
+                ariaLabel="搜索流水"
                 className="pending-invoices-search"
-                onChange={(value) => {
-                  setKeyword(value);
+                onChange={setKeywordDraft}
+                onClear={() => {
+                  setKeywordDraft("");
+                  setKeyword("");
                   clearSelectedTransactions();
                   setPage(1);
                 }}
-                value={keyword}
-              >
-                <SearchField.Group className="pending-invoices-search-group">
-                  <SearchField.SearchIcon />
-                  <SearchField.Input className="pending-invoices-search-input" placeholder="搜索流水" />
-                  <SearchField.ClearButton aria-label="清空搜索" />
-                </SearchField.Group>
-              </SearchField>
+                onSubmit={() => {
+                  setKeyword(keywordDraft.trim());
+                  clearSelectedTransactions();
+                  setPage(1);
+                }}
+                placeholder="搜索流水"
+                value={keywordDraft}
+              />
             </div>
           )}
         />

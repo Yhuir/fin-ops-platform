@@ -1,3 +1,5 @@
+import { Dropdown } from "@heroui/react";
+import { Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -21,8 +23,9 @@ type RowActionsProps = {
   canMutateData: boolean;
   availableActions: string[];
   showDetailAction?: boolean;
-  onOpenDetail: (event: MouseEvent<HTMLButtonElement>) => void;
-  onAction: (action: WorkbenchInlineAction, event: MouseEvent<HTMLButtonElement>) => void;
+  onOpenDetail: (event?: MouseEvent<HTMLButtonElement>) => void;
+  onAction: (action: WorkbenchInlineAction, event?: MouseEvent<HTMLButtonElement>) => void;
+  compact?: boolean;
 };
 
 export default function RowActions({
@@ -34,6 +37,7 @@ export default function RowActions({
   showDetailAction = true,
   onOpenDetail,
   onAction,
+  compact = false,
 }: RowActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
@@ -92,6 +96,51 @@ export default function RowActions({
       window.removeEventListener("mousedown", handlePointerDown);
     };
   }, [menuOpen]);
+
+  if (compact) {
+    const actions: Array<{ id: WorkbenchInlineAction | "detail"; label: string; warning?: boolean }> = [];
+    if (showDetailAction) actions.push({ id: "detail", label: "详情" });
+    if (canMutateData && canIgnore) actions.push({ id: "ignore-row", label: "忽略", warning: true });
+    if (canMutateData && showWorkflowActions && variant === "confirm-exception") {
+      actions.push({ id: "confirm-match", label: "确认关联" });
+      actions.push({ id: "flag-exception", label: recordType === "invoice" ? "标记异常" : "异常处理", warning: true });
+    }
+    if (canMutateData && showWorkflowActions && variant === "bank-review") {
+      actions.push({ id: "relation-status", label: "关联情况" });
+      actions.push({ id: "unlink", label: "取消关联" });
+      actions.push({ id: "handle-exception", label: "异常处理", warning: true });
+      if (canConfirmCashPassThrough) actions.push({ id: "confirm-cash-pass-through", label: "确认为过账" });
+      if (canConfirmCashTicketPurchase) actions.push({ id: "confirm-cash-ticket-purchase", label: "确认为买票" });
+      if (canCancelCashSpecial) actions.push({ id: "cancel-cash-special", label: "取消现金处理", warning: true });
+    }
+    if (actions.length === 0) return null;
+
+    return (
+      <div className="row-actions row-actions-compact" onClick={(event) => event.stopPropagation()}>
+        <Dropdown>
+          <Dropdown.Trigger aria-label="更多操作" className="row-actions-compact-trigger">
+            <Ellipsis aria-hidden="true" size={16} />
+          </Dropdown.Trigger>
+          <Dropdown.Popover placement="bottom end">
+            <Dropdown.Menu
+              aria-label="记录操作"
+              onAction={(key) => {
+                const action = String(key) as WorkbenchInlineAction | "detail";
+                if (action === "detail") onOpenDetail();
+                else onAction(action);
+              }}
+            >
+              {actions.map((action) => (
+                <Dropdown.Item className={action.warning ? "row-menu-item-warning" : undefined} id={action.id} key={action.id}>
+                  {action.label}
+                </Dropdown.Item>
+              ))}
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
+      </div>
+    );
+  }
 
   const handleMenuToggle = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();

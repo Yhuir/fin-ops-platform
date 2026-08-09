@@ -1,4 +1,4 @@
-import { Button, Checkbox } from "@heroui/react";
+import { Button, Checkbox, Input } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
@@ -700,30 +700,32 @@ export default function BankFlowRuleBatchPage() {
       titleAccessory={titleAccessory}
       actions={(
         <div className="bank-flow-rule-batches-actions">
-          <button
+          <Button
             className="bank-flow-rule-batches-button"
-            disabled={tagLoading}
-            type="button"
-            onClick={() => {
+            isDisabled={tagLoading}
+            onPress={() => {
               loadTagSelection();
               setTagDrawerOpen(true);
             }}
+            size="sm"
+            variant="secondary"
           >
             流水规则标签管理
-          </button>
-          <button
+          </Button>
+          <Button
             className="bank-flow-rule-batches-button"
-            disabled={loading}
-            type="button"
-            onClick={() => {
+            isDisabled={loading}
+            onPress={() => {
               setDetails({});
               loadTagSelection();
               setRefreshToken((current) => current + 1);
             }}
+            size="sm"
+            variant="secondary"
           >
             <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
             刷新
-          </button>
+          </Button>
         </div>
       )}
     >
@@ -732,35 +734,45 @@ export default function BankFlowRuleBatchPage() {
       ) : null}
       <div aria-label="批次筛选" className="bank-flow-rule-batches-filter" role="region">
         <div aria-label="批次状态" className="bank-flow-rule-batches-segment" role="group">
-          <button
+          <Button
             aria-pressed={bucket === "unsubmitted"}
             className={cx("bank-flow-rule-batches-segment__button", bucket === "unsubmitted" && "bank-flow-rule-batches-segment__button--active")}
-            type="button"
-            onClick={() => selectBucket("unsubmitted")}
+            onPress={() => selectBucket("unsubmitted")}
+            size="sm"
+            variant={bucket === "unsubmitted" ? "primary" : "secondary"}
           >
             未提交 {unsubmittedCount}
-          </button>
-          <button
+          </Button>
+          <Button
             aria-pressed={bucket === "submitted"}
             className={cx("bank-flow-rule-batches-segment__button", bucket === "submitted" && "bank-flow-rule-batches-segment__button--active")}
-            type="button"
-            onClick={() => selectBucket("submitted")}
+            onPress={() => selectBucket("submitted")}
+            size="sm"
+            variant={bucket === "submitted" ? "primary" : "secondary"}
           >
             已提交 {payload.summary.submittedCount}
-          </button>
-          <button
+          </Button>
+          <Button
             aria-pressed={bucket === "withdrawn"}
             className={cx("bank-flow-rule-batches-segment__button", bucket === "withdrawn" && "bank-flow-rule-batches-segment__button--active")}
-            type="button"
-            onClick={() => selectBucket("withdrawn")}
+            onPress={() => selectBucket("withdrawn")}
+            size="sm"
+            variant={bucket === "withdrawn" ? "primary" : "secondary"}
           >
             历史 {payload.summary.withdrawnCount}
-          </button>
+          </Button>
         </div>
-        <label className="bank-flow-rule-batches-field">
-          <span>月份</span>
-          <input onChange={(event) => handleMonthChange(event.target.value)} type="month" value={month} />
-        </label>
+        <div aria-label="批次月份" className="bank-flow-rule-batches-field" role="group">
+          <Button
+            aria-pressed={month === ""}
+            onPress={() => handleMonthChange("")}
+            size="sm"
+            variant={month === "" ? "primary" : "secondary"}
+          >
+            全部
+          </Button>
+          <Input aria-label="选择月份" onChange={(event) => handleMonthChange(event.target.value)} type="month" value={month} />
+        </div>
         <PageControls
           disabled={loading}
           label="流水规则批次分页"
@@ -771,14 +783,15 @@ export default function BankFlowRuleBatchPage() {
           total={listPagination.total}
         />
         {bucket === "unsubmitted" && canMutateData ? (
-          <button
+          <Button
             className="bank-flow-rule-batches-button bank-flow-rule-batches-button--primary"
-            disabled={selectedTransactionIds.size === 0 || mutating}
-            type="button"
-            onClick={handleSubmitSelected}
+            isDisabled={selectedTransactionIds.size === 0 || mutating}
+            onPress={handleSubmitSelected}
+            size="sm"
+            variant="primary"
           >
             提交批次
-          </button>
+          </Button>
         ) : null}
           {selectedTransactionIds.size > 0 ? (
             <span className="bank-flow-rule-batches-selected-count">

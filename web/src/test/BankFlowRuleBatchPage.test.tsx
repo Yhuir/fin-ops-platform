@@ -656,7 +656,8 @@ describe("BankFlowRuleBatchPage", () => {
     expect(screen.getByRole("button", { name: "流水规则标签管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(screen.getByLabelText("月份")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部" })).toBeInTheDocument();
+    expect(screen.getByLabelText("选择月份")).toBeInTheDocument();
     expect(screen.queryByLabelText("银行账户")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("精确账户键，如 建设银行:8106")).not.toBeInTheDocument();
 

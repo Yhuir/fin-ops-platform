@@ -1,8 +1,8 @@
 import { Info } from "lucide-react";
-import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
-import { Chip } from "@heroui/react";
+import { memo, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
+import { Chip, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
 
-import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
+import { getWorkbenchColumns, type WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 import { formatMoney } from "../../features/money";
 import {
   compactWorkbenchBankAccountLabel,
@@ -42,6 +42,7 @@ type WorkbenchRecordCardProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   leadingControl?: ReactNode;
+  layoutMode?: WorkbenchLayoutMode;
 };
 
 function WorkbenchRecordCard({
@@ -62,8 +63,9 @@ function WorkbenchRecordCard({
   canMutateData,
   readOnly = false,
   leadingControl,
+  layoutMode = "classic",
 }: WorkbenchRecordCardProps) {
-  const columns = columnsProp ?? getWorkbenchColumns(paneId);
+  const columns = columnsProp ?? getWorkbenchColumns(paneId, undefined, layoutMode);
   const hasActionColumn = !readOnly && showActionColumn;
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
@@ -97,7 +99,11 @@ function WorkbenchRecordCard({
           >
             <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
-              {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {layoutMode === "compact" && isCompactTruncatedColumn(paneId, column.key) ? (
+                <CompactCellPopover label={compactCellLabel(row, column.key, value)}>
+                  {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+                </CompactCellPopover>
+              ) : renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
             </div>
           </div>
         );
@@ -112,11 +118,32 @@ function WorkbenchRecordCard({
             showWorkflowActions={showWorkflowActions}
             variant={row.actionVariant}
             onAction={(action, event) => {
-              event.stopPropagation();
+              event?.stopPropagation();
               onRowAction(row, action);
             }}
             onOpenDetail={(event) => {
-              event.stopPropagation();
+              event?.stopPropagation();
+              onOpenDetail(row);
+            }}
+          />
+        </div>
+      ) : null}
+      {layoutMode === "compact" && paneId !== "oa" && !readOnly ? (
+        <div className="record-card-compact-actions">
+          <RowActions
+            compact
+            availableActions={row.availableActions}
+            canMutateData={canMutateData}
+            recordType={row.recordType}
+            showDetailAction={!isSummaryRow && !showInlineDetail}
+            showWorkflowActions={showWorkflowActions}
+            variant={row.actionVariant}
+            onAction={(action, event) => {
+              event?.stopPropagation();
+              onRowAction(row, action);
+            }}
+            onOpenDetail={(event) => {
+              event?.stopPropagation();
               onOpenDetail(row);
             }}
           />
@@ -141,10 +168,64 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.canMutateData === nextProps.canMutateData
   && previousProps.readOnly === nextProps.readOnly
   && previousProps.leadingControl === nextProps.leadingControl
+  && previousProps.layoutMode === nextProps.layoutMode
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail
   && previousProps.onRowAction === nextProps.onRowAction
 ));
+
+function isCompactTruncatedColumn(paneId: WorkbenchRecordType, columnKey: string) {
+  return (
+    (paneId === "oa" && ["projectName", "counterparty", "reason"].includes(columnKey))
+    || (paneId === "bank" && columnKey === "note")
+    || (paneId === "invoice" && columnKey === "buyerName")
+  );
+}
+
+function compactCellLabel(row: WorkbenchRecord, columnKey: string, fallback: string) {
+  if (row.recordType === "bank" && columnKey === "note" && row.bankTextFields?.length) {
+    return row.bankTextFields.map((field) => `${field.label}：${field.value}`).join("\n");
+  }
+  if (row.recordType === "invoice" && columnKey === "buyerName") {
+    return [row.tableValues.buyerName, row.tableValues.buyerTaxId].filter(Boolean).join("\n");
+  }
+  return fallback;
+}
+
+function CompactCellPopover({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const hide = () => {
+    closeTimer.current = setTimeout(() => setOpen(false), 80);
+  };
+
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
+
+  return (
+    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        aria-label={`查看完整内容：${label}`}
+        className="workbench-compact-cell-trigger"
+        onBlur={hide}
+        onFocus={show}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </PopoverTrigger>
+      <PopoverContent className="workbench-compact-cell-popover" onMouseEnter={show} onMouseLeave={hide} placement="bottom start">
+        <PopoverDialog className="workbench-compact-cell-dialog">{label}</PopoverDialog>
+      </PopoverContent>
+    </PopoverRoot>
+  );
+}
 
 function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, columns: WorkbenchColumn[]) {
   const values: string[] = [];

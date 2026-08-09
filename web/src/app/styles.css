@@ -215,6 +215,57 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.query-search {
+  display: grid;
+  width: min(420px, 100%);
+  min-width: min(280px, 100%);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.query-search__field {
+  min-height: 34px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  transition: border-color var(--motion-fast) var(--ease-out-quart), box-shadow var(--motion-fast) var(--ease-out-quart);
+}
+
+.query-search__field:hover {
+  border-color: var(--fp-border-strong);
+}
+
+.query-search__field[data-focus-within] {
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
+}
+
+.bank-grid-search {
+  width: min(440px, 100%);
+  margin-right: auto;
+}
+
+.batch-accounting-query-search {
+  width: min(390px, 100%);
+}
+
+.cost-view-search-form {
+  display: grid;
+  width: min(420px, 100%);
+  min-width: min(280px, 100%);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+@media (max-width: 640px) {
+  .query-search {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 .invoice-count-page-scaffold .page-header {
   align-items: flex-start;
   padding-bottom: var(--fp-space-3);
@@ -7135,15 +7186,17 @@ textarea {
 }
 
 .bank-flow-rule-batches-field {
-  display: grid;
-  min-width: 150px;
-  gap: 3px;
+  display: flex;
+  min-width: 230px;
+  align-items: center;
+  gap: var(--fp-space-2);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 800;
 }
 
 .bank-flow-rule-batches-field input {
+  min-width: 150px;
   min-height: 34px;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -13152,6 +13205,109 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   display: block;
 }
 
+.zone-view-menu-trigger {
+  flex: 0 0 auto;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  color: var(--ops-header-text);
+}
+
+.zone-view-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.zone[data-layout="compact"] .zone-header {
+  align-items: center;
+  gap: 10px;
+  padding-block: 9px;
+}
+
+.zone[data-layout="compact"] .zone-title-block {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.zone[data-layout="compact"] .zone-heading-row {
+  flex: 0 1 auto;
+  gap: 10px;
+}
+
+.zone[data-layout="compact"] .zone-title-copy {
+  min-width: max-content;
+}
+
+.zone[data-layout="compact"] .zone-meta {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.zone[data-layout="compact"] .workbench-zone-search {
+  width: clamp(210px, 20vw, 280px);
+  flex-basis: 280px;
+}
+
+.zone[data-layout="compact"] .zone-selection-toolbar {
+  min-width: 0;
+  margin-top: 0;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.zone[data-layout="compact"] .zone-selection-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.zone[data-layout="compact"] .zone-selection-summary,
+.zone[data-layout="compact"] .zone-selection-actions {
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+.zone[data-layout="compact"] .zone-selection-pill {
+  height: 30px;
+  min-width: max-content;
+  padding-inline: 8px;
+}
+
+.zone[data-layout="compact"] .zone-selection-btn {
+  min-width: max-content;
+  height: 30px;
+  min-height: 30px;
+  padding-inline: 10px;
+}
+
+.zone[data-layout="compact"] .zone-selection-notice {
+  display: none;
+}
+
+.zone[data-layout="compact"] .zone-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.zone[data-layout="compact"] .zone-aux-action-group {
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 1280px) {
+  .zone[data-layout="compact"] .zone-title-block {
+    flex-wrap: wrap;
+  }
+
+  .zone[data-layout="compact"] .zone-selection-toolbar {
+    flex-basis: 100%;
+  }
+}
+
 .resizable-tri-pane {
   --tri-pane-scrollbar-gutter: 15px;
   display: flex;
@@ -13161,6 +13317,11 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   height: 360px;
   background: var(--ops-zone-body, #ffffff);
   overflow: hidden;
+}
+
+.zone[data-layout="compact"] .resizable-tri-pane {
+  gap: 5px;
+  padding: 7px;
 }
 
 .zone.zone-expanded .resizable-tri-pane {
@@ -15254,6 +15415,106 @@ body.column-layout-dragging {
   gap: 3px;
   position: relative;
   min-width: max-content;
+}
+
+.zone[data-layout="compact"] .candidate-grid-body {
+  overflow-x: hidden;
+}
+
+.zone[data-layout="compact"] .candidate-pane-footer-scroll {
+  overflow-x: hidden;
+}
+
+.zone[data-layout="compact"] .column-drag-handle {
+  display: none;
+}
+
+.zone[data-layout="compact"] .candidate-columnheader,
+.zone[data-layout="compact"] .record-card-cell {
+  padding-inline: 5px;
+}
+
+.zone[data-layout="compact"] .candidate-columnheader-main {
+  gap: 4px;
+}
+
+.zone[data-layout="compact"] .record-card {
+  position: relative;
+  min-width: 0;
+}
+
+.workbench-compact-cell-trigger {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.workbench-compact-cell-trigger > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-compact-cell-popover {
+  z-index: 1700;
+  max-width: min(420px, calc(100vw - 24px));
+  border: 1px solid #d8e1eb;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.workbench-compact-cell-dialog {
+  padding: 9px 11px;
+  color: #243548;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.record-card-compact-actions {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 5;
+  opacity: 0.34;
+  transition: opacity 120ms ease;
+}
+
+.record-card:hover .record-card-compact-actions,
+.record-card:focus-within .record-card-compact-actions {
+  opacity: 1;
+}
+
+.row-actions-compact {
+  min-width: 0;
+}
+
+.row-actions-compact button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border: 1px solid #d8e1eb;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #334155;
+}
+
+.row-menu-item-warning {
+  color: #b54708;
 }
 
 .row-action-btn,

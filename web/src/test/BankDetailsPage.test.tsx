@@ -401,6 +401,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "内部转账");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const internalTransferTag = (await within(table).findAllByText("内部往来款"))[0];
 
@@ -777,6 +778,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("无 295")).not.toBeInTheDocument();
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const supplierRow = supplierName.closest("tr");
@@ -827,6 +829,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const supplier = await within(table).findByText("普通供应商");
     const row = supplier.closest("tr");
@@ -876,6 +879,7 @@ describe("Bank details page", () => {
     await user.click(within(drawer).getByRole("button", { name: "关闭自动标签规则抽屉" }));
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const supplierRow = supplierName.closest("tr");
@@ -897,6 +901,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const counterpartyName = await within(table).findByText("候选供应商", { exact: true });
     const row = counterpartyName.closest("tr");
@@ -944,6 +949,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const row = (await within(table).findByText("候选供应商", { exact: true })).closest("tr");
     expect(row).toBeInstanceOf(HTMLElement);
@@ -971,6 +977,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "外部候选");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     expect(await within(table).findByText("外部候选供应商")).toBeInTheDocument();
 
@@ -1017,6 +1024,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const row = supplierName.closest("tr");
@@ -1183,6 +1191,7 @@ describe("Bank details page", () => {
     });
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "跨页目标");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
 
     await waitFor(() => {
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
@@ -1231,6 +1240,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /工商银行 6386/ }));
     await user.type(within(page).getByPlaceholderText("搜索流水"), "跨页目标");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
     await waitFor(() => {
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
       expect(transactionRequest?.searchParams.get("keyword")).toBe("跨页目标");

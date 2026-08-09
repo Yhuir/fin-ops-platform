@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import {
   Button,
   PopoverContent,
@@ -231,36 +231,46 @@ function CostViewSearch({
   value,
   onChange,
   onCompositionChange,
+  onSubmit,
 }: {
   composing: boolean;
   pending: boolean;
   value: string;
   onChange: (value: string) => void;
   onCompositionChange: (value: boolean) => void;
+  onSubmit: () => void;
 }) {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSubmit();
+  };
+
   return (
-    <SearchField
-      aria-label="搜索当前成本统计表格"
-      className="cost-view-search"
-      maxLength={200}
-      onChange={onChange}
-      value={value}
-    >
-      <SearchField.Group className="cost-view-search-group">
-        {pending && !composing ? (
-          <Spinner aria-label="搜索中" className="cost-view-search-spinner" color="current" size="sm" />
-        ) : (
-          <SearchField.SearchIcon className="cost-view-search-icon" />
-        )}
-        <SearchField.Input
-          className="cost-view-search-input"
-          onCompositionEnd={() => onCompositionChange(false)}
-          onCompositionStart={() => onCompositionChange(true)}
-          placeholder="搜索当前表格"
-        />
-        <SearchField.ClearButton aria-label="清空搜索" className="cost-view-search-clear" />
-      </SearchField.Group>
-    </SearchField>
+    <form className="cost-view-search-form" onSubmit={handleSubmit} role="search">
+      <SearchField
+        aria-label="搜索当前成本统计表格"
+        className="cost-view-search"
+        maxLength={200}
+        onChange={onChange}
+        value={value}
+      >
+        <SearchField.Group className="cost-view-search-group">
+          {pending && !composing ? (
+            <Spinner aria-label="搜索中" className="cost-view-search-spinner" color="current" size="sm" />
+          ) : (
+            <SearchField.SearchIcon className="cost-view-search-icon" />
+          )}
+          <SearchField.Input
+            className="cost-view-search-input"
+            onCompositionEnd={() => onCompositionChange(false)}
+            onCompositionStart={() => onCompositionChange(true)}
+            placeholder="搜索当前表格"
+          />
+          <SearchField.ClearButton aria-label="清空搜索" className="cost-view-search-clear" />
+        </SearchField.Group>
+      </SearchField>
+      <Button size="sm" type="submit" variant="secondary">查询</Button>
+    </form>
   );
 }
 
@@ -1728,6 +1738,11 @@ export default function CostStatisticsPage() {
       value={searchDraft}
       onChange={setSearchDraft}
       onCompositionChange={setIsSearchComposing}
+      onSubmit={() => {
+        const normalizedQuery = searchDraft.trim().replace(/\s+/g, " ");
+        resetExplorerSelection(viewMode);
+        setSearchQuery(normalizedQuery);
+      }}
     />
   );
   const autoLoadTableProps = {
@@ -1789,45 +1804,55 @@ export default function CostStatisticsPage() {
             <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
               <div className="cost-view-group">
                 <span className="cost-view-group-label">OA配对流水统计</span>
-                <button
+                <Button
+                  aria-pressed={viewMode === "project"}
                   className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
-                  type="button"
-                  onClick={() => handleViewModeChange("project")}
+                  onPress={() => handleViewModeChange("project")}
+                  size="sm"
+                  variant={viewMode === "project" ? "primary" : "secondary"}
                 >
                   按项目
-                </button>
-                <button
+                </Button>
+                <Button
+                  aria-pressed={viewMode === "bank"}
                   className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
-                  type="button"
-                  onClick={() => handleViewModeChange("bank")}
+                  onPress={() => handleViewModeChange("bank")}
+                  size="sm"
+                  variant={viewMode === "bank" ? "primary" : "secondary"}
                 >
                   按银行
-                </button>
-                <button
+                </Button>
+                <Button
+                  aria-pressed={viewMode === "expenseType"}
                   className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
-                  type="button"
-                  onClick={() => handleViewModeChange("expenseType")}
+                  onPress={() => handleViewModeChange("expenseType")}
+                  size="sm"
+                  variant={viewMode === "expenseType" ? "primary" : "secondary"}
                 >
                   按OA费用类型
-                </button>
+                </Button>
               </div>
               <span className="cost-view-divider" aria-hidden="true" />
               <div className="cost-view-group">
                 <span className="cost-view-group-label">流水统计</span>
-                <button
+                <Button
+                  aria-pressed={viewMode === "bankTag"}
                   className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
-                  type="button"
-                  onClick={() => handleViewModeChange("bankTag")}
+                  onPress={() => handleViewModeChange("bankTag")}
+                  size="sm"
+                  variant={viewMode === "bankTag" ? "primary" : "secondary"}
                 >
                   按标签
-                </button>
-                <button
+                </Button>
+                <Button
+                  aria-pressed={viewMode === "time"}
                   className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
-                  type="button"
-                  onClick={() => handleViewModeChange("time")}
+                  onPress={() => handleViewModeChange("time")}
+                  size="sm"
+                  variant={viewMode === "time" ? "primary" : "secondary"}
                 >
                   按时间
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1841,31 +1866,34 @@ export default function CostStatisticsPage() {
           inert={interactionLocked ? true : undefined}
           ref={headerActionsRef}
         >
-          <button
+          <Button
             aria-label="刷新成本统计"
             className="cost-export-button cost-refresh-button"
-            type="button"
-            disabled={isExplorerLoading}
-            onClick={handleManualRefresh}
+            isDisabled={isExplorerLoading}
+            onPress={handleManualRefresh}
+            size="sm"
+            variant="secondary"
           >
             刷新
-          </button>
-          <button
+          </Button>
+          <Button
             className="cost-export-button"
-            type="button"
-            disabled={isTagRulesSaving}
-            onClick={openTagRulesDrawer}
+            isDisabled={isTagRulesSaving}
+            onPress={openTagRulesDrawer}
+            size="sm"
+            variant="secondary"
           >
             成本统计标签规则
-          </button>
-          <button
+          </Button>
+          <Button
             className="cost-export-button"
-            type="button"
-            disabled={isExplorerLoading || isExportReferenceLoading || hasExplorerLoadError}
-            onClick={() => void openExportCenter()}
+            isDisabled={isExplorerLoading || isExportReferenceLoading || hasExplorerLoadError}
+            onPress={() => void openExportCenter()}
+            size="sm"
+            variant="primary"
           >
 	          {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
-	          </button>
+	          </Button>
 	        </div>
 	      </header>
 

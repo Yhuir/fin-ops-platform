@@ -1,5 +1,5 @@
 import { Button, Checkbox } from "@heroui/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, RefreshCw } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -583,7 +583,7 @@ export default function TurnoverLedgerPage() {
     return () => controller.abort();
   }, [active, exportFamily, exportOpen]);
 
-  const handleFamilyChange = (_event: SyntheticEvent, nextFamily: TurnoverLedgerFamily) => {
+  const handleFamilyChange = (nextFamily: TurnoverLedgerFamily) => {
     if (!nextFamily || nextFamily === family || ledgerNavigationDisabled) {
       return;
     }
@@ -1023,23 +1023,25 @@ export default function TurnoverLedgerPage() {
         titleAccessory={titleAccessory}
         actions={(
           <>
-            <button
+            <Button
               className="turnover-ledger-button"
-              disabled={ledgerNavigationDisabled}
-              onClick={() => loadLedger()}
-              type="button"
+              isDisabled={ledgerNavigationDisabled}
+              onPress={() => loadLedger()}
+              size="sm"
+              variant="secondary"
             >
               <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
               刷新台账
-            </button>
-            <button
+            </Button>
+            <Button
               className="turnover-ledger-button"
-              disabled={tagLoading}
-              onClick={() => setTagDrawerOpen(true)}
-              type="button"
+              isDisabled={tagLoading}
+              onPress={() => setTagDrawerOpen(true)}
+              size="sm"
+              variant="secondary"
             >
               外部往来款标签设置
-            </button>
+            </Button>
           </>
         )}
       >
@@ -1084,19 +1086,19 @@ export default function TurnoverLedgerPage() {
         <section className="turnover-ledger-table-panel">
           <div className="turnover-ledger-table-panel__inner">
             <div className="turnover-ledger-table-panel__toolbar">
-              <div aria-label="往来款账单范围" className="turnover-ledger-tabs" role="tablist">
+              <div aria-label="往来款账单范围" className="turnover-ledger-tabs" role="group">
                 {FAMILY_TABS.map((tab) => (
-                  <button
-                    aria-selected={family === tab.value}
+                  <Button
+                    aria-pressed={family === tab.value}
                     className={`turnover-ledger-tabs__tab${family === tab.value ? " turnover-ledger-tabs__tab--active" : ""}`}
-                    disabled={ledgerNavigationDisabled}
+                    isDisabled={ledgerNavigationDisabled}
                     key={tab.value}
-                    onClick={(event) => handleFamilyChange(event, tab.value)}
-                    role="tab"
-                    type="button"
+                    onPress={() => handleFamilyChange(tab.value)}
+                    size="sm"
+                    variant={family === tab.value ? "primary" : "secondary"}
                   >
                     {tab.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
               <div className="turnover-ledger-actions">
@@ -1105,24 +1107,25 @@ export default function TurnoverLedgerPage() {
                     已选 {selectedClosureRows.length} 笔
                   </span>
                 ) : null}
-                <button
+                <Button
                   className={`turnover-ledger-button${selectedRowsAllCashClosure ? " turnover-ledger-button--warning" : ""}`}
-                  disabled={!canRunClosurePrimaryAction}
-                  onClick={() => {
+                  isDisabled={!canRunClosurePrimaryAction}
+                  onPress={() => {
                     if (selectedRowsAllCashClosure) {
                       void handleWithdrawSelectedCashClosure();
                       return;
                     }
                     setClosureDrawerOpen(true);
                   }}
-                  type="button"
+                  size="sm"
+                  variant={selectedRowsAllCashClosure ? "danger" : "secondary"}
                 >
                   {closureActionLabel}
-                </button>
-                <button className="turnover-ledger-button turnover-ledger-button--primary" onClick={handleOpenExport} type="button">
+                </Button>
+                <Button className="turnover-ledger-button turnover-ledger-button--primary" onPress={handleOpenExport} size="sm" variant="primary">
                   <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格
-                </button>
+                </Button>
               </div>
             </div>
             <div className="turnover-ledger-table-panel__divider" />

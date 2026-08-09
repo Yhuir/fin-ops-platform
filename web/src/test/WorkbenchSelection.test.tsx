@@ -747,8 +747,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(confirmButton);
 
     const busyButton = within(unpairedZone).getByRole("button", { name: "正在准备确认预览" });
-    expect(busyButton).toBeDisabled();
-    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    expect(busyButton).toHaveAttribute("aria-disabled", "true");
+    expect(busyButton).toHaveAttribute("data-pending", "true");
     await user.click(busyButton);
     expect(previewCalls).toBe(1);
 
@@ -785,8 +785,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(withdrawButton);
 
     const busyButton = within(pairedZone).getByRole("button", { name: "正在准备撤回预览" });
-    expect(busyButton).toBeDisabled();
-    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    expect(busyButton).toHaveAttribute("aria-disabled", "true");
+    expect(busyButton).toHaveAttribute("data-pending", "true");
     await user.click(busyButton);
     expect(previewCalls).toBe(1);
 
@@ -3201,13 +3201,15 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /放大 未配对/ }));
+    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^放大 未配对/ }));
 
     expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
     expect(screen.getByTestId("zone-paired")).toHaveClass("zone-hidden");
-    expect(screen.getByRole("button", { name: /恢复 未配对/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /未配对.*布局与栏显示/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /恢复 未配对/ }));
+    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
+    await user.click(screen.getByRole("menuitem", { name: /^恢复 未配对/ }));
 
     expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
     expect(screen.getByTestId("zone-paired")).not.toHaveClass("zone-hidden");

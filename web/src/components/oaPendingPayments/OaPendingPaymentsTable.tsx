@@ -4,7 +4,7 @@ import {
   PopoverRoot,
   PopoverTrigger,
 } from "@heroui/react";
-import { ArrowUpDown, Filter, Info, Search } from "lucide-react";
+import { ArrowUpDown, Filter, Info } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useMemo, useState } from "react";
 
@@ -25,6 +25,7 @@ import type {
 } from "../../features/oaPendingPayments/types";
 import { formatMoney } from "../../features/money";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
+import QuerySearch from "../common/QuerySearch";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
@@ -39,6 +40,7 @@ type OaPendingPaymentsTableProps = {
   filters: OaPendingPaymentFilter[];
   onKeywordDraftChange: (value: string) => void;
   onKeywordSubmit: () => void;
+  onKeywordClear: () => void;
   onFilterApply: (filter: OaColumnFilterValue) => void;
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
@@ -135,6 +137,7 @@ export default function OaPendingPaymentsTable({
   filters,
   onKeywordDraftChange,
   onKeywordSubmit,
+  onKeywordClear,
   onFilterApply,
   onFilterClear,
   onSortChange,
@@ -153,23 +156,15 @@ export default function OaPendingPaymentsTable({
   return (
     <div className="oa-pending-payments-table-frame" data-testid="oa-pending-payments-table-frame">
       <div className="oa-pending-payments-table-toolbar">
-        <label className="oa-pending-payments-table-search">
-          <Search aria-hidden="true" size={15} strokeWidth={2.2} />
-          <input
-            aria-label="搜索OA待付款核对"
-            placeholder="搜索 OA / 流水 / 发票"
-            value={keywordDraft}
-            onChange={(event) => onKeywordDraftChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                onKeywordSubmit();
-              }
-            }}
-          />
-        </label>
-        <button className="oa-pending-payments-button oa-pending-payments-table-search-button" onClick={onKeywordSubmit} type="button">
-          查询
-        </button>
+        <QuerySearch
+          ariaLabel="搜索OA待付款核对"
+          className="oa-pending-payments-table-search"
+          onChange={onKeywordDraftChange}
+          onClear={onKeywordClear}
+          onSubmit={onKeywordSubmit}
+          placeholder="搜索 OA / 流水 / 发票"
+          value={keywordDraft}
+        />
       </div>
       <div ref={tableWrapRef} className="oa-pending-payments-table-shell" data-testid="oa-pending-payments-table-shell">
         <table aria-label="OA待付款核对表格" className="oa-pending-payments-table">

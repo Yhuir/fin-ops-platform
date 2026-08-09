@@ -1178,7 +1178,7 @@ describe("Turnover ledger page", () => {
     const page = await screen.findByTestId("turnover-ledger-page");
     expect(within(page).getByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
     expect(within(page).queryByText("基于银行明细标签实时汇总外部往来关系，并把已确认关系同步到关联台。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
+    expect(within(page).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
     expect(within(page).getByText("当前待还款金额")).toBeInTheDocument();
     expect(within(page).getByText("累计已还款金额")).toBeInTheDocument();
     expect(within(page).getByText("当前待收款金额")).toBeInTheDocument();
@@ -2176,7 +2176,7 @@ describe("Turnover ledger page", () => {
     });
     expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(before);
 
-    await user.click(within(page).getByRole("tab", { name: "公司往来" }));
+    await user.click(within(page).getByRole("button", { name: "公司往来" }));
     await within(page).findByText("云南建设有限公司");
     await user.click(within(page).getByRole("button", { name: "下载表格" }));
 

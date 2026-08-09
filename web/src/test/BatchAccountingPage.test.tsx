@@ -655,6 +655,7 @@ describe("BatchAccountingPage", () => {
 
     expect(await screen.findByText("正在加载流水")).toBeInTheDocument();
     await user.type(screen.getByLabelText("搜索OA内容"), "刘");
+    await user.click(screen.getByRole("button", { name: "查询" }));
     await waitFor(() => expect(pendingResolvers).toHaveLength(2));
     expect(requestSignals[0]?.aborted).toBe(true);
 
@@ -986,6 +987,7 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("王青")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("搜索OA内容"), "上海客户");
+    await user.click(screen.getByRole("button", { name: "查询" }));
     await waitFor(() => {
       expect(within(oaTable).queryByText("刘晨")).not.toBeInTheDocument();
       expect(within(oaTable).getByText("王青")).toBeInTheDocument();
@@ -997,7 +999,7 @@ describe("BatchAccountingPage", () => {
       })).toBe(true);
     });
 
-    await user.click(screen.getByRole("button", { name: "清空搜索" }));
+    await user.click(screen.getByRole("button", { name: "清除查询" }));
     expect(await within(oaTable).findByText("刘晨")).toBeInTheDocument();
   });
 

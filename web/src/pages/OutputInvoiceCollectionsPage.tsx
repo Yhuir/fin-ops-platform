@@ -1,9 +1,11 @@
+import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
+import QuerySearch from "../components/common/QuerySearch";
 import MonthPicker from "../components/MonthPicker";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
 import OutputInvoiceCollectionExportDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer";
@@ -282,17 +284,17 @@ export default function OutputInvoiceCollectionsPage() {
 
   const actions = (
     <div className="output-invoice-collections-actions">
-      <button className="output-invoice-collections-button" disabled={loading || refreshing} onClick={() => loadRows("refresh")} type="button">
+      <Button isDisabled={loading || refreshing} onPress={() => loadRows("refresh")} size="sm" variant="secondary">
         {refreshing ? "刷新中" : "刷新"}
-      </button>
-      <button
-        className="output-invoice-collections-button"
-        disabled={Boolean(error)}
-        onClick={() => setQuery((current) => ({ ...current, activeWorkflow: { kind: "export" } }))}
-        type="button"
+      </Button>
+      <Button
+        isDisabled={Boolean(error)}
+        onPress={() => setQuery((current) => ({ ...current, activeWorkflow: { kind: "export" } }))}
+        size="sm"
+        variant="secondary"
       >
         筛选内容导出
-      </button>
+      </Button>
     </div>
   );
 
@@ -317,28 +319,18 @@ export default function OutputInvoiceCollectionsPage() {
                     value={query.month}
                   />
                 </div>
-                <div className="output-invoice-collections-search-cluster">
-                  <input
-                    aria-label="搜索销项发票收款情况"
-                    className="output-invoice-collections-search-input"
-                    onChange={(event) => setKeywordDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        setQuery((current) => ({ ...current, keyword: keywordDraft.trim(), page: 1 }));
-                      }
-                    }}
-                    placeholder="发票号、购方、业务或流水"
-                    type="search"
-                    value={keywordDraft}
-                  />
-                  <button
-                    className="output-invoice-collections-button output-invoice-collections-button--primary"
-                    onClick={() => setQuery((current) => ({ ...current, keyword: keywordDraft.trim(), page: 1 }))}
-                    type="button"
-                  >
-                    查询
-                  </button>
-                </div>
+                <QuerySearch
+                  ariaLabel="搜索销项发票收款情况"
+                  className="output-invoice-collections-search-cluster"
+                  onChange={setKeywordDraft}
+                  onClear={() => {
+                    setKeywordDraft("");
+                    setQuery((current) => ({ ...current, keyword: "", page: 1 }));
+                  }}
+                  onSubmit={() => setQuery((current) => ({ ...current, keyword: keywordDraft.trim(), page: 1 }))}
+                  placeholder="发票号、购方、业务或流水"
+                  value={keywordDraft}
+                />
               </div>
             </PageToolbar>
             {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}

@@ -85,11 +85,11 @@ export default function PaneTable({
                       showWorkflowActions
                       variant={row.actionVariant}
                       onAction={(action, event) => {
-                        event.stopPropagation();
+                        event?.stopPropagation();
                         onRowAction(row, action);
                       }}
                       onOpenDetail={(event) => {
-                        event.stopPropagation();
+                        event?.stopPropagation();
                         onOpenDetail(row);
                       }}
                     />
