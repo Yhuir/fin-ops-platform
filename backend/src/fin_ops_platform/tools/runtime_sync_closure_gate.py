@@ -55,6 +55,7 @@ CANDIDATE_AUDIT_BOOTSTRAP_ERRORS = frozenset(
         "system_audit_business_pages_failed",
         "system_audit_internal_gate_failed",
         "system_audit_page_count_or_contract_failed",
+        "system_audit_registry_contract_failed",
     }
 )
 

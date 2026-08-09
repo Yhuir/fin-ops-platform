@@ -336,7 +336,7 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
     def test_page_canonical_audit_bootstraps_candidate_audit_code_after_valid_http_failure(self) -> None:
         current_audit = {
             "status": "fail",
-            "error": "system_audit_page_count_or_contract_failed",
+            "error": "system_audit_registry_contract_failed",
         }
         candidate_audit = {
             "status": "pass",
