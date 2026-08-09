@@ -110,7 +110,6 @@ Result: no output. Non-workbench runtime remains no-MUI at the start of thisä¸“é
 - `web/src/components/workbench/OaBankExceptionModal.tsx`
 - `web/src/components/workbench/WorkbenchColumnFilterMenu.tsx`
 - `web/src/components/workbench/WorkbenchPaneTimeFilter.tsx`
-- `web/src/components/workbench/WorkbenchSettingsModal.tsx`
 
 These files currently have no direct MUI hit in the baseline scan. They may need regression tests but should not be structurally rewritten for this migration.
 

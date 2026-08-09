@@ -3,7 +3,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pymongo.errors import PyMongoError
 
@@ -36,6 +36,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     SettingsDataResetAlreadyActive,
     SettingsDataResetIdempotencyConflict,
+    SettingsDataResetRecoveryUnavailable,
 )
 from fin_ops_platform.services.settings_data_reset_request import SettingsDataResetEnqueueError
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlVersionConflict
@@ -150,8 +151,10 @@ class SettingsApiRoutes:
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
             project_id = unquote(route_path.rsplit("/", 1)[-1])
             return self.delete_project(project_id, headers)
+        if method == "GET" and route_path == "/api/workbench/settings/data-reset/preview":
+            return self.data_reset_preview(query, headers)
         if method == "POST" and route_path == "/api/workbench/settings/data-reset/jobs":
-            return self.create_data_reset_job(body, headers)
+            return self.create_data_reset_job(body, headers, request_id=request_id or uuid4().hex)
         if method == "GET" and route_path == "/api/workbench/settings/data-reset/jobs/active":
             return self.active_data_reset_job(headers)
         if method == "GET" and route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
@@ -671,7 +674,27 @@ class SettingsApiRoutes:
         settings_payload = self._app_settings_service().delete_project(normalized_project_id)
         return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
 
-    def create_data_reset_job(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+    def data_reset_preview(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Any:
+        _admin_session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        action = str((query.get("action") or [""])[0] or "").strip()
+        reset_service = self._settings_data_reset_service()
+        if reset_service is None or action not in reset_service.supported_actions():
+            return self._unsupported_settings_data_reset_response()
+        return self._json_response(HTTPStatus.OK, {"preview": reset_service.preview(action)})
+
+    def create_data_reset_job(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        request_id: str,
+    ) -> Any:
         payload, admin_session, error = self._validate_data_reset_request(body, headers)
         if error is not None:
             return error
@@ -696,6 +719,10 @@ class SettingsApiRoutes:
                 owner_user_id=owner_user_id,
                 idempotency_key=idempotency_key,
                 label=self._data_reset_job_label(action),
+                reason=str(payload.get("reason") or "").strip(),
+                impact_fingerprint=str(payload.get("impact_fingerprint") or "").strip(),
+                recovery_receipt_id=str(payload.get("recovery_receipt_id") or "").strip(),
+                request_id=request_id,
             )
         except SettingsDataResetAlreadyActive as exc:
             active_job = self._background_job_service().job_from_payload(exc.payload)
@@ -713,6 +740,14 @@ class SettingsApiRoutes:
                 {
                     "error": "settings_data_reset_idempotency_conflict",
                     "message": "该操作标识已用于不同的数据重置请求。",
+                },
+            )
+        except SettingsDataResetRecoveryUnavailable:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "settings_data_reset_recovery_unavailable",
+                    "message": "恢复点已失效或不再匹配当前数据，请重新生成恢复点后再试。",
                 },
             )
         except SettingsDataResetEnqueueError as exc:
@@ -775,6 +810,44 @@ class SettingsApiRoutes:
             return {}, None, self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_workbench_settings_reset_request", "message": "action is required."},
+            )
+        reset_service = self._settings_data_reset_service()
+        if reset_service is None or action not in reset_service.supported_actions():
+            return {}, None, self._unsupported_settings_data_reset_response()
+        reason = str(payload.get("reason") or "").strip()
+        if len(reason) < 5 or len(reason) > 500:
+            return {}, None, self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "settings_data_reset_reason_required",
+                    "message": "请填写 5 至 500 个字符的重置原因。",
+                },
+            )
+        impact_fingerprint = str(payload.get("impact_fingerprint") or "").strip()
+        recovery_receipt_id = str(payload.get("recovery_receipt_id") or "").strip()
+        try:
+            UUID(recovery_receipt_id)
+        except (TypeError, ValueError):
+            return {}, None, self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "settings_data_reset_recovery_unavailable",
+                    "message": "本次重置没有可用的恢复点。",
+                },
+            )
+        preview = reset_service.preview(action)
+        if (
+            preview.get("impact_fingerprint") != impact_fingerprint
+            or preview.get("recovery_receipt_id") != recovery_receipt_id
+            or preview.get("recovery_ready") is not True
+        ):
+            return {}, None, self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "settings_data_reset_impact_changed",
+                    "message": "数据范围或恢复点已变化，请重新确认。",
+                    "preview": preview,
+                },
             )
         oa_password = payload.get("oa_password")
         if not isinstance(oa_password, str) or not oa_password:

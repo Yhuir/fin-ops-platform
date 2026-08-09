@@ -194,6 +194,7 @@ class AuthGuardTests(unittest.TestCase):
                     "/api/workbench/settings/data-reset/jobs",
                     {"action": "reset_bank_transactions", "oa_password": "not-used-for-non-admin"},
                 ),
+                ("GET", "/api/workbench/settings/data-reset/preview?action=reset_bank_transactions", {}),
                 ("GET", "/api/workbench/settings/data-reset/jobs/active", {}),
                 ("GET", "/api/workbench/settings/data-reset/jobs/job-1", {}),
             ]

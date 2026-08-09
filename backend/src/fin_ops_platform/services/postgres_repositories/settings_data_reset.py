@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
-from fin_ops_platform.services.state_store_protocol import PROTECTED_ADMIN_USERNAME
+
+class SettingsDataResetImpactChanged(RuntimeError):
+    pass
+
+
+class SettingsDataResetRecoveryEvidenceInvalid(RuntimeError):
+    pass
 
 
 class PostgresSettingsDataResetRepository:
@@ -16,8 +24,51 @@ class PostgresSettingsDataResetRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def reset_bank_transaction_data(self) -> dict[str, Any]:
-        self._authorize_fact_deletion("管理员重置银行流水域数据")
+    def preview(
+        self,
+        action: str,
+        *,
+        row_ids: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        impact = self._impact(action, row_ids=row_ids or [], case_ids=case_ids or [])
+        receipt = self._connection.fetch_one(
+            """
+            select receipt_id::text as receipt_id, valid_until
+            from job.settings_data_reset_recovery_receipts
+            where action = %s
+              and impact_fingerprint = %s
+              and consumed_by_job_id is null
+              and revoked_at is null
+              and valid_until > now()
+            order by valid_until desc, created_at desc
+            limit 1
+            """,
+            (action, impact["impact_fingerprint"]),
+        )
+        return {
+            **impact,
+            "recovery_ready": receipt is not None,
+            "recovery_receipt_id": str((receipt or {}).get("receipt_id") or "") or None,
+            "recovery_valid_until": (receipt or {}).get("valid_until"),
+        }
+
+    def reset_bank_transaction_data(
+        self,
+        *,
+        expected_impact_fingerprint: str,
+        recovery_receipt_id: str,
+        job_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        self._validate_guard(
+            "reset_bank_transactions",
+            expected_impact_fingerprint=expected_impact_fingerprint,
+            recovery_receipt_id=recovery_receipt_id,
+            job_id=job_id,
+        )
+        self._authorize_fact_deletion(actor_id, reason)
         file_state = self._import_file_state(self._BANK_BATCH_TYPES)
         relation_counts = self._delete_workbench_domain(
             row_types=self._BANK_ROW_TYPES,
@@ -67,8 +118,22 @@ class PostgresSettingsDataResetRepository:
             "stored_import_file_paths": file_state["stored_import_file_paths"],
         }
 
-    def reset_invoice_data(self) -> dict[str, Any]:
-        self._authorize_fact_deletion("管理员重置发票域数据")
+    def reset_invoice_data(
+        self,
+        *,
+        expected_impact_fingerprint: str,
+        recovery_receipt_id: str,
+        job_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        self._validate_guard(
+            "reset_invoices",
+            expected_impact_fingerprint=expected_impact_fingerprint,
+            recovery_receipt_id=recovery_receipt_id,
+            job_id=job_id,
+        )
+        self._authorize_fact_deletion(actor_id, reason)
         file_state = self._import_file_state(self._INVOICE_BATCH_TYPES)
         relation_counts = self._delete_workbench_domain(
             row_types=self._INVOICE_ROW_TYPES,
@@ -115,9 +180,23 @@ class PostgresSettingsDataResetRepository:
         *,
         row_ids: list[str],
         case_ids: list[str],
+        expected_impact_fingerprint: str,
+        recovery_receipt_id: str,
+        job_id: str,
+        actor_id: str,
+        reason: str,
     ) -> dict[str, Any]:
         normalized_row_ids = self._dedupe(row_ids)
         normalized_case_ids = self._dedupe(case_ids)
+        self._validate_guard(
+            "reset_oa_and_rebuild",
+            row_ids=normalized_row_ids,
+            case_ids=normalized_case_ids,
+            expected_impact_fingerprint=expected_impact_fingerprint,
+            recovery_receipt_id=recovery_receipt_id,
+            job_id=job_id,
+        )
+        self._authorize_fact_deletion(actor_id, reason)
         if normalized_case_ids:
             history_count = self._connection.execute(
                 """
@@ -159,14 +238,242 @@ class PostgresSettingsDataResetRepository:
             "workbench_preserved_non_oa_pair_relations": preserved_count,
         }
 
-    def _authorize_fact_deletion(self, reason: str) -> None:
+    def _validate_guard(
+        self,
+        action: str,
+        *,
+        expected_impact_fingerprint: str,
+        recovery_receipt_id: str,
+        job_id: str,
+        row_ids: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> None:
+        expected = str(expected_impact_fingerprint or "").strip()
+        receipt_id = str(recovery_receipt_id or "").strip()
+        normalized_job_id = str(job_id or "").strip()
+        if not expected or not receipt_id or not normalized_job_id:
+            raise SettingsDataResetRecoveryEvidenceInvalid(
+                "Data reset requires an impact fingerprint, a recovery receipt and a job id."
+            )
+        self._lock_targets(action)
+        current = self._impact(action, row_ids=row_ids or [], case_ids=case_ids or [])
+        if current["impact_fingerprint"] != expected:
+            raise SettingsDataResetImpactChanged("Data reset impact changed after confirmation.")
+        receipt = self._connection.fetch_one(
+            """
+            select receipt_id::text as receipt_id
+            from job.settings_data_reset_recovery_receipts
+            where receipt_id = %s::uuid
+              and action = %s
+              and impact_fingerprint = %s
+              and consumed_by_job_id = %s
+              and consumed_at is not null
+              and revoked_at is null
+              and valid_until > now()
+            for share
+            """,
+            (receipt_id, action, expected, normalized_job_id),
+        )
+        if receipt is None:
+            raise SettingsDataResetRecoveryEvidenceInvalid(
+                "The verified restore point is missing, expired, revoked or belongs to another job."
+            )
+
+    def _impact(
+        self,
+        action: str,
+        *,
+        row_ids: list[str],
+        case_ids: list[str],
+    ) -> dict[str, Any]:
+        signatures: dict[str, dict[str, Any]] = {}
+        for key, statement, params in self._impact_targets(
+            action,
+            row_ids=self._dedupe(row_ids),
+            case_ids=self._dedupe(case_ids),
+        ):
+            row = self._connection.fetch_one(
+                f"""
+                select count(*)::bigint as count,
+                       md5(
+                           count(*)::text || ':'
+                           || coalesce(sum(hashtextextended(identity, 0)::numeric), 0)::text || ':'
+                           || coalesce(sum(hashtextextended(identity, 1)::numeric), 0)::text
+                       ) as signature
+                from ({statement}) as impact_target
+                """,
+                params,
+            ) or {}
+            signatures[key] = {
+                "count": int(row.get("count") or 0),
+                "signature": str(row.get("signature") or ""),
+            }
+        serialized = json.dumps(signatures, sort_keys=True, separators=(",", ":"))
+        return {
+            "action": action,
+            "impact_counts": {key: value["count"] for key, value in signatures.items()},
+            "impact_fingerprint": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        }
+
+    def _impact_targets(
+        self,
+        action: str,
+        *,
+        row_ids: list[str],
+        case_ids: list[str],
+    ) -> list[tuple[str, str, tuple[Any, ...] | None]]:
+        matching = [
+            ("matching_results", "select id::text || ':' || xmin::text as identity from app.matching_results", None),
+            ("matching_runs", "select id::text || ':' || xmin::text as identity from app.matching_runs", None),
+        ]
+        if action == "reset_bank_transactions":
+            workbench = self._workbench_impact_targets(
+                row_types=self._BANK_ROW_TYPES,
+                row_id_prefixes=("bk-", "bk_", "txn-", "txn_", "bank-", "bank_"),
+            )
+            return [
+                *workbench,
+                ("no_oa_bank_batch_events", "select id::text || ':' || xmin::text as identity from app.no_oa_bank_batch_events", None),
+                ("no_oa_bank_batches", "select id::text || ':' || xmin::text as identity from app.no_oa_bank_batches", None),
+                ("bank_flow_rule_batch_events", "select id::text || ':' || xmin::text as identity from app.bank_flow_rule_batch_events", None),
+                ("bank_flow_rule_batches", "select id::text || ':' || xmin::text as identity from app.bank_flow_rule_batches", None),
+                ("turnover_relation_events", "select id::text || ':' || xmin::text as identity from app.turnover_relation_events", None),
+                ("turnover_relations", "select id::text || ':' || xmin::text as identity from app.turnover_relations", None),
+                ("bank_transaction_category_events", "select id::text || ':' || xmin::text as identity from app.bank_transaction_category_events", None),
+                ("bank_transaction_category_confirmations", "select id::text || ':' || xmin::text as identity from app.bank_transaction_category_confirmations", None),
+                ("bank_transaction_categories", "select id::text || ':' || xmin::text as identity from app.bank_transaction_categories", None),
+                *matching,
+                ("bank_transactions", "select id::text || ':' || xmin::text as identity from app.bank_transactions", None),
+                *self._import_impact_targets(self._BANK_BATCH_TYPES),
+            ]
+        if action == "reset_invoices":
+            workbench = self._workbench_impact_targets(
+                row_types=self._INVOICE_ROW_TYPES,
+                row_id_prefixes=("iv-", "iv_", "inv-", "inv_", "invoice-", "invoice_", "oa-att-inv-", "etc-summary-"),
+            )
+            return [
+                *workbench,
+                ("etc_batch_invoice_links", "select id::text || ':' || xmin::text as identity from app.etc_batch_invoice_links", None),
+                *matching,
+                ("invoices", "select id::text || ':' || xmin::text as identity from app.invoices", None),
+                *self._import_impact_targets(self._INVOICE_BATCH_TYPES),
+                ("tax_certified_import_records", "select id::text || ':' || xmin::text as identity from app.tax_certified_import_records", None),
+                ("tax_certified_import_batches", "select id::text || ':' || xmin::text as identity from app.tax_certified_import_batches", None),
+                ("tax_certified_import_sessions", "select id::text || ':' || xmin::text as identity from app.tax_certified_import_sessions", None),
+            ]
+        if action == "reset_oa_and_rebuild":
+            return [
+                (
+                    "workbench_pair_relation_history",
+                    """select id::text || ':' || xmin::text as identity from app.workbench_pair_relation_history
+                       where relation_id in (select id from app.workbench_pair_relations where case_id = any(%s::text[]))""",
+                    (case_ids,),
+                ),
+                (
+                    "workbench_pair_relations",
+                    "select id::text || ':' || xmin::text as identity from app.workbench_pair_relations where case_id = any(%s::text[])",
+                    (case_ids,),
+                ),
+                (
+                    "workbench_row_overrides",
+                    "select id::text || ':' || xmin::text as identity from app.workbench_row_overrides where row_id = any(%s::text[])",
+                    (row_ids,),
+                ),
+            ]
+        raise ValueError(f"unsupported reset action: {action}")
+
+    def _workbench_impact_targets(
+        self,
+        *,
+        row_types: tuple[str, ...],
+        row_id_prefixes: tuple[str, ...],
+    ) -> list[tuple[str, str, tuple[Any, ...]]]:
+        predicate = self._workbench_relation_predicate()
+        params = (list(row_types), list(row_id_prefixes))
+        return [
+            (
+                "workbench_pair_relation_history",
+                f"""select id::text || ':' || xmin::text as identity from app.workbench_pair_relation_history
+                    where relation_id in (select id from app.workbench_pair_relations where {predicate})""",
+                params,
+            ),
+            (
+                "workbench_pair_relations",
+                f"select id::text || ':' || xmin::text as identity from app.workbench_pair_relations where {predicate}",
+                params,
+            ),
+            (
+                "workbench_row_overrides",
+                """select id::text || ':' || xmin::text as identity from app.workbench_row_overrides
+                   where lower(row_type) = any(%s::text[])
+                      or exists (select 1 from unnest(%s::text[]) as prefix(value)
+                                 where lower(row_id) like prefix.value || '%%')""",
+                params,
+            ),
+        ]
+
+    def _import_impact_targets(
+        self,
+        batch_types: tuple[str, ...],
+    ) -> list[tuple[str, str, tuple[Any, ...]]]:
+        values = list(batch_types)
+        return [
+            (
+                "import_files",
+                f"select id::text || ':' || xmin::text as identity from app.import_files where {self._import_file_batch_type_predicate()}",
+                (values,),
+            ),
+            (
+                "import_batch_rows",
+                """select id::text || ':' || xmin::text as identity from app.import_batch_rows
+                   where import_batch_id in (select id from app.import_batches where batch_type = any(%s::text[]))
+                      or legacy_batch_id in (select legacy_mongo_id from app.import_batches
+                                             where batch_type = any(%s::text[]) and legacy_mongo_id is not null)""",
+                (values, values),
+            ),
+            (
+                "import_batches",
+                "select id::text || ':' || xmin::text as identity from app.import_batches where batch_type = any(%s::text[])",
+                (values,),
+            ),
+        ]
+
+    def _lock_targets(self, action: str) -> None:
+        tables = {
+            "reset_bank_transactions": (
+                "app.workbench_pair_relation_history", "app.workbench_pair_relations", "app.workbench_row_overrides",
+                "app.no_oa_bank_batch_events", "app.no_oa_bank_batches", "app.bank_flow_rule_batch_events",
+                "app.bank_flow_rule_batches", "app.turnover_relation_events", "app.turnover_relations",
+                "app.bank_transaction_category_events", "app.bank_transaction_category_confirmations",
+                "app.bank_transaction_categories", "app.matching_results", "app.matching_runs",
+                "app.bank_transactions", "app.import_files", "app.import_batch_rows", "app.import_batches",
+            ),
+            "reset_invoices": (
+                "app.workbench_pair_relation_history", "app.workbench_pair_relations", "app.workbench_row_overrides",
+                "app.etc_batch_invoice_links", "app.matching_results", "app.matching_runs", "app.invoices",
+                "app.import_files", "app.import_batch_rows", "app.import_batches", "app.tax_certified_import_records",
+                "app.tax_certified_import_batches", "app.tax_certified_import_sessions",
+            ),
+            "reset_oa_and_rebuild": (
+                "app.workbench_pair_relation_history", "app.workbench_pair_relations", "app.workbench_row_overrides",
+            ),
+        }.get(action)
+        if tables is None:
+            raise ValueError(f"unsupported reset action: {action}")
+        self._connection.execute(f"lock table {', '.join(tables)} in share row exclusive mode")
+
+    def _authorize_fact_deletion(self, actor_id: str, reason: str) -> None:
+        normalized_actor = str(actor_id or "").strip()
+        normalized_reason = str(reason or "").strip()
+        if not normalized_actor or not normalized_reason:
+            raise ValueError("Data reset actor and reason are required.")
         self._connection.execute(
             "select set_config('fin_ops.correction_reason', %s, true)",
-            (reason,),
+            (normalized_reason,),
         )
         self._connection.execute(
             "select set_config('fin_ops.actor_id', %s, true)",
-            (PROTECTED_ADMIN_USERNAME,),
+            (normalized_actor,),
         )
 
     def _delete_matching(self) -> dict[str, int]:

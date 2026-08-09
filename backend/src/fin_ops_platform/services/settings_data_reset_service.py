@@ -88,25 +88,53 @@ class SettingsDataResetService:
         action: str,
         *,
         progress_callback: SettingsDataResetProgressCallback | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> SettingsDataResetResult:
         normalized_action = str(action or "").strip()
         if normalized_action == RESET_BANK_TRANSACTIONS_ACTION:
-            return self._reset_bank_transactions(progress_callback=progress_callback)
+            return self._reset_bank_transactions(
+                progress_callback=progress_callback,
+                reset_context=reset_context,
+            )
         if normalized_action == RESET_INVOICES_ACTION:
-            return self._reset_invoices(progress_callback=progress_callback)
+            return self._reset_invoices(
+                progress_callback=progress_callback,
+                reset_context=reset_context,
+            )
         if normalized_action == RESET_OA_AND_REBUILD_ACTION:
-            return self._reset_oa_and_rebuild(progress_callback=progress_callback)
+            return self._reset_oa_and_rebuild(
+                progress_callback=progress_callback,
+                reset_context=reset_context,
+            )
         raise ValueError(f"unsupported reset action: {normalized_action}")
+
+    def preview(self, action: str) -> dict[str, Any]:
+        normalized_action = str(action or "").strip()
+        if normalized_action not in self.supported_actions():
+            raise ValueError(f"unsupported reset action: {normalized_action}")
+        row_ids: list[str] = []
+        case_ids: list[str] = []
+        if normalized_action == RESET_OA_AND_REBUILD_ACTION:
+            row_ids, case_ids = self._oa_target_ids()
+        return dict(
+            self._state_store.preview_settings_data_reset(
+                normalized_action,
+                row_ids=row_ids,
+                case_ids=case_ids,
+            )
+        )
 
     def _reset_bank_transactions(
         self,
         *,
         progress_callback: SettingsDataResetProgressCallback | None,
+        reset_context: dict[str, str] | None,
     ) -> SettingsDataResetResult:
         self._emit_progress(progress_callback, "reset_data", "正在事务性清除银行流水域数据。", 0, 2)
         reset_result = dict(
             self._state_store.reset_bank_transaction_data(
                 source_snapshot=self._local_source_snapshot(),
+                reset_context=reset_context,
             )
         )
         removed_file_paths = list(reset_result.pop("stored_import_file_paths", []) or [])
@@ -144,11 +172,13 @@ class SettingsDataResetService:
         self,
         *,
         progress_callback: SettingsDataResetProgressCallback | None,
+        reset_context: dict[str, str] | None,
     ) -> SettingsDataResetResult:
         self._emit_progress(progress_callback, "reset_data", "正在事务性清除发票域数据。", 0, 2)
         reset_result = dict(
             self._state_store.reset_invoice_data(
                 source_snapshot=self._local_source_snapshot(),
+                reset_context=reset_context,
             )
         )
         removed_file_paths = list(reset_result.pop("stored_import_file_paths", []) or [])
@@ -185,25 +215,16 @@ class SettingsDataResetService:
         self,
         *,
         progress_callback: SettingsDataResetProgressCallback | None,
+        reset_context: dict[str, str] | None,
     ) -> SettingsDataResetResult:
         self._emit_progress(progress_callback, "clear_oa_state", "正在清空 OA 工作台人工状态。", 0, 2)
-        row_overrides = self._row_overrides()
-        pair_relations = self._pair_relations()
-        oa_row_ids = [
-            str(row_id)
-            for row_id, override in row_overrides.items()
-            if self._is_oa_workbench_row_override(row_id, override)
-        ]
-        oa_case_ids = [
-            str(case_id)
-            for case_id, relation in pair_relations.items()
-            if self._is_oa_pair_relation(relation)
-        ]
+        oa_row_ids, oa_case_ids = self._oa_target_ids()
         self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
         deleted_counts = self._state_store.reset_oa_workbench_data(
             row_ids=oa_row_ids,
             case_ids=oa_case_ids,
             source_snapshot=self._local_source_snapshot(),
+            reset_context=reset_context,
         )
         return SettingsDataResetResult(
             action=RESET_OA_AND_REBUILD_ACTION,
@@ -236,6 +257,19 @@ class SettingsDataResetService:
 
     def _pair_relations(self) -> dict[str, Any]:
         return self._workbench_pair_snapshot_port.pair_relations()
+
+    def _oa_target_ids(self) -> tuple[list[str], list[str]]:
+        row_ids = [
+            str(row_id)
+            for row_id, override in self._row_overrides().items()
+            if self._is_oa_workbench_row_override(row_id, override)
+        ]
+        case_ids = [
+            str(case_id)
+            for case_id, relation in self._pair_relations().items()
+            if self._is_oa_pair_relation(relation)
+        ]
+        return row_ids, case_ids
 
     def _local_source_snapshot(self) -> dict[str, Any] | None:
         if self._state_store.storage_backend != "local_pickle":

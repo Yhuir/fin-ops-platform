@@ -1080,21 +1080,37 @@ class PostgresStateStore:
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         del source_snapshot
+        context = dict(reset_context or {})
         with self._connection.transaction() as transaction:
             return PostgresSettingsDataResetRepository(
                 transaction
-            ).reset_bank_transaction_data()
+            ).reset_bank_transaction_data(
+                expected_impact_fingerprint=context.get("impact_fingerprint", ""),
+                recovery_receipt_id=context.get("recovery_receipt_id", ""),
+                job_id=context.get("job_id", ""),
+                actor_id=context.get("actor_id", ""),
+                reason=context.get("reason", ""),
+            )
 
     def reset_invoice_data(
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         del source_snapshot
+        context = dict(reset_context or {})
         with self._connection.transaction() as transaction:
-            return PostgresSettingsDataResetRepository(transaction).reset_invoice_data()
+            return PostgresSettingsDataResetRepository(transaction).reset_invoice_data(
+                expected_impact_fingerprint=context.get("impact_fingerprint", ""),
+                recovery_receipt_id=context.get("recovery_receipt_id", ""),
+                job_id=context.get("job_id", ""),
+                actor_id=context.get("actor_id", ""),
+                reason=context.get("reason", ""),
+            )
 
     def reset_oa_workbench_data(
         self,
@@ -1102,15 +1118,35 @@ class PostgresStateStore:
         row_ids: list[str],
         case_ids: list[str],
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         del source_snapshot
+        context = dict(reset_context or {})
         with self._connection.transaction() as transaction:
             return PostgresSettingsDataResetRepository(
                 transaction
             ).reset_oa_workbench_data(
                 row_ids=row_ids,
                 case_ids=case_ids,
+                expected_impact_fingerprint=context.get("impact_fingerprint", ""),
+                recovery_receipt_id=context.get("recovery_receipt_id", ""),
+                job_id=context.get("job_id", ""),
+                actor_id=context.get("actor_id", ""),
+                reason=context.get("reason", ""),
             )
+
+    def preview_settings_data_reset(
+        self,
+        action: str,
+        *,
+        row_ids: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return PostgresSettingsDataResetRepository(self._connection).preview(
+            action,
+            row_ids=row_ids,
+            case_ids=case_ids,
+        )
 
     def load_imports_snapshot(self) -> dict[str, Any]:
         return self._load_imports()

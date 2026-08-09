@@ -1058,11 +1058,37 @@ class ApplicationStateStore:
     def load(self) -> dict[str, Any]:
         return self._load_local_pickle()
 
+    def preview_settings_data_reset(
+        self,
+        action: str,
+        *,
+        row_ids: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        fingerprint_payload = {
+            "action": str(action or "").strip(),
+            "row_ids": sorted(set(row_ids or [])),
+            "case_ids": sorted(set(case_ids or [])),
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return {
+            "action": fingerprint_payload["action"],
+            "impact_counts": {},
+            "impact_fingerprint": fingerprint,
+            "recovery_ready": True,
+            "recovery_receipt_id": "00000000-0000-0000-0000-000000000001",
+            "recovery_valid_until": None,
+        }
+
     def reset_bank_transaction_data(
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        del reset_context
         return self._reset_local_import_domain(
             source_snapshot=source_snapshot,
             removed_batch_types={"bank_transaction"},
@@ -1076,7 +1102,9 @@ class ApplicationStateStore:
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        del reset_context
         result = self._reset_local_import_domain(
             source_snapshot=source_snapshot,
             removed_batch_types={"input_invoice", "output_invoice"},
@@ -1122,7 +1150,9 @@ class ApplicationStateStore:
         row_ids: list[str],
         case_ids: list[str],
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        del reset_context
         normalized_row_ids = {
             str(row_id or "").strip()
             for row_id in row_ids

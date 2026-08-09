@@ -1,66 +1,79 @@
-import json
 import unittest
-from unittest.mock import patch
 
-from fin_ops_platform.services.oa_identity_service import OAIdentityService, OAIdentitySettings
+from fin_ops_platform.services.oa_identity_service import (
+    OAIdentityConfigurationError,
+    OAIdentityService,
+    OAIdentitySettings,
+    OAUserIdentity,
+)
+from fin_ops_platform.services.target_oa_applicant_token_provider import (
+    TargetOaApplicantConfigurationError,
+    TargetOaApplicantLoginError,
+)
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+def _identity(*, user_id: str = "admin-id", username: str = "YNSYLP005") -> OAUserIdentity:
+    return OAUserIdentity(
+        user_id=user_id,
+        username=username,
+        nickname="管理员",
+        display_name="管理员",
+    )
 
-    def __enter__(self) -> "_FakeResponse":
-        return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
+class _LoginClient:
+    def __init__(self, result: str | Exception) -> None:
+        self.result = result
+        self.calls: list[tuple[str, str]] = []
 
-    def read(self) -> bytes:
-        return self._body
+    def login(self, username: str, password: str) -> str:
+        self.calls.append((username, password))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
 
 
 class OAIdentityServicePasswordVerificationTests(unittest.TestCase):
-    def _service(self) -> OAIdentityService:
-        return OAIdentityService(
-            OAIdentitySettings(
-                base_url="https://oa.example.test",
-                password_verify_path="/system/user/profile/updatePwd",
-                request_timeout_ms=1000,
-                cache_ttl_seconds=0,
-            )
+    def _service(self, login_client: _LoginClient) -> OAIdentityService:
+        service = OAIdentityService(
+            OAIdentitySettings(base_url="https://oa.example.test", cache_ttl_seconds=0),
+            login_client=login_client,
+        )
+        identities = {
+            "session-token": _identity(),
+            "verified-token": _identity(),
+            "other-token": _identity(user_id="other-id", username="YNSYLP006"),
+        }
+        service.resolve_identity = lambda token: identities[token]  # type: ignore[method-assign]
+        return service
+
+    def test_verify_current_user_password_requires_login_and_matching_identity(self) -> None:
+        login_client = _LoginClient("verified-token")
+
+        result = self._service(login_client).verify_current_user_password(
+            "session-token", "secret-password"
         )
 
-    def test_verify_current_user_password_treats_same_new_password_rejection_as_success(self) -> None:
-        requests = []
-
-        def fake_urlopen(request, timeout):
-            requests.append(request)
-            return _FakeResponse({"code": 500, "msg": "新密码不能与旧密码相同"})
-
-        with patch("fin_ops_platform.services.oa_identity_service.urlopen", fake_urlopen):
-            result = self._service().verify_current_user_password("session-token", "secret-password")
-
         self.assertTrue(result)
-        self.assertEqual(len(requests), 1)
-        request = requests[0]
-        self.assertEqual(request.get_method(), "PUT")
-        self.assertEqual(request.get_header("Authorization"), "Bearer session-token")
-        self.assertEqual(request.get_header("Content-type"), "application/x-www-form-urlencoded")
-        self.assertIn("/system/user/profile/updatePwd", request.full_url)
-        self.assertNotIn("secret-password", request.full_url)
-        form_body = request.data.decode("utf-8")
-        self.assertIn("oldPassword=secret-password", form_body)
-        self.assertIn("newPassword=secret-password", form_body)
-        self.assertNotIn("username", request.full_url)
+        self.assertEqual(login_client.calls, [("YNSYLP005", "secret-password")])
 
-    def test_verify_current_user_password_returns_false_for_wrong_old_password(self) -> None:
-        def fake_urlopen(request, timeout):
-            return _FakeResponse({"code": 500, "msg": "修改密码失败，旧密码错误"})
+    def test_verify_current_user_password_rejects_wrong_password(self) -> None:
+        service = self._service(_LoginClient(TargetOaApplicantLoginError("wrong password")))
 
-        with patch("fin_ops_platform.services.oa_identity_service.urlopen", fake_urlopen):
-            result = self._service().verify_current_user_password("session-token", "wrong-password")
+        self.assertFalse(service.verify_current_user_password("session-token", "wrong-password"))
 
-        self.assertFalse(result)
+    def test_verify_current_user_password_rejects_login_for_another_identity(self) -> None:
+        service = self._service(_LoginClient("other-token"))
+
+        self.assertFalse(service.verify_current_user_password("session-token", "secret-password"))
+
+    def test_verify_current_user_password_fails_closed_when_login_is_unconfigured(self) -> None:
+        service = self._service(
+            _LoginClient(TargetOaApplicantConfigurationError("missing public key"))
+        )
+
+        with self.assertRaises(OAIdentityConfigurationError):
+            service.verify_current_user_password("session-token", "secret-password")
 
 
 if __name__ == "__main__":

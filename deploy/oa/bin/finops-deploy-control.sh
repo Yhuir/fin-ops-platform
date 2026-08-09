@@ -101,6 +101,8 @@ commands:
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
   write-operation-restore-point <release-name> <run-id>
                                       create and verify a fixed full PostgreSQL backup before write smoke
+  settings-data-reset-restore-point <release-name> <run-id> <action> <operator>
+                                      create, verify and bind a fresh restore point to one exact settings reset impact
   write-operation-restore-point-delete <run-id> <expected-sha256>
                                       delete one exact verified write-smoke backup
   write-operation-e2e-scenario-install <release-name> <temporary-scenario-path>
@@ -1694,6 +1696,7 @@ parameter_environment = {
     "sslrootcert": "PGSSLROOTCERT",
     "target_session_attrs": "PGTARGETSESSIONATTRS",
 }
+
 for parameter, environment_name in parameter_environment.items():
     value = parameters.get(parameter)
     if value is not None and str(value):
@@ -1714,6 +1717,55 @@ PY
     printf '{\n  "status": "created",\n  "run_id": "%s",\n  "release": "%s",\n  "created_at": "%s",\n  "dump_path": "%s",\n  "size_bytes": %s,\n  "sha256": "%s",\n  "format": "postgresql_custom"\n}\n' \
       "$run_id" "$release" "$created_at" "$dump_path" "$size" "$checksum" >"$manifest_path"
     cat "$manifest_path"
+  )
+}
+
+settings_data_reset_restore_point() {
+  local release="${1:-}" run_id="${2:-}" action="${3:-}" operator="${4:-}"
+  [[ -n "$release" ]] || die "settings-data-reset-restore-point requires release name"
+  [[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]] \
+    || die "settings-data-reset-restore-point run-id must be 1..80 safe filename characters"
+  case "$action" in
+    reset_bank_transactions|reset_invoices|reset_oa_and_rebuild) ;;
+    *) die "settings-data-reset-restore-point action is unsupported" ;;
+  esac
+  [[ -n "$operator" ]] || die "settings-data-reset-restore-point operator is required"
+  [[ $# -le 4 ]] || die "settings-data-reset-restore-point accepts release, run-id, action and operator"
+
+  local src manifest_path impact_fingerprint
+  src="$(release_src "$release")"
+  manifest_path="$WRITE_E2E_BACKUP_ROOT/$run_id/manifest.json"
+  impact_fingerprint="$(
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
+    set +a
+    PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" -m fin_ops_platform.tools.settings_data_reset_restore_point \
+        preview --action "$action" --fingerprint-only
+  )"
+  [[ "$impact_fingerprint" =~ ^[0-9a-f]{64}$ ]] \
+    || die "settings-data-reset-restore-point preview returned an invalid fingerprint"
+  write_operation_restore_point "$release" "$run_id"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
+    set +a
+    PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$API_PYTHON" -m fin_ops_platform.tools.settings_data_reset_restore_point register \
+        --action "$action" \
+        --manifest "$manifest_path" \
+        --expected-impact-fingerprint "$impact_fingerprint" \
+        --created-by "$operator"
   )
 }
 
@@ -2834,6 +2886,10 @@ case "$cmd" in
   write-operation-restore-point)
     shift
     write_operation_restore_point "$@"
+    ;;
+  settings-data-reset-restore-point)
+    shift
+    settings_data_reset_restore_point "$@"
     ;;
   write-operation-restore-point-delete)
     shift

@@ -477,6 +477,15 @@ export type WorkbenchSettingsDataResetAction =
   | "reset_invoices"
   | "reset_oa_and_rebuild";
 
+export type WorkbenchSettingsDataResetPreview = {
+  action: WorkbenchSettingsDataResetAction;
+  impactCounts: Record<string, number>;
+  impactFingerprint: string;
+  recoveryReady: boolean;
+  recoveryReceiptId: string | null;
+  recoveryValidUntil: string | null;
+};
+
 export type WorkbenchSettingsDataResetResult = {
   action: WorkbenchSettingsDataResetAction;
   status: string;

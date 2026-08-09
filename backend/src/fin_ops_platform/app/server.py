@@ -893,7 +893,7 @@ class Application:
         self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
             app_settings_service=self._app_settings_service,
         )
-        self._oa_identity_service = OAIdentityService()
+        self._oa_identity_service = OAIdentityService(login_client=OaLoginClient())
         self._access_control_service = AccessControlService.from_environment(
             access_control_snapshot_provider=self._app_settings_service.get_access_control_snapshot,
         )
@@ -2098,7 +2098,10 @@ class Application:
                 "/api/workbench/settings/oa/manual-search",
                 "/api/workbench/settings/oa/manual-search/refresh-attachments",
                 "/api/workbench/settings/oa/manual-imports",
-                "/api/workbench/settings/data-reset",
+                "/api/workbench/settings/data-reset/preview",
+                "/api/workbench/settings/data-reset/jobs",
+                "/api/workbench/settings/data-reset/jobs/active",
+                "/api/workbench/settings/data-reset/jobs/{job_id}",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/exception/preview",
                 "/api/workbench/exception/apply",
@@ -5505,6 +5508,10 @@ class Application:
         owner_user_id: str,
         idempotency_key: str,
         label: str,
+        reason: str,
+        impact_fingerprint: str,
+        recovery_receipt_id: str,
+        request_id: str,
     ) -> tuple[object, bool]:
         service = getattr(self, "_settings_data_reset_request_service_instance", None)
         if isinstance(service, SettingsDataResetRequestService):
@@ -5513,6 +5520,10 @@ class Application:
                 owner_user_id=owner_user_id,
                 idempotency_key=idempotency_key,
                 label=label,
+                reason=reason,
+                impact_fingerprint=impact_fingerprint,
+                recovery_receipt_id=recovery_receipt_id,
+                request_id=request_id,
             )
         queue = getattr(self._runtime_repositories, "queue_repository", None)
         if queue is None:
@@ -5536,6 +5547,10 @@ class Application:
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
             label=label,
+            reason=reason,
+            impact_fingerprint=impact_fingerprint,
+            recovery_receipt_id=recovery_receipt_id,
+            request_id=request_id,
         )
 
     def _input_invoice_usage_oa_reverse_service(self) -> InputInvoiceUsageOaReverseService:

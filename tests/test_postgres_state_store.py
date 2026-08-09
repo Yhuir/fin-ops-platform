@@ -1463,7 +1463,15 @@ class PostgresStateStoreTests(unittest.TestCase):
     ) -> None:
         connection = FakePostgresConnection()
 
-        PostgresSettingsDataResetRepository(connection).reset_bank_transaction_data()
+        repository = PostgresSettingsDataResetRepository(connection)
+        with patch.object(repository, "_validate_guard"):
+            repository.reset_bank_transaction_data(
+                expected_impact_fingerprint="a" * 64,
+                recovery_receipt_id="00000000-0000-0000-0000-000000000001",
+                job_id="job-1",
+                actor_id="YNSYLP005",
+                reason="管理员重置银行流水域数据",
+            )
 
         import_file_sql = [
             " ".join(sql.lower().split())

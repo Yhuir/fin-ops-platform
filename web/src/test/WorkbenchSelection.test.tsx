@@ -2311,6 +2311,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(passwordDialog).queryByLabelText(/用户名/)).not.toBeInTheDocument();
 
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
+    await user.type(within(passwordDialog).getByLabelText("操作原因"), "生产数据修复验证");
     await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
 
     const resetRequest = fetchMock.mock.calls.find(([url]) => url === "/api/workbench/settings/data-reset/jobs");
@@ -2319,6 +2320,9 @@ describe("Workbench row selection and detail drawer", () => {
       action: "reset_bank_transactions",
       oa_password: "correct-password",
       idempotency_key: expect.any(String),
+      reason: "生产数据修复验证",
+      impact_fingerprint: "a".repeat(64),
+      recovery_receipt_id: "00000000-0000-0000-0000-000000000001",
     });
     expect(await screen.findByText(/正在清理 app 内部状态。 25%/)).toBeInTheDocument();
     expect(await screen.findAllByText("已完成数据重置。")).not.toHaveLength(0);
@@ -2341,6 +2345,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
+    await user.type(within(passwordDialog).getByLabelText("操作原因"), "生产数据重置验证");
     await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
 
     expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
@@ -2373,6 +2378,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "wrong-password");
+    await user.type(within(passwordDialog).getByLabelText("操作原因"), "错误密码拒绝验证");
     await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
 
     expect(await screen.findByText("当前 OA 用户密码复核失败，未执行数据重置。")).toBeInTheDocument();

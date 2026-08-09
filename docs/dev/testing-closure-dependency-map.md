@@ -379,7 +379,6 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | Frontend page | `web/src/pages/SettingsPage.tsx` | section 切换、loading/error、admin-only 凭据、数据重置确认、active job reentry |
-| Workbench settings modal | `web/src/components/workbench/WorkbenchSettingsModal.tsx` | 关联台内设置入口与设置页共享 API，项目同步/账户映射/重置入口不能漂移 |
 | Frontend API mapper | `web/src/features/workbench/api.ts` | settings payload snake_case/camelCase、data reset job、credential payload、密码不入普通 settings save |
 | HTTP routes | `server.py` `/api/workbench/settings*` | GET/POST settings、项目 sync/create/delete、data reset、OA credential routes 的权限和 response shape |
 | Settings service | `AppSettingsService` | 项目范围、访问控制、银行映射、OA retention/import、OA invoice offset、银行标签、pending invoice 规则、audit/OA role sync |

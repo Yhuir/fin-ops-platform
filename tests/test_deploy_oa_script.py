@@ -594,6 +594,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"password": "PGPASSWORD"', script)
         self.assertIn('environment["PGAPPNAME"] = "finops-write-operation-restore-point"', script)
         self.assertIn('["pg_dump", "--format=custom", "--no-owner", "--no-acl", f"--file={sys.argv[1]}"]', script)
+        self.assertIn("settings-data-reset-restore-point <release-name> <run-id> <action> <operator>", script)
+        self.assertIn("settings_data_reset_restore_point()", script)
+        self.assertIn("fin_ops_platform.tools.settings_data_reset_restore_point", script)
+        self.assertIn("--expected-impact-fingerprint", script)
 
         self.assertIn('pg_restore --list "$temp_path"', script)
         self.assertIn('sha256sum "$dump_path"', script)
@@ -1051,6 +1055,27 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("run-id must be 1..80 safe filename characters", result.stderr)
+        self.assertNotIn("release src directory not found", result.stderr)
+
+    def test_deploy_control_data_reset_restore_point_refuses_unsupported_action_before_release_lookup(self) -> None:
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "settings-data-reset-restore-point",
+                "fake-release",
+                "safe-run-id",
+                "reset_everything",
+                "YNSYLP005",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("settings-data-reset-restore-point action is unsupported", result.stderr)
         self.assertNotIn("release src directory not found", result.stderr)
 
     def test_deploy_control_restore_point_delete_requires_exact_sha256_before_file_lookup(self) -> None:

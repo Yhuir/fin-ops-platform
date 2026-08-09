@@ -9,6 +9,7 @@ class RouteAccessPolicyTests(unittest.TestCase):
             ("GET", "/api/workbench"),
             ("GET", "/api/operations/app-health-dashboard"),
             ("GET", "/api/workbench/settings/oa-applicant-credentials"),
+            ("GET", "/api/workbench/settings/data-reset/preview?action=reset_bank_transactions"),
             ("GET", "/api/workbench/settings/data-reset/jobs/active"),
             ("HEAD", "/api/workbench"),
             ("OPTIONS", "/api/workbench/actions/ignore-row"),

@@ -6,7 +6,8 @@
 
 | 影响面 | 当前入口 | 必测原因 |
 | --- | --- | --- |
-| 管理员权限/OA 密码 | `server.py` data reset routes、`OAIdentityService`、`tests/test_session_api.py` | 防止非管理员、无真实 OA token、失效密码或退役本地 auth 配置触发危险删除；响应不能泄露密码，应用不得保留默认重置密码 |
+| 管理员权限/OA 密码 | `routes_settings.py`、`OAIdentityService`、`tests/test_oa_identity_service.py` | 防止非管理员、无真实 OA token、错误密码、其他 OA 身份或未知上游响应触发危险删除；响应不能泄露密码 |
+| 影响与恢复凭证 | preview/repository/restore-point tool | fingerprint 必须覆盖目标成员及行版本；数据变化、过期/撤销/已消费/其他 job receipt 均阻断删除 |
 | 重置 service | `SettingsDataResetService` | 删除目标、保留目标、文件清理、状态写入必须稳定 |
 | protected targets | `SettingsDataResetService.protected_targets()` | 防止误删 OA 源表、app settings、metadata、import metadata |
 | 后台 job | `BackgroundJobService` + `/data-reset/jobs*` | 页面离开后可恢复进度；并发提交必须互斥；失败要可诊断 |
@@ -14,7 +15,7 @@
 | OA rebuild | `reset_oa_and_rebuild` 路径、OA adapter、workbench worker | reset 只可靠登记后台重建并返回 pending，不同步构建页面；下游重建要受保留月份和配置表单限制，不能破坏纯银行+发票关系 |
 | App Health/App Status | `tests/test_app_health_api.py`、App Status overview | running/failed/partial reset job 必须进入全局状态平面 |
 | 设置页 UI | `SettingsPage`、`SettingsDataResetDialogs`、Workbench 内设置入口 | 影响确认、密码弹窗、progress reentry、错误反馈、权限隐藏 |
-| 备份/恢复 | operations docs | App Mongo export 工具已删除；真实 PostgreSQL/PITR/对象存储恢复仍需 staging |
+| 备份/恢复 | deploy-control + operations docs | 复用 verified custom `pg_dump` 并登记短时 receipt；真实 restore 演练仍需 staging |
 
 ## 场景覆盖清单
 
@@ -26,6 +27,9 @@
 | OA 重置可靠登记 lifecycle、返回 pending、不同步构建 OA/Workbench 行，并保留附件发票缓存 | `tests/test_settings_data_reset_service.py`；过滤与附件缓存投影合同由 `tests/test_mongo_oa_adapter.py` 覆盖 | 已覆盖 |
 | OA pair relation 删除但纯银行+发票 relation 保留 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
 | 缺失/错误 OA 密码不清数据、不重建、不泄露密码 | `tests/test_settings_data_reset_service.py` | 已覆盖 |
+| OA 登录复核只接受与当前 session 完全相同的 identity，未知/其他 identity/config failure 均 fail closed | `tests/test_oa_identity_service.py` | 已覆盖 |
+| 影响变化、缺失或过期恢复凭证在 worker 删除前阻断 | `tests/test_settings_data_reset_guard.py` | 已覆盖 |
+| receipt 消费、job、outbox、queued audit 原子提交，失败回滚且幂等重放不重复消费 | `tests/test_runtime_infrastructure_postgres_integration.py` | 已覆盖；需要测试 PostgreSQL |
 | 后台 reset job 可创建、查询、恢复 active progress，不保存密码，且不恢复旧内存 job path | `tests/test_settings_data_reset_service.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_settings_data_reset_uses_background_job_service_only` | 已覆盖 |
 | 并发 reset job 返回 `409 settings_data_reset_job_running` 且不泄露密码 | `tests/test_settings_data_reset_service.py` | 2026-06-11 新增 |
 | failed/partial/interrupted background job 进入 App Health attention | `tests/test_app_health_api.py`、`tests/test_background_job_service.py` | 已覆盖 |
@@ -38,7 +42,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 action、protected targets、bank/invoice/OA relation 保留删除规则、unsupported action | 无 P0 | 新增 reset action 或删除规则时必须先补 service 规则测试 |
 | 2. Service-layer tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_postgres_state_store.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_background_job_service.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 state store 清理、`deleting -> deleted` 文件删除意图/幂等重试、job 进度、payload sanitize、旧内存 data reset job 删除和 Workbench reset 显式 port | P1 | PostgreSQL PITR/对象存储备份恢复未本地自动化 |
-| 3. API contract tests | 适用 | `tests/test_settings_data_reset_service.py` | 覆盖 admin-only、密码失败、同步 reset、job create/query/active、并发 409、protected_targets、敏感字段不泄露 | 无 P0 | 修改 route/error/status/job shape 时同步补契约断言 |
+| 3. API contract tests | 适用 | `tests/test_settings_data_reset_job.py`、`tests/test_oa_identity_service.py` | 覆盖 admin-only、preview、原因/恢复凭证/密码失败、job create/query/active、幂等/并发、敏感字段不泄露 | 无 P0 | 修改 route/error/status/job shape 时同步补契约断言 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_settings_data_reset_service.py`、`tests/test_app_health_api.py`、`tests/test_background_job_service.py`、`tests/test_runtime_state_policy.py` | 覆盖 lifecycle fan-out、cost statistics clear、job attention/active、runtime state policy | P1 | 真 Redis cache、真实 Postgres dirty/outbox/worker drain 需要 staging/nightly smoke |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖确认、密码弹窗、cancel、错误、progress reentry、权限隐藏；Browser e2e 覆盖真实页面 job polling/reload 和 reset 后跨页读取银行明细/待找发票 fresh contract | P1 | 真实浏览器视觉、长任务 progress、网络断开恢复需 smoke |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_settings_data_reset_service.py` 间接集成；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 UI -> job -> reload -> downstream reads | 覆盖 reset -> durable lifecycle pending 的核心路径，以及设置页发起 job 到 reload，再进入银行明细 fresh empty 和待找发票 fresh rows 的浏览器路径 | P1 | 真实导入数据 -> reset -> worker drain -> 多页面最终 fresh 需统一部署后的 staging smoke |

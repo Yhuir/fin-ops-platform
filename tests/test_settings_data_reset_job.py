@@ -27,6 +27,37 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
 class SettingsDataResetJobTests(unittest.TestCase):
+    @staticmethod
+    def _request_body(
+        app,
+        *,
+        idempotency_key: str = "reset-request-1",
+        password: str = "secret-password",
+    ) -> str:
+        preview = app._settings_data_reset_service.preview(RESET_BANK_TRANSACTIONS_ACTION)
+        return json.dumps(
+            {
+                "action": RESET_BANK_TRANSACTIONS_ACTION,
+                "oa_password": password,
+                "idempotency_key": idempotency_key,
+                "reason": "生产数据清理测试",
+                "impact_fingerprint": preview["impact_fingerprint"],
+                "recovery_receipt_id": preview["recovery_receipt_id"],
+            }
+        )
+
+    @staticmethod
+    def _event_payload(job_id: str, owner_user_id: str = "admin") -> dict[str, str]:
+        return {
+            "job_id": job_id,
+            "owner_user_id": owner_user_id,
+            "action": RESET_BANK_TRANSACTIONS_ACTION,
+            "reason": "生产数据清理测试",
+            "impact_fingerprint": "a" * 64,
+            "recovery_receipt_id": "00000000-0000-0000-0000-000000000001",
+            "request_id": "request-1",
+        }
+
     def test_runtime_factory_reloads_durable_state_for_each_reset(self) -> None:
         stores = [
             SimpleNamespace(
@@ -78,11 +109,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({
-                    "action": RESET_BANK_TRANSACTIONS_ACTION,
-                    "oa_password": "secret-password",
-                    "idempotency_key": "reset-request-1",
-                }),
+                body=self._request_body(app),
                 headers={"Authorization": "Bearer admin-token"},
             )
             payload = json.loads(response.body)
@@ -124,6 +151,31 @@ class SettingsDataResetJobTests(unittest.TestCase):
         self.assertEqual(payload["error"], "admin_only")
         self.assertEqual(queue.events, [])
 
+    def test_api_rejects_reset_without_reason_or_recovery_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_local_state_application(data_dir=Path(temp_dir))
+            queue = install_durable_import_queue(app)
+            app._resolve_admin_session = lambda _headers: (
+                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
+                None,
+            )
+
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/data-reset/jobs",
+                body=json.dumps(
+                    {
+                        "action": RESET_BANK_TRANSACTIONS_ACTION,
+                        "oa_password": "secret-password",
+                        "idempotency_key": "reset-request-1",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body)["error"], "settings_data_reset_reason_required")
+        self.assertEqual(queue.events, [])
+
     def test_api_rejects_wrong_password_without_enqueuing_or_echoing_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
@@ -141,11 +193,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({
-                    "action": RESET_BANK_TRANSACTIONS_ACTION,
-                    "oa_password": "wrong-secret",
-                    "idempotency_key": "reset-request-1",
-                }),
+                body=self._request_body(app, password="wrong-secret"),
                 headers={"Authorization": "Bearer admin-token"},
             )
 
@@ -162,16 +210,8 @@ class SettingsDataResetJobTests(unittest.TestCase):
                 None,
             )
             app._verify_reset_oa_password = lambda _session, _password: None
-            first_request = json.dumps({
-                "action": RESET_BANK_TRANSACTIONS_ACTION,
-                "oa_password": "secret-password",
-                "idempotency_key": "reset-request-1",
-            })
-            second_request = json.dumps({
-                "action": RESET_BANK_TRANSACTIONS_ACTION,
-                "oa_password": "secret-password",
-                "idempotency_key": "reset-request-2",
-            })
+            first_request = self._request_body(app)
+            second_request = self._request_body(app, idempotency_key="reset-request-2")
 
             headers = {"X-User": "YNSYLP005"}
             first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=first_request, headers=headers)
@@ -191,11 +231,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
                 None,
             )
             app._verify_reset_oa_password = lambda _session, _password: None
-            request = json.dumps({
-                "action": RESET_BANK_TRANSACTIONS_ACTION,
-                "oa_password": "secret-password",
-                "idempotency_key": "reset-request-1",
-            })
+            request = self._request_body(app)
 
             first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
             second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
@@ -221,11 +257,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
-                body=json.dumps({
-                    "action": RESET_BANK_TRANSACTIONS_ACTION,
-                    "oa_password": "secret-password",
-                    "idempotency_key": "reset-request-1",
-                }),
+                body=self._request_body(app),
             )
             payload = json.loads(response.body)
 
@@ -248,7 +280,8 @@ class SettingsDataResetJobTests(unittest.TestCase):
             lifecycle_calls: list[tuple[list[str], str]] = []
             runtime_reload_calls: list[str] = []
 
-            def reset_executor(action: str, *, progress_callback):
+            def reset_executor(action: str, *, progress_callback, reset_context):
+                self.assertEqual(reset_context["job_id"], job.job_id)
                 progress_callback("reset", "正在重置。", 1, 1)
                 return SettingsDataResetResult(
                     action=action,
@@ -272,11 +305,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
                 runtime_reload_request=lambda: runtime_reload_calls.append("reload"),
             )
             event = SimpleNamespace(
-                payload={
-                    "job_id": job.job_id,
-                    "owner_user_id": "admin",
-                    "action": RESET_BANK_TRANSACTIONS_ACTION,
-                }
+                payload=self._event_payload(job.job_id)
             )
 
             result = handler.handle_runtime_event(event)
@@ -314,11 +343,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
 
             result = handler.handle_runtime_event(
                 SimpleNamespace(
-                    payload={
-                        "job_id": job.job_id,
-                        "owner_user_id": "admin",
-                        "action": RESET_BANK_TRANSACTIONS_ACTION,
-                    }
+                    payload=self._event_payload(job.job_id)
                 )
             )
             failed = jobs.get_job(job.job_id, "admin")
@@ -348,11 +373,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
 
             result = handler.handle_runtime_event(
                 SimpleNamespace(
-                    payload={
-                        "job_id": job.job_id,
-                        "owner_user_id": "admin",
-                        "action": RESET_BANK_TRANSACTIONS_ACTION,
-                    }
+                    payload=self._event_payload(job.job_id)
                 )
             )
             failed = jobs.get_job(job.job_id, "admin")

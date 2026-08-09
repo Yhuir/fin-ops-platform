@@ -880,12 +880,27 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             idempotency_key="reset-request-1",
             source={"action": "reset_bank_transactions"},
         )
+        impact_fingerprint = "a" * 64
+        receipt = self.connection.fetch_one(
+            """
+            insert into job.settings_data_reset_recovery_receipts(
+                action, impact_fingerprint, restore_point_run_id, dump_sha256,
+                dump_size_bytes, created_by, valid_until
+            ) values ('reset_bank_transactions', %s, 'integration-reset-1', %s, 1, 'YNSYLP005', now() + interval '1 hour')
+            returning receipt_id::text as receipt_id
+            """,
+            (impact_fingerprint, "b" * 64),
+        )
 
         created_payload, created = repository.create_or_get(
             job_payload=job.to_payload(),
             request_fingerprint="fingerprint-1",
             event_type="settings.data_reset.requested",
             action="reset_bank_transactions",
+            reason="集成测试数据清理",
+            impact_fingerprint=impact_fingerprint,
+            recovery_receipt_id=receipt["receipt_id"],
+            request_id="integration-request-1",
         )
         replay_payload, replay_created = repository.create_or_get(
             job_payload=jobs.build_job(
@@ -899,6 +914,10 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             request_fingerprint="fingerprint-1",
             event_type="settings.data_reset.requested",
             action="reset_bank_transactions",
+            reason="集成测试数据清理",
+            impact_fingerprint=impact_fingerprint,
+            recovery_receipt_id=receipt["receipt_id"],
+            request_id="integration-request-1",
         )
 
         self.assertTrue(created)
@@ -934,6 +953,17 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             idempotency_key="reset-request-rollback",
             source={"action": "reset_bank_transactions"},
         )
+        impact_fingerprint = "c" * 64
+        receipt = self.connection.fetch_one(
+            """
+            insert into job.settings_data_reset_recovery_receipts(
+                action, impact_fingerprint, restore_point_run_id, dump_sha256,
+                dump_size_bytes, created_by, valid_until
+            ) values ('reset_bank_transactions', %s, 'integration-reset-rollback', %s, 1, 'YNSYLP005', now() + interval '1 hour')
+            returning receipt_id::text as receipt_id
+            """,
+            (impact_fingerprint, "d" * 64),
+        )
 
         with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
             repository.create_or_get(
@@ -941,6 +971,10 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 request_fingerprint="fingerprint-rollback",
                 event_type="settings.data_reset.requested",
                 action="reset_bank_transactions",
+                reason="集成测试回滚",
+                impact_fingerprint=impact_fingerprint,
+                recovery_receipt_id=receipt["receipt_id"],
+                request_id="integration-request-rollback",
             )
 
         self.assertEqual(
@@ -949,6 +983,13 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 "select count(*) from job.background_jobs where idempotency_key = 'reset-request-rollback';",
             ),
             "0",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select count(*) from job.settings_data_reset_recovery_receipts where receipt_id = '{receipt['receipt_id']}'::uuid and consumed_by_job_id is null;",
+            ),
+            "1",
         )
 
     def test_import_job_request_identity_and_retry_lease_are_durable(self) -> None:

@@ -5,10 +5,16 @@ from dataclasses import dataclass, field
 import json
 import os
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
+
+from fin_ops_platform.services.target_oa_applicant_token_provider import (
+    OaLoginClient,
+    TargetOaApplicantConfigurationError,
+    TargetOaApplicantLoginError,
+)
 
 
 def _normalize_string(value: Any) -> str:
@@ -41,6 +47,10 @@ class OASessionExpiredError(OAIdentityServiceError):
     pass
 
 
+class OALoginPort(Protocol):
+    def login(self, username: str, password: str) -> str: ...
+
+
 @dataclass(slots=True)
 class OAUserIdentity:
     user_id: str
@@ -58,7 +68,6 @@ class OAUserIdentity:
 class OAIdentitySettings:
     base_url: str | None
     user_info_path: str = "/system/user/getInfo"
-    password_verify_path: str = "/system/user/profile/updatePwd"
     request_timeout_ms: int = 5000
     cache_ttl_seconds: int = 300
 
@@ -67,18 +76,20 @@ class OAIdentitySettings:
         return cls(
             base_url=os.getenv("FIN_OPS_OA_BASE_URL"),
             user_info_path=os.getenv("FIN_OPS_OA_USER_INFO_PATH", "/system/user/getInfo").strip() or "/system/user/getInfo",
-            password_verify_path=(
-                os.getenv("FIN_OPS_OA_PASSWORD_VERIFY_PATH", "/system/user/profile/updatePwd").strip()
-                or "/system/user/profile/updatePwd"
-            ),
             request_timeout_ms=int(os.getenv("FIN_OPS_OA_REQUEST_TIMEOUT_MS", "5000")),
             cache_ttl_seconds=max(int(os.getenv("FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS", "300")), 0),
         )
 
 
 class OAIdentityService:
-    def __init__(self, settings: OAIdentitySettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: OAIdentitySettings | None = None,
+        *,
+        login_client: OALoginPort | None = None,
+    ) -> None:
         self._settings = settings or OAIdentitySettings.from_environment()
+        self._login_client = login_client or OaLoginClient()
         self._cache: dict[str, tuple[float, OAUserIdentity]] = {}
 
     def clear_cache(self) -> None:
@@ -110,53 +121,18 @@ class OAIdentityService:
         if not normalized_password:
             return False
 
-        base_url = _normalize_string(self._settings.base_url)
-        if not base_url:
-            raise OAIdentityConfigurationError("未配置 OA 用户密码复核服务地址。")
-
-        # OA has no read-only password-check endpoint. Calling updatePwd with
-        # oldPassword == newPassword verifies the old password and is rejected
-        # before any password mutation when the password is correct.
-        url = urljoin(f"{base_url.rstrip('/')}/", self._settings.password_verify_path.lstrip("/"))
-        form_body = urlencode({"oldPassword": normalized_password, "newPassword": normalized_password}).encode("utf-8")
-        request = Request(
-            url,
-            data=form_body,
-            headers={
-                "Authorization": f"Bearer {normalized_token}",
-                "Accept": "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            method="PUT",
+        current_identity = self.resolve_identity(normalized_token)
+        try:
+            verified_token = self._login_client.login(current_identity.username, normalized_password)
+        except TargetOaApplicantConfigurationError as error:
+            raise OAIdentityConfigurationError("OA 登录复核服务未配置。") from error
+        except TargetOaApplicantLoginError:
+            return False
+        verified_identity = self.resolve_identity(verified_token)
+        return (
+            current_identity.user_id == verified_identity.user_id
+            and current_identity.username.casefold() == verified_identity.username.casefold()
         )
-        timeout_seconds = max(self._settings.request_timeout_ms / 1000, 1)
-        try:
-            with urlopen(request, timeout=timeout_seconds) as response:
-                raw_body = response.read().decode("utf-8")
-        except HTTPError as error:
-            raw_body = error.read().decode("utf-8", errors="ignore")
-            if error.code in {401, 403}:
-                raise OASessionExpiredError(self._extract_error_message(raw_body) or "OA 登录状态已过期。") from error
-            return False
-        except URLError as error:
-            raise OAIdentityServiceError("无法连接 OA 用户密码复核服务。") from error
-
-        try:
-            payload = json.loads(raw_body)
-        except json.JSONDecodeError as error:
-            raise OAIdentityServiceError("OA 用户密码复核服务返回了无效 JSON。") from error
-        if not isinstance(payload, dict):
-            raise OAIdentityServiceError("OA 用户密码复核服务返回格式不正确。")
-
-        response_code = payload.get("code", 200)
-        message = _normalize_string(payload.get("msg") or payload.get("message"))
-        if response_code in {401, 403}:
-            raise OASessionExpiredError(message or "OA 登录状态已过期。")
-        if "新密码不能与旧密码相同" in message:
-            return True
-        if "旧密码错误" in message or "密码错误" in message:
-            return False
-        return response_code in {0, 200, "0", "200"}
 
     def _fetch_user_info(self, token: str) -> dict[str, Any]:
         base_url = _normalize_string(self._settings.base_url)

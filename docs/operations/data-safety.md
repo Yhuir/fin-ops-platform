@@ -21,6 +21,15 @@
 
 重置后必须确保页面不会把旧缓存或旧 read model 显示为 fresh。
 
+生产执行数据重置前，必须由 root 运维入口创建与动作绑定的恢复点：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control settings-data-reset-restore-point \
+  <release-name> <run-id> reset_bank_transactions|reset_invoices|reset_oa_and_rebuild <operator>
+```
+
+该命令复用 `write-operation-restore-point` 的 custom `pg_dump`、`pg_restore --list`、SHA-256 manifest 和固定目录约束，并在备份前后重算包含目标行版本的影响 fingerprint。数据范围变化、dump/manifest 不一致或数据库登记失败均不签发短时 receipt。设置页只能使用 action/fingerprint 精确匹配且未过期、未撤销、未消费的 receipt；API 创建任务时原子消费，worker 锁表后再次重算 fingerprint。不得直接插入 receipt、复用其他动作/任务的 receipt，或绕过设置页/worker 执行 SQL 清理。
+
 ## 备份与恢复
 
 备份至少覆盖：

@@ -8416,6 +8416,20 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
+    if (path === "/api/workbench/settings/data-reset/preview") {
+      const action = (new URL(request.url()).searchParams.get("action") ?? "reset_bank_transactions") as SettingsDataResetAction;
+      return json(route, {
+        preview: {
+          action,
+          impact_counts: { bank_transactions: 2 },
+          impact_fingerprint: "a".repeat(64),
+          recovery_ready: true,
+          recovery_receipt_id: "00000000-0000-0000-0000-000000000001",
+          recovery_valid_until: "2026-08-09T12:00:00+08:00",
+        },
+      });
+    }
+
     if (path === "/api/workbench/settings/data-reset/jobs/active") {
       const activeJob = settingsDataResetJob?.status === "running"
         ? settingsDataResetJobPayload(settingsDataResetJob).job
@@ -8427,9 +8441,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const body = JSON.parse(request.postData() || "{}") as {
         action?: SettingsDataResetAction;
         oa_password?: string;
+        reason?: string;
+        impact_fingerprint?: string;
+        recovery_receipt_id?: string;
       };
       const action = body.action ?? "reset_bank_transactions";
-      if (!body.oa_password) {
+      if (
+        !body.oa_password
+        || !body.reason
+        || body.impact_fingerprint !== "a".repeat(64)
+        || body.recovery_receipt_id !== "00000000-0000-0000-0000-000000000001"
+      ) {
         return json(route, {
           error: "oa_password_required",
           message: "当前 OA 用户密码复核失败，未执行数据重置。",

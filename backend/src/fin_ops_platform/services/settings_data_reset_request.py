@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from fin_ops_platform.services.background_job_service import BackgroundJob, BackgroundJobService
@@ -36,11 +37,24 @@ class SettingsDataResetRequestService:
         owner_user_id: str,
         idempotency_key: str,
         label: str,
+        reason: str,
+        impact_fingerprint: str,
+        recovery_receipt_id: str,
+        request_id: str,
     ) -> tuple[BackgroundJob, bool]:
         normalized_key = str(idempotency_key or "").strip()
         if not normalized_key:
             raise ValueError("idempotency_key is required.")
-        fingerprint = hashlib.sha256(str(action).encode("utf-8")).hexdigest()
+        source = {
+            "action": action,
+            "reason": reason,
+            "impact_fingerprint": impact_fingerprint,
+            "recovery_receipt_id": recovery_receipt_id,
+            "request_id": request_id,
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         job_options = {
             "job_type": "settings_data_reset",
             "label": label,
@@ -52,7 +66,7 @@ class SettingsDataResetRequestService:
             "message": "数据重置任务已排队。",
             "result_summary": {"action": action},
             "idempotency_key": normalized_key,
-            "source": {"action": action},
+            "source": source,
             "affected_scopes": ["settings", "workbench"],
         }
 
@@ -63,6 +77,10 @@ class SettingsDataResetRequestService:
                 request_fingerprint=fingerprint,
                 event_type=SETTINGS_DATA_RESET_REQUESTED_EVENT,
                 action=action,
+                reason=reason,
+                impact_fingerprint=impact_fingerprint,
+                recovery_receipt_id=recovery_receipt_id,
+                request_id=request_id,
             )
             return self._background_jobs.job_from_payload(payload), created
 
@@ -90,7 +108,7 @@ class SettingsDataResetRequestService:
                 scope_key=action,
                 dedupe_key=f"settings-data-reset:{job.job_id}",
                 priority="urgent",
-                payload={"job_id": job.job_id, "owner_user_id": owner_user_id, "action": action},
+                payload={"job_id": job.job_id, "owner_user_id": owner_user_id, **source},
             )
         except Exception as exc:
             self._background_jobs.fail_job(job.job_id, "数据重置任务入队失败。", str(exc))

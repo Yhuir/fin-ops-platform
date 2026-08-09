@@ -355,8 +355,8 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await page.goto("/pending-invoices");
       await expect(page.getByRole("heading", { name: "待找发票" })).toBeVisible();
       await expect(page.getByText("当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。")).toBeVisible();
-      await page.getByRole("button", { name: /^收入 / }).click();
-      await expect(page.getByRole("button", { name: /^收入 / })).toHaveAttribute("aria-pressed", "true");
+      await page.getByRole("radio", { name: /^收入 / }).click();
+      await expect(page.getByRole("radio", { name: /^收入 / })).toBeChecked();
       await page.getByRole("button", { name: "收入待找发票规则设置" }).click();
       const incomeRulesDrawer = page.getByRole("dialog", { name: "收入待找发票规则设置" });
       await expect(incomeRulesDrawer).toBeVisible();
@@ -374,7 +374,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await page.goto("/pending-invoices");
       await expect(page.getByRole("heading", { name: "待找发票" })).toBeVisible();
       await expect(page.getByText("当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。")).toBeVisible();
-      await page.getByRole("button", { name: /^收入 / }).click();
+      await page.getByRole("radio", { name: /^收入 / }).click();
       await expect(page.getByRole("row", { name: /收入批量客户A/ })).toBeVisible();
       await page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }).check();
       await page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }).check();
@@ -1030,6 +1030,7 @@ test.describe("permissions browser role matrix", () => {
     await expect(passwordDialog).toBeVisible();
     await expect(passwordDialog.getByRole("button", { name: "确认清理" })).toBeDisabled();
     await passwordDialog.getByLabel("当前 OA 用户密码").fill("admin-reset-password");
+    await passwordDialog.getByLabel("操作原因").fill("权限矩阵安全验证");
     await expect(passwordDialog.getByRole("button", { name: "确认清理" })).toBeEnabled();
     await passwordDialog.getByRole("button", { name: "取消" }).click();
     await expect(passwordDialog).toBeHidden();

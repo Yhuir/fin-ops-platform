@@ -22,15 +22,15 @@
 
 - 后端 service：`backend/src/fin_ops_platform/services/settings_data_reset_service.py`
 - 后端 route/job：`backend/src/fin_ops_platform/app/server.py`
-  - `POST /api/workbench/settings/data-reset`
+  - `GET /api/workbench/settings/data-reset/preview`
   - `POST /api/workbench/settings/data-reset/jobs`
   - `GET /api/workbench/settings/data-reset/jobs/active`
   - `GET /api/workbench/settings/data-reset/jobs/{job_id}`
-- 后台任务：`BackgroundJobService` 的 `settings_data_reset` job
+- 后台任务：`BackgroundJobService` 的 `settings_data_reset` job；`settings-maintenance` worker 在锁表后重算影响并校验一次性恢复凭证
 - 派生数据：`Application._execute_derived_data_lifecycle_event("settings_reset_completed", include_all=True, ...)`
-- 前端入口：`web/src/pages/SettingsPage.tsx`、`web/src/components/workbench/SettingsDataResetDialogs.tsx`
+- 前端入口：`web/src/pages/SettingsPage.tsx`、`web/src/components/settings/SettingsDataResetDialogs.tsx`
 - 共享状态提示：`web/src/components/shell/AppStatusIndicator.tsx`、`web/src/pages/AppHealthOperationsPage.tsx`
-- 备份/恢复参考：`scripts/reset_demo_db.sh` 和 operations runbooks；旧 App Mongo export 工具已删除。
+- 备份/恢复入口：`finops-deploy-control settings-data-reset-restore-point <release> <run-id> <action> <operator>`；旧 App Mongo export 工具已删除。
 
 ## 当前边界
 
@@ -53,7 +53,8 @@
 
 每次改本模块都要先列出影响面，不能只看设置页：
 
-- 权限和身份：必须是管理员；重置前必须校验当前 OA 密码；响应和 job payload 不得回显密码。
+- 权限和身份：必须是管理员；重置前必须通过 OA 登录接口重新登录且精确匹配当前身份。禁止复用改密接口或接受未知 OA 响应；响应和 job payload 不得回显密码。
+- 恢复和范围：必须先验证 PostgreSQL custom dump 的 manifest/checksum/size，备份前后及 worker 删除前的 action/fingerprint 必须一致；receipt 只能由一个 job 消费。
 - 数据事实：PostgreSQL app facts 是主事实源；OA Mongo 只读；旧 app Mongo 只作迁移/审计参考，不能覆盖 PostgreSQL。
 - 发票事实：`app.invoices` 是唯一 canonical 发票池；`app.etc_batch_invoice_links` 是 ETC 批次到 canonical invoice 的关系事实；`app.etc_invoices` 只保留 ETC ZIP/PDF/XML 源 metadata、附件和审计。`reset_invoices` 不能留下指向旧 invoice id 的 active link，重导后必须通过 dry-run/backfill 恢复有效 link 再刷新关联台。
 - 文件/对象：PostgreSQL 事务先把目标导入文件标为 `deleting`，提交后再删除本地文件或对象；成功后标为 `deleted`。删除失败必须保留 `deleting` 和可诊断 job 状态，同一 reset 可安全重试。

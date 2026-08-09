@@ -424,10 +424,12 @@ describe("Settings page", () => {
     const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
     expect(confirmDialog).toBeInTheDocument();
     expect(within(confirmDialog).getByText("已导入银行流水会被清空")).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("恢复点已验证。")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(await screen.findByRole("dialog", { name: "OA 密码复核" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("当前 OA 用户密码"), "oa-password");
+    await user.type(screen.getByLabelText("操作原因"), "生产数据修复验证");
     await user.click(screen.getByRole("button", { name: "确认清理" }));
 
     expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
@@ -435,7 +437,7 @@ describe("Settings page", () => {
       "/api/workbench/settings/data-reset/jobs",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining("\"oa_password\":\"oa-password\""),
+        body: expect.stringMatching(/"oa_password":"oa-password".*"reason":"生产数据修复验证".*"impact_fingerprint":"a{64}".*"recovery_receipt_id":"00000000-0000-0000-0000-000000000001"/),
       }),
     );
   });

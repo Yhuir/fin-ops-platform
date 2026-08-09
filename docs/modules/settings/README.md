@@ -23,7 +23,6 @@
 
 - `web/src/pages/SettingsPage.tsx`
 - `web/src/components/settings/*`
-- `web/src/components/workbench/WorkbenchSettingsModal.tsx`（仅普通列布局设置，不承载 ACL）
 - `web/src/features/workbench/api.ts`
 - `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
 - `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 durable reset enqueue

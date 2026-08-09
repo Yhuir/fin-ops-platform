@@ -26,6 +26,7 @@ class SettingsDataResetJobHandler:
         scope_months_provider: Callable[[], list[str]],
         lifecycle_executor: Callable[[list[str], str], dict[str, object]],
         runtime_reload_request: Callable[[], None] | None = None,
+        audit_recorder: Callable[..., Any] | None = None,
     ) -> None:
         self._reset_executor = reset_executor
         self._supported_actions = set(supported_actions)
@@ -33,14 +34,27 @@ class SettingsDataResetJobHandler:
         self._scope_months_provider = scope_months_provider
         self._lifecycle_executor = lifecycle_executor
         self._runtime_reload_request = runtime_reload_request
+        self._audit_recorder = audit_recorder
 
     def handle_runtime_event(self, event: Any) -> dict[str, object]:
         payload = event.payload if isinstance(getattr(event, "payload", None), dict) else {}
         job_id = str(payload.get("job_id") or "").strip()
         owner_user_id = str(payload.get("owner_user_id") or "").strip()
         action = str(payload.get("action") or "").strip()
-        if not job_id or not owner_user_id or action not in self._supported_actions:
-            raise ValueError("settings data reset event requires job_id, owner_user_id and a supported action.")
+        reason = str(payload.get("reason") or "").strip()
+        impact_fingerprint = str(payload.get("impact_fingerprint") or "").strip()
+        recovery_receipt_id = str(payload.get("recovery_receipt_id") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        if (
+            not job_id
+            or not owner_user_id
+            or action not in self._supported_actions
+            or not reason
+            or not impact_fingerprint
+            or not recovery_receipt_id
+            or not request_id
+        ):
+            raise ValueError("settings data reset event is missing its recovery or audit contract.")
 
         job = self._background_jobs.get_job(job_id, owner_user_id)
         if job.status in TERMINAL_BACKGROUND_JOB_STATUSES:
@@ -51,6 +65,16 @@ class SettingsDataResetJobHandler:
             return {"action": action, "status": "failed", "message": message}
 
         self._background_jobs.start_job(job_id)
+        self._record_audit(
+            actor_id=owner_user_id,
+            action=action,
+            job_id=job_id,
+            request_id=request_id,
+            reason=reason,
+            outcome="started",
+            impact_fingerprint=impact_fingerprint,
+            recovery_receipt_id=recovery_receipt_id,
+        )
 
         def update(phase: str, message: str, current: int, total: int) -> None:
             safe_total = max(int(total), 1)
@@ -66,7 +90,17 @@ class SettingsDataResetJobHandler:
 
         try:
             scope_months = self._scope_months_provider()
-            result = self._reset_executor(action, progress_callback=update)
+            result = self._reset_executor(
+                action,
+                progress_callback=update,
+                reset_context={
+                    "job_id": job_id,
+                    "actor_id": owner_user_id,
+                    "reason": reason,
+                    "impact_fingerprint": impact_fingerprint,
+                    "recovery_receipt_id": recovery_receipt_id,
+                },
+            )
             self._background_jobs.update_progress(
                 job_id,
                 phase="refresh",
@@ -117,7 +151,66 @@ class SettingsDataResetJobHandler:
                     str(payload_result["message"]),
                     result_summary=payload_result,
                 )
+            self._record_audit(
+                actor_id=owner_user_id,
+                action=action,
+                job_id=job_id,
+                request_id=request_id,
+                reason=reason,
+                outcome="partial" if failed else "success",
+                impact_fingerprint=impact_fingerprint,
+                recovery_receipt_id=recovery_receipt_id,
+                result=payload_result,
+            )
             return payload_result
         except Exception as exc:
             self._background_jobs.fail_job(job_id, "数据重置任务失败。", str(exc))
+            self._record_audit(
+                actor_id=owner_user_id,
+                action=action,
+                job_id=job_id,
+                request_id=request_id,
+                reason=reason,
+                outcome="failed",
+                impact_fingerprint=impact_fingerprint,
+                recovery_receipt_id=recovery_receipt_id,
+                error=str(exc),
+            )
             return {"action": action, "status": "failed", "message": str(exc)}
+
+    def _record_audit(
+        self,
+        *,
+        actor_id: str,
+        action: str,
+        job_id: str,
+        request_id: str,
+        reason: str,
+        outcome: str,
+        impact_fingerprint: str,
+        recovery_receipt_id: str,
+        result: dict[str, object] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if self._audit_recorder is None:
+            return
+        self._audit_recorder(
+            actor_id=actor_id,
+            action=action,
+            entity_type="settings_data_reset_job",
+            entity_id=job_id,
+            metadata={
+                "event_type": f"settings.data_reset.{outcome}",
+                "scope": "settings",
+                "trace_id": request_id,
+                "page_key": "settings",
+                "operation_location": "设置/数据重置",
+                "reason": reason,
+                "outcome": outcome,
+                "request_id": request_id,
+                "impact_fingerprint": impact_fingerprint,
+                "recovery_receipt_id": recovery_receipt_id,
+                "result": result or {},
+                "error": error,
+            },
+        )

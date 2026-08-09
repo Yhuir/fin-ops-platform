@@ -146,12 +146,14 @@ class ApplicationStateStoreProtocol(Protocol):
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]: ...
 
     def reset_invoice_data(
         self,
         *,
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
     ) -> dict[str, Any]: ...
 
     def reset_oa_workbench_data(
@@ -160,6 +162,15 @@ class ApplicationStateStoreProtocol(Protocol):
         row_ids: list[str],
         case_ids: list[str],
         source_snapshot: dict[str, Any] | None = None,
+        reset_context: dict[str, str] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def preview_settings_data_reset(
+        self,
+        action: str,
+        *,
+        row_ids: list[str] | None = None,
+        case_ids: list[str] | None = None,
     ) -> dict[str, Any]: ...
 
     def save_import_delta(self, payload: dict[str, Any]) -> None: ...

@@ -32,6 +32,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | OA session/token | `auth.py`、session API | 只认证 canonical username；roles/permissions 仅为信息，不能 grant APP access |
+| OA password reauthentication | Settings data reset | 复用 OA login client 获取新 token，再经 identity endpoint 解析；只有 user id 与 canonical username 都等于当前 session 才成功。登录失败返回 false，配置/网络/未知响应 fail closed；禁止复用改密接口或凭 message/code 猜测成功。 |
 | Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 full/read assignments，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
 | Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
 | Deployment ACL preflight artifact | preflight/deploy control | 显式专项验收可接受 release-bound、secret-safe、SHA-256 绑定的 canonical ACL、migration/env 与 OA exact topology 只读证据；标准发布的任何 profile 都不消费 006 或该 artifact |

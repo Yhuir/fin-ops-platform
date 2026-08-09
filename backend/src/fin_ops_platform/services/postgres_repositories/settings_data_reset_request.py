@@ -5,6 +5,10 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from fin_ops_platform.services.postgres_repositories.operations_audit import (
+    PostgresOperationsAuditRepository,
+)
+
 
 class SettingsDataResetIdempotencyConflict(ValueError):
     pass
@@ -14,6 +18,10 @@ class SettingsDataResetAlreadyActive(RuntimeError):
     def __init__(self, payload: dict[str, object]) -> None:
         super().__init__("A settings data reset is already active.")
         self.payload = payload
+
+
+class SettingsDataResetRecoveryUnavailable(RuntimeError):
+    pass
 
 
 class PostgresSettingsDataResetRequestRepository:
@@ -30,6 +38,10 @@ class PostgresSettingsDataResetRequestRepository:
         request_fingerprint: str,
         event_type: str,
         action: str,
+        reason: str,
+        impact_fingerprint: str,
+        recovery_receipt_id: str,
+        request_id: str,
     ) -> tuple[dict[str, object], bool]:
         owner_id = str(job_payload.get("owner_user_id") or "").strip()
         idempotency_key = str(job_payload.get("idempotency_key") or "").strip()
@@ -70,6 +82,26 @@ class PostgresSettingsDataResetRequestRepository:
             )
             if active is not None:
                 raise SettingsDataResetAlreadyActive(self._payload(active))
+
+            consumed = transaction.fetch_one(
+                """
+                update job.settings_data_reset_recovery_receipts
+                set consumed_by_job_id = %s,
+                    consumed_at = now()
+                where receipt_id = %s::uuid
+                  and action = %s
+                  and impact_fingerprint = %s
+                  and consumed_by_job_id is null
+                  and revoked_at is null
+                  and valid_until > now()
+                returning receipt_id::text as receipt_id
+                """,
+                (job_id, recovery_receipt_id, action, impact_fingerprint),
+            )
+            if consumed is None:
+                raise SettingsDataResetRecoveryUnavailable(
+                    "A fresh verified restore point is required for this exact reset impact."
+                )
 
             transaction.execute(
                 """
@@ -119,7 +151,35 @@ class PostgresSettingsDataResetRequestRepository:
                 scope_key=action,
                 dedupe_key=f"settings-data-reset:{job_id}",
                 priority="urgent",
-                payload={"job_id": job_id, "owner_user_id": owner_id, "action": action},
+                payload={
+                    "job_id": job_id,
+                    "owner_user_id": owner_id,
+                    "action": action,
+                    "reason": reason,
+                    "impact_fingerprint": impact_fingerprint,
+                    "recovery_receipt_id": recovery_receipt_id,
+                    "request_id": request_id,
+                },
+            )
+            PostgresOperationsAuditRepository(transaction).append_operation_event(
+                {
+                    "event_type": "settings.data_reset.queued",
+                    "object_type": "settings_data_reset_job",
+                    "object_id": job_id,
+                    "actor_id": owner_id,
+                    "scope": "settings",
+                    "trace_id": request_id,
+                    "action": action,
+                    "page_key": "settings",
+                    "operation_location": "设置/数据重置",
+                    "reason": reason,
+                    "outcome": "queued",
+                    "request_id": request_id,
+                    "payload": {
+                        "impact_fingerprint": impact_fingerprint,
+                        "recovery_receipt_id": recovery_receipt_id,
+                    },
+                }
             )
         return job_payload, True
 

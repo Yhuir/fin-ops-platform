@@ -5523,31 +5523,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/workbench/settings/data-reset": ({ jsonBody }) => {
-      if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {
-        return {
-          status: 403,
-          body: {
-            error: "oa_password_verification_failed",
-            message: "当前 OA 用户密码复核失败，未执行数据重置。",
-          },
-        };
-      }
-      return {
-        body: {
-          action: String(jsonBody.action ?? ""),
-          status: "completed",
-          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
-          deleted_counts: {
-            workbench_row_overrides: 0,
-            workbench_pair_relations: 0,
-          },
-          protected_targets: ["form_data_db.form_data"],
-          rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
-          message: "已完成数据重置。",
-        },
-      };
-    },
     "/api/tax-offset": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.taxErrorMonths?.includes(month)) {
@@ -7820,6 +7795,21 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? jsonResponse({ body: task })
           : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
       }
+    }
+    if (url.pathname === "/api/workbench/settings/data-reset/preview") {
+      const action = url.searchParams.get("action") ?? "reset_bank_transactions";
+      return jsonResponse({
+        body: {
+          preview: {
+            action,
+            impact_counts: { bank_transactions: 2 },
+            impact_fingerprint: "a".repeat(64),
+            recovery_ready: true,
+            recovery_receipt_id: "00000000-0000-0000-0000-000000000001",
+            recovery_valid_until: "2026-08-09T12:00:00+08:00",
+          },
+        },
+      });
     }
     if ((init?.method ?? "GET").toUpperCase() === "POST" && url.pathname === "/api/workbench/settings/data-reset/jobs") {
       if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {

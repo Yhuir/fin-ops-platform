@@ -14,6 +14,7 @@ import type {
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
+  WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
 } from "../../features/workbench/types";
 import SettingsAccessAccountsSection from "./SettingsAccessAccountsSection";
@@ -63,8 +64,14 @@ type SettingsPageContentProps = {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
     idempotencyKey: string;
+    reason: string;
+    impactFingerprint: string;
+    recoveryReceiptId: string;
     onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }) => Promise<WorkbenchSettingsDataResetResult>;
+  onLoadDataResetPreview: (
+    action: WorkbenchSettingsDataResetAction,
+  ) => Promise<WorkbenchSettingsDataResetPreview>;
   onSyncProjects: () => Promise<WorkbenchSettings>;
   onCreateProject: (payload: {
     projectCode: string;
@@ -87,8 +94,8 @@ type SettingsDraftSession = {
 };
 
 type DataResetDialogState =
-  | { step: "confirm"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string }
-  | { step: "password"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string }
+  | { step: "confirm"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string; preview: WorkbenchSettingsDataResetPreview }
+  | { step: "password"; action: WorkbenchSettingsDataResetAction; idempotencyKey: string; preview: WorkbenchSettingsDataResetPreview }
   | null;
 
 const OA_INVOICE_OFFSET_SETTINGS_VISIBLE_USERNAMES = new Set(["YNSYLP005", "YNSYKJ001"]);
@@ -251,6 +258,7 @@ export default function SettingsPageContent({
   canManageAccessControl,
   onCreateProject,
   onDataReset,
+  onLoadDataResetPreview,
   onDeleteProject,
   onDeleteOaApplicantCredential,
   onSave,
@@ -324,6 +332,7 @@ export default function SettingsPageContent({
   const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
+  const [dataResetReason, setDataResetReason] = useState("");
   const [settingsActionStatus, setSettingsActionStatus] = useState<DataResetStatus | null>(null);
   const [dataResetStatus, setDataResetStatus] = useState<DataResetStatus | null>(null);
   const [dataResetProgress, setDataResetProgress] = useState<WorkbenchSettingsDataResetJob | null>(null);
@@ -699,12 +708,21 @@ export default function SettingsPageContent({
     await onSaveAccessControl(normalizedAccessAccounts);
   }
 
-  function handleOpenDataResetConfirm(action: WorkbenchSettingsDataResetAction) {
+  async function handleOpenDataResetConfirm(action: WorkbenchSettingsDataResetAction) {
     if (controlsDisabled) {
       return;
     }
     setDataResetStatus(null);
-    setDataResetDialog({ step: "confirm", action, idempotencyKey: crypto.randomUUID() });
+    try {
+      const preview = await onLoadDataResetPreview(action);
+      setDataResetReason("");
+      setDataResetDialog({ step: "confirm", action, idempotencyKey: crypto.randomUUID(), preview });
+    } catch (error) {
+      setDataResetStatus({
+        tone: "error",
+        message: error instanceof Error ? parseResetErrorMessage(error.message) : "无法读取数据重置范围。",
+      });
+    }
   }
 
   function handleContinueDataReset() {
@@ -716,11 +734,12 @@ export default function SettingsPageContent({
       step: "password",
       action: dataResetDialog.action,
       idempotencyKey: dataResetDialog.idempotencyKey,
+      preview: dataResetDialog.preview,
     });
   }
 
   async function handleConfirmDataReset() {
-    if (!dataResetDialog || isDataResetting || !dataResetPassword) {
+    if (!dataResetDialog || isDataResetting || !dataResetPassword || dataResetReason.trim().length < 5) {
       return;
     }
     setIsDataResetting(true);
@@ -731,6 +750,9 @@ export default function SettingsPageContent({
         action: dataResetDialog.action,
         oaPassword: dataResetPassword,
         idempotencyKey: dataResetDialog.idempotencyKey,
+        reason: dataResetReason.trim(),
+        impactFingerprint: dataResetDialog.preview.impactFingerprint,
+        recoveryReceiptId: dataResetDialog.preview.recoveryReceiptId ?? "",
         onProgress: (job) => {
           setDataResetPassword("");
           setDataResetDialog(null);
@@ -761,6 +783,7 @@ export default function SettingsPageContent({
       return;
     }
     setDataResetPassword("");
+    setDataResetReason("");
     setDataResetDialog(null);
   }
 
@@ -964,10 +987,13 @@ export default function SettingsPageContent({
           config={dataResetActionConfig(dataResetDialog.action)}
           isBusy={isDataResetting}
           password={dataResetPassword}
+          preview={dataResetDialog.preview}
+          reason={dataResetReason}
           step={dataResetDialog.step}
           onCancel={handleCancelDataResetDialog}
           onContinue={handleContinueDataReset}
           onPasswordChange={setDataResetPassword}
+          onReasonChange={setDataResetReason}
           onSubmit={handleConfirmDataReset}
         />
       ) : null}

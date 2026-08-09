@@ -116,7 +116,7 @@
 ## 2026-06-11 - settings 测试闭环首轮
 
 - 目标：把 settings 从“凭据管理局部文档”扩展为完整配置域闭环，覆盖设置保存、规则 fan-out、数据重置、OA 凭据、权限和下游 read model/worker 风险。
-- 影响范围：`SettingsPage`、`WorkbenchSettingsModal`、`web/src/features/workbench/api.ts`、`AppSettingsService`、`SettingsDataResetService`、OA applicant credential service/repository/token provider、derived lifecycle、App Status。
+- 影响范围：`SettingsPage`、当时仍存在的关联台旧设置弹窗、`web/src/features/workbench/api.ts`、`AppSettingsService`、`SettingsDataResetService`、OA applicant credential service/repository/token provider、derived lifecycle、App Status。
 - 关键决策：不为本轮新增低价值代码测试；现有测试已经覆盖主要 service/API/UI contract。本轮补齐影响面、状态机、验证命令和 documented-risk，真实环境风险交给 staging/production smoke。
 - 文档影响：更新 `README.md`、`tests.md`、`state-machine.md`、`implementation-notes.md` 和全局 `testing-closure-dependency-map.md`。
 - 测试覆盖：后端覆盖 app settings、data reset、OA credentials、target OA token provider、migration、App Status、derived lifecycle；前端覆盖 SettingsPage、WorkbenchSelection、AppStatusIndicator。

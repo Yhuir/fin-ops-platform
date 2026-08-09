@@ -2,6 +2,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-09 - 数据重置 fail-closed 二次认证与恢复凭证
+
+- 删除“旧密码等于新密码”的 OA 改密复核；改用既有 OA 登录 client，登录结果必须解析为与当前 session 相同的 user id/username，未知响应不可能被当作成功。
+- 复用既有 custom `pg_dump` restore-point helper，不新增备份系统。运维命令在备份前后重算 action 影响 fingerprint，并把 dump checksum/size 与短时一次性 receipt 写入 PostgreSQL。
+- API 只在 preview fingerprint、receipt、原因和 OA 密码均通过后创建任务；receipt 消费、job、outbox 与 queued audit 同事务提交。
+- worker 锁定全部目标表后再次计算包含行版本的 fingerprint，任何变化或凭证异常都在删除前失败；删除触发器使用真实操作者与原因，任务写 started/success/partial/failed audit。
+
 ## 2026-08-01 - Data reset durable execution 与 runtime reload 闭环
 
 - 重置 API 不再执行或启动任何清理线程，只持久化非敏感 job/event；worker 从 PostgreSQL durable queue 领取并显式更新 lifecycle。

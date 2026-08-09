@@ -35,6 +35,9 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+from fin_ops_platform.services.postgres_repositories.operations_audit import (
+    PostgresOperationsAuditRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
     PostgresWorkbenchFormalRelationFactRepository,
@@ -286,6 +289,9 @@ class SettingsDataResetRuntimeFactory:
             scope_months_provider=self._scope_months,
             lifecycle_executor=self._execute_lifecycle,
             runtime_reload_request=_request_api_runtime_reload,
+            audit_recorder=AuditTrailService(
+                PostgresOperationsAuditRepository(self._connection)
+            ).record_action,
         )
 
     def _execute_reset(self, action: str, **kwargs: Any) -> Any:

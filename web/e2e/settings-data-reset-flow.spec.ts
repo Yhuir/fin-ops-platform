@@ -124,6 +124,7 @@ test.describe("settings data reset browser flow", () => {
     });
     await expect(impactDialog).toBeVisible();
     await expect(impactDialog.getByText("已导入银行流水会被清空")).toBeVisible();
+    await expect(impactDialog.getByText("恢复点已验证。")).toBeVisible();
 
     const passwordDialog = page.getByRole("dialog", { name: "OA 密码复核" });
     await recordLatency({
@@ -141,6 +142,7 @@ test.describe("settings data reset browser flow", () => {
       actionType: "fill",
     }, async (mark) => {
       await passwordDialog.getByLabel("当前 OA 用户密码").fill("oa-password-e2e");
+      await passwordDialog.getByLabel("操作原因").fill("生产数据修复验证");
       await mark("finalSettledLatencyMs", expect(passwordDialog.getByRole("button", { name: "确认清理" })).toBeEnabled());
     });
 

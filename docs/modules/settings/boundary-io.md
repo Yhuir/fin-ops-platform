@@ -39,7 +39,7 @@
 | OA 草稿预填 GET/PUT | ETC 票据、进项发票使用页面 | 两个独立 family 均允许已授权账号读取，只有 admin 可保存；PUT 只接受 `expected_version + configuration`，校验 OA 真实枚举 code、项目和申请事由模板 token |
 | OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、跨 tier overlap、控制字符和 protected admin 输入在 OA I/O 前失败 |
 | OA credentials | settings/OA credential API | secret 不进入日志 |
-| 数据重置请求 | settings data reset dialogs | 必须走 request service；一次确认意图生成稳定 `idempotency_key`，生产 PostgreSQL 在同一事务写 job 与 durable outbox，禁止 route 先存 job 再单独入队。 |
+| 数据重置 preview/request | settings data reset dialogs | preview 只返回服务端 count/fingerprint 与恢复凭证状态。request 必须携带原因、同一 fingerprint/receipt、稳定 `idempotency_key` 并通过同身份 OA 登录复核；生产 PostgreSQL 在同一事务消费 receipt、写 job、durable outbox 与 queued audit，禁止 route 先存 job 再单独入队。 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=settings` | 管理员只读；同一 repeatable-read snapshot，禁止 secret/provider/reset mutation I/O |
 
 数据重置 create/detail/active 都必须重新取得 admin session；job owner 直接取该 session username。旧的“身份解析失败时回退 `web_finance_user`” resolver 已删除，禁止恢复匿名/共享 owner。
@@ -80,7 +80,7 @@
 | 层 | 文件或目录 |
 | --- | --- |
 | Frontend page | `web/src/pages/SettingsPage.tsx` |
-| Frontend components | `web/src/components/settings/*`、`web/src/components/workbench/WorkbenchSettingsModal.tsx`、`web/src/components/common/OaDraftPrefillDrawer.tsx` |
+| Frontend components | `web/src/components/settings/*`、`web/src/components/common/OaDraftPrefillDrawer.tsx`；无调用方的旧 `WorkbenchSettingsModal.tsx` 已删除 |
 | Frontend API | `web/src/features/workbench/api.ts`、`web/src/features/oaDraftPrefill.ts`；普通 mapper/serializer 与专用 versioned client 分离 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 与 session/runtime ports 组装 |
 | Backend service | `app_settings_service.py`、`oa_draft_prefill.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |

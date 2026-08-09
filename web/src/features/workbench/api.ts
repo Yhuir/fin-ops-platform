@@ -22,6 +22,7 @@ import type {
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
+  WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
   WorkbenchSummary,
   WorkbenchOaStatus,
@@ -833,10 +834,24 @@ type ApiWorkbenchSettingsDataResetJobResponse = {
   job?: ApiWorkbenchSettingsDataResetJob | null;
 };
 
+type ApiWorkbenchSettingsDataResetPreviewResponse = {
+  preview?: {
+    action?: WorkbenchSettingsDataResetAction;
+    impact_counts?: Record<string, number>;
+    impact_fingerprint?: string;
+    recovery_ready?: boolean;
+    recovery_receipt_id?: string | null;
+    recovery_valid_until?: string | null;
+  };
+};
+
 type WorkbenchSettingsDataResetPayload = {
   action: WorkbenchSettingsDataResetAction;
   oaPassword: string;
   idempotencyKey: string;
+  reason: string;
+  impactFingerprint: string;
+  recoveryReceiptId: string;
   onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   pollIntervalMs?: number;
 };
@@ -3137,6 +3152,23 @@ export async function fetchActiveWorkbenchSettingsDataResetJob(): Promise<Workbe
   return payload.job ? mapDataResetJob(payload.job) : null;
 }
 
+export async function fetchWorkbenchSettingsDataResetPreview(
+  action: WorkbenchSettingsDataResetAction,
+): Promise<WorkbenchSettingsDataResetPreview> {
+  const payload = await requestJson<ApiWorkbenchSettingsDataResetPreviewResponse>(
+    `/api/workbench/settings/data-reset/preview?action=${encodeURIComponent(action)}`,
+  );
+  const preview = payload.preview ?? {};
+  return {
+    action: preview.action ?? action,
+    impactCounts: preview.impact_counts ?? {},
+    impactFingerprint: String(preview.impact_fingerprint ?? ""),
+    recoveryReady: preview.recovery_ready === true,
+    recoveryReceiptId: preview.recovery_receipt_id ?? null,
+    recoveryValidUntil: preview.recovery_valid_until ?? null,
+  };
+}
+
 async function waitForWorkbenchSettingsDataResetJob(
   initialJob: WorkbenchSettingsDataResetJob,
   payload: Pick<WorkbenchSettingsDataResetPayload, "onProgress" | "pollIntervalMs">,
@@ -3186,6 +3218,9 @@ export async function resetWorkbenchSettingsData(
       action: payload.action,
       oa_password: payload.oaPassword,
       idempotency_key: payload.idempotencyKey,
+      reason: payload.reason,
+      impact_fingerprint: payload.impactFingerprint,
+      recovery_receipt_id: payload.recoveryReceiptId,
     }),
   });
   const createdJob = mapDataResetJob(createdPayload.job ?? {});

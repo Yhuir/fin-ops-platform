@@ -13,6 +13,7 @@ import {
   deleteOaApplicantCredential,
   deleteWorkbenchSettingsProject,
   fetchActiveWorkbenchSettingsDataResetJob,
+  fetchWorkbenchSettingsDataResetPreview,
   fetchWorkbenchAccessControl,
   fetchOaApplicantCredentials,
   fetchWorkbenchSettingsWithProgress,
@@ -33,6 +34,7 @@ import type {
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
+  WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
 } from "../features/workbench/types";
 
@@ -312,6 +314,9 @@ export default function SettingsPage() {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
     idempotencyKey: string;
+    reason: string;
+    impactFingerprint: string;
+    recoveryReceiptId: string;
     onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }): Promise<WorkbenchSettingsDataResetResult> => {
     if (!canAdminAccess) {
@@ -332,6 +337,10 @@ export default function SettingsPage() {
     setPageFeedback({ tone: "success", message: result.message });
     return result;
   };
+
+  const handleLoadSettingsDataResetPreview = (
+    action: WorkbenchSettingsDataResetAction,
+  ): Promise<WorkbenchSettingsDataResetPreview> => fetchWorkbenchSettingsDataResetPreview(action);
 
   const handleSyncSettingsProjects = async (): Promise<WorkbenchSettings> => {
     if (!canMutateData) {
@@ -473,6 +482,7 @@ export default function SettingsPage() {
           activeDataResetJob={activeDataResetJob}
           onCreateProject={handleCreateSettingsProject}
           onDataReset={handleSettingsDataReset}
+          onLoadDataResetPreview={handleLoadSettingsDataResetPreview}
           onDeleteProject={handleDeleteSettingsProject}
           onDeleteOaApplicantCredential={handleDeleteOaApplicantCredential}
           onSave={handleSaveSettings}
