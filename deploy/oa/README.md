@@ -375,7 +375,7 @@ python -m fin_ops_platform.app.worker \
 
 - 本地重新构建 `web/dist`
 - 打包生产运行所需的 `backend + web/dist + scripts + deploy/oa`
-- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支、`settings-access-control-v1` capability、0133 migration sha256 和 deploy-control sha256
+- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支、`settings-access-control-v1` capability、0133 migration sha256、deploy-control sha256，以及全量 PostgreSQL migration count/head/fingerprint
 - 通过 `finops-prod` 免密 SSH 推送到：
   - `/opt/fin-ops/releases/<release-name>/src`
 - release 上传路径不自更新 `/usr/local/sbin`。deploy-control 变更必须使用下文 hash-pinned、同文件系统 temp、`mv -f` 原子 bootstrap；禁止旧 `self-update`，也禁止在 bootstrap 中触碰 runtime-worker helper
@@ -383,6 +383,7 @@ python -m fin_ops_platform.app.worker \
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control release-gate-activate <release-name>`
 - `check-release` 会在隔离临时 venv 中安装锁定的 `backend/requirements-audit.txt`，审计候选 `backend/requirements.txt`；存在已知漏洞或审计失败时停止发布，审计工具不进入 API/worker runtime venv。
+- `schema-compatibility-plan` 只读生产 `public.schema_migrations`，验真候选包内 migration fingerprint、checksum 和生产 applied head。无 pending migration 时不要求额外 evidence；有 pending migration 时，必须先在 disposable PostgreSQL 上用 exact previous release 代码逐个验证每个候选中间 schema head，并通过 `schema-compatibility-evidence-install <release> --stdin` 安装绑定 exact plan 的 root-owned `0600` 证据。固定探针覆盖已有发票/流水 upsert、import enrichment、settings reset、correction 与 audit 同事务。
 - `release-gate-activate` 是唯一正常激活入口；公开 `activate` 命令已删除。helper 比较 exact candidate 与唯一 active release 的实际包内容，自动判定 `frontend`、`runtime` 或 `acl`，没有手工 profile/skip。所有 profile 的标准激活都只读取 005，不读取 006，也不依赖双身份 artifact。`runtime`/`acl` 先对当前 release
   执行 production-equivalent pre checkpoint，再用 `/etc/fin-ops/fin-ops.postgres-migrator.env`
   停止旧 API 和 runtime workers，执行 PostgreSQL schema migration/validated CHECK，
@@ -447,7 +448,7 @@ python -m fin_ops_platform.app.worker \
   `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`，任一缺失或不可读都 fail closed
 - 最终 PASS evidence 写入
   `/opt/fin-ops/runtime-smoke/release-gates/<release-name>/evidence.json`，绑定 release 与 Git commit；
-  `frontend`/`runtime` 失败可恢复满足当前安全 capability/fingerprint 的 previous release；`acl` 失败保持 API maintenance/fail-closed 并执行 forward repair，绝不重启 vulnerable binary。pre checkpoint 失败不改任何 helper
+  `frontend`/`runtime` 失败只有在 schema 未前移，或 previous release 已通过 exact candidate schema（包含全部中间 migration head）兼容证据时才可自动恢复；否则保持 API maintenance/fail-closed 并 forward repair，绝不启动未证明兼容的新 schema/旧 binary 组合。`acl` 失败继续只允许 forward repair。pre checkpoint 失败不改任何 helper
 
 常用参数：
 
@@ -921,8 +922,8 @@ cd web && npm run build
 
 1. 先在 OA 菜单中隐藏或下线 `财务运营平台`
 2. 撤销目标角色的 `finops:app:view`
-3. 只有 previous release 的 `settings-access-control-v1` capability、source/migration fingerprints 都有效时，才允许 release gate 自动恢复其前后端
-4. previous 不安全或不存在时保持 API maintenance；保留已应用 0133/CHECK，使用新的安全 candidate forward repair，禁止手工启动旧 vulnerable binary
+3. 只有 previous release 的安全 capability/source fingerprints 有效，且 schema 未变化或 exact schema compatibility evidence 覆盖所有已应用候选 migration head 时，才允许 release gate 自动恢复其前后端
+4. previous 不安全、不存在或 schema compatibility 未证明时保持 API maintenance；保留已应用 migration，使用新的安全 candidate forward repair，禁止手工启动旧 binary
 5. 如需要，再回滚 iframe 高度修复或 OA 菜单配置
 
 不要先回滚后端再保留菜单入口，否则用户会进入一个失效页。

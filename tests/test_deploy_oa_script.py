@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 import io
 import importlib.util
 import json
@@ -141,6 +142,21 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertEqual(
             metadata["settings_access_control"]["capability"],
             "settings-access-control-v1",
+        )
+        self.assertEqual(
+            metadata["schema_contract"],
+            {
+                "contract": "postgres-schema-migrations-v1",
+                "migration_count": 1,
+                "migration_head": "0133",
+                "migration_fingerprint_sha256": metadata["schema_contract"][
+                    "migration_fingerprint_sha256"
+                ],
+            },
+        )
+        self.assertRegex(
+            metadata["schema_contract"]["migration_fingerprint_sha256"],
+            r"^[0-9a-f]{64}$",
         )
         self.assertRegex(metadata["settings_access_control"]["migration_sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(metadata["settings_access_control"]["deploy_control_sha256"], r"^[0-9a-f]{64}$")
@@ -956,6 +972,132 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("install_deploy_control_helper", activate)
         self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', activate)
         self.assertIn('"component_statuses": {', script)
+
+    def test_release_gate_blocks_unproven_schema_rollback_before_services_stop(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        activate = script.split("release_gate_activate() {", 1)[1].split("\n}\n", 1)[0]
+        rollback = script.split("rollback_release_gate() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertIn("schema_compatibility_plan", script)
+        self.assertIn("schema_compatibility_evidence_install", script)
+        self.assertIn(
+            'schema_compatibility_plan "$release" --json >"$schema_plan_path"',
+            activate,
+        )
+        self.assertIn(
+            'schema_compatibility_evidence_valid "$release" "$schema_plan_path"',
+            activate,
+        )
+        self.assertLess(
+            activate.index('schema_compatibility_plan "$release"'),
+            activate.index('activate_release "$release"'),
+        )
+        self.assertIn("services were not stopped and schema was not changed", activate)
+        self.assertIn(
+            'schema_compatibility_evidence_valid "$candidate" "$schema_plan_path"',
+            rollback,
+        )
+        self.assertLess(
+            rollback.index("schema_compatibility_evidence_valid"),
+            rollback.index('activate_release "$previous_release"'),
+        )
+        self.assertIn("production remains in maintenance for forward repair", rollback)
+        for operation in (
+            "bank_transaction_existing_upsert",
+            "correction_audit_same_transaction",
+            "import_enrichment",
+            "invoice_existing_upsert",
+            "settings_data_reset",
+        ):
+            self.assertIn(operation, script)
+
+    def test_schema_compatibility_evidence_is_exact_and_secret_free(self) -> None:
+        definitions = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8").split(
+            '\ncmd="${1:-}"', 1
+        )[0]
+        plan = {
+            "candidate": {"release_name": "candidate", "git_commit": "a" * 40},
+            "previous": {"release_name": "previous", "git_commit": "b" * 40},
+            "database": {"postgres_major": 17},
+            "pending_migrations": [{"version": "0142"}],
+            "plan_fingerprint_sha256": "c" * 64,
+        }
+        evidence = {
+            "contract": "schema-rollback-compatibility-evidence-v1",
+            "status": "pass",
+            "plan_fingerprint_sha256": "c" * 64,
+            "candidate_release": "candidate",
+            "candidate_git_commit": "a" * 40,
+            "previous_release": "previous",
+            "previous_git_commit": "b" * 40,
+            "postgres_major": 17,
+            "tested_schema_heads": ["0142"],
+            "tested_operations": [
+                "bank_transaction_existing_upsert",
+                "correction_audit_same_transaction",
+                "import_enrichment",
+                "invoice_existing_upsert",
+                "settings_data_reset",
+            ],
+            "candidate_schema_applied": True,
+            "previous_release_write_probe": True,
+            "test_database_name": "fin_ops_schema_test",
+            "test_run_id": "schema-test-1",
+            "approved_by": "release-test",
+            "reason": "rollback compatibility regression",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "probe_sha256": "d" * 64,
+            "secret": "must-not-survive-normalization",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            definitions_path = root / "definitions.sh"
+            plan_path = root / "plan.json"
+            evidence_path = root / "evidence.json"
+            definitions_path.write_text(definitions, encoding="utf-8")
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            command = (
+                'source "$1"; API_PYTHON="$2"; '
+                'validate_schema_compatibility_evidence "$3" "$4" true'
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "bash",
+                    str(definitions_path),
+                    sys.executable,
+                    str(plan_path),
+                    str(evidence_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("must-not-survive-normalization", result.stdout)
+
+            evidence["previous_git_commit"] = "e" * 40
+            evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+            rejected = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    command,
+                    "bash",
+                    str(definitions_path),
+                    sys.executable,
+                    str(plan_path),
+                    str(evidence_path),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("previous_git_commit", rejected.stderr)
 
     def test_release_gate_loads_rabbitmq_env_without_automatic_business_write(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()

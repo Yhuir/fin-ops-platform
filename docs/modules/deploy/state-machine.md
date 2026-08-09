@@ -25,6 +25,8 @@
 | `check_release_failed` | `finops-deploy-control check-release` | release layout/env contract 不满足，禁止激活 |
 | `profile_classified` | `release-gate-profile` | 自动得到 `frontend` / `runtime` / `acl`；无法证明 pure frontend 时为 runtime，ACL boundary drift 优先为 acl |
 | `acl_profile_classified` | profile=`acl` | 直接鉴权/权限、OA role sync 或 ACL migration 发生变化；仍使用 005-only 标准门禁，失败后只允许 forward repair |
+| `schema_plan_verified` | `schema-compatibility-plan` | `RELEASE.json` migration fingerprint 与包内 migration 一致，生产 applied schema 不领先且 checksum 无未知漂移 |
+| `schema_compatibility_blocked` | pending migration 且 exact compatibility evidence 缺失/漂移 | 在服务停止和 migration 前失败；生产 runtime/schema 均不变 |
 | `preflight_succeeded` | profile-specific pre checkpoint | frontend 证明 ready/005/shell/asset/dist；runtime/acl 证明完整 runtime closure |
 | `migration_running` | runtime/acl activation | 正在用 migrator env 执行 PostgreSQL migration；frontend 不进入此状态 |
 | `migration_failed` | migration command non-zero | 禁止继续发布；需要恢复/修复 schema 状态 |
@@ -36,12 +38,14 @@
 | `runtime_t300_verified` | runtime/acl evidence | pre、T+0、T+60、T+300 queue/read-model/audit 均稳定 |
 | `release_succeeded` | deploy script 退出 0 | 发布脚本范围完成；仍需业务 smoke |
 | `release_failed` | deploy trap step + exit code | 输出失败 step；不能吞错 |
-| `rollback_needed` | migration/activation/readiness/public route/业务 smoke 失败 | 需要按 runbook 切回 release 或恢复备份 |
+| `rollback_needed` | migration/activation/readiness/public route/业务 smoke 失败 | 只有 schema 未变化，或 exact previous 已通过 candidate schema（含全部中间 head）写入证据，才可自动切回；否则 maintenance + forward repair |
 | `rollback_done` | active release、frontend、API、workers、App Health 收敛 | 回滚完成后仍需验证数据和 worker 状态 |
 
 ## 禁止流转
 
 - `check_release_failed` / `migration_failed` -> `activation_running`。
+- pending migration 未通过 exact previous-code/candidate-schema evidence -> `migration_running`。
+- schema 已前移但兼容证据缺失/漂移 -> `rollback_done`；必须保持 maintenance，不得把旧 binary 启动或声称恢复成功。
 - systemd active 但 `/health/ready` 未 ready 时标记 release succeeded。
 - required worker missing/stale/mismatch 非 0 时标记 workers ready。
 - `/fin-ops/api/*` 被 SPA fallback 返回 HTML 时标记 public routes ready。

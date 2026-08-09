@@ -26,6 +26,7 @@ ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/loca
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json}"
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
+SCHEMA_COMPATIBILITY_EVIDENCE_ROOT="${FINOPS_SCHEMA_COMPATIBILITY_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/schema-compatibility}"
 SETTINGS_ACL_EVIDENCE_ROOT="${FINOPS_SETTINGS_ACL_EVIDENCE_ROOT:-/opt/fin-ops/evidence}"
 SETTINGS_ACL_CONTRACT="settings-access-control-v1"
 LEGACY_ADMIN_ENV="FIN_OPS_""ADMIN_USERNAMES"
@@ -48,6 +49,10 @@ commands:
   contract-version [--require VERSION] print or require the deploy-control safety contract
   candidate-status <release-name> --json
                                       validate candidate source and ACL safety fingerprints
+  schema-compatibility-plan <release-name> --json
+                                      compare exact candidate migrations with production schema and active release
+  schema-compatibility-evidence-install <release-name> --stdin
+                                      validate and atomically install previous-code/candidate-schema test evidence
   release-gate-profile <release-name> --json
                                       classify the exact candidate as frontend, runtime, or ACL
   settings-access-control-preflight <release-name> --http-tokens-stdin --dry-run --json
@@ -283,6 +288,315 @@ payload = {
 }
 print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 raise SystemExit(0 if candidate["safe"] else 1)
+PY
+}
+
+schema_compatibility_plan() {
+  local release="${1:-}"
+  [[ "$#" -eq 2 && "$2" == "--json" ]] \
+    || die "schema-compatibility-plan requires release name and --json"
+  local candidate_src previous_release active_count previous_src
+  candidate_status "$release" --json >/dev/null
+  candidate_src="$(release_src "$release")"
+  previous_release="$(active_release_names)"
+  active_count="$(printf '%s\n' "$previous_release" | sed '/^$/d' | wc -l | tr -d ' ')"
+  [[ "$active_count" == "1" ]] \
+    || die "schema compatibility requires exactly one active release, found $active_count"
+  [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
+  previous_src="$(release_src "$previous_release")"
+  [[ -f "$MIGRATOR_ENV" ]] || die "missing PostgreSQL migrator env: $MIGRATOR_ENV"
+  set -a
+  # shellcheck disable=SC1090
+  source "$MIGRATOR_ENV"
+  set +a
+  CANDIDATE_RELEASE="$release" PREVIOUS_RELEASE="$previous_release" \
+  PYTHONPATH="$candidate_src/backend/src" \
+    "$API_PYTHON" - "$candidate_src" "$previous_src" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+
+from fin_ops_platform.postgres.migrate import (
+    database_url_from_env_or_arg,
+    discover_migrations,
+    fetch_applied_migrations,
+    is_accepted_checksum_drift,
+    load_accepted_checksum_drifts,
+    run_psql,
+)
+
+candidate_src = Path(__import__("sys").argv[1])
+previous_src = Path(__import__("sys").argv[2])
+filename_pattern = re.compile(r"^(?P<version>\d{4})_[a-z0-9_]+\.sql$")
+
+
+def metadata(root):
+    return json.loads((root / "RELEASE.json").read_text(encoding="utf-8"))
+
+
+def schema_contract(root):
+    entries = []
+    migrations_dir = root / "backend/src/fin_ops_platform/postgres/migrations"
+    for path in sorted(migrations_dir.glob("*.sql")):
+        match = filename_pattern.fullmatch(path.name)
+        if match is None:
+            raise SystemExit(f"invalid migration filename: {path.name}")
+        entries.append(
+            {
+                "version": match.group("version"),
+                "name": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    if not entries:
+        raise SystemExit(f"no migrations found: {migrations_dir}")
+    fingerprint = hashlib.sha256(
+        json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        "contract": "postgres-schema-migrations-v1",
+        "migration_count": len(entries),
+        "migration_head": entries[-1]["version"],
+        "migration_fingerprint_sha256": fingerprint,
+    }
+
+
+candidate_meta = metadata(candidate_src)
+previous_meta = metadata(previous_src)
+candidate_contract = schema_contract(candidate_src)
+if candidate_meta.get("schema_contract") != candidate_contract:
+    raise SystemExit("candidate RELEASE.json schema contract does not match packaged migrations")
+previous_contract = schema_contract(previous_src)
+
+database_url = database_url_from_env_or_arg(None)
+migrations = discover_migrations(candidate_src / "backend/src/fin_ops_platform/postgres/migrations")
+applied = fetch_applied_migrations(database_url)
+accepted = load_accepted_checksum_drifts(
+    candidate_src / "backend/src/fin_ops_platform/postgres/accepted_checksum_drifts.json"
+)
+candidate_versions = {migration.version for migration in migrations}
+unexpected_applied = sorted(set(applied) - candidate_versions)
+if unexpected_applied:
+    raise SystemExit(
+        "production schema is ahead of candidate migrations: " + ", ".join(unexpected_applied)
+    )
+
+pending = []
+for migration in migrations:
+    current = applied.get(migration.version)
+    if current is None:
+        pending.append(
+            {
+                "version": migration.version,
+                "name": migration.name,
+                "sha256": migration.checksum_sha256,
+            }
+        )
+        continue
+    if current.checksum_sha256 == migration.checksum_sha256:
+        continue
+    if not is_accepted_checksum_drift(migration, current, accepted):
+        raise SystemExit(
+            f"production migration checksum mismatch: {migration.version} {migration.name}"
+        )
+
+server_version_num = int(run_psql(database_url, sql="show server_version_num;"))
+applied_versions = sorted(applied)
+
+
+def release_identity(name, release_meta, contract):
+    access = release_meta.get("settings_access_control") or {}
+    return {
+        "release_name": name,
+        "git_commit": release_meta.get("git_commit"),
+        "source_sha256": access.get("source_sha256"),
+        "schema_contract": contract,
+    }
+
+
+plan = {
+    "contract": "schema-rollback-compatibility-plan-v1",
+    "candidate": release_identity(
+        os.environ["CANDIDATE_RELEASE"], candidate_meta, candidate_contract
+    ),
+    "previous": release_identity(
+        os.environ["PREVIOUS_RELEASE"], previous_meta, previous_contract
+    ),
+    "database": {
+        "postgres_major": server_version_num // 10000,
+        "applied_migration_count": len(applied_versions),
+        "applied_migration_head": applied_versions[-1] if applied_versions else None,
+    },
+    "pending_migrations": pending,
+    "requires_compatibility_evidence": bool(pending),
+}
+plan["plan_fingerprint_sha256"] = hashlib.sha256(
+    json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
+).hexdigest()
+print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+}
+
+validate_schema_compatibility_evidence() {
+  local plan_path="$1"
+  local evidence_path="$2"
+  local require_fresh="${3:-false}"
+  "$API_PYTHON" - "$plan_path" "$evidence_path" "$require_fresh" <<'PY'
+from datetime import UTC, datetime
+import json
+from pathlib import Path
+import re
+import sys
+
+plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+evidence = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+require_fresh = sys.argv[3] == "true"
+required_operations = [
+    "bank_transaction_existing_upsert",
+    "correction_audit_same_transaction",
+    "import_enrichment",
+    "invoice_existing_upsert",
+    "settings_data_reset",
+]
+candidate = plan.get("candidate") or {}
+previous = plan.get("previous") or {}
+database = plan.get("database") or {}
+tested_schema_heads = [
+    str(item.get("version") or "") for item in plan.get("pending_migrations") or []
+]
+expected = {
+    "contract": "schema-rollback-compatibility-evidence-v1",
+    "status": "pass",
+    "plan_fingerprint_sha256": plan.get("plan_fingerprint_sha256"),
+    "candidate_release": candidate.get("release_name"),
+    "candidate_git_commit": candidate.get("git_commit"),
+    "previous_release": previous.get("release_name"),
+    "previous_git_commit": previous.get("git_commit"),
+    "postgres_major": database.get("postgres_major"),
+    "tested_schema_heads": tested_schema_heads,
+    "tested_operations": required_operations,
+    "candidate_schema_applied": True,
+    "previous_release_write_probe": True,
+}
+violations = {
+    key: {"expected": value, "actual": evidence.get(key)}
+    for key, value in expected.items()
+    if evidence.get(key) != value
+}
+database_name = str(evidence.get("test_database_name") or "")
+if "test" not in database_name.lower() or database_name.lower() in {"fin_ops", "postgres"}:
+    violations["test_database_name"] = {
+        "expected": "a disposable database name containing 'test'",
+        "actual": database_name,
+    }
+for key in ("test_run_id", "approved_by", "reason"):
+    if not str(evidence.get(key) or "").strip():
+        violations[key] = {"expected": "non-empty", "actual": evidence.get(key)}
+try:
+    generated_at = datetime.fromisoformat(str(evidence.get("generated_at") or ""))
+    if generated_at.tzinfo is None:
+        raise ValueError
+    age_seconds = (datetime.now(UTC) - generated_at.astimezone(UTC)).total_seconds()
+    if require_fresh and not 0 <= age_seconds <= 86400:
+        raise ValueError
+except ValueError:
+    violations["generated_at"] = {
+        "expected": "timezone-aware timestamp no older than 24 hours" if require_fresh else "timezone-aware timestamp",
+        "actual": evidence.get("generated_at"),
+    }
+if not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("probe_sha256") or "")):
+    violations["probe_sha256"] = {
+        "expected": "sha256 of the exact compatibility probe",
+        "actual": evidence.get("probe_sha256"),
+    }
+if violations:
+    raise SystemExit(
+        "schema compatibility evidence contract failed: "
+        + json.dumps(violations, ensure_ascii=False, sort_keys=True)
+    )
+normalized = {key: evidence.get(key) for key in (*expected, "test_database_name", "test_run_id", "approved_by", "reason", "generated_at", "probe_sha256")}
+print(json.dumps(normalized, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+}
+
+schema_compatibility_evidence_install() {
+  local release="${1:-}"
+  [[ "$#" -eq 2 && "$2" == "--stdin" ]] \
+    || die "schema-compatibility-evidence-install requires release name and --stdin"
+  local plan_path input_path normalized_path target_path requires_evidence
+  plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
+  input_path="$(mktemp /run/finops-schema-evidence-input.XXXXXX)"
+  normalized_path="$(mktemp /run/finops-schema-evidence-normalized.XXXXXX)"
+  trap 'rm -f -- "$plan_path" "$input_path" "$normalized_path"' RETURN
+  schema_compatibility_plan "$release" --json >"$plan_path"
+  requires_evidence="$("$API_PYTHON" - "$plan_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+print("true" if json.loads(Path(sys.argv[1]).read_text())["requires_compatibility_evidence"] else "false")
+PY
+)"
+  [[ "$requires_evidence" == "true" ]] \
+    || die "candidate has no pending migrations; schema compatibility evidence is unnecessary"
+  dd bs=262145 count=1 of="$input_path" status=none
+  [[ "$(stat -c %s "$input_path")" -le 262144 ]] || die "schema compatibility evidence exceeds 256 KiB"
+  validate_schema_compatibility_evidence "$plan_path" "$input_path" true >"$normalized_path"
+  install -d -m 0700 "$SCHEMA_COMPATIBILITY_EVIDENCE_ROOT"
+  target_path="$SCHEMA_COMPATIBILITY_EVIDENCE_ROOT/$release.json"
+  [[ ! -e "$target_path" ]] || die "schema compatibility evidence already exists: $target_path"
+  install -o root -g root -m 0600 "$normalized_path" "$target_path"
+  printf '%s\n' "$target_path"
+}
+
+schema_compatibility_evidence_valid() {
+  local release="$1"
+  local plan_path="$2"
+  local evidence_path="$SCHEMA_COMPATIBILITY_EVIDENCE_ROOT/$release.json"
+  local candidate_src
+  [[ -f "$evidence_path" ]] || return 1
+  validate_schema_compatibility_evidence "$plan_path" "$evidence_path" false >/dev/null || return 1
+  candidate_src="$(release_src "$release")"
+  [[ -f "$MIGRATOR_ENV" ]] || return 1
+  set -a
+  # shellcheck disable=SC1090
+  source "$MIGRATOR_ENV"
+  set +a
+  PYTHONPATH="$candidate_src/backend/src" "$API_PYTHON" - "$plan_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+from fin_ops_platform.postgres.migrate import (
+    database_url_from_env_or_arg,
+    fetch_applied_migrations,
+)
+
+plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+applied = fetch_applied_migrations(database_url_from_env_or_arg(None))
+database = plan.get("database") or {}
+initial_count = int(database.get("applied_migration_count") or 0)
+initial_head = database.get("applied_migration_head")
+pending = plan.get("pending_migrations") or []
+allowed_states = {(initial_count, initial_head)}
+for index, item in enumerate(pending, start=1):
+    allowed_states.add((initial_count + index, item.get("version")))
+actual_versions = sorted(applied)
+actual_state = (
+    len(actual_versions),
+    actual_versions[-1] if actual_versions else None,
+)
+if actual_state not in allowed_states:
+    raise SystemExit(
+        f"production schema state {actual_state!r} is outside the tested migration prefix"
+    )
+for item in pending:
+    current = applied.get(str(item.get("version") or ""))
+    if current is not None and current.checksum_sha256 != item.get("sha256"):
+        raise SystemExit(
+            f"applied candidate migration checksum changed: {current.version}"
+        )
 PY
 }
 
@@ -2645,7 +2959,26 @@ rollback_release_gate() {
   local failure_checkpoint="$5"
   local release_profile="$6"
   local rolled_back=false
+  local schema_plan_path="$evidence_dir/schema-compatibility-plan.json"
+  local schema_evidence_required=false
   cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
+  if [[ -f "$schema_plan_path" ]]; then
+    schema_evidence_required="$("$API_PYTHON" - "$schema_plan_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+print("true" if json.loads(Path(sys.argv[1]).read_text())["requires_compatibility_evidence"] else "false")
+PY
+)"
+  fi
+  if [[ "$schema_evidence_required" == "true" ]] \
+    && ! schema_compatibility_evidence_valid "$candidate" "$schema_plan_path"; then
+    systemctl stop fin-ops.service || true
+    stop_runtime_worker_services_for_activation || true
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
+    die "release gate failed at $failure_checkpoint; previous release is not proven compatible with the candidate schema, production remains in maintenance for forward repair"
+  fi
   if [[ "$release_profile" == "acl" ]]; then
     systemctl stop fin-ops.service || true
     stop_runtime_worker_services_for_activation || true
@@ -2680,6 +3013,7 @@ release_gate_activate() {
   local release="${1:-}"
   [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
   local admin_token previous_release active_count evidence_dir profile_report release_profile
+  local schema_plan_path schema_evidence_required
   release_src "$release" >/dev/null
   assert_runtime_env_contract
   candidate_status "$release" --json >/dev/null
@@ -2691,7 +3025,8 @@ release_gate_activate() {
     || die "release gate requires exactly one active release, found $active_count"
   [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
   profile_report="$(mktemp /run/finops-release-profile.XXXXXX)"
-  trap 'rm -f -- "$profile_report"' EXIT
+  schema_plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
+  trap 'rm -f -- "$profile_report" "$schema_plan_path"' EXIT
   release_gate_profile "$release" --json >"$profile_report"
   release_profile="$("$API_PYTHON" - "$profile_report" <<'PY'
 import json
@@ -2705,10 +3040,23 @@ if profile not in {"frontend", "runtime", "acl"}:
 print(profile)
 PY
 )"
+  schema_compatibility_plan "$release" --json >"$schema_plan_path"
+  schema_evidence_required="$("$API_PYTHON" - "$schema_plan_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+print("true" if json.loads(Path(sys.argv[1]).read_text())["requires_compatibility_evidence"] else "false")
+PY
+)"
+  if [[ "$schema_evidence_required" == "true" ]] \
+    && ! schema_compatibility_evidence_valid "$release" "$schema_plan_path"; then
+    die "candidate has pending migrations but no exact previous-release compatibility evidence; services were not stopped and schema was not changed"
+  fi
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
   install -m 0600 "$profile_report" "$evidence_dir/profile.json"
+  install -m 0600 "$schema_plan_path" "$evidence_dir/schema-compatibility-plan.json"
   if [[ "$release_profile" == "frontend" ]]; then
     if ! release_gate_frontend_checkpoint \
       "$previous_release" pre "$admin_token" "$evidence_dir"; then
@@ -2799,7 +3147,7 @@ PY
     rollback_release_gate \
       "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract "$release_profile"
   fi
-  rm -f -- "$profile_report"
+  rm -f -- "$profile_report" "$schema_plan_path"
   trap - EXIT
 }
 cmd="${1:-}"
@@ -2817,6 +3165,14 @@ case "$cmd" in
   candidate-status)
     shift
     candidate_status "$@"
+    ;;
+  schema-compatibility-plan)
+    shift
+    schema_compatibility_plan "$@"
+    ;;
+  schema-compatibility-evidence-install)
+    shift
+    schema_compatibility_evidence_install "$@"
     ;;
   release-gate-profile)
     shift

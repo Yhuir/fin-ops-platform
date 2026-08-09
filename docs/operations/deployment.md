@@ -46,10 +46,11 @@
 
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control check-release <release-name>
-sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
+sudo -n /usr/local/sbin/finops-deploy-control schema-compatibility-plan <release-name> --json
+sudo -n /usr/local/sbin/finops-deploy-control release-gate-activate <release-name>
 ```
 
-`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release，执行 schema migration，并调用服务器上
+`release-gate-activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release。它先验证候选 migration fingerprint 与生产 applied schema；存在 pending migration 时必须先有 exact previous-code/candidate-schema 写入证据，否则在停止服务前失败。只有通过后才执行 schema migration，并调用服务器上
 root-owned 的 `/usr/local/sbin/finops-ensure-runtime-workers`，幂等安装 runtime worker systemd 模板、补齐缺失的
 worker env、并 `enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。

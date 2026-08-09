@@ -18,6 +18,7 @@ import tempfile
 
 
 RELEASE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+MIGRATION_FILENAME_PATTERN = re.compile(r"^(?P<version>\d{4})_[a-z0-9_]+\.sql$")
 RELEASE_EXCLUDED_PARTS = {
     ".git",
     ".mypy_cache",
@@ -576,6 +577,7 @@ def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
         "git_status_porcelain": _git_output(config.root_dir, "status", "--porcelain"),
         "frontend_base_path": config.frontend_base_path,
         "deploy_mode": "release",
+        "schema_contract": _schema_contract(config.root_dir),
         "settings_access_control": {
             "capability": "settings-access-control-v1",
             "migration": migration_path.name,
@@ -583,6 +585,40 @@ def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
             "deploy_control_sha256": _file_sha256(helper_path),
             "source_sha256": _release_source_sha256(config.root_dir),
         },
+    }
+
+
+def _schema_contract(root_dir: Path) -> dict[str, object]:
+    migrations_dir = (
+        root_dir
+        / "backend"
+        / "src"
+        / "fin_ops_platform"
+        / "postgres"
+        / "migrations"
+    )
+    entries: list[dict[str, str]] = []
+    for path in sorted(migrations_dir.glob("*.sql")):
+        match = MIGRATION_FILENAME_PATTERN.fullmatch(path.name)
+        if match is None:
+            raise RuntimeError(f"invalid PostgreSQL migration filename: {path.name}")
+        entries.append(
+            {
+                "version": match.group("version"),
+                "name": path.name,
+                "sha256": _file_sha256(path),
+            }
+        )
+    if not entries:
+        raise RuntimeError(f"no PostgreSQL migrations found: {migrations_dir}")
+    fingerprint = hashlib.sha256(
+        json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "contract": "postgres-schema-migrations-v1",
+        "migration_count": len(entries),
+        "migration_head": entries[-1]["version"],
+        "migration_fingerprint_sha256": fingerprint,
     }
 
 

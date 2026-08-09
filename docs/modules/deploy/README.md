@@ -48,9 +48,10 @@
 1. 本地构建 `web/dist`，打包 `backend + web/dist + scripts + deploy/oa`。
 2. 上传到 `/opt/fin-ops/releases/<release-name>/src`。
 3. 远端先执行 deploy-control contract check、release layout check、storage preflight、`check-release`。
-4. 激活时由 root-owned `finops-deploy-control` 执行依赖安装、PostgreSQL migration、legacy current archive、systemd drop-in、runtime worker ensure、frontend publish、service restart、worker readiness wait。
-5. 发布脚本等待本机 `/health/ready`，再检查公网 `/fin-ops-api/api/session/me` 和 `/fin-ops/api/session/me` 都作为 JSON API 被代理。
-6. 旧 release 默认保留最近 4 个，并保护 active release references。
+4. 激活前由 root-owned `finops-deploy-control` 计算 candidate schema plan；存在 pending migration 时必须先验真“上一 release 代码 + 每个候选中间 schema head”的 PostgreSQL 写入证据。证据缺失时在停止服务、执行 migration 前失败关闭。
+5. 通过兼容门禁后执行依赖安装、PostgreSQL migration、legacy current archive、systemd drop-in、runtime worker ensure、frontend publish、service restart、worker readiness wait。
+6. 发布脚本等待本机 `/health/ready`，再检查公网 `/fin-ops-api/api/session/me` 和 `/fin-ops/api/session/me` 都作为 JSON API 被代理。
+7. 旧 release 默认保留最近 4 个，并保护 active release references。
 
 旧覆盖式 `legacy-current` deploy mode 已移除；`scripts/deploy-oa.sh` 不再接受 `--mode`，
 也不再生成覆盖 `/www/wwwroot/fin-ops/dist` 或 `/opt/fin-ops/current/backend` 的 payload。
@@ -71,6 +72,7 @@ bash scripts/verify.sh all
 - 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；标准激活不读取或要求 `YNSYLP006`。
 - `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。切换前固定捕获已通过 preflight 的 active worker 集合，切换与回退都必须重启同一集合，不得在 stop 之后重新从 active 状态推导。
 - `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 使用相同的 005-only 门禁，并在失败后保持 maintenance、仅允许 forward repair。
+- `RELEASE.json.schema_contract` 绑定候选 migration count/head/fingerprint。无 pending migration 时沿用原快速路径；有 pending migration 时只接受与 exact candidate、exact previous、PostgreSQL major、全部中间 schema heads 及固定写操作矩阵一致的 root-owned evidence。候选失败后若该证据缺失或漂移，禁止激活 previous binary，生产保持 maintenance 并 forward repair。
 - 三项 retired admission env 和 legacy admin env 已完成一次性清理；稳态发布只读断言它们缺席。历史 OA non-dedicated binding cleanup/rollback SQL 与激活代码已经删除，migration 0132/0133 作为不可变历史保留。
 - release 上传不得更新 root helper。deploy-control 变更仍使用 candidate hash-pinned、同文件系统 temp + atomic `mv` bootstrap；禁止 `self-update`。
 
