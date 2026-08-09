@@ -39,11 +39,14 @@ class BankDetailsPostgresIntegrationTests(unittest.TestCase):
             """
             insert into app.bank_transactions(
                 legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
-                amount, signed_amount, txn_date, txn_month, trade_time, summary, status
+                amount, signed_amount, txn_date, txn_month, trade_time, summary,
+                raw_payload, status
             ) values (
                 'bank-narrow-1', '6222000011118106', 'outflow', '材料供应商',
                 118, -118, '2026-07-31', '2026-07-01',
-                '2026-07-31 10:00:00', '材料款', 'active'
+                '2026-07-31 10:00:00', '材料款',
+                '{"normalized_payload":{"imported_bank_name":"建设银行","imported_bank_last4":"8106"}}'::jsonb,
+                'active'
             )
             """
         )
@@ -99,6 +102,8 @@ class BankDetailsPostgresIntegrationTests(unittest.TestCase):
         [row] = payload["rows"]
         self.assertEqual(row["id"], "bank-narrow-1")
         self.assertEqual(row["effective_category_code"], "materials")
+        self.assertEqual(row["bank_name"], "建设银行")
+        self.assertEqual(row["account_last4"], "8106")
 
         filtered_payload = BankDetailsCanonicalQueryService(
             PostgresBankDetailsCanonicalQueryRepository(self.connection)

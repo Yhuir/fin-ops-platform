@@ -183,6 +183,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertIn("from classified_filter_rows", main_sql)
         self.assertIn("classified_with_semantics as not materialized", main_sql)
         self.assertIn("join classified_with_semantics page_rows", main_sql)
+        self.assertIn("left join app.bank_transactions page_bank", main_sql)
         self.assertNotIn("select *\n              from filtered", main_sql)
         rule_source_sql = main_sql.split(
             "canonical_rule_banks as materialized", 1
@@ -210,6 +211,55 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             ],
         )
         self.assertEqual(payload["pagination"]["total"], 1)
+
+    def test_page_classifier_defers_large_raw_payload_until_page_rows(self) -> None:
+        definition = {
+            "code": "fee",
+            "status": "active",
+            "rules": {
+                "match_fields": ["summary_text"],
+                "contains_any": ["手续费"],
+            },
+        }
+
+        sql, _params = _classification_cte(
+            definitions=[definition],
+            date_from="2026-01-01",
+            date_to="2026-12-31",
+            defer_full_payload=True,
+        )
+
+        source_sql = sql.split("source_rows as materialized", 1)[1].split(
+            "display_rows as materialized",
+            1,
+        )[0]
+        self.assertIn("'{}'::jsonb as normalized_payload", source_sql)
+        self.assertNotIn("bank.raw_payload,", source_sql)
+
+        for raw_definition in (
+            {
+                **definition,
+                "rules": {
+                    "match_fields": ["counterparty_bank"],
+                    "contains_any": ["建设银行"],
+                },
+            },
+            {
+                **definition,
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "contains_any": ["建设银行"],
+                },
+            },
+            {**definition, "account_scope": {"type": "account_type"}},
+        ):
+            raw_field_sql, _raw_field_params = _classification_cte(
+                definitions=[raw_definition],
+                date_from="2026-01-01",
+                date_to="2026-12-31",
+                defer_full_payload=True,
+            )
+            self.assertIn("bank.raw_payload->'normalized_payload'", raw_field_sql)
 
     def test_money_keyword_prefilters_rule_classification_candidates(self) -> None:
         connection = _Connection()

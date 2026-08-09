@@ -547,6 +547,7 @@
 
 - 生产稳定窗证明银行明细年度首屏唯一超出核心读取 `p95 <= 1000ms`，数据库执行占绝大部分；其它重点 direct-canonical 页面与关联台均已达标，因此不扩散修改范围。
 - 同一 `_classification_cte(...)` 新增窄 `classified_filter_rows`，全量范围只物化筛选、精确统计、分类 facets 与分页键所需字段；完整页面 DTO 的 `classified_with_semantics` 仅在 Bank Details 分页查询中允许 PostgreSQL 按 50 个 page keys 延迟展开。导出、Workbench/批量账务复用的 bounded classifier 继续保留原物化合同。
+- 第二轮生产剖析确认约 `1s` 固定成本来自默认规则分类时仍为全量行解压 `raw_payload`；分页查询现仅在规则、账户范围或关键词确实依赖原始字段时展开 normalized payload，默认文本规则只扫描 canonical 列，银行名称与尾号在 page keys 确定后回连当前页补齐。
 - API、repeatable-read snapshot、分类/人工覆盖优先级、内部往来匹配、精确 total/facets、关系查询、分页与导出合同不变；没有新增缓存、read model、worker、表、索引、依赖或并行旧路径。真实 PostgreSQL integration 同时校验标签文本筛选、分类筛选、facets 和完整行 DTO。
 
 ## 2026-08-08 - 标签筛选面板可读性放大

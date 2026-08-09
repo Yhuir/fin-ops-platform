@@ -505,6 +505,44 @@ class PostgresBankDetailsCanonicalQueryRepository:
             )
             select
               page_rows.*,
+              coalesce(
+                nullif(
+                  case
+                    when jsonb_typeof(page_bank.raw_payload->'normalized_payload') = 'object'
+                      then page_bank.raw_payload->'normalized_payload'->>'imported_bank_name'
+                    else page_bank.raw_payload->>'imported_bank_name'
+                  end,
+                  ''
+                ),
+                nullif(
+                  case
+                    when jsonb_typeof(page_bank.raw_payload->'normalized_payload') = 'object'
+                      then page_bank.raw_payload->'normalized_payload'->>'bank_name'
+                    else page_bank.raw_payload->>'bank_name'
+                  end,
+                  ''
+                ),
+                page_rows.bank_name
+              ) as imported_bank_name,
+              coalesce(
+                nullif(
+                  case
+                    when jsonb_typeof(page_bank.raw_payload->'normalized_payload') = 'object'
+                      then page_bank.raw_payload->'normalized_payload'->>'imported_bank_last4'
+                    else page_bank.raw_payload->>'imported_bank_last4'
+                  end,
+                  ''
+                ),
+                nullif(
+                  case
+                    when jsonb_typeof(page_bank.raw_payload->'normalized_payload') = 'object'
+                      then page_bank.raw_payload->'normalized_payload'->>'account_last4'
+                    else page_bank.raw_payload->>'account_last4'
+                  end,
+                  ''
+                ),
+                page_rows.account_last4
+              ) as imported_bank_last4,
               summary.total as result_total,
               summary.expense_count as result_expense_count,
               summary.income_count as result_income_count,
@@ -516,6 +554,8 @@ class PostgresBankDetailsCanonicalQueryRepository:
             left join page_keys on true
             left join classified_with_semantics page_rows
               on page_rows.row_id = page_keys.row_id
+            left join app.bank_transactions page_bank
+              on page_bank.id::text = page_rows.canonical_transaction_id
             order by page_keys.trade_time_sort desc nulls last, page_keys.row_id desc
             """,
             tuple(
@@ -977,6 +1017,44 @@ def _classification_cte(
         date_to=date_to,
         keyword=keyword,
     )
+    normalized_payload_fields = {
+        "all_text",
+        "counterparty_account",
+        "counterparty_bank",
+        "account_type",
+        "bank_name",
+    }
+    active_definitions = [
+        definition
+        for definition in definitions
+        if str(definition.get("status") or "active") == "active"
+    ]
+    needs_normalized_payload = (
+        not defer_full_payload
+        or bool(str(keyword or "").strip())
+        or any(
+            isinstance(definition.get("rules"), dict)
+            and normalized_payload_fields.intersection(
+                str(field)
+                for field in list(definition["rules"].get("match_fields") or [])
+            )
+            for definition in active_definitions
+        )
+        or any(
+            isinstance(definition.get("account_scope"), dict)
+            and str(definition["account_scope"].get("type") or "")
+            in {"account_type", "bank"}
+            for definition in active_definitions
+        )
+    )
+    normalized_payload_sql = (
+        "case "
+        "when jsonb_typeof(bank.raw_payload->'normalized_payload') = 'object' "
+        "then bank.raw_payload->'normalized_payload' "
+        "else bank.raw_payload end"
+        if needs_normalized_payload
+        else "'{}'::jsonb"
+    )
     query_target_cte_sql = (
         f"""
         query_target_rows as materialized (
@@ -1057,12 +1135,7 @@ def _classification_cte(
             bank.summary,
             bank.remark,
             bank.bank_text_fields,
-            bank.raw_payload,
-            case
-              when jsonb_typeof(bank.raw_payload->'normalized_payload') = 'object'
-                then bank.raw_payload->'normalized_payload'
-              else bank.raw_payload
-            end as normalized_payload,
+            {normalized_payload_sql} as normalized_payload,
             manual.category as manual_category_code,
             manual.source as manual_category_source,
             manual.version as manual_category_version,
