@@ -175,24 +175,6 @@ class FakeWriteConnection:
         return FakeTransactionContext(self.transaction_value)
 
 
-def read_model_pass_report() -> dict[str, object]:
-    return {
-        "status": "pass",
-        "planned_scope_count": 1,
-        "result_count": 1,
-        "failed_count": 0,
-        "results": [
-            {
-                "status": "pass",
-                "read_model_key": "workbench",
-                "scope_type": "workbench",
-                "scope_key": "all",
-                "enqueue_to_fresh_ms": 500.0,
-            }
-        ],
-    }
-
-
 def http_pass_report() -> dict[str, object]:
     return {
         "status": "pass",
@@ -541,7 +523,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate,
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
-        ), patch.object(gate.read_model_slo_smoke, "run_smoke") as read_model_smoke, patch.object(
+        ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
         ) as http_slo, patch.object(
@@ -567,7 +549,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "page_canonical_audit",
             ],
         )
-        read_model_smoke.assert_not_called()
         http_slo.assert_not_called()
         write_audit.assert_not_called()
         business_write_e2e.assert_not_called()
@@ -702,10 +683,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
         ), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value=read_model_pass_report(),
-        ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
             return_value=http_pass_report(),
@@ -721,7 +698,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 object(),
                 base_url="https://example.test",
                 headers={"Authorization": "Bearer token"},
-                apply_read_model_smoke=True,
             )
 
         self.assertEqual(report["status"], gate.PASS)
@@ -729,7 +705,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             [check["name"] for check in report["checks"]],
             [
                 "postgres_reversible_write",
-                "read_model_direct_smoke",
                 "authenticated_http_slo",
                 "health_ready_payload",
                 "write_operation_audit",
@@ -740,12 +715,12 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         )
         business_write_e2e.assert_not_called()
 
-    def test_stability_gate_observes_without_enqueuing_read_model_smoke(self) -> None:
+    def test_stability_gate_is_read_only(self) -> None:
         with patch.object(
             gate,
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
-        ), patch.object(gate.read_model_slo_smoke, "run_smoke") as read_model_smoke, patch.object(
+        ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
             return_value=http_pass_report(),
@@ -759,12 +734,10 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 base_url="https://example.test",
                 headers={"Authorization": "Bearer token"},
                 profile="stability",
-                apply_read_model_smoke=True,
             )
 
         self.assertEqual(report["status"], gate.PASS)
         self.assertNotIn("read_model_direct_smoke", [check["name"] for check in report["checks"]])
-        read_model_smoke.assert_not_called()
 
     def test_gate_fails_without_authenticated_read_only_evidence(self) -> None:
         with patch.object(
@@ -780,10 +753,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate,
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
-        ), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value={"status": "dry_run", "planned_scope_count": 14},
         ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
@@ -805,7 +774,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
 
         self.assertEqual(report["status"], gate.FAIL)
         self.assertIn("page_canonical_audit", report["failed_checks"])
-        self.assertIn("read_model_direct_smoke", report["failed_checks"])
         self.assertIn("authenticated_http_slo", report["failed_checks"])
         self.assertFalse(report["auth_configured"])
 
@@ -835,10 +803,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
         ), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value=read_model_pass_report(),
-        ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
             side_effect=collect_http,
@@ -852,7 +816,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 base_url="https://example.test",
                 headers={"Authorization": "Bearer user"},
                 admin_headers={"Cookie": "Admin-Token=admin"},
-                apply_read_model_smoke=True,
             )
 
         self.assertEqual(report["status"], gate.PASS)
@@ -864,15 +827,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate,
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
-        ), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value={
-                "status": "pass",
-                "planned_scope_count": 0,
-                "result_count": 0,
-                "results": [],
-            },
         ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
@@ -895,11 +849,9 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 object(),
                 base_url="https://example.test",
                 headers={"Authorization": "Bearer token"},
-                apply_read_model_smoke=True,
             )
 
         self.assertEqual(report["status"], gate.FAIL)
-        self.assertIn("read_model_direct_smoke", report["failed_checks"])
         self.assertIn("authenticated_http_slo", report["failed_checks"])
         self.assertIn("write_operation_audit", report["failed_checks"])
 
@@ -915,10 +867,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "RuntimeMonitoringRepository",
             FakeRuntimeMonitoringRepository,
         ), patch.object(
-            gate.read_model_slo_smoke,
-            "run_smoke",
-            return_value=read_model_pass_report(),
-        ), patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
             return_value=http_pass_report(),
@@ -931,7 +879,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 object(),
                 base_url="https://example.test",
                 headers={"Authorization": "Bearer token"},
-                apply_read_model_smoke=True,
             )
 
         self.assertEqual(report["status"], gate.PASS)

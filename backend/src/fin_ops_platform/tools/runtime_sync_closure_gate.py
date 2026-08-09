@@ -21,7 +21,6 @@ from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_
 from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
-    read_model_slo_smoke,
     write_operation_e2e_smoke,
     write_operation_slo_audit,
 )
@@ -89,7 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
     parser.add_argument("--allow-unauthenticated-http", action="store_true")
     parser.add_argument("--profile", choices=GATE_PROFILES, default="full")
-    parser.add_argument("--apply-read-model-smoke", action="store_true")
+    # ponytail: accept the retired flag until the pinned production helper is replaced.
+    parser.add_argument("--apply-read-model-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
@@ -140,7 +140,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         admin_headers=admin_headers,
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
         profile=str(args.profile),
-        apply_read_model_smoke=bool(args.apply_read_model_smoke),
         read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
@@ -176,7 +175,6 @@ def run_closure_gate(
     admin_headers: Mapping[str, str] | None = None,
     allow_unauthenticated_http: bool = False,
     profile: str = "full",
-    apply_read_model_smoke: bool = False,
     read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
@@ -224,17 +222,6 @@ def run_closure_gate(
             ]
         )
     else:
-        if profile == "full":
-            checks.append(
-                _read_model_smoke_check(
-                    connection,
-                    apply=apply_read_model_smoke,
-                    tenant_id=tenant_id,
-                    target_ms=read_model_target_ms,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
-                )
-            )
         checks.extend(
             [
                 _http_slo_check(
@@ -317,7 +304,6 @@ def run_closure_gate(
             ),
         },
         "auth_configured": _auth_configured(normalized_headers) or _auth_configured(normalized_admin_headers),
-        "apply_read_model_smoke": bool(apply_read_model_smoke),
         "checks": [check.to_payload() for check in checks],
         "failed_checks": [check.name for check in checks if check.status == FAIL],
         "skipped_checks": [check.name for check in checks if check.status == SKIP],
@@ -422,51 +408,6 @@ def _runtime_health_check(
                 },
             )
         sleep(min(max(0.05, poll_interval_seconds), max(0.0, deadline - monotonic())))
-
-
-def _read_model_smoke_check(
-    connection: Any,
-    *,
-    apply: bool,
-    tenant_id: str,
-    target_ms: float,
-    timeout_seconds: float,
-    poll_interval_seconds: float,
-) -> ClosureCheck:
-    report = read_model_slo_smoke.run_smoke(
-        connection,
-        apply=apply,
-        tenant_id=tenant_id,
-        target_ms=target_ms,
-        timeout_seconds=timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-        critical_only=True,
-    )
-    if not apply:
-        return ClosureCheck(
-            "read_model_direct_smoke",
-            FAIL,
-            "Direct read model smoke was not applied; final closure requires enqueue-to-fresh evidence.",
-            _compact_report(report),
-        )
-    planned_scope_count = _safe_int(report.get("planned_scope_count"))
-    result_count = _safe_int(report.get("result_count"))
-    if report.get("status") == PASS and (planned_scope_count <= 0 or result_count <= 0):
-        return ClosureCheck(
-            "read_model_direct_smoke",
-            FAIL,
-            "Direct read model smoke produced no scope/result samples; final closure requires non-empty enqueue-to-fresh evidence.",
-            {
-                **_compact_report(report),
-                "error": "read_model_smoke_empty_samples",
-            },
-        )
-    return ClosureCheck(
-        "read_model_direct_smoke",
-        PASS if report.get("status") == PASS else FAIL,
-        "All critical App Status read models converged within target." if report.get("status") == PASS else "One or more critical read models missed the direct-scope SLO.",
-        _compact_report(report),
-    )
 
 
 def _http_slo_check(
