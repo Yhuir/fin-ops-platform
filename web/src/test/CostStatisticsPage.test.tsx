@@ -157,6 +157,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*36px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
+    expect(css).toMatch(/\.cost-explorer-list\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
     expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
