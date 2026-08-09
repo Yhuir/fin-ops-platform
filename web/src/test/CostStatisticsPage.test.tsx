@@ -762,7 +762,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "按标签" }));
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
-    expect(within(dialog).getByRole("button", { name: "按标签" })).toHaveClass("active");
+    expect(within(dialog).getByRole("button", { name: "按标签" })).toHaveAttribute("aria-pressed", "true");
 
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
 
@@ -1062,7 +1062,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expectProjectCostDialog("导出中心");
-    expect(within(dialog).getByRole("button", { name: "按时间" })).toHaveClass("active");
+    expect(within(dialog).getByRole("button", { name: "按时间" })).toHaveAttribute("aria-pressed", "true");
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
       expect.any(Object),
@@ -1150,7 +1150,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expectProjectCostDialog("导出中心");
-    expect(within(dialog).getByRole("button", { name: "按项目" })).toHaveClass("active");
+    expect(within(dialog).getByRole("button", { name: "按项目" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
     await user.click(within(dialog).getByLabelText("交通费"));
     await user.click(within(dialog).getByLabelText("经营/办公费用"));
@@ -1192,7 +1192,7 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expectProjectCostDialog("导出中心");
-    expect(within(dialog).getByRole("button", { name: "按费用类型" })).toHaveClass("active");
+    expect(within(dialog).getByRole("button", { name: "按费用类型" })).toHaveAttribute("aria-pressed", "true");
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
     expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
     await user.click(within(dialog).getByLabelText("自定义时间区间（精确到日）"));

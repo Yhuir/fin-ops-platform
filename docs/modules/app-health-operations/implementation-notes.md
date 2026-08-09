@@ -590,3 +590,7 @@
 - 修复边界：Audit handler 保持只读。生产 drift 只允许通过正式 `ReadModelRefreshGateway` / durable queue 按 `workbench_relation -> invoice_lifecycle -> downstream page read models` 分阶段重建；每阶段必须等待 queue drained，再复跑 9 个 Audit。
 - 测试覆盖：`tests/test_operations_audit_report.py`、`tests/test_audit_page_business_read_model_tool.py`、`tests/test_audit_input_invoice_usage_read_model_tool.py`、`tests/test_audit_output_invoice_collection_read_model_tool.py`、`tests/test_app_health_api.py`。
 - 保证边界：全部 Audit 通过只能证明已登记 App 内部 canonical facts、read models、relation edges、freshness 与 queue 一致；不能证明银行/OA/发票源系统或 `t_payment_simple` 没有漏同步。
+## 2026-08-10 - 状态页面去卡片墙
+
+- 审计指标和运行概览改为连续分区带，正常项降低视觉重量，异常色和既有诊断顺序保持不变。
+- 只调整页面样式，不改变 `/api/app-health`、readiness、worker blocker、权限或诊断字段。

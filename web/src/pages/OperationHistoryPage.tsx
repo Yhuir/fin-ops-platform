@@ -245,7 +245,7 @@ export default function OperationHistoryPage() {
 
       {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
 
-      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={closeDetail}>
+      <AppDrawer open={selected !== null} title="操作详情" width={720} onClose={closeDetail}>
         {selected ? (
           <div className="operation-history-detail">
             <dl>

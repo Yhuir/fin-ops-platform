@@ -23,3 +23,6 @@
 8. 生产数据验证时间行不输出 OA 占位项目/费用类型，标签顺序符合支出/混合/收入合同。
 
 不运行 183 个浏览器测试或无关全量 CI；只运行成本统计及直接受影响的回归门禁。
+## 2026-08-10 视觉回归
+
+- `web/src/test/CostStatisticsPage.test.tsx` 保护 HeroUI 导出中心的类型切换、字段选择和原有导出链；`DesignTokens.test.ts` 保护共享 token 完整性。

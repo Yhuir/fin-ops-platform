@@ -338,3 +338,6 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `tests/test_oa_attachment_invoice_promotion_service.py` 保护一个费用项可绑定多张正式发票，promotion 写入时复用现有五个月 matching window，并证明 canonical invoice 与 durable dirty scope 在同一 PostgreSQL transaction 内提交。
 - `tests/test_workbench_free_matching_engine.py` 保护已有 OA + 流水 active relation 能按明确 `attachment_source` 一次扩展全部 5 张发票；附件合计与 OA 相差 0.13 元时保留金额不一致，不丢附件、不改 case id。
 - 同一 promotion service 的人工刷新回归进一步保护：canonical 发票已全部存在且 source link 不变时零 invoice write，但显式补发精确五个月 matching reconciliation；自动 OA sync 仍保持幂等零 dirty。
+## 2026-08-10 视觉回归
+
+- `web/src/test/ReconciliationWorkbenchPage.test.tsx` 继续保护关联台交互；共享对话框/抽屉与 token 由前端组件测试和 `DesignTokens.test.ts` 保护。

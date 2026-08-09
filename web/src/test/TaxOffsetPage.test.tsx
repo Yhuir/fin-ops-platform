@@ -26,7 +26,7 @@ afterEach(() => {
 function getStatCard(label: string) {
   const card = screen
     .getAllByText(label)
-    .map((element) => element.closest(".stat-card"))
+    .map((element) => element.closest(".tax-summary-band__metric, .stat-card"))
     .find((element): element is HTMLElement => Boolean(element));
   if (!card) {
     throw new Error(`Stat card not found for ${label}`);
@@ -86,13 +86,14 @@ describe("Tax offset workbench", () => {
 
   test("keeps tax offset premium visual polish scoped to project primitives", () => {
     const styles = readFileSync("src/app/styles.css", "utf8");
-    const summarySource = readFileSync("src/components/tax/TaxSummaryCards.tsx", "utf8");
+    const summarySource = readFileSync("src/components/tax/TaxSummaryBand.tsx", "utf8");
     const certifiedDrawerSource = readFileSync("src/components/tax/CertifiedResultsDrawer.tsx", "utf8");
 
-    expect(summarySource).toContain("tax-summary-strip");
-    expect(summarySource).toContain("tax-summary-card");
-    expect(styles).toMatch(/\.tax-summary-card\.stat-card\s*\{/);
-    expect(styles).toMatch(/\.tax-result-panel\s*\{[\s\S]*border-left:\s*3px solid var\(--fp-primary\)/);
+    expect(summarySource).toContain("tax-summary-band");
+    expect(styles).toMatch(/\.tax-summary-band\s*\{[\s\S]*border:\s*1px solid var\(--fp-border\)/);
+    expect(styles).toMatch(/\.tax-summary-band__metric\s*\{[\s\S]*border-right:\s*1px solid var\(--fp-border-subtle\)/);
+    expect(styles).not.toContain(".tax-summary-card");
+    expect(styles).not.toContain(".tax-result-panel");
     expect(styles).toMatch(/\.tax-panel-header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
     expect(styles).toMatch(/\.tax-certified-drawer\s*\{[\s\S]*border-radius:\s*var\(--fp-radius-md\)/);
     expect(styles).toMatch(/\.tax-certified-drawer-body\s*\{[^}]*transition:[^}]*opacity[^}]*transform/s);

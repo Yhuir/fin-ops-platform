@@ -487,7 +487,7 @@ function formatConfirmAuditMessage(audit: ImportPreviewAuditCounts | null) {
   return `将导入 ${audit.confirmableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
 }
 
-function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }) {
+function AuditSummaryBand({ audit }: { audit: ImportPreviewAuditCounts | null }) {
   if (!audit) {
     return null;
   }
@@ -501,15 +501,15 @@ function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }
     ["未导入", audit.skippedCount],
   ] as const;
   return (
-    <div aria-label="导入预览审计汇总" className="import-workflow-audit-grid">
+    <div aria-label="导入预览审计汇总" className="import-workflow-audit-band">
       {items.map(([label, value]) => (
         <div
           key={label}
           aria-label={`审计汇总 ${label} ${value}`}
-          className="import-workflow-audit-card"
+          className="import-workflow-audit-metric"
         >
-          <div className="import-workflow-audit-card__label">{label}</div>
-          <div className="import-workflow-audit-card__value">{value}</div>
+          <div className="import-workflow-audit-metric__label">{label}</div>
+          <div className="import-workflow-audit-metric__value">{value}</div>
         </div>
       ))}
     </div>
@@ -1629,15 +1629,15 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                       };
 
                       return (
-                        <div key={key} className="import-workflow-file-card">
-                          <div className="import-workflow-file-card__content">
-                            <div className="import-workflow-file-card__header">
-                              <div className="import-workflow-file-card__identity">
-                                <div className="import-workflow-file-card__name" title={file.name}>{file.name}</div>
+                        <div key={key} className="import-workflow-file-row">
+                          <div className="import-workflow-file-row__content">
+                            <div className="import-workflow-file-row__header">
+                              <div className="import-workflow-file-row__identity">
+                                <div className="import-workflow-file-row__name" title={file.name}>{file.name}</div>
                                 <div className="import-workflow-muted-text">{formatFileSize(file)}</div>
                               </div>
                               <Button
-                                className="import-workflow-file-card__remove"
+                                className="import-workflow-file-row__remove"
                                 isDisabled={isPreviewing || isConfirming}
                                 onPress={() => handleRemoveFile(file)}
                                 size="sm"
@@ -1709,7 +1709,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         <ImportChip>{etcPreviewPayload.sessionId}</ImportChip>
                       </div>
                     ) : null}
-                    <AuditSummaryCards audit={etcPreviewAudit} />
+                    <AuditSummaryBand audit={etcPreviewAudit} />
                     {etcPreviewPayload ? (
                       <div className="import-workflow-chip-row">
                         <ImportChip color="success">{`本次导入新增 ${etcPreviewPayload.imported}`}</ImportChip>
@@ -1726,7 +1726,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                             {missingEtcRequirementIssues.map((issue) => (
                               <div
                                 key={issue.requirementId || formatMissingRequirementLine(issue)}
-                                className="import-workflow-issue-card"
+                                className="import-workflow-issue-row"
                               >
                                 <div className="import-workflow-chip-row">
                                   <ImportChip color="warning">{displayValue(issue.transactionAt || issue.transactionDate)}</ImportChip>
@@ -1749,7 +1749,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                   </div>
                 ) : (
                   <div className="import-workflow-preview-stack">
-                    <AuditSummaryCards audit={previewAudit} />
+                    <AuditSummaryBand audit={previewAudit} />
                     <div className="import-workflow-grid-shell import-workflow-grid-shell--preview">
                       <ImportPreviewTable loading={isPreviewing} rows={previewRows} />
                     </div>
@@ -1873,12 +1873,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           <div className="import-workflow-dialog-stack">
             <ImportNotice tone="warning">以下文件的系统识别结果与所选账户不一致，确认后仍会按你选择的账户导入。</ImportNotice>
             {conflictingPreviewFiles.map((file) => (
-              <div key={file.id} className="import-workflow-conflict-card">
-                <div className="import-workflow-conflict-card__title">{file.fileName}</div>
+              <div key={file.id} className="import-workflow-conflict-row">
+                <div className="import-workflow-conflict-row__title">{file.fileName}</div>
                 <p className="import-workflow-muted-text">
                   所选：{`${file.selectedBankName ?? "--"} ${file.selectedBankLast4 ?? "--"}`} / 识别：{`${file.detectedBankName ?? "--"} ${file.detectedLast4 ?? "--"}`}
                 </p>
-                {file.conflictMessage ? <p className="import-workflow-conflict-card__message">{file.conflictMessage}</p> : null}
+                {file.conflictMessage ? <p className="import-workflow-conflict-row__message">{file.conflictMessage}</p> : null}
               </div>
             ))}
           </div>

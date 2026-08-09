@@ -170,3 +170,6 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_import_processing_service.py`：ETC confirm 仍按真实 changed months 关联 canonical facts、保持幂等与 durable job recovery；无变化重放为零影响，普通完成不发布页面 read-model refresh。
 - 共享导入前端与 ETC 页面测试：完成后只重新读取当前可见页，不等待 tax/workbench/cost barrier；其它页面首次访问时按自己的 owner 合同读取。
 - 旧 `etc_import_confirmed` SLO 中“必须观察到核心下游 refresh 事件”的要求已被零 fan-out 合同取代。
+## 2026-08-10 视觉回归
+
+- `web/src/test/ImportCenterPage.test.tsx` 保护共享工作区；既有 ETC backend/E2E 测试继续保护 ZIP、任务和确认链路。

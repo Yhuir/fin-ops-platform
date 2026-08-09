@@ -9,8 +9,7 @@ import StatePanel from "../components/common/StatePanel";
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
 import MonthPicker from "../components/MonthPicker";
-import TaxResultPanel from "../components/tax/TaxResultPanel";
-import TaxSummaryCards from "../components/tax/TaxSummaryCards";
+import TaxSummaryBand from "../components/tax/TaxSummaryBand";
 import TaxTable from "../components/tax/TaxTable";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
@@ -417,15 +416,12 @@ export default function TaxOffsetPage() {
       ) : null}
       {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
-      {summary ? <TaxSummaryCards summary={summary} /> : null}
-
       {summary ? (
-        <TaxResultPanel
+        <TaxSummaryBand
+          summary={summary}
           outputCount={monthData?.outputInvoices.length ?? 0}
           certifiedCount={(monthData?.certifiedMatchedInvoices.length ?? 0) + (monthData?.certifiedOutsidePlanInvoices.length ?? 0)}
           selectedPlanInputCount={selectedInputIds.length}
-          resultAmount={summary.resultAmount}
-          resultLabel={summary.resultLabel}
           canSave={canMutateData}
           isSaving={isSavingPlan}
           saveDisabled={isCalculating || isLoading || isRefreshing}

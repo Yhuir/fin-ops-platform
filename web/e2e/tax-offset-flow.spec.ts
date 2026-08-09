@@ -8,7 +8,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { currentBusinessMonth } from "../src/features/dateTime";
 
 function statCard(page: Page, label: string) {
-  return page.locator(".stat-card").filter({ hasText: label });
+  return page.locator(".tax-summary-band__metric").filter({ hasText: label });
 }
 
 function createTaxOffsetLatencyRecorder(page: Page, testInfo: TestInfo) {
@@ -257,7 +257,7 @@ test.describe("tax offset browser flow", () => {
 
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
     await expect(statCard(page, "销项税额").getByText("41600.00")).toBeVisible();
-    await expect(page.getByText("销项票 81 张按开票情况只读计入")).toBeVisible();
+    await expect(page.getByText("销项票 81", { exact: true })).toBeVisible();
     await expectVisibleAndUncovered(page.getByRole("button", { name: "已认证发票导入" }), "certified import button");
     await expectVisibleAndUncovered(page.getByRole("button", { name: "保存计划" }), "save tax plan button");
 

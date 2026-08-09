@@ -115,7 +115,7 @@ function familySummaryAmount(summary: TurnoverLedgerFamilySummary | undefined, m
   return formatMoney(summary?.[metric] ?? "0.00");
 }
 
-function SummaryCard({
+function SummaryMetric({
   label,
   value,
   breakdown,
@@ -127,16 +127,16 @@ function SummaryCard({
   testId: string;
 }) {
   return (
-    <div className="turnover-ledger-summary-card" data-testid={testId}>
-      <span className="turnover-ledger-summary-card__label">
+    <div className="turnover-ledger-summary-metric" data-testid={testId}>
+      <span className="turnover-ledger-summary-metric__label">
         {label}
       </span>
-      <span className="turnover-ledger-summary-card__value">
+      <span className="turnover-ledger-summary-metric__value">
         {value}
       </span>
-      <span className="turnover-ledger-summary-card__breakdown">
+      <span className="turnover-ledger-summary-metric__breakdown">
         {breakdown.map((item) => (
-          <span className="turnover-ledger-summary-card__breakdown-row" key={item.label}>
+          <span className="turnover-ledger-summary-metric__breakdown-row" key={item.label}>
             <span>{item.label}</span>
             <span>{item.value}</span>
           </span>
@@ -1056,26 +1056,26 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        <div className="turnover-ledger-summary-grid">
-          <SummaryCard
+        <div className="turnover-ledger-summary-band">
+          <SummaryMetric
             label="当前待还款金额"
             value={formatMoney(summary.pendingRepaymentAmount)}
             breakdown={summaryBreakdown("pendingRepaymentAmount")}
             testId="turnover-summary-pending-repayment"
           />
-          <SummaryCard
+          <SummaryMetric
             label="累计已还款金额"
             value={formatMoney(summary.repaidAmount)}
             breakdown={summaryBreakdown("repaidAmount")}
             testId="turnover-summary-repaid"
           />
-          <SummaryCard
+          <SummaryMetric
             label="当前待收款金额"
             value={formatMoney(summary.pendingCollectionAmount)}
             breakdown={summaryBreakdown("pendingCollectionAmount")}
             testId="turnover-summary-pending-collection"
           />
-          <SummaryCard
+          <SummaryMetric
             label="累计已收款金额"
             value={formatMoney(summary.collectedAmount)}
             breakdown={summaryBreakdown("collectedAmount")}

@@ -806,3 +806,8 @@ git diff --check
 
 - grouped 页面只消费当前 active `pair_relations`，旧链却同时加载并规范化完整 relation history。现复用 workbench relation repository 已有 active-only scoped loader，删除页面热路径的一次历史查询。
 - 生产事实源经只读 SSH 隧道测量约从 `892–1053ms` 降至 `705–735ms`；业务分组、FIFO、金额、关系状态和 API DTO 不变。未新增缓存、read model、worker、表、依赖或并行查询路径。
+## 2026-08-10 - 汇总带与导出控件收敛
+
+- 将四张顶部指标卡合并为一个连续汇总带，并把导出筛选、日期和选项收敛为 HeroUI 原生控件；查询、筛选、导出列和金额口径不变。
+- 22 列预览保留 `xl` 复杂财务表例外，避免压缩字段可读性；普通抽屉仍遵守 420/560/720px 阶梯。
+- 删除旧 summary-card 样式，不新增 API、read model、worker、cache 或页面间 I/O。

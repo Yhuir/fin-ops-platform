@@ -1,4 +1,4 @@
-import { Button, TextArea } from "@heroui/react";
+import { Button, Input, TextArea } from "@heroui/react";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -2597,7 +2597,6 @@ function CashTicketPurchaseModal({
         </>
       )}
       ariaLabel="确认买票成本"
-      className="detail-modal"
       closeLabel="关闭买票确认"
       maxWidth="md"
       onClose={onClose}
@@ -2609,27 +2608,27 @@ function CashTicketPurchaseModal({
         </div>
         <label className="relation-preview-note">
           <span>现金往来金额</span>
-          <input value={cashAmount} onChange={(event) => setCashAmount(event.target.value)} />
+          <Input aria-label="现金往来金额" value={cashAmount} onChange={(event) => setCashAmount(event.target.value)} />
         </label>
         <label className="relation-preview-note">
           <span>买票成本（必填）</span>
-          <input value={ticketCostAmount} onChange={(event) => setTicketCostAmount(event.target.value)} />
+          <Input aria-label="买票成本（必填）" value={ticketCostAmount} onChange={(event) => setTicketCostAmount(event.target.value)} />
         </label>
         <label className="relation-preview-note">
           <span>项目名称（必填）</span>
-          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+          <Input aria-label="项目名称（必填）" value={projectName} onChange={(event) => setProjectName(event.target.value)} />
         </label>
         <label className="relation-preview-note">
           <span>费用类型</span>
-          <input value={expenseType} onChange={(event) => setExpenseType(event.target.value)} />
+          <Input aria-label="费用类型" value={expenseType} onChange={(event) => setExpenseType(event.target.value)} />
         </label>
         <label className="relation-preview-note">
           <span>费用内容</span>
-          <input value={expenseContent} onChange={(event) => setExpenseContent(event.target.value)} />
+          <Input aria-label="费用内容" value={expenseContent} onChange={(event) => setExpenseContent(event.target.value)} />
         </label>
         <label className="relation-preview-note">
           <span>备注</span>
-          <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+          <TextArea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
         </label>
     </AppDialog>
   );

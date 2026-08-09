@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
 
 import AppDialog from "../common/AppDialog";
 import MonthPicker from "../MonthPicker";
@@ -66,35 +66,36 @@ function ExpenseTypeSelector({ title, options, selected, onChange }: ExpenseType
       <div className="export-center-section-header">
         <h3>{title}</h3>
         <div className="export-center-inline-actions">
-          <button
-            className="secondary-button compact"
-            type="button"
-            onClick={() => onChange(options)}
-            disabled={!hasOptions || allSelected}
+          <Button
+            isDisabled={!hasOptions || allSelected}
+            onPress={() => onChange(options)}
+            size="sm"
+            variant="secondary"
           >
             全选
-          </button>
-          <button
-            className="secondary-button compact"
-            type="button"
-            onClick={() => onChange([])}
-            disabled={selected.length === 0}
+          </Button>
+          <Button
+            isDisabled={selected.length === 0}
+            onPress={() => onChange([])}
+            size="sm"
+            variant="secondary"
           >
             清空
-          </button>
+          </Button>
         </div>
       </div>
       {hasOptions ? (
         <div className="export-center-checkbox-grid" role="group" aria-label={title}>
           {options.map((option) => (
-            <label key={option} className="export-center-checkbox">
-              <input
-                checked={selected.includes(option)}
-                type="checkbox"
-                onChange={() => onChange(toggleSelection(selected, option))}
-              />
+            <Checkbox
+              className="export-center-checkbox"
+              isSelected={selected.includes(option)}
+              key={option}
+              onChange={() => onChange(toggleSelection(selected, option))}
+            >
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
               <span>{option}</span>
-            </label>
+            </Checkbox>
           ))}
         </div>
       ) : (
@@ -116,11 +117,11 @@ function DateRangeFields({ startDate, endDate, onStartDateChange, onEndDateChang
     <div className="project-export-range-pickers">
       <label className="project-export-select-field">
         <span>开始日期</span>
-        <input aria-label="开始日期" type="date" value={startDate} onChange={(event) => onStartDateChange(event.currentTarget.value)} />
+        <Input aria-label="开始日期" type="date" value={startDate} onChange={(event) => onStartDateChange(event.currentTarget.value)} />
       </label>
       <label className="project-export-select-field">
         <span>结束日期</span>
-        <input aria-label="结束日期" type="date" value={endDate} onChange={(event) => onEndDateChange(event.currentTarget.value)} />
+        <Input aria-label="结束日期" type="date" value={endDate} onChange={(event) => onEndDateChange(event.currentTarget.value)} />
       </label>
     </div>
   );
@@ -181,41 +182,49 @@ export default function ExportCenterModal({
       closeLabel="关闭导出中心"
       disableEscapeClose={isBusy}
       isDismissable={!isBusy}
-      maxWidth="xl"
+      maxWidth="lg"
       onClose={onClose}
       open
       title="导出中心"
     >
         <div className="export-center-modal-body">
           <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
-            <button
-              className={mode === "bank_tag" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => onModeChange("bank_tag")}
+            <Button
+              aria-pressed={mode === "bank_tag"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("bank_tag")}
+              size="sm"
+              variant={mode === "bank_tag" ? "primary" : "secondary"}
             >
               按标签
-            </button>
-            <button
-              className={mode === "time" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => onModeChange("time")}
+            </Button>
+            <Button
+              aria-pressed={mode === "time"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("time")}
+              size="sm"
+              variant={mode === "time" ? "primary" : "secondary"}
             >
               按时间
-            </button>
-            <button
-              className={mode === "project" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => onModeChange("project")}
+            </Button>
+            <Button
+              aria-pressed={mode === "project"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("project")}
+              size="sm"
+              variant={mode === "project" ? "primary" : "secondary"}
             >
               按项目
-            </button>
-            <button
-              className={mode === "expense_type" ? "cost-view-tab active" : "cost-view-tab"}
-              type="button"
-              onClick={() => onModeChange("expense_type")}
+            </Button>
+            <Button
+              aria-pressed={mode === "expense_type"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("expense_type")}
+              size="sm"
+              variant={mode === "expense_type" ? "primary" : "secondary"}
             >
               按费用类型
-            </button>
+            </Button>
           </div>
 
           {mode === "time" || mode === "bank_tag" ? (
@@ -224,26 +233,16 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>时间范围</h3>
                 </div>
-                <div className="project-export-radio-group">
-                  <label className="project-export-choice">
-                    <input
-                      checked={timeRangeMode === "month"}
-                      name="time-export-range"
-                      type="radio"
-                      onChange={() => onTimeRangeModeChange("month")}
-                    />
+                <RadioGroup aria-label="时间范围" className="project-export-radio-group" onChange={(value) => onTimeRangeModeChange(value as ExportRangeMode)} value={timeRangeMode}>
+                  <Radio className="project-export-choice" value="month">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
-                  </label>
-                  <label className="project-export-choice">
-                    <input
-                      checked={timeRangeMode === "custom"}
-                      name="time-export-range"
-                      type="radio"
-                      onChange={() => onTimeRangeModeChange("custom")}
-                    />
+                  </Radio>
+                  <Radio className="project-export-choice" value="custom">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义时间区间（精确到日）</span>
-                  </label>
-                </div>
+                  </Radio>
+                </RadioGroup>
                 {timeRangeMode === "month" ? (
                   <MonthPicker ariaLabel="统计月份" caption="统计月份" value={timeMonth} onChange={onTimeMonthChange} />
                 ) : (
@@ -264,26 +263,16 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>项目</h3>
                 </div>
-                <div className="project-export-radio-group">
-                  <label className="project-export-choice">
-                    <input
-                      checked={projectAggregateBy === "month"}
-                      name="project-export-aggregate"
-                      type="radio"
-                      onChange={() => onProjectAggregateByChange("month")}
-                    />
+                <RadioGroup aria-label="项目聚合方式" className="project-export-radio-group" onChange={(value) => onProjectAggregateByChange(value as "month" | "year")} value={projectAggregateBy}>
+                  <Radio className="project-export-choice" value="month">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>按月算</span>
-                  </label>
-                  <label className="project-export-choice">
-                    <input
-                      checked={projectAggregateBy === "year"}
-                      name="project-export-aggregate"
-                      type="radio"
-                      onChange={() => onProjectAggregateByChange("year")}
-                    />
+                  </Radio>
+                  <Radio className="project-export-choice" value="year">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>按年算</span>
-                  </label>
-                </div>
+                  </Radio>
+                </RadioGroup>
                 <ExpenseTypeSelector
                   title="项目选择"
                   options={projectOptions}
@@ -306,26 +295,16 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>时间范围</h3>
                 </div>
-                <div className="project-export-radio-group">
-                  <label className="project-export-choice">
-                    <input
-                      checked={expenseTypeRangeMode === "month"}
-                      name="expense-type-export-range"
-                      type="radio"
-                      onChange={() => onExpenseTypeRangeModeChange("month")}
-                    />
+                <RadioGroup aria-label="费用类型时间范围" className="project-export-radio-group" onChange={(value) => onExpenseTypeRangeModeChange(value as ExportRangeMode)} value={expenseTypeRangeMode}>
+                  <Radio className="project-export-choice" value="month">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
-                  </label>
-                  <label className="project-export-choice">
-                    <input
-                      checked={expenseTypeRangeMode === "custom"}
-                      name="expense-type-export-range"
-                      type="radio"
-                      onChange={() => onExpenseTypeRangeModeChange("custom")}
-                    />
+                  </Radio>
+                  <Radio className="project-export-choice" value="custom">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义时间区间（精确到日）</span>
-                  </label>
-                </div>
+                  </Radio>
+                </RadioGroup>
                 {expenseTypeRangeMode === "month" ? (
                   <MonthPicker ariaLabel="统计月份" caption="统计月份" value={expenseTypeMonth} onChange={onExpenseTypeMonthChange} />
                 ) : (

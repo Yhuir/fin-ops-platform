@@ -172,3 +172,6 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_import_processing_service.py`、`tests/test_import_file_api.py`：发票 confirm 保留原子事实提交、source version、审计、幂等与失败回滚；普通结果不再携带 tax/input/output/pending/search/cost/workbench barrier targets，也不发布页面 refresh。
 - 共享导入前端测试证明完成反馈不读取 Workbench 或等待跨页面 barrier；进项、销项、待找、税金、搜索和成本在各自页面访问时检查 current scope freshness。
 - 旧的 write-operation 测试若要求写后存在 `*.read_model.refresh`，必须删除或改为“零下游页面事件 + 访问后 exact-scope 收敛”。
+## 2026-08-10 视觉回归
+
+- `web/src/test/ImportCenterPage.test.tsx` 继续保护发票专用复核字段和共享工作区交互，避免视觉收敛恢复银行流水字段污染。

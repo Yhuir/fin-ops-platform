@@ -1063,7 +1063,8 @@ describe("Turnover ledger page", () => {
     const styles = readWebSource("src/app/styles.css");
     const buttonRule = cssRule(styles, ".turnover-ledger-button", "transition");
     const tabRule = cssRule(styles, ".turnover-ledger-tabs__tab");
-    const summaryCardRule = cssRule(styles, ".turnover-ledger-summary-card");
+    const summaryBandRule = cssRule(styles, ".turnover-ledger-summary-band", "border: 1px solid var(--fp-border)");
+    const summaryMetricRule = cssRule(styles, ".turnover-ledger-summary-metric", "min-height: 84px");
     const panelRule = cssRule(styles, ".turnover-ledger-table-panel__inner");
     const tableWrapRule = cssRule(styles, ".turnover-ledger-table-wrap");
     const tableCellRule = cssRule(styles, ".turnover-ledger-table th,\n.turnover-ledger-table td");
@@ -1099,8 +1100,9 @@ describe("Turnover ledger page", () => {
     expect(buttonRule).toContain("--motion-fast");
     expect(buttonRule).toContain("--ease-out-quart");
     expect(tabRule).toContain("--motion-fast");
-    expect(summaryCardRule).toContain("min-height: 96px");
-    expect(summaryCardRule).toContain("var(--fp-space-2) var(--fp-space-3)");
+    expect(summaryBandRule).toContain("border: 1px solid var(--fp-border)");
+    expect(summaryMetricRule).toContain("min-height: 84px");
+    expect(summaryMetricRule).toContain("var(--fp-space-2) var(--fp-space-3)");
     expect(panelRule).toContain("var(--fp-space-2)");
     expect(tableWrapRule).toContain("calc(100vh - 244px)");
     expect(tableCellRule).toContain("--motion-fast");
@@ -2186,7 +2188,7 @@ describe("Turnover ledger page", () => {
     await user.click(within(page).getByRole("button", { name: "下载表格" }));
 
     const dialog = await screen.findByRole("dialog", { name: "下载往来款台账" });
-    expect(within(dialog).getByRole("combobox", { name: "下载范围" })).toHaveTextContent("公司往来");
+    expect(within(dialog).getByRole("button", { name: /下载范围/ })).toHaveTextContent("公司往来");
     expect(await within(dialog).findByText("正式字段预览")).toBeInTheDocument();
     expect(within(dialog).getByText("行类型")).toBeInTheDocument();
     expect(within(dialog).getByText("余额")).toBeInTheDocument();

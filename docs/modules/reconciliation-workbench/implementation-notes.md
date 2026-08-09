@@ -1570,3 +1570,8 @@
 - 生产 authenticated SLO 证明 `month=all` 已配对 OA 申请人候选接口稳定 p95 约 `1055ms`；根因是每次打开菜单都重新扫描完整 active generation，未复用关联台已有的 fresh Redis read-through。
 - 修复复用 `WorkbenchQueryFacade` 的 freshness gate、Redis helper、TTL 和 generation-versioned key 语义；filter-options key 覆盖 scope、zone、pane、facet、目标列、候选搜索、分页及全部区域筛选，active generation 变化自动 miss。repository 读取绑定 gate 返回的 generation，避免查询期间换代后把新 payload 写入旧 key。
 - stale、refreshing、version conflict、Redis miss/down 继续走既有 fail-closed/SQL 合同；不新增表、migration、worker、queue、Redis owner、依赖、API 字段或第二套刷新链。
+## 2026-08-10 - 旧弹窗样式退役
+
+- 现金票据输入改用现有 `AppDialog` 与 HeroUI `Input`/`Textarea`；异常和操作历史详情抽屉统一到 720px 阶梯。
+- 删除手写 `.detail-modal*` 的渐变、重阴影、24px 圆角和全屏 blur，不保留隐藏 fallback。
+- 关联台查询、active generation、freshness/status/enqueue、自刷新和 canonical 写链均未改变。

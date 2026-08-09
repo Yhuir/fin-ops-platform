@@ -191,3 +191,7 @@
 
 - 根因：旧 `batch_row_00001` 由 process-global counter 生成，多进程/多文件会重用；PostgreSQL upsert 又允许同 ID 跨 batch 更新 owner，后续发票预览因此覆盖了 153 条银行导入 row evidence，但 79 条 canonical bank transaction 未丢失。
 - 决策：runtime 改为 `batch_row:<batch_id>:<row_no>` 并在 repository 拒绝跨 batch re-parent；历史恢复走固定 dry-run/fingerprint 工具，不在 API/service 增加 fallback。
+## 2026-08-10 - 共享导入工作区去嵌套卡片
+
+- 共享 `ImportWorkflowPage` 将审计卡、文件卡、问题卡和冲突卡收敛为连续汇总带与分隔行；上传、预览、确认、重复检测和后台任务状态机不变。
+- 删除对应旧卡片样式，不新增导入阶段、表、API、worker、fallback 或第二条写链。

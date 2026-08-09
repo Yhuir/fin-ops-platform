@@ -1,3 +1,5 @@
+import { Button, ListBox, Select } from "@heroui/react";
+
 import AppDialog from "../common/AppDialog";
 import type {
   TurnoverLedgerExportPreview,
@@ -80,12 +82,12 @@ export default function TurnoverLedgerExportDialog({
     <AppDialog
       actions={(
         <>
-          <button className="turnover-ledger-button" onClick={onClose} type="button">
+          <Button onPress={onClose} variant="secondary">
             取消
-          </button>
-          <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={loading || downloading} onClick={onDownload} type="button">
+          </Button>
+          <Button isDisabled={loading || downloading} isPending={downloading} onPress={onDownload} variant="primary">
             确认下载
-          </button>
+          </Button>
         </>
       )}
       maxWidth="xl"
@@ -94,19 +96,23 @@ export default function TurnoverLedgerExportDialog({
       onClose={onClose}
     >
       <div className="turnover-ledger-export-dialog">
-        <label className="turnover-ledger-extra-control turnover-ledger-export-dialog__range">
+        <div className="turnover-ledger-extra-control turnover-ledger-export-dialog__range">
           <span>下载范围</span>
-          <select
-            value={family}
-            onChange={(event) => onFamilyChange(event.target.value as TurnoverLedgerFamily)}
+          <Select
+            aria-label="下载范围"
+            selectedKey={family}
+            onSelectionChange={(key) => onFamilyChange(String(key) as TurnoverLedgerFamily)}
           >
-            {FAMILY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                {FAMILY_OPTIONS.map((option) => (
+                  <ListBox.Item id={option.value} key={option.value} textValue={option.label}>{option.label}</ListBox.Item>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
+        </div>
         {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
         <h3 className="turnover-ledger-extra-section__title">正式字段预览</h3>
         <div className="turnover-ledger-export-dialog__table-wrap">

@@ -58,3 +58,6 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_api tests.
 PYTHONPATH=backend/src python3 -m unittest tests.test_import_job_queue tests.test_import_processing_service -v
 cd web && npm test -- --run src/test/CostStatisticsPage.test.tsx src/test/InputInvoiceUsagePage.test.tsx src/test/OutputInvoiceCollectionsPage.test.tsx
 ```
+## 2026-08-10 视觉回归
+
+- `web/src/test/TaxOffsetPage.test.tsx` 保护连续汇总带的五项指标、试算结果和保存交互；`DesignTokens.test.ts` 保护所用 `--fp-*` token 均已定义。

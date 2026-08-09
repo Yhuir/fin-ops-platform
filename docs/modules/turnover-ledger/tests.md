@@ -75,3 +75,6 @@ PostgreSQL integration 在没有 `FIN_OPS_TEST_DATABASE_URL` 时按仓库合同 
 - confirm/withdraw 前后新增 Turnover outbox/dirty scope 数为零。
 - runtime worker/manifest/status 无 Turnover owner。
 - 记录页面 GET、confirm、withdraw 的多次耗时；本次无 3 秒硬门，但不得出现阻塞、超时、队列等待或数据不完整。
+## 2026-08-10 视觉回归
+
+- `web/src/test/TurnoverLedgerPage.test.tsx` 保护连续汇总带、HeroUI 导出筛选和原有导出行为；业务/API 测试继续保护 canonical direct-read 合同。

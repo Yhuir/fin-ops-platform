@@ -339,3 +339,8 @@
 
 - invoice fact source version 是全局值，不是月份值；旧链只失效本次导入月份，使其它 25 个已有月份继续保存旧版本。
 - invoice 写后改为清除全部已存在 tax_offset scope，并通过正式 refresh gateway 重建已存在月份与本次月份的并集。
+## 2026-08-10 - 连续税金汇总带
+
+- 将五张指标卡和独立试算卡合并为一个连续 HeroUI 汇总带；字段、试算口径、保存动作和 API 合同不变。
+- 删除 `TaxSummaryCards`、`TaxResultPanel` 及其旧样式，不保留并行 UI 或兼容选择器。
+- 本次只有前端展示 I/O，没有改变 canonical repository、read model、worker、权限或跨页面链路。

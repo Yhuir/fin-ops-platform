@@ -95,10 +95,10 @@ function expectProjectNotice(message: HTMLElement) {
   expect(noticeRoot).not.toHaveClass("MuiAlert-root");
 }
 
-function expectProjectAuditCard(label: string) {
-  const card = screen.getByLabelText(label);
-  expect(card).toHaveClass("import-workflow-audit-card");
-  expect(card).not.toHaveClass("MuiPaper-root");
+function expectProjectAuditMetric(label: string) {
+  const metric = screen.getByLabelText(label);
+  expect(metric).toHaveClass("import-workflow-audit-metric");
+  expect(metric).not.toHaveClass("MuiPaper-root");
 }
 
 function expectProjectPreviewTable(name: string) {
@@ -128,7 +128,7 @@ describe("Import pages", () => {
     expect(css).toContain(".import-workflow-upload-zone {\n  display: grid;\n  place-items: center;\n  gap: var(--fp-space-1);\n  min-height: 112px;");
     expect(css).toContain("border-color var(--motion-base) var(--ease-standard)");
     expect(css).toContain(".import-workflow-select-field__control:focus-visible");
-    expect(css).toContain(".import-workflow-audit-card__value {\n  margin-top: var(--fp-space-1);\n  color: var(--fp-ink);\n  font-family: var(--fp-font-data);\n  font-size: 18px;");
+    expect(css).toContain(".import-workflow-audit-metric__value {\n  margin-top: var(--fp-space-1);\n  color: var(--fp-ink);\n  font-family: var(--fp-font-data);\n  font-size: 18px;");
     expect(css).toContain(".import-workflow-grid-shell--preview {\n  height: 260px;");
     expect(css).toContain(".import-workflow-grid-shell--detail {\n  height: 220px;");
     expect(css).toContain(".import-workflow-detail-tabs .tabs__tab:hover");
@@ -223,7 +223,7 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 18")).toBeInTheDocument();
-    expectProjectAuditCard("审计汇总 原始 18");
+    expectProjectAuditMetric("审计汇总 原始 18");
     expect(screen.getByLabelText("审计汇总 唯一 16")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 重复 2")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 已存在 2")).toBeInTheDocument();
@@ -415,7 +415,7 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 28")).toBeInTheDocument();
-    expectProjectAuditCard("审计汇总 原始 28");
+    expectProjectAuditMetric("审计汇总 原始 28");
     expect(screen.getByLabelText("审计汇总 唯一 24")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 可导入 22")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 异常 1")).toBeInTheDocument();
@@ -697,7 +697,7 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 4")).toBeInTheDocument();
-    expectProjectAuditCard("审计汇总 原始 4");
+    expectProjectAuditMetric("审计汇总 原始 4");
     expect(screen.getByLabelText("审计汇总 唯一 3")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 重复 1")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 已存在 1")).toBeInTheDocument();

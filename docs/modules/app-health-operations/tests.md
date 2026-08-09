@@ -176,3 +176,6 @@ Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests�
 - `tests/test_operations_dashboard_service.py` 覆盖最近 read-model scope evidence：current-scope/full-history 分类、expected/projection source versions、lag、queue wait、handler duration、attempt/retry、dedupe 与 error。
 - `web/src/test/AppHealthOperationsPage.test.tsx` 覆盖 scope 类型和 timing/retry 证据展示，不再用一个“同步中”总状态解释所有后台工作。
 - 真实 p50/p95/p99、队列等待与逐页面访问收敛仍必须在 Phase 27-07 使用 test-owned 生产 fixture 采集；本地 fake repository 不作为性能结论。
+## 2026-08-10 视觉回归
+
+- `web/src/test/AppHealthOperationsPage.test.tsx` 继续保护状态、异常和操作入口；共享 token 完整性由 `DesignTokens.test.ts` 保护。

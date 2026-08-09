@@ -64,4 +64,12 @@ describe("Ledger Calm design tokens", () => {
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
     expect(css).toMatch(/transition-duration:\s*1ms\s*!important/);
   });
+
+  test("defines every fp token used by the stylesheet", () => {
+    const css = source();
+    const used = new Set(Array.from(css.matchAll(/var\(--(fp-[\w-]+)/g), (match) => match[1]));
+    const defined = new Set(Array.from(css.matchAll(/--(fp-[\w-]+)\s*:/g), (match) => match[1]));
+
+    expect(Array.from(used).filter((token) => !defined.has(token)).sort()).toEqual([]);
+  });
 });

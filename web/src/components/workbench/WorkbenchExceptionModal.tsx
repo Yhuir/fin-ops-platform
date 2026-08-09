@@ -268,7 +268,7 @@ export default function WorkbenchExceptionModal({
     </span>
   );
   const footer = (
-    <div className="detail-modal-footer workbench-exception-drawer-actions">
+    <div className="workbench-exception-drawer-actions">
       {isCommittedError ? (
         <Button className="secondary-button" onPress={closeIfIdle} size="sm" variant="secondary">
           关闭
@@ -298,10 +298,10 @@ export default function WorkbenchExceptionModal({
       footer={footer}
       open
       title="统一异常处理"
-      width="min(760px, 100vw)"
+      width="min(720px, 100vw)"
       onClose={closeIfIdle}
     >
-      <div className="detail-modal-body workbench-exception-drawer-body">
+      <div className="workbench-exception-drawer-body">
         {subtitle}
         {isPreviewLoading ? <div className="state-panel">正在加载异常预览</div> : null}
         {previewError ? (
