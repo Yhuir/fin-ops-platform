@@ -1564,3 +1564,9 @@
 - 决策：保留历史 WEX 表和记录作为审计事实，但从 canonical projection、grouping、异常桶、计数、前端旧动作和 generation source freshness 全部移除。只有新 `oa_invoice_anomaly` 能进入“异常 / 已忽略”链路；正式关系继续是唯一 ownership 事实源。
 - 搜索：复用统一 query normalizer，把合法金额和 `¥/￥` 输入归一为十进制值，并在 Workbench searchable text 同时发布原始/归一金额与 OA `completed_at`；普通文本转义、关系组完整返回和选择语义不变。
 - 发布：schema 升级为 v20，使 v19 generation/cache fail closed 并经既有 exact-scope refresh 原子重建；没有删除审计数据，没有新增表、migration、worker、queue、Redis owner、依赖、fallback 或第二套异常链路。
+
+## 2026-08-09 - 完整下拉候选 generation cache 性能闭环
+
+- 生产 authenticated SLO 证明 `month=all` 已配对 OA 申请人候选接口稳定 p95 约 `1055ms`；根因是每次打开菜单都重新扫描完整 active generation，未复用关联台已有的 fresh Redis read-through。
+- 修复复用 `WorkbenchQueryFacade` 的 freshness gate、Redis helper、TTL 和 generation-versioned key 语义；filter-options key 覆盖 scope、zone、pane、facet、目标列、候选搜索、分页及全部区域筛选，active generation 变化自动 miss。repository 读取绑定 gate 返回的 generation，避免查询期间换代后把新 payload 写入旧 key。
+- stale、refreshing、version conflict、Redis miss/down 继续走既有 fail-closed/SQL 合同；不新增表、migration、worker、queue、Redis owner、依赖、API 字段或第二套刷新链。

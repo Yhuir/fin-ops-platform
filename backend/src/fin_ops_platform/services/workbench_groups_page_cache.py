@@ -11,6 +11,7 @@ WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = (
     f"{WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION}:relation-completion-v1:collapsed-summary-v2:exception-filter-v1"
 )
 WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION = f"{WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION}:initial-v2"
+WORKBENCH_FILTER_OPTIONS_CACHE_SCHEMA_VERSION = f"{WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION}:filter-options-v1"
 
 
 def normalize_workbench_group_detail_level(value: str | None) -> str:
@@ -125,6 +126,50 @@ def build_workbench_groups_redis_cache_key_from_version(
     }
     digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return f"workbench:{version_token}:groups:{digest}"
+
+
+def build_workbench_filter_options_redis_cache_key_from_version(
+    *,
+    cache_version: str | None,
+    scope_key: str,
+    zone: str,
+    pane: str,
+    facet: str,
+    column: str | None,
+    option_search: str,
+    page: int,
+    page_size: int,
+    status: str | None,
+    source_kind: str | None,
+    search: str | None,
+    column_filters: dict[str, object] | None = None,
+    time_filters: dict[str, object] | None = None,
+    exception_bucket: str | None = None,
+    schema_version: str = WORKBENCH_FILTER_OPTIONS_CACHE_SCHEMA_VERSION,
+) -> str | None:
+    if not cache_version:
+        return None
+    version_token = _workbench_groups_cache_version_token(str(cache_version))
+    key_payload = {
+        "workbench_read_model_schema_version": schema_version,
+        "scope": scope_key,
+        "zone": zone,
+        "pane": pane,
+        "facet": facet,
+        "column": column or "",
+        "option_search": option_search,
+        "page": page,
+        "page_size": page_size,
+        "status": status or "",
+        "source_kind": source_kind or "",
+        "search": search or "",
+        "column_filters": stable_json_value(column_filters or {}),
+        "time_filters": stable_json_value(time_filters or {}),
+        "exception_bucket": exception_bucket or "",
+        "filter_semantics": "active_generation_complete_options_v1",
+    }
+    digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return f"workbench:{version_token}:filter-options:{digest}"
 
 
 def workbench_groups_redis_ttl_seconds_from_env() -> int:

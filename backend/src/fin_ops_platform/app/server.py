@@ -393,6 +393,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 )
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+    build_workbench_filter_options_redis_cache_key_from_version,
     build_workbench_groups_redis_cache_key_from_version,
     build_workbench_initial_redis_cache_key,
     is_default_workbench_initial_query,
@@ -2485,6 +2486,7 @@ class Application:
             groups_cache_key=self._workbench_groups_redis_cache_key,
             groups_cache_version_from_key=self._workbench_groups_redis_cache_version_from_key,
             groups_redis_ttl_seconds=self._workbench_groups_redis_ttl_seconds,
+            filter_options_cache_key_from_version=build_workbench_filter_options_redis_cache_key_from_version,
             initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
             is_default_initial_query=is_default_workbench_initial_query,
             oa_status_provider=getattr(query_service, "oa_status_payload", None),

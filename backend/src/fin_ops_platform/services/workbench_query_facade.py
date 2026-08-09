@@ -37,6 +37,7 @@ class WorkbenchQueryFacade:
         groups_cache_key: Callable[..., str | None] | None = None,
         groups_cache_version_from_key: Callable[[str], str | None] | None = None,
         groups_redis_ttl_seconds: Callable[[], int] | None = None,
+        filter_options_cache_key_from_version: Callable[..., str | None] | None = None,
         initial_cache_key_from_version: Callable[..., str | None] | None = None,
         is_default_initial_query: Callable[..., bool] | None = None,
         oa_status_provider: Callable[[], object] | None = None,
@@ -57,6 +58,7 @@ class WorkbenchQueryFacade:
         self._groups_cache_key = groups_cache_key
         self._groups_cache_version_from_key = groups_cache_version_from_key
         self._groups_redis_ttl_seconds = groups_redis_ttl_seconds or (lambda: 600)
+        self._filter_options_cache_key_from_version = filter_options_cache_key_from_version
         self._initial_cache_key_from_version = initial_cache_key_from_version
         self._is_default_initial_query = is_default_initial_query
         self._oa_status_provider = oa_status_provider
@@ -737,7 +739,12 @@ class WorkbenchQueryFacade:
                     "read_model_version": current_version,
                 },
             )
-        repository_kwargs: dict[str, object] = {
+        refresh_status_value = (
+            str(refresh_status_payload.get("read_model_status") or "")
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        cache_kwargs: dict[str, object] = {
             "scope_key": scope_key,
             "zone": zone,
             "pane": pane,
@@ -753,8 +760,27 @@ class WorkbenchQueryFacade:
             "time_filters": time_filters,
             "exception_bucket": exception_bucket,
         }
-        if expected_version:
-            repository_kwargs["expected_read_model_version"] = expected_version
+        cache_key = (
+            self._filter_options_cache_key_from_version(cache_version=current_version, **cache_kwargs)
+            if current_version
+            and refresh_status_value == "fresh"
+            and callable(self._filter_options_cache_key_from_version)
+            else None
+        )
+        get_cached = getattr(self._redis_helper, "get_json", None)
+        cached_result = self._cached_groups_payload(
+            cache_key,
+            get_cached=get_cached,
+            can_use_cache=refresh_status_value == "fresh",
+            scope_key=scope_key,
+            expected_read_model_version=current_version,
+        )
+        if cached_result is not None:
+            return cached_result
+        repository_kwargs = dict(cache_kwargs)
+        repository_version = expected_version or current_version
+        if repository_version:
+            repository_kwargs["expected_read_model_version"] = repository_version
         try:
             payload = get_filter_options(**repository_kwargs)
         except Exception as error:
@@ -829,11 +855,6 @@ class WorkbenchQueryFacade:
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = stale_reasons
-        refresh_status_value = (
-            str(refresh_status_payload.get("read_model_status") or "")
-            if isinstance(refresh_status_payload, dict)
-            else ""
-        )
         if refresh_status_value and refresh_status_value != "fresh":
             payload["read_model_status"] = refresh_status_value
             if current_version:
@@ -849,6 +870,15 @@ class WorkbenchQueryFacade:
                 read_model_status=options_status,
                 reason="sql_status",
             )
+        set_cached = getattr(self._redis_helper, "set_json", None)
+        payload_version = str(payload.get("read_model_version") or "").strip()
+        if (
+            cache_key
+            and callable(set_cached)
+            and options_status == "fresh"
+            and payload_version == current_version
+        ):
+            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._groups_redis_ttl_seconds())
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
 
     def group_detail(

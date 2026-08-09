@@ -4,6 +4,7 @@ from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.services.workbench_groups_page_cache import (
+    build_workbench_filter_options_redis_cache_key_from_version,
     build_workbench_initial_redis_cache_key,
     build_workbench_groups_redis_cache_key_from_version,
     is_default_workbench_initial_query,
@@ -1723,7 +1724,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/refresh-status")
         self.assertEqual(metrics.calls[0]["reason"], "query_timeout")
 
-    def test_filter_options_reads_stable_generation_without_redis_cache(self) -> None:
+    def test_filter_options_reuses_fresh_generation_cache(self) -> None:
         calls: list[dict[str, object]] = []
 
         class Repository:
@@ -1759,28 +1760,67 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             stale_reasons=no_stale_reasons,
             emit_status_metric=MetricRecorder().emit,
             missing_read_model_error=lambda _error: False,
+            filter_options_cache_key_from_version=build_workbench_filter_options_redis_cache_key_from_version,
         )
 
-        result = facade.filter_options(
-            "all",
-            zone="unpaired",
-            pane="oa",
-            facet="column",
-            column="applicant",
-            option_search="杨",
-            page=1,
-            page_size=100,
-            column_filters={"oa": {"projectName": ["大理项目"]}},
-            expected_read_model_version="generation-set-7",
-        )
+        query = {
+            "zone": "unpaired",
+            "pane": "oa",
+            "facet": "column",
+            "column": "applicant",
+            "option_search": "杨",
+            "page": 1,
+            "page_size": 100,
+            "column_filters": {"oa": {"projectName": ["大理项目"]}},
+            "expected_read_model_version": "generation-set-7",
+        }
+        result = facade.filter_options("all", **query)
+        cached_result = facade.filter_options("all", **query)
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(cached_result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["options"][0]["value"], "杨丽萍")
+        self.assertEqual(cached_result.payload["options"][0]["value"], "杨丽萍")
         self.assertEqual(calls[0]["scope_key"], "all")
         self.assertEqual(calls[0]["column_filters"], {"oa": {"projectName": ["大理项目"]}})
         self.assertEqual(calls[0]["expected_read_model_version"], "generation-set-7")
-        self.assertEqual(redis.get_json_calls, [])
-        self.assertEqual(redis.set_json_calls, [])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(redis.get_json_calls), 2)
+        self.assertEqual(len(redis.set_json_calls), 1)
+        self.assertEqual(redis.set_json_calls[0][2], 600)
+
+    def test_filter_options_cache_key_covers_query_and_normalizes_filter_order(self) -> None:
+        base = {
+            "cache_version": "generation-set-7",
+            "scope_key": "all",
+            "zone": "unpaired",
+            "pane": "oa",
+            "facet": "column",
+            "column": "applicant",
+            "option_search": "杨",
+            "page": 1,
+            "page_size": 100,
+            "status": None,
+            "source_kind": None,
+            "search": None,
+            "time_filters": None,
+            "exception_bucket": None,
+        }
+        first = build_workbench_filter_options_redis_cache_key_from_version(
+            **base,
+            column_filters={"oa": {"projectName": ["昆明", "大理"], "status": ["完成"]}},
+        )
+        reordered = build_workbench_filter_options_redis_cache_key_from_version(
+            **base,
+            column_filters={"oa": {"status": ["完成"], "projectName": ["大理", "昆明"]}},
+        )
+        changed = build_workbench_filter_options_redis_cache_key_from_version(
+            **{**base, "option_search": "刘"},
+            column_filters={"oa": {"projectName": ["昆明", "大理"], "status": ["完成"]}},
+        )
+
+        self.assertEqual(first, reordered)
+        self.assertNotEqual(first, changed)
 
     def test_filter_options_stale_all_scope_enqueues_only_exact_refresh_scopes_once(self) -> None:
         class Repository:
@@ -1806,9 +1846,10 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 }
 
         queue = QueueRecorder()
+        redis = RedisRecorder()
         facade = WorkbenchQueryFacade(
             repository=Repository(),
-            redis_helper=None,
+            redis_helper=redis,
             enqueue_refresh=queue.enqueue,
             scope_key_for_month=scope_key_for_month,
             stale_reasons=no_stale_reasons,
@@ -1819,6 +1860,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 "read_model_status": "stale",
                 "refresh_scope_keys": ["2026-05", "2026-06"],
             },
+            filter_options_cache_key_from_version=build_workbench_filter_options_redis_cache_key_from_version,
         )
 
         result = facade.filter_options(
@@ -1842,6 +1884,8 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 ("2026-06", "api_groups_source_versions_stale"),
             ],
         )
+        self.assertEqual(redis.get_json_calls, [])
+        self.assertEqual(redis.set_json_calls, [])
 
     def test_filter_options_rejects_version_conflict_before_repository_read(self) -> None:
         calls: list[dict[str, object]] = []
