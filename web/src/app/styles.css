@@ -20827,21 +20827,30 @@ body.column-layout-dragging {
 }
 
 .cost-explorer-item-main {
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   display: grid;
   gap: var(--fp-space-1);
 }
 
 .cost-explorer-item-main strong {
+  min-width: 0;
+  overflow: hidden;
   font-size: 12px;
   line-height: 1.45;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cost-explorer-item-main span {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fp-text-muted);
   font-size: 11px;
   line-height: 1.55;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cost-explorer-item-meta {
