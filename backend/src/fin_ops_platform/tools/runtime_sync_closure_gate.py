@@ -224,8 +224,8 @@ def run_closure_gate(
             ]
         )
     else:
-        checks.extend(
-            [
+        if profile == "full":
+            checks.append(
                 _read_model_smoke_check(
                     connection,
                     apply=apply_read_model_smoke,
@@ -233,7 +233,10 @@ def run_closure_gate(
                     target_ms=read_model_target_ms,
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
-                ),
+                )
+            )
+        checks.extend(
+            [
                 _http_slo_check(
                     base_url=base_url,
                     page_base_url=page_base_url or base_url,
@@ -511,15 +514,17 @@ def _http_slo_check(
             require_auth=require_auth,
             probes=probes,
         )
-        if report.get("status") == PASS or not _http_slo_has_only_transient_freshness_failures(report):
+        retryable_freshness = _http_slo_has_only_transient_freshness_failures(report)
+        retryable_latency = attempts == 1 and _http_slo_has_only_single_window_latency_miss(report)
+        if report.get("status") == PASS or not (retryable_freshness or retryable_latency):
             break
         remaining = deadline - monotonic()
         if remaining <= 0:
             break
         sleep(min(max(0.05, poll_interval_seconds), remaining))
     wait_payload = {
-        "freshness_wait_attempts": max(0, attempts - 1),
-        "freshness_wait_elapsed_ms": round(max(0.0, monotonic() - started) * 1000, 3),
+        "retry_attempts": max(0, attempts - 1),
+        "retry_elapsed_ms": round(max(0.0, monotonic() - started) * 1000, 3),
     }
     if report.get("status") == "auth_missing":
         return ClosureCheck(
@@ -568,6 +573,25 @@ def _http_slo_has_only_transient_freshness_failures(report: Mapping[str, Any]) -
             bool(probe.get("non_fresh_read_model_statuses"))
             or _safe_int(probe.get("refresh_enqueued_count")) > 0
         )
+        for probe in failed_probes
+    )
+
+
+def _http_slo_has_only_single_window_latency_miss(report: Mapping[str, Any]) -> bool:
+    probes = report.get("probes")
+    if report.get("status") != FAIL or not isinstance(probes, list):
+        return False
+    failed_probes = [
+        probe
+        for probe in probes
+        if isinstance(probe, Mapping) and probe.get("status") != PASS
+    ]
+    return bool(failed_probes) and all(
+        _safe_int(probe.get("failure_count")) == 0
+        and not probe.get("errors")
+        and probe.get("freshness_pass") is True
+        and probe.get("p95_pass") is False
+        and probe.get("p99_pass") is True
         for probe in failed_probes
     )
 

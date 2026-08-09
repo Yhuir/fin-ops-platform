@@ -2325,7 +2325,6 @@ release_gate_checkpoint() {
       --page-base-url https://www.yn-sourcing.com
       --api-prefix ""
       --profile "$profile"
-      --apply-read-model-smoke
       --read-model-target-ms 5000
       --write-target-ms 5000
       --http-target-ms 1000
@@ -2333,6 +2332,9 @@ release_gate_checkpoint() {
       --timeout-seconds 120
       --output "$closure_report"
     )
+    if [[ "$profile" == "full" ]]; then
+      closure_args+=(--apply-read-model-smoke)
+    fi
     if [[ "$profile" == "preflight" ]]; then
       for required_worker_instance in $(required_worker_instances "$src"); do
         closure_args+=(--required-worker-instance "$required_worker_instance")

@@ -975,6 +975,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("--apply-write-scenarios", checkpoint)
         self.assertNotIn("--write-scenario", checkpoint)
         self.assertIn("--page-base-url https://www.yn-sourcing.com", checkpoint)
+        self.assertIn('if [[ "$profile" == "full" ]]', checkpoint)
+        self.assertIn('closure_args+=(--apply-read-model-smoke)', checkpoint)
         self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
         self.assertIn('required_worker_instances "$src"', checkpoint)
         self.assertLess(

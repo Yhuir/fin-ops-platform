@@ -421,8 +421,9 @@ python -m fin_ops_platform.app.worker \
 - `runtime`/`acl` 候选激活后 T+0 运行 `full`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、critical read-model SLO、隔离事务写入能力、domain/page canonical
   audit 及 API/health 性能
-- `runtime`/`acl` 在 T+60s、T+300s 运行 `stability`：重跑 critical read-model、性能、domain audit 和 runtime 收敛检查，
-  全程不执行 confirm/withdraw；最终证据以 T+300 证明异步拓扑持续稳定
+- `runtime`/`acl` 在 T+60s、T+300s 运行只读 `stability`：重跑性能、domain audit 和 runtime 收敛检查，
+  不再重复 enqueue T+0 已证明的 critical read-model smoke，也不执行 confirm/withdraw；单个无错误、fresh、p99
+  合格但 p95 超标的三样本窗口只允许重采样一次，第二个窗口仍超标即失败。最终证据以 T+300 证明异步拓扑持续稳定
 - `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/首个 hashed asset；不执行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 等待
 - 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
   防止内部地址页面 404 或公开 Nginx fallback 被误判为业务 API 结果

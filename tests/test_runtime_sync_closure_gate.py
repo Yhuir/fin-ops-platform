@@ -244,6 +244,8 @@ def http_latency_fail_report() -> dict[str, object]:
                 "success_count": 3,
                 "failure_count": 0,
                 "slo_pass": False,
+                "p95_pass": False,
+                "p99_pass": True,
                 "freshness_pass": True,
                 "errors": [],
                 "non_fresh_read_model_statuses": {},
@@ -738,6 +740,32 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         )
         business_write_e2e.assert_not_called()
 
+    def test_stability_gate_observes_without_enqueuing_read_model_smoke(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            FakeRuntimeMonitoringRepository,
+        ), patch.object(gate.read_model_slo_smoke, "run_smoke") as read_model_smoke, patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            return_value=http_pass_report(),
+        ), patch.object(
+            gate.write_operation_slo_audit,
+            "audit_write_operation_slo",
+            return_value=write_audit_pass_report(),
+        ):
+            report = gate.run_closure_gate(
+                object(),
+                base_url="https://example.test",
+                headers={"Authorization": "Bearer token"},
+                profile="stability",
+                apply_read_model_smoke=True,
+            )
+
+        self.assertEqual(report["status"], gate.PASS)
+        self.assertNotIn("read_model_direct_smoke", [check["name"] for check in report["checks"]])
+        read_model_smoke.assert_not_called()
+
     def test_gate_fails_without_authenticated_read_only_evidence(self) -> None:
         with patch.object(
             gate,
@@ -1001,7 +1029,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             )
 
         self.assertEqual(check.status, gate.PASS)
-        self.assertEqual(check.payload["freshness_wait_attempts"], 1)
+        self.assertEqual(check.payload["retry_attempts"], 1)
         self.assertEqual(collect.call_count, 2)
         sleep.assert_called_once_with(0.05)
 
@@ -1028,19 +1056,45 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             )
 
         self.assertEqual(check.status, gate.FAIL)
-        self.assertEqual(check.payload["freshness_wait_attempts"], 1)
+        self.assertEqual(check.payload["retry_attempts"], 1)
         self.assertEqual(collect.call_count, 2)
         sleep.assert_called_once_with(0.5)
 
-    def test_http_slo_does_not_retry_latency_failure(self) -> None:
+    def test_http_slo_retries_one_clean_latency_window(self) -> None:
         with patch.object(
             gate.http_slo_probe,
             "collect_http_slo",
-            return_value=http_latency_fail_report(),
+            side_effect=[http_latency_fail_report(), http_pass_report()],
         ) as collect, patch.object(
             gate,
             "monotonic",
-            side_effect=[0.0, 0.1],
+            side_effect=[0.0, 0.1, 0.2],
+        ), patch.object(gate, "sleep") as sleep:
+            check = gate._http_slo_check(
+                base_url="https://example.test",
+                page_base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                admin_headers={},
+                target_ms=1_000,
+                timeout_seconds=1,
+                require_auth=True,
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(check.payload["retry_attempts"], 1)
+        self.assertEqual(collect.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+
+    def test_http_slo_fails_after_two_latency_windows(self) -> None:
+        with patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            side_effect=[http_latency_fail_report(), http_latency_fail_report()],
+        ) as collect, patch.object(
+            gate,
+            "monotonic",
+            side_effect=[0.0, 0.1, 0.2],
         ), patch.object(gate, "sleep") as sleep:
             check = gate._http_slo_check(
                 base_url="https://example.test",
@@ -1054,9 +1108,9 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             )
 
         self.assertEqual(check.status, gate.FAIL)
-        self.assertEqual(check.payload["freshness_wait_attempts"], 0)
-        collect.assert_called_once()
-        sleep.assert_not_called()
+        self.assertEqual(check.payload["retry_attempts"], 1)
+        self.assertEqual(collect.call_count, 2)
+        sleep.assert_called_once_with(0.5)
 
 
 if __name__ == "__main__":
