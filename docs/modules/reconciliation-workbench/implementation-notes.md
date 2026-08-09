@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-10 - fresh generation 分组缓存回填合并
+
+- 生产并发探针确认 `/api/workbench/groups` 始终返回 HTTP 200 与同一 fresh generation，但新 generation 首次缓存未命中时，并发请求会同时回源 PostgreSQL，形成短时 p95 尾延迟。
+- 修复复用既有 Redis `SET NX EX` 锁，仅让一个请求回填精确 generation + query cache key；同 key 其它请求最多等待 400ms 读取该代缓存，等待失败、Redis 异常或缓存未生成时仍回源 PostgreSQL，保持可用性。
+- 锁不承担 freshness 或事实源职责；freshness gate、active generation 版本校验、Redis 仅缓存 fresh payload、PostgreSQL fallback 与 API response shape 均不变。未新增表、配置、依赖、worker、queue、read model 或第二缓存层。
+
 ## 2026-08-08 - 三栏下拉候选脱离主表分页
 
 - 根因：`RelationGroupGrid` 从 `sourceGroups ?? groups` 收集候选；该集合只包含 combined initial 与滚动加载过的主表页，因此菜单选项随着用户滚动才逐步变多，和服务端全量筛选口径不一致。

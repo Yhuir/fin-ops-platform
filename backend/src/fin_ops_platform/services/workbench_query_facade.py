@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http import HTTPStatus
+import time
 from typing import Callable
 
 from fin_ops_platform.services.workbench_read_model_version import (
@@ -563,6 +564,37 @@ class WorkbenchQueryFacade:
         )
         if cached_result is not None:
             return cached_result
+        acquire_cache_fill_lock = getattr(self._redis_helper, "acquire_lock", None)
+        redis_enabled = getattr(self._redis_helper, "enabled", True)
+        if (
+            cache_key
+            and can_use_groups_redis_cache
+            and redis_enabled is not False
+            and callable(acquire_cache_fill_lock)
+        ):
+            try:
+                owns_cache_fill = bool(
+                    acquire_cache_fill_lock(
+                        f"workbench-groups-fill:{cache_key}",
+                        owner="workbench-groups",
+                        ttl_seconds=5,
+                    )
+                )
+            except Exception:
+                owns_cache_fill = True
+            if not owns_cache_fill:
+                # ponytail: bounded coalescing only; availability still falls back to PostgreSQL.
+                for _ in range(8):
+                    time.sleep(0.05)
+                    cached_result = self._cached_groups_payload(
+                        cache_key,
+                        get_cached=get_cached,
+                        can_use_cache=True,
+                        scope_key=scope_key,
+                        expected_read_model_version=current_version,
+                    )
+                    if cached_result is not None:
+                        return cached_result
         repository_kwargs = dict(cache_kwargs)
         if expected_version:
             repository_kwargs["expected_read_model_version"] = expected_version

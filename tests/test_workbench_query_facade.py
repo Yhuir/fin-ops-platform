@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.workbench_groups_page_cache import (
     build_workbench_filter_options_redis_cache_key_from_version,
@@ -1171,6 +1172,70 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["groups"], [{"group_id": "current"}])
         self.assertEqual(redis.get_json_calls, [cache_key, cache_key])
         self.assertEqual(redis.set_json_calls[0][1]["payload"]["read_model_version"], "generation-current")
+
+    def test_groups_cache_miss_waits_for_same_generation_fill_before_querying(self) -> None:
+        cache_key = "workbench:generation-current:groups:digest"
+
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-current",
+                    "scope_key": "all",
+                }
+
+            @staticmethod
+            def get_workbench_groups_page(**_kwargs: object) -> object:
+                raise AssertionError("a concurrent exact-generation cache fill must prevent duplicate SQL")
+
+        class FollowerRedis(RedisRecorder):
+            def __init__(self) -> None:
+                super().__init__(text_values={"workbench:groups:version:all": "generation-current"})
+                self.lock_calls: list[tuple[str, str, int]] = []
+
+            def acquire_lock(self, name: str, *, owner: str, ttl_seconds: int) -> bool:
+                self.lock_calls.append((name, owner, ttl_seconds))
+                return False
+
+            def get_json(self, key: str) -> object:
+                value = super().get_json(key)
+                if len(self.get_json_calls) >= 3:
+                    return {
+                        "payload": {
+                            "month": "all",
+                            "zone": "paired",
+                            "groups": [{"group_id": "filled-by-owner"}],
+                            "read_model_status": "fresh",
+                            "read_model_version": "generation-current",
+                        }
+                    }
+                return value
+
+        redis = FollowerRedis()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=redis,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            groups_redis_version_key=lambda scope_key: f"workbench:groups:version:{scope_key}",
+            groups_cache_key_from_version=lambda **_kwargs: cache_key,
+        )
+
+        with patch("fin_ops_platform.services.workbench_query_facade.time.sleep") as sleep:
+            result = facade.groups("all", zone="paired")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["groups"], [{"group_id": "filled-by-owner"}])
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(
+            redis.lock_calls,
+            [(f"workbench-groups-fill:{cache_key}", "workbench-groups", 5)],
+        )
 
     def test_groups_uses_fast_freshness_status_instead_of_heavy_refresh_status(self) -> None:
         class Repository:
