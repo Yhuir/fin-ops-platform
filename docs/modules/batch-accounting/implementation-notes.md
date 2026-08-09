@@ -427,3 +427,9 @@
 
 - 生产历史关系的冗余 membership metadata 已通过指纹保护、history 和 rollback 的正式 relation command 边界清理，禁止手工 SQL。
 - 生产只读闭环使用 `batch-accounting-audit` 和 `batch-accounting-read-smoke`；后者覆盖未提交/已提交 canonical route-service-repository、严格 JSON 序列化和 1 秒 p95 门槛，不依赖浏览器 token。
+
+## 2026-08-10 - 关系成员查询复用既有 GIN 索引
+
+- 生产并发 4 复测中未提交列表 p95 为 `1738.024ms`，但响应组装不足 `1ms`；耗时集中在 canonical PostgreSQL snapshot。
+- 旧 SQL 以 `value = any(relation.row_ids)` 逐行检查 active relation，不能使用既有 `workbench_pair_relations_row_ids_gin`。查询改为等价的 `relation.row_ids @> array[value]`，复用已有索引，不新增 migration 或基础设施。
+- 1,083 条流水、401 条 OA、1,500 个 active relation 的本地 A/B 从约 `2.7s` 降至 `50–58ms`；API shape、候选口径、提交/撤回写链和其他页面 I/O 均不变。

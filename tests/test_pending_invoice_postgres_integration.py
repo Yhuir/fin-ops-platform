@@ -120,6 +120,69 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
             "materials",
         )
 
+    def test_page_resolves_relation_invoice_by_legacy_or_canonical_identity(self) -> None:
+        for suffix in ("legacy", "canonical"):
+            self.connection.execute(
+                """
+                insert into app.bank_transactions(
+                    legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                    amount, signed_amount, txn_date, txn_month, trade_time, status
+                ) values (%s, '6222000011118106', 'outflow', %s, 118, -118,
+                          '2026-07-31', '2026-07-01', '2026-07-31 10:00:00', 'active')
+                """,
+                (f"pending-bank-{suffix}", f"供应商-{suffix}"),
+            )
+        invoice_ids: dict[str, str] = {}
+        for suffix in ("legacy", "canonical"):
+            row = self.connection.fetch_one(
+                """
+                insert into app.invoices(
+                    legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                    seller_name, buyer_name, amount, signed_amount, total_with_tax, status
+                ) values (%s, 'input', %s, '2026-07-31', '2026-07-01',
+                          %s, '云南溯源科技有限公司', 100, 100, 118, 'active')
+                returning id::text as id
+                """,
+                (
+                    f"pending-invoice-{suffix}",
+                    f"INV-{suffix}",
+                    f"供应商-{suffix}",
+                ),
+            )
+            invoice_ids[suffix] = str((row or {}).get("id") or "")
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, month_scope, row_ids, row_types
+            ) values
+                ('CASE-PENDING-LEGACY', 'manual_confirmed', 'active', '2026-07-01',
+                 array['pending-bank-legacy', 'pending-invoice-legacy'], array['bank', 'invoice']),
+                ('CASE-PENDING-CANONICAL', 'manual_confirmed', 'active', '2026-07-01',
+                 array['pending-bank-canonical', %s], array['bank', 'invoice'])
+            """,
+            (invoice_ids["canonical"],),
+        )
+
+        payload = PendingInvoiceCanonicalQueryService(
+            repository=PostgresPendingInvoiceCanonicalRepository(self.connection)
+        ).rows(
+            {
+                "direction": ["expense"],
+                "filter": ["all"],
+                "include_statistics": ["false"],
+            }
+        )
+
+        rows = {row["id"]: row for row in payload["rows"]}
+        self.assertEqual(
+            rows["pending-bank-legacy"]["input_invoices"]["primary"]["id"],
+            "pending-invoice-legacy",
+        )
+        self.assertEqual(
+            rows["pending-bank-canonical"]["input_invoices"]["primary"]["id"],
+            "pending-invoice-canonical",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

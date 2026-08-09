@@ -44,11 +44,13 @@ _OA_NOT_LINKED_TO_BANK_SQL = f"""
         select 1
         from app.workbench_pair_relations relation
         where relation.status = 'active'
-          and oa.row_id = any(relation.row_ids)
+          and relation.row_ids @> array[oa.row_id]::text[]
           and exists (
               select 1
               from app.bank_transactions linked_bank
-              where coalesce(linked_bank.legacy_mongo_id, linked_bank.id::text) = any(relation.row_ids)
+              where relation.row_ids @> array[
+                        coalesce(linked_bank.legacy_mongo_id, linked_bank.id::text)
+                    ]::text[]
                 and linked_bank.status <> 'deleted'
           )
     )
@@ -58,7 +60,7 @@ _BANK_NOT_LINKED_SQL = f"""
         select 1
         from app.workbench_pair_relations relation
         where relation.status = 'active'
-          and {_BANK_ID_SQL} = any(relation.row_ids)
+          and relation.row_ids @> array[{_BANK_ID_SQL}]::text[]
     )
 """
 
@@ -155,8 +157,12 @@ class PostgresBatchAccountingQueryRepository:
                           and exists (
                               select 1
                               from app.bank_transactions submitted_bank
-                              where coalesce(submitted_bank.legacy_mongo_id, submitted_bank.id::text)
-                                    = any(relation.row_ids)
+                              where relation.row_ids @> array[
+                                        coalesce(
+                                            submitted_bank.legacy_mongo_id,
+                                            submitted_bank.id::text
+                                        )
+                                    ]::text[]
                                 and submitted_bank.status <> 'deleted'
                                 and coalesce(
                                       submitted_bank.txn_date,

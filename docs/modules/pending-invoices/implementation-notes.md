@@ -534,6 +534,13 @@
 - 待找发票 canonical 查询现在只把这 4 个已规范化字段用 `chr(1)` 合并一次，shared compiler 仅对字段集合完全一致的 contains/excludes/contains-all 使用合并文本；exact 与 regex 语义不变，规则 token 含该分隔符时继续逐字段判断，避免跨字段误命中。
 - 本地 PostgreSQL 隔离 A/B 使用同一批生产活动规则与 1,014 条合成规范化流水：旧/新命中数一致，参数从 742 降到 283，warm 十次中位耗时从 `29.777ms` 降到 `16.014ms`（`-46.22%`）。未新增索引、表、缓存、worker、依赖或 API 字段。
 
+## 2026-08-10 - 关系发票身份连接线性化
+
+- 生产并发 4 复测中 rows p95 为 `1211.417ms`，串行约 `556–674ms`；连接获取与响应组装不是主因。
+- 真实 PostgreSQL 计划显示旧的 `coalesce(legacy_mongo_id, id::text) = invoice_id or id::text = invoice_id` 对关系发票执行嵌套循环，并在 1,019 张发票、816 个关系成员样本中移除 830,688 个候选行。
+- 查询现在一次生成 legacy/canonical 两种发票身份，再以等值连接聚合；页面 API、金额、关系、精确 total、分页和直接事实源边界不变。生产规模本地 A/B 的 warm 耗时由约 `185–308ms` 降至 `104–107ms`，未新增索引、缓存、read model、worker 或依赖。
+- PostgreSQL 集成测试同时覆盖 relation 使用 legacy ID 和 canonical UUID 两条历史身份路径，防止性能修复丢失旧关系。
+
 ## 2026-07-22 - 页面自有全量标题统计
 
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。

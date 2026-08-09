@@ -304,6 +304,35 @@ case_invoice_members as materialized (
     from bank_cases owner
     join relation_members member on member.case_id = owner.case_id and member.row_type = 'invoice'
 ),
+invoice_identity_rows as materialized (
+    select
+        invoice.id,
+        invoice.legacy_mongo_id,
+        invoice.invoice_type,
+        invoice.invoice_no,
+        invoice.invoice_code,
+        invoice.digital_invoice_no,
+        invoice.invoice_date,
+        invoice.seller_name,
+        invoice.seller_tax_no,
+        invoice.buyer_name,
+        invoice.buyer_tax_no,
+        invoice.amount,
+        invoice.total_with_tax,
+        identity.row_id
+    from app.invoices invoice
+    cross join lateral (
+        values
+            (coalesce(invoice.legacy_mongo_id, invoice.id::text)),
+            (case
+                when invoice.legacy_mongo_id is not null
+                 and invoice.legacy_mongo_id <> invoice.id::text
+                then invoice.id::text
+            end)
+    ) identity(row_id)
+    where invoice.status <> 'deleted'
+      and identity.row_id is not null
+),
 relation_invoice_facts as materialized (
     select
         member.bank_id,
@@ -336,10 +365,7 @@ relation_invoice_facts as materialized (
             '[]'::jsonb
         ) as invoice_summaries
     from case_invoice_members member
-    join app.invoices invoice
-      on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.invoice_id
-      or invoice.id::text = member.invoice_id
-    where invoice.status <> 'deleted'
+    join invoice_identity_rows invoice on invoice.row_id = member.invoice_id
     group by member.bank_id
 ),
 case_oa_members as materialized (
