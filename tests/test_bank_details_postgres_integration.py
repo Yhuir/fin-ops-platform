@@ -100,6 +100,27 @@ class BankDetailsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["id"], "bank-narrow-1")
         self.assertEqual(row["effective_category_code"], "materials")
 
+        filtered_payload = BankDetailsCanonicalQueryService(
+            PostgresBankDetailsCanonicalQueryRepository(self.connection)
+        ).transactions_payload(
+            account_key=None,
+            date_from="2026-07-01",
+            date_to="2026-07-31",
+            keyword="材料费",
+            category_code="materials",
+            category_primary_label="货款",
+            category_sub_label="材料费",
+            category_third_label=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(filtered_payload["pagination"]["total"], 1)
+        self.assertEqual(filtered_payload["category_counts"]["materials"], 1)
+        [filtered_row] = filtered_payload["rows"]
+        self.assertEqual(filtered_row["id"], "bank-narrow-1")
+        self.assertEqual(filtered_row["summary"], "材料款")
+
 
 if __name__ == "__main__":
     unittest.main()

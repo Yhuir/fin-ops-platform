@@ -265,6 +265,40 @@ describe("Workbench row selection and detail drawer", () => {
     ))).toHaveLength(initialRequestCount + 1);
   });
 
+  test("fails closed when a fresh workbench refresh check loses the network", async () => {
+    setDocumentVisibility("visible");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    const refreshRequests: Array<ReturnType<typeof deferredResponse>> = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
+        const request = deferredResponse();
+        refreshRequests.push(request);
+        return request.promise;
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+
+    renderWorkbenchPage();
+    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
+    expect(screen.getByRole("button", { name: "确认关联" })).toBeEnabled();
+
+    await act(async () => {
+      refreshRequests[0].reject(new Error("network down"));
+      await Promise.resolve();
+    });
+    expect(screen.getByText("关联台读模型不可用")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(screen.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
+  });
+
   test.each([
     ["initial generation first", false],
     ["refresh generation first", true],

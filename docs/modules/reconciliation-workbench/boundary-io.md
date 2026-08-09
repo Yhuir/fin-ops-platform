@@ -77,6 +77,7 @@
 - `WorkbenchRelationCommandService` 拥有正式关系状态转换；repository/UoW 拥有 SQL 与事务，普通关系写入不拥有下游 durable outbox。
 - `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。
+- 前端每秒刷新状态检查必须 fail closed：网络/解析失败立即把两区状态标记为 `unavailable` 并阻断确认、撤回等写操作，同时保留当前稳定 generation 的只读行；后续成功轮询按既有状态机恢复或重载新 generation。不得保留上一次 `fresh` 写门禁，也不得把短暂失败清空成 false-empty。
 - 前端 OA 行只负责选择与打开详情；关系 mutation 由区域表头动作统一编排，自动识别的 OA/发票异常由统一异常抽屉处理。银行流水和发票的现有行级能力保持各自边界，不因 OA 操作列删除而改变。
 - 前端三栏只从已加载 DTO 线性计算单条精确一一对应、显式 `sourceExpenseItemId` 费用子项附件发票合计同行、残余展示和等分高度；允许完整 source group 内方向已知、双方唯一的单条精确金额展示兜底，禁止无显式费用子项归属的金额组合/顺序猜测、栏位级额外请求、DOM 测量或第二套布局状态。
 - 列筛选弹层只在打开/resize/scroll 时读取当前 `.app-sidebar` 的真实几何来约束视口 inset；不消费继承 CSS 变量、不持有 shell state，也不触发业务 I/O。

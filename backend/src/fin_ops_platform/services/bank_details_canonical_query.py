@@ -451,6 +451,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             date_to=date_to,
             account_key=account_key,
             keyword=keyword,
+            defer_full_payload=True,
         )
         where_sql, where_params = _transaction_filter_sql(
             account_key=account_key,
@@ -471,7 +472,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 trade_time_sort,
                 direction,
                 effective_category_code
-              from classified_with_semantics
+              from classified_filter_rows
               where {where_sql}
             ),
             category_counts as (
@@ -956,6 +957,7 @@ def _classification_cte(
     candidate_transaction_ids: list[str] | None = None,
     account_key: str | None = None,
     keyword: str | None = None,
+    defer_full_payload: bool = False,
 ) -> tuple[str, list[Any]]:
     tag_definitions_json = json.dumps(
         definitions,
@@ -1465,7 +1467,52 @@ def _classification_cte(
             end as effective_category_source
           from classified
         ),
-        classified_with_semantics as materialized (
+        classified_filter_rows as materialized (
+          select
+            base.row_id,
+            base.trade_time_sort,
+            base.direction,
+            base.account_key,
+            base.txn_date,
+            base.counterparty_name_raw,
+            base.trade_time,
+            base.amount,
+            base.balance,
+            base.summary_text,
+            base.purpose_text,
+            base.note_text,
+            base.bank_name,
+            base.account_last4,
+            effective.effective_category_code,
+            coalesce(
+              base.confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
+              definition.definition->>'output_primary_label',
+              definition.definition->>'category_primary_label'
+            ) as effective_category_primary_label,
+            coalesce(
+              base.confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_sub_label',
+              definition.definition->>'output_sub_label',
+              definition.definition->>'category_sub_label'
+            ) as effective_category_sub_label,
+            coalesce(
+              base.confirmation_raw_payload->'normalized_payload'->>'category_third_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_third_label',
+              definition.definition->>'output_third_label',
+              definition.definition->>'category_third_label'
+            ) as effective_category_third_label,
+            coalesce(
+              base.confirmation_raw_payload->'normalized_payload'->>'category_label',
+              base.manual_category_raw_payload->'normalized_payload'->>'category_label',
+              definition.definition->>'label'
+            ) as effective_category_label
+          from effective
+          join base on base.row_id = effective.row_id
+          left join tag_definitions definition
+            on definition.definition->>'code' = effective.effective_category_code
+        ),
+        classified_with_semantics as {"not materialized" if defer_full_payload else "materialized"} (
           select
             base.*,
             effective.counterpart_id,

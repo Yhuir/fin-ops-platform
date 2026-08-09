@@ -543,6 +543,12 @@
 - 两个页面复用同一个 compiler；没有新分类器、缓存、projection、worker、表、索引或 API 变化。真实 PostgreSQL integration 继续校验规则命中和往来关系语义。
 - 生产并发复测证明禁用 PostgreSQL query parallelism 会让银行首屏更慢，因此撤销该设置，仅在当前 read-only transaction 关闭短查询 JIT。真实热点是 43 条 active 规则重复扫描携带 raw JSON/文本数组的宽 `base`；现改为只扫描规则必需列，分类中间态只保留决策字段，精确统计/排序只处理 key，完整行仅回连首屏分页。不改规则、优先级、分页、精确统计、导出或全局数据库设置。
 
+## 2026-08-09 - canonical 首屏窄筛选与延迟完整行
+
+- 生产稳定窗证明银行明细年度首屏唯一超出核心读取 `p95 <= 1000ms`，数据库执行占绝大部分；其它重点 direct-canonical 页面与关联台均已达标，因此不扩散修改范围。
+- 同一 `_classification_cte(...)` 新增窄 `classified_filter_rows`，全量范围只物化筛选、精确统计、分类 facets 与分页键所需字段；完整页面 DTO 的 `classified_with_semantics` 仅在 Bank Details 分页查询中允许 PostgreSQL 按 50 个 page keys 延迟展开。导出、Workbench/批量账务复用的 bounded classifier 继续保留原物化合同。
+- API、repeatable-read snapshot、分类/人工覆盖优先级、内部往来匹配、精确 total/facets、关系查询、分页与导出合同不变；没有新增缓存、read model、worker、表、索引、依赖或并行旧路径。真实 PostgreSQL integration 同时校验标签文本筛选、分类筛选、facets 和完整行 DTO。
+
 ## 2026-08-08 - 标签筛选面板可读性放大
 
 - 目标：放大银行明细右侧标签筛选面板，解决原 8–9px 字号和紧凑行高难以阅读的问题。

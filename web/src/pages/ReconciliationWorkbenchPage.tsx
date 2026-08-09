@@ -1198,7 +1198,30 @@ export default function ReconciliationWorkbenchPage() {
           }
           applyWorkbenchRefreshStatus(status);
         })
-        .catch(() => undefined)
+        .catch(() => {
+          if (!isActive || controller.signal.aborted) {
+            return;
+          }
+          setWorkbenchRefreshStatus((current) => ({
+            scopeKey: current?.scopeKey ?? WORKBENCH_VIEW_MONTH,
+            readModelStatus: "unavailable",
+            consistencyStatus: current?.consistencyStatus ?? null,
+            generatedAt: current?.generatedAt ?? null,
+            activeGenerationId: current?.activeGenerationId ?? null,
+            readModelVersion: current?.readModelVersion ?? (activeWorkbenchReadModelVersionRef.current || null),
+            dirtyScopes: current?.dirtyScopes ?? [],
+            runningScopes: current?.runningScopes ?? [],
+            processedCount: current?.processedCount ?? null,
+            totalCount: current?.totalCount ?? null,
+            workerLagSeconds: current?.workerLagSeconds ?? null,
+            lastError: "关联台刷新状态检查失败，请稍后重试。",
+            retryable: true,
+          }));
+          setZonePages((current) => ({
+            paired: { ...current.paired, readModelStatus: "unavailable" },
+            unpaired: { ...current.unpaired, readModelStatus: "unavailable" },
+          }));
+        })
         .finally(() => {
           if (pollController === controller) {
             pollController = null;
