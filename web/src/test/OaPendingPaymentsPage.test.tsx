@@ -810,7 +810,7 @@ describe("OA pending payments page", () => {
     expect(paginationButton).toContain("var(--motion-fast)");
     expect(viewToggle).toContain("display: inline-flex");
     expect(writebackLine).toContain("flex-wrap: wrap");
-    expect(tableCell).toContain("font-size: 10.5px");
+    expect(tableCell).toContain("font-size: 12px");
     expect(invoiceColumn).toContain("width: 13%");
     expect(statusColumn).toContain("width: 8%");
     expect(oaGrid).toContain("display: grid");

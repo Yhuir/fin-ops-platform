@@ -18,44 +18,44 @@ colors:
   info: "#2563eb"
   success: "#16803c"
   success-soft: "#e8f7ee"
-  warning: "#b76e00"
+  warning: "#8a4b00"
   warning-soft: "#fff4df"
   danger: "#c2412d"
   danger-soft: "#fff0ed"
   neutral-tag: "#edf2f7"
 typography:
   display:
-    fontFamily: "\"Inter\", \"SF Pro Text\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
-    fontSize: "24px"
-    fontWeight: 800
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontSize: "20px"
+    fontWeight: 600
     lineHeight: 1.25
     letterSpacing: "0"
   headline:
-    fontFamily: "\"Inter\", \"SF Pro Text\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
-    fontSize: "20px"
-    fontWeight: 800
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontSize: "18px"
+    fontWeight: 600
     lineHeight: 1.3
     letterSpacing: "0"
   title:
-    fontFamily: "\"Inter\", \"SF Pro Text\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
     fontSize: "16px"
-    fontWeight: 700
+    fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "0"
   body:
-    fontFamily: "\"Inter\", \"SF Pro Text\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "0"
   label:
-    fontFamily: "\"Inter\", \"SF Pro Text\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
     fontSize: "12px"
-    fontWeight: 700
+    fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "0"
   data:
-    fontFamily: "\"Roboto Mono\", \"SFMono-Regular\", \"Cascadia Mono\", \"PingFang SC\", monospace"
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
     fontSize: "13px"
     fontWeight: 700
     lineHeight: 1.35
@@ -134,7 +134,7 @@ The palette is cool, restrained, and operational. Blue is for primary actions an
 
 - **Income Green** (`#16803c`): Income direction, success, completed refresh, resolved state.
 - **Income Green Wash** (`#e8f7ee`): Filled background for low-emphasis success tags.
-- **Review Amber** (`#b76e00`): Warnings, pending review, mismatched amount, stale read model, incomplete import.
+- **Review Amber** (`#8a4b00`): Warnings, pending review, mismatched amount, stale read model, incomplete import.
 - **Review Amber Wash** (`#fff4df`): Filled background for low-emphasis warning tags.
 - **Audit Red** (`#c2412d`): Destructive actions, failed jobs, blocking exceptions, invalid state.
 - **Audit Red Wash** (`#fff0ed`): Filled background for low-emphasis error tags.
@@ -164,21 +164,25 @@ The palette is cool, restrained, and operational. Blue is for primary actions an
 
 ## 3. Typography
 
-**Display Font:** Inter, SF Pro Text, PingFang SC, Microsoft YaHei, sans-serif  
-**Body Font:** Inter, SF Pro Text, PingFang SC, Microsoft YaHei, sans-serif  
-**Data Font:** Roboto Mono, SFMono-Regular, Cascadia Mono, PingFang SC, monospace
+**Display Font:** native system UI, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif
 
-**Character:** Use one clear sans system for UI and a compact monospaced stack for financial figures. The system should feel precise, not editorial.
+**Body Font:** native system UI, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif
+
+**Data Font:** same native UI stack with tabular numerals
+
+**Character:** Use the installed system UI stack without a hidden runtime font download. Financial figures use the same stack with tabular numerals so columns remain stable without introducing a competing monospaced texture.
 
 ### Hierarchy
 
-- **Display** (`24px`, `800`, `1.25`): Only for top-level page titles inside the app shell. Do not use marketing hero sizes.
-- **Headline** (`20px`, `800`, `1.3`): Section titles, drawer titles, dialog titles.
-- **Title** (`16px`, `700`, `1.35`): Panel headings, table group headings, form group headings.
-- **Body** (`14px`, `400`, `1.5`): Default text, form values, table supporting text.
-- **Compact Body** (`13px`, `400-700`, `1.35`): Dense table cells and secondary metadata.
-- **Label** (`12px`, `700`, `1.35`): Tags, table labels, compact field labels. Do not use wide tracking.
+- **Display** (`20px`, `600`, `1.25`): Top-level page titles inside the app shell. Do not use marketing hero sizes.
+- **Headline** (`18px`, `600`, `1.3`): Drawer and dialog titles.
+- **Title** (`16px`, `600`, `1.35`): Section, panel, table group, and form group headings.
+- **Body** (`14px`, `400-500`, `1.5`): Default text and form values.
+- **Compact Body** (`13px`, `400-500`, `1.35`): Dense table cells and secondary metadata.
+- **Label** (`12px`, `500-600`, `1.35`): Tags, table labels, and compact field labels. Do not use wide tracking.
 - **Data** (`13px`, `700`, `1.35`, tabular nums): Amounts, counts, percentages, ratios, invoice totals, balances.
+
+Only `400`, `500`, `600`, and `700` are valid product font weights. `10px` and `11px` are not valid for normal business information.
 
 ### Named Rules
 
@@ -221,7 +225,7 @@ New non-workbench UI uses HeroUI v3 and Tailwind CSS v4. Components should be wr
 ### PageScaffold
 
 - **Shape:** No marketing hero. Page title and actions share one compact header row when space allows.
-- **Spacing:** Page padding uses `16px` on compact screens and `20-24px` on desktop.
+- **Spacing:** Page padding uses `16px`; compact pages may reduce vertical spacing without reducing readable text size.
 - **Actions:** Primary actions stay at the top right or established toolbar location. Secondary actions group beside them, not inside unrelated cards.
 - **Description:** Use one short supporting line only when it helps clarify data scope or freshness.
 
@@ -250,7 +254,7 @@ Use `FinanceTag` for all status, direction, count, account, source, version, and
 
 Use `FinanceTable`, backed by HeroUI Table, for migrated non-workbench tables. Do not introduce TanStack Table or TanStack Virtual in this migration.
 
-- **Density:** Default row height `40-48px`. Complex rows may use `56-68px` when they contain a fixed cell stack.
+- **Density:** Compact row height `36px`, standard row height `44px`, and complex row height `60px` when a fixed cell stack requires it.
 - **Header:** Muted surface background, strong text, stable height, no oversized typography.
 - **Borders:** Row dividers use Border. Group separators use Strong Border.
 - **Hover:** Use a subtle blue wash or neutral raised surface. Hover must not shift layout.

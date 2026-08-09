@@ -72,4 +72,26 @@ describe("Ledger Calm design tokens", () => {
 
     expect(Array.from(used).filter((token) => !defined.has(token)).sort()).toEqual([]);
   });
+
+  test("keeps the production typography scale readable and finite", () => {
+    const css = source();
+    const literalFontSizes = Array.from(css.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g), (match) => Number(match[1]));
+    const literalFontWeights = Array.from(css.matchAll(/font-weight:\s*(\d+)/g), (match) => Number(match[1]));
+
+    expect(css).toMatch(/--fp-text-display:\s*20px\b/);
+    expect(css).toMatch(/--fp-text-headline:\s*18px\b/);
+    expect(css).toMatch(/--fp-text-body:\s*14px\b/);
+    expect(css).toMatch(/--fp-text-data:\s*13px\b/);
+    expect(css).toMatch(/--fp-text-caption:\s*12px\b/);
+    expect(literalFontSizes.filter((size) => size < 12)).toEqual([]);
+    expect(literalFontWeights.filter((weight) => ![400, 500, 600, 700].includes(weight))).toEqual([]);
+  });
+
+  test("uses the native UI stack and tabular financial figures without a hidden font download", () => {
+    const css = source();
+
+    expect(css).toMatch(/--fp-font-ui:\s*-apple-system,\s*BlinkMacSystemFont,\s*"Segoe UI"/);
+    expect(css).toMatch(/--fp-font-data:\s*var\(--fp-font-ui\)/);
+    expect(css).toMatch(/body\s*\{[^}]*font-variant-numeric:\s*tabular-nums/s);
+  });
 });

@@ -299,7 +299,7 @@ function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: s
         {label || "--"}
       </span>
       <time
-        className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-[11px] font-bold leading-none text-[var(--fp-text-muted)] tabular-nums"
+        className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-xs font-semibold leading-none text-[var(--fp-text-muted)] tabular-nums"
         dateTime={tradeTime}
       >
         {formattedTradeTime || "--"}

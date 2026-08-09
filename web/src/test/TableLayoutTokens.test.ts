@@ -6,6 +6,7 @@ describe("finance table layout tokens", () => {
   test("defines table density and cell tokens", () => {
     const css = source();
 
+    expect(css).toMatch(/--fp-table-row-height-compact:\s*36px\b/);
     expect(css).toMatch(/--fp-table-row-height:\s*44px\b/);
     expect(css).toMatch(/--fp-table-row-height-complex:\s*60px\b/);
     expect(css).toMatch(/--fp-table-cell-padding-x:\s*10px\b/);

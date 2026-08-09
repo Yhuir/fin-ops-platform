@@ -33,10 +33,10 @@
   --fp-danger-soft: #fff0ed;
   --fp-neutral-tag: #edf2f7;
 
-  --fp-font-ui: "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --fp-font-data: "Roboto Mono", "SFMono-Regular", "Cascadia Mono", "PingFang SC", monospace;
-  --fp-text-display: 24px;
-  --fp-text-headline: 20px;
+  --fp-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --fp-font-data: var(--fp-font-ui);
+  --fp-text-display: 20px;
+  --fp-text-headline: 18px;
   --fp-text-title: 16px;
   --fp-text-title-sm: 15px;
   --fp-text-title-md: 18px;
@@ -44,10 +44,15 @@
   --fp-text-body: 14px;
   --fp-text-label: 12px;
   --fp-text-small: 12px;
-  --fp-text-caption: 11px;
+  --fp-text-caption: 12px;
   --fp-text-data: 13px;
   --fp-text-tertiary: #64748b;
   --fp-text-disabled: #64748b;
+
+  --fp-weight-regular: 400;
+  --fp-weight-medium: 500;
+  --fp-weight-semibold: 600;
+  --fp-weight-bold: 700;
 
   --fp-space-1: 4px;
   --fp-space-2: 8px;
@@ -73,12 +78,15 @@
   --fp-leading-tight: 1.3;
   --fp-leading-normal: 1.5;
 
+  --fp-z-critical: 10000;
+
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 240ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 
+  --fp-table-row-height-compact: 36px;
   --fp-table-row-height: 44px;
   --fp-table-row-height-complex: 60px;
   --fp-table-cell-padding-x: 10px;
@@ -164,6 +172,9 @@ body,
 
 body {
   margin: 0;
+  font-size: var(--fp-text-body);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--fp-leading-normal);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -188,7 +199,7 @@ textarea {
   margin: 0;
   color: var(--fp-ink);
   font-size: var(--fp-text-display);
-  font-weight: 800;
+  font-weight: var(--fp-weight-semibold);
   line-height: 1.25;
 }
 
@@ -347,7 +358,7 @@ textarea {
 .page-statistics-value strong {
   color: var(--fp-ink);
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .page-statistics-value[data-tone="expense"] strong {
@@ -436,7 +447,7 @@ textarea {
   max-width: min(520px, 100vw - 64px);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -681,7 +692,7 @@ textarea {
 .input-invoice-usage-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
   padding: 9px var(--fp-table-cell-padding-x);
   text-align: center;
@@ -819,7 +830,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -827,7 +838,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-secondary);
   font-family: var(--fp-font-data);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
 }
@@ -841,7 +852,7 @@ textarea {
   font-family: var(--fp-font-data);
   font-size: var(--fp-text-label);
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -859,7 +870,7 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   background: var(--fp-neutral-tag);
   color: var(--fp-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.1;
   padding: 2px 7px;
@@ -917,8 +928,8 @@ textarea {
   background: transparent;
   color: var(--fp-primary);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   padding: 1px 5px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
@@ -965,7 +976,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   padding: 0 5px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
@@ -1100,7 +1111,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   padding: 0 5px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
@@ -1169,7 +1180,7 @@ textarea {
   padding: var(--fp-space-2) var(--fp-space-3) var(--fp-space-1);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 @keyframes input-invoice-usage-menu-in {
@@ -1193,12 +1204,12 @@ textarea {
 .input-invoice-usage-filter-menu__title {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-filter-menu__subtitle {
   color: var(--fp-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -1248,8 +1259,8 @@ textarea {
   justify-content: center;
   border: 1px solid var(--fp-border-strong);
   color: var(--fp-primary);
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -1322,7 +1333,7 @@ textarea {
 }
 
 .input-invoice-usage-drawer-alert__title {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-drawer-alert--error {
@@ -1362,7 +1373,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -1380,7 +1391,7 @@ textarea {
 .input-invoice-usage-detail-field__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -1425,7 +1436,7 @@ textarea {
   background: var(--fp-table-header-bg);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-detail-table tr:not(.input-invoice-usage-detail-table__section-row) th {
@@ -1433,7 +1444,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .input-invoice-usage-detail-table td {
@@ -1469,7 +1480,7 @@ textarea {
 .input-invoice-usage-export-table th {
   background: var(--fp-table-header-bg);
   color: var(--fp-text-secondary);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-export-table td {
@@ -1497,7 +1508,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-2);
 }
@@ -1550,7 +1561,7 @@ textarea {
   background: var(--fp-table-header-bg);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -1565,7 +1576,7 @@ textarea {
 
 .input-invoice-usage-rules-table__status {
   width: 22%;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-rules-table__enabled {
@@ -1584,7 +1595,7 @@ textarea {
   gap: 4px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .input-invoice-usage-rules-field input,
@@ -1632,7 +1643,7 @@ textarea {
   gap: var(--fp-space-1);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-rules-toggle input {
@@ -1659,7 +1670,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -1728,7 +1739,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -1793,7 +1804,7 @@ textarea {
   overflow: hidden;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1812,14 +1823,14 @@ textarea {
 .input-invoice-usage-payment-rule-readonly-field span {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
 .input-invoice-usage-payment-rule-readonly-field strong {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -1868,14 +1879,14 @@ textarea {
 .input-invoice-usage-oa-metric span {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .input-invoice-usage-oa-metric strong {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -2023,7 +2034,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-xs);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.3;
   padding: 3px var(--fp-space-2);
   text-overflow: ellipsis;
@@ -2067,7 +2078,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
   padding: var(--fp-space-2) var(--fp-space-3);
   transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
@@ -2116,7 +2127,7 @@ textarea {
 .input-invoice-usage-oa-table__invoice .finance-cell-stack__primary,
 .input-invoice-usage-oa-table__amount {
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .input-invoice-usage-oa-table__date {
@@ -2146,7 +2157,7 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-2);
 }
 
@@ -2184,7 +2195,7 @@ textarea {
 
 .input-invoice-usage-oa-filter-mark {
   color: var(--fp-primary);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   text-align: center;
 }
@@ -2250,7 +2261,7 @@ textarea {
 .input-invoice-usage-oa-confirmation h3 {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -2268,7 +2279,7 @@ textarea {
 }
 
 .input-invoice-usage-oa-decision-label span:first-child {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-oa-decision-label span:last-child {
@@ -2299,7 +2310,7 @@ textarea {
 .input-invoice-usage-oa-history-item__header strong {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .input-invoice-usage-oa-history-item__header span {
@@ -2347,7 +2358,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
@@ -2427,7 +2438,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
@@ -2461,7 +2472,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .oa-pending-payments-field input,
@@ -2524,7 +2535,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   white-space: nowrap;
   transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
@@ -2641,7 +2652,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   outline: none;
 }
 
@@ -2697,7 +2708,7 @@ textarea {
   top: 0;
   z-index: 4;
   height: 30px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .oa-pending-payments-table-group-header--oa {
@@ -2722,7 +2733,7 @@ textarea {
   min-height: 32px;
   padding: 4px 4px;
   color: var(--fp-text-secondary);
-  font-weight: 850;
+  font-weight: 700;
   white-space: normal;
 }
 
@@ -2748,7 +2759,7 @@ textarea {
   min-width: 0;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .oa-pending-payments-subheader-grid--oa {
@@ -2784,7 +2795,7 @@ textarea {
   padding: 5px 4px;
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.28;
   overflow-wrap: anywhere;
   vertical-align: top;
@@ -2944,7 +2955,7 @@ textarea {
   gap: 3px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .oa-pending-payments-writeback-button {
@@ -2985,7 +2996,7 @@ textarea {
 }
 
 .oa-pending-payments-table-text--strong {
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .oa-pending-payments-table-text--numeric {
@@ -3013,8 +3024,8 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
-  font-size: 10px;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 4px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
@@ -3060,7 +3071,7 @@ textarea {
   padding: 0 5px;
   color: var(--fp-accent);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -3081,7 +3092,7 @@ textarea {
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-weight: 850;
+  font-weight: 700;
   padding: 0;
   text-align: left;
   transition: color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
@@ -3176,7 +3187,7 @@ textarea {
 .oa-pending-payments-column-filter__section-title {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .oa-pending-payments-column-filter__section {
@@ -3230,7 +3241,7 @@ textarea {
   border: 1px solid var(--fp-border-strong);
   border-radius: 4px;
   color: var(--fp-primary);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .oa-pending-payments-column-filter__actions {
@@ -3252,7 +3263,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
 }
 
@@ -3280,7 +3291,7 @@ textarea {
   padding: var(--fp-space-2) var(--fp-space-3);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .oa-pending-payments-pagination-size {
@@ -3322,7 +3333,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
@@ -3368,7 +3379,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
   transition:
@@ -3439,7 +3450,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .output-invoice-collections-field input,
@@ -3505,7 +3516,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
   transition:
@@ -3542,7 +3553,7 @@ textarea {
 .output-invoice-collections-summary-tile__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .output-invoice-collections-summary-tile__value {
@@ -3550,7 +3561,7 @@ textarea {
   font-family: var(--fp-font-data);
   font-size: 20px;
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -3607,7 +3618,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   padding: 0 5px;
   transition:
@@ -3666,12 +3677,12 @@ textarea {
 .output-invoice-collection-filter-menu__title {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .output-invoice-collection-filter-menu__subtitle {
   color: var(--fp-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -3732,8 +3743,8 @@ textarea {
   justify-content: center;
   border: 1px solid var(--fp-border-strong);
   color: var(--fp-primary);
-  font-size: 10px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -3757,7 +3768,7 @@ textarea {
   gap: 4px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .output-invoice-collection-filter-menu__field input,
@@ -3806,7 +3817,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -3951,7 +3962,7 @@ textarea {
   top: 0;
   z-index: 4;
   height: 33px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .output-invoice-collections-table-group-header--invoice {
@@ -3973,7 +3984,7 @@ textarea {
   min-height: 36px;
   padding: 6px 8px;
   color: var(--fp-text-secondary);
-  font-weight: 850;
+  font-weight: 700;
   white-space: normal;
 }
 
@@ -4003,7 +4014,7 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   padding: 0 var(--fp-space-2);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -4062,9 +4073,9 @@ textarea {
   flex-basis: 100%;
   color: var(--fp-text-tertiary);
   font-family: var(--fp-table-data-font);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.1;
 }
 
@@ -4156,7 +4167,7 @@ textarea {
 }
 
 .output-invoice-collections-table-text--strong {
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .output-invoice-collections-table-text--muted,
@@ -4189,7 +4200,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
 }
 
@@ -4207,7 +4218,7 @@ textarea {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
   padding: var(--fp-space-3) var(--fp-space-4);
 }
 
@@ -4232,7 +4243,7 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
 }
 
@@ -4240,7 +4251,7 @@ textarea {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   padding: var(--fp-space-2) var(--fp-space-4);
 }
 
@@ -4284,7 +4295,7 @@ textarea {
 .oa-pending-payments-bank-drawer__counterparty {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
@@ -4300,7 +4311,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   padding: 2px 6px;
 }
 
@@ -4315,7 +4326,7 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 700;
   text-align: right;
 }
 
@@ -4328,7 +4339,7 @@ textarea {
   border-top: 1px solid var(--fp-border);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   padding: var(--fp-space-2) var(--fp-space-4);
 }
 
@@ -4392,7 +4403,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-2);
 }
@@ -4426,7 +4437,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-2);
   transition:
@@ -4544,7 +4555,7 @@ textarea {
   padding: var(--fp-space-2) var(--fp-space-3);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .output-invoice-collections-pagination-size {
@@ -4589,7 +4600,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -4650,7 +4661,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-small);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -4669,7 +4680,7 @@ textarea {
 .output-invoice-collection-detail-field__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .output-invoice-collection-detail-field__value {
@@ -4713,7 +4724,7 @@ textarea {
 .output-invoice-collection-rules-table th {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .output-invoice-collection-rules-table tr:last-child td {
@@ -4721,7 +4732,7 @@ textarea {
 }
 
 .output-invoice-collection-rules-table__strong {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .output-invoice-collection-rules-table__description,
@@ -4741,7 +4752,7 @@ textarea {
   gap: 4px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .output-invoice-collection-drawer__field input,
@@ -4808,7 +4819,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .output-invoice-collection-drawer__footer-actions {
@@ -4828,7 +4839,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -4908,7 +4919,7 @@ textarea {
 .output-invoice-collection-candidate-list legend {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0;
 }
 
@@ -5110,7 +5121,7 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-primary-hover);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding-inline: var(--fp-space-3);
 }
@@ -5127,7 +5138,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
   transition:
@@ -5195,7 +5206,7 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -5230,7 +5241,7 @@ textarea {
   gap: 3px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .batch-accounting-field--year {
@@ -5251,7 +5262,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
   transition:
@@ -5363,7 +5374,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title-sm);
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -5392,7 +5403,7 @@ textarea {
   min-width: 96px;
   color: var(--fp-text-muted);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: var(--fp-leading-tight);
   text-align: right;
@@ -5505,7 +5516,7 @@ textarea {
 .batch-accounting-bank-row__amount {
   min-width: 0;
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -5543,7 +5554,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.1;
   padding: 0 var(--fp-space-2);
   transition:
@@ -5585,7 +5596,7 @@ textarea {
 .batch-accounting-field--note small {
   color: var(--fp-text-muted);
   font-size: var(--fp-text-caption);
-  font-weight: 650;
+  font-weight: 600;
   line-height: var(--fp-leading-tight);
 }
 
@@ -5703,7 +5714,7 @@ textarea {
   background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .batch-accounting-oa-table tr:last-child td {
@@ -5727,7 +5738,7 @@ textarea {
 .batch-accounting-oa-table__applicant {
   display: block;
   margin-bottom: var(--fp-space-1);
-  font-weight: 850;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -5740,7 +5751,7 @@ textarea {
   white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
-  font-weight: 820;
+  font-weight: 700;
 }
 
 .batch-accounting-oa-table__empty {
@@ -5788,7 +5799,7 @@ textarea {
   color: var(--fp-primary-hover);
   cursor: pointer;
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   padding: 1px var(--fp-space-1);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -5823,7 +5834,7 @@ textarea {
   box-shadow: var(--fp-shadow-popover);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: var(--fp-leading-normal);
   padding: var(--fp-space-2) var(--fp-space-3);
 }
@@ -5919,7 +5930,7 @@ textarea {
   overflow: hidden;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5993,7 +6004,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
   transition:
@@ -6070,7 +6081,7 @@ textarea {
 .turnover-ledger-summary-metric__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -6079,7 +6090,7 @@ textarea {
   font-family: var(--fp-font-data);
   font-size: var(--fp-text-title-md);
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -6101,7 +6112,7 @@ textarea {
 .turnover-ledger-summary-metric__breakdown-row span:last-child {
   color: var(--fp-text-primary);
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .turnover-ledger-table-panel {
@@ -6148,7 +6159,7 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -6194,7 +6205,7 @@ textarea {
   background: color-mix(in srgb, var(--fp-surface-muted) 72%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-2);
   white-space: nowrap;
 }
@@ -6233,7 +6244,7 @@ textarea {
   background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .turnover-sticky-left-header,
@@ -6322,7 +6333,7 @@ textarea {
 .turnover-ledger-table__empty {
   height: 128px;
   color: var(--fp-text-muted);
-  font-weight: 800;
+  font-weight: 700;
   text-align: center !important;
   vertical-align: middle !important;
 }
@@ -6352,7 +6363,7 @@ textarea {
 
 .turnover-ledger-balance-block__name {
   color: var(--fp-text-primary);
-  font-weight: 900;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
   word-break: break-word;
 }
@@ -6373,7 +6384,7 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -6412,7 +6423,7 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.1;
   padding: 0 var(--fp-space-2);
   transition:
@@ -6465,13 +6476,13 @@ textarea {
 
 .turnover-ledger-balance-line__label {
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .turnover-ledger-balance-line__amount {
   font-variant-numeric: tabular-nums;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -6491,7 +6502,7 @@ textarea {
   gap: 3px;
   border-radius: var(--fp-tag-radius-table);
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
   padding: 2px 6px;
 }
 
@@ -6518,8 +6529,8 @@ textarea {
 
 .turnover-ledger-direction-tag {
   border-radius: var(--fp-tag-radius-table);
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
   padding: 1px 4px;
 }
@@ -6534,7 +6545,7 @@ textarea {
 
 .turnover-ledger-interest-cell__amount {
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .turnover-ledger-interest-cell__rate {
@@ -6551,7 +6562,7 @@ textarea {
   color: var(--fp-primary-hover);
   cursor: pointer;
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   padding: 0 var(--fp-space-2);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -6604,7 +6615,7 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning) 10%, var(--fp-surface));
   color: var(--fp-warning);
   font-size: var(--fp-text-body);
-  font-weight: 750;
+  font-weight: 700;
   line-height: var(--fp-leading-normal);
   padding: var(--fp-space-2) var(--fp-space-3);
 }
@@ -6627,7 +6638,7 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 750;
+  font-weight: 700;
   line-height: var(--fp-leading-normal);
   padding: var(--fp-space-3);
 }
@@ -6667,7 +6678,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 750;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
   transition:
     color var(--motion-fast) var(--ease-out-quart),
@@ -6679,7 +6690,7 @@ textarea {
 }
 
 .turnover-ledger-checkbox-row--primary {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .turnover-ledger-tag-group__children {
@@ -6714,7 +6725,7 @@ textarea {
 
 .turnover-ledger-closure-card__main,
 .turnover-ledger-closure-card__delta {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .turnover-ledger-closure-card__row {
@@ -6725,7 +6736,7 @@ textarea {
 .turnover-ledger-closure-card__delta span:last-child {
   color: var(--fp-text-primary);
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .turnover-ledger-closure-card__delta {
@@ -6772,7 +6783,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -6794,7 +6805,7 @@ textarea {
 .turnover-ledger-extra-control span {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   line-height: var(--fp-leading-tight);
 }
 
@@ -6803,7 +6814,7 @@ textarea {
   overflow-wrap: anywhere;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 720;
+  font-weight: 700;
   line-height: var(--fp-leading-normal);
 }
 
@@ -6869,7 +6880,7 @@ textarea {
 .turnover-ledger-extra-bank-card__chips strong {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .turnover-ledger-extra-bank-card p {
@@ -6939,20 +6950,20 @@ textarea {
   background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   white-space: nowrap;
 }
 
 .turnover-ledger-export-dialog__money-cell {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  font-weight: 780;
+  font-weight: 700;
 }
 
 .turnover-ledger-export-dialog__state-cell {
   height: 120px;
   color: var(--fp-text-secondary);
-  font-weight: 800;
+  font-weight: 700;
   text-align: center !important;
   vertical-align: middle !important;
 }
@@ -6980,7 +6991,7 @@ textarea {
   box-shadow: var(--fp-shadow-popover);
   color: var(--fp-surface);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.4;
   padding: var(--fp-space-3);
 }
@@ -7013,7 +7024,7 @@ textarea {
   color: inherit;
   cursor: pointer;
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1;
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -7118,7 +7129,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
   transition:
@@ -7182,7 +7193,7 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   padding: 0 var(--fp-space-3);
   transition:
     background-color var(--motion-fast) var(--ease-out-quart),
@@ -7218,7 +7229,7 @@ textarea {
   gap: var(--fp-space-2);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-field input {
@@ -7230,7 +7241,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
   transition:
@@ -7250,7 +7261,7 @@ textarea {
 .bank-flow-rule-batches-selected-count {
   color: var(--fp-primary-hover);
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -7266,7 +7277,7 @@ textarea {
   min-width: 96px;
   color: var(--fp-text-muted);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: var(--fp-leading-tight);
   text-align: right;
@@ -7328,7 +7339,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -7402,7 +7413,7 @@ textarea {
   min-width: 0;
   overflow: hidden;
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7410,13 +7421,13 @@ textarea {
 
 .bank-flow-rule-batches-rail__item--active .bank-flow-rule-batches-rail__item-label,
 .bank-flow-rule-batches-rail__item[aria-pressed="true"] .bank-flow-rule-batches-rail__item-label {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-rail__item-count {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.25;
   white-space: nowrap;
 }
@@ -7424,7 +7435,7 @@ textarea {
 .bank-flow-rule-batches-rail__item--active .bank-flow-rule-batches-rail__item-count,
 .bank-flow-rule-batches-rail__item[aria-pressed="true"] .bank-flow-rule-batches-rail__item-count {
   color: var(--fp-primary-hover);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-rail__item-count--empty {
@@ -7456,7 +7467,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -7464,13 +7475,13 @@ textarea {
   margin: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.35;
 }
 
 .bank-flow-rule-batches-transactions__account {
   flex: 0 0 auto;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-transactions__list {
@@ -7528,7 +7539,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -7537,7 +7548,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -7557,7 +7568,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.1;
   padding: 0 var(--fp-space-2);
   transition:
@@ -7595,7 +7606,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   font-size: var(--fp-text-body);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.4;
   padding: var(--fp-space-2) var(--fp-space-3);
 }
@@ -7641,7 +7652,7 @@ textarea {
   background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -7684,7 +7695,7 @@ textarea {
 
 .bank-flow-rule-batches-amount {
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -7695,12 +7706,12 @@ textarea {
 .bank-flow-rule-batches-tag--bank {
   background: transparent;
   color: var(--fp-text-secondary);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-summary-cell__summary {
   color: var(--fp-text-primary);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-summary-cell__memo {
@@ -7721,7 +7732,7 @@ textarea {
   border-color: color-mix(in srgb, var(--fp-primary) 22%, var(--fp-border));
   background: color-mix(in srgb, var(--fp-primary) 8%, var(--fp-surface));
   color: var(--fp-primary-hover);
-  font-weight: 820;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-drawer .finance-drawer__body {
@@ -7783,7 +7794,7 @@ textarea {
   z-index: 1;
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-drawer__grid tr:last-child td {
@@ -7798,7 +7809,7 @@ textarea {
 .bank-flow-rule-batches-drawer__direction-cell,
 .bank-flow-rule-batches-drawer__primary-cell {
   color: var(--fp-text-primary);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-drawer__direction-cell {
@@ -7832,7 +7843,7 @@ textarea {
   gap: var(--fp-space-1);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .bank-flow-rule-batches-dialog__field textarea {
@@ -7844,7 +7855,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.45;
   min-height: 96px;
   outline: none;
@@ -7874,7 +7885,7 @@ textarea {
   box-shadow: var(--fp-shadow-popover);
   color: var(--fp-surface);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.4;
   padding: var(--fp-space-3);
 }
@@ -8051,7 +8062,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
   transition:
@@ -8130,7 +8141,7 @@ textarea {
 .pending-invoice-status-filter-button {
   min-height: 24px;
   padding: 0 7px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .pending-invoice-status-filter-menu {
@@ -8207,7 +8218,7 @@ textarea {
   border-right: 1px solid var(--fp-border);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .pending-invoices-selection-toolbar > span {
@@ -8303,7 +8314,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
     background-color var(--motion-fast) var(--ease-standard),
@@ -8433,7 +8444,7 @@ textarea {
   align-items: center;
   justify-content: center;
   height: 33px;
-  font-weight: 900;
+  font-weight: 700;
   position: static;
 }
 
@@ -8465,7 +8476,7 @@ textarea {
   min-height: 36px;
   padding: 6px 7px;
   color: var(--fp-text-secondary);
-  font-weight: 800;
+  font-weight: 700;
   z-index: 3;
   white-space: normal;
 }
@@ -8560,7 +8571,7 @@ textarea {
 
 .pending-invoices-sort-icon {
   color: var(--fp-text-tertiary);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
 }
 
@@ -8639,7 +8650,7 @@ textarea {
 .pending-invoices-column-filter-menu__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -8692,7 +8703,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .pending-invoices-column-filter-menu__apply {
@@ -8756,7 +8767,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-primary);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.3;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -8765,8 +8776,8 @@ textarea {
 .pending-invoices-cell-secondary {
   min-width: 0;
   color: var(--fp-text-secondary);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1.25;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -8784,7 +8795,7 @@ textarea {
   border-radius: var(--fp-radius-pill);
   background: var(--fp-surface);
   color: var(--fp-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   text-overflow: ellipsis;
@@ -8810,21 +8821,21 @@ textarea {
 .pending-invoices-amount-cell [class~="finance-direction-tag"] {
   min-width: 18px;
   height: 18px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .pending-invoices-money-primary {
   color: var(--fp-text-primary);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
 }
 
 .pending-invoices-money-extra {
   color: var(--fp-accent);
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .pending-invoices-status-cell {
@@ -8847,8 +8858,8 @@ textarea {
   border-radius: var(--fp-radius-sm);
   color: var(--fp-text-secondary);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
@@ -9047,14 +9058,14 @@ textarea {
 .pending-invoice-field__label {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
 }
 
 .pending-invoice-metric__value {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
 }
@@ -9068,7 +9079,7 @@ textarea {
   padding: 10px var(--fp-space-3) 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -9093,7 +9104,7 @@ textarea {
 .pending-invoice-list__primary {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .pending-invoice-list__secondary,
@@ -9128,7 +9139,7 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .pending-invoice-simple-table tr:last-child td {
@@ -9175,7 +9186,7 @@ textarea {
   min-width: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -9190,7 +9201,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   font-size: var(--fp-text-body);
-  font-weight: 650;
+  font-weight: 600;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard);
@@ -9223,7 +9234,7 @@ textarea {
 
 .pending-invoice-table-stack strong {
   color: var(--fp-text-primary);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .pending-invoice-status-tag {
@@ -9235,7 +9246,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-pill);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -9388,7 +9399,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-data);
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -9400,8 +9411,8 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-pill);
   color: var(--fp-text-secondary);
-  font-size: 10.5px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -9419,8 +9430,8 @@ textarea {
 .pending-invoice-rule-primary__label {
   justify-self: start;
   color: var(--fp-text-secondary);
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -9456,7 +9467,7 @@ textarea {
   color: var(--fp-text-primary);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -9491,7 +9502,7 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -9609,7 +9620,7 @@ textarea {
   margin: 0;
   color: var(--fp-ink);
   font-size: var(--fp-text-display);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -9676,7 +9687,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -9715,7 +9726,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -9724,7 +9735,7 @@ textarea {
   border: 1px solid var(--fp-border);
   background: var(--fp-surface);
   color: var(--fp-text-primary);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .app-health-history-button:hover,
@@ -9757,7 +9768,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -9784,7 +9795,7 @@ textarea {
   border: 1px solid var(--fp-border);
   background: var(--fp-surface);
   color: var(--fp-text-primary);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .app-health-audit-button:hover,
@@ -9821,7 +9832,7 @@ textarea {
   overflow: hidden;
   color: var(--fp-text-muted);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9832,7 +9843,7 @@ textarea {
   font-family: var(--fp-font-data);
   font-size: var(--fp-text-title);
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -9881,7 +9892,7 @@ textarea {
   padding: 10px 12px;
   color: var(--fp-text-muted);
   font-size: var(--fp-text-label);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .app-health-runtime-overview__item:last-child {
@@ -9917,7 +9928,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -9955,7 +9966,7 @@ textarea {
   border-top: 0;
   background: var(--fp-surface);
   color: var(--fp-text-muted);
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -9967,7 +9978,7 @@ textarea {
 .app-health-inventory-table__total {
   font-family: var(--fp-font-data);
   font-variant-numeric: tabular-nums;
-  font-weight: 750;
+  font-weight: 700;
   text-align: right !important;
   white-space: nowrap;
 }
@@ -9975,7 +9986,7 @@ textarea {
 .app-health-inventory-table__total {
   background: var(--fp-surface-muted);
   color: var(--fp-text-primary);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .app-health-inventory-table__dimension {
@@ -9994,7 +10005,7 @@ textarea {
 .app-health-inventory-table__dimension small {
   margin-top: 3px;
   color: var(--fp-warning);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -10002,7 +10013,7 @@ textarea {
 .app-health-inventory-table__annotation {
   margin-top: 2px;
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.25;
 }
@@ -10169,7 +10180,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-title);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -10293,7 +10304,7 @@ textarea {
 .import-workflow-upload-zone__title {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .import-workflow-upload-zone__description {
@@ -10332,7 +10343,7 @@ textarea {
   overflow: hidden;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10372,7 +10383,7 @@ textarea {
   color: var(--fp-ink);
   font-family: var(--fp-font-data);
   font-size: 18px;
-  font-weight: 900;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
@@ -10456,7 +10467,7 @@ textarea {
   padding-inline: var(--fp-space-3);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-data);
-  font-weight: 800;
+  font-weight: 700;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard);
@@ -10520,7 +10531,7 @@ textarea {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -10564,7 +10575,7 @@ textarea {
 .finance-dialog__title {
   color: var(--fp-ink);
   font-size: var(--fp-text-title);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -10698,7 +10709,7 @@ textarea {
   overflow: hidden;
   color: var(--fp-ink);
   font-size: var(--fp-text-subtitle);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10768,7 +10779,7 @@ textarea {
   background: var(--fp-table-header-bg);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -10871,7 +10882,7 @@ textarea {
 
 .finance-amount-cell__value {
   color: var(--fp-ink);
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -10903,7 +10914,7 @@ textarea {
   min-width: var(--fp-tag-direction-min-width);
   border-radius: var(--fp-tag-radius-table);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
@@ -10914,7 +10925,7 @@ textarea {
   min-height: var(--fp-tag-height-table);
   border-radius: var(--fp-tag-radius-table);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
@@ -10944,7 +10955,7 @@ textarea {
 .app-skip-link {
   position: fixed;
   inset: 8px auto auto 8px;
-  z-index: 10000;
+  z-index: var(--fp-z-critical);
   padding: 8px 12px;
   border-radius: var(--fp-radius-sm);
   background: var(--fp-primary);
@@ -11008,7 +11019,7 @@ textarea {
   color: var(--fp-danger);
   cursor: pointer;
   font-size: var(--fp-text-title);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -11074,7 +11085,7 @@ body.workbench-focus-mode .global-header {
 
 .eyebrow {
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
   color: #6b7280;
@@ -11083,7 +11094,7 @@ body.workbench-focus-mode .global-header {
 .global-title {
   margin-top: 4px;
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 700;
   color: #171717;
   letter-spacing: 0;
 }
@@ -11406,7 +11417,7 @@ body.workbench-focus-mode .global-header {
 .app-status-section h3 {
   margin: 0;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -11414,7 +11425,7 @@ body.workbench-focus-mode .global-header {
   margin: 2px 0 0;
   overflow: hidden;
   color: #486581;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -11450,8 +11461,8 @@ body.workbench-focus-mode .global-header {
   gap: 6px;
   min-width: 0;
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .app-status-summary-row > span {
@@ -11486,8 +11497,8 @@ body.workbench-focus-mode .global-header {
 .app-status-task-label,
 .app-status-domain-label {
   min-width: 0;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .app-status-task-progress {
@@ -11526,21 +11537,21 @@ body.workbench-focus-mode .global-header {
 .app-status-scope-row {
   display: block;
   color: #486581;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.3;
 }
 
 .app-status-scope-row strong {
   color: #243b53;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .app-status-admin-link {
   width: fit-content;
   border-radius: 6px;
   color: #0f4c81;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -11581,7 +11592,7 @@ body.workbench-focus-mode .global-header {
 
 .app-sidebar-title {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.25;
   color: #9db8d8;
@@ -11863,7 +11874,7 @@ body.workbench-focus-mode .global-header {
   background: #eaf2ff;
   color: #24558b;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -11892,14 +11903,14 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-account-copy strong {
   color: #f8fbff;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.35;
 }
 
 .app-sidebar-account-copy span,
 .app-sidebar-account-label {
   color: #9db8d8;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
 }
@@ -11962,7 +11973,7 @@ body.workbench-focus-mode .global-header {
   overflow: hidden;
   color: #243b53;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -11970,7 +11981,7 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-account-popover-heading span,
 .app-sidebar-account-details dt {
   color: #627d98;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -11998,7 +12009,7 @@ body.workbench-focus-mode .global-header {
   overflow: hidden;
   color: #243b53;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -12076,14 +12087,14 @@ body.workbench-focus-mode .global-header {
   background: var(--fp-primary-soft);
   color: var(--fp-primary);
   font-size: var(--fp-text-headline);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
 .finance-file-dropzone__label {
   color: var(--fp-ink);
   font-size: var(--fp-text-body);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .finance-file-dropzone__helper {
@@ -12161,7 +12172,7 @@ body.workbench-focus-mode .global-header {
   background: #f9fbfe;
   color: #243b53;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -12223,7 +12234,7 @@ body.workbench-focus-mode .global-header {
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.08);
   color: #102a43;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .background-progress-action,
@@ -12239,8 +12250,8 @@ body.workbench-focus-mode .global-header {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.72);
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
@@ -12333,8 +12344,8 @@ body.workbench-focus-mode .global-header {
 }
 
 .month-picker-section-title {
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   color: #5d6d7e;
 }
 
@@ -12548,7 +12559,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
 .workbench-import-trigger {
   padding: 0 16px;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .workbench-settings-entry {
@@ -13005,7 +13016,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   color: var(--ops-header-text);
   font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12px;
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .workbench-zone-search-input::placeholder {
@@ -13092,7 +13103,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   background: #ffffff;
   color: var(--ops-header-text);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   font-feature-settings: "tnum" 1;
 }
 
@@ -13118,7 +13129,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   background: #ffffff;
   color: var(--ops-header-text);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1;
   text-transform: none;
   transform: none;
@@ -13235,7 +13246,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   background: #ffffff;
   color: var(--ops-header-text);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
@@ -14015,7 +14026,7 @@ body.column-layout-dragging {
 .oa-expense-summary-total {
   color: #344054;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 
@@ -14120,7 +14131,7 @@ body.column-layout-dragging {
   background: #ffffff;
   color: #102a43;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .processed-exception-summary-cell {
@@ -14516,7 +14527,7 @@ body.column-layout-dragging {
 .bank-amount-mismatch-tooltip strong {
   color: #7a4d16;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .money-cell-account {
@@ -14543,7 +14554,7 @@ body.column-layout-dragging {
 
 .bank-account-secondary {
   color: #5d6d7e;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .bank-account-tag {
@@ -14563,7 +14574,7 @@ body.column-layout-dragging {
 .bank-account-tag .bank-account-primary {
   display: inline;
   color: #243b53;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   min-width: 0;
   overflow: hidden;
@@ -14573,7 +14584,7 @@ body.column-layout-dragging {
 .bank-account-tag .bank-account-secondary {
   display: inline;
   color: #486581;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -14676,8 +14687,8 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #eef4fb;
   color: #35506b;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -14705,7 +14716,7 @@ body.column-layout-dragging {
 
 .cell-subtext-value {
   color: #52667a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .invoice-party-primary {
@@ -14755,7 +14766,7 @@ body.column-layout-dragging {
 
 .invoice-oa-anomaly-chip {
   max-width: 100%;
-  font-size: 10px;
+  font-size: 12px;
   white-space: normal;
 }
 
@@ -14838,8 +14849,8 @@ body.column-layout-dragging {
 
 .workbench-anomaly-drawer__pane-label {
   color: #748295;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1.25;
 }
 
@@ -14919,8 +14930,8 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   flex: 0 0 auto;
   margin-top: 1px;
@@ -15004,7 +15015,7 @@ body.column-layout-dragging {
 
 .datetime-line-secondary {
   color: #5d6d7e;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .record-card-action-cell {
@@ -15073,7 +15084,7 @@ body.column-layout-dragging {
   white-space: nowrap;
   color: #d0d6e0;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   font-feature-settings: "tnum" 1;
 }
 
@@ -15142,7 +15153,7 @@ body.column-layout-dragging {
 .pane-time-filter-label {
   display: inline-block;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
@@ -15150,7 +15161,7 @@ body.column-layout-dragging {
 .pane-sort-label {
   display: inline-block;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
@@ -15216,8 +15227,8 @@ body.column-layout-dragging {
   display: inline-block;
   overflow: hidden;
   max-width: 100%;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -15302,7 +15313,7 @@ body.column-layout-dragging {
   color: #102a43;
   font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 18px;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
@@ -15638,7 +15649,7 @@ body.column-layout-dragging {
   border-radius: 8px;
   background: #ffffff;
   color: #243b53;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   line-height: 1;
@@ -15648,7 +15659,7 @@ body.column-layout-dragging {
   min-height: 28px;
   padding: 0 6px;
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .row-action-btn-icon {
@@ -15702,7 +15713,7 @@ body.column-layout-dragging {
   border-radius: 8px;
   background: transparent;
   color: #243b53;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-align: left;
   cursor: pointer;
@@ -15764,7 +15775,7 @@ body.column-layout-dragging {
   background: #eaf3ff;
   color: #164c9b;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.1;
   justify-content: center;
   text-align: center;
@@ -15790,8 +15801,8 @@ body.column-layout-dragging {
   min-height: 20px;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -15972,8 +15983,8 @@ body.column-layout-dragging {
   min-height: 18px;
   padding: 0 7px;
   border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -16001,8 +16012,8 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #eef4fb;
   color: #486581;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -16015,8 +16026,8 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #eef4fb;
   color: #486581;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -16077,7 +16088,7 @@ body.column-layout-dragging {
   background: #ffffff;
   color: #102a43;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .tax-certified-drawer-body {
@@ -16148,8 +16159,8 @@ body.column-layout-dragging {
 
 .tax-certified-item-head span {
   color: #164c9b;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .tax-certified-item-meta {
@@ -16689,7 +16700,7 @@ body.column-layout-dragging {
 .workbench-import-preview-item header span {
   color: #486581;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .workbench-import-preview-item p {
@@ -16743,7 +16754,7 @@ body.column-layout-dragging {
 .certified-import-preview-file-header span {
   color: #164c9b;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -16787,7 +16798,7 @@ body.column-layout-dragging {
   flex-wrap: wrap;
   gap: 4px 12px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   color: #64748b;
   font-variant-numeric: tabular-nums;
 }
@@ -16911,8 +16922,8 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #eef2ff;
   color: #3730a3;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -16924,7 +16935,7 @@ body.column-layout-dragging {
 .field-label {
   color: #486581;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .field-input,
@@ -17012,7 +17023,7 @@ body.column-layout-dragging {
 .global-operation-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--fp-z-critical);
   display: grid;
   place-items: center;
   padding: 24px;
@@ -17036,7 +17047,7 @@ body.column-layout-dragging {
 .global-operation-overlay__title {
   font-size: 24px;
   line-height: 1.25;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .global-operation-overlay__body {
@@ -17051,7 +17062,7 @@ body.column-layout-dragging {
   background: #f8fbff;
   color: #486581;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .global-operation-overlay__spinner {
@@ -17085,7 +17096,7 @@ body.column-layout-dragging {
 
 .detail-drawer-title {
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .workbench-detail-drawer .finance-drawer__header {
@@ -17156,7 +17167,7 @@ body.column-layout-dragging {
   background: var(--fp-table-header-bg);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .workbench-detail-table tr:not(.workbench-detail-table__section-row) th {
@@ -17164,7 +17175,7 @@ body.column-layout-dragging {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .workbench-detail-table td {
@@ -17307,7 +17318,7 @@ body.column-layout-dragging {
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .status-chip.tone-success {
@@ -17453,7 +17464,7 @@ body.column-layout-dragging {
 
 .settings-session-account strong {
   color: #102a43;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .workbench-settings-body {
@@ -18529,8 +18540,8 @@ body.column-layout-dragging {
 .settings-nav-header span,
 .settings-section-header span {
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-section-panel {
@@ -18591,8 +18602,8 @@ body.column-layout-dragging {
 
 .settings-project-column-head span {
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-project-list {
@@ -18631,7 +18642,7 @@ body.column-layout-dragging {
 
 .settings-project-main small {
   color: #5d6d7e;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -18645,7 +18656,7 @@ body.column-layout-dragging {
 .settings-project-actions .secondary-button {
   min-height: 30px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .project-action-status {
@@ -18666,8 +18677,8 @@ body.column-layout-dragging {
 
 .settings-project-row > span:last-child {
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -18702,8 +18713,8 @@ body.column-layout-dragging {
   margin: 0 0 8px;
   padding: 0;
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-checkbox-list {
@@ -19297,7 +19308,7 @@ body.column-layout-dragging {
   background: var(--fp-accent);
   color: #ffffff;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
@@ -19326,7 +19337,7 @@ body.column-layout-dragging {
   padding-inline: 12px;
   border-radius: var(--fp-radius-sm);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .project-export-secondary-button {
@@ -19495,8 +19506,8 @@ body.column-layout-dragging {
 .cost-view-group-label {
   padding: 0 6px;
   color: var(--fp-text-muted);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -19517,7 +19528,7 @@ body.column-layout-dragging {
   background: transparent;
   color: var(--fp-text-subtle);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
@@ -19550,7 +19561,7 @@ body.column-layout-dragging {
 
 .cost-toolbar-refreshing {
   color: #1f6feb;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -19593,15 +19604,15 @@ body.column-layout-dragging {
   min-height: 26px;
   color: var(--fp-text);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .cost-tag-rules-main em {
   margin-left: auto;
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .cost-tag-rules-main input,
@@ -19664,7 +19675,7 @@ body.column-layout-dragging {
   padding: 0 14px;
   border-radius: var(--fp-radius-sm);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -19717,8 +19728,8 @@ body.column-layout-dragging {
 .cost-finance-table .finance-table__column {
   background: var(--fp-surface-raised);
   color: var(--fp-text-muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cost-finance-table .finance-table__row {
@@ -19769,8 +19780,8 @@ body.column-layout-dragging {
   border-top: 1px solid var(--fp-border-subtle);
   color: var(--fp-text-muted);
   background: var(--fp-surface-raised);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cost-auto-load-status button {
@@ -19803,8 +19814,8 @@ body.column-layout-dragging {
 .cost-table th {
   background: var(--fp-surface-raised);
   color: var(--fp-text-muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -19827,7 +19838,7 @@ body.column-layout-dragging {
   background: transparent;
   color: var(--fp-text);
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   text-align: left;
   cursor: pointer;
   transition:
@@ -19942,15 +19953,15 @@ body.column-layout-dragging {
   margin: 0;
   color: var(--fp-text);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .cost-section-heading > span,
 .cost-explorer-lane-header > span,
 .cost-section-heading-copy > span:not(.cost-direction-amount) {
   color: var(--fp-text-muted);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cost-direction-summary {
@@ -19963,7 +19974,7 @@ body.column-layout-dragging {
 .cost-direction-amount {
   font-family: var(--fp-font-data);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -20062,7 +20073,7 @@ body.column-layout-dragging {
   color: var(--fp-text);
   font: inherit;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .cost-view-search-input::placeholder {
@@ -20088,7 +20099,7 @@ body.column-layout-dragging {
 
 .cost-tag-count {
   font-family: var(--fp-font-data);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .cost-tag-count--expense {
@@ -20118,7 +20129,7 @@ body.column-layout-dragging {
   background: var(--fp-surface);
   color: var(--fp-text);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
   cursor: pointer;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
@@ -20149,15 +20160,15 @@ body.column-layout-dragging {
 
 .cost-scope-trigger-label span {
   color: var(--fp-text-muted);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cost-scope-trigger-label strong {
   color: inherit;
   font-family: var(--fp-font-data);
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0;
   white-space: nowrap;
 }
@@ -20185,8 +20196,8 @@ body.column-layout-dragging {
 
 .cost-scope-panel-section span {
   color: var(--fp-text-muted);
-  font-size: 11px;
-  font-weight: 900;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .cost-scope-option-grid {
@@ -20210,7 +20221,7 @@ body.column-layout-dragging {
   background: var(--fp-surface);
   color: var(--fp-text-subtle);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -20293,8 +20304,8 @@ body.column-layout-dragging {
 
 .project-export-history-header span {
   color: #486581;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .project-export-history-empty {
@@ -20347,9 +20358,9 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #edf5ff;
   color: #1f4f82;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .project-export-history-main span,
@@ -20484,7 +20495,7 @@ body.column-layout-dragging {
 .project-export-select-field span {
   color: #486581;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .project-export-select-field select {
@@ -20703,7 +20714,7 @@ body.column-layout-dragging {
   color: #243b53;
   border: 1px solid #d8e1eb;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .export-center-sheet-list {
@@ -20820,7 +20831,7 @@ body.column-layout-dragging {
   min-width: 0;
   overflow: hidden;
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -20830,7 +20841,7 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   color: var(--fp-accent);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -20853,7 +20864,7 @@ body.column-layout-dragging {
 }
 
 .cost-direction-meta .cost-direction-amount {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .cost-explorer-lane-skeleton,
@@ -20882,8 +20893,8 @@ body.column-layout-dragging {
   min-height: 20px;
   padding-inline: 7px;
   border-radius: var(--fp-radius-pill);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0;
   white-space: nowrap;
 }
@@ -20904,9 +20915,9 @@ body.column-layout-dragging {
   min-width: 30px;
   justify-content: center;
   font-family: var(--fp-font-data);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .cost-table-cell-money {
@@ -20943,7 +20954,7 @@ body.column-layout-dragging {
   margin: 0 0 var(--fp-space-2);
   color: var(--fp-ink);
   font-size: var(--fp-text-title);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -20990,7 +21001,7 @@ body.column-layout-dragging {
 .cost-detail-allocation-amount {
   font-family: var(--fp-font-data);
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .cost-detail-chips {
@@ -21336,7 +21347,7 @@ body.column-layout-dragging {
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -21558,7 +21569,7 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -21953,7 +21964,7 @@ body.column-layout-dragging {
   background: #f2f4f7;
   color: #5f6772;
   font-size: 0.72rem;
-  font-weight: 820;
+  font-weight: 700;
   line-height: 1.2;
   text-align: left;
 }
@@ -21999,7 +22010,7 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-primary-cell {
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .bank-auto-tag-cell-stack {
@@ -22036,7 +22047,7 @@ body.column-layout-dragging {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
-  font-weight: 800;
+  font-weight: 700;
   tab-size: 4;
 }
 
@@ -22061,7 +22072,7 @@ body.column-layout-dragging {
   cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 700;
   padding: 5px 10px;
 }
 
@@ -22134,7 +22145,7 @@ body.column-layout-dragging {
   cursor: pointer;
   font: inherit;
   font-size: 0.76rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .bank-auto-tag-condition-field-button {
@@ -22266,7 +22277,7 @@ body.column-layout-dragging {
 .bank-auto-tag-option-check {
   width: 12px;
   color: #0f62fe;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .bank-auto-tag-status-tabs,
@@ -22361,7 +22372,7 @@ body.column-layout-dragging {
   background: #e2e8f0;
   color: #334155;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
   padding: 2px 8px;
 }
 
@@ -22483,8 +22494,8 @@ body.column-layout-dragging {
 
 .bank-account-summary-label {
   color: var(--bank-text-secondary);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -22559,7 +22570,7 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: var(--bank-surface-muted);
   color: var(--bank-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
 }
@@ -22576,7 +22587,7 @@ body.column-layout-dragging {
   overflow: hidden;
   color: var(--bank-text);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -22603,7 +22614,7 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   color: var(--bank-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -22620,7 +22631,7 @@ body.column-layout-dragging {
   display: block;
   overflow: hidden;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -22647,7 +22658,7 @@ body.column-layout-dragging {
 .bank-account-inline-balance {
   flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -22714,7 +22725,7 @@ body.column-layout-dragging {
   overflow: hidden;
   color: var(--bank-text);
   font-size: 18px;
-  font-weight: 820;
+  font-weight: 700;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -22750,7 +22761,7 @@ body.column-layout-dragging {
   border-radius: 999px;
   background: #ffffff;
   color: var(--bank-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -22763,7 +22774,7 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   min-height: 30px;
   height: auto;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -22795,7 +22806,7 @@ body.column-layout-dragging {
   border-color: var(--bank-border-subtle);
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1;
   text-transform: none;
   white-space: nowrap;
@@ -22850,7 +22861,7 @@ body.column-layout-dragging {
   background: var(--bank-surface-muted);
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -22992,7 +23003,7 @@ body.column-layout-dragging {
   background: #ffffff;
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -23159,7 +23170,7 @@ body.column-layout-dragging {
   min-height: 36px;
   background: transparent;
   color: #2f3742;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .bank-category-filter-primary-row:hover,
@@ -23217,7 +23228,7 @@ body.column-layout-dragging {
   min-width: 0;
   overflow: hidden;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -23225,7 +23236,7 @@ body.column-layout-dragging {
 
 .bank-category-filter-child-row .bank-category-filter-label {
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .bank-category-filter-count {
@@ -23235,7 +23246,7 @@ body.column-layout-dragging {
   background: rgba(255, 255, 255, 0.62);
   color: #5f6772;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
   text-align: center;
@@ -23306,7 +23317,7 @@ body.column-layout-dragging {
   color: #7a5d00;
   cursor: pointer;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   white-space: normal;
   line-height: 1.15;
   text-align: center;
@@ -23373,7 +23384,7 @@ body.column-layout-dragging {
   background: transparent;
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.2;
   padding: 5px 9px;
   text-align: left;
@@ -23416,7 +23427,7 @@ body.column-layout-dragging {
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -23431,7 +23442,7 @@ body.column-layout-dragging {
   background: #ffffff;
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -23494,7 +23505,7 @@ body.column-layout-dragging {
   border-color: var(--bank-border);
   color: var(--bank-text);
   font-size: 12px;
-  font-weight: 760;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -23559,8 +23570,8 @@ body.column-layout-dragging {
   border-bottom: 1px solid #dde3eb;
   background: #f2f4f7;
   color: #606772;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
   text-align: left;
   white-space: nowrap;
@@ -23647,7 +23658,7 @@ body.column-layout-dragging {
 }
 
 .bank-counterparty-name.dense {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.1;
 }
 
@@ -23729,7 +23740,7 @@ body.column-layout-dragging {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   padding: 2px 8px;
 }
 
@@ -23759,7 +23770,7 @@ body.column-layout-dragging {
   background: #eef7f1;
   color: #245c32;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   overflow: hidden;
 }
@@ -23795,7 +23806,7 @@ body.column-layout-dragging {
   text-align: right;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .bank-amount-value {
@@ -23823,8 +23834,8 @@ body.column-layout-dragging {
   max-width: 100%;
   overflow: hidden;
   color: var(--bank-text-secondary);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -23852,7 +23863,7 @@ body.column-layout-dragging {
   height: auto;
   border: 0;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   overflow: hidden;
 }
@@ -23898,7 +23909,7 @@ body.column-layout-dragging {
   height: auto;
   border-color: var(--bank-border-subtle);
   color: var(--bank-text-secondary);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .bank-details-page .direction-tag.expense,
@@ -23959,7 +23970,7 @@ body.column-layout-dragging {
 
 .bank-category-tag.compact {
   min-height: 26px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .bank-category-tag-label {
@@ -24066,7 +24077,7 @@ body.column-layout-dragging {
   display: block;
   margin-bottom: 8px;
   color: #171717;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -24121,7 +24132,7 @@ body.column-layout-dragging {
   display: block;
   margin-bottom: 8px;
   color: #171717;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -24141,7 +24152,7 @@ body.column-layout-dragging {
 .bank-category-hierarchy-branch {
   color: #71717a;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.4;
   text-align: center;
 }
@@ -24319,7 +24330,7 @@ body.column-layout-dragging {
   margin: 0;
   color: #172033;
   font-size: 16px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-detail-heading p {
@@ -24365,7 +24376,7 @@ body.column-layout-dragging {
   border-radius: 6px;
   font: inherit;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
@@ -24526,7 +24537,7 @@ body.column-layout-dragging {
   margin: 0;
   color: #52677a;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .etc-list-row-button {
@@ -24597,7 +24608,7 @@ body.column-layout-dragging {
   margin: 0;
   color: #172033;
   font-size: 16px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-count-tag,
@@ -24608,7 +24619,7 @@ body.column-layout-dragging {
   padding: 0 8px;
   color: #1d4ed8;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: 999px;
@@ -24648,7 +24659,7 @@ body.column-layout-dragging {
   margin: 0;
   color: #172033;
   font-size: 15px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-source-file-row {
@@ -24768,7 +24779,7 @@ body.column-layout-dragging {
 .etc-import-attempt-row strong {
   color: #172033;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-plate-summary {
@@ -24805,7 +24816,7 @@ body.column-layout-dragging {
   display: block;
   color: #172033;
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-oa-status-header p {
@@ -24962,7 +24973,7 @@ body.column-layout-dragging {
 
 .etc-dialog-warning {
   color: #b45309 !important;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .etc-dialog-field {
@@ -24971,7 +24982,7 @@ body.column-layout-dragging {
   min-width: 0;
   color: #243b53;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .etc-dialog-field textarea {
@@ -25011,13 +25022,13 @@ body.column-layout-dragging {
 .etc-supplement-upload-target span {
   color: #52677a;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .etc-supplement-upload-target strong {
   color: #172033;
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-file-picker {
@@ -25034,7 +25045,7 @@ body.column-layout-dragging {
   color: #1d4ed8;
   background: #ffffff;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
   overflow-wrap: anywhere;
 }
@@ -25139,7 +25150,7 @@ body.column-layout-dragging {
 
 .etc-upload-drop-disabled-reason {
   color: #b45309;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 @media (max-width: 900px) {
@@ -25189,7 +25200,7 @@ body.column-layout-dragging {
 .etc-manual-review-field > span {
   color: #52677a;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .etc-manual-review-field {
@@ -25276,7 +25287,7 @@ body.column-layout-dragging {
   top: 0;
   z-index: 1;
   color: #172033;
-  font-weight: 850;
+  font-weight: 700;
   text-align: left;
   background: #f4f7fb;
 }
@@ -25355,7 +25366,7 @@ body.column-layout-dragging {
   margin: 0;
   color: #172033;
   font-size: 15px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-reconciliation-table-container {
@@ -25390,7 +25401,7 @@ body.column-layout-dragging {
   padding-bottom: 5px;
   background: #f4f7fb;
   color: #243b53;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -25519,7 +25530,7 @@ body.column-layout-dragging {
   color: #1d4ed8;
   font: inherit;
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   background: transparent;
@@ -25542,7 +25553,7 @@ body.column-layout-dragging {
 }
 
 .etc-reconciliation-money {
-  font-weight: 800;
+  font-weight: 700;
   color: #1f2f46;
   font-size: 0.8rem;
   line-height: 1.1;
@@ -25810,15 +25821,15 @@ body.column-layout-dragging {
 
 .etc-workflow-command-strip span {
   color: var(--fp-text-secondary);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .etc-workflow-command-strip strong {
   overflow: hidden;
   color: var(--fp-text-primary);
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -25882,7 +25893,7 @@ body.column-layout-dragging {
 .etc-disclosure-title {
   color: var(--fp-text-primary);
   font-size: 13px;
-  font-weight: 850;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -26297,7 +26308,7 @@ body.column-layout-dragging {
   margin: 0;
   color: var(--fp-text-primary);
   font-size: 16px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-batch-context__title p,
@@ -26305,15 +26316,15 @@ body.column-layout-dragging {
   margin: 5px 0 0;
   color: var(--fp-text-secondary);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .etc-batch-context__eyebrow {
   display: block;
   margin-bottom: 4px;
   color: var(--fp-text-secondary);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.06em;
 }
 
@@ -26365,7 +26376,7 @@ body.column-layout-dragging {
   background: var(--fp-surface);
   color: var(--fp-text-secondary);
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .etc-batch-progress__step[data-state="complete"] .etc-batch-progress__marker {
@@ -26402,7 +26413,7 @@ body.column-layout-dragging {
 .etc-batch-progress__copy strong {
   color: var(--fp-text-primary);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .etc-batch-progress__copy span {
@@ -26625,7 +26636,7 @@ body.column-layout-dragging {
 .oa-prefill-field > span {
   color: var(--text-secondary, #526078);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.2;
 }
 
