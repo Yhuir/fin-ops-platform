@@ -300,8 +300,15 @@ describe("AppSidebar shell contract", () => {
     unmount();
     renderSidebarAt("/imports/bank-transactions");
 
-    expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
+    const importToggle = screen.getByRole("button", { name: "导入" });
+    expect(importToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("aria-current", "page");
+
+    fireEvent.click(importToggle);
+    expect(importToggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(importToggle);
+    expect(importToggle).toHaveAttribute("aria-expanded", "true");
   });
 
   test("opens the import group without preloading every child route", () => {

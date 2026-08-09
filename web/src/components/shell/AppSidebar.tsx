@@ -81,7 +81,7 @@ export default function AppSidebar({
   const location = useLocation();
   const { canAdminAccess } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
-  const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports/"));
+  const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports"));
 
   const drawerContent = (
     <div className={`app-sidebar-content${showExpandedContent ? " expanded" : " collapsed"}`}>
@@ -135,7 +135,7 @@ export default function AppSidebar({
                     <li key={item.id} className="app-sidebar-item app-sidebar-disclosure-item">
                       <Disclosure
                         className="app-sidebar-disclosure"
-                        isExpanded={showExpandedContent && (importsExpanded || routeActive)}
+                        isExpanded={showExpandedContent && importsExpanded}
                         onExpandedChange={(isExpanded) => {
                           setImportsExpanded(isExpanded);
                           if (isExpanded && !showExpandedContent) {
