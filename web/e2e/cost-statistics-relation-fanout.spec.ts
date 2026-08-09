@@ -52,7 +52,7 @@ test.describe("cost statistics relation browser fan-out", () => {
     const detailRequest = page.waitForRequest((request) =>
       requestPath(request.url()).endsWith("/api/cost-statistics/transactions/bk-o-202603-001"),
     );
-    await projectRows.getByRole("button", { name: "查看流水 bk-o-202603-001" }).click();
+    await projectRows.getByRole("button", { name: /^查看流水 智能工厂设备商/ }).click();
     expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
 
     const detailDialog = page.getByRole("dialog", { name: "流水详情" });

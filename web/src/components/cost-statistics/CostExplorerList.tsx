@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Button, Chip } from "@heroui/react";
 
 type CostExplorerListProps<Row> = {
   title: string;
@@ -31,7 +32,9 @@ export default function CostExplorerList<Row>({
     <section aria-busy={loading} className="cost-explorer-lane">
       <header className="cost-explorer-lane-header">
         <h2>{title}</h2>
-        <span>{count}</span>
+        <Chip className="cost-explorer-lane-count" color="default" size="sm" variant="soft">
+          <Chip.Label>{count}</Chip.Label>
+        </Chip>
       </header>
       {loading ? (
         <div aria-hidden="true" className="cost-explorer-lane-skeleton">
@@ -44,18 +47,20 @@ export default function CostExplorerList<Row>({
       ) : (
         <div className="cost-explorer-list">
           {items.map((item) => (
-            <button
+            <Button
               key={getKey(item)}
+              aria-pressed={isActive(item)}
               className={isActive(item) ? "cost-explorer-item active" : "cost-explorer-item"}
-              type="button"
-              onClick={() => onSelect(item)}
+              onPress={() => onSelect(item)}
+              size="sm"
+              variant="tertiary"
             >
               <div className="cost-explorer-item-main">
                 <strong>{renderPrimary(item)}</strong>
                 {renderSecondary ? <span>{renderSecondary(item)}</span> : null}
               </div>
               {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}
-            </button>
+            </Button>
           ))}
         </div>
       )}

@@ -1,6 +1,7 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import {
   Button,
+  Chip,
   PopoverContent,
   PopoverDialog,
   PopoverRoot,
@@ -208,6 +209,22 @@ function DirectionAmount({
       <span className="cost-direction-amount-label">{label}</span>
       <span className="cost-direction-amount-value">{formattedAmount}</span>
     </span>
+  );
+}
+
+function CostPercentageChip({ label }: { label: string }) {
+  return (
+    <Chip className="cost-explorer-percentage-badge" color="accent" size="sm" variant="soft">
+      <Chip.Label>{label}</Chip.Label>
+    </Chip>
+  );
+}
+
+function CostLaneCount({ value }: { value: number }) {
+  return (
+    <Chip className="cost-explorer-lane-count" color="default" size="sm" variant="soft">
+      <Chip.Label>{value}</Chip.Label>
+    </Chip>
   );
 }
 
@@ -1785,7 +1802,7 @@ export default function CostStatisticsPage() {
   );
 
   return (
-    <div className="page-stack cost-page">
+    <div className="page-stack cost-page gap-3 bg-[var(--fp-page)]">
       <header className="page-header cost-page-header">
         <div className="cost-page-header-main">
           <div className="page-title-row">
@@ -1868,7 +1885,7 @@ export default function CostStatisticsPage() {
         >
           <Button
             aria-label="刷新成本统计"
-            className="cost-export-button cost-refresh-button"
+            className="cost-page-action cost-refresh-button"
             isDisabled={isExplorerLoading}
             onPress={handleManualRefresh}
             size="sm"
@@ -1877,7 +1894,7 @@ export default function CostStatisticsPage() {
             刷新
           </Button>
           <Button
-            className="cost-export-button"
+            className="cost-page-action"
             isDisabled={isTagRulesSaving}
             onPress={openTagRulesDrawer}
             size="sm"
@@ -1886,7 +1903,7 @@ export default function CostStatisticsPage() {
             成本统计标签规则
           </Button>
           <Button
-            className="cost-export-button"
+            className="cost-page-action"
             isDisabled={isExplorerLoading || isExportReferenceLoading || hasExplorerLoadError}
             onPress={() => void openExportCenter()}
             size="sm"
@@ -1958,7 +1975,7 @@ export default function CostStatisticsPage() {
         {explorerData ? (
           <>
             {viewMode === "time" ? (
-              <div className="cost-analysis-layout time-layout single-column">
+              <div className="cost-analysis-layout time-layout single-column grid min-h-[520px] grid-cols-1 gap-3">
                 <section className="cost-table-section">
                   <div className="cost-section-heading cost-view-scope-heading">
                     <div className="cost-section-heading-copy">
@@ -2005,7 +2022,7 @@ export default function CostStatisticsPage() {
             ) : null}
 
             {viewMode === "project" ? (
-              <div className="cost-analysis-layout explorer-layout">
+              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按项目统计</h2>
@@ -2032,7 +2049,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                <div className="cost-explorer-grid project">
+                <div className="cost-explorer-grid project grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]">
                   <CostExplorerList<CostProjectExplorerRow>
                     title="项目名"
                     count={projectRows.length}
@@ -2052,7 +2069,7 @@ export default function CostStatisticsPage() {
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
                         {row.percentageLabel ? (
-                          <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                          <CostPercentageChip label={row.percentageLabel} />
                         ) : null}
                       </div>
                     )}
@@ -2075,7 +2092,7 @@ export default function CostStatisticsPage() {
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
                       </div>
                     )}
                   />
@@ -2085,7 +2102,7 @@ export default function CostStatisticsPage() {
                   >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length}</span>
+                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
@@ -2100,7 +2117,7 @@ export default function CostStatisticsPage() {
                         emptyLabel="该费用类型下暂无流水。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty" />}
+                    ) : <div className="cost-explorer-empty">依次选择项目和费用类型</div>}
                   </section>
                 </div>
                 )}
@@ -2108,7 +2125,7 @@ export default function CostStatisticsPage() {
             ) : null}
 
             {viewMode === "bank" ? (
-              <div className="cost-analysis-layout explorer-layout">
+              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按银行统计</h2>
@@ -2135,7 +2152,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                <div className="cost-explorer-grid project">
+                <div className="cost-explorer-grid project grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]">
                   <CostExplorerList<CostBankExplorerRow>
                     title="银行账户"
                     count={bankRows.length}
@@ -2154,7 +2171,7 @@ export default function CostStatisticsPage() {
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
                       </div>
                     )}
                   />
@@ -2176,7 +2193,7 @@ export default function CostStatisticsPage() {
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
                       </div>
                     )}
                   />
@@ -2186,7 +2203,7 @@ export default function CostStatisticsPage() {
                   >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length}</span>
+                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
@@ -2201,7 +2218,7 @@ export default function CostStatisticsPage() {
                         emptyLabel="该项目下暂无流水。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty" />}
+                    ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
                   </section>
                 </div>
                 )}
@@ -2209,7 +2226,7 @@ export default function CostStatisticsPage() {
             ) : null}
 
             {viewMode === "expenseType" ? (
-              <div className="cost-analysis-layout explorer-layout expense-layout">
+              <div className="cost-analysis-layout explorer-layout expense-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按OA费用类型统计</h2>
@@ -2236,7 +2253,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                <div className="cost-explorer-grid expense">
+                <div className="cost-explorer-grid expense grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,2.15fr)]">
                   <CostExplorerList<CostExpenseTypeExplorerRow>
                     title="费用类型"
                     count={expenseTypeRows.length}
@@ -2254,7 +2271,7 @@ export default function CostStatisticsPage() {
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        <em className="cost-explorer-percentage-badge">{row.percentageLabel}</em>
+                        <CostPercentageChip label={row.percentageLabel} />
                       </div>
                     )}
                   />
@@ -2264,7 +2281,7 @@ export default function CostStatisticsPage() {
                   >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length}</span>
+                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
@@ -2279,7 +2296,7 @@ export default function CostStatisticsPage() {
                         emptyLabel="该费用类型下暂无流水。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty" />}
+                    ) : <div className="cost-explorer-empty">选择费用类型查看流水</div>}
                   </section>
                 </div>
                 )}
@@ -2287,7 +2304,7 @@ export default function CostStatisticsPage() {
             ) : null}
 
             {viewMode === "bankTag" ? (
-              <div className="cost-analysis-layout explorer-layout">
+              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按标签统计</h2>
@@ -2317,7 +2334,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                <div className="cost-explorer-grid bank-tag">
+                <div className="cost-explorer-grid bank-tag grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(210px,0.82fr)_minmax(210px,0.82fr)_minmax(0,2.36fr)]">
                   <CostExplorerList<CostBankTagPrimaryExplorerRow>
                     title="主标签"
                     count={bankTagPrimaryRows.length}
@@ -2379,7 +2396,7 @@ export default function CostStatisticsPage() {
                   >
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankTagSubRows.length}</span>
+                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankTagSubRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
@@ -2394,7 +2411,7 @@ export default function CostStatisticsPage() {
                         emptyLabel="该流水标签下暂无流水。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty" />}
+                    ) : <div className="cost-explorer-empty">依次选择主标签和子标签</div>}
                   </section>
                 </div>
                 )}

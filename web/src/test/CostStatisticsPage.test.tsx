@@ -147,17 +147,27 @@ describe("Cost statistics page", () => {
 
   test("locks compact premium surface and motion styling contracts", () => {
     const css = readFileSync("src/app/styles.css", "utf8");
+    const pageSource = readFileSync("src/pages/CostStatisticsPage.tsx", "utf8");
+    const listSource = readFileSync("src/components/cost-statistics/CostExplorerList.tsx", "utf8");
 
     expect(css).not.toContain(".cost-page .stat-card");
     expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
+    expect(css).toMatch(/\.cost-view-switcher\s*{[^}]*border:\s*1px solid var\(--fp-border\)[^}]*background:\s*var\(--fp-surface-muted\)/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*34px[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*36px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
-    expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(144px,\s*0\.8fr\) minmax\(144px,\s*0\.8fr\) minmax\(420px,\s*2\.4fr\)/s);
-    expect(css).toMatch(/\.cost-explorer-grid\.project,[\s\S]*height:\s*max\(560px,\s*calc\(100dvh - 240px\)\)/s);
-    expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
+    expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
+    expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
+    expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*justify-content:\s*flex-end/s);
+    expect(css).not.toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
+    expect(pageSource).toContain("lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]");
+    expect(pageSource).toContain("lg:grid-cols-[minmax(210px,0.82fr)_minmax(210px,0.82fr)_minmax(0,2.36fr)]");
+    expect(pageSource).toContain("bg-[var(--fp-page)]");
+    expect(listSource).toContain('import { Button, Chip } from "@heroui/react";');
+    expect(listSource).toContain("<Button");
+    expect(listSource).toContain("<Chip");
     expect(css).toMatch(/\.cost-lock-target\.is-locked\s*{[^}]*opacity:\s*0\.62/s);
     expect(css).toMatch(/\.cost-lock-overlay\s*{[^}]*background:\s*color-mix\(in srgb, var\(--fp-page\) 20%, transparent\)[^}]*pointer-events:\s*auto/s);
     expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*backdrop-filter/s);

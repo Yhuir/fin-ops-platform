@@ -79,7 +79,11 @@ export async function confirmWorkbenchRelation(
     visibleLabel: "91330108MA27B4011D 杭州溯源科技有限公司",
     actionType: "click",
   }, async (mark) => {
-    await openInvoiceGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+    await openInvoiceGroup
+      .getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })
+      .getByRole("cell")
+      .first()
+      .click();
     await mark("firstVisibleResponseLatencyMs", expect(openZone.getByText("已选 3")).toBeVisible());
     await mark("finalSettledLatencyMs", expect(openZone.getByText("已选 3")).toBeVisible());
   });
