@@ -16,9 +16,11 @@ class FakeStore:
         *,
         runtime_snapshots: dict[str, dict] | None = None,
         runtime_infrastructure: dict[str, object] | None = None,
+        postgres_status: str = "ready",
     ) -> None:
         self.runtime_snapshots = runtime_snapshots or {}
         self.runtime_infrastructure = runtime_infrastructure
+        self.postgres_status = postgres_status
         self.runtime_loader_calls: list[str] = []
         self.health_summary_calls = 0
         self.ready_health_summary_calls = 0
@@ -59,13 +61,20 @@ class FakeStore:
 
     def _health_summary_payload(self) -> dict[str, object]:
         return {
-            "postgres_status": "ready",
+            "postgres_status": self.postgres_status,
             "postgres_database": "fin_ops_test",
             "postgres_schema_version": 7,
             "runtime_infrastructure": self.runtime_infrastructure or {
                 "missing_required_worker_count": 0,
                 "stale_required_worker_count": 0,
                 "mismatched_required_worker_count": 0,
+                "critical_failed_outbox_count": 0,
+                "critical_failed_dirty_scope_count": 0,
+                "critical_stale_dirty_scope_count": 0,
+                "critical_read_models": {
+                    "workbench": {"status": "fresh"},
+                    "workbench_relation": {"status": "fresh"},
+                },
                 "worker_metrics": [],
             },
         }
@@ -164,6 +173,13 @@ class AppPostgresModeTests(unittest.TestCase):
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 1,
+            "critical_failed_outbox_count": 1,
+            "critical_failed_dirty_scope_count": 0,
+            "critical_stale_dirty_scope_count": 0,
+            "critical_read_models": {
+                "workbench": {"status": "fresh"},
+                "workbench_relation": {"status": "fresh"},
+            },
             "worker_metrics": [
                 {"worker_instance": "workbench", "worker_kind": "workbench", "status": "available", "required": True},
                 {
@@ -193,7 +209,10 @@ class AppPostgresModeTests(unittest.TestCase):
         response = app.handle_request("GET", "/health/ready")
         payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["status"], "not_ready")
+        self.assertEqual(payload["readiness_blockers"]["required_worker_mismatch"], 1)
+        self.assertEqual(payload["readiness_blockers"]["critical_outbox_failed"], 1)
         self.assertEqual(payload["runtime_infrastructure"]["missing_required_worker_count"], 0)
         self.assertEqual(payload["runtime_infrastructure"]["stale_required_worker_count"], 0)
         self.assertEqual(payload["runtime_infrastructure"]["mismatched_required_worker_count"], 1)
@@ -209,6 +228,23 @@ class AppPostgresModeTests(unittest.TestCase):
         )
         self.assertEqual(payload["runtime_infrastructure"]["dirty_scopes_by_scope_summary"]["count"], 2)
         self.assertEqual(payload["runtime_infrastructure"]["pending_outbox_events_by_scope_summary"]["count"], 1)
+
+    def test_ready_endpoint_returns_503_when_postgres_is_unavailable_but_health_stays_live(self) -> None:
+        store = FakeStore(postgres_status="error")
+        with TemporaryDirectory() as temp_dir, patch(
+            "fin_ops_platform.app.server.build_state_store",
+            return_value=store,
+        ):
+            app = build_application(data_dir=Path(temp_dir))
+
+        ready_response = app.handle_request("GET", "/health/ready")
+        ready_payload = json.loads(ready_response.body)
+        health_response = app.handle_request("GET", "/health")
+
+        self.assertEqual(ready_response.status_code, 503)
+        self.assertEqual(ready_payload["status"], "not_ready")
+        self.assertEqual(ready_payload["readiness_blockers"], {"postgres_unavailable": "error"})
+        self.assertEqual(health_response.status_code, 200)
 
     def test_health_endpoint_exposes_workbench_relation_distribution_status(self) -> None:
         runtime_infrastructure = {

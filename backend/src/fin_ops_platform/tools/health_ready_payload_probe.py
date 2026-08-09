@@ -128,7 +128,7 @@ def collect_health_ready_payload(
     if expected_health_status and health_status != expected_health_status:
         errors.append("health_status_not_ready")
 
-    runtime_blockers = _runtime_blockers(payload)
+    runtime_blockers = _readiness_blockers(payload)
     return {
         "version": 1,
         "tool": "health_ready_payload_probe",
@@ -154,91 +154,9 @@ def collect_health_ready_payload(
     }
 
 
-def _runtime_blockers(payload: Mapping[str, Any]) -> dict[str, Any]:
-    if not payload:
-        return {}
-    runtime = payload.get("runtime_infrastructure")
-    if not isinstance(runtime, dict):
-        storage = payload.get("storage")
-        runtime = storage.get("runtime_infrastructure") if isinstance(storage, dict) else None
-    blockers: dict[str, Any] = {}
-    if isinstance(runtime, dict):
-        for key in (
-            "queue_backlog",
-            "dirty_scopes",
-            "failed_jobs",
-            "stale_dirty_scope_count",
-            "missing_required_worker_count",
-            "stale_required_worker_count",
-            "mismatched_required_worker_count",
-            "rabbitmq_queue_depth",
-            "rabbitmq_unacked_messages",
-            "rabbitmq_dlq_count",
-            "read_model_refresh_failure_rate",
-        ):
-            value = runtime.get(key)
-            if key in {"queue_backlog", "dirty_scopes"}:
-                status_blockers = _status_count_blockers(value)
-                if status_blockers:
-                    blockers[key] = status_blockers
-            elif _is_blocking_value(value):
-                blockers[key] = value
-        worker_metrics = runtime.get("worker_metrics")
-        if isinstance(worker_metrics, list):
-            worker_status_counts: dict[str, int] = {}
-            for worker in worker_metrics:
-                if not isinstance(worker, dict):
-                    continue
-                status = str(worker.get("status") or worker.get("worker_status") or "unknown")
-                worker_status_counts[status] = worker_status_counts.get(status, 0) + 1
-            if any(status not in {"available", "idle", "ok"} for status in worker_status_counts):
-                blockers["worker_status_counts"] = worker_status_counts
-        worker_status_counts = runtime.get("worker_status_counts")
-        if isinstance(worker_status_counts, dict) and any(
-            str(status) not in {"available", "idle", "ok"} and _is_blocking_value(count)
-            for status, count in worker_status_counts.items()
-        ):
-            blockers["worker_status_counts"] = worker_status_counts
-    production_guard = payload.get("production_runtime_guard")
-    if isinstance(production_guard, dict) and production_guard.get("problems"):
-        blockers["production_runtime_guard_problems"] = production_guard.get("problems")
-    workbench_relation = payload.get("workbench_relation_read_model")
-    if isinstance(workbench_relation, dict) and workbench_relation.get("status") not in {None, "ready"}:
-        blockers["workbench_relation_read_model_status"] = workbench_relation.get("status")
-    storage = payload.get("storage")
-    if isinstance(storage, dict):
-        postgres_status = storage.get("postgres_status")
-        if postgres_status not in {None, "ready"}:
-            blockers["postgres_status"] = postgres_status
-    return blockers
-
-
-def _is_blocking_value(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return float(value) > 0
-    if isinstance(value, dict):
-        return any(_is_blocking_value(item) for item in value.values())
-    if isinstance(value, list):
-        return bool(value)
-    return bool(str(value).strip())
-
-
-def _status_count_blockers(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    non_blocking = {"done", "ready", "fresh", "ok", "available", "idle", "success", "succeeded"}
-    blockers: dict[str, Any] = {}
-    for key, count in value.items():
-        normalized = str(key or "").strip().lower()
-        if normalized in non_blocking:
-            continue
-        if _is_blocking_value(count):
-            blockers[str(key)] = count
-    return blockers
+def _readiness_blockers(payload: Mapping[str, Any]) -> dict[str, Any]:
+    blockers = payload.get("readiness_blockers") if payload else None
+    return dict(blockers) if isinstance(blockers, dict) else {}
 
 
 def _runtime_release_name(payload: Mapping[str, Any]) -> str | None:

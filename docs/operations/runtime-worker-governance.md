@@ -711,6 +711,11 @@ PostgreSQL done/fresh。
 4. 检查 PostgreSQL durable queue 和 readiness 是否收敛。
 5. RabbitMQ 残留消息只按 transport envelope 处理；不要把清空 RabbitMQ 当成 read model 修复。
 
+`/health/ready` 的最终门禁只消费服务端顶层 `readiness_blockers`：空对象对应 HTTP 200；非空对应
+HTTP 503。required worker missing/stale/mismatch、critical read model missing/failed、critical
+failed/dead-letter outbox、failed dirty scope，以及超过 300 秒的 critical dirty scope 会阻断；短暂
+pending/processing 和非 critical 历史记录不阻断。
+
 ## App Status Readiness Convergence
 
 `read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。

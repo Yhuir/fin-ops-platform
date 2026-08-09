@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
-from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository, readiness_blockers
 from fin_ops_platform.services.runtime_worker_registry import required_worker_instance_names
 
 
@@ -17,6 +17,16 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "from read_model.app_status_readiness" in normalized and "select read_model_key" in normalized:
+            return [
+                {"read_model_key": "workbench", "scope_type": "workbench", "scope_key": "all", "status": "fresh"},
+                {
+                    "read_model_key": "workbench_relation",
+                    "scope_type": "workbench_relation",
+                    "scope_key": "all",
+                    "status": "fresh",
+                },
+            ]
         if "current_refresh_event_samples" in normalized:
             return [
                 {
@@ -516,6 +526,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["rabbitmq_publishing_backlog"], 0)
         self.assertEqual(summary["rabbitmq_queue_depth"], 5)
         self.assertEqual(summary["stale_dirty_scope_count"], 1)
+        self.assertEqual(summary["critical_failed_outbox_count"], 0)
+        self.assertEqual(summary["critical_failed_dirty_scope_count"], 0)
+        self.assertEqual(summary["critical_stale_dirty_scope_count"], 0)
+        self.assertEqual(summary["critical_read_models"]["workbench"]["status"], "fresh")
         self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench_relation.read_model.refresh")
         self.assertEqual(summary["dirty_scopes_by_scope"][0]["scope_key"], "all")
         self.assertNotIn("read_model_refresh_duration_ms", summary)
@@ -540,6 +554,38 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn(
             "dirty_counts as ( select status, count(*)::bigint as count from current_dirty_scopes",
             " ".join(executed_sql.split()),
+        )
+
+    def test_readiness_blockers_only_reject_platform_failures(self) -> None:
+        healthy_runtime = {
+            "missing_required_worker_count": 0,
+            "stale_required_worker_count": 0,
+            "mismatched_required_worker_count": 0,
+            "critical_failed_outbox_count": 0,
+            "critical_failed_dirty_scope_count": 0,
+            "critical_stale_dirty_scope_count": 0,
+            "critical_read_models": {
+                "workbench": {"status": "fresh"},
+                "workbench_relation": {"status": "fresh"},
+            },
+            "queue_backlog": {"pending": 4},
+        }
+        common = {
+            "storage_backend": "postgres",
+            "postgres_status": "ready",
+            "runtime_release": {"consistent": True},
+            "production_runtime_guard": {"consistent": True},
+        }
+
+        self.assertEqual(readiness_blockers(**common, runtime_infrastructure=healthy_runtime), {})
+        blocked_runtime = dict(healthy_runtime, missing_required_worker_count=6, critical_failed_outbox_count=2)
+        self.assertEqual(
+            readiness_blockers(**common, runtime_infrastructure=blocked_runtime),
+            {"required_worker_missing": 6, "critical_outbox_failed": 2},
+        )
+        self.assertEqual(
+            readiness_blockers(**dict(common, postgres_status="error"), runtime_infrastructure=healthy_runtime),
+            {"postgres_unavailable": "error"},
         )
 
     def test_ready_health_summary_scopes_required_workers_for_release_preflight(self) -> None:

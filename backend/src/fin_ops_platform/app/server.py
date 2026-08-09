@@ -152,6 +152,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
+from fin_ops_platform.services.runtime_monitoring import readiness_blockers
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
@@ -1545,9 +1546,10 @@ class Application:
         if method == "GET" and route_path == "/health":
             return self._json_response(HTTPStatus.OK, self._health_payload())
         if method == "GET" and route_path == "/health/ready":
+            payload = self._readiness_health_payload()
             return self._json_response(
-                HTTPStatus.OK,
-                self._readiness_health_payload(),
+                HTTPStatus.OK if payload.get("status") == "ready" else HTTPStatus.SERVICE_UNAVAILABLE,
+                payload,
             )
         if method == "GET" and route_path == "/health/deep":
             return self._json_response(
@@ -1991,11 +1993,19 @@ class Application:
         if not isinstance(runtime_infrastructure, dict):
             runtime_infrastructure = {}
         workbench_relation_read_model = self._workbench_relation_readiness_payload(runtime_infrastructure)
-        status = "ready" if runtime_release["consistent"] and production_runtime_guard["consistent"] else "not_ready"
+        blockers = readiness_blockers(
+            storage_backend=str(storage_summary.get("backend") or "") if check_dependencies else "",
+            postgres_status=storage_summary.get("postgres_status"),
+            runtime_release=runtime_release,
+            production_runtime_guard=production_runtime_guard,
+            runtime_infrastructure=runtime_infrastructure,
+        )
+        status = "ready" if not blockers else "not_ready"
         return {
             "service": "fin-ops-platform-api",
             "version": __version__,
             "status": status,
+            "readiness_blockers": blockers,
             "runtime_release": runtime_release,
             "production_runtime_guard": production_runtime_guard,
             "bootstrap": {

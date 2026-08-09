@@ -74,8 +74,9 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - workbench generation consistency failure 会把 `/api/app-health.workbench_read_model.status` 提升为 `error`，并在 `last_error` 中保留 `generation_metadata_actual_mismatch`、all-scope parent inconsistency、`duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone` 原因。
 - 工作台刷新状态由 `/api/workbench/refresh-status` 有界轮询；排障同时查看 HTTP timeout、worker lag、dirty scope 和 outbox 状态。
 - `/health` / `/health/ready` 输出 bounded `api_performance` 进程内 rolling window 摘要，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99，但只保留 p95 最慢的有限 endpoint，并通过 `endpoint_count` / `omitted_endpoint_count` 标明是否被截断。完整 endpoint 明细由 `/metrics` 或 admin-only `/api/operations/app-health-dashboard` 提供。
+- `/health` 仅是进程 liveness，HTTP 固定 200；`/health/ready` 是流量和发布门禁，`status=ready` 返回 200，`status=not_ready` 返回 503。权威原因只看响应顶层 `readiness_blockers`，probe、负载均衡和部署脚本不得再从诊断字段各自推导另一套规则。
 - P2/P3 readiness payload gate 使用 `health_ready_payload_probe` 验证 `/fin-ops-api/health/ready` 本身不成为慢探针：默认要求 1000ms 内、JSON、response 不超过 50KB、`api_performance.endpoints<=20` 且带 `endpoint_count` / `omitted_endpoint_count`；ready payload 只保留 runtime blocker 需要的 counts、status summary 和 bounded problem samples，不输出完整 `entrypoints`、`worker_metrics` 或重复的 `storage.runtime_infrastructure`；慢、大、未截断、缺 metadata 或 HTML fallback 均视为失败。
-- `/health/ready` 只计算当前 blocker：current-effective outbox、dirty scope、required worker heartbeat 和发布状态；历史完成 refresh 的 duration/failure 样本不属于 readiness blocker，不在该热路径读取。完整历史/窗口性能指标保留在 `/health`、`/metrics` 和 admin-only Operations dashboard。
+- `/health/ready` 只计算当前 blocker：PostgreSQL、release/runtime guard、required worker heartbeat，以及 critical `workbench` / `workbench_relation` 的 current-effective failed/dead-letter、readiness 缺失/失败和超过 300 秒的 dirty scope。普通短暂 pending/processing、非 critical backlog 和历史已覆盖 failure 不阻断。完整历史/窗口性能指标保留在 `/health`、`/metrics` 和 admin-only Operations dashboard。
 - 不输出 token、密码、完整附件正文或敏感原始文件内容。
 - 高风险动作需要审计日志，不只依赖应用日志。
 

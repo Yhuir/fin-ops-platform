@@ -1,5 +1,14 @@
 # 系统状态 实施记录
 
+## 2026-08-09 - `/health/ready` 权威判决闭环
+
+- 目标：修复 PostgreSQL 或必需 worker 已不可用时 `/health/ready` 仍返回 200/ready 的 fail-open。
+- 影响范围：readiness runtime summary、HTTP status、health-ready probe、发布与监控契约；不改变业务 API、worker 执行、read model refresh 或 `/health` liveness。
+- 关键决策：复用现有 current-effective outbox/dirty snapshot、required worker registry 和 `app_status_readiness`，由服务端生成唯一 `readiness_blockers`；probe 删除旧的诊断字段猜测。短暂 pending 不阻断，critical 失败或 300 秒未收敛才阻断。
+- 旧代码删除：移除 `health_ready_payload_probe` 内部 queue/dirty/worker blocker 推断，避免 API 与 probe 双重口径。
+- 测试覆盖：业务判决单测、runtime/service SQL 契约、API 200/503 与 liveness 回归、probe 权威字段、真实 PostgreSQL integration；前端、写链路、权限不适用，因为没有 UI、mutation 或认证变更。
+- 验证：运行模块测试、PostgreSQL integration、lint、后端与前端全量验证、相关浏览器 smoke、部署 gate，并在生产只读采样 HTTP status、blocker、required worker、critical readiness 和耗时。
+
 ## 2026-08-01 - HTTP SLO 有界并发与 payload 证据
 
 - `http_slo_probe` 新增默认关闭的 `--concurrency`，在每个 probe 内使用有界线程池采样；默认 `1` 保持历史串行语义。

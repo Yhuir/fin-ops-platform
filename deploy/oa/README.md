@@ -360,8 +360,9 @@ python -m fin_ops_platform.app.worker \
   --worker-instance <instance>
 ```
 
-发布激活阶段会在服务重启后等待 `/health/ready` 返回 `ready`；systemd active 只代表进程存在，
-不代表 API 已经加载正确 release identity 和 readiness 边界。
+发布激活阶段会在服务重启后等待 `/health/ready` 同时返回 HTTP 200 和 `status=ready`；HTTP 503
+表示 PostgreSQL、必需 worker、critical read model 或 release/runtime guard 仍有权威 blocker。systemd
+active 只代表进程存在，不代表 API 已经加载正确 release identity 和 readiness 边界。
 
 ## 一键发布脚本
 

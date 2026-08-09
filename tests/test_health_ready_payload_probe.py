@@ -77,7 +77,7 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
         self.assertIn("api_performance_endpoints_unbounded", report["errors"])
         self.assertIn("api_performance_bound_metadata_missing", report["errors"])
 
-    def test_extracts_runtime_blockers_without_counting_done_as_blocker(self) -> None:
+    def test_consumes_authoritative_readiness_blockers(self) -> None:
         report = collect_health_ready_payload(
             base_url="https://example.test",
             request_fn=lambda _url, _headers, _timeout: _json_response(
@@ -97,6 +97,10 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
                             {"status": "stale"},
                         ],
                     },
+                    "readiness_blockers": {
+                        "required_worker_stale": 1,
+                        "critical_outbox_failed": 3,
+                    },
                     "api_performance": {
                         "endpoint_count": 1,
                         "omitted_endpoint_count": 0,
@@ -107,13 +111,13 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
         )
 
         self.assertEqual(report["runtime_release_name"], "main-abc-20260616")
-        self.assertEqual(report["runtime_blockers"]["queue_backlog"], {"dead_lettered": 3})
-        self.assertEqual(report["runtime_blockers"]["dirty_scopes"], {"pending": 3})
-        self.assertEqual(report["runtime_blockers"]["failed_jobs"], 3)
-        self.assertEqual(report["runtime_blockers"]["worker_status_counts"], {"available": 1, "stale": 1})
-        self.assertGreaterEqual(report["runtime_blocker_count"], 4)
+        self.assertEqual(
+            report["runtime_blockers"],
+            {"required_worker_stale": 1, "critical_outbox_failed": 3},
+        )
+        self.assertEqual(report["runtime_blocker_count"], 2)
 
-    def test_extracts_runtime_blockers_from_compact_worker_status_counts(self) -> None:
+    def test_does_not_infer_blockers_from_diagnostic_counts(self) -> None:
         report = collect_health_ready_payload(
             base_url="https://example.test",
             request_fn=lambda _url, _headers, _timeout: _json_response(
@@ -134,7 +138,30 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(report["runtime_blockers"], {"worker_status_counts": {"available": 1, "mismatch": 1}})
+        self.assertEqual(report["runtime_blockers"], {})
+
+    def test_fails_for_503_not_ready_with_authoritative_blockers(self) -> None:
+        report = collect_health_ready_payload(
+            base_url="https://example.test",
+            request_fn=lambda _url, _headers, _timeout: _json_response(
+                {
+                    "status": "not_ready",
+                    "readiness_blockers": {"required_worker_missing": 6},
+                    "api_performance": {
+                        "endpoint_count": 1,
+                        "omitted_endpoint_count": 0,
+                        "endpoints": {"GET /health/ready": {}},
+                    },
+                },
+                status_code=503,
+            ),
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["health_status"], "not_ready")
+        self.assertEqual(report["runtime_blockers"], {"required_worker_missing": 6})
+        self.assertIn("unexpected_status:503", report["errors"])
+        self.assertIn("health_status_not_ready", report["errors"])
 
     def test_fails_for_slow_or_large_payload(self) -> None:
         def slow_large_response(_url: str, _headers: dict[str, str], _timeout: float) -> HttpProbeResponse:
@@ -184,9 +211,9 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
         )
 
 
-def _json_response(payload: dict[str, object]) -> HttpProbeResponse:
+def _json_response(payload: dict[str, object], *, status_code: int = 200) -> HttpProbeResponse:
     return HttpProbeResponse(
-        status_code=200,
+        status_code=status_code,
         headers={"content-type": "application/json"},
         body=json.dumps(payload).encode("utf-8"),
     )

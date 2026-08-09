@@ -33,6 +33,51 @@ RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 _CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL = "true"
 
 
+def readiness_blockers(
+    *,
+    storage_backend: str,
+    postgres_status: object,
+    runtime_release: dict[str, object],
+    production_runtime_guard: dict[str, object],
+    runtime_infrastructure: dict[str, object],
+) -> dict[str, object]:
+    """Return the authoritative, bounded platform-readiness blockers."""
+    blockers: dict[str, object] = {}
+    if not bool(runtime_release.get("consistent")):
+        blockers["runtime_release_inconsistent"] = runtime_release.get("problems") or True
+    if not bool(production_runtime_guard.get("consistent")):
+        blockers["production_runtime_guard_failed"] = production_runtime_guard.get("problems") or True
+    if storage_backend != "postgres":
+        return blockers
+    if str(postgres_status or "").strip().lower() != "ready":
+        blockers["postgres_unavailable"] = str(postgres_status or "unknown")
+    if not runtime_infrastructure or str(runtime_infrastructure.get("status") or "").strip().lower() == "error":
+        blockers["runtime_monitoring_unavailable"] = True
+        return blockers
+
+    for field, code in (
+        ("missing_required_worker_count", "required_worker_missing"),
+        ("stale_required_worker_count", "required_worker_stale"),
+        ("mismatched_required_worker_count", "required_worker_mismatch"),
+        ("critical_failed_outbox_count", "critical_outbox_failed"),
+        ("critical_failed_dirty_scope_count", "critical_dirty_scope_failed"),
+        ("critical_stale_dirty_scope_count", "critical_dirty_scope_stale"),
+    ):
+        count = int(runtime_infrastructure.get(field) or 0)
+        if count > 0:
+            blockers[code] = count
+
+    critical_read_models = runtime_infrastructure.get("critical_read_models")
+    if not isinstance(critical_read_models, dict):
+        blockers["critical_read_model_status_unavailable"] = True
+        return blockers
+    for key, raw_status in critical_read_models.items():
+        status = str(raw_status.get("status") if isinstance(raw_status, dict) else raw_status or "missing").strip().lower()
+        if status in {"failed", "missing", "unavailable"}:
+            blockers[f"critical_read_model_{key}_{status}"] = True
+    return blockers
+
+
 def _current_effective_outbox_event_predicate_sql(alias: str) -> str:
     _ = alias
     return "true"
@@ -1374,6 +1419,12 @@ class RuntimeMonitoringRepository:
     ) -> dict[str, Any]:
         outbox_summary = self._ready_outbox_summary()
         dirty_summary = self._ready_dirty_scope_summary(stale_after_seconds=stale_after_seconds)
+        readiness_statuses = self._app_status_readiness_statuses()
+        critical_read_models = {
+            key: readiness_statuses.get(key, {"status": "missing"})
+            for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items()
+            if definition.critical
+        }
         worker_lag_row = self._connection.fetch_one(
             """
             with latest_worker_kind_heartbeats as (
@@ -1419,6 +1470,10 @@ class RuntimeMonitoringRepository:
             "rabbitmq_dispatcher_lag_seconds": outbox_summary["max_unpublished_age_seconds"],
             **rabbitmq_metrics,
             "stale_dirty_scope_count": dirty_summary["stale_dirty_scope_count"],
+            "critical_failed_outbox_count": outbox_summary["critical_failed_outbox_count"],
+            "critical_failed_dirty_scope_count": dirty_summary["critical_failed_dirty_scope_count"],
+            "critical_stale_dirty_scope_count": dirty_summary["critical_stale_dirty_scope_count"],
+            "critical_read_models": critical_read_models,
             "stale_dirty_scopes": stale_dirty_scopes,
             "pending_outbox_events_by_scope": outbox_summary["pending_outbox_events_by_scope"],
             "dirty_scopes_by_scope": dirty_summary["dirty_scopes_by_scope"],
@@ -1503,9 +1558,19 @@ class RuntimeMonitoringRepository:
               coalesce(
                 (select jsonb_agg(to_jsonb(scope_rows)) from scope_rows),
                 '[]'::jsonb
-              ) as pending_outbox_events_by_scope
+              ) as pending_outbox_events_by_scope,
+              (
+                select count(*)::bigint
+                from current_events
+                where status in ('failed', 'dead_lettered')
+                  and event_type = any(%s)
+              ) as critical_failed_outbox_count
             """,
-            (list(_rabbitmq_dispatch_event_types()), list(_rabbitmq_dispatch_event_types())),
+            (
+                list(_rabbitmq_dispatch_event_types()),
+                list(_rabbitmq_dispatch_event_types()),
+                [definition.refresh_event_type for definition in APP_STATUS_READ_MODEL_REGISTRY.values() if definition.critical],
+            ),
         )
         payload = row if isinstance(row, dict) else {}
         queue_payload = payload.get("queue_backlog") if isinstance(payload.get("queue_backlog"), dict) else {}
@@ -1520,6 +1585,7 @@ class RuntimeMonitoringRepository:
             "max_pending_age_seconds": payload.get("max_pending_age_seconds"),
             "publish_status": {str(key): int(value or 0) for key, value in publish_payload.items()},
             "max_unpublished_age_seconds": payload.get("max_unpublished_age_seconds"),
+            "critical_failed_outbox_count": int(payload.get("critical_failed_outbox_count") or 0),
             "pending_outbox_events_by_scope": [
                 {
                     "event_type": str(scope.get("event_type") or ""),
@@ -1593,9 +1659,26 @@ class RuntimeMonitoringRepository:
               coalesce(
                 (select jsonb_agg(to_jsonb(scope_rows)) from scope_rows),
                 '[]'::jsonb
-              ) as dirty_scopes_by_scope
+              ) as dirty_scopes_by_scope,
+              (
+                select count(*)::bigint
+                from current_dirty_scopes
+                where status = 'failed'
+                  and scope_type = any(%s)
+              ) as critical_failed_dirty_scope_count,
+              (
+                select count(*)::bigint
+                from current_dirty_scopes
+                where updated_at < now() - (%s * interval '1 second')
+                  and scope_type = any(%s)
+              ) as critical_stale_dirty_scope_count
             """,
-            (stale_after_seconds,),
+            (
+                stale_after_seconds,
+                [definition.scope_type for definition in APP_STATUS_READ_MODEL_REGISTRY.values() if definition.critical],
+                stale_after_seconds,
+                [definition.scope_type for definition in APP_STATUS_READ_MODEL_REGISTRY.values() if definition.critical],
+            ),
         )
         payload = row if isinstance(row, dict) else {}
         dirty_payload = payload.get("dirty_scopes") if isinstance(payload.get("dirty_scopes"), dict) else {}
@@ -1618,6 +1701,8 @@ class RuntimeMonitoringRepository:
         return {
             "dirty_scopes": {str(key): int(value or 0) for key, value in dirty_payload.items()},
             "stale_dirty_scope_count": int((first_stale or {}).get("total_count") or len(stale_dirty_scopes)),
+            "critical_failed_dirty_scope_count": int(payload.get("critical_failed_dirty_scope_count") or 0),
+            "critical_stale_dirty_scope_count": int(payload.get("critical_stale_dirty_scope_count") or 0),
             "stale_dirty_scopes": stale_dirty_scopes,
             "dirty_scopes_by_scope": [
                 {

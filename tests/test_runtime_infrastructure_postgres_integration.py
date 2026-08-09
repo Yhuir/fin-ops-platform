@@ -11,6 +11,7 @@ from fin_ops_platform.services.postgres_repositories.settings_data_reset_request
     PostgresSettingsDataResetRequestRepository,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
@@ -40,6 +41,22 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 f"select to_regclass('{table}') is not null;",
             )
             self.assertEqual(exists, "t", table)
+
+    def test_ready_health_summary_executes_authoritative_blocker_queries(self) -> None:
+        class RabbitMqMetricsUnavailable:
+            @staticmethod
+            def summary() -> dict[str, object]:
+                return {"rabbitmq_metric_error": "integration_test_skipped"}
+
+        summary = RuntimeMonitoringRepository(
+            self.connection,
+            rabbitmq_metrics_provider=RabbitMqMetricsUnavailable(),
+        ).ready_health_summary()
+
+        self.assertIn("critical_failed_outbox_count", summary)
+        self.assertIn("critical_failed_dirty_scope_count", summary)
+        self.assertIn("critical_stale_dirty_scope_count", summary)
+        self.assertEqual(set(summary["critical_read_models"]), {"workbench", "workbench_relation"})
 
     def test_outbox_events_runtime_columns_exist(self) -> None:
         columns = (

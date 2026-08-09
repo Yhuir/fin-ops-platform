@@ -17,6 +17,9 @@ _RUNTIME_KEEP_KEYS = (
     "mismatched_required_worker_count",
     "failed_jobs",
     "stale_dirty_scope_count",
+    "critical_failed_outbox_count",
+    "critical_failed_dirty_scope_count",
+    "critical_stale_dirty_scope_count",
     "read_model_refresh_duration_ms",
     "read_model_refresh_enqueue_to_fresh_ms",
     "read_model_refresh_sample_count",
@@ -45,6 +48,7 @@ _RUNTIME_SUMMARY_KEYS = (
     "stale_dirty_scopes",
     "dirty_scopes_by_scope",
     "pending_outbox_events_by_scope",
+    "critical_read_models",
     "rabbitmq_queues",
 )
 
