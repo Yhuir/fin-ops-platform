@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 import json
 import os
+import signal
 import unittest
 from unittest.mock import patch
 
@@ -96,6 +97,12 @@ class ClosedFakeChannel(FakeChannel):
 
     def basic_publish(self, **kwargs):
         raise RuntimeError("Channel is closed.")
+
+
+class TimedOutFakeChannel(FakeChannel):
+    def basic_publish(self, **kwargs):
+        signal.raise_signal(signal.SIGALRM)
+        return True
 
 
 class FakeConnection:
@@ -264,6 +271,26 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(result["published"], 1)
         self.assertEqual(queue.published[0][0], "event-1")
         self.assertEqual(queue.failed, [])
+
+    def test_dispatcher_releases_publish_lock_after_confirm_timeout(self) -> None:
+        queue = FakeQueue()
+        settings = RuntimeQueueSettings.from_env(
+            {
+                "RABBITMQ_URL": "amqp://rabbitmq.internal",
+                "RABBITMQ_PUBLISH_TIMEOUT_SECONDS": "1",
+            }
+        )
+        dispatcher = RabbitMqDispatcher(
+            queue_repository=queue,
+            publisher=RabbitMqPublisher(settings, channel=TimedOutFakeChannel()),
+            config=RabbitMqDispatcherConfig(publisher_id="publisher-1", batch_size=10),
+        )
+
+        result = dispatcher.dispatch_once()
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["published"], 0)
+        self.assertIn("publisher confirm exceeded 1 seconds", queue.failed[0][1])
 
     def test_dispatcher_check_defaults_to_active_registry_event_types(self) -> None:
         stdout = StringIO()

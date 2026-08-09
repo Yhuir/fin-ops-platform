@@ -116,6 +116,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "RABBITMQ_DEAD_LETTER_EXCHANGE": "finops.events.dlx",
                 "RABBITMQ_PREFETCH": "25",
                 "RABBITMQ_PUBLISH_CONFIRM": "false",
+                "RABBITMQ_PUBLISH_TIMEOUT_SECONDS": "7",
                 "RABBITMQ_HEARTBEAT_SECONDS": "30",
                 "RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS": "120",
                 "RABBITMQ_MANAGEMENT_URL": "http://rabbitmq.internal:15672",
@@ -135,6 +136,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(settings.rabbitmq_dead_letter_exchange, "finops.events.dlx")
         self.assertEqual(settings.rabbitmq_prefetch, 25)
         self.assertFalse(settings.rabbitmq_publish_confirm)
+        self.assertEqual(settings.rabbitmq_publish_timeout_seconds, 7)
         self.assertEqual(settings.rabbitmq_heartbeat_seconds, 30)
         self.assertEqual(settings.rabbitmq_blocked_connection_timeout_seconds, 120)
         self.assertEqual(settings.rabbitmq_management_url, "http://rabbitmq.internal:15672")

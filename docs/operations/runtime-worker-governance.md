@@ -123,6 +123,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `tests/test_postgres_migrations.py` 的 read model storage contract 必须覆盖每个 App Status read model；新增 SQL projection 表时不能只写 migration 而不更新本地 schema 基线。
 - `read_model_slo_smoke --critical-only` 必须规划所有 critical App Status read model；dry-run 只证明 scope discovery，`--apply` 才证明真实 enqueue-to-fresh worker drain。
 - `fin-ops.rabbitmq-worker.env` 只放共享 RabbitMQ 凭据和 consumer fallback 参数，不设置 `FIN_OPS_QUEUE_BACKEND`；RabbitMQ 灰度切换只能发生在单 worker instance env。`RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS` 当前基线为 `0.05`，避免 RabbitMQ envelope 丢失或 dispatcher 延迟时让 1s read model SLO 卡在 fallback drain。
+- RabbitMQ dispatcher 的同步 publisher confirm 由 `RABBITMQ_PUBLISH_TIMEOUT_SECONDS`（默认 10 秒）硬截止；超时必须关闭连接、标记 publish failed 并按 durable queue 合同重试，不能让单个 confirm 永久占住 dispatcher 循环。
 - Redis 生产 env 模板必须和 `RuntimeRedisSettings.from_env()` 保持一致；Redis 只能缓存 fresh gate 后 payload，不能成为 worker/readiness 状态事实源。
 
 ## 独立受控业务写 smoke 输入（不属于自动 Release Gate）

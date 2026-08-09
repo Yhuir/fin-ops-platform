@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from time import monotonic, sleep, time
 import base64
 import json
+import signal
 from typing import Any, Iterable
 from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
@@ -204,17 +205,31 @@ class RabbitMqPublisher:
             },
         )
         started_at = monotonic()
+        timeout_seconds = self._settings.rabbitmq_publish_timeout_seconds
+
+        def raise_publish_timeout(_signum: int, _frame: object) -> None:
+            raise RabbitMqPublishError(f"RabbitMQ publisher confirm exceeded {timeout_seconds} seconds.")
+
         try:
-            published = channel.basic_publish(
-                exchange=exchange,
-                routing_key=routing_key,
-                body=body,
-                properties=properties,
-                mandatory=True,
-            )
-        except Exception:
-            self.close()
-            raise
+            previous_alarm_handler = signal.signal(signal.SIGALRM, raise_publish_timeout)
+        except (AttributeError, ValueError) as exc:
+            raise RabbitMqPublishError("RabbitMQ publisher requires a main-thread POSIX deadline.") from exc
+        signal.alarm(timeout_seconds)
+        try:
+            try:
+                published = channel.basic_publish(
+                    exchange=exchange,
+                    routing_key=routing_key,
+                    body=body,
+                    properties=properties,
+                    mandatory=True,
+                )
+            except Exception:
+                self.close()
+                raise
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_alarm_handler)
         if published is False:
             self.close()
             raise RabbitMqPublishError("RabbitMQ basic_publish returned false under publisher confirms.")

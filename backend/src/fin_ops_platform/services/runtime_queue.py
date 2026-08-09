@@ -77,6 +77,7 @@ class RuntimeQueueSettings:
     rabbitmq_dead_letter_exchange: str = "finops.events.dlx"
     rabbitmq_prefetch: int = 10
     rabbitmq_publish_confirm: bool = True
+    rabbitmq_publish_timeout_seconds: int = 10
     rabbitmq_heartbeat_seconds: int = 60
     rabbitmq_consumer_postgres_drain_interval_seconds: float = 0.05
     rabbitmq_blocked_connection_timeout_seconds: int = 300
@@ -103,6 +104,11 @@ class RuntimeQueueSettings:
             or "finops.events.dlx",
             rabbitmq_prefetch=_positive_int(source.get("RABBITMQ_PREFETCH"), default=10, name="RABBITMQ_PREFETCH"),
             rabbitmq_publish_confirm=_bool(source.get("RABBITMQ_PUBLISH_CONFIRM"), default=True),
+            rabbitmq_publish_timeout_seconds=_positive_int(
+                source.get("RABBITMQ_PUBLISH_TIMEOUT_SECONDS"),
+                default=10,
+                name="RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
+            ),
             rabbitmq_heartbeat_seconds=_positive_int(source.get("RABBITMQ_HEARTBEAT_SECONDS"), default=60, name="RABBITMQ_HEARTBEAT_SECONDS"),
             rabbitmq_consumer_postgres_drain_interval_seconds=_positive_float(
                 source.get("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS"),
@@ -140,6 +146,7 @@ class RuntimeQueueSettings:
             "rabbitmq_dead_letter_exchange": self.rabbitmq_dead_letter_exchange,
             "rabbitmq_prefetch": self.rabbitmq_prefetch,
             "rabbitmq_publish_confirm": self.rabbitmq_publish_confirm,
+            "rabbitmq_publish_timeout_seconds": self.rabbitmq_publish_timeout_seconds,
             "rabbitmq_heartbeat_seconds": self.rabbitmq_heartbeat_seconds,
             "rabbitmq_consumer_postgres_drain_interval_seconds": self.rabbitmq_consumer_postgres_drain_interval_seconds,
             "rabbitmq_blocked_connection_timeout_seconds": self.rabbitmq_blocked_connection_timeout_seconds,
