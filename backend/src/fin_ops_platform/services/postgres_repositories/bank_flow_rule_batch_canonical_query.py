@@ -1,12 +1,48 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_details_canonical_query import (
+    bank_category_classification_cte,
+)
 from fin_ops_platform.services.postgres_repositories.common import int_value, month_start, row_payload, text, text_list
+
+_CLASSIFIED_CANDIDATE_ROWS_SQL = """
+    select
+        candidate.canonical_transaction_id as id,
+        candidate.row_id as transaction_id,
+        candidate.account_no,
+        candidate.direction as txn_direction,
+        candidate.normalized_counterparty_name,
+        candidate.counterparty_name_raw,
+        candidate.amount,
+        candidate.txn_date,
+        candidate.trade_time,
+        candidate.pay_receive_time,
+        candidate.summary_text as summary,
+        candidate.purpose_text as purpose,
+        candidate.note_text as remark,
+        candidate.bank_name,
+        candidate.account_last4,
+        coalesce(
+            nullif(candidate.normalized_payload->>'account_key', ''),
+            candidate.bank_name || ':' || candidate.account_last4
+        ) as account_key,
+        candidate.effective_category_code as category_code,
+        candidate.effective_category_source as category_source,
+        coalesce(
+            candidate.confirmation_version,
+            candidate.manual_category_version,
+            0
+        )::integer as category_version,
+        'canonical_sql'::text as category_resolution_authority
+    from classified_with_semantics candidate
+"""
 
 
 class BankFlowRuleBatchCanonicalQueryRepository:
@@ -38,17 +74,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             resolved_summary_filters.get("account_key")
             or resolved_filters.get("account_key")
         )
-        candidate_scope_sql = ""
-        candidate_scope_params: list[object] = []
         formal_scope_sql = ""
         formal_scope_params: list[object] = []
-        if source_month:
-            scope_start = month_start(source_month)
-            candidate_scope_sql = """
-                and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
-                and coalesce(bank.txn_date, bank.txn_month) < %s::date + interval '1 month 2 days'
-            """
-            candidate_scope_params.extend([scope_start, scope_start])
         if source_month:
             scope_start = month_start(source_month)
             formal_scope_sql += " and batch.scope_month = %s::date"
@@ -59,170 +86,47 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         with self._snapshot() as transaction:
             tag_sources = self._tag_sources(transaction)
             tag_policy = tag_sources["tag_policy"]
+            tag_dictionary = tag_sources["tag_dictionary"]
+            definitions = [
+                dict(definition)
+                for definition in list(tag_dictionary.get("definitions") or [])
+                if isinstance(definition, dict)
+            ]
+            scope_start = (
+                date.fromisoformat(month_start(source_month)) if source_month else None
+            )
+            scope_end = (
+                date(
+                    scope_start.year,
+                    scope_start.month,
+                    monthrange(scope_start.year, scope_start.month)[1],
+                )
+                if scope_start is not None
+                else None
+            )
+            classification_sql, classification_params = bank_category_classification_cte(
+                definitions=definitions,
+                date_from=scope_start.isoformat() if scope_start is not None else None,
+                date_to=scope_end.isoformat() if scope_end is not None else None,
+                defer_full_payload=True,
+            )
+            transaction.execute("set local jit = off")
             source_result = transaction.fetch_one(
                 f"""
-                with bank_source as materialized (
-                    select
-                        bank.id,
-                        bank.legacy_mongo_id,
-                        bank.account_no,
-                        bank.txn_direction,
-                        bank.normalized_counterparty_name,
-                        bank.counterparty_name_raw,
-                        bank.amount,
-                        bank.txn_date,
-                        bank.txn_month,
-                        bank.trade_time,
-                        bank.pay_receive_time,
-                        bank.summary,
-                        bank.remark,
-                        bank.bank_text_fields,
-                        coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
-                        jsonb_strip_nulls(
-                            jsonb_build_object(
-                                'account_key', bank.raw_payload->'normalized_payload'->'account_key',
-                                'account_number', bank.raw_payload->'normalized_payload'->'account_number',
-                                'account_type', bank.raw_payload->'normalized_payload'->'account_type',
-                                'bank_name', bank.raw_payload->'normalized_payload'->'bank_name',
-                                'bank', bank.raw_payload->'normalized_payload'->'bank',
-                                'bank_short_name', bank.raw_payload->'normalized_payload'->'bank_short_name',
-                                'account_bank', bank.raw_payload->'normalized_payload'->'account_bank',
-                                'account_last4', bank.raw_payload->'normalized_payload'->'account_last4',
-                                'imported_bank_name', bank.raw_payload->'normalized_payload'->'imported_bank_name',
-                                'imported_bank_last4', bank.raw_payload->'normalized_payload'->'imported_bank_last4',
-                                'counterparty_account', bank.raw_payload->'normalized_payload'->'counterparty_account',
-                                'counterparty_account_no', bank.raw_payload->'normalized_payload'->'counterparty_account_no',
-                                'counterparty_account_number', bank.raw_payload->'normalized_payload'->'counterparty_account_number',
-                                'counterparty_no', bank.raw_payload->'normalized_payload'->'counterparty_no',
-                                'counterparty_bank', bank.raw_payload->'normalized_payload'->'counterparty_bank',
-                                'counterparty_bank_name', bank.raw_payload->'normalized_payload'->'counterparty_bank_name',
-                                'counterparty_opening_bank', bank.raw_payload->'normalized_payload'->'counterparty_opening_bank',
-                                'purpose', bank.raw_payload->'normalized_payload'->'purpose',
-                                'purpose_text', bank.raw_payload->'normalized_payload'->'purpose_text',
-                                'usage', bank.raw_payload->'normalized_payload'->'usage',
-                                'use', bank.raw_payload->'normalized_payload'->'use',
-                                'summary_text', bank.raw_payload->'normalized_payload'->'summary_text',
-                                'note_text', bank.raw_payload->'normalized_payload'->'note_text',
-                                'note', bank.raw_payload->'normalized_payload'->'note',
-                                'customer_note', bank.raw_payload->'normalized_payload'->'customer_note',
-                                'detail_text', bank.raw_payload->'normalized_payload'->'detail_text',
-                                'detail_fields', bank.raw_payload->'normalized_payload'->'detail_fields',
-                                '_detail_fields', bank.raw_payload->'normalized_payload'->'_detail_fields',
-                                'summary_fields', bank.raw_payload->'normalized_payload'->'summary_fields',
-                                '_summary_fields', bank.raw_payload->'normalized_payload'->'_summary_fields',
-                                'bank_text_fields', coalesce(
-                                    bank.raw_payload->'normalized_payload'->'bank_text_fields',
-                                    bank.bank_text_fields
-                                )
-                            )
-                        ) as payload
-                    from app.bank_transactions bank
-                    where bank.status <> 'deleted'
-                      {candidate_scope_sql}
+                with {classification_sql},
+                bank_source as materialized (
+                    {_CLASSIFIED_CANDIDATE_ROWS_SQL}
                 ),
                 bank_identities as materialized (
                     select bank.id as bank_id, bank.transaction_id as identity
                     from bank_source bank
                     union
-                    select bank.id as bank_id, bank.id::text as identity
+                    select bank.id as bank_id, bank.id as identity
                     from bank_source bank
-                ),
-                confirmed_category_candidates as materialized (
-                    select
-                        bank.id as bank_id,
-                        confirmation.category_code,
-                        confirmation.version,
-                        confirmation.confirmed_at,
-                        confirmation.id as confirmation_id
-                    from app.bank_transaction_category_confirmations confirmation
-                    join bank_source bank
-                      on bank.id = confirmation.bank_transaction_id
-                    where confirmation.tenant_id = 'default'
-                      and confirmation.status = 'active'
-                    union all
-                    select
-                        identity.bank_id,
-                        confirmation.category_code,
-                        confirmation.version,
-                        confirmation.confirmed_at,
-                        confirmation.id as confirmation_id
-                    from app.bank_transaction_category_confirmations confirmation
-                    join bank_identities identity
-                      on identity.identity = confirmation.legacy_transaction_id
-                    where confirmation.tenant_id = 'default'
-                      and confirmation.status = 'active'
-                ),
-                confirmed_categories as materialized (
-                    select distinct on (candidate.bank_id)
-                        candidate.bank_id,
-                        candidate.category_code,
-                        candidate.version
-                    from confirmed_category_candidates candidate
-                    order by
-                        candidate.bank_id,
-                        candidate.confirmed_at desc,
-                        candidate.confirmation_id desc
-                ),
-                manual_category_candidates as materialized (
-                    select
-                        bank.id as bank_id,
-                        manual.category,
-                        manual.source,
-                        manual.version,
-                        manual.updated_at,
-                        manual.id as manual_category_id
-                    from app.bank_transaction_categories manual
-                    join bank_source bank
-                      on bank.id = manual.bank_transaction_id
-                    where manual.status = 'active'
-                    union all
-                    select
-                        identity.bank_id,
-                        manual.category,
-                        manual.source,
-                        manual.version,
-                        manual.updated_at,
-                        manual.id as manual_category_id
-                    from app.bank_transaction_categories manual
-                    join bank_identities identity
-                      on identity.identity = manual.legacy_transaction_id
-                    where manual.status = 'active'
-                ),
-                manual_categories as materialized (
-                    select distinct on (candidate.bank_id)
-                        candidate.bank_id,
-                        candidate.category,
-                        candidate.source,
-                        candidate.version
-                    from manual_category_candidates candidate
-                    order by
-                        candidate.bank_id,
-                        candidate.updated_at desc,
-                        candidate.manual_category_id desc
                 ),
                 candidate_rows as materialized (
-                    select
-                        bank.*,
-                        coalesce(
-                            confirmed_category.category_code,
-                            manual_category.category,
-                            ''
-                        ) as category_code,
-                        case
-                            when confirmed_category.category_code is not null
-                                then 'auto_confirmation'
-                            else coalesce(manual_category.source, '')
-                        end as category_source,
-                        coalesce(
-                            confirmed_category.version,
-                            manual_category.version,
-                            0
-                        )::integer as category_version
+                    select bank.*
                     from bank_source bank
-                    left join confirmed_categories confirmed_category
-                      on confirmed_category.bank_id = bank.id
-                    left join manual_categories manual_category
-                      on manual_category.bank_id = bank.id
                 ),
                 candidate_identity_array as materialized (
                     select array_agg(identity order by identity) as row_ids
@@ -307,9 +211,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         '[]'::jsonb
                     ) as formal_items
                 """,
-                tuple(
-                    [*candidate_scope_params, *formal_scope_params]
-                ),
+                tuple([*classification_params, *formal_scope_params]),
             ) or {}
         candidate_rows = source_result.get("candidate_rows")
         candidate_rows = candidate_rows if isinstance(candidate_rows, list) else []
@@ -365,75 +267,51 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         *,
         scope_month: str,
     ) -> dict[str, object]:
-        scope_start = month_start(text(scope_month))
+        scope_start = date.fromisoformat(month_start(text(scope_month)))
+        scope_end = date(
+            scope_start.year,
+            scope_start.month,
+            monthrange(scope_start.year, scope_start.month)[1],
+        )
         tag_sources = cls._tag_sources(transaction)
         tag_policy = tag_sources["tag_policy"]
+        tag_dictionary = tag_sources["tag_dictionary"]
+        definitions = [
+            dict(definition)
+            for definition in list(tag_dictionary.get("definitions") or [])
+            if isinstance(definition, dict)
+        ]
+        classification_sql, classification_params = bank_category_classification_cte(
+            definitions=definitions,
+            date_from=scope_start.isoformat(),
+            date_to=scope_end.isoformat(),
+            defer_full_payload=True,
+        )
+        transaction.execute("set local jit = off")
         result = transaction.fetch_one(
-            """
-            with candidate_rows as materialized (
-                select
-                    bank.*,
-                    coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
-                    coalesce(bank.raw_payload->'normalized_payload', '{}'::jsonb) as payload,
-                    coalesce(
-                        confirmed_category.category_code,
-                        manual_category.category,
-                        ''
-                    ) as category_code,
-                    case
-                        when confirmed_category.category_code is not null
-                            then 'auto_confirmation'
-                        else coalesce(manual_category.source, '')
-                    end as category_source,
-                    coalesce(
-                        confirmed_category.version,
-                        manual_category.version,
-                        0
-                    )::integer as category_version
-                from app.bank_transactions bank
-                left join lateral (
-                    select confirmation.category_code, confirmation.version
-                    from app.bank_transaction_category_confirmations confirmation
-                    where confirmation.tenant_id = 'default'
-                      and confirmation.status = 'active'
-                      and (
-                          confirmation.bank_transaction_id = bank.id
-                          or confirmation.legacy_transaction_id in (
-                              coalesce(bank.legacy_mongo_id, bank.id::text),
-                              bank.id::text
-                          )
-                      )
-                    order by confirmation.confirmed_at desc, confirmation.id desc
-                    limit 1
-                ) confirmed_category on true
-                left join lateral (
-                    select manual.category, manual.source, manual.version
-                    from app.bank_transaction_categories manual
-                    where manual.status = 'active'
-                      and (
-                          manual.bank_transaction_id = bank.id
-                          or manual.legacy_transaction_id in (
-                              coalesce(bank.legacy_mongo_id, bank.id::text),
-                              bank.id::text
-                          )
-                      )
-                    order by manual.updated_at desc, manual.id desc
-                    limit 1
-                ) manual_category on true
-                where bank.status <> 'deleted'
-                  and coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
-                  and coalesce(bank.txn_date, bank.txn_month) < %s::date + interval '1 month 2 days'
+            f"""
+            with {classification_sql},
+            candidate_rows as materialized (
+                {_CLASSIFIED_CANDIDATE_ROWS_SQL}
+            ),
+            candidate_identities as materialized (
+                select candidate.transaction_id as identity
+                from candidate_rows candidate
+                union
+                select candidate.id as identity
+                from candidate_rows candidate
+            ),
+            candidate_identity_array as materialized (
+                select array_agg(identity order by identity) as row_ids
+                from candidate_identities
             ),
             active_relations as materialized (
                 select relation.*
                 from app.workbench_pair_relations relation
+                cross join candidate_identity_array candidate_ids
                 where relation.status = 'active'
-                  and exists (
-                      select 1
-                      from candidate_rows candidate
-                      where candidate.transaction_id = any(relation.row_ids)
-                         or candidate.id::text = any(relation.row_ids)
-                  )
+                  and candidate_ids.row_ids is not null
+                  and relation.row_ids && candidate_ids.row_ids
             )
             select
                 coalesce(
@@ -454,7 +332,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     '[]'::jsonb
                 ) as active_relations
             """,
-            (scope_start, scope_start),
+            tuple(classification_params),
         ) or {}
         candidate_rows = result.get("candidate_rows")
         active_relations = result.get("active_relations")
@@ -803,8 +681,16 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         amount = BankFlowRuleBatchCanonicalQueryRepository._decimal_text(row.get("amount"))
         direction = text(row.get("txn_direction")).lower()
         account_no = text(row.get("account_no")) or ""
-        bank_name = text(result.get("bank_name") or result.get("imported_bank_name"))
-        account_last4 = text(result.get("account_last4") or result.get("imported_bank_last4"))
+        bank_name = text(
+            result.get("bank_name")
+            or result.get("imported_bank_name")
+            or row.get("bank_name")
+        )
+        account_last4 = text(
+            result.get("account_last4")
+            or result.get("imported_bank_last4")
+            or row.get("account_last4")
+        )
         if not account_last4:
             digits = "".join(character for character in account_no if character.isdigit())
             account_last4 = digits[-4:] if digits else ""
@@ -813,7 +699,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 "id": transaction_id,
                 "transaction_id": transaction_id,
                 "account_no": account_no,
-                "account_key": text(result.get("account_key")) or f"{bank_name}:{account_last4}".strip(":"),
+                "account_key": text(result.get("account_key") or row.get("account_key"))
+                or f"{bank_name}:{account_last4}".strip(":"),
                 "bank_name": bank_name,
                 "account_last4": account_last4,
                 "counterparty_name": text(
@@ -827,10 +714,18 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     row.get("trade_time") or row.get("pay_receive_time") or row.get("txn_date")
                 ),
                 "summary": text(row.get("summary")),
-                "purpose": text(result.get("purpose") or result.get("usage") or result.get("use")),
+                "purpose": text(
+                    result.get("purpose")
+                    or result.get("usage")
+                    or result.get("use")
+                    or row.get("purpose")
+                ),
                 "remark": text(row.get("remark")),
                 "category_code": text(row.get("category_code")),
                 "category_source": text(row.get("category_source")),
+                "category_resolution_authority": text(
+                    row.get("category_resolution_authority")
+                ),
                 "relation_status": "linked" if text_list(row.get("relation_case_ids")) else "unlinked",
                 "relation_case_ids": text_list(row.get("relation_case_ids")),
                 "linked_oa_count": int_value(row.get("linked_oa_count"), 0),

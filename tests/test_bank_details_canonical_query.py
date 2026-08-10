@@ -8,7 +8,7 @@ from fin_ops_platform.services.bank_details_canonical_query import (
     BANK_DETAIL_EXPORT_ROW_LIMIT,
     BankDetailsCanonicalQueryService,
     PostgresBankDetailsCanonicalQueryRepository,
-    _classification_cte,
+    bank_category_classification_cte,
 )
 
 
@@ -228,7 +228,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             },
         }
 
-        sql, _params = _classification_cte(
+        sql, _params = bank_category_classification_cte(
             definitions=[definition],
             date_from="2026-01-01",
             date_to="2026-12-31",
@@ -259,7 +259,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             },
             {**definition, "account_scope": {"type": "account_type"}},
         ):
-            raw_field_sql, _raw_field_params = _classification_cte(
+            raw_field_sql, _raw_field_params = bank_category_classification_cte(
                 definitions=[raw_definition],
                 date_from="2026-01-01",
                 date_to="2026-12-31",
@@ -295,7 +295,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(sql.count("%s"), len(params))
 
     def test_money_keyword_keeps_full_classifier_when_category_label_matches(self) -> None:
-        sql, params = _classification_cte(
+        sql, params = bank_category_classification_cte(
             definitions=[
                 {
                     "code": "numeric-label",
@@ -403,7 +403,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             )
 
     def test_rule_sql_has_aligned_parameters_for_all_supported_predicates(self) -> None:
-        sql, params = _classification_cte(
+        sql, params = bank_category_classification_cte(
             definitions=[
                 {
                     "code": "complex",

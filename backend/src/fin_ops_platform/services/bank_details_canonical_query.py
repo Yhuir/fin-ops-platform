@@ -138,7 +138,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             tags,
             category_codes=normalized_codes,
         )
-        cte_sql, cte_params = _classification_cte(
+        cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
             date_from=None,
             date_to=None,
@@ -175,7 +175,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             for item in list(tags.get("definitions") or [])
             if isinstance(item, dict)
         ]
-        cte_sql, cte_params = _classification_cte(
+        cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
             date_from=None,
             date_to=None,
@@ -237,7 +237,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             for item in list(tags.get("definitions") or [])
             if isinstance(item, dict)
         ]
-        cte_sql, cte_params = _classification_cte(
+        cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
             date_from=None,
             date_to=None,
@@ -445,7 +445,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             for item in list(tags.get("definitions") or [])
             if isinstance(item, dict)
         ]
-        cte_sql, cte_params = _classification_cte(
+        cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
             date_from=date_from,
             date_to=date_to,
@@ -988,7 +988,7 @@ def _transaction_prefilter_sql(
     return " and ".join(clauses), params
 
 
-def _classification_cte(
+def bank_category_classification_cte(
     *,
     definitions: list[dict[str, Any]],
     date_from: str | None,
@@ -1178,8 +1178,14 @@ def _classification_cte(
             limit 1
           ) confirmation on true
           where coalesce(nullif(bank.status, ''), 'active') <> all(%s::text[])
-            and (%s::date is null or bank.txn_date >= %s::date - interval '2 days')
-            and (%s::date is null or bank.txn_date <= %s::date + interval '2 days')
+            and (
+              %s::date is null
+              or coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
+            )
+            and (
+              %s::date is null
+              or coalesce(bank.txn_date, bank.txn_month) <= %s::date + interval '2 days'
+            )
             and (
               %s::text[] is null
               or confirmation.category_code = any(%s::text[])

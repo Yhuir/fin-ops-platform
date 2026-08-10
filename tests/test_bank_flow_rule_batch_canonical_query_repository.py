@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 import pytest
-
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
@@ -227,7 +226,8 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
     assert len(connection.fetched_one) == 2
     assert len(connection.fetched_all) == 0
     assert connection.executed == [
-        ("set transaction isolation level repeatable read read only", ())
+        ("set transaction isolation level repeatable read read only", ()),
+        ("set local jit = off", ()),
     ]
     all_sql = [sql for sql, _params in [*connection.fetched_one, *connection.fetched_all]]
     assert not any("read_model." in sql for sql in all_sql)
@@ -240,7 +240,9 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
         for sql, params in connection.fetched_one
         if "candidate_rows" in sql and "formal_items" in sql
     )
-    assert source_params[:2] == ("2026-05-01", "2026-05-01")
+    assert "2026-05-01" in source_params
+    assert "2026-05-31" in source_params
+    assert source_params[-1] == "2026-05-01"
 
 
 def test_submitted_page_query_keeps_candidate_rows_and_active_relations_in_snapshot() -> None:
@@ -260,7 +262,9 @@ def test_submitted_page_query_keeps_candidate_rows_and_active_relations_in_snaps
         if "candidate_rows" in sql and "formal_items" in sql
     )
     assert "where bank.status <> 'deleted' and false" not in source_sql
-    assert source_params[:2] == ("2026-05-01", "2026-05-01")
+    assert "2026-05-01" in source_params
+    assert "2026-05-31" in source_params
+    assert source_params[-1] == "2026-05-01"
 
 
 def test_all_page_query_reads_the_complete_canonical_source_without_a_month_predicate() -> None:
@@ -281,14 +285,42 @@ def test_all_page_query_reads_the_complete_canonical_source_without_a_month_pred
         if "candidate_rows" in sql and "formal_items" in sql
     )
     assert "where bank.status <> 'deleted' and false" not in source_sql
-    assert "coalesce(bank.txn_date, bank.txn_month) >= %s::date" not in source_sql
+    assert "%s::date is null or coalesce(bank.txn_date, bank.txn_month)" in source_sql
     assert "bank.*" not in source_sql.split("), bank_identities", 1)[0]
-    assert "left join lateral" not in source_sql
+    assert "confirmed_category_candidates" not in source_sql
+    assert "manual_category_candidates" not in source_sql
+    assert "from classified_with_semantics candidate" in source_sql
     assert "relation.row_ids && candidate_ids.row_ids" in source_sql
-    assert "join bank_identities identity" in source_sql
-    assert source_params == ()
+    assert "2026-05-01" not in source_params
+    assert source_params
     assert connection.transaction_enters == connection.transaction_exits == 1
     assert len(connection.fetched_one) == 2
+
+
+def test_submit_guard_reuses_the_same_canonical_sql_classifier() -> None:
+    connection = _Connection(empty_page=True)
+
+    with connection.transaction() as transaction:
+        result = BankFlowRuleBatchCanonicalQueryRepository.read_candidate_guard_source(
+            transaction,
+            scope_month="2026-05",
+        )
+
+    source_sql, source_params = next(
+        (sql, params)
+        for sql, params in connection.fetched_one
+        if "candidate_rows as materialized" in sql
+        and "candidate_identity_array" in sql
+        and "formal_items" not in sql
+    )
+    assert result["candidate_rows"] == []
+    assert "from classified_with_semantics candidate" in source_sql
+    assert "category_resolution_authority" in source_sql
+    assert "relation.row_ids && candidate_ids.row_ids" in source_sql
+    assert "confirmed_category_candidates" not in source_sql
+    assert "manual_category_candidates" not in source_sql
+    assert "2026-05-01" in source_params
+    assert "2026-05-31" in source_params
 
 
 def test_page_query_returns_an_explicit_empty_result() -> None:

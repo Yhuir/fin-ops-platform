@@ -38,7 +38,7 @@
 | 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
 | 银行流水 | `app.bank_transactions` | 精确月份在边界窗口内批量读取 non-deleted 当前行；省略月份时一次读取全部 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
-| 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 返回请求范围内全部 non-deleted 银行流水及人工/确认事实，不用人工分类 SQL 预筛；application service 复用 `BankTransactionEffectiveCategoryProvider` 与现有自动分类规则批量得出 effective category。confirmation、manual 与 auto 的优先级和银行明细一致。 |
+| 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 对请求范围内全部 non-deleted 银行流水复用银行明细 owner 的 `bank_category_classification_cte(...)`，在同一 canonical snapshot 内集合式得出 effective category；不按人工分类预筛，也不在 Python 对同一批流水再次执行自动分类。confirmation、manual 与 auto 的优先级和银行明细共用一个 SQL compiler。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
@@ -62,7 +62,7 @@
 ## 一致性与查询预算
 
 - 一次列表请求中的 tag policy、total、page rows 和 summary aggregates 位于同一显式 `REPEATABLE READ / READ ONLY` transaction。
-- 列表使用固定数量的集合查询读取 settings、请求范围内全部 non-deleted 银行流水、人工/确认分类事实、正式历史和 active relation；精确月份包含内部转账 ±2 天窗口，省略月份时一次读取全部月份，禁止按月份循环。effective category 在共享 service 内批量计算，月份数、批次数、分页深度和每批行数不增加查询次数。
+- 列表使用固定数量的集合查询读取 settings、请求范围内全部 non-deleted 银行流水及其 effective category、正式历史和 active relation；精确月份包含内部转账 ±2 天窗口，省略月份时一次读取全部月份，禁止按月份循环。effective category 复用银行明细 canonical SQL compiler，Python live builder 只负责批次分组，月份数、批次数、分页深度和每批行数不增加查询次数。
 - 正式详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。live candidate 详情先确认不存在正式批次，再执行一次与列表相同的月份 canonical snapshot；不逐行查询、不写 draft。
 - repository 只有在调用方省略 `month`、明确请求全部范围时才允许一次加载跨月份 canonical 流水；精确月份仍必须保持窗口约束。application service 对同一完整 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐月份、逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
 - 未提交 batch 由共享 builder 实时推导，必须同时满足：有效分类命中当前双 false 标签、所有成员仍存在且分类一致、成员未与任一 active relation overlap。禁止在 SQL 层仅按 manual/confirmation category 预筛，否则 auto-only 候选会被静默遗漏。
@@ -107,6 +107,7 @@ Canonical facts：
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py` |
 | Canonical query repository | `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py` |
+| Shared category SQL compiler | `backend/src/fin_ops_platform/services/bank_details_canonical_query.py` 的 `bank_category_classification_cte(...)` |
 | Live candidate builder | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_query.py` |
 | PostgreSQL assembly | `backend/src/fin_ops_platform/services/postgres_state_store.py`、`backend/src/fin_ops_platform/app/server.py` 的最小依赖接线 |
 | Mutation persistence | `backend/src/fin_ops_platform/services/postgres_repositories/workbench.py` 的既有 bank-flow delta writer |
@@ -123,7 +124,7 @@ Canonical facts：
 
 ## Live candidate 合同
 
-- GET、提交事务复核与 Page/System Audit 都调用同一 live builder 和有效分类 provider；输入来自当前银行流水、人工/确认分类事实、当前自动规则、paired policy、active relation 和正式历史占用。
+- GET、提交事务复核与 Page/System Audit 都调用同一 live builder；列表 GET 的 effective category 来自银行明细 owner 的 canonical SQL compiler，写事务复核继续在同一事务内按同一分类口径重算。输入来自当前银行流水、人工/确认分类事实、当前自动规则、paired policy、active relation 和正式历史占用。
 - 列表生成的 live candidate id 与详情按 `batch_id + scope_month` 重算出的 identity 必须一致；前端详情请求必须携带列表项的 `scope_month`。
 - 候选 identity、成员、金额与内部往来匹配必须确定性；歧义 fail closed，内部往来金额只计单边。内部往来的 ±2 天查询窗口只用于发现跨月配对，配对 owner month 固定为最早成员月份，相邻月份查询不得重复返回。
 - 提交必须携带合法 `scope_month` 并在写事务内重读、重算、锁定和复核；遗留 persisted draft 不能被恢复或提交。

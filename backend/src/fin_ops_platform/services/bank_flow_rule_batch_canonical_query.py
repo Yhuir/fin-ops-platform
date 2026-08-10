@@ -21,7 +21,6 @@ from fin_ops_platform.services.bank_transaction_effective_category_provider impo
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
-
 _BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
@@ -176,6 +175,29 @@ def bank_flow_rule_batch_effective_categories(
         for row in list(source.get("candidate_rows") or source.get("rows") or [])
         if isinstance(row, dict)
     ]
+    if all(
+        str(row.get("category_resolution_authority") or "") == "canonical_sql"
+        for row in rows
+    ):
+        categories: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            transaction_id = str(
+                row.get("id") or row.get("transaction_id") or ""
+            ).strip()
+            if not transaction_id:
+                continue
+            category_code = str(row.get("category_code") or "").strip()
+            category_source = str(row.get("category_source") or "").strip()
+            categories[transaction_id] = {
+                "transaction_id": transaction_id,
+                "category_code": category_code or None,
+                "effective_category_code": category_code or None,
+                "category_source": category_source,
+                "effective_category_source": category_source,
+                "source": category_source,
+                "category_version": int(row.get("category_version") or 0),
+            }
+        return categories
     manual_categories: dict[str, dict[str, Any]] = {}
     for row in rows:
         transaction_id = str(

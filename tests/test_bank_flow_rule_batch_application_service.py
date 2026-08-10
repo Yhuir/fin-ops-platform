@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_batch_application_service import (
@@ -17,6 +18,9 @@ from fin_ops_platform.services.bank_batch_service import (
 )
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import (
     BankFlowRuleBatchApplicationService,
+)
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    bank_flow_rule_batch_effective_categories,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
@@ -211,6 +215,35 @@ class RecordingTransactionConnection:
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
+    def test_canonical_sql_categories_skip_duplicate_python_classification(self) -> None:
+        with patch(
+            "fin_ops_platform.services.bank_flow_rule_batch_canonical_query.BankTransactionEffectiveCategoryProvider",
+            side_effect=AssertionError("canonical SQL categories must not be classified twice"),
+        ):
+            categories = bank_flow_rule_batch_effective_categories(
+                {
+                    "candidate_rows": [
+                        {
+                            "id": "bank-1",
+                            "category_code": "fee",
+                            "category_source": "auto",
+                            "category_version": 7,
+                            "category_resolution_authority": "canonical_sql",
+                        },
+                        {
+                            "id": "bank-2",
+                            "category_code": "",
+                            "category_source": "",
+                            "category_resolution_authority": "canonical_sql",
+                        },
+                    ]
+                }
+            )
+
+        self.assertEqual(categories["bank-1"]["effective_category_code"], "fee")
+        self.assertEqual(categories["bank-1"]["category_version"], 7)
+        self.assertIsNone(categories["bank-2"]["effective_category_code"])
+
     def test_bank_flow_domain_contract_uses_new_namespace_and_keeps_historical_ids_readable(self) -> None:
         historical_id = "no_oa_batch_historical"
         service = BankBatchService(
