@@ -1,6 +1,6 @@
 # 销项发票收款情况测试矩阵
 
-日期：2026-08-10
+日期：2026-08-11
 
 ## 七类测试适用性
 
@@ -25,6 +25,7 @@
 - row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。
 - 页面只注册七个 GET route，旧 lifecycle/receipt/manual-red route 返回未匹配。
 - 前端只呈现三组表格，不显示旧按钮、旧抽屉、OA 或收据列。
+- 表格保持有界内部滚动，HeroUI 分页位于 FinanceTable footer；范围选择与搜索保持同一紧凑行且不重叠。
 
 ## 主要测试入口
 

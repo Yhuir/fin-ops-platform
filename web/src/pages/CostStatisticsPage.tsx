@@ -1037,21 +1037,6 @@ export default function CostStatisticsPage() {
     });
   }, [interactionLocked, invalidateExportReferenceData, resetDetailSelection]);
 
-  const isRootEmpty = !isExplorerLoading
-    && !loadError
-    && loadedExplorer?.requestKey === explorerRequestKey
-    && explorerData
-    ? viewMode === "time"
-      ? explorerData.rowCount === 0
-      : viewMode === "project"
-        ? projectRows.length === 0
-        : viewMode === "bank"
-          ? bankRows.length === 0
-          : viewMode === "bankTag"
-            ? bankTagPrimaryRows.length === 0
-          : expenseTypeRows.length === 0
-    : false;
-
   async function loadTransactionDetail(transactionId: string, source: CostTransactionDetailSource) {
     detailRequestRef.current?.abort();
     const controller = new AbortController();
@@ -1683,20 +1668,6 @@ export default function CostStatisticsPage() {
             {exportFeedback && !isExportCenterOpen ? (
               <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
             ) : null}
-            {isRootEmpty ? (
-              <div className="state-panel">
-                {viewMode === "project"
-                  ? "当前时间范围没有可用于项目成本统计的支出流水。"
-                  : viewMode === "bank"
-                    ? "当前时间范围没有可用于银行成本统计的支出流水。"
-                    : viewMode === "expenseType"
-                      ? "当前时间范围没有可用于 OA 费用类型统计的支出流水。"
-                      : viewMode === "bankTag"
-                        ? "当前时间范围没有可用于标签统计的收入或支出流水。"
-                        : "当前时间范围没有可用于流水统计的收入或支出流水。"}
-              </div>
-            ) : null}
-
         {explorerData ? (
           <>
             {viewMode === "time" ? (
@@ -1750,13 +1721,13 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={projectTotalAmount} label="支出金额" tone="expense" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
-                    {costViewSearch}
                     <BusinessPeriodPicker
                       ariaLabel="项目统计时间范围"
                       onChange={(selection) => updateScopeSelection("project", selection)}
                       selection={{ mode: projectScopeMode, year: projectScopeYear, month: projectScopeMonth }}
                       years={availableScopeYears}
                     />
+                    {costViewSearch}
                   </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
@@ -1845,13 +1816,13 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
-                      {costViewSearch}
                     <BusinessPeriodPicker
                       ariaLabel="银行统计时间范围"
                       onChange={(selection) => updateScopeSelection("bank", selection)}
                       selection={{ mode: bankScopeMode, year: bankScopeYear, month: bankScopeMonth }}
                       years={availableScopeYears}
                     />
+                    {costViewSearch}
                   </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
@@ -1938,13 +1909,13 @@ export default function CostStatisticsPage() {
                     <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
-                      {costViewSearch}
                     <BusinessPeriodPicker
                       ariaLabel="OA费用类型统计时间范围"
                       onChange={(selection) => updateScopeSelection("expenseType", selection)}
                       selection={{ mode: expenseTypeScopeMode, year: expenseTypeScopeYear, month: expenseTypeScopeMonth }}
                       years={availableScopeYears}
                     />
+                    {costViewSearch}
                   </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
@@ -2011,13 +1982,13 @@ export default function CostStatisticsPage() {
                     </div>
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
-                    {costViewSearch}
                     <BusinessPeriodPicker
                       ariaLabel="流水标签统计时间范围"
                       onChange={(selection) => updateScopeSelection("bankTag", selection)}
                       selection={{ mode: bankTagScopeMode, year: bankTagScopeYear, month: bankTagScopeMonth }}
                       years={availableScopeYears}
                     />
+                    {costViewSearch}
                   </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (

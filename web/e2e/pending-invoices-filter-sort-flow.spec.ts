@@ -95,7 +95,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow.getByText("已支付待开票")).toBeVisible();
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
-    await expect(page.locator(".pending-invoices-pagination-range")).toHaveText("1-1 / 1");
+    await expect(page.locator(".finance-table-pagination__summary")).toHaveText("显示 1-1 / 1");
     expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(failedRowsRequests);
     expect(browserErrors.filter((error) => !error.includes("status of 503"))).toEqual([]);
   });
@@ -209,7 +209,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
       { field: "counterparty_name", operator: "in", values: ["智能工厂设备商二号"] },
     ]));
     await expect.poll(() => visibleCounterparties(page)).toEqual(["智能工厂设备商二号"]);
-    await expect(page.locator(".pending-invoices-pagination-range")).toHaveText("1-1 / 1");
+    await expect(page.locator(".finance-table-pagination__summary")).toHaveText("显示 1-1 / 1");
     expect(browserErrors).toEqual([]);
     diagnostics.dispose();
   });

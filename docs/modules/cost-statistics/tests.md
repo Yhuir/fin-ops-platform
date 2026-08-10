@@ -9,7 +9,7 @@
 | Service/API | `tests/test_cost_statistics_api.py` | 五种视图、详情、导出、错误、标签保存后重新读取、后续请求跳过全局统计、query 长度/游标合同 |
 | Audit | `tests/test_cost_statistics_page_audit.py`、`tests/test_audit_page_business_read_model_tool.py` | 直接事实源合同与关系成员完整性 |
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` | 首次加载、局部 surface/children/rows 加载、当前视图搜索与过期请求保护、单次交互只发一个 explorer 请求、范围切换清除旧筛选、标签笔数/金额/顺序、主/子标签零金额方向项整体隐藏且零笔数保留、时间真实字段、自动分页与局部失败重试、无手动加载按钮、导出、流水详情抽屉即时打开/局部 loading/局部失败重试/关闭 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` | 首次加载、单一表内空态、五视图统一有界高度、非时间视图范围/搜索同一行、局部 surface/children/rows 加载、当前视图搜索与过期请求保护、单次交互只发一个 explorer 请求、范围切换清除旧筛选、标签笔数/金额/顺序、主/子标签零金额方向项整体隐藏且零笔数保留、时间真实字段、自动分页与局部失败重试、无手动加载按钮、导出、流水详情抽屉即时打开/局部 loading/局部失败重试/关闭 |
 
 ## 候选发布门禁
 

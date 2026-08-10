@@ -14,6 +14,7 @@
 - rules、attach-existing、income status 等 command 保留权限、CAS、idempotency、audit 与
   冲突校验；成功后页面执行一次 normal GET。
 - API/frontend 没有 read-model status/source/scope/job/barrier、202、polling 或 fallback。
+- 表格仅保留共享 FinanceTable footer 分页；组件与 Browser 测试使用共享分页 summary、HeroUI 页容量选择器和上一页/下一页合同，不允许旧原生分页 class 回归。
 
 ## 七类测试
 

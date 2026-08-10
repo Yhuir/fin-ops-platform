@@ -278,6 +278,8 @@ describe("WorkbenchZone", () => {
     await user.hover(trigger);
 
     expect(await screen.findByText("华东改造项目", { selector: ".workbench-compact-cell-dialog" })).toBeVisible();
+    expect(screen.getByText("设备首付款支付")).toBeVisible();
+    expect(screen.queryByLabelText("查看完整内容：设备首付款支付")).not.toBeInTheDocument();
   });
 
   test("renders one HeroUI search field inside the zone header", async () => {

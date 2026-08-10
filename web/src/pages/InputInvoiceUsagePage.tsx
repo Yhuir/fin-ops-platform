@@ -444,8 +444,6 @@ export default function InputInvoiceUsagePage() {
       ) : null}
     </div>
   ), [canAdminAccess, loading, visibleStatistics]);
-  const isEmpty = !loading && !refreshing && !error && rows.length === 0;
-
   return (
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
@@ -487,9 +485,7 @@ export default function InputInvoiceUsagePage() {
                 <span className="input-invoice-usage-loading__bar" />
               </div>
             ) : (
-              <>
-                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
-                <InputInvoiceUsageTable
+              <InputInvoiceUsageTable
                   rows={rows}
                   page={query.page}
                   pageSize={query.pageSize}
@@ -514,8 +510,7 @@ export default function InputInvoiceUsagePage() {
                         ? "进项发票使用情况正在刷新，请稍候。"
                         : undefined
                   }
-                />
-              </>
+              />
             )}
           </div>
         </PageScaffold>

@@ -1,4 +1,4 @@
-import { Button, Checkbox } from "@heroui/react";
+import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { Filter, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -12,6 +12,7 @@ import {
   FinanceTableCell,
   FinanceTableColumn,
   FinanceTableHeader,
+  FinanceTablePagination,
   FinanceTableRow,
   FinanceStatusTag,
   type FinanceTone,
@@ -52,6 +53,11 @@ type PendingInvoicesTableProps = {
   isTransactionSelectable?: (row: PendingInvoiceRow) => boolean;
   emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 };
 
 function invoiceNumber(row: NonNullable<PendingInvoiceRow["inputInvoices"]["primary"]>) {
@@ -402,6 +408,11 @@ export default function PendingInvoicesTable({
   isTransactionSelectable,
   emptyStateMessage = "当前条件下没有待找发票流水。",
   tableWrapRef,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
@@ -455,7 +466,33 @@ export default function PendingInvoicesTable({
 
   return (
     <div className="pending-invoices-table-frame">
-      <FinanceTable ariaLabel="待找发票四区表" className="pending-invoices-table pending-invoices-table-shell" minWidth={1380} scrollMode="contained" scrollRef={tableWrapRef}>
+      <FinanceTable
+        ariaLabel="待找发票四区表"
+        className="pending-invoices-table pending-invoices-table-shell"
+        footer={(
+          <div className="pending-invoices-pagination">
+            <Select aria-label="每页行数" onSelectionChange={(key) => onPageSizeChange(Number(key))} selectedKey={String(pageSize)}>
+              <Select.Trigger className="pending-invoices-pagination-size">
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {[25, 50, 100].map((option) => (
+                    <ListBox.Item id={String(option)} key={option} textValue={`${option} 条/页`}>
+                      {option} 条/页
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
+          </div>
+        )}
+        minWidth={1380}
+        scrollMode="contained"
+        scrollRef={tableWrapRef}
+      >
             <FinanceTableHeader>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" columnRole="identity" id="counterparty_name" isRowHeader>
                   <span className="pending-invoices-table-column-heading"><span>{bankGroupLabel}</span>{renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}</span>
@@ -548,7 +585,7 @@ function PendingInvoiceTableRow({
   selectedTransactionIds,
   onToggleTransactionSelection,
   isTransactionSelectable,
-}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters"> & { row: PendingInvoiceRow }) {
+}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "page" | "pageSize" | "total" | "onPageChange" | "onPageSizeChange"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const bankRelationCount = Math.max(0, row.bankTransactions.relationCount);

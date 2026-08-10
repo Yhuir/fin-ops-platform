@@ -203,6 +203,8 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
     expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*justify-content:\s*flex-end/s);
+    expect(css).toMatch(/\.cost-view-scope-heading\s*{[^}]*flex-wrap:\s*nowrap[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.cost-table-section > \.cost-table-shell\s*{[^}]*border:\s*0[^}]*border-radius:\s*0/s);
     expect(css).not.toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
     expect(pageSource).toContain("lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]");
     expect(pageSource).toContain("lg:grid-cols-[minmax(210px,0.82fr)_minmax(210px,0.82fr)_minmax(0,2.36fr)]");
@@ -822,7 +824,7 @@ describe("Cost statistics page", () => {
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "五月");
 
     expect(await screen.findAllByText("当前时间范围没有收入或支出流水。")).toHaveLength(1);
-    expect(screen.getByText("当前时间范围没有可用于流水统计的收入或支出流水。")).toBeInTheDocument();
+    expect(screen.queryByText("当前时间范围没有可用于流水统计的收入或支出流水。")).not.toBeInTheDocument();
     expectInlineTimeSelection("五月");
     await chooseScopeOption(user, "时间统计时间范围：2026年5月", "三月");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();

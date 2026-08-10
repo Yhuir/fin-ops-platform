@@ -1,6 +1,6 @@
 # 进项发票使用情况测试矩阵
 
-日期：2026-07-27
+日期：2026-08-11
 
 ## 七类测试适用性
 
@@ -21,6 +21,7 @@
 - 一个页面 snapshot 最多 8 条批量 SQL statement，无逐行 N+1；rows/summary/facets 只计算一次 materialized canonical CTE。
 - `/rows` 同时返回 rows/summary/statistics/filter options，前端不请求 `/filter-options`。
 - relation details、export 和 OA reverse preview 不回退旧 page repository。
+- OA 详情按 rows DTO 的 canonical `oa.id` 直接读取 completed/in-progress OA projection；测试必须禁止把该 id 送入发票使用行 hash 查询。
 - OA summary 从 completed/in-progress canonical source 输出 `workflowStatus`，OA 申请人列显示 HeroUI workflow chip。
 - OA reverse preview 必须区分 `permissions.canCreateDraft` 写能力与顶层 `canCreateDraft` 当前集合业务状态；多销方整组不可创建时，选择同一销方子集仍可触发精确 re-preview 并创建。
 - OA reverse 候选表只保留选择、发票号码、销方、价税合计和 OA 关联列；开票日期在发票号码单元格内以 chip 展示，禁用通用说明不占据抽屉头部。

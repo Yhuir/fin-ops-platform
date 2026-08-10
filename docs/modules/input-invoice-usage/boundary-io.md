@@ -1,6 +1,6 @@
 # 进项发票使用情况模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-08-11
 
 ## 模块化状态
 
@@ -34,6 +34,7 @@
 | canonical invoices | `app.invoices` | 只取非删除 input invoices；金额和日期保持 canonical 口径 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；按 relation component 聚合 |
 | bank/OA facts | `app.bank_transactions`、`app.oa_applications`、`app.oa_pending_payment_admissions` | 只读取已同步 PostgreSQL snapshot；OA summary 输出 canonical `workflowStatus=completed|in_progress`，重复 identity fail closed |
+| OA detail id | rows DTO 的 `oa.id` | 只接受 canonical OA identity；repository 通过既有 OA workflow repository 定向查询，不经过进项发票使用行 hash |
 | payment rules | `app.app_settings` | 使用现有 input invoice payment rule contract |
 | OA reverse facts | `app.input_invoice_usage_oa_reverse_batches` | statistics、preview 和命令状态 |
 | lifecycle command | 页面专属写 API | 保持原权限、审计、CAS/idempotency；成功后 GET |
@@ -44,7 +45,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
-| relation/details | drawer | 按 row/invoice/bank/OA id 定向读取；不存在返回 404 |
+| relation/details | drawer | row/invoice/bank 按 canonical id 定向读取，不存在返回 404；OA 详情按 canonical OA id 返回 `detailAvailable=true|false`，不可用时保持 200 的既有 drawer 合同 |
 | OA 申请人列 | frontend | 使用 HeroUI 原生 chip 显示真实申请类型与“已完成/进行中”；不得从 linked/unlinked 关系状态推断流程状态 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
 | OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot，并分别返回 `permissions.canCreateDraft` 写能力与当前整组 `canCreateDraft` 业务可创建状态；前端对当前勾选集合只做同一非空销方的轻量可用性判断，提交前必须按精确发票集合重新 preview，并以新 preview 的权限、业务状态和 hash 为准。命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
@@ -58,6 +59,7 @@
 - rows、summary、statistics、facets 和用于组装当前页的 facts 都在该 transaction 中读取。
 - rows/summary/facets 复用一次 materialized canonical CTE；付款规则从同一 request snapshot 交给有界行装配，禁止逐行重读 `app_settings`。整个请求最多 8 条批量 SQL statement，数量不随当前页行数或 relation 数增长。
 - 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
+- OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
 
 ## 文件范围

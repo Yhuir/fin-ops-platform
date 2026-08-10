@@ -36,6 +36,7 @@
 - 同一 active relation component 中的多发票、多 OA、多流水归并为一行；`invoiceRelations`、`oa`、`bankTransactions` 保留合计、`relationCount`、`detailMode` 和明细摘要。
 - 支付状态只由 active relation、OA/流水金额合计和已配置支付规则判定；未正式化 candidate 不得充当已付款证据。
 - `/rows/{row_id}/relation-details`、详情、导出和 OA reverse preview 使用同一 canonical query 边界，不允许 live fallback、双读或全量 Python 过滤。
+- OA 详情以 rows DTO 中的 canonical `oa.id` 定向读取 `app.oa_applications` 及 admission；不得把 OA id 当作进项发票使用行的 hash id，也不得先加载整组页面行。
 - rows 响应不含 `read_model_status`、`source_versions`、refresh target 或 polling 合同；前端只维护 loading、empty、error 和用户主动刷新状态。
 - OA reverse 命令继续写 canonical batch/relation/audit/idempotency facts；成功后当前页面重跑正常 GET。写命令不等待页面 read model 或 operation barrier。
 

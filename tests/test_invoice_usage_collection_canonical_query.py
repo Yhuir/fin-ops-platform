@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from decimal import Decimal
 import unittest
 
 from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
@@ -125,6 +127,16 @@ class RecordingInputRowAssembler:
             fully_matched=False,
             invoice_oa_amount_matched=False,
         )
+
+
+class RecordingInputDetailRepository:
+    def __init__(self, record: OAApplicationRecord | None) -> None:
+        self.record = record
+        self.calls: list[tuple[str, str]] = []
+
+    def load_oa_record(self, oa_id: str, *, tenant_id: str) -> OAApplicationRecord | None:
+        self.calls.append((oa_id, tenant_id))
+        return self.record
 
 
 class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
@@ -254,6 +266,56 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             "else identity_key end, 'sha1'",
             input_sql,
         )
+
+    def test_input_oa_lookup_reads_the_canonical_oa_projection_by_oa_id(self) -> None:
+        connection = RecordingConnection()
+        record = PostgresInputInvoiceUsageQueryRepository(connection).load_oa_record(
+            "oa-detail-1",
+            tenant_id="tenant-a",
+        )
+
+        self.assertIsNone(record)
+        self.assertEqual(len(connection.transactions), 1)
+        statements = connection.transactions[0].statements
+        self.assertEqual(
+            statements[0],
+            "set transaction isolation level repeatable read read only",
+        )
+        sql = "\n".join(statements)
+        self.assertIn("from app.oa_applications", sql)
+        self.assertIn("where row_id = any(%s::text[])", sql)
+        self.assertIn("from app.oa_pending_payment_admissions", sql)
+        self.assertNotIn("encode(digest(", sql)
+        self.assertNotIn("from app.invoices", sql)
+
+    def test_input_oa_detail_uses_oa_identity_instead_of_invoice_usage_row_identity(self) -> None:
+        record = OAApplicationRecord(
+            id="oa-detail-1",
+            month="2026-05",
+            section="已完成",
+            case_id="OA-001",
+            applicant="申请人",
+            project_name="项目名称",
+            apply_type="报销",
+            amount=Decimal("120.00"),
+            counterparty_name="供应商",
+            reason="费用报销",
+            relation_code="completed",
+            relation_label="已完成",
+            relation_tone="success",
+        )
+        repository = RecordingInputDetailRepository(record)
+        service = InputInvoiceUsageCanonicalQueryService(
+            repository=repository,
+            row_assembler=RecordingInputRowAssembler(),  # type: ignore[arg-type]
+        )
+
+        detail = service.oa_detail("oa-detail-1", tenant_id="tenant-a")
+
+        self.assertEqual(repository.calls, [("oa-detail-1", "tenant-a")])
+        self.assertTrue(detail["detailAvailable"])
+        self.assertEqual(detail["oaId"], "oa-detail-1")
+        self.assertEqual(detail["workflowNo"], "OA-001")
 
     def test_invalid_month_fails_before_opening_a_snapshot(self) -> None:
         connection = RecordingConnection()

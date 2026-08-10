@@ -414,7 +414,7 @@ export default function InputInvoiceUsageTable({
               <Select.Trigger><Select.Value /></Select.Trigger>
               <Select.Popover><ListBox>{PAGE_SIZE_OPTIONS.map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}</ListBox></Select.Popover>
             </Select>
-            <FinanceTablePagination compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
+            <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
           </div>
         )}
         minWidth={1480}

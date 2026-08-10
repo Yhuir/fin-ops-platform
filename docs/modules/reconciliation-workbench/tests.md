@@ -5,6 +5,7 @@
 ## 2026-08-11 固定紧凑三栏与区域时间筛选
 
 - Frontend component：`WorkbenchZone.test.tsx` 保护银行“全部 + 年月”位于区域标题栏、栏显示菜单只包含 OA/银行流水/进销项发票且最后一栏不可隐藏；`WorkbenchSelection.test.tsx` 保护 paired/unpaired 时间筛选独立、筛选仍映射既有银行时间 I/O、两区始终同时可见且无布局/放大入口。
+- `WorkbenchZone.test.tsx` 同时保护 OA 申请事由完整直显、不创建 hover 浮层；列筛选候选仍由 HeroUI 菜单惰性读取并允许长标签换行。
 - Layout / regression：`RelationGroupGrid.test.tsx`、`WorkbenchColumnLayout.test.tsx` 与 `App.test.tsx` 保护单一紧凑列合同、无经典 action column/focus body class；详情、预览、异常抽屉继续复用同一固定布局。没有后端、API response、read model、worker、权限或持久化合同变化。
 
 ## 2026-08-06 进行中 OA workflow gate v21

@@ -178,10 +178,11 @@ export default function BusinessPeriodPicker({
   );
 
   return (
-    <div className={`business-period-picker${inline ? " business-period-picker--inline" : ""}${className ? ` ${className}` : ""}`} role="group" aria-label={ariaLabel}>
+    <div className={`business-period-picker${inline ? " business-period-picker--inline" : ""}${allowAll && !inline ? " business-period-picker--segmented" : ""}${className ? ` ${className}` : ""}`} role="group" aria-label={ariaLabel}>
       {allowAll ? (
         <Button
           aria-pressed={selection.mode === "all"}
+          className="business-period-all"
           isDisabled={disabled}
           onPress={() => select({ ...selection, mode: "all" })}
           size="sm"
@@ -202,7 +203,7 @@ export default function BusinessPeriodPicker({
           <PopoverTrigger
             aria-label={`${ariaLabel}：${triggerLabel}`}
             aria-disabled={disabled}
-            className="business-period-trigger"
+            className={`business-period-trigger${selection.mode !== "all" ? " is-active" : ""}`}
           >
             <span><small>{label}</small><strong>{triggerLabel}</strong></span>
             <span aria-hidden="true">▾</span>

@@ -983,7 +983,8 @@ describe("Pending invoices page", () => {
 
     expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*padding:\s*var\(--fp-space-4\) var\(--fp-space-5\)/s);
     expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:\s*var\(--fp-radius-sm\) var\(--fp-radius-sm\) 0 0/s);
+    expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*height:\s*clamp\(600px, calc\(100dvh - 144px\), 840px\)/s);
+    expect(css).not.toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:/s);
     expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.finance-table--contained \.finance-table__scroll\s*{[^}]*overflow:\s*auto;[^}]*overscroll-behavior:\s*contain/s);
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
@@ -1044,6 +1045,7 @@ describe("Pending invoices page", () => {
   });
 
   test("renders project four-zone table contract and summarizes multiple relations", async () => {
+    const user = userEvent.setup();
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
@@ -1120,8 +1122,12 @@ describe("Pending invoices page", () => {
     expect(request.searchParams.get("page_size")).toBe("50");
     expect(request.searchParams.get("sort_field")).toBe("trade_date");
     expect(request.searchParams.get("sort_direction")).toBe("desc");
-    const pageSizeSelect = within(page).getByLabelText("每页行数") as HTMLSelectElement;
-    expect(Array.from(pageSizeSelect.options).map((option) => option.value)).toEqual(["25", "50", "100"]);
+    const pageSizeSelect = within(page).getByLabelText("每页行数");
+    expect(pageSizeSelect.closest(".finance-table__footer")).not.toBeNull();
+    await user.click(pageSizeSelect);
+    expect(await screen.findByRole("option", { name: "25 条/页" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "50 条/页" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "100 条/页" })).toBeInTheDocument();
   });
 
   test("supports multi-select invoice acquisition status filters for expense rows", async () => {

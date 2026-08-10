@@ -114,6 +114,23 @@ class PostgresInputInvoiceUsageQueryRepository:
             row_id=str(row_id or "").strip(),
         )
 
+    def load_oa_record(
+        self,
+        oa_id: str,
+        *,
+        tenant_id: str = "default",
+    ) -> Any | None:
+        normalized_oa_id = str(oa_id or "").strip()
+        if not normalized_oa_id:
+            return None
+        with self._connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            records = PostgresOAWorkflowRepository(
+                transaction,
+                tenant_id=tenant_id,
+            ).list_application_records_by_row_ids([normalized_oa_id])
+        return records[0] if records else None
+
     def _load(
         self,
         *,

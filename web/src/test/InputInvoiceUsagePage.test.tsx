@@ -471,8 +471,8 @@ describe("Input invoice usage page", () => {
     const strongSeparator = cssRule(styles, ".input-invoice-usage-table-cell--strong-separator");
     const compositeFilter = cssRule(styles, ".input-invoice-usage-filter-menu__panel--composite");
 
-    expect(tableFrame).toContain("border-radius: var(--fp-radius-sm)");
-    expect(tableFrame).toContain("height: clamp(520px, calc(100dvh - 176px), 720px)");
+    expect(tableFrame).not.toContain("border-radius");
+    expect(tableFrame).toContain("height: clamp(600px, calc(100dvh - 132px), 1080px)");
     expect(tableFrame).toContain("overflow: hidden");
     expect(tableShell).toContain("height: 100%");
     expect(tableShell).toContain("min-height: 0");
@@ -518,7 +518,8 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(await within(page).findByText("当前条件下没有进项发票使用记录。")).toBeInTheDocument();
+    expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
     expect(
       fetchMock.mock.calls.some(([input]) =>

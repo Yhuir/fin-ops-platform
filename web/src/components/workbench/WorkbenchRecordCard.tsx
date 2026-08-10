@@ -152,7 +152,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
 
 function isCompactTruncatedColumn(paneId: WorkbenchRecordType, columnKey: string) {
   return (
-    (paneId === "oa" && ["projectName", "counterparty", "reason"].includes(columnKey))
+    (paneId === "oa" && ["projectName", "counterparty"].includes(columnKey))
     || (paneId === "bank" && columnKey === "note")
     || (paneId === "invoice" && columnKey === "buyerName")
   );

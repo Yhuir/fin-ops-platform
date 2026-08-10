@@ -407,7 +407,7 @@ function PaginationControls({ page, pageSize, total, onPageChange, onPageSizeCha
           </ListBox>
         </Select.Popover>
       </Select>
-      <FinanceTablePagination compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
+      <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
     </div>
   );
 }

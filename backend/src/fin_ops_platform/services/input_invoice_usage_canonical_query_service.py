@@ -289,11 +289,7 @@ class InputInvoiceUsageCanonicalQueryService:
     ) -> dict[str, Any]:
         if self._repository is None:
             return self._row_assembler.oa_detail(oa_id)
-        # OA detail remains a canonical PostgreSQL projection read; repository
-        # snapshots load only OA rows linked to the selected invoice groups.
-        snapshot = self._repository.load_row(oa_id, tenant_id=tenant_id)
-        context = _context(snapshot)
-        record = context.oa_records_by_id([oa_id]).get(oa_id)
+        record = self._repository.load_oa_record(oa_id, tenant_id=tenant_id)
         return _oa_detail(record, oa_id=oa_id)
 
     def relation_details(

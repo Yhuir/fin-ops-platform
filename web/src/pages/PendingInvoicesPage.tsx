@@ -166,17 +166,6 @@ function readPersistedTagVersion() {
   }
 }
 
-function displayedPendingInvoiceRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) {
-    return "0-0 / 0";
-  }
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
-  const from = (currentPage - 1) * pageSize + 1;
-  const to = Math.min(currentPage * pageSize, total);
-  return `${from}-${to} / ${total}`;
-}
-
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
@@ -572,8 +561,6 @@ export default function PendingInvoicesPage() {
     expense: sourceSummary?.expenseRows ?? 0,
     income: sourceSummary?.incomeRows ?? 0,
   };
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
   const statusFilterSummary = statusFilterLabel(direction, statusFilters);
 
   const statusFilterControl = (
@@ -797,52 +784,19 @@ export default function PendingInvoicesPage() {
           onToggleTransactionSelection={handleToggleTransactionSelection}
           isTransactionSelectable={isTransactionSelectable}
           emptyStateMessage={error ? "待找发票加载失败，请点击刷新重试。" : undefined}
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={(nextPage) => {
+            clearSelectedTransactions();
+            setPage(nextPage);
+          }}
+          onPageSizeChange={(nextPageSize) => {
+            setPageSize(nextPageSize);
+            clearSelectedTransactions();
+            setPage(1);
+          }}
         />
-        <div className="pending-invoices-pagination">
-          <label className="pending-invoices-pagination-size">
-            <span>每页行数</span>
-            <select
-              aria-label="每页行数"
-              onChange={(event) => {
-                setPageSize(Number(event.target.value));
-                clearSelectedTransactions();
-                setPage(1);
-              }}
-              value={pageSize}
-            >
-              {[25, 50, 100].map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </label>
-          <span className="pending-invoices-pagination-range">
-            {displayedPendingInvoiceRange(currentPage, pageSize, total)}
-          </span>
-          <div className="pending-invoices-pagination-actions">
-            <button
-              aria-label="上一页"
-              disabled={currentPage <= 1}
-              onClick={() => {
-                clearSelectedTransactions();
-                setPage(currentPage - 1);
-              }}
-              type="button"
-            >
-              上一页
-            </button>
-            <button
-              aria-label="下一页"
-              disabled={currentPage >= totalPages}
-              onClick={() => {
-                clearSelectedTransactions();
-                setPage(currentPage + 1);
-              }}
-              type="button"
-            >
-              下一页
-            </button>
-          </div>
-        </div>
       </PageScaffold>
       <PendingInvoiceRulesDrawer
         open={activeDrawer === "rules"}

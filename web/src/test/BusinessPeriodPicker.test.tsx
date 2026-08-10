@@ -67,6 +67,7 @@ describe("BusinessPeriodPicker", () => {
 
     const allButton = screen.getByRole("button", { name: "全部发票" });
     expect(allButton).toHaveAttribute("aria-pressed", "true");
+    expect(allButton.closest(".business-period-picker")).toHaveClass("business-period-picker--segmented");
     await user.click(allButton);
     expect(onChange).toHaveBeenCalledWith({ mode: "all", year: "2026", month: "2026-03" });
   });

@@ -28,6 +28,7 @@
 - `useFinanceTableSession` 当前主要由专项测试覆盖；并非所有页面都已统一接入该 hook。已经接入或自行实现 session 的页面必须在页面模块测试中保护恢复语义。
 - 列对齐由 `columnRole` 决定：金额/数量右对齐，日期/状态/方向/选择居中，主体/账户/说明左对齐。禁止全局把所有 cell 居中。
 - 页面需要固定表格高度时使用 `scrollMode="contained"`，并由页面外壳提供有界高度；滚动、sticky 表头和 overscroll 隔离由共享 `FinanceTable` 负责，同一双栏/三栏中的各表格互不带动。
+- 需要分页的页面把 HeroUI 页容量选择器与 `FinanceTablePagination` 放进同一个表格 footer；不得在表格外再维护第二个原生 select/button 分页块。
 - 非关联台生产表格必须使用共享 `FinanceTable`。关联台 `PaneTable` 与详情表是当前唯一冻结例外，其独立高性能滚动合同由 Workbench 模块负责。
 - 表格 migration 不能删除旧页面的导出、确认、刷新、筛选、选择、右侧详情抽屉或现有分页语义。
 
