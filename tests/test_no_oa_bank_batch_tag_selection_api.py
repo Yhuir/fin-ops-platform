@@ -896,7 +896,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             {"relation_mode": "bank_flow_rule_batch", "status": "draft"}
         )
         self.assertEqual(len(drafts), 1)
-        self.assertEqual(drafts[0]["row_ids"], row_ids)
+        self.assertCountEqual(drafts[0]["row_ids"], row_ids)
         self.assertEqual(drafts[0]["row_count"], 3)
         self.assertEqual(drafts[0]["total_amount"], "6.00")
 
@@ -913,7 +913,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         resubmitted = _json(resubmit_response)["batch"]
 
         self.assertEqual(resubmit_response.status_code, 200)
-        self.assertEqual(resubmitted["row_ids"], row_ids)
+        self.assertCountEqual(resubmitted["row_ids"], row_ids)
         self.assertEqual(resubmitted["row_count"], 3)
         self.assertEqual(resubmitted["total_amount"], "6.00")
         self.assertNotIn(

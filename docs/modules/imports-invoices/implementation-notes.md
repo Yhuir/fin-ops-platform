@@ -237,3 +237,9 @@
 
 - 共享 `ImportWorkflowPage` 统一使用连续汇总带与分隔行，发票预览字段、重复票处理、确认和后台任务合同不变。
 - 删除旧卡片样式，不新增发票事实写入、映射、API、worker 或兼容链路。
+## 2026-08-11 - 预览所有者与并发 ID 闭环
+
+- 根因：preview 首写和最终 file/session delta 都没有把认证 username 写入 `app.import_files.uploaded_by/raw_payload`；生命周期恢复与放弃从文件事实校验 owner，因而把真实 owner 降级为 `postgres/空值` 并返回 403，AppHealth 只能长期显示 pending。
+- 修复：首写和 delta 使用同一服务端 owner；`0144` 只从已关联 preview batch 回填缺失 owner，不猜测无 batch 文件；discard 忽略已删除旧文件但继续拒绝其它 owner、已确认 session 和活跃 job。
+- 旧链删除：session/file/batch/invoice/transaction 新 ID 不再使用进程内顺序号加存在性预查，统一使用 stdlib UUID 前缀 ID，关闭多 Gunicorn worker 的复用/竞态窗口。
+- 验证：owner 持久化、恢复、active list、discard、UUID 跨实例唯一性、迁移合同与生产 preview→recover→discard；preview 前后 canonical invoice 总数必须相等。

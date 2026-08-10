@@ -218,7 +218,15 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def remove_manual_oa_import(self, row_id: str, *, actor_id: str | None = None) -> bool: ...
 
-    def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str: ...
+    def store_import_file(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+        imported_by: str | None = None,
+    ) -> str: ...
 
     def find_confirmed_import_file_by_sha256(
         self,

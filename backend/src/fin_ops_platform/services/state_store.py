@@ -1537,7 +1537,15 @@ class ApplicationStateStore:
         current_payload["workbench_exception_cases"] = snapshot
         self._save_local_pickle(current_payload)
 
-    def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
+    def store_import_file(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+        imported_by: str | None = None,
+    ) -> str:
         session_dir = self._import_file_root / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         target_path = session_dir / f"{file_id}_{self._sanitize_name(file_name)}"

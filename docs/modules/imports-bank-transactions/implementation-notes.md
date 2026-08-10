@@ -195,3 +195,9 @@
 
 - 共享 `ImportWorkflowPage` 将审计卡、文件卡、问题卡和冲突卡收敛为连续汇总带与分隔行；上传、预览、确认、重复检测和后台任务状态机不变。
 - 删除对应旧卡片样式，不新增导入阶段、表、API、worker、fallback 或第二条写链。
+## 2026-08-11 - 预览所有者与并发 ID 闭环
+
+- 根因：共享 preview 持久化遗漏 `app.import_files` owner，恢复/放弃无法证明当前认证用户；顺序型 session/file/batch/candidate ID 还存在多 API worker 竞态。
+- 修复：首写和最终 delta 持久化认证 username；`0144` 从已关联 batch 回填现存缺失 owner；discard 只忽略已删除旧文件，权限、terminal/job guard 不放宽。
+- 旧链删除：共享导入新 ID 改为带类型前缀的 UUID，删除运行时“计数器递增 + 先查存在性”分配循环；不新增表、队列、read model、缓存或兼容写链。
+- 验证：共享 service/repository/API 合同、迁移、完整后端回归及生产可逆 preview→recover→discard；银行正式事实不在该 smoke 中写入。

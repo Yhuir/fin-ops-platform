@@ -1237,7 +1237,16 @@ class PostgresStateStore:
     def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_workbench_exception_cases(snapshot)
 
-    def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
+    def store_import_file(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+        imported_by: str | None = None,
+    ) -> str:
+        normalized_imported_by = str(imported_by or "").strip() or None
         if self._object_storage_repository is not None:
             stored_file_path = self._store_object_file(namespace="imports", file_id=file_id, file_name=file_name, content=content)
             file_object_id = self._file_object_id_for_storage_uri(stored_file_path)
@@ -1246,14 +1255,18 @@ class PostgresStateStore:
             file_object_id = self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         self._connection.execute(
             """
-            insert into app.import_files(legacy_mongo_id, session_id, stored_file_path, original_filename, status, file_object_id, raw_payload)
-            values (%s, %s, %s, %s, 'stored', %s::uuid, %s)
+            insert into app.import_files(
+                legacy_mongo_id, session_id, stored_file_path, original_filename,
+                status, file_object_id, uploaded_by, raw_payload
+            )
+            values (%s, %s, %s, %s, 'stored', %s::uuid, %s, %s)
             on conflict (legacy_mongo_id) do update set
                 session_id = excluded.session_id,
                 stored_file_path = excluded.stored_file_path,
                 original_filename = excluded.original_filename,
                 status = excluded.status,
                 file_object_id = excluded.file_object_id,
+                uploaded_by = excluded.uploaded_by,
                 raw_payload = excluded.raw_payload
             """,
             (
@@ -1262,7 +1275,16 @@ class PostgresStateStore:
                 stored_file_path,
                 file_name,
                 file_object_id,
-                _jsonb({"normalized_payload": {"id": file_id, "file_name": file_name, "stored_file_path": stored_file_path, "session_id": session_id}}),
+                normalized_imported_by,
+                _jsonb({
+                    "normalized_payload": {
+                        "id": file_id,
+                        "file_name": file_name,
+                        "stored_file_path": stored_file_path,
+                        "session_id": session_id,
+                        "imported_by": normalized_imported_by,
+                    }
+                }),
             ),
         )
         return stored_file_path

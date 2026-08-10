@@ -156,6 +156,7 @@ EXPECTED_MIGRATIONS = [
     "0141_settings_data_reset_recovery_guard.sql",
     "0142_operation_history_logical_operations.sql",
     "0143_import_lifecycle_hot_paths.sql",
+    "0144_import_file_session_owner.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -314,7 +315,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 144)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 145)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -378,6 +379,17 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("uploaded_at desc", sql)
         self.assertIn("import_jobs_session_latest_idx", sql)
         self.assertIn("(import_session_id, created_at desc, id desc)", sql)
+
+    def test_import_file_session_owner_backfill_uses_linked_batch_owner(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0144_import_file_session_owner.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("update app.import_files", sql)
+        self.assertIn("uploaded_by = import_batch.imported_by", sql)
+        self.assertIn("jsonb_build_object('imported_by', import_batch.imported_by)", sql)
+        self.assertIn("raw_payload->'normalized_payload'->>'preview_batch_id'", sql)
+        self.assertIn("from app.import_batches import_batch", sql)
 
     def test_batch_accounting_relation_count_hot_path_index_matches_query_contract(self) -> None:
         sql = (

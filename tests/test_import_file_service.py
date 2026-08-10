@@ -78,7 +78,15 @@ class FakeImportIdStore:
     def import_file_exists(self, file_id: str) -> bool:
         return file_id in self._existing_file_ids
 
-    def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
+    def store_import_file(
+        self,
+        *,
+        session_id: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+        imported_by: str | None = None,
+    ) -> str:
         self._existing_session_ids.add(session_id)
         self._existing_file_ids.add(file_id)
         ref = f"stored://{session_id}/{file_id}/{file_name}"
@@ -272,7 +280,10 @@ class ImportFileServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(preview.row_results[0].id, "batch_row:batch_import_0055:00001")
+        self.assertRegex(
+            preview.row_results[0].id,
+            r"^batch_row:batch_import_[0-9a-f]{32}:00001$",
+        )
         self.assertNotIn("row_counter", service.snapshot())
 
     def test_confirmed_session_persistence_payload_excludes_unrelated_fact_domains_and_sessions(self) -> None:
@@ -421,7 +432,7 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.row_count, 1)
         self.assertEqual(preview_file.normalized_rows[0]["digital_invoice_no"], "25502000000145098656")
 
-    def test_preview_skips_existing_session_file_and_batch_ids_when_counters_restart(self) -> None:
+    def test_preview_uses_process_independent_opaque_ids(self) -> None:
         file_store = FakeImportIdStore()
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service, file_store=file_store)
@@ -431,11 +442,30 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
         )
 
-        self.assertEqual(session.id, "import_session_0003")
-        self.assertEqual(session.files[0].id, "import_file_0003")
-        self.assertEqual(session.files[0].preview_batch_id, "batch_import_0002")
+        self.assertRegex(session.id, r"^import_session_[0-9a-f]{32}$")
+        self.assertRegex(session.files[0].id, r"^import_file_[0-9a-f]{32}$")
+        self.assertRegex(session.files[0].preview_batch_id or "", r"^batch_import_[0-9a-f]{32}$")
         self.assertEqual(session.files[0].status, "preview_ready")
         self.assertTrue(session.files[0].stored_file_path)
+
+        second_import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        second_service = FileImportService(
+            second_import_service,
+            file_store=FakeImportIdStore(),
+        )
+        second = second_service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        self.assertNotEqual(second.id, session.id)
+        self.assertNotEqual(second.files[0].id, session.files[0].id)
+        self.assertNotEqual(second.files[0].preview_batch_id, session.files[0].preview_batch_id)
+        service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+        second_service.confirm_session(session_id=second.id, selected_file_ids=[second.files[0].id])
+        self.assertNotEqual(
+            second_import_service.list_invoices()[0].id,
+            import_service.list_invoices()[0].id,
+        )
 
     def test_preview_persists_selected_bank_mapping_and_marks_conflict_against_detected_account(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())

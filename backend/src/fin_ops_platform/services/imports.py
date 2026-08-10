@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterator
+from uuid import uuid4
 
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import (
@@ -1916,35 +1917,20 @@ class ImportNormalizationService:
         return sum(1 for row in row_results if row.decision in decision_set)
 
     def _next_batch_id(self) -> str:
-        while True:
-            self._batch_counter += 1
-            batch_id = f"batch_import_{self._batch_counter:04d}"
-            if batch_id not in self._batches and not self._registry_has("import_batch_exists", batch_id):
-                return batch_id
+        self._batch_counter += 1
+        return f"batch_import_{uuid4().hex}"
 
     @staticmethod
     def _row_id(batch_id: str, row_no: int) -> str:
         return f"batch_row:{batch_id}:{int(row_no):05d}"
 
     def _next_invoice_id(self) -> str:
-        while True:
-            self._invoice_counter += 1
-            invoice_id = f"inv_imported_{self._invoice_counter:04d}"
-            if invoice_id not in self._invoices_by_id and not self._registry_has("invoice_exists", invoice_id):
-                return invoice_id
+        self._invoice_counter += 1
+        return f"inv_imported_{uuid4().hex}"
 
     def _next_transaction_id(self) -> str:
-        while True:
-            self._txn_counter += 1
-            transaction_id = f"txn_imported_{self._txn_counter:04d}"
-            if transaction_id not in self._transactions_by_id and not self._registry_has("transaction_exists", transaction_id):
-                return transaction_id
-
-    def _registry_has(self, method_name: str, identifier: str) -> bool:
-        checker = getattr(self._id_registry, method_name, None)
-        if not callable(checker):
-            return False
-        return bool(checker(identifier))
+        self._txn_counter += 1
+        return f"txn_imported_{uuid4().hex}"
 
     @staticmethod
     def _parse_date(value: Any) -> str | None:

@@ -23,9 +23,11 @@ class FakeDiscardTransaction:
         self.rows = rows
         self.active_job = active_job
         self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_all_sql = ""
         self.fetch_one_sql = ""
 
-    def fetch_all(self, _sql: str, _params: tuple[object, ...]):
+    def fetch_all(self, sql: str, _params: tuple[object, ...]):
+        self.fetch_all_sql = sql
         return self.rows
 
     def fetch_one(self, sql: str, _params: tuple[object, ...]):
@@ -104,6 +106,7 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(len(transaction.executed), 2)
         self.assertIn("import_job.id::text as import_job_id", transaction.fetch_one_sql)
         self.assertNotIn("import_job.import_job_id", transaction.fetch_one_sql)
+        self.assertIn("import_file.status <> 'deleted'", transaction.fetch_all_sql)
 
         with self.assertRaises(PermissionError):
             PostgresImportLifecycleRepository(

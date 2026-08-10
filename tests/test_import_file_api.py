@@ -142,7 +142,8 @@ class ImportFileApiTests(unittest.TestCase):
         response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(persist_calls, ["import_session_0001"])
+        self.assertEqual(len(persist_calls), 1)
+        self.assertRegex(persist_calls[0], r"^import_session_[0-9a-f]{32}$")
 
     def test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch(self) -> None:
         app = build_application()

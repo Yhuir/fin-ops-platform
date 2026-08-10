@@ -909,6 +909,33 @@ def test_save_import_delta_rolls_back_batch_when_file_write_fails() -> None:
     assert connection.committed_sql == []
 
 
+def test_save_file_imports_persists_session_owner_for_recovery() -> None:
+    connection = NotificationConnection()
+    repository = PostgresCoreRepository(connection)
+
+    repository.save_file_imports({
+        "sessions": {
+            "import_session_owner": {
+                "id": "import_session_owner",
+                "imported_by": "YNSYLP005",
+                "status": "preview_ready",
+                "created_at": "2026-08-11T05:00:00+00:00",
+                "files": [{
+                    "id": "import_file_owner",
+                    "file_name": "invoice.xlsx",
+                    "status": "preview_ready",
+                }],
+            }
+        }
+    })
+
+    params = connection.executed_params[-1]
+    payload = getattr(params[-1], "obj", params[-1])
+    assert params[-2] == "YNSYLP005"
+    assert payload["normalized_payload"]["imported_by"] == "YNSYLP005"
+    assert payload["normalized_payload"]["created_at"] == "2026-08-11T05:00:00+00:00"
+
+
 def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
     class ConflictConnection:
         def execute_many_values(self, sql: str, _params_seq: list[tuple]) -> int:

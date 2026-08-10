@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any, Callable
+from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
 import xlrd
@@ -338,7 +339,12 @@ class FileImportService:
         seen_hashes: dict[str, str] = {}
         for upload in uploads:
             file_id = self._next_file_id()
-            stored_file_path = self._store_upload_file(session.id, file_id, upload)
+            stored_file_path = self._store_upload_file(
+                session.id,
+                file_id,
+                upload,
+                imported_by=imported_by,
+            )
             content_sha256 = hashlib.sha256(upload.content).hexdigest()
             duplicate_name = seen_hashes.get(content_sha256)
             if duplicate_name:
@@ -1021,18 +1027,12 @@ class FileImportService:
         raise ValueError("无法识别文件模板。")
 
     def _next_session_id(self) -> str:
-        while True:
-            self._session_counter += 1
-            session_id = f"import_session_{self._session_counter:04d}"
-            if session_id not in self._sessions and not self._file_store_has("import_session_exists", session_id):
-                return session_id
+        self._session_counter += 1
+        return f"import_session_{uuid4().hex}"
 
     def _next_file_id(self) -> str:
-        while True:
-            self._file_counter += 1
-            file_id = f"import_file_{self._file_counter:04d}"
-            if not self._file_store_has("import_file_exists", file_id):
-                return file_id
+        self._file_counter += 1
+        return f"import_file_{uuid4().hex}"
 
     def _resolve_invoice_batch_type(self, rows: list[dict[str, Any]], override: str | None) -> BatchType:
         if override:
@@ -1054,7 +1054,14 @@ class FileImportService:
                 output_votes += 1
         return BatchType.OUTPUT_INVOICE if output_votes > input_votes else BatchType.INPUT_INVOICE
 
-    def _store_upload_file(self, session_id: str, file_id: str, upload: UploadedImportFile) -> str | None:
+    def _store_upload_file(
+        self,
+        session_id: str,
+        file_id: str,
+        upload: UploadedImportFile,
+        *,
+        imported_by: str,
+    ) -> str | None:
         if self._file_store is None:
             return None
         return self._file_store.store_import_file(
@@ -1062,13 +1069,8 @@ class FileImportService:
             file_id=file_id,
             file_name=upload.file_name,
             content=upload.content,
+            imported_by=imported_by,
         )
-
-    def _file_store_has(self, method_name: str, identifier: str) -> bool:
-        checker = getattr(self._file_store, method_name, None)
-        if not callable(checker):
-            return False
-        return bool(checker(identifier))
 
     def _find_confirmed_duplicate_file(self, *, content_sha256: str, exclude_file_id: str) -> str | None:
         for session in self._sessions.values():

@@ -148,7 +148,8 @@ class MatchingEngineServiceTests(unittest.TestCase):
         result = next(item for item in run.results if item.rule_code == "no_confident_match")
 
         self.assertEqual(result.result_type, MatchingResultType.MANUAL_REVIEW)
-        self.assertEqual(result.invoice_ids, ["inv_imported_0001"])
+        self.assertEqual(len(result.invoice_ids), 1)
+        self.assertRegex(result.invoice_ids[0], r"^inv_imported_[0-9a-f]{32}$")
         self.assertEqual(result.transaction_ids, [])
 
     def _confirm(self, batch_type: BatchType, rows: list[dict[str, str]]) -> None:

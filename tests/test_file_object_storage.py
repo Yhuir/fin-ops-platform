@@ -63,7 +63,8 @@ class FileObjectConnection:
                 "stored_file_path": params[2],
                 "original_filename": params[3],
                 "file_object_id": params[4],
-                "raw_payload": unwrap_jsonb(params[5]),
+                "uploaded_by": params[5],
+                "raw_payload": unwrap_jsonb(params[6]),
             }
             return 1
         if "update app.file_objects" in normalized and "migration_status = 'failed'" in normalized:
@@ -112,12 +113,18 @@ class FileObjectStorageTests(unittest.TestCase):
                 file_id="file-1",
                 file_name="bank.xlsx",
                 content=b"file-bytes",
+                imported_by="YNSYLP005",
             )
 
             self.assertTrue(stored_uri.startswith("minio://fin-ops-files/objects/imports/file-1/"))
             self.assertEqual(store.read_import_file(stored_uri), b"file-bytes")
             self.assertEqual(connection.file_objects["file-object-1"]["migration_status"], "verified")
             self.assertEqual(connection.import_files["file-1"]["stored_file_path"], stored_uri)
+            self.assertEqual(connection.import_files["file-1"]["uploaded_by"], "YNSYLP005")
+            self.assertEqual(
+                connection.import_files["file-1"]["raw_payload"]["normalized_payload"]["imported_by"],
+                "YNSYLP005",
+            )
             self.assertFalse((Path(temp_dir) / "postgres_files").exists())
 
     def test_postgres_import_upload_fails_fast_and_marks_file_object_failed_when_object_storage_fails(self) -> None:

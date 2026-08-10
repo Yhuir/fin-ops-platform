@@ -146,6 +146,7 @@ class PostgresImportLifecycleRepository:
                   ) as batch_id
                 from app.import_files import_file
                 where import_file.session_id = %s
+                  and import_file.status <> 'deleted'
                 order by import_file.id
                 for update
                 """,

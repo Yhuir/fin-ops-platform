@@ -1010,15 +1010,16 @@ class PostgresCoreRepository:
                     """
                     insert into app.import_files(
                         legacy_mongo_id, session_id, stored_file_path, original_filename,
-                        template_kind, status, raw_payload
+                        template_kind, status, uploaded_by, raw_payload
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (legacy_mongo_id) do update set
                         session_id = excluded.session_id,
                         stored_file_path = excluded.stored_file_path,
                         original_filename = excluded.original_filename,
                         template_kind = excluded.template_kind,
                         status = excluded.status,
+                        uploaded_by = excluded.uploaded_by,
                         raw_payload = excluded.raw_payload
                     """,
                     (
@@ -1028,11 +1029,14 @@ class PostgresCoreRepository:
                         self._text(raw_file.get("file_name")) or file_id,
                         self._text(raw_file.get("template_code")),
                         self._text(raw_file.get("status")) or "stored",
+                        self._text(session_payload.get("imported_by")),
                         _jsonb(
                             {
                                 "normalized_payload": {
                                     **raw_file,
                                     "session_id": self._text(session_payload.get("id") or session_id),
+                                    "imported_by": self._text(session_payload.get("imported_by")),
+                                    "created_at": session_payload.get("created_at"),
                                     "session_status": self._text(session_payload.get("status")),
                                     "session_audit": session_payload.get("audit"),
                                     "duplicate_groups": session_payload.get("duplicate_groups"),
