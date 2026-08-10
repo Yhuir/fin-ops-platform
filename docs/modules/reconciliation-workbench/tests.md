@@ -1,6 +1,11 @@
 # 关联台测试与验证
 
-日期：2026-08-06
+日期：2026-08-11
+
+## 2026-08-11 固定紧凑三栏与区域时间筛选
+
+- Frontend component：`WorkbenchZone.test.tsx` 保护银行“全部 + 年月”位于区域标题栏、栏显示菜单只包含 OA/银行流水/进销项发票且最后一栏不可隐藏；`WorkbenchSelection.test.tsx` 保护 paired/unpaired 时间筛选独立、筛选仍映射既有银行时间 I/O、两区始终同时可见且无布局/放大入口。
+- Layout / regression：`RelationGroupGrid.test.tsx`、`WorkbenchColumnLayout.test.tsx` 与 `App.test.tsx` 保护单一紧凑列合同、无经典 action column/focus body class；详情、预览、异常抽屉继续复用同一固定布局。没有后端、API response、read model、worker、权限或持久化合同变化。
 
 ## 2026-08-06 进行中 OA workflow gate v21
 

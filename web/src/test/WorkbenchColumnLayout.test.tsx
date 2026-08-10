@@ -23,7 +23,7 @@ describe("Workbench column layout", () => {
     expect(nextLayouts.oa).toEqual(["applicant", "reason", "projectName", "amount", "counterparty"]);
   });
 
-  test("keeps bank column widths bound to the column after reorder", () => {
+  test("keeps fixed compact bank column weights bound to the column after reorder", () => {
     const gridStyle = getWorkbenchPaneGridStyle(
       "bank",
       {
@@ -31,18 +31,17 @@ describe("Workbench column layout", () => {
         bank: ["amount", "counterparty", "loanRepaymentDate", "note"],
         invoice: ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
       },
-      false,
     );
 
     expect(gridStyle.gridTemplateColumns).toBe(
-      "minmax(144px, 144fr) minmax(176px, 176fr) minmax(108px, 108fr) minmax(168px, 168fr)",
+      "minmax(0, 1fr) minmax(0, 1.45fr) minmax(0, 1.35fr)",
     );
-    expect(gridStyle.minWidth).toBe("596px");
+    expect(gridStyle.minWidth).toBe("0px");
   });
 
-  test("uses a zero-minimum compact grid and removes the repayment-date column", () => {
-    const columns = getWorkbenchColumns("bank", undefined, "compact");
-    const gridStyle = getWorkbenchPaneGridStyle("bank", undefined, true, "compact");
+  test("uses the only supported compact grid and removes the repayment-date column", () => {
+    const columns = getWorkbenchColumns("bank");
+    const gridStyle = getWorkbenchPaneGridStyle("bank");
 
     expect(columns.map((column) => column.key)).toEqual(["counterparty", "amount", "note"]);
     expect(gridStyle.minWidth).toBe("0px");

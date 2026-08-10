@@ -16,7 +16,7 @@ import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench candidate grouping layout", () => {
   const invoiceColumns = getWorkbenchColumns("invoice");
-  const invoiceGridStyle = getWorkbenchPaneGridStyle("invoice", undefined, true);
+  const invoiceGridStyle = getWorkbenchPaneGridStyle("invoice");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
 
   function createInvoiceRecord(id: string, invoiceNo: string): WorkbenchRecord {
@@ -879,7 +879,7 @@ describe("Workbench candidate grouping layout", () => {
   }
 
   test("allows invoice candidate rows to grow vertically while long text stays inside cells", () => {
-    expect(getCssRuleBody(".record-card-invoice.record-card-has-action")).not.toMatch(/\bheight\s*:/);
+    expect(getStandaloneCssRuleBody(".record-card")).not.toMatch(/(?:^|[;{]\s*)height\s*:/);
     expect(getCssRuleBody(".candidate-group-cell")).not.toMatch(/(?:^|\n)\s*height\s*:\s*100%/);
     expect(getCssRuleBody(".candidate-group-cell")).toMatch(/min-height:\s*100%/);
     expect(getStandaloneCssRuleBody(".record-card-cell", 1)).toMatch(/overflow:\s*hidden/);
@@ -897,7 +897,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="oa"\][\s\S]*order:\s*1/);
     expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="bank"\][\s\S]*order:\s*2/);
     expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="invoice"\][\s\S]*order:\s*3/);
-    expect(appStyles).toMatch(/@media \(max-width: 1560px\)[\s\S]*\.zone\[data-layout="compact"\] \.zone-selection-toolbar[\s\S]*flex-basis:\s*100%/);
+    expect(appStyles).toMatch(/@media \(max-width: 1560px\)[\s\S]*\.workbench-shell \.zone \.zone-selection-toolbar[\s\S]*flex-basis:\s*100%/);
     expect(appStyles).not.toMatch(/\.workbench-import-(?:modal|dropzone|file-|body|preview)/);
     expect(appStyles).not.toContain(".workbench-settings-modal");
   });

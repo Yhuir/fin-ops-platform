@@ -2,7 +2,7 @@ import { Info } from "lucide-react";
 import { memo, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 import { Chip, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
 
-import { getWorkbenchColumns, type WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
+import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import { formatMoney } from "../../features/money";
 import {
   compactWorkbenchBankAccountLabel,
@@ -31,7 +31,6 @@ type WorkbenchRecordCardProps = {
   };
   row: WorkbenchRecord;
   rowState: WorkbenchRowState;
-  showActionColumn?: boolean;
   highlighted?: boolean;
   searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
@@ -42,7 +41,6 @@ type WorkbenchRecordCardProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   leadingControl?: ReactNode;
-  layoutMode?: WorkbenchLayoutMode;
 };
 
 function WorkbenchRecordCard({
@@ -52,7 +50,6 @@ function WorkbenchRecordCard({
   columnGridStyle,
   row,
   rowState,
-  showActionColumn = false,
   highlighted = false,
   searchQuery = "",
   sheetRowMode = "split",
@@ -63,10 +60,8 @@ function WorkbenchRecordCard({
   canMutateData,
   readOnly = false,
   leadingControl,
-  layoutMode = "classic",
 }: WorkbenchRecordCardProps) {
-  const columns = columnsProp ?? getWorkbenchColumns(paneId, undefined, layoutMode);
-  const hasActionColumn = !readOnly && showActionColumn;
+  const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
@@ -80,7 +75,7 @@ function WorkbenchRecordCard({
   return (
     <div
       aria-label={buildRowAriaLabel(row, paneId, columns)}
-      className={`record-card record-card-sheet-row record-card-sheet-row-${sheetRowMode}${sheetStateClass}${sheetHighlightClass} workbench-row row-state-${rowState} record-card-${paneId} ${hasActionColumn ? "record-card-has-action" : "record-card-no-action"}${highlighted ? " search-target-highlighted" : ""}${row.displayRole ? ` record-card-${row.displayRole}` : ""}`}
+      className={`record-card record-card-sheet-row record-card-sheet-row-${sheetRowMode}${sheetStateClass}${sheetHighlightClass} workbench-row row-state-${rowState} record-card-${paneId}${highlighted ? " search-target-highlighted" : ""}${row.displayRole ? ` record-card-${row.displayRole}` : ""}`}
       data-row-id={row.id}
       data-row-state={rowState}
       data-search-highlighted={highlighted ? "true" : "false"}
@@ -99,8 +94,11 @@ function WorkbenchRecordCard({
           >
             <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
-              {layoutMode === "compact" && isCompactTruncatedColumn(paneId, column.key) ? (
-                <CompactCellPopover label={compactCellLabel(row, column.key, value)}>
+              {isCompactTruncatedColumn(paneId, column.key) ? (
+                <CompactCellPopover
+                  label={compactCellLabel(row, column.key, value)}
+                  onSelect={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
+                >
                   {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
                 </CompactCellPopover>
               ) : renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
@@ -108,27 +106,7 @@ function WorkbenchRecordCard({
           </div>
         );
       })}
-      {hasActionColumn ? (
-        <div className="record-card-cell record-card-action-cell record-card-action-cell-sheet" role="cell">
-          <RowActions
-            availableActions={row.availableActions}
-            canMutateData={canMutateData}
-            recordType={row.recordType}
-            showDetailAction={!isSummaryRow && !showInlineDetail}
-            showWorkflowActions={showWorkflowActions}
-            variant={row.actionVariant}
-            onAction={(action, event) => {
-              event?.stopPropagation();
-              onRowAction(row, action);
-            }}
-            onOpenDetail={(event) => {
-              event?.stopPropagation();
-              onOpenDetail(row);
-            }}
-          />
-        </div>
-      ) : null}
-      {layoutMode === "compact" && paneId !== "oa" && !readOnly ? (
+      {paneId !== "oa" && !readOnly ? (
         <div className="record-card-compact-actions">
           <RowActions
             compact
@@ -160,7 +138,6 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.columnGridStyle === nextProps.columnGridStyle
   && previousProps.row === nextProps.row
   && previousProps.rowState === nextProps.rowState
-  && previousProps.showActionColumn === nextProps.showActionColumn
   && previousProps.highlighted === nextProps.highlighted
   && previousProps.searchQuery === nextProps.searchQuery
   && previousProps.sheetRowMode === nextProps.sheetRowMode
@@ -168,7 +145,6 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.canMutateData === nextProps.canMutateData
   && previousProps.readOnly === nextProps.readOnly
   && previousProps.leadingControl === nextProps.leadingControl
-  && previousProps.layoutMode === nextProps.layoutMode
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail
   && previousProps.onRowAction === nextProps.onRowAction
@@ -192,7 +168,7 @@ function compactCellLabel(row: WorkbenchRecord, columnKey: string, fallback: str
   return fallback;
 }
 
-function CompactCellPopover({ label, children }: { label: string; children: ReactNode }) {
+function CompactCellPopover({ label, children, onSelect }: { label: string; children: ReactNode; onSelect?: () => void }) {
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const show = () => {
@@ -216,7 +192,10 @@ function CompactCellPopover({ label, children }: { label: string; children: Reac
         onFocus={show}
         onMouseEnter={show}
         onMouseLeave={hide}
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect?.();
+        }}
       >
         {children}
       </PopoverTrigger>

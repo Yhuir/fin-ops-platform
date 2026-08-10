@@ -2,7 +2,8 @@
 
 ## 2026-08-10 - 栏位时间筛选统一控件
 
-- 银行流水栏位删除私有年月弹层，复用共享 HeroUI“全部 + 年/月”控件；异步年份读取、active generation、选择保留和 Workbench API I/O 不变。
+- 银行流水栏位删除私有年月弹层，复用共享 HeroUI“全部 + 年/月”控件；该控件从银行栏表头移到已配对/未配对区域标题栏最右侧，两个区域继续独立使用既有 `timeFilterByPane.bank` 与 `time_filters.bank`，异步年份读取、active generation、选择保留和 Workbench API I/O 不变。
+- 关联台固定为紧凑三栏；栏显示菜单只保留 OA、银行流水、进销项发票并禁止隐藏最后一栏。经典布局、布局切换、区域放大/恢复、焦点 body class、操作列并行布局和相关样式/测试已删除，没有新增组件、依赖、API、read model、worker、cache 或跨页面 I/O。
 
 ## 2026-08-10 - fresh generation 分组缓存回填合并
 

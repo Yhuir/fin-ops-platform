@@ -1,6 +1,6 @@
 import { Fragment, memo, useMemo, useRef } from "react";
 
-import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
@@ -13,7 +13,6 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import RelationGroupGrid from "./RelationGroupGrid";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
-import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 
 const COLLAPSE_EPSILON = 0.0001;
 
@@ -51,11 +50,6 @@ type ResizableTriPaneProps = {
     selectedValues: string[],
   ) => void;
   onTogglePaneSort: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneTimeFilterChange?: (
-    zoneId: "paired" | "unpaired",
-    paneId: "oa" | "bank" | "invoice",
-    filter: WorkbenchPaneTimeFilter,
-  ) => void;
   onReorderPaneColumns: (
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -63,7 +57,6 @@ type ResizableTriPaneProps = {
     position: WorkbenchColumnDropPosition,
   ) => void;
   canMutateData: boolean;
-  layoutMode?: WorkbenchLayoutMode;
 };
 
 function ResizableTriPane({
@@ -88,10 +81,8 @@ function ResizableTriPane({
   loadFilterOptions,
   onColumnFilterChange,
   onTogglePaneSort,
-  onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns,
   canMutateData,
-  layoutMode = "classic",
 }: ResizableTriPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -158,7 +149,6 @@ function ResizableTriPane({
         canRequestNextPage={canRequestNextPage}
         onRequestNextPage={onRequestNextPage}
         onColumnFilterChange={onColumnFilterChange}
-        onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
         onTogglePaneSort={onTogglePaneSort}
@@ -166,7 +156,6 @@ function ResizableTriPane({
         rowTemplateColumns={rowTemplateColumns}
         sourceGroups={sourceGroups ?? effectiveGroups}
         canMutateData={canMutateData}
-        layoutMode={layoutMode}
         zoneId={zoneId}
       />
     </div>

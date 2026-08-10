@@ -426,12 +426,12 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
+    const pairedZone = screen.getByTestId("zone-paired");
 
     expect((await within(unpairedZone).findAllByText("杭州张三广告有限公司")).length).toBeGreaterThan(0);
     expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
 
-    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
 
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
@@ -439,8 +439,9 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
     expect(within(unpairedZone).queryByText("智能工厂设备商")).not.toBeInTheDocument();
+    expect(within(pairedZone).getByRole("button", { name: "银行流水时间筛选：年月" })).toBeInTheDocument();
 
-    await user.click(within(openBankPane).getByRole("button", { name: "全部" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "全部" }));
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
     expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
@@ -1236,7 +1237,6 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
     const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /王青.*维保续费项目/,
     });
@@ -1251,7 +1251,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByText("流水 1 / 6000.00")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
-    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "三月" }));
@@ -1322,7 +1322,6 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
-    const pairedBankPane = within(pairedZone).getByTestId("pane-bank");
     const pairedBankRow = await within(pairedZone).findByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
     });
@@ -1331,7 +1330,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
     expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();
 
-    await user.click(within(pairedBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    await user.click(within(pairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "四月" }));
@@ -3231,24 +3230,16 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("expands one zone to the full workbench area and restores it", async () => {
+  test("keeps both zones visible and exposes no expand or layout mode controls", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
+    expect(screen.getByTestId("zone-unpaired")).toBeVisible();
+    expect(screen.getByTestId("zone-paired")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
-    await user.click(screen.getByRole("menuitem", { name: /^放大 未配对/ }));
-
-    expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
-    expect(screen.getByTestId("zone-paired")).toHaveClass("zone-hidden");
-    expect(screen.getByRole("button", { name: /未配对.*布局与栏显示/ })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
-    await user.click(screen.getByRole("menuitem", { name: /^恢复 未配对/ }));
-
-    expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
-    expect(screen.getByTestId("zone-paired")).not.toHaveClass("zone-hidden");
+    await user.click(screen.getByRole("button", { name: /未配对.*栏显示/ }));
+    expect(screen.queryByRole("menuitem", { name: /放大|恢复|紧凑三栏|经典三栏/ })).not.toBeInTheDocument();
   });
 });

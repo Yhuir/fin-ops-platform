@@ -231,26 +231,17 @@ describe("Finance operations shell", () => {
     expect(after).toBe(before);
   });
 
-  test("hides the global workbench title block while a zone is expanded", async () => {
+  test("keeps the workbench in fixed dual-zone page mode", async () => {
     window.history.pushState({}, "", "/");
-    const user = userEvent.setup();
     installMockApiFetch();
 
     render(<App />);
 
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
     expect(screen.getByText("财务运营平台")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
-    await user.click(screen.getByRole("menuitem", { name: /^放大 未配对/ }));
-
-    expect(document.body.classList.contains("workbench-focus-mode")).toBe(true);
-
-    await user.click(screen.getByRole("button", { name: /未配对.*布局与栏显示/ }));
-    await user.click(screen.getByRole("menuitem", { name: /^恢复 未配对/ }));
-
-    expect(document.body.classList.contains("workbench-focus-mode")).toBe(false);
-    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
+    expect(screen.getByTestId("zone-paired")).toBeVisible();
+    expect(screen.getByTestId("zone-unpaired")).toBeVisible();
+    expect(document.body.classList.contains("workbench-page-mode")).toBe(true);
     expect(screen.queryByRole("button", { name: "年月选择" })).not.toBeInTheDocument();
   });
 

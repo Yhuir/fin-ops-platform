@@ -14,7 +14,6 @@ import {
 import {
   buildWorkbenchGroupDisplayLayout,
   createEmptyWorkbenchZoneDisplayState,
-  type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
 import type {
@@ -29,13 +28,11 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import {
   getWorkbenchColumns,
   getWorkbenchPaneGridStyle,
-  type WorkbenchLayoutMode,
 } from "../../features/workbench/tableConfig";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchPane } from "./ResizableTriPane";
 import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
-import WorkbenchPaneTimeFilter from "./WorkbenchPaneTimeFilter";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
 type RelationGroupGridProps = {
@@ -69,11 +66,6 @@ type RelationGroupGridProps = {
     selectedValues: string[],
   ) => void;
   onTogglePaneSort?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneTimeFilterChange?: (
-    zoneId: "paired" | "unpaired",
-    paneId: "oa" | "bank" | "invoice",
-    filter: WorkbenchPaneTimeFilterState,
-  ) => void;
   onReorderPaneColumns?: (
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -83,7 +75,6 @@ type RelationGroupGridProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   hidePaneHeaders?: boolean;
-  layoutMode?: WorkbenchLayoutMode;
 };
 
 type CollapsedSummaryCopy = {
@@ -154,12 +145,10 @@ function RelationGroupGrid({
   loadFilterOptions,
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
-  onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns = () => undefined,
   canMutateData,
   readOnly = false,
   hidePaneHeaders = false,
-  layoutMode = "classic",
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const gridBodyRef = useRef<HTMLDivElement | null>(null);
@@ -188,14 +177,6 @@ function RelationGroupGrid({
     invoice: { left: 0, ratio: null },
   });
   const normalizedSearchQuery = displayState.searchQuery.trim();
-  const loadBankTimeYears = useMemo(() => loadFilterOptions
-    ? (page: number, signal?: AbortSignal) => loadFilterOptions(zoneId, {
-      pane: "bank",
-      facet: "time_year",
-      page,
-    }, signal)
-    : undefined, [loadFilterOptions, zoneId]);
-
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
     setExpandedPaneGroups(new Set());
@@ -271,35 +252,24 @@ function RelationGroupGrid({
     });
   };
 
-  const paneHasActionColumn = useCallback((paneId: WorkbenchRecordType) => {
-    if (layoutMode === "compact") {
-      return false;
-    }
-    if (paneId === "oa") {
-      return false;
-    }
-    return groups.some((group) => group.rows[paneId].some(hasDefaultRowActions));
-  }, [groups, layoutMode]);
-  const paneLayoutClass = (paneId: WorkbenchRecordType) =>
-    paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
   const hasTrailingColumns = trailingColumns.length > 0;
 
   const columnsByPane = useMemo(
     () => ({
-      oa: getWorkbenchColumns("oa", columnLayouts, layoutMode),
-      bank: getWorkbenchColumns("bank", columnLayouts, layoutMode),
-      invoice: getWorkbenchColumns("invoice", columnLayouts, layoutMode),
+      oa: getWorkbenchColumns("oa", columnLayouts),
+      bank: getWorkbenchColumns("bank", columnLayouts),
+      invoice: getWorkbenchColumns("invoice", columnLayouts),
     }),
-    [columnLayouts, layoutMode],
+    [columnLayouts],
   );
 
   const paneGridStyleByPane = useMemo(
     () => ({
-      oa: getWorkbenchPaneGridStyle("oa", columnLayouts, paneHasActionColumn("oa"), layoutMode),
-      bank: getWorkbenchPaneGridStyle("bank", columnLayouts, paneHasActionColumn("bank"), layoutMode),
-      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts, paneHasActionColumn("invoice"), layoutMode),
+      oa: getWorkbenchPaneGridStyle("oa", columnLayouts),
+      bank: getWorkbenchPaneGridStyle("bank", columnLayouts),
+      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts),
     }),
-    [columnLayouts, layoutMode, paneHasActionColumn],
+    [columnLayouts],
   );
 
   const sourceGroupById = useMemo(
@@ -559,10 +529,8 @@ function RelationGroupGrid({
                           records={segment.rows[paneId]}
                           scrollPaneId={paneId}
                           scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
-                          showActionColumn={paneHasActionColumn(paneId)}
                           showWorkflowActions={zoneId !== "unpaired"}
                           canMutateData={canMutateData}
-                          layoutMode={layoutMode}
                           readOnly={readOnly}
                           zoneId={zoneId}
                         />
@@ -600,10 +568,8 @@ function RelationGroupGrid({
                       records={paneRecords(paneId)}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
-                      showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
-                      layoutMode={layoutMode}
                       readOnly={readOnly}
                       zoneId={zoneId}
                     />
@@ -683,10 +649,8 @@ function RelationGroupGrid({
                       records={paneRecords(paneId)}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
-                      showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
-                      layoutMode={layoutMode}
                       readOnly={readOnly}
                       zoneId={zoneId}
                     />
@@ -768,14 +732,6 @@ function RelationGroupGrid({
                   <span>{pane.totalRows ?? pane.rows.length} 条</span>
                 </div>
                 <div className="pane-header-tools">
-                  {pane.id === "bank" ? (
-                    <WorkbenchPaneTimeFilter
-                      filter={displayState.timeFilterByPane.bank}
-                      loadYears={loadBankTimeYears}
-                      paneTitle={pane.title}
-                      onChange={(filter) => onPaneTimeFilterChange(zoneId, "bank", filter)}
-                    />
-                  ) : null}
                   {pane.id === "oa" || pane.id === "bank" || pane.id === "invoice" ? (
                     (() => {
                       const sortPaneId: "oa" | "bank" | "invoice" = pane.id;
@@ -800,7 +756,7 @@ function RelationGroupGrid({
                 onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
               >
                 <div
-                  className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                  className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id}`}
                   role="row"
                   style={paneGridStyleByPane[pane.id]}
                 >
@@ -856,11 +812,6 @@ function RelationGroupGrid({
                       )}
                     </div>
                   ))}
-                  {paneHasActionColumn(pane.id) ? (
-                    <div className="candidate-columnheader action-column" role="columnheader">
-                      操作
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </section>
@@ -892,14 +843,13 @@ function RelationGroupGrid({
                 onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
               >
                 <div
-                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id}`}
                   aria-hidden="true"
                   style={paneGridStyleByPane[pane.id]}
                 >
                   {columnsByPane[pane.id].map((column) => (
                     <div key={column.key} className="candidate-scrollbar-track-cell" />
                   ))}
-                  {paneHasActionColumn(pane.id) ? <div className="candidate-scrollbar-track-cell action-column" /> : null}
                 </div>
               </div>
             </div>
@@ -916,10 +866,6 @@ function RelationGroupGrid({
 }
 
 export default memo(RelationGroupGrid);
-
-function hasDefaultRowActions(row: WorkbenchRecord) {
-  return row.availableActions.some((action) => action !== "detail" && action !== "view_relation");
-}
 
 function buildPaneSortActionLabel(paneId: "oa" | "bank" | "invoice", currentDirection: "asc" | "desc" | null) {
   const paneTitle = paneId === "oa" ? "OA" : paneId === "bank" ? "银行流水" : "进销项发票";

@@ -120,8 +120,6 @@ describe("WorkbenchZone", () => {
       <WorkbenchZone
         auxiliaryHeaderActions={[{ label: "查看已忽略异常", onClick: onAuxiliaryAction, tone: "warning" }]}
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         primarySelectionActionDisabled
         primarySelectionActionLabel="确认关联"
         selectionActionNotice="OA 正在同步，完成后将自动恢复关联操作。"
@@ -150,7 +148,6 @@ describe("WorkbenchZone", () => {
         onSecondarySelectionAction={onSecondarySelectionAction}
         onSelectRow={() => {}}
         onTertiarySelectionAction={onTertiarySelectionAction}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="unpaired"
       />,
@@ -185,8 +182,6 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         primarySelectionActionLabel="确认关联"
         primarySelectionActionPending
         primarySelectionActionPendingLabel="正在准备确认预览"
@@ -206,7 +201,6 @@ describe("WorkbenchZone", () => {
         onPrimarySelectionAction={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="unpaired"
       />,
@@ -218,35 +212,34 @@ describe("WorkbenchZone", () => {
     expect(within(button).getByRole("status", { name: "正在准备确认预览" })).toBeInTheDocument();
   });
 
-  test("keeps layout and pane controls in one accessible menu", async () => {
+  test("keeps the bank time filter and pane-only controls at the right of the zone header", async () => {
     const user = userEvent.setup();
-    const onToggleExpand = vi.fn();
+    const onPaneTimeFilterChange = vi.fn();
 
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
-        title="已配对"
+        title="已配对 1536 项"
         tone="success"
         searchQuery=""
         onSearchQueryChange={() => {}}
         onOpenDetail={() => {}}
+        onPaneTimeFilterChange={onPaneTimeFilterChange}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={onToggleExpand}
         panes={panes}
         zoneId="paired"
       />,
     );
 
     const zone = screen.getByTestId("zone-paired");
-    const menuTrigger = within(zone).getByRole("button", { name: "已配对布局与栏显示" });
-    expect(zone).toHaveAttribute("data-layout", "compact");
-
-    await user.click(menuTrigger);
-    await user.click(screen.getByRole("menuitem", { name: "经典三栏" }));
-    expect(zone).toHaveAttribute("data-layout", "classic");
+    const zoneActions = zone.querySelector(".zone-actions");
+    const timeFilter = within(zone).getByRole("group", { name: "银行流水时间筛选" });
+    const bankPane = within(zone).getByTestId("pane-bank");
+    const menuTrigger = within(zone).getByRole("button", { name: "已配对 1536 项栏显示" });
+    expect(zoneActions).toContainElement(timeFilter);
+    expect(zoneActions).toContainElement(menuTrigger);
+    expect(within(bankPane).queryByRole("group", { name: "银行流水时间筛选" })).not.toBeInTheDocument();
 
     await user.click(menuTrigger);
     await user.click(screen.getByRole("menuitem", { name: "✓ 银行流水" }));
@@ -258,8 +251,9 @@ describe("WorkbenchZone", () => {
     expect(screen.getByTestId("pane-oa")).toBeInTheDocument();
 
     await user.click(menuTrigger);
-    await user.click(screen.getByRole("menuitem", { name: "放大 已配对" }));
-    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("menuitem", { name: "✓ OA" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("menuitem", { name: /紧凑三栏|经典三栏|放大|恢复/ })).not.toBeInTheDocument();
+    expect(onPaneTimeFilterChange).not.toHaveBeenCalled();
   });
 
   test("reveals full compact cell content on hover", async () => {
@@ -268,8 +262,6 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         searchQuery=""
@@ -277,7 +269,6 @@ describe("WorkbenchZone", () => {
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="paired"
       />,
@@ -295,13 +286,10 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSearchQueryChange={onChange}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         searchPending
         searchQuery="陈涛"
@@ -357,14 +345,11 @@ describe("WorkbenchZone", () => {
       <WorkbenchZone
         canMutateData
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         onOpenDetail={() => {}}
         onRequestNextPage={onRequestNextPage}
         onRowAction={() => {}}
         onSearchQueryChange={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         pageInfo={pageInfo}
         panes={panes}
         searchQuery=""
@@ -438,14 +423,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={[
           panes[0],
           {
@@ -502,14 +484,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={[
           {
             ...panes[0],
@@ -529,14 +508,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="未配对"
         tone="warning"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="unpaired"
       />,
@@ -551,14 +527,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={[
           panes[0],
           {
@@ -623,14 +596,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={[
           panes[0],
           {
@@ -651,14 +621,11 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="已配对"
         tone="success"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="paired"
       />,
@@ -667,7 +634,7 @@ describe("WorkbenchZone", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(2);
     expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
 
-    const menuTrigger = screen.getByRole("button", { name: "已配对布局与栏显示" });
+    const menuTrigger = screen.getByRole("button", { name: "已配对栏显示" });
     await user.click(menuTrigger);
     await user.click(screen.getByRole("menuitem", { name: /银行流水/ }));
 
@@ -692,15 +659,12 @@ describe("WorkbenchZone", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
         title="未配对"
         tone="warning"
         meta="等待人工处理"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
-        onToggleExpand={() => {}}
         panes={panes}
         zoneId="unpaired"
       />,
@@ -725,7 +689,7 @@ describe("WorkbenchZone", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(1);
   });
 
-  test("shows the combined view menu in the zone header", async () => {
+  test("shows only the three pane visibility options in the zone header menu", async () => {
     const user = userEvent.setup();
     render(
       <WorkbenchZone
@@ -737,14 +701,15 @@ describe("WorkbenchZone", () => {
         onRowAction={() => {}}
         onSelectRow={() => {}}
         panes={panes}
-        isExpanded={false}
-        isVisible
-        onToggleExpand={() => {}}
         zoneId="unpaired"
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "未配对布局与栏显示" }));
-    expect(screen.getByRole("menuitem", { name: "放大 未配对" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "未配对栏显示" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "✓ OA",
+      "✓ 银行流水",
+      "✓ 进销项发票",
+    ]);
   });
 });

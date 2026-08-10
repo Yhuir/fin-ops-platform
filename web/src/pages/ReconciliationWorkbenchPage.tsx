@@ -423,7 +423,6 @@ export default function ReconciliationWorkbenchPage() {
   const loadMoreInFlightRef = useRef<Record<"paired" | "unpaired", boolean>>({ paired: false, unpaired: false });
   const activeWorkbenchReadModelVersionRef = useRef("");
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
-  const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
@@ -765,7 +764,6 @@ export default function ReconciliationWorkbenchPage() {
         setIsDetailLoading(false);
       }
       setSelectionSourceGroups({ paired: [], unpaired: [] });
-      setExpandedZoneId(null);
       setActionDialog(null);
       setRelationPreviewDialog(null);
       setWorkbenchExceptionDialog(null);
@@ -1297,13 +1295,11 @@ export default function ReconciliationWorkbenchPage() {
   }, [active, applyOaSyncStatus]);
 
   useEffect(() => {
-    document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
     document.body.classList.add("workbench-page-mode");
     return () => {
-      document.body.classList.remove("workbench-focus-mode");
       document.body.classList.remove("workbench-page-mode");
     };
-  }, [expandedZoneId]);
+  }, []);
 
   useEffect(() => {
     if (loadError) {
@@ -2280,14 +2276,6 @@ export default function ReconciliationWorkbenchPage() {
     [displayOpenGroups, workbenchData?.summary.zoneCounts.unpaired, zonePages.unpaired.rowCounts],
   );
 
-  const togglePairedExpand = useCallback(() => {
-    setExpandedZoneId((current) => (current === "paired" ? null : "paired"));
-  }, []);
-
-  const toggleOpenExpand = useCallback(() => {
-    setExpandedZoneId((current) => (current === "unpaired" ? null : "unpaired"));
-  }, []);
-
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
@@ -2304,8 +2292,6 @@ export default function ReconciliationWorkbenchPage() {
   const oaStatus = workbenchData?.oaStatus ?? null;
   const isOaReady = oaStatus?.code === "ready";
   const oaStatusPanelMessage = oaStatus && !isOaReady ? `${oaStatus.message}，本次结果未包含完整 OA 数据。` : null;
-  const isPairedVisible = expandedZoneId === null || expandedZoneId === "paired";
-  const isUnpairedVisible = expandedZoneId === null || expandedZoneId === "unpaired";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
   const pairedSearchPending = pairedDisplayState !== deferredPairedDisplayState
@@ -2328,8 +2314,6 @@ export default function ReconciliationWorkbenchPage() {
     <WorkbenchZone
       canMutateData={canWriteWorkbench}
       getRowState={getWorkbenchRowState}
-      isExpanded={expandedZoneId === "paired"}
-      isVisible={isPairedVisible}
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
       onEnsureGroupDetail={handleEnsureGroupDetail}
@@ -2343,7 +2327,6 @@ export default function ReconciliationWorkbenchPage() {
       selectionActionNotice={pairedSelectionActionNotice}
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
-      onToggleExpand={togglePairedExpand}
       displayState={pairedDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
       onSearchQueryChange={(query) => handleSearchQueryChange("paired", query)}
@@ -2377,8 +2360,6 @@ export default function ReconciliationWorkbenchPage() {
       auxiliaryHeaderActions={openAuxiliaryHeaderActions}
       canMutateData={canWriteWorkbench}
       getRowState={getWorkbenchRowState}
-      isExpanded={expandedZoneId === "unpaired"}
-      isVisible={isUnpairedVisible}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
       onEnsureGroupDetail={handleEnsureGroupDetail}
@@ -2394,7 +2375,6 @@ export default function ReconciliationWorkbenchPage() {
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
       selectionActionNotice={openSelectionActionNotice}
-      onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
       onSearchQueryChange={(query) => handleSearchQueryChange("unpaired", query)}
@@ -2426,7 +2406,7 @@ export default function ReconciliationWorkbenchPage() {
 
   return (
     <div className="workbench-shell">
-      <div className={`page-stack${expandedZoneId ? " zone-expanded-layout" : ""}`}>
+      <div className="page-stack">
         <header className="page-header">
           <div className="page-title-row">
             <h1 className="page-title">关联台</h1>
@@ -2482,14 +2462,10 @@ export default function ReconciliationWorkbenchPage() {
 
         {!loadError ? (
           <div className="workbench-zone-stack">
-            <div
-              className={`workbench-zone-slot workbench-zone-slot-top${isPairedVisible ? "" : " workbench-zone-slot-hidden"}`}
-            >
+            <div className="workbench-zone-slot workbench-zone-slot-top">
               {pairedZoneElement}
             </div>
-            <div
-              className={`workbench-zone-slot workbench-zone-slot-bottom${isUnpairedVisible ? "" : " workbench-zone-slot-hidden"}`}
-            >
+            <div className="workbench-zone-slot workbench-zone-slot-bottom">
               {unpairedZoneElement}
             </div>
           </div>

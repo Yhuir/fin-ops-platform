@@ -1,7 +1,6 @@
 import type { WorkbenchColumnLayouts, WorkbenchRecordType } from "./types";
 
 export type WorkbenchColumnKind = "text" | "money" | "status";
-export type WorkbenchLayoutMode = "compact" | "classic";
 
 export type WorkbenchColumn = {
   key: string;
@@ -135,9 +134,8 @@ export const defaultWorkbenchColumnLayouts: WorkbenchColumnLayouts = {
 export function getWorkbenchColumns(
   paneId: WorkbenchRecordType,
   layouts?: Partial<WorkbenchColumnLayouts> | null,
-  layoutMode: WorkbenchLayoutMode = "classic",
 ) {
-  const columns = layoutMode === "compact" && paneId === "bank"
+  const columns = paneId === "bank"
     ? workbenchColumns[paneId].filter((column) => column.key !== "loanRepaymentDate")
     : workbenchColumns[paneId];
   const requestedOrder = layouts?.[paneId];
@@ -168,35 +166,20 @@ export function getWorkbenchColumns(
   return ordered;
 }
 
-const ACTION_COLUMN_WIDTHS: Record<Exclude<WorkbenchRecordType, "oa">, { track: string; minWidth: number }> = {
-  bank: { track: "minmax(168px, 168fr)", minWidth: 168 },
-  invoice: { track: "minmax(0px, 0fr)", minWidth: 0 },
-};
-
 export function getWorkbenchPaneGridStyle(
   paneId: WorkbenchRecordType,
   layouts?: Partial<WorkbenchColumnLayouts> | null,
-  includeActionColumn = false,
-  layoutMode: WorkbenchLayoutMode = "classic",
 ) {
-  const columns = getWorkbenchColumns(paneId, layouts, layoutMode);
+  const columns = getWorkbenchColumns(paneId, layouts);
   const compactTracks: Record<WorkbenchRecordType, Record<string, string>> = {
     oa: { applicant: "0.8fr", projectName: "1.25fr", amount: "0.72fr", counterparty: "1fr", reason: "1.1fr" },
     bank: { counterparty: "1.45fr", amount: "1fr", note: "1.35fr" },
     invoice: { sellerName: "1.35fr", buyerName: "1.15fr", issueDate: "1.05fr", grossAmount: "1.05fr" },
   };
-  const tracks = columns.map((column) => (
-    layoutMode === "compact" ? `minmax(0, ${compactTracks[paneId][column.key] ?? "1fr"})` : column.track
-  ));
-  let minWidth = layoutMode === "compact" ? 0 : columns.reduce((sum, column) => sum + column.minWidth, 0);
-
-  if (layoutMode === "classic" && includeActionColumn && paneId !== "oa") {
-    tracks.push(ACTION_COLUMN_WIDTHS[paneId].track);
-    minWidth += ACTION_COLUMN_WIDTHS[paneId].minWidth;
-  }
+  const tracks = columns.map((column) => `minmax(0, ${compactTracks[paneId][column.key] ?? "1fr"})`);
 
   return {
     gridTemplateColumns: tracks.join(" "),
-    minWidth: `${minWidth}px`,
+    minWidth: "0px",
   };
 }

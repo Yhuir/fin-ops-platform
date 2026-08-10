@@ -5,7 +5,6 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import WorkbenchRecordCard from "./WorkbenchRecordCard";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
-import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
 
 type RelationGroupCellProps = {
   zoneId: "paired" | "unpaired";
@@ -18,7 +17,6 @@ type RelationGroupCellProps = {
   records: WorkbenchRecord[];
   scrollPaneId: WorkbenchRecordType;
   scrollTestId: string;
-  showActionColumn?: boolean;
   highlightedRowId?: string | null;
   searchQuery?: string;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
@@ -29,7 +27,6 @@ type RelationGroupCellProps = {
   canMutateData: boolean;
   readOnly?: boolean;
   leadingControl?: ReactNode;
-  layoutMode?: WorkbenchLayoutMode;
 };
 
 function RelationGroupCell({
@@ -40,7 +37,6 @@ function RelationGroupCell({
   records,
   scrollPaneId,
   scrollTestId,
-  showActionColumn = false,
   highlightedRowId,
   searchQuery = "",
   getRowState,
@@ -51,7 +47,6 @@ function RelationGroupCell({
   canMutateData,
   readOnly = false,
   leadingControl,
-  layoutMode = "classic",
 }: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -92,10 +87,8 @@ function RelationGroupCell({
             rowState={getRowState(row, zoneId)}
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
             leadingControl={index === 0 ? leadingControl : undefined}
-            showActionColumn={showActionColumn}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
-            layoutMode={layoutMode}
             readOnly={readOnly}
             zoneId={zoneId}
           />

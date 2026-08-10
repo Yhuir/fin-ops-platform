@@ -77,9 +77,9 @@ function RelationPreviewTriPane({
   );
   const paneGridStyleByPane = useMemo(
     () => ({
-      oa: getWorkbenchPaneGridStyle("oa", columnLayouts, false),
-      bank: getWorkbenchPaneGridStyle("bank", columnLayouts, false),
-      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts, false),
+      oa: getWorkbenchPaneGridStyle("oa", columnLayouts),
+      bank: getWorkbenchPaneGridStyle("bank", columnLayouts),
+      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts),
     }),
     [columnLayouts],
   );
@@ -179,7 +179,7 @@ function RelationPreviewTriPane({
                   data-testid={`relation-preview-pane-scroll-head-${title}-${pane.id}`}
                 >
                   <div
-                    className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id} pane-layout-no-action`}
+                    className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id}`}
                     role="row"
                     style={paneGridStyleByPane[pane.id]}
                   >
@@ -250,7 +250,7 @@ function RelationPreviewTriPane({
                 onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
               >
                 <div
-                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id} pane-layout-no-action`}
+                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id}`}
                   aria-hidden="true"
                   style={paneGridStyleByPane[pane.id]}
                 >

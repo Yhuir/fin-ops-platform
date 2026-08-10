@@ -1,10 +1,14 @@
-import { memo, useState } from "react";
+import { memo, useMemo } from "react";
 import { Button, Dropdown, SearchField, Spinner, Tooltip } from "@heroui/react";
-import { Ellipsis, Maximize2, Minimize2, RefreshCw } from "lucide-react";
+import { Ellipsis, RefreshCw } from "lucide-react";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
-import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import {
+  createEmptyWorkbenchZoneDisplayState,
+  type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
+  type WorkbenchZoneDisplayState,
+} from "../../features/workbench/groupDisplayModel";
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
@@ -17,7 +21,7 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 import { formatMoney } from "../../features/money";
-import type { WorkbenchLayoutMode } from "../../features/workbench/tableConfig";
+import WorkbenchPaneTimeFilter from "./WorkbenchPaneTimeFilter";
 
 type WorkbenchZoneProps = {
   zoneId: "paired" | "unpaired";
@@ -28,11 +32,8 @@ type WorkbenchZoneProps = {
   groups?: WorkbenchRelationGroup[];
   sourceGroups?: WorkbenchRelationGroup[];
   invoiceInventory?: WorkbenchInvoiceInventory;
-  displayState: WorkbenchZoneDisplayState;
+  displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
-  isExpanded: boolean;
-  isVisible: boolean;
-  onToggleExpand: () => void;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
@@ -90,7 +91,7 @@ type WorkbenchZoneProps = {
   onPaneTimeFilterChange?: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
-    filter: WorkbenchPaneTimeFilter,
+    filter: WorkbenchPaneTimeFilterState,
   ) => void;
   onReorderPaneColumns: (
     paneId: "oa" | "bank" | "invoice",
@@ -109,11 +110,8 @@ function WorkbenchZone({
   groups,
   sourceGroups,
   invoiceInventory,
-  displayState,
+  displayState = createEmptyWorkbenchZoneDisplayState(),
   columnLayouts,
-  isExpanded,
-  isVisible,
-  onToggleExpand,
   getRowState,
   onSelectRow,
   onOpenDetail,
@@ -152,15 +150,19 @@ function WorkbenchZone({
   onReorderPaneColumns,
 }: WorkbenchZoneProps) {
   const { widths, visibleIndices, visibleCount, togglePane, startDrag } = useResizablePanes();
-  const [layoutMode, setLayoutMode] = useState<WorkbenchLayoutMode>("compact");
-  const expandLabel = `${isExpanded ? "恢复" : "放大"} ${title}`;
   const shouldShowSelectionToolbar = Boolean(selectionSummary);
   const explicitSelectionTotal = selectionSummary?.explicitTotal ?? selectionSummary?.total ?? 0;
   const contextualSelectionTotal = Math.max(0, (selectionSummary?.total ?? 0) - explicitSelectionTotal);
   const activePaneIds = panes.filter((_, index) => widths[index] > 0.0001).map((pane) => pane.id);
+  const loadBankTimeYears = useMemo(() => loadFilterOptions
+    ? (page: number, signal?: AbortSignal) => loadFilterOptions(zoneId, {
+      pane: "bank",
+      facet: "time_year",
+      page,
+    }, signal)
+    : undefined, [loadFilterOptions, zoneId]);
   const canRequestNextPage = Boolean(
-    isVisible
-    && pageInfo?.hasMore
+    pageInfo?.hasMore
     && pageInfo.readModelStatus === "fresh"
     && !loadingMore
     && !loadMoreError
@@ -171,9 +173,7 @@ function WorkbenchZone({
 
   return (
     <section
-      aria-hidden={!isVisible}
-      className={`zone zone-${tone}${isExpanded ? " zone-expanded" : ""}${isVisible ? "" : " zone-hidden"}`}
-      data-layout={layoutMode}
+      className={`zone zone-${tone}`}
       data-testid={`zone-${zoneId}`}
     >
       <header className={`zone-header ${tone}`}>
@@ -321,49 +321,36 @@ function WorkbenchZone({
               ))}
             </div>
           ) : null}
+          <WorkbenchPaneTimeFilter
+            filter={displayState.timeFilterByPane.bank}
+            loadYears={loadBankTimeYears}
+            paneTitle="银行流水"
+            onChange={(filter) => onPaneTimeFilterChange?.(zoneId, "bank", filter)}
+          />
           <Dropdown>
             <Dropdown.Trigger
-              aria-label={`${title}布局与栏显示`}
+              aria-label={`${title}栏显示`}
               className="zone-view-menu-trigger"
             >
               <Ellipsis aria-hidden="true" size={18} />
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label={`${title}布局与栏显示`}
+                aria-label={`${title}栏显示`}
+                disabledKeys={visibleCount === 1 ? [`pane-${activePaneIds[0]}`] : []}
                 onAction={(key) => {
                   const action = String(key);
-                  if (action === "layout-compact" || action === "layout-classic") {
-                    setLayoutMode(action === "layout-compact" ? "compact" : "classic");
-                    return;
-                  }
-                  if (action === "expand") {
-                    onToggleExpand();
-                    return;
-                  }
                   const paneIndex = panes.findIndex((pane) => `pane-${pane.id}` === action);
                   if (paneIndex >= 0 && !(widths[paneIndex] > 0.0001 && visibleCount === 1)) {
                     togglePane(paneIndex);
                   }
                 }}
               >
-                <Dropdown.Item id="layout-compact" key="layout-compact">
-                  {layoutMode === "compact" ? "✓ 紧凑三栏" : "紧凑三栏"}
-                </Dropdown.Item>
-                <Dropdown.Item id="layout-classic" key="layout-classic">
-                  {layoutMode === "classic" ? "✓ 经典三栏" : "经典三栏"}
-                </Dropdown.Item>
                 {panes.map((pane, index) => (
                   <Dropdown.Item id={`pane-${pane.id}`} key={`pane-${pane.id}`}>
                     {widths[index] > 0.0001 ? `✓ ${pane.title}` : pane.title}
                   </Dropdown.Item>
                 ))}
-                <Dropdown.Item id="expand" key="expand">
-                  <span className="zone-view-menu-item">
-                    {isExpanded ? <Minimize2 aria-hidden="true" size={15} /> : <Maximize2 aria-hidden="true" size={15} />}
-                    {expandLabel}
-                  </span>
-                </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
@@ -376,14 +363,12 @@ function WorkbenchZone({
         groups={groups}
         highlightedRowId={highlightedRowId}
         invoiceInventory={invoiceInventory}
-        layoutMode={layoutMode}
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}
         canRequestNextPage={canRequestNextPage}
         onColumnFilterChange={onColumnFilterChange}
-        onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
         onRequestNextPage={onRequestNextPage}
