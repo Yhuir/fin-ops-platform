@@ -9,6 +9,12 @@ from fin_ops_platform.services.input_invoice_usage_canonical_query_service impor
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
+    OutputInvoiceCollectionCanonicalQueryService,
+)
+from fin_ops_platform.services.output_invoice_collection_service import (
+    OutputInvoiceCollectionQueryService,
+)
 from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
@@ -120,9 +126,8 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
-        snapshot = PostgresOutputInvoiceCollectionQueryRepository(
-            self.connection
-        ).load_page(
+        repository = PostgresOutputInvoiceCollectionQueryRepository(self.connection)
+        snapshot = repository.load_page(
             page=1,
             page_size=1,
             keyword=None,
@@ -167,6 +172,28 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             ["output-red-1"],
         )
         self.assertEqual(snapshot.supporting_groups[0]["status_code"], "reverses_blue")
+
+        query_service = OutputInvoiceCollectionCanonicalQueryService(
+            repository=repository,
+            row_assembler=OutputInvoiceCollectionQueryService(
+                import_service=ImportNormalizationService(),
+                require_fresh_relations=False,
+            ),
+        )
+        rows = query_service.list_rows(page=1, page_size=20, month="2026-07")["rows"]
+        blue_row = next(row for row in rows if row["invoiceId"] == "output-blue-1")
+
+        details = query_service.relation_details(
+            blue_row["id"],
+            {"kind": ["invoice"]},
+        )
+
+        self.assertEqual(details["rowId"], blue_row["id"])
+        self.assertEqual(details["relationCount"], 2)
+        self.assertEqual(
+            [summary["invoiceId"] for summary in details["summaries"]],
+            ["output-blue-1", "output-red-1"],
+        )
 
     def test_output_over_collection_is_collected_with_zero_pending_amount(self) -> None:
         self.connection.execute(

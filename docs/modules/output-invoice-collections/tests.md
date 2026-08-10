@@ -1,6 +1,6 @@
 # 销项发票收款情况测试矩阵
 
-日期：2026-07-31
+日期：2026-08-10
 
 ## 七类测试适用性
 
@@ -20,6 +20,7 @@
 - 匹配结果写入正式 relation mode `output_invoice_reversal`；重复执行幂等，歧义不写。
 - 红票不进入通用自由匹配。
 - 蓝票和红票各自保留为独立行，并通过 `invoiceRelations.summaries` 互相引用。
+- 列表与关系详情共用唯一 row ID 合同：`output_invoice_collection_row_` 加 `sha1(group_key)` 前 16 位；PostgreSQL `load_row()` 必须能原样读取列表返回的 ID。
 - 已收金额只统计 active relation 中的收入流水，支出流水不计入。
 - row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。
 - 页面只注册七个 GET route，旧 lifecycle/receipt/manual-red route 返回未匹配。
@@ -29,6 +30,7 @@
 
 - `tests/test_workbench_free_matching_engine.py`
 - `tests/test_invoice_usage_collection_canonical_query.py`
+- `tests/test_invoice_usage_collection_postgres_integration.py`
 - `tests/test_output_invoice_collection_api.py`
 - `tests/test_output_invoice_collection_service.py`
 - `tests/test_platform_runtime_boundary_guards.py`
@@ -58,6 +60,8 @@ npm --prefix web run e2e -- \
 ```
 
 发布前还必须通过仓库 release gate；部署后执行页面 canonical audit、关键 GET 性能和 T+0/T+60/T+300 延迟复核。
+
+PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> relation_details()`，不能用固定 mock ID 替代生产 repository 的 row ID 反查合同。
 
 ## 剩余风险
 

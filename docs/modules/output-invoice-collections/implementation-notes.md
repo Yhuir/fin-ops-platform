@@ -12,6 +12,15 @@
 
 以下按日期记录的旧实施条目只用于解释历史迁移，不覆盖以上当前决策。
 
+## 2026-08-10 - 关系列表 row ID 定向读取闭环
+
+- 根因：列表 assembler 在自动红蓝票改造后按 `group_key` 生成 `output_invoice_collection_row_*`，PostgreSQL `load_row()` 仍按旧 `identity_key` 反算同一 ID，导致列表已返回的有效 row ID 在关系详情接口稳定返回 404。
+- 修复：销项 row lookup 改为与列表共用 `sha1(group_key)`；不增加前端绕行、fallback、缓存、read model、worker、数据库字段或查询次数，进项 `invoice_usage_row_*` 合同保持不变。
+- 测试覆盖：新增 SQL 契约回归，锁定销项使用 `group_key` 且进项算法不变；扩展 PostgreSQL 集成测试，覆盖 `load_page -> row.id -> relation_details` 的红蓝票两张 summary 闭环。
+- 文档影响：API shape、模块边界和业务口径不变；只更新测试责任与实施记录。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest -q tests/test_invoice_usage_collection_canonical_query.py tests/test_output_invoice_collection_service.py tests/test_output_invoice_collection_api.py`；真实 PostgreSQL 集成测试在配置 `FIN_OPS_TEST_DATABASE_URL` 时执行。
+- 回滚：无 schema 或数据变更，恢复上一应用 release 即可。
+
 ## 2026-08-01 - 红蓝票 supporting groups 重复关系图查询删除
 
 - 根因：rows/summary/facets 首次执行完整 recursive canonical CTE 后，当前页存在红蓝票关联时又执行同一整套 CTE 读取 supporting groups。

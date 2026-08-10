@@ -233,6 +233,28 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("read_model.workbench_relation", sql)
         self.assertNotIn("read_model.invoice_lifecycle", sql)
 
+    def test_output_row_lookup_hashes_the_same_group_key_as_list_rows(self) -> None:
+        output_connection = RecordingConnection()
+        PostgresOutputInvoiceCollectionQueryRepository(output_connection).load_row(
+            "output_invoice_collection_row_contract"
+        )
+
+        output_sql = "\n".join(output_connection.transactions[0].statements)
+        self.assertIn("encode(digest(group_key, 'sha1'), 'hex')", output_sql)
+        self.assertNotIn("encode(digest(identity_key, 'sha1'), 'hex')", output_sql)
+
+        input_connection = RecordingConnection()
+        PostgresInputInvoiceUsageQueryRepository(input_connection).load_row(
+            "invoice_usage_row_contract"
+        )
+
+        input_sql = "\n".join(input_connection.transactions[0].statements)
+        self.assertIn(
+            "case when relation_case_id is not null then 'relation:' || relation_case_id "
+            "else identity_key end, 'sha1'",
+            input_sql,
+        )
+
     def test_invalid_month_fails_before_opening_a_snapshot(self) -> None:
         connection = RecordingConnection()
         repository = PostgresInputInvoiceUsageQueryRepository(connection)

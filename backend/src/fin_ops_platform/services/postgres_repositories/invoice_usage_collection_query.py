@@ -1377,7 +1377,7 @@ def _where_sql(
         elif row_id.startswith("output_invoice_collection_row_"):
             clauses.append(
                 "'output_invoice_collection_row_' || substr("
-                "encode(digest(identity_key, 'sha1'), 'hex'), 1, 16) = %s"
+                "encode(digest(group_key, 'sha1'), 'hex'), 1, 16) = %s"
             )
         else:
             clauses.append(
