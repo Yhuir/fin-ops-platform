@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_batch_application_service import (
@@ -215,6 +215,97 @@ class RecordingTransactionConnection:
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
+    def test_list_filters_one_normalized_batch_snapshot_for_rows_and_summary(self) -> None:
+        list_batches = Mock(
+            return_value=[
+                    {
+                        "batch_id": "draft-may",
+                        "batch_type": "fee",
+                        "scope_month": "2026-05",
+                        "status": "draft",
+                        "status_bucket": "unsubmitted",
+                        "row_count": 2,
+                        "total_amount": "2.00",
+                    },
+                    {
+                        "batch_id": "submitted-may",
+                        "batch_type": "fee",
+                        "scope_month": "2026-05",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "row_count": 3,
+                        "total_amount": "3.00",
+                    },
+                    {
+                        "batch_id": "draft-june",
+                        "batch_type": "fee",
+                        "scope_month": "2026-06",
+                        "status": "draft",
+                        "status_bucket": "unsubmitted",
+                        "row_count": 4,
+                        "total_amount": "4.00",
+                    },
+            ]
+        )
+        live_batch_service = SimpleNamespace(list_batches=list_batches)
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = SimpleNamespace(
+            read_page=lambda *_args, **_kwargs: {
+                "tag_policy": {"active_tags": [{"code": "fee", "label": "手续费"}]}
+            }
+        )
+        service._live_batch_service = lambda *_args, **_kwargs: live_batch_service  # type: ignore[method-assign]
+
+        payload = service.list_batches_payload(
+            {"month": ["2026-05"], "bucket": ["unsubmitted"]}
+        )
+
+        list_batches.assert_called_once_with(
+            {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
+        )
+        self.assertEqual([batch["batch_id"] for batch in payload["batches"]], ["draft-may"])
+        self.assertEqual(payload["summary"]["draft"], 1)
+        self.assertEqual(payload["summary"]["submitted"], 1)
+
+    def test_build_can_skip_unused_normalized_return_and_reuse_current_row_ids(self) -> None:
+        service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        result = service.build_batches(
+            [
+                {
+                    "id": "bank-1",
+                    "txn_date": "2026-05-01",
+                    "account_key": "CCB:8106",
+                    "amount": "1.00",
+                }
+            ],
+            {"bank-1": {"category_code": "fee", "category_source": "auto"}},
+            [],
+            {},
+            eligible_batch_types={"fee"},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            return_batches=False,
+        )
+
+        self.assertEqual(result, [])
+        self.assertEqual(len(service.list_batches()), 1)
+        with patch.object(
+            service,
+            "_row_id",
+            side_effect=AssertionError("precomputed current row ids must be reused"),
+        ):
+            self.assertTrue(
+                service._submitted_batch_still_current(
+                    {"row_ids": ["bank-1"]},
+                    [],
+                    {},
+                    current_row_ids={"bank-1"},
+                )
+            )
+
     def test_canonical_sql_categories_skip_duplicate_python_classification(self) -> None:
         with patch(
             "fin_ops_platform.services.bank_flow_rule_batch_canonical_query.BankTransactionEffectiveCategoryProvider",

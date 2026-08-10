@@ -82,22 +82,13 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             page_result,
             eligible_tag_codes=eligible_tag_codes,
         )
-        batches_for_summary = self._public_batches(
+        live_batches = self._public_batches(
             live_batch_service.list_batches(
-                self._batch_filters(
-                    summary_filters,
-                    relation_mode=relation_mode,
-                )
+                {"relation_mode": relation_mode}
             )
         )
-        filtered_batches = self._public_batches(
-            live_batch_service.list_batches(
-                self._batch_filters(
-                    filters,
-                    relation_mode=relation_mode,
-                )
-            )
-        )
+        batches_for_summary = self._filter_batches(live_batches, summary_filters)
+        filtered_batches = self._filter_batches(live_batches, filters)
         filtered_batches.sort(key=lambda batch: str(batch.get("batch_id") or ""))
         filtered_batches.sort(key=lambda batch: str(batch.get("scope_month") or ""), reverse=True)
         total = len(filtered_batches)
@@ -123,19 +114,26 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         return payload
 
     @staticmethod
-    def _batch_filters(
+    def _filter_batches(
+        batches: list[dict[str, object]],
         filters: dict[str, object],
-        *,
-        relation_mode: str,
-    ) -> dict[str, object]:
-        return {
-            key: value
-            for key, value in {
-                **filters,
-                "relation_mode": relation_mode,
-            }.items()
-            if str(value or "").strip() not in {"", "all"}
-        }
+    ) -> list[dict[str, object]]:
+        resolved = list(batches)
+        for field_name, filter_key in (
+            ("scope_month", "month"),
+            ("batch_type", "type"),
+            ("status", "status"),
+            ("account_key", "account_key"),
+            ("status_bucket", "bucket"),
+        ):
+            value = str(filters.get(filter_key) or "").strip()
+            if value and value != "all":
+                resolved = [
+                    batch
+                    for batch in resolved
+                    if str(batch.get(field_name) or "") == value
+                ]
+        return resolved
 
     def _live_batch_service(
         self,

@@ -289,6 +289,8 @@ def test_all_page_query_reads_the_complete_canonical_source_without_a_month_pred
     assert "coalesce(candidate.txn_date, candidate.txn_month)" not in source_sql
     assert "or bank.txn_date >= %s::date" in source_sql
     assert "bank.*" not in source_sql.split("), bank_identities", 1)[0]
+    assert "select relation.*" not in source_sql
+    assert "batch.*" not in source_sql
     assert "confirmed_category_candidates" not in source_sql
     assert "manual_category_candidates" not in source_sql
     assert "from classified_with_semantics candidate" in source_sql

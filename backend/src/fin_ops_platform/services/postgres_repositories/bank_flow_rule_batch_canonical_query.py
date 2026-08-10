@@ -147,7 +147,19 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     from bank_identities
                 ),
                 active_relations as materialized (
-                    select relation.*
+                    select
+                        relation.case_id,
+                        relation.relation_mode,
+                        relation.status,
+                        relation.month_scope,
+                        relation.row_ids,
+                        relation.row_types,
+                        relation.note,
+                        relation.amount_check,
+                        relation.special_metadata,
+                        relation.created_by,
+                        relation.created_at,
+                        relation.updated_at
                     from app.workbench_pair_relations relation
                     cross join candidate_identity_array candidate_ids
                     where relation.status = 'active'
@@ -156,7 +168,19 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 ),
                 formal_items as materialized (
                     select
-                        batch.*,
+                        batch.batch_id,
+                        batch.status,
+                        batch.status_bucket,
+                        batch.version,
+                        batch.scope_month,
+                        batch.account_key,
+                        batch.total_amount,
+                        batch.bank_transaction_ids,
+                        batch.submitted_by,
+                        batch.submitted_at,
+                        batch.withdrawn_by,
+                        batch.withdrawn_at,
+                        batch.source_versions,
                         coalesce(
                             batch.raw_payload->'normalized_payload',
                             '{{}}'::jsonb

@@ -163,6 +163,7 @@ def build_live_bank_flow_rule_batch_service(
         apply_relation_repairs=False,
         relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         include_relation_backed_submitted_batches=False,
+        return_batches=False,
     )
     return batch_service
 

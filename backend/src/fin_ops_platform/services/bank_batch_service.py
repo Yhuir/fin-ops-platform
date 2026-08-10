@@ -190,6 +190,7 @@ class BankBatchService:
         refresh_scope_key: str = "all",
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
         include_relation_backed_submitted_batches: bool = True,
+        return_batches: bool = True,
     ) -> list[dict[str, Any]]:
         normalized_refresh_scope_key = str(refresh_scope_key or "all").strip() or "all"
         normalized_relation_mode = self._normalize_relation_mode(relation_mode)
@@ -207,6 +208,9 @@ class BankBatchService:
             )
 
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
+        current_row_ids = {
+            row_id for row in rows if (row_id := self._row_id(row))
+        }
         categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
         source_version_payload = dict(source_versions or {})
         eligible_types = self._eligible_batch_types(eligible_batch_types)
@@ -238,6 +242,7 @@ class BankBatchService:
             rows,
             categories,
             relation_mode=normalized_relation_mode,
+            current_row_ids=current_row_ids,
         )
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
         relation_backed_submitted_batches = (
@@ -278,7 +283,12 @@ class BankBatchService:
                 continue
             if batch.get("status") == "withdrawn" and batch_id in generated:
                 continue
-            if batch.get("status") == "submitted" and not self._submitted_batch_still_current(batch, rows, categories):
+            if batch.get("status") == "submitted" and not self._submitted_batch_still_current(
+                batch,
+                rows,
+                categories,
+                current_row_ids=current_row_ids,
+            ):
                 stale = deepcopy(batch)
                 stale["status"] = "stale"
                 stale["version"] = int(stale.get("version") or 1) + 1
@@ -333,7 +343,7 @@ class BankBatchService:
             batch_id: self._normalize_batch(batch)
             for batch_id, batch in other_relation_mode_batches.items()
         }
-        return self.list_batches()
+        return self.list_batches() if return_batches else []
 
     def _build_batches_for_month_scope(
         self,
@@ -494,6 +504,7 @@ class BankBatchService:
         categories: dict[str, dict[str, Any]],
         *,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        current_row_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         migrated_case_ids = {
             str(case_id).strip()
@@ -513,6 +524,7 @@ class BankBatchService:
             rows,
             categories,
             relation_mode=relation_mode,
+            current_row_ids=current_row_ids,
         ):
             case_id = str(relation.get("case_id") or "").strip()
             if case_id:
@@ -525,6 +537,7 @@ class BankBatchService:
         categories: dict[str, dict[str, Any]],
         *,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        current_row_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         normalized_relation_mode = self._normalize_relation_mode(relation_mode)
         facts: list[dict[str, Any]] = []
@@ -533,7 +546,12 @@ class BankBatchService:
                 continue
             if self._batch_relation_mode(batch) != normalized_relation_mode:
                 continue
-            if not self._submitted_batch_still_current(batch, rows, categories):
+            if not self._submitted_batch_still_current(
+                batch,
+                rows,
+                categories,
+                current_row_ids=current_row_ids,
+            ):
                 continue
             relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
             row_ids = [
@@ -2549,10 +2567,17 @@ class BankBatchService:
         batch: dict[str, Any],
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
+        *,
+        current_row_ids: set[str] | None = None,
     ) -> bool:
-        rows_by_id = {self._row_id(row): row for row in rows if self._row_id(row)}
+        _ = categories
+        resolved_row_ids = (
+            current_row_ids
+            if current_row_ids is not None
+            else {self._row_id(row) for row in rows if self._row_id(row)}
+        )
         for row_id in list(batch.get("row_ids") or []):
-            if rows_by_id.get(str(row_id)) is None:
+            if str(row_id) not in resolved_row_ids:
                 return False
         return True
 
@@ -2740,7 +2765,7 @@ class BankBatchService:
             enriched["status"] == "stale" and has_active_relation
         )
         enriched["blocked_reason"] = self._blocked_reason(enriched)
-        return deepcopy(enriched)
+        return enriched
 
     def _has_active_relation_for_batch(self, batch: dict[str, Any]) -> bool:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
