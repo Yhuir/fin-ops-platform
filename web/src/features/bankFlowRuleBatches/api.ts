@@ -12,7 +12,6 @@ import type {
   BankFlowRuleBatchCountMap,
   BankFlowRuleBatchSummary,
   SaveBankFlowRuleBatchTagSelectionRequest,
-  SubmitBankFlowRuleBatchesRequest,
   SubmitBankFlowRuleBatchRequest,
   SubmitBankFlowRuleBatchSelectionRequest,
   WithdrawBankFlowRuleBatchRequest,
@@ -628,27 +627,6 @@ export async function withdrawBankFlowRuleBatch({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_version: expectedVersion, reason }),
-      signal,
-    },
-  );
-  return mapMutationResult(payload);
-}
-
-export async function submitBankFlowRuleBatches({
-  batches,
-  signal,
-}: SubmitBankFlowRuleBatchesRequest): Promise<BankFlowRuleBatchMutationResult> {
-  const payload = await requestJson<ApiBankFlowRuleBatchMutationResult>(
-    "/api/bank-flow-rule-batches/submit",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        batches: batches.map((batch) => ({
-          batch_id: batch.batchId,
-          expected_version: batch.expectedVersion,
-        })),
-      }),
       signal,
     },
   );

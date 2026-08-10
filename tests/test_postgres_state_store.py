@@ -1083,13 +1083,15 @@ class PostgresStateStoreTests(unittest.TestCase):
     def test_active_workbench_pair_relation_loader_skips_history(self) -> None:
         class RelationRepository:
             def __init__(self) -> None:
-                self.calls: list[list[str]] = []
+                self.calls: list[dict[str, list[str]]] = []
 
             def load_active_workbench_pair_relations_for_row_ids(
                 self,
                 row_ids: list[str],
+                *,
+                case_ids: list[str] | None = None,
             ) -> dict[str, object]:
-                self.calls.append(list(row_ids))
+                self.calls.append({"row_ids": list(row_ids), "case_ids": list(case_ids or [])})
                 return {
                     "pair_relations": {
                         "case-1": {
@@ -1104,9 +1106,15 @@ class PostgresStateStoreTests(unittest.TestCase):
         store = object.__new__(PostgresStateStore)
         store._workbench_relation_repository = repository
 
-        snapshot = store.load_active_workbench_pair_relations_for_row_ids(["bank-row-1"])
+        snapshot = store.load_active_workbench_pair_relations_for_row_ids(
+            ["bank-row-1"],
+            case_ids=["case-1"],
+        )
 
-        self.assertEqual(repository.calls, [["bank-row-1"]])
+        self.assertEqual(
+            repository.calls,
+            [{"row_ids": ["bank-row-1"], "case_ids": ["case-1"]}],
+        )
         self.assertEqual(list(snapshot["pair_relations"]), ["case-1"])
 
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:

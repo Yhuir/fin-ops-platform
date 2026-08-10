@@ -153,14 +153,6 @@ export type WithdrawBankFlowRuleBatchRequest = {
   signal?: AbortSignal;
 };
 
-export type SubmitBankFlowRuleBatchesRequest = {
-  batches: Array<{
-    batchId: string;
-    expectedVersion: number | null;
-  }>;
-  signal?: AbortSignal;
-};
-
 export type BankFlowRuleBatchMutationResult = {
   batch: BankFlowRuleBatch | null;
   affectedMonths: string[];

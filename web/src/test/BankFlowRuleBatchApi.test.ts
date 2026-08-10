@@ -6,7 +6,6 @@ import {
   fetchBankFlowRuleBatches,
   saveBankFlowRuleBatchTagSelection,
   submitBankFlowRuleBatch,
-  submitBankFlowRuleBatches,
   submitBankFlowRuleBatchSelection,
   withdrawBankFlowRuleBatch,
 } from "../features/bankFlowRuleBatches/api";
@@ -462,7 +461,7 @@ describe("bank flow rule batch API", () => {
     expect(detail.directionCounts).toEqual({ expense: 1 });
   });
 
-  test("submits, withdraws, and bulk submits with expected version payloads", async () => {
+  test("submits and withdraws with expected version payloads", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       batch: {
         batch_id: "batch-fee-2026-05",
@@ -484,12 +483,6 @@ describe("bank flow rule batch API", () => {
 
     const submit = await submitBankFlowRuleBatch({ batchId: "batch-fee-2026-05", expectedVersion: 1, note: "确认" });
     await withdrawBankFlowRuleBatch({ batchId: "batch-fee-2026-05", expectedVersion: 2, reason: "撤回重核" });
-    await submitBankFlowRuleBatches({
-      batches: [
-        { batchId: "batch-fee-2026-05", expectedVersion: 1 },
-        { batchId: "batch-bonus-2026-05", expectedVersion: 3 },
-      ],
-    });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -509,19 +502,7 @@ describe("bank flow rule batch API", () => {
         body: JSON.stringify({ expected_version: 2, reason: "撤回重核" }),
       }),
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      "/api/bank-flow-rule-batches/submit",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          batches: [
-            { batch_id: "batch-fee-2026-05", expected_version: 1 },
-            { batch_id: "batch-bonus-2026-05", expected_version: 3 },
-          ],
-        }),
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   test("submits selected transaction ids as one batch", async () => {

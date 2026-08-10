@@ -579,3 +579,11 @@
 - 前端删除 freshness/status/version、refresh enqueue、202 与 polling 语义；submit-selection、submit、withdraw、reset 和规则保存成功后均只重新执行一次当前列表 GET。
 - disposable PostgreSQL 在 projection 表保持空集时验证 2 个批次的列表、汇总、详情与 active relation 一致性。10,000 批次、page size 200 的本机热查询 20 次样本：列表 p50 `780.802ms`、p95 `1621.686ms`、max `2007.049ms`；详情 p50 `15.408ms`、p95 `17.266ms`。列表组合 SQL 的 `EXPLAIN (ANALYZE, BUFFERS)` execution 为 `397.194–449.873ms`，shared read blocks 为 0。
 - 查询已复用现有主键、legacy id、分类和 relation GIN 索引；当前证据没有证明需要新增索引或 migration。本机样本不替代主控合并后的生产 HTTP 测量。
+
+## 2026-08-10 撤回后重提 500 根因修复
+
+- 页面 canonical 列表和详情数据正确；建设银行 20 条候选是三个 withdrawn 批次流水的精确并集，不存在 active relation 占用或半提交。
+- 根因是 relation command 按 `row_ids + case_ids` 查询 active relation 时，`PostgresStateStore.load_active_workbench_pair_relations_for_row_ids(...)` 包装层只接受 `row_ids`，运行时在原子写事务前抛出 `TypeError`。
+- 修复只补齐包装层已有契约并转发 `case_ids`；不改变候选分组、API、SQL、数据库 schema、relation mode 或最终 `SERIALIZABLE` 原子写边界。
+- 删除前端无调用且后端无 route 的旧 `submitBankFlowRuleBatches` 与 `/api/bank-flow-rule-batches/submit` 合同；保留普通流水 `submit-selection` 和内部往来 `/{batch_id}/submit`。
+- 完整回归覆盖三个同账户手续费批次分别提交、撤回、自然归并为一个候选并重提；生产发布后以当前 20 条真实候选执行一次受控写验证并记录性能、批次、关系、历史和审计结果。

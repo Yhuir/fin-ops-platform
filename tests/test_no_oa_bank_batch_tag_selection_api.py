@@ -824,6 +824,117 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         )
         self.assertEqual([batch["batch_type"] for batch in unsubmitted], ["fee"])
 
+    def test_bank_flow_rule_withdrawn_batches_regroup_and_resubmit(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="fees-bank-flow-regroup.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": f"2026-05-0{index}",
+                    "trade_time": f"2026-05-0{index} 10:20:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": f"{index}.00",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                }
+                for index in range(1, 4)
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [
+                {"transaction_id": row_id, "category_code": "fee"}
+                for row_id in row_ids
+            ],
+            actor="tester",
+        )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
+
+        submitted_batches = []
+        for row_id in row_ids:
+            response = app.handle_request(
+                "POST",
+                "/api/bank-flow-rule-batches/submit-selection",
+                body=json.dumps({
+                    "transaction_ids": [row_id],
+                    "scope_month": "2026-05",
+                    "note": "分批提交流水规则",
+                }),
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(response.status_code, 200)
+            submitted_batches.append(_json(response)["batch"])
+
+        for batch in submitted_batches:
+            response = app.handle_request(
+                "POST",
+                f"/api/bank-flow-rule-batches/{batch['batch_id']}/withdraw",
+                body=json.dumps({
+                    "expected_version": batch["version"],
+                    "reason": "合并同银行批次",
+                }),
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(_json(response)["batch"]["status"], "withdrawn")
+
+        app._bank_flow_rule_batch_application_service().refresh_batches(
+            scope_key="2026-05",
+            relation_mode="bank_flow_rule_batch",
+        )
+        drafts = app._bank_flow_rule_batch_service.list_batches(
+            {"relation_mode": "bank_flow_rule_batch", "status": "draft"}
+        )
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(drafts[0]["row_ids"], row_ids)
+        self.assertEqual(drafts[0]["row_count"], 3)
+        self.assertEqual(drafts[0]["total_amount"], "6.00")
+
+        resubmit_response = app.handle_request(
+            "POST",
+            "/api/bank-flow-rule-batches/submit-selection",
+            body=json.dumps({
+                "transaction_ids": row_ids,
+                "scope_month": "2026-05",
+                "note": "合并后重新提交",
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+        resubmitted = _json(resubmit_response)["batch"]
+
+        self.assertEqual(resubmit_response.status_code, 200)
+        self.assertEqual(resubmitted["row_ids"], row_ids)
+        self.assertEqual(resubmitted["row_count"], 3)
+        self.assertEqual(resubmitted["total_amount"], "6.00")
+        self.assertNotIn(
+            resubmitted["batch_id"],
+            {batch["batch_id"] for batch in submitted_batches},
+        )
+        self.assertEqual(
+            {
+                app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)["case_id"]
+                for row_id in row_ids
+            },
+            {resubmitted["batch_id"]},
+        )
+        self.assertTrue(
+            all(
+                app._bank_flow_rule_batch_service.get_batch(batch["batch_id"])["status"]
+                == "withdrawn"
+                for batch in submitted_batches
+            )
+        )
+
     def test_bank_flow_rule_withdraw_tolerates_missing_active_relation(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

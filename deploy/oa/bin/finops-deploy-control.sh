@@ -2272,22 +2272,22 @@ write_operation_e2e_smoke() {
 
 api_request_error() {
   local request_id="${1:-}"
-  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ "$request_id" =~ ^[0-9a-f]{32}$ ]] || die "request id must be 32 lowercase hexadecimal characters"
   [[ $# -le 1 ]] || die "api-request-error accepts only request id"
   local match
   match="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat \
-    | grep -F "request_id=$request_id" | tail -n 1 || true)"
+    | grep -F "\"request_id\": \"$request_id\"" | tail -n 1 || true)"
   [[ -n "$match" ]] || die "request error not found in the bounded journal window"
   printf '%s\n' "$match"
 }
 
 api_request_trace() {
   local request_id="${1:-}"
-  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ "$request_id" =~ ^[0-9a-f]{32}$ ]] || die "request id must be 32 lowercase hexadecimal characters"
   [[ $# -le 1 ]] || die "api-request-trace accepts only request id"
   local journal line_number trace
   journal="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat)"
-  line_number="$(printf '%s\n' "$journal" | grep -n -F "request_id=$request_id" | tail -n 1 | cut -d: -f1 || true)"
+  line_number="$(printf '%s\n' "$journal" | grep -n -F "\"request_id\": \"$request_id\"" | tail -n 1 | cut -d: -f1 || true)"
   [[ "$line_number" =~ ^[0-9]+$ ]] || die "request trace not found in the bounded journal window"
   trace="$(
     printf '%s\n' "$journal" \
@@ -2307,7 +2307,7 @@ api_request_trace() {
 
 api_request_timing() {
   local request_id="${1:-}"
-  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ "$request_id" =~ ^[0-9a-f]{32}$ ]] || die "request id must be 32 lowercase hexadecimal characters"
   [[ $# -le 1 ]] || die "api-request-timing accepts only request id"
   local matches
   matches="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat \

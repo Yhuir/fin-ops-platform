@@ -2,6 +2,14 @@
 
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
+## 2026-08-10 撤回后自然归并重提回归
+
+- `tests/test_postgres_state_store.py` 保护 active relation 窄查询把 `row_ids` 与可选 `case_ids` 一起转发到 PostgreSQL repository。
+- `tests/test_workbench_relation_command_repository_adapter.py` 使用真实 `adapter -> PostgresStateStore -> repository` 组合，防止包装层签名再次偏离 relation command I/O。
+- `tests/test_no_oa_bank_batch_tag_selection_api.py` 覆盖同月、同账户、同标签的三个批次分别提交、全部撤回、自动形成一个候选并重新提交；断言旧批次保持 withdrawn，全部流水只属于新的单一 active relation。
+- `web/src/test/BankFlowRuleBatchApi.test.ts` 删除无后端 route、无生产调用的旧 `/api/bank-flow-rule-batches/submit` client 合同；普通流水只使用 `submit-selection`，内部往来继续使用 `/{batch_id}/submit`。
+- 第 1、2、3、6、7 类适用并覆盖；第 4 类不适用，因为本页保持 PostgreSQL canonical direct-read；第 5 类行为未改，复跑既有页面交互与 Browser E2E 回归。
+
 ## 2026-07-31 标签管理抽屉回归
 
 - `web/src/test/BankFlowRuleBatchPage.test.tsx` 保护共享 `AppDrawer`、`min(960px, 92vw)`、busy dismiss、权限、dirty/form/table/save/nested dialog 行为，并阻止旧 backdrop/aside/header/close/footer shell 回归。

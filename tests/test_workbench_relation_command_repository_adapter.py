@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
     WorkbenchRelationCommandRepositoryAdapter,
@@ -199,6 +200,37 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         self.assertEqual(
             repository.active_scoped_loads,
             [{"row_ids": ["bank-1"], "case_ids": []}],
+        )
+
+    def test_active_overlap_load_forwards_case_ids_through_postgres_state_store(self) -> None:
+        pair_service = SnapshotBlockingPairRelationService()
+        repository = CaptureRepository()
+        repository.snapshot = {
+            "pair_relations": {
+                "CASE-1": {
+                    "case_id": "CASE-1",
+                    "row_ids": ["bank-1"],
+                    "status": "active",
+                },
+            },
+        }
+        store = object.__new__(PostgresStateStore)
+        store._workbench_relation_repository = repository
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=store,
+            save_repository=False,
+        )
+
+        snapshot = adapter.load_active_workbench_pair_relations_for_row_ids(
+            ["bank-1"],
+            case_ids=["CASE-1"],
+        )
+
+        self.assertEqual(list(snapshot["pair_relations"]), ["CASE-1"])
+        self.assertEqual(
+            repository.active_scoped_loads,
+            [{"row_ids": ["bank-1"], "case_ids": ["CASE-1"]}],
         )
 
     def test_save_forwards_to_repository_and_applies_changed_case_delta(self) -> None:

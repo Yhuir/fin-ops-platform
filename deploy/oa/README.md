@@ -548,6 +548,7 @@ sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-na
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
   /opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json --apply-stdin 10
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>
+sudo /usr/local/sbin/finops-deploy-control api-request-trace <request-id>
 sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
   --scope workbench_relation=all --dry-run
@@ -617,8 +618,9 @@ apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固�
 将同步 relation 写响应门禁固定为 `5000ms`，exact receipt 绑定的异步 refresh 收敛门禁为
 `30000ms`（总等待上限 `120s`），consumer HTTP 仍为 `1000ms`；三者是独立合同，该配置不构成
 “所有页面一秒级真同步”的性能声明。
-`api-request-error` 只接受 API 返回的 12 位小写十六进制 request ID，并只从最近两小时
-`fin-ops.service` journal 返回匹配的单行异常摘要；它不开放任意 journal 参数或日志全文。
+`api-request-error` 只接受 API 返回的 32 位小写十六进制 request ID，并按结构化 JSON
+`request_id` 字段从最近两小时 `fin-ops.service` journal 返回匹配的单行异常摘要；它不开放任意
+journal 参数或日志全文。
 `api-request-trace` 使用同一严格 request ID，从该摘要开始最多返回 64 行，并在 traceback 的异常终止行
 立即停止；它不包含 locals、不接受任意时间窗或 journal 参数，用于把生产 500 精确定位到文件和行号。
 `api-request-timing` 使用同一 request ID，只返回最近两小时最多 32 条结构化
