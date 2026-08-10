@@ -133,7 +133,7 @@
 - 目标：当时在 AppHealth 运维状态主页面展示流水、手工发票和 OA 派生事件的每次数量，默认只展示最新 5 条，并通过右侧抽屉查看全量历史；同时把发票来源统计收敛为 `手工导入` 和 `OA 解析` 两类。2026-07-07 起，导入历史已收敛为只展示手工银行流水和发票导入批次。
 - 影响范围：`OperationsDashboardService`、`/api/operations/app-health-dashboard` response shape、`AppHealthOperationsPage`、前端 AppHealth 类型、模块文档和运维/API 合同；不新增 read model、worker 或写操作。
 - 关键决策：发票 inventory 的事实源从 OA OCR cache 改为 canonical `app.invoices.source_links`。`manual_invoice_import` 计入 `手工导入`，`oa_attachment_invoice` 计入 `OA 解析`，同时有 OA 来源但没有手工导入来源的 active 发票计入 `OA 解析` 后面的括号数。`普通导入` 不再展示；`ETC` 已包含在手工导入中，不单独展示。OA 解析仍是校验/补充来源：只有不存在于发票池并被 promotion 的 OA 附件发票才通过 canonical source link 进入统计。
-- 导入历史 I/O：后端输出 `data_inventory.import_events` 全量列表。当前只读取 `app.import_batches.success_count` 中的手工银行流水和发票导入批次；OA 解析和 OA 单据同步已从导入历史移除。前端主页面截取最新 5 条，抽屉展示全量。
+- 导入历史 I/O：`data_inventory.import_events` 只输出统一生命周期口径的最新 5 条；抽屉通过 admin-only 分页接口按需读取全部历史。OA 解析和 OA 单据同步不属于文件导入历史。
 - 文档影响：更新本模块 README、boundary-io、tests、运维 monitoring 和 API contracts。
 - 测试覆盖：`tests/test_operations_dashboard_service.py` 覆盖 source_links 统计、OA supplementary count、导入事件和 import history 降级；`tests/test_app_health_api.py` 覆盖 admin dashboard API 新 shape；`web/src/test/AppHealthOperationsPage.test.tsx` 覆盖页面不显示 `普通导入`/`ETC`、`OA 解析` 括号数、最新 5 条和抽屉全量历史。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest -q tests/test_operations_dashboard_service.py`；`PYTHONPATH=backend/src python3 -m pytest -q tests/test_app_health_api.py`；`cd web && npm test -- --run src/test/AppHealthOperationsPage.test.tsx`。

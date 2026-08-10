@@ -8,11 +8,13 @@ from typing import Any
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.external_control_evidence import EXTERNAL_CONTROL_EVIDENCE_CONTRACT_VERSION
+from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.page_audit_registry import PageAuditRegistration
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue, evaluate_audit_issues
 from fin_ops_platform.services.postgres_repositories.external_control_evidence_audit import (
     audit_external_control_evidence,
 )
+from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_ALIASES
 from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
@@ -240,7 +242,10 @@ def _expected_inventory(connection: Any) -> dict[str, Any]:
     invoice = connection.fetch_one(_EXPECTED_INVOICE_SQL) or {}
     completed_statuses = sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)
     oa = connection.fetch_one(_EXPECTED_OA_SQL, (completed_statuses, completed_statuses)) or {}
-    import_events = connection.fetch_all(_EXPECTED_IMPORT_EVENTS_SQL) or []
+    import_events = ImportLifecycleService(PostgresImportLifecycleRepository(connection)).list_events(
+        page=1,
+        page_size=5,
+    )["rows"]
     bank_latest = _iso(bank.get("latest_synced_at"))
     invoice_latest = _iso(invoice.get("latest_synced_at"))
     oa_latest = _iso(oa.get("oa_latest_synced_at"))
@@ -292,20 +297,7 @@ def _expected_inventory(connection: Any) -> dict[str, Any]:
                 _source("oa_items", "明细", oa.get("oa_items_count"), oa_latest),
             ],
         ),
-        "import_events": [
-            {
-                "key": str(row.get("event_id") or ""),
-                "source_key": str(row.get("source_key") or ""),
-                "label": str(row.get("label") or ""),
-                "source_name": str(row.get("source_name") or ""),
-                "imported_by": str(row.get("imported_by") or ""),
-                "count": _integer(row.get("count")),
-                "supplementary_count": None,
-                "imported_at": _iso(row.get("imported_at")),
-                "status": str(row.get("status") or ""),
-            }
-            for row in import_events
-        ],
+        "import_events": import_events,
     }
 
 
@@ -631,20 +623,4 @@ select
     (select max(last_success_at) from app.oa_sync_watermarks),
     (select max(synced_at) from app.oa_applications)
   ) as oa_latest_synced_at
-"""
-
-
-_EXPECTED_IMPORT_EVENTS_SQL = """
-select
-  coalesce(legacy_mongo_id, id::text) as event_id,
-  case when batch_type = 'bank_transaction' then 'bank_transactions' else 'manual' end as source_key,
-  case when batch_type = 'bank_transaction' then '流水导入' else '手工导入' end as label,
-  source_name,
-  imported_by,
-  success_count::bigint as count,
-  imported_at,
-  status
-from app.import_batches
-where batch_type in ('bank_transaction', 'input_invoice', 'output_invoice')
-order by imported_at desc, event_id desc
 """

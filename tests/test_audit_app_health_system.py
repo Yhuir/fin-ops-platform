@@ -14,6 +14,8 @@ from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.app_health_system_audit import (
+    _expected_inventory,
+    _inventory_issues,
     audit_app_health_system_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
@@ -146,6 +148,7 @@ class FakeSystemAuditConnection:
     def __init__(self) -> None:
         self.transaction_count = 0
         self.executed: list[str] = []
+        self.import_rows: list[dict[str, object]] = []
 
     @contextmanager
     def transaction(self):
@@ -180,12 +183,15 @@ class FakeSystemAuditConnection:
                 "oa_records_in_progress_count": 0,
                 "oa_items_count": 0,
             }
+        if "count(*)::bigint as total from app.import_batches batch" in normalized:
+            return {"total": len(self.import_rows)}
         raise AssertionError(f"Unexpected fetch_one SQL: {sql}")
 
     def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
         normalized = " ".join(sql.split()).lower()
         if "from app.import_batches" in normalized:
-            return []
+            limit, offset = params or (len(self.import_rows), 0)
+            return self.import_rows[int(offset) : int(offset) + int(limit)]
         if "from audit.external_control_evidence" in normalized:
             return []
         raise AssertionError(f"Unexpected fetch_all SQL: {sql}")
@@ -222,6 +228,25 @@ class StubPageProofRepository(PostgresOperationsAuditRepository):
 
 
 class AppHealthSystemAuditTests(unittest.TestCase):
+    def test_import_event_audit_uses_the_same_bounded_lifecycle_contract(self) -> None:
+        connection = FakeSystemAuditConnection()
+        connection.import_rows = [
+            {
+                "event_id": f"event-{index}",
+                "source_key": "manual",
+                "label": "手工导入",
+                "count": 1,
+                "batch_status": "completed",
+                "file_status": "confirmed",
+            }
+            for index in range(7)
+        ]
+
+        expected = _expected_inventory(connection)
+
+        self.assertEqual(len(expected["import_events"]), 5)
+        self.assertEqual(_inventory_issues(expected=expected, actual=deepcopy(expected)), [])
+
     def test_system_repository_uses_one_outer_snapshot_for_every_page(self) -> None:
         connection = FakeSystemAuditConnection()
         repository = StubPageProofRepository(connection)
