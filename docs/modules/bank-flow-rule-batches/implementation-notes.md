@@ -1,5 +1,9 @@
 # 流水规则批量处理实施记录
 
+## 2026-08-10 HeroUI 批次筛选收敛
+
+- 未提交/已提交/历史改用共享 HeroUI `ToggleButtonGroup`，月份改用共享“全部 + 年/月”控件；删除旧嵌套 segment、原生 month input 和对应 CSS，canonical 列表/提交/撤回 I/O 不变。
+
 ## 2026-08-08 submit-selection canonical 事实源闭环
 
 - 生产 `submit-selection` 曾先从 `ImportNormalizationService._transactions_by_id` 和启动时 category/settings snapshot 生成 expected proof，再由 PostgreSQL `SERIALIZABLE` guard 用当前事实生成 actual proof；两套事实源导致页面刷新后仍反复返回 `bank_flow_rule_batch_candidate_conflict`。

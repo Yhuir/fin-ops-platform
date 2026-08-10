@@ -909,9 +909,8 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "年月选择" }));
-    await user.click(screen.getByRole("radio", { name: "2026" }));
-    await user.click(screen.getByRole("radio", { name: "五月" }));
+    await user.click(screen.getByRole("button", { name: "税金抵扣月份：2026年3月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "税金抵扣月份选择器" })).getByRole("button", { name: "五月" }));
 
     expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
   });

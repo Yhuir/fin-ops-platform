@@ -1,5 +1,9 @@
 # 批量账务 实施记录
 
+## 2026-08-10 HeroUI 批次筛选收敛
+
+- 未提交/已提交改用 HeroUI `ToggleButtonGroup`，流水年份改用共享年份控件；删除旧 segment 和 number input 外壳，批量账务 API、关联/撤回命令与 direct-read I/O 不变。
+
 ## 2026-08-05 - canonical 标签 chip 与批量账务标签规则
 
 - 目标：左栏显示银行明细当前 effective tag；未提交列表只保留规则勾选标签，提供紧凑 HeroUI 右侧抽屉管理选择。

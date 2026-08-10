@@ -196,7 +196,7 @@ test.describe("input invoice usage relation browser fan-out", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /智能工厂项目/ })).toBeVisible());
     });
     const linkedProject = page.getByRole("button", { name: /智能工厂项目/ });

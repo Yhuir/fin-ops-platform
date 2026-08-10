@@ -2,14 +2,15 @@ import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
-import MonthPicker from "../components/MonthPicker";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
 import OutputInvoiceCollectionExportDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer";
 import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollections/OutputInvoiceCollectionsTable";
+import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -310,15 +311,21 @@ export default function OutputInvoiceCollectionsPage() {
           <div className="output-invoice-collections-content">
             <PageToolbar className="output-invoice-collections-query">
               <div className="output-invoice-collections-query__grid">
-                <div className="output-invoice-collections-field">
-                  <MonthPicker
-                    allOptionLabel="全部时间"
-                    ariaLabel="销项发票月份"
-                    caption={null}
-                    onChange={(month) => setQuery((current) => ({ ...current, month, page: 1 }))}
-                    value={query.month}
-                  />
-                </div>
+                <BusinessPeriodPicker
+                  allowedModes={["month"]}
+                  ariaLabel="销项发票月份"
+                  onChange={(selection) => setQuery((current) => ({
+                    ...current,
+                    month: selection.mode === "all" ? "" : selection.month,
+                    page: 1,
+                  }))}
+                  selection={{
+                    mode: query.month ? "month" : "all",
+                    year: (query.month || DEFAULT_MONTH).slice(0, 4),
+                    month: query.month || DEFAULT_MONTH,
+                  }}
+                  years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
+                />
                 <QuerySearch
                   ariaLabel="搜索销项发票收款情况"
                   className="output-invoice-collections-search-cluster"

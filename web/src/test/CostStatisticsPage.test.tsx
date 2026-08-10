@@ -78,7 +78,7 @@ function expectProjectCostShell() {
   const page = heading.closest(".cost-page");
   expect(page).not.toBeNull();
   expect(page).not.toHaveClass("MuiBox-root");
-  const viewSwitcher = screen.getByRole("tablist", { name: "成本统计视图切换" });
+  const viewSwitcher = screen.getByRole("radiogroup", { name: "成本统计视图切换" });
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
   expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
@@ -125,9 +125,28 @@ function renderCostStatisticsPage(session: SessionContextValue = staticSession) 
 }
 
 async function chooseScopeOption(user: ReturnType<typeof userEvent.setup>, triggerName: string, optionName: string) {
-  await user.click(screen.getByRole("button", { name: triggerName }));
-  const picker = await screen.findByRole("dialog", { name: /时间范围选择器/ });
+  const groupName = triggerName.split("：")[0];
+  if (optionName === "全部") {
+    await user.click(within(screen.getByRole("group", { name: groupName })).getByRole("button", { name: "全部" }));
+    return;
+  }
+  const trigger = screen.queryByRole("button", { name: triggerName });
+  if (trigger) {
+    await user.click(trigger);
+    const picker = await screen.findByRole("dialog", { name: /时间范围选择器/ });
+    const modeName = /^\d{4}年$/.test(optionName) ? "按年" : "按月";
+    const modeButton = within(picker).queryByRole("button", { name: modeName });
+    if (modeButton && modeButton.getAttribute("aria-pressed") !== "true") await user.click(modeButton);
+    await user.click(within(picker).getByRole("button", { name: optionName }));
+    return;
+  }
+  const picker = screen.getByRole("group", { name: groupName });
   await user.click(within(picker).getByRole("button", { name: optionName }));
+}
+
+function expectInlineTimeSelection(optionName: string) {
+  const picker = screen.getByRole("group", { name: "时间统计时间范围" });
+  expect(within(picker).getByRole("button", { name: optionName })).toHaveAttribute("aria-pressed", "true");
 }
 
 describe("Cost statistics page", () => {
@@ -159,10 +178,12 @@ describe("Cost statistics page", () => {
     expect(css).not.toContain(".cost-page .stat-card");
     expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
-    expect(css).toMatch(/\.cost-view-switcher\s*{[^}]*border:\s*1px solid var\(--fp-border\)[^}]*background:\s*var\(--fp-surface-muted\)/s);
+    expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border\)[^}]*background:\s*var\(--fp-surface-muted\)/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-scope-trigger\s*{[^}]*min-height:\s*36px[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.cost-scope-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\)/s);
+    expect(css).toMatch(/\.business-period-trigger\s*{[^}]*min-height:\s*34px/s);
+    expect(css).toMatch(/\.business-period-popover\s*{[^}]*width:\s*min\(340px,\s*calc\(100vw - 24px\)\)/s);
+    expect(css).toMatch(/\.cost-time-workspace,\s*\.cost-explorer-grid\s*{[^}]*height:\s*var\(--cost-workspace-height\)/s);
+    expect(css).toMatch(/\.cost-analysis-layout\.time-layout\s*{[^}]*grid-template-columns:\s*minmax\(190px, 15%\) minmax\(0, 1fr\)/s);
     expect(css).toMatch(/\.cost-explorer-list\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item-main strong\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s);
@@ -201,7 +222,7 @@ describe("Cost statistics page", () => {
     const heading = await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
     const statusCopy = screen.getByText("正在加载成本统计");
     const status = statusCopy.closest('[role="status"]');
-    const tablist = screen.getByRole("tablist", { name: "成本统计视图切换" });
+    const tablist = screen.getByRole("radiogroup", { name: "成本统计视图切换" });
     const overlay = screen.getByTestId("cost-statistics-interaction-overlay");
 
     expect(status).toHaveClass("cost-lock-status--loading");
@@ -224,12 +245,12 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    const bankViewButton = screen.getByRole("button", { name: "按银行" });
+    const bankViewButton = screen.getByRole("radio", { name: "按银行" });
     await user.click(bankViewButton);
 
     expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
   });
@@ -243,7 +264,7 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expectProjectCostShell();
-    expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
+    expect(screen.getByRole("radio", { name: "按时间" })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByText(/以已配对的支出流水为基准/)).not.toBeInTheDocument();
     expect(screen.queryByText("费用类型数")).not.toBeInTheDocument();
     expect(screen.queryByText("支出流水")).not.toBeInTheDocument();
@@ -271,7 +292,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("总金额 15360.00")).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看流水 项目客户 2026-03-22 10:30:00 2000.00" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
-    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
+    expectInlineTimeSelection("三月");
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
@@ -291,7 +312,7 @@ describe("Cost statistics page", () => {
     const nextTimeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
     expectProjectCostTable("按时间统计表");
     expect(await within(nextTimeGrid).findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
+    expectInlineTimeSelection("四月");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
@@ -394,8 +415,8 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按项目" }));
-    expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
+    expect(await screen.findByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=50&include_statistics=false",
       expect.any(Object),
@@ -508,7 +529,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按项目" }));
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
 
     const projectLane = (await screen.findByRole("heading", { name: "项目名" })).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
@@ -541,7 +562,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按项目" }));
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
 
     const projectLane = (await screen.findByRole("heading", { name: "项目名" })).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
@@ -559,7 +580,7 @@ describe("Cost statistics page", () => {
     expect(projectCalls[0]).toContain("project_name=%E4%BA%91%E5%8D%97%E6%BA%AF%E6%BA%90%E7%A7%91%E6%8A%80");
 
     const scopeCallStart = fetchMock.mock.calls.length;
-    await chooseScopeOption(user, "项目统计时间范围：全部时间", "四月");
+    await chooseScopeOption(user, "项目统计时间范围：年月", "四月");
     expect(await screen.findByRole("button", { name: "项目统计时间范围：2026年4月" })).toBeInTheDocument();
     await waitFor(() => expect(projectLane).toHaveAttribute("aria-busy", "false"));
 
@@ -583,7 +604,7 @@ describe("Cost statistics page", () => {
       renderCostStatisticsPage();
 
       expect(await findCostStatisticsHeading()).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "按项目" }));
+      await user.click(screen.getByRole("radio", { name: "按项目" }));
 
       const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
       expect(projectLane).not.toBeNull();
@@ -614,15 +635,15 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按项目" }));
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
 
-    expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
     const projectLane = () => screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane") as HTMLElement;
     expect(within(projectLane()).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(projectLane()).getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
     expect(within(projectLane()).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
 
-    await chooseScopeOption(user, "项目统计时间范围：全部时间", "2026年");
+    await chooseScopeOption(user, "项目统计时间范围：年月", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(await within(projectLane()).findByText("云南溯源科技")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeInTheDocument();
@@ -633,10 +654,10 @@ describe("Cost statistics page", () => {
     expect(await within(projectLane()).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
     expect(within(projectLane()).queryByText("云南溯源科技")).not.toBeInTheDocument();
 
-    await chooseScopeOption(user, "项目统计时间范围：2026年4月", "全部时间");
+    await chooseScopeOption(user, "项目统计时间范围：2026年4月", "全部");
     expect(await within(projectLane()).findByText("云南溯源科技")).toBeInTheDocument();
     expect(await within(projectLane()).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
   });
 
   test("expense type view shows time, project name, amount and expense content in a drawer drilldown", async () => {
@@ -647,7 +668,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
     await waitForCostStatisticsReady();
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
@@ -684,7 +705,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按标签" }));
+    await user.click(screen.getByRole("radio", { name: "按标签" }));
 
     expect(screen.getByRole("heading", { name: "按标签统计" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeInTheDocument();
@@ -759,7 +780,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按标签" }));
+    await user.click(screen.getByRole("radio", { name: "按标签" }));
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expect(within(dialog).getByRole("button", { name: "按标签" })).toHaveAttribute("aria-pressed", "true");
@@ -789,7 +810,7 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findAllByText("当前时间范围没有收入或支出流水。")).toHaveLength(1);
     expect(screen.getByText("当前时间范围没有可用于流水统计的收入或支出流水。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年5月" })).toBeInTheDocument();
+    expectInlineTimeSelection("五月");
     await chooseScopeOption(user, "时间统计时间范围：2026年5月", "三月");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
@@ -802,10 +823,10 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按银行" }));
+    await user.click(screen.getByRole("radio", { name: "按银行" }));
     await waitForCostStatisticsReady();
 
-    expect(await screen.findByRole("button", { name: "银行统计时间范围：全部时间" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "银行统计时间范围：年月" })).toBeInTheDocument();
     const bankLane = screen.getByRole("heading", { name: "银行账户" }).closest(".cost-explorer-lane");
     expect(bankLane).not.toBeNull();
     expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
@@ -834,7 +855,7 @@ describe("Cost statistics page", () => {
     expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
 
-    await chooseScopeOption(user, "银行统计时间范围：全部时间", "2026年");
+    await chooseScopeOption(user, "银行统计时间范围：年月", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     const yearBankLane = screen.getByRole("heading", { name: "银行账户" }).closest(".cost-explorer-lane");
     expect(yearBankLane).not.toBeNull();
@@ -860,23 +881,24 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按时间" }));
+    await user.click(screen.getByRole("radio", { name: "按时间" }));
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
-    expect(await screen.findByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
+    await screen.findByRole("grid", { name: "按时间统计表" });
+    expectInlineTimeSelection("四月");
     expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
     await chooseScopeOption(user, "OA费用类型统计时间范围：2026年3月", "2026年");
     expect(screen.getByRole("button", { name: "OA费用类型统计时间范围：2026年" })).toBeInTheDocument();
     expect(await screen.findByText("交通费")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "按时间" }));
-    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按时间" }));
+    expectInlineTimeSelection("四月");
     expect(await screen.findByRole("button", { name: "查看流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
   });
 
-  test("scope picker floats under the range button instead of taking layout height", async () => {
+  test("time view keeps its period picker permanently visible in the fixed left rail", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -884,16 +906,16 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按时间" }));
-    const trigger = screen.getByRole("button", { name: "时间统计时间范围：2026年3月" });
-    const scopeControls = trigger.closest(".cost-scope-controls");
-    await user.click(trigger);
-    expect(scopeControls).not.toBeNull();
-    expect(scopeControls).not.toHaveClass("MuiTabs-root");
-    expect(await screen.findByRole("dialog", { name: "时间统计时间范围选择器" })).toHaveClass("popover__dialog");
+    const timeTab = screen.getByRole("radio", { name: "按时间" });
+    await user.click(timeTab);
+    const rail = document.querySelector(".cost-time-filter-rail");
+    expect(rail).not.toBeNull();
+    expect(within(rail as HTMLElement).getByRole("button", { name: "全部" })).toBeInTheDocument();
+    expect(within(rail as HTMLElement).getByRole("button", { name: "三月" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("dialog", { name: "时间统计时间范围选择器" })).not.toBeInTheDocument();
   });
 
-  test("scope picker closes when clicking the active button again or clicking outside", async () => {
+  test("popover period picker closes when clicking the trigger again or clicking outside", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -901,18 +923,19 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    const monthScopeButton = await screen.findByRole("button", { name: "时间统计时间范围：2026年3月" });
-    expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
+    const monthScopeButton = await screen.findByRole("button", { name: "项目统计时间范围：年月" });
+    expect(screen.queryByRole("button", { name: "按年" })).not.toBeInTheDocument();
 
     await user.click(monthScopeButton);
-    expect(screen.getByRole("button", { name: "三月" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "按年" })).toBeInTheDocument();
 
     await user.click(monthScopeButton);
-    expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "按年" })).not.toBeInTheDocument();
     await user.click(monthScopeButton);
-    expect(screen.getByRole("button", { name: "三月" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "按年" })).toBeInTheDocument();
     await user.click(document.body);
-    expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "按年" })).not.toBeInTheDocument();
   });
 
   test("only replaces the content surface while a new view is loading", async () => {
@@ -925,15 +948,15 @@ describe("Cost statistics page", () => {
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "按银行" }));
+    await user.click(screen.getByRole("radio", { name: "按银行" }));
 
     expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.queryByRole("grid", { name: "按时间统计表" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
-    expect(screen.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("button", { name: "银行统计时间范围：年月" })).toBeInTheDocument();
   });
 
   test("only replaces the content surface while the time range is loading", async () => {
@@ -945,7 +968,7 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
 
-    expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeEnabled();
+    expectInlineTimeSelection("四月");
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
@@ -1068,7 +1091,7 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
-    expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^统计月份：/ })).toBeInTheDocument();
     await user.click(within(dialog).getByLabelText("自定义时间区间（精确到日）"));
     fireEvent.change(within(dialog).getByLabelText("开始日期"), {
       target: { value: "2026-03-10" },
@@ -1144,8 +1167,8 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按项目" }));
-    expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按项目" }));
+    expect(await screen.findByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
@@ -1179,7 +1202,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
       expect.any(Object),
@@ -1194,7 +1217,7 @@ describe("Cost statistics page", () => {
     expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按费用类型" })).toHaveAttribute("aria-pressed", "true");
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
-    expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /^统计月份：/ })).toBeInTheDocument();
     await user.click(within(dialog).getByLabelText("自定义时间区间（精确到日）"));
     fireEvent.change(within(dialog).getByLabelText("开始日期"), {
       target: { value: "2026-03-18" },

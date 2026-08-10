@@ -325,7 +325,7 @@ test.describe("settings data reset browser flow", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();

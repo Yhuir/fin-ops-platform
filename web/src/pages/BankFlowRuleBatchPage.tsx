@@ -1,10 +1,11 @@
-import { Button, Checkbox, Input } from "@heroui/react";
+import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
@@ -733,46 +734,33 @@ export default function BankFlowRuleBatchPage() {
         <StatePanel compact tone="warning">当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。</StatePanel>
       ) : null}
       <div aria-label="批次筛选" className="bank-flow-rule-batches-filter" role="region">
-        <div aria-label="批次状态" className="bank-flow-rule-batches-segment" role="group">
-          <Button
-            aria-pressed={bucket === "unsubmitted"}
-            className={cx("bank-flow-rule-batches-segment__button", bucket === "unsubmitted" && "bank-flow-rule-batches-segment__button--active")}
-            onPress={() => selectBucket("unsubmitted")}
-            size="sm"
-            variant={bucket === "unsubmitted" ? "primary" : "secondary"}
-          >
-            未提交 {unsubmittedCount}
-          </Button>
-          <Button
-            aria-pressed={bucket === "submitted"}
-            className={cx("bank-flow-rule-batches-segment__button", bucket === "submitted" && "bank-flow-rule-batches-segment__button--active")}
-            onPress={() => selectBucket("submitted")}
-            size="sm"
-            variant={bucket === "submitted" ? "primary" : "secondary"}
-          >
-            已提交 {payload.summary.submittedCount}
-          </Button>
-          <Button
-            aria-pressed={bucket === "withdrawn"}
-            className={cx("bank-flow-rule-batches-segment__button", bucket === "withdrawn" && "bank-flow-rule-batches-segment__button--active")}
-            onPress={() => selectBucket("withdrawn")}
-            size="sm"
-            variant={bucket === "withdrawn" ? "primary" : "secondary"}
-          >
-            历史 {payload.summary.withdrawnCount}
-          </Button>
-        </div>
-        <div aria-label="批次月份" className="bank-flow-rule-batches-field" role="group">
-          <Button
-            aria-pressed={month === ""}
-            onPress={() => handleMonthChange("")}
-            size="sm"
-            variant={month === "" ? "primary" : "secondary"}
-          >
-            全部
-          </Button>
-          <Input aria-label="选择月份" onChange={(event) => handleMonthChange(event.target.value)} type="month" value={month} />
-        </div>
+        <ToggleButtonGroup
+          aria-label="批次状态"
+          className="bank-flow-rule-batches-segment"
+          disallowEmptySelection
+          onSelectionChange={(keys) => {
+            const [next] = Array.from(keys);
+            if (next === "unsubmitted" || next === "submitted" || next === "withdrawn") selectBucket(next);
+          }}
+          selectedKeys={new Set([bucket])}
+          selectionMode="single"
+          size="sm"
+        >
+          <ToggleButton id="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
+          <ToggleButton id="submitted"><ToggleButtonGroup.Separator />已提交 {payload.summary.submittedCount}</ToggleButton>
+          <ToggleButton id="withdrawn"><ToggleButtonGroup.Separator />历史 {payload.summary.withdrawnCount}</ToggleButton>
+        </ToggleButtonGroup>
+        <BusinessPeriodPicker
+          allowedModes={["month"]}
+          ariaLabel="批次月份"
+          onChange={(selection) => handleMonthChange(selection.mode === "all" ? "" : selection.month)}
+          selection={{
+            mode: month ? "month" : "all",
+            year: (month || currentMonth()).slice(0, 4),
+            month: month || currentMonth(),
+          }}
+          years={nearbyBusinessYears(month || currentMonth())}
+        />
         <PageControls
           disabled={loading}
           label="流水规则批次分页"

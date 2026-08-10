@@ -159,12 +159,7 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", defaultYear);
-    expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute(
-      "aria-valuenow",
-      String(Number(defaultMonthNumber)),
-    );
+    expect(screen.getByRole("button", { name: `税金抵扣月份：${defaultYear}年${Number(defaultMonthNumber)}月` })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", expect.any(Object));
     expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?"))).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith(`/api/tax-offset?month=${defaultMonth}`, expect.any(Object));

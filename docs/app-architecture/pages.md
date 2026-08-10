@@ -16,6 +16,11 @@
 - 操作闭环 API client：`web/src/features/operationBarrier/api.ts`
 - 后端路由：`backend/src/fin_ops_platform/app/routes_*.py` 与仍在 `server.py` 的 legacy handler
 
+## 共享筛选控件合同
+
+- 页面级年月筛选统一复用 `web/src/components/common/BusinessPeriodPicker.tsx`：使用 HeroUI `Button`、`Popover` 与 `Spinner`，支持“全部 + 年/月”及永久展开两种布局；不再新增原生 `input[type=month]`、页面私有年月弹层或并行月份组件。业务只允许精确月份的税金抵扣和导出参数不虚构“全部”语义。
+- 页面查询统一优先复用 `QuerySearch`，状态切换统一使用 HeroUI `ToggleButtonGroup`；全站业务按钮使用 6px 小圆角。共享控件只输出筛选 selection，不读取 API、不持有业务 rows，也不改变页面 canonical/read-model I/O。
+
 ## 页面分组
 
 | 页面域 | 前端入口 | API / 后端 owner | 主要事实来源 | 刷新来源 |

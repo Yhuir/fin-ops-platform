@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
-import { Button, Chip, Input } from "@heroui/react";
+import { Button, Chip, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 
 import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
 import AppDialog from "../components/common/AppDialog";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
@@ -664,26 +665,21 @@ export default function BatchAccountingPage() {
       )}
     >
       <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
-        <div aria-label="批量账务状态" className="batch-accounting-segment" role="group">
-          <Button
-            aria-pressed={bucket === "unsubmitted"}
-            className={cx("batch-accounting-segment__button", bucket === "unsubmitted" && "batch-accounting-segment__button--active")}
-            onPress={() => handleBucketChange("unsubmitted")}
-            size="sm"
-            variant={bucket === "unsubmitted" ? "primary" : "secondary"}
-          >
-            未提交 {payload.summary.unsubmittedCount}
-          </Button>
-          <Button
-            aria-pressed={bucket === "submitted"}
-            className={cx("batch-accounting-segment__button", bucket === "submitted" && "batch-accounting-segment__button--active")}
-            onPress={() => handleBucketChange("submitted")}
-            size="sm"
-            variant={bucket === "submitted" ? "primary" : "secondary"}
-          >
-            已提交 {payload.summary.submittedCount}
-          </Button>
-        </div>
+        <ToggleButtonGroup
+          aria-label="批量账务状态"
+          className="batch-accounting-segment"
+          disallowEmptySelection
+          onSelectionChange={(keys) => {
+            const [next] = Array.from(keys);
+            if (next === "unsubmitted" || next === "submitted") handleBucketChange(next);
+          }}
+          selectedKeys={new Set([bucket])}
+          selectionMode="single"
+          size="sm"
+        >
+          <ToggleButton id="unsubmitted">未提交 {payload.summary.unsubmittedCount}</ToggleButton>
+          <ToggleButton id="submitted"><ToggleButtonGroup.Separator />已提交 {payload.summary.submittedCount}</ToggleButton>
+        </ToggleButtonGroup>
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
@@ -700,16 +696,14 @@ export default function BatchAccountingPage() {
               <h2 className="batch-accounting-bank-panel__title">批量账务流水</h2>
               <p className="batch-accounting-bank-panel__subtitle">对方户名精确匹配批量账务集中处理</p>
             </div>
-            <div className="batch-accounting-field batch-accounting-field--year">
-              <Input
-                aria-label="流水年份"
-                max={2100}
-                min={2000}
-                onChange={(event) => handleBankYearChange(event.target.value)}
-                type="number"
-                value={bankYear}
-              />
-            </div>
+            <BusinessPeriodPicker
+              allowAll={false}
+              allowedModes={["year"]}
+              ariaLabel="流水年份"
+              onChange={(selection) => handleBankYearChange(selection.year)}
+              selection={{ mode: "year", year: bankYear, month: `${bankYear}-01` }}
+              years={nearbyBusinessYears(bankYear)}
+            />
             <PageControls
               disabled={loading}
               label="批量账务流水分页"

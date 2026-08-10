@@ -223,7 +223,7 @@ test.describe("cost statistics browser flow", () => {
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expect(page.locator(".cost-page-header").getByRole("tablist", { name: "成本统计视图切换" })).toBeVisible();
+    await expect(page.locator(".cost-page-header").getByRole("radiogroup", { name: "成本统计视图切换" })).toBeVisible();
     await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
@@ -416,17 +416,15 @@ test.describe("cost statistics browser flow", () => {
     expect((await refreshResponse).status()).toBe(200);
 
     const aprilResponse = waitForCostStatisticsExplorer(page, "2026-04", "active");
-    const timePicker = page.getByRole("dialog", { name: "时间统计时间范围选择器" });
+    const timePicker = page.getByRole("group", { name: "时间统计时间范围" });
     await recordLatency({
       operationId: "cost-statistics.set-time-view-april",
       visibleLabel: "时间统计时间范围：2026年3月 -> 四月",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "时间统计时间范围：2026年3月" }).click();
-      await expect(timePicker).toBeVisible();
       await timePicker.getByRole("button", { name: "四月" }).click();
       await mark("apiLatencyMs", aprilResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(timePicker.getByRole("button", { name: "四月" })).toHaveAttribute("aria-pressed", "true"));
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: costTransactionLabels.office })).toBeVisible());
     });
     expect((await aprilResponse).status()).toBe(200);
@@ -436,9 +434,9 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "项目统计时间范围：全部时间" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("group", { name: "项目统计时间范围" }).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true"));
     });
     const projectPicker = page.getByRole("dialog", { name: "项目统计时间范围选择器" });
     await recordLatency({
@@ -446,7 +444,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "项目统计时间范围：全部时间 -> 2026年",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "项目统计时间范围：全部时间" }).click();
+      await page.getByRole("button", { name: "项目统计时间范围：年月" }).click();
       await expect(projectPicker).toBeVisible();
       await projectPicker.getByRole("button", { name: "2026年" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeVisible());
@@ -458,9 +456,9 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "按银行",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按银行" }).click();
+      await page.getByRole("radio", { name: "按银行" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("group", { name: "银行统计时间范围" }).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true"));
     });
     const bankPicker = page.getByRole("dialog", { name: "银行统计时间范围选择器" });
     await recordLatency({
@@ -468,8 +466,9 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "银行统计时间范围：全部时间 -> 四月",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "银行统计时间范围：全部时间" }).click();
+      await page.getByRole("button", { name: "银行统计时间范围：年月" }).click();
       await expect(bankPicker).toBeVisible();
+      await bankPicker.getByRole("button", { name: "按月" }).click();
       await bankPicker.getByRole("button", { name: "四月" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /平安银行 账户 8821/ })).toBeVisible());
@@ -481,7 +480,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "按OA费用类型",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按OA费用类型" }).click();
+      await page.getByRole("radio", { name: "按OA费用类型" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按OA费用类型统计" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "OA费用类型统计时间范围：2026年3月" })).toBeVisible());
     });
@@ -493,6 +492,7 @@ test.describe("cost statistics browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "OA费用类型统计时间范围：2026年3月" }).click();
       await expect(expensePicker).toBeVisible();
+      await expensePicker.getByRole("button", { name: "按年" }).click();
       await expensePicker.getByRole("button", { name: "2026年" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "OA费用类型统计时间范围：2026年" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "OA费用类型统计时间范围：2026年" })).toBeVisible());
@@ -503,7 +503,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "按标签",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按标签" }).click();
+      await page.getByRole("radio", { name: "按标签" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按标签统计" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "流水标签统计时间范围：2026年3月" })).toBeVisible());
     });
@@ -564,7 +564,7 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByText("云南溯源科技")).toBeVisible());
     });
@@ -671,9 +671,9 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
 
-    await page.getByRole("button", { name: "按银行" }).click();
+    await page.getByRole("radio", { name: "按银行" }).click();
     await expect(page.getByRole("heading", { name: "按银行统计" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "银行统计时间范围" }).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button", { name: /民生银行 账户 9486/ })).toBeVisible();
 
     await page.getByRole("button", { name: /工商银行 账户 0001/ }).click();
@@ -696,7 +696,7 @@ test.describe("cost statistics browser flow", () => {
     await bankDetailDialog.getByRole("button", { name: "关闭流水详情" }).click();
     await expect(page.getByRole("dialog", { name: "流水详情" })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "按OA费用类型" }).click();
+    await page.getByRole("radio", { name: "按OA费用类型" }).click();
     await expect(page.getByRole("heading", { name: "按OA费用类型统计" })).toBeVisible();
     await expect(page.getByRole("button", { name: "OA费用类型统计时间范围：2026年3月" })).toBeVisible();
     await page.getByRole("button", { name: /设备货款及材料费/ }).first().click();
@@ -760,7 +760,7 @@ test.describe("cost statistics browser flow", () => {
         && url.searchParams.get("scope") === "all"
         && url.searchParams.get("project_scope") === "active";
     });
-    await page.getByRole("button", { name: "按项目" }).click();
+    await page.getByRole("radio", { name: "按项目" }).click();
     const projectExplorerPayload = await (await projectExplorerResponsePromise).json() as CostExplorerBrowserPayload;
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     const largeProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();

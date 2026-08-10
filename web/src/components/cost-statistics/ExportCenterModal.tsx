@@ -1,7 +1,7 @@
 import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
 
 import AppDialog from "../common/AppDialog";
-import MonthPicker from "../MonthPicker";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../common/BusinessPeriodPicker";
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
@@ -244,7 +244,14 @@ export default function ExportCenterModal({
                   </Radio>
                 </RadioGroup>
                 {timeRangeMode === "month" ? (
-                  <MonthPicker ariaLabel="统计月份" caption="统计月份" value={timeMonth} onChange={onTimeMonthChange} />
+                  <BusinessPeriodPicker
+                    allowAll={false}
+                    allowedModes={["month"]}
+                    ariaLabel="统计月份"
+                    onChange={(selection) => onTimeMonthChange(selection.month)}
+                    selection={{ mode: "month", year: timeMonth.slice(0, 4), month: timeMonth }}
+                    years={nearbyBusinessYears(timeMonth)}
+                  />
                 ) : (
                   <DateRangeFields
                     startDate={timeStartDate}
@@ -306,7 +313,14 @@ export default function ExportCenterModal({
                   </Radio>
                 </RadioGroup>
                 {expenseTypeRangeMode === "month" ? (
-                  <MonthPicker ariaLabel="统计月份" caption="统计月份" value={expenseTypeMonth} onChange={onExpenseTypeMonthChange} />
+                  <BusinessPeriodPicker
+                    allowAll={false}
+                    allowedModes={["month"]}
+                    ariaLabel="统计月份"
+                    onChange={(selection) => onExpenseTypeMonthChange(selection.month)}
+                    selection={{ mode: "month", year: expenseTypeMonth.slice(0, 4), month: expenseTypeMonth }}
+                    years={nearbyBusinessYears(expenseTypeMonth)}
+                  />
                 ) : (
                   <DateRangeFields
                     startDate={expenseTypeStartDate}

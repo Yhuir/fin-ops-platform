@@ -37,7 +37,7 @@ test.describe("bank details initial browser state", () => {
 
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "全部流水" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /时间选择 2026年/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "银行明细时间范围：2026年" })).toBeVisible();
 
     await expect(page.getByText("总余额")).toBeVisible();
     await expect(page.getByText("130500.50").first()).toBeVisible();

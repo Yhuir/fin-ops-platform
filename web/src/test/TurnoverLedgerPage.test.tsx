@@ -1061,8 +1061,8 @@ describe("Turnover ledger page", () => {
 
   test("keeps premium compact summary, grouped table, drawers, export dialog, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const pageSource = readWebSource("src/pages/TurnoverLedgerPage.tsx");
     const buttonRule = cssRule(styles, ".turnover-ledger-button", "transition");
-    const tabRule = cssRule(styles, ".turnover-ledger-tabs__tab");
     const summaryBandRule = cssRule(styles, ".turnover-ledger-summary-band", "border: 1px solid var(--fp-border)");
     const summaryMetricRule = cssRule(styles, ".turnover-ledger-summary-metric", "min-height: 84px");
     const panelRule = cssRule(styles, ".turnover-ledger-table-panel__inner");
@@ -1099,7 +1099,8 @@ describe("Turnover ledger page", () => {
 
     expect(buttonRule).toContain("--motion-fast");
     expect(buttonRule).toContain("--ease-out-quart");
-    expect(tabRule).toContain("--motion-fast");
+    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).not.toContain("turnover-ledger-tabs__tab");
     expect(summaryBandRule).toContain("border: 1px solid var(--fp-border)");
     expect(summaryMetricRule).toContain("min-height: 84px");
     expect(summaryMetricRule).toContain("var(--fp-space-2) var(--fp-space-3)");
@@ -1180,7 +1181,7 @@ describe("Turnover ledger page", () => {
     const page = await screen.findByTestId("turnover-ledger-page");
     expect(within(page).getByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
     expect(within(page).queryByText("基于银行明细标签实时汇总外部往来关系，并把已确认关系同步到关联台。")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "全部" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(page).getByRole("radio", { name: "全部" })).toHaveAttribute("aria-checked", "true");
     expect(within(page).getByText("当前待还款金额")).toBeInTheDocument();
     expect(within(page).getByText("累计已还款金额")).toBeInTheDocument();
     expect(within(page).getByText("当前待收款金额")).toBeInTheDocument();
@@ -2184,7 +2185,7 @@ describe("Turnover ledger page", () => {
     });
     expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(before);
 
-    await user.click(within(page).getByRole("button", { name: "公司往来" }));
+    await user.click(within(page).getByRole("radio", { name: "公司往来" }));
     await within(page).findByText("云南建设有限公司");
     await user.click(within(page).getByRole("button", { name: "下载表格" }));
 

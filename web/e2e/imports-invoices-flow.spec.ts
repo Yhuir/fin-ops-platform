@@ -375,7 +375,7 @@ test.describe("invoice import browser flow", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /发票导入成本项目/ })).toBeVisible());
     });
     const importedCostProject = page.getByRole("button", { name: /发票导入成本项目/ });

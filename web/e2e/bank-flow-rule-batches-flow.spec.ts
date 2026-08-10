@@ -317,7 +317,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("流水规则批次加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
@@ -339,7 +339,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
@@ -354,7 +354,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(api.count("GET /api/bank-flow-rule-batches")).toBe(settledListReads);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
@@ -371,7 +371,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "未提交 7" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 7" })).toBeChecked();
 
     for (const [index, item] of ordinaryBankFlowRuleCheckboxCases.entries()) {
       await page.getByRole("button", { name: item.primaryButton, exact: true }).click();
@@ -406,9 +406,10 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
     const monthReload = waitForBankFlowRuleBatches(page);
-    await page.getByRole("textbox", { name: "选择月份" }).fill("2026-05");
+    await page.getByRole("button", { name: /批次月份：\d{4}年\d{1,2}月/ }).click();
+    await page.getByRole("dialog", { name: "批次月份选择器" }).getByRole("button", { name: "五月" }).click();
     await monthReload;
 
     const tagDrawer = page.getByRole("dialog", { name: "流水规则标签管理" });
@@ -516,7 +517,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "未提交 2" })).toBeChecked();
     await expect(page.getByRole("button", { name: "内部往来款 2批 · 4条" }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "主标签本身 2批 · 4条" })).toBeVisible();
 
@@ -576,8 +577,8 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
@@ -629,7 +630,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
     expect(costPayload).not.toHaveProperty("read_model_status");
     expect(costPayload).not.toHaveProperty("refresh_enqueued");
-    await page.getByRole("button", { name: "按项目" }).click();
+    await page.getByRole("radio", { name: "按项目" }).click();
     const bankFlowRuleCostProject = page.getByRole("button", { name: /流水规则手续费成本项目/ });
     await expect(bankFlowRuleCostProject).toBeVisible();
     await expect(bankFlowRuleCostProject).toContainText("8.80");
@@ -687,8 +688,8 @@ test.describe("bank flow rule batches browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await page.goto("/bank-flow-rule-batches");
-    await page.getByRole("button", { name: "已提交 1" }).click();
-    await expect(page.getByRole("button", { name: "已提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("radio", { name: "已提交 1" }).click();
+    await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
@@ -743,8 +744,8 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeWithdraw + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await page.getByRole("button", { name: "历史 1" }).click();
-    await expect(page.getByRole("button", { name: "历史 1" })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("radio", { name: "历史 1" }).click();
+    await expect(page.getByRole("radio", { name: "历史 1" })).toBeChecked();
     await expect(page.getByText("已撤回", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "提交批次" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "撤回批次" })).toHaveCount(0);

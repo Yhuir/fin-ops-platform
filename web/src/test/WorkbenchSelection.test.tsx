@@ -420,7 +420,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
   });
 
-  test("bank pane time filter supports month selection and clears on second click", async () => {
+  test("bank pane time filter supports month selection and clears through the all-time control", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -431,16 +431,16 @@ describe("Workbench row selection and detail drawer", () => {
     expect((await within(unpairedZone).findAllByText("杭州张三广告有限公司")).length).toBeGreaterThan(0);
     expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
 
-    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
-    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
 
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
-    await user.click(within(dialog).getByRole("button", { name: "4月" }));
+    await user.click(within(dialog).getByRole("button", { name: "四月" }));
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
     expect(within(unpairedZone).queryByText("智能工厂设备商")).not.toBeInTheDocument();
 
-    await user.click(within(openBankPane).getByRole("button", { name: "清除银行流水时间筛选 2026年4月" }));
+    await user.click(within(openBankPane).getByRole("button", { name: "全部" }));
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
     expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
@@ -1251,10 +1251,10 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByText("流水 1 / 6000.00")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
-    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
-    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
-    await user.click(within(dialog).getByRole("button", { name: "3月" }));
+    await user.click(within(dialog).getByRole("button", { name: "三月" }));
 
     expect(within(unpairedZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
     expect(within(unpairedZone).queryByRole("row", { name: /2026-04-20.*杭州张三广告有限公司/ })).not.toBeInTheDocument();
@@ -1331,10 +1331,10 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
     expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();
 
-    await user.click(within(pairedBankPane).getByRole("button", { name: "银行流水时间筛选" }));
-    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+    await user.click(within(pairedBankPane).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
-    await user.click(within(dialog).getByRole("button", { name: "4月" }));
+    await user.click(within(dialog).getByRole("button", { name: "四月" }));
 
     expect(within(pairedZone).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();

@@ -1,5 +1,9 @@
 # 银行明细 实施记录
 
+## 2026-08-10 - 时间筛选控件收敛
+
+- 删除银行明细私有日期面板及旧 CSS，复用共享 HeroUI“全部 + 年/月”控件；`BankDateFilter` 到 canonical query 的转换、导出与 direct-read I/O 不变。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

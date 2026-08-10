@@ -1,5 +1,9 @@
 # 外部往来款管理 实施记录
 
+## 2026-08-10 往来类型切换收敛
+
+- 全部/个人/公司/银行/业务切换统一为 HeroUI `ToggleButtonGroup` 并删除旧 family-tab CSS；筛选语义、canonical API 与往来款命令 I/O 不变。
+
 ## 2026-07-24 - 访问时 closure exact delta 与轻量 gate
 
 - Turnover GET 先读取原子 `all` scope source/dirty proof；non-fresh 在 page SQL 前返回空 rows。sole canonical manual-closure mismatch 且 change rows 能安全给出 case/status/row ids/months 时，只入队 exact month relation delta；其它 drift fail closed 为 full-`all`。

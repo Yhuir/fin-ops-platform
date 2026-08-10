@@ -90,8 +90,8 @@ test.describe("bank details filtered export and read-export permissions", () => 
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByText("1-100 / 299")).toBeVisible();
 
-    await page.getByRole("button", { name: /时间选择 2026年/ }).click();
-    const datePicker = page.getByRole("dialog", { name: "银行明细时间选择面板" });
+    await page.getByRole("button", { name: "银行明细时间范围：2026年" }).click();
+    const datePicker = page.getByRole("dialog", { name: "银行明细时间范围选择器" });
     await datePicker.getByRole("button", { name: "按月" }).click();
     const monthRowsRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
@@ -102,9 +102,9 @@ test.describe("bank details filtered export and read-export permissions", () => 
         && url.searchParams.get("page") === "1"
         && url.searchParams.get("page_size") === "100";
     });
-    await datePicker.getByRole("button", { name: "3月" }).click();
+    await datePicker.getByRole("button", { name: "三月" }).click();
     await monthRowsRequest;
-    await expect(page.getByRole("button", { name: /时间选择 2026年3月/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "银行明细时间范围：2026年3月" })).toBeVisible();
 
     await page.getByRole("button", { name: /建设银行 1138/ }).click();
     const keywordRowsRequest = page.waitForRequest((request) => {

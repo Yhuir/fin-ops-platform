@@ -1,5 +1,9 @@
 # 税金抵扣 实施记录
 
+## 2026-08-10 月份筛选收敛
+
+- 税金抵扣删除旧 `MonthPicker`，复用共享 HeroUI 精确月份控件；本模块 API 必须携带月份，因此不显示会产生错误语义的“全部”按钮。canonical snapshot、保存计划和认证导入 I/O 不变。
+
 ## 2026-07-31 - 认证结果 complementary rail 动效
 
 - 认证结果继续是 mounted `role="complementary"` rail，不改造成 modal drawer；只在内容容器上用 transform/opacity 展开收起，避免动画 grid/width 引发布局重排。

@@ -127,7 +127,7 @@ test.describe("batch accounting browser flow", () => {
     const bankHeader = bankPanel.locator(".batch-accounting-bank-panel__header");
     const title = bankPanel.locator(".batch-accounting-bank-panel__title");
     const subtitle = bankPanel.locator(".batch-accounting-bank-panel__subtitle");
-    const yearInput = page.getByLabel("流水年份");
+    const yearInput = page.getByRole("button", { name: "流水年份：2026年" });
     const pagination = page.getByRole("group", { name: "批量账务流水分页" });
     const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
     const refreshButton = page.getByRole("button", { name: "刷新" });
@@ -235,10 +235,10 @@ test.describe("batch accounting browser flow", () => {
     }, async (mark) => {
       await page.goto("/batch-accounting");
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true"));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked());
     });
-    await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
 
     const bankPanel = page.getByRole("region", { name: "批量账务流水" });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
@@ -282,7 +282,7 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/batch-accounting/submit")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeSubmit + 1);
-    await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 1" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await recordLatency({
@@ -290,11 +290,11 @@ test.describe("batch accounting browser flow", () => {
       visibleLabel: "已提交 1",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "已提交 1" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "已提交 1" })).toHaveAttribute("aria-pressed", "true"));
+      await page.getByRole("radio", { name: "已提交 1" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked());
       await mark("finalSettledLatencyMs", expect(page.getByRole("table", { name: "已关联OA项" })).toBeVisible());
     });
-    await expect(page.getByRole("button", { name: "已提交 1" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
     const submittedTable = page.getByRole("table", { name: "已关联OA项" });
@@ -340,7 +340,7 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeWithdraw + 1);
-    await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
     await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -349,7 +349,7 @@ test.describe("batch accounting browser flow", () => {
       visibleLabel: "未提交 1",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "未提交 1" }).click();
+      await page.getByRole("radio", { name: "未提交 1" }).click();
       await mark("finalSettledLatencyMs", expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true"));
     });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");

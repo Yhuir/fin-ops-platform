@@ -11,7 +11,7 @@ import {
   PopoverRoot,
   PopoverTrigger,
 } from "@heroui/react";
-import { CalendarDays, Filter, RefreshCw, Tags } from "lucide-react";
+import { Filter, RefreshCw, Tags } from "lucide-react";
 
 import {
   FinanceTable,
@@ -22,6 +22,7 @@ import {
   FinanceTableRow,
 } from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import StatePanel from "../components/common/StatePanel";
@@ -396,32 +397,6 @@ function createDateFilter(preset: BankDateFilter["preset"], value = DEFAULT_BANK
   }
   const year = normalizeYearValue(value);
   return { preset: "year", year, dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` };
-}
-
-function dateFilterLabel(filter: BankDateFilter) {
-  if (filter.preset === "all") {
-    return "选择时间";
-  }
-  if (filter.preset === "month") {
-    const [, month] = filter.month.split("-");
-    return `${filter.month.slice(0, 4)}年${Number(month)}月`;
-  }
-  return `${filter.year}年`;
-}
-
-function activeYearFromDateFilter(filter: BankDateFilter) {
-  if (filter.preset === "month") {
-    return filter.month.slice(0, 4);
-  }
-  if (filter.preset === "year") {
-    return filter.year;
-  }
-  return DEFAULT_BANK_YEAR;
-}
-
-function createYearOptions(activeYear: string) {
-  const year = Number(normalizeYearValue(activeYear));
-  return Array.from({ length: 6 }, (_, index) => String(year - 1 + index));
 }
 
 function displayBalance(value: string | null) {
@@ -1457,15 +1432,6 @@ export default function BankDetailsPage() {
     storage: "session",
     validate: isBankDateFilter,
   });
-  const datePickerYearSession = usePageSessionState<string>({
-    pageKey: "bank-details",
-    stateKey: "datePickerYear",
-    version: 2,
-    initialValue: DEFAULT_BANK_YEAR,
-    ttlMs: 24 * 60 * 60 * 1000,
-    storage: "session",
-    validate: (value): value is string => typeof value === "string" && /^\d{4}$/.test(value),
-  });
   const [accountsData, setAccountsData] = useState<{
     accounts: BankDetailAccount[];
     totalBalance: string | null;
@@ -1475,8 +1441,6 @@ export default function BankDetailsPage() {
   const setSelectedAccountKey = selectedAccountSession.setValue;
   const dateFilter = dateFilterSession.value;
   const setDateFilter = dateFilterSession.setValue;
-  const activeDatePickerYear = datePickerYearSession.value;
-  const setActiveDatePickerYear = datePickerYearSession.setValue;
   const [rows, setRows] = useState<BankDetailTransaction[]>([]);
   const [statistics, setStatistics] = useState<BankDetailStatistics | null>(null);
   const [rowCount, setRowCount] = useState(0);
@@ -1502,8 +1466,6 @@ export default function BankDetailsPage() {
     [selectedCategoryFilter],
   );
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
-  const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
-  const [datePickerMode, setDatePickerMode] = useState<"year" | "month">("year");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
@@ -1757,7 +1719,6 @@ export default function BankDetailsPage() {
     [accountsData.accounts],
   );
   const currentViewTitle = isAllAccountsSelected ? "全部流水" : selectedAccount?.displayName ?? "账户流水";
-  const dateFilterOpen = Boolean(dateFilterAnchorEl);
 
   const resetToFirstPage = () => {
     setPaginationModel((current) => (
@@ -1970,34 +1931,6 @@ export default function BankDetailsPage() {
     setSelectedCategoryFilter(filter);
   };
 
-  const applyYearFilter = (year: string) => {
-    const normalizedYear = normalizeYearValue(year);
-    setActiveDatePickerYear(normalizedYear);
-    applyDateFilter(createDateFilter("year", normalizedYear));
-    closeDateFilterPopover();
-  };
-
-  const applyMonthFilter = (monthNumber: number) => {
-    const month = `${normalizeYearValue(activeDatePickerYear)}-${String(monthNumber).padStart(2, "0")}`;
-    applyDateFilter(createDateFilter("month", month));
-    closeDateFilterPopover();
-  };
-
-  const applyAllDatesFilter = () => {
-    applyDateFilter(createDateFilter("all"));
-    closeDateFilterPopover();
-  };
-
-  const openDateFilterPopover = (event: MouseEvent<HTMLElement>) => {
-    setActiveDatePickerYear(activeYearFromDateFilter(dateFilter));
-    setDatePickerMode(dateFilter.preset === "month" ? "month" : "year");
-    setDateFilterAnchorEl(event.currentTarget);
-  };
-
-  const closeDateFilterPopover = () => {
-    setDateFilterAnchorEl(null);
-  };
-
   const openExportMenu = () => {
     setExportMenuOpen((current) => !current);
   };
@@ -2144,8 +2077,11 @@ export default function BankDetailsPage() {
     throw result.error;
   }, [publishAutoTagRulesSaved, reloadTransactionsAfterRulesMutation, runOperation]);
 
-  const datePickerYears = createYearOptions(activeDatePickerYear);
-  const selectedDateFilterLabel = dateFilterLabel(dateFilter);
+  const selectedDateFilterYear = dateFilter.preset === "month"
+    ? dateFilter.month.slice(0, 4)
+    : dateFilter.preset === "year"
+      ? dateFilter.year
+      : DEFAULT_BANK_YEAR;
   const visibleStatistics = statistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -2304,28 +2240,19 @@ export default function BankDetailsPage() {
                     <Tags aria-hidden="true" size={14} />
                     自动标签规则
                   </button>
-                  <div className="bank-date-toolbar">
-                    <button
-                      aria-describedby={dateFilterOpen ? "bank-date-filter-popover" : undefined}
-                      aria-expanded={dateFilterOpen}
-                      aria-haspopup="dialog"
-                      aria-label={`时间选择 ${selectedDateFilterLabel}`}
-                      className="bank-date-range-button"
-                      onClick={openDateFilterPopover}
-                      type="button"
-                    >
-                      <CalendarDays aria-hidden="true" size={14} />
-                      {selectedDateFilterLabel}
-                    </button>
-                    <button
-                      aria-pressed={dateFilter.preset === "all"}
-                      className={`bank-date-all-button${dateFilter.preset === "all" ? " active" : ""}`}
-                      onClick={applyAllDatesFilter}
-                      type="button"
-                    >
-                      全部
-                    </button>
-                  </div>
+                  <BusinessPeriodPicker
+                    ariaLabel="银行明细时间范围"
+                    onChange={(selection) => applyDateFilter(createDateFilter(
+                      selection.mode,
+                      selection.mode === "month" ? selection.month : selection.year,
+                    ))}
+                    selection={{
+                      mode: dateFilter.preset,
+                      year: selectedDateFilterYear,
+                      month: dateFilter.preset === "month" ? dateFilter.month : `${selectedDateFilterYear}-01`,
+                    }}
+                    years={nearbyBusinessYears(selectedDateFilterYear)}
+                  />
                 </div>
               </div>
             </div>
@@ -2488,97 +2415,6 @@ export default function BankDetailsPage() {
         saveAutoTagRules={saveAutoTagRulesWithRefresh}
         reapplyAutoTagRules={reapplyAutoTagRulesWithRefresh}
       />
-      {dateFilterOpen ? (
-        <div
-          className="bank-date-filter-popover"
-          id="bank-date-filter-popover"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              closeDateFilterPopover();
-            }
-          }}
-          aria-label="银行明细时间选择面板"
-          role="dialog"
-        >
-          <div className="bank-date-filter">
-            <div className="bank-date-filter-mode-row" role="group" aria-label="时间筛选模式">
-              <button
-                aria-pressed={datePickerMode === "year"}
-                className={`bank-date-filter-mode-button${datePickerMode === "year" ? " active" : ""}`}
-                type="button"
-                onClick={() => setDatePickerMode("year")}
-              >
-                按年
-              </button>
-              <button
-                aria-pressed={datePickerMode === "month"}
-                className={`bank-date-filter-mode-button${datePickerMode === "month" ? " active" : ""}`}
-                type="button"
-                onClick={() => setDatePickerMode("month")}
-              >
-                按月
-              </button>
-            </div>
-            {datePickerMode === "year" ? (
-              <div className="month-picker-section">
-                <div className="month-picker-section-title">年份</div>
-                <div className="month-picker-chip-grid years" role="group" aria-label="年份">
-                  {datePickerYears.map((year) => (
-                    <button
-                      key={year}
-                      aria-pressed={dateFilter.preset === "year" && dateFilter.year === year}
-                      className={`month-picker-chip${dateFilter.preset === "year" && dateFilter.year === year ? " active" : ""}`}
-                      type="button"
-                      onClick={() => applyYearFilter(year)}
-                    >
-                      {year}年
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="month-picker-section">
-                  <div className="month-picker-section-title">年份</div>
-                  <div className="month-picker-chip-grid years" role="group" aria-label="年份">
-                    {datePickerYears.map((year) => (
-                      <button
-                        key={year}
-                        aria-pressed={activeDatePickerYear === year}
-                        className={`month-picker-chip${activeDatePickerYear === year ? " active" : ""}`}
-                        type="button"
-                        onClick={() => setActiveDatePickerYear(year)}
-                      >
-                        {year}年
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="month-picker-section">
-                  <div className="month-picker-section-title">{activeDatePickerYear} 年月份</div>
-                  <div className="month-picker-chip-grid months" role="group" aria-label={`${activeDatePickerYear}年月份`}>
-                    {Array.from({ length: 12 }, (_, index) => index + 1).map((monthNumber) => {
-                      const month = `${activeDatePickerYear}-${String(monthNumber).padStart(2, "0")}`;
-                      const active = dateFilter.preset === "month" && dateFilter.month === month;
-                      return (
-                        <button
-                          key={month}
-                          aria-pressed={active}
-                          className={`month-picker-chip${active ? " active" : ""}`}
-                          type="button"
-                          onClick={() => applyMonthFilter(monthNumber)}
-                        >
-                          {monthNumber}月
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

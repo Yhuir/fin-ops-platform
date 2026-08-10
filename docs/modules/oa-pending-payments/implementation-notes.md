@@ -1,5 +1,9 @@
 # OA待付款核对 实施记录
 
+## 2026-08-10 - 筛选栏视觉收敛
+
+- 状态切换移除外层遗留白框，月份改用共享 HeroUI“全部 + 年/月”控件，搜索区删除重复容器边框；canonical rows API、写回/关联命令和写后单次 GET 不变。
+
 ## 2026-08-06 - 进行中 OA 统一为正式 Workbench relation
 
 - completed/in-progress OA 统一通过 `app.workbench_pair_relations` 持有关系；OA 待付款命令只调用正式 relation command，唯一已有 case 原地扩展并保留发票成员。

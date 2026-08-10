@@ -585,8 +585,8 @@ const readExportSubmittedStateWriteControlOpeners: DynamicWriteControlOpener[] =
       await page.goto("/batch-accounting");
       await expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible();
       await expect(page.getByText("当前账号仅支持查看和导出，不能提交或撤回批量账务关联。")).toBeVisible();
-      await page.getByRole("button", { name: "已提交 1" }).click();
-      await expect(page.getByRole("button", { name: "已提交 1" })).toHaveAttribute("aria-pressed", "true");
+      await page.getByRole("radio", { name: "已提交 1" }).click();
+      await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
       await expect(page.getByRole("table", { name: "已关联OA项" })).toBeVisible();
       await expect(page.getByRole("button", { name: "撤回关联" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);

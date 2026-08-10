@@ -1,5 +1,9 @@
 # 关联台 实施记录
 
+## 2026-08-10 - 栏位时间筛选统一控件
+
+- 银行流水栏位删除私有年月弹层，复用共享 HeroUI“全部 + 年/月”控件；异步年份读取、active generation、选择保留和 Workbench API I/O 不变。
+
 ## 2026-08-10 - fresh generation 分组缓存回填合并
 
 - 生产并发探针确认 `/api/workbench/groups` 始终返回 HTTP 200 与同一 fresh generation，但新 generation 首次缓存未命中时，并发请求会同时回源 PostgreSQL，形成短时 p95 尾延迟。

@@ -527,7 +527,7 @@ describe("BankFlowRuleBatchPage", () => {
     });
     const forbiddenLegacySurfaces = bankFlowRuleBatchSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
+      return /RefreshOutlinedIcon|CloseIcon|TextField|TableCell|TableRow|TableHead|TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
         ? [path]
         : [];
     });
@@ -575,10 +575,9 @@ describe("BankFlowRuleBatchPage", () => {
 
   test("keeps premium compact rails, transaction table, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const pageSource = readWebSource("src/pages/BankFlowRuleBatchPage.tsx");
     const filterRule = cssRule(styles, ".bank-flow-rule-batches-filter");
     const buttonRule = cssRule(styles, ".bank-flow-rule-batches-button");
-    const segmentRule = cssRule(styles, ".bank-flow-rule-batches-segment__button");
-    const inputRule = cssRule(styles, ".bank-flow-rule-batches-field input");
     const railRule = cssRule(styles, ".bank-flow-rule-batches-rail");
     const railItemRule = cssRule(styles, ".bank-flow-rule-batches-rail__item");
     const transactionRule = cssRule(styles, ".bank-flow-rule-batches-transactions");
@@ -605,8 +604,9 @@ describe("BankFlowRuleBatchPage", () => {
     expect(filterRule).toContain("grid-template-columns");
     expect(filterRule).toContain("align-items: end");
     expect(buttonRule).toContain("var(--motion-fast)");
-    expect(segmentRule).toContain("var(--motion-fast)");
-    expect(inputRule).toContain("var(--motion-fast)");
+    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<BusinessPeriodPicker");
+    expect(pageSource).not.toContain("bank-flow-rule-batches-segment__button");
     expect(railItemRule).toContain("var(--motion-fast)");
     expect(batchRule).toContain("var(--motion-fast)");
     expect(tableCellRule).toContain("var(--motion-fast)");
@@ -654,10 +654,10 @@ describe("BankFlowRuleBatchPage", () => {
       expect(url.searchParams.get("page_size")).toBe("50");
     });
     expect(screen.getByRole("button", { name: "流水规则标签管理" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "未提交 3" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "全部" })).toBeInTheDocument();
-    expect(screen.getByLabelText("选择月份")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^批次月份：/ })).toBeInTheDocument();
     expect(screen.queryByLabelText("银行账户")).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("精确账户键，如 建设银行:8106")).not.toBeInTheDocument();
 
@@ -676,7 +676,7 @@ describe("BankFlowRuleBatchPage", () => {
     });
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    expect(within(transactionRegion).getByText("建设银行8106")).toBeInTheDocument();
+    expect(within(transactionRegion).getAllByText("建设银行8106").length).toBeGreaterThan(0);
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByText("2026-05-03 10:20:00")).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("2026-05-03T10:20:00+08:00")).not.toBeInTheDocument();
@@ -730,7 +730,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("流水规则批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "未提交 3" })).toHaveAttribute("aria-checked", "true");
       expect(screen.getByRole("button", { name: "费用 1批 · 2条" })).toBeInTheDocument();
     });
     expect(await screen.findByText("网银手续费")).toBeInTheDocument();
@@ -793,7 +793,7 @@ describe("BankFlowRuleBatchPage", () => {
       expect(screen.getByRole("button", { name: "费用 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByRole("button", { name: "手续费 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(screen.getByText("建设银行0000")).toBeInTheDocument();
+    expect(screen.getAllByText("建设银行0000").length).toBeGreaterThan(0);
     expect(screen.queryByText("建设银行0204")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "流水规则批次分页下一页" }));
@@ -822,12 +822,12 @@ describe("BankFlowRuleBatchPage", () => {
 
     expect(screen.queryByText("内部往来存在多解，不能自动形成可提交批次。")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "已提交 1" }));
+    await user.click(screen.getByRole("radio", { name: "已提交 1" }));
     expect(await screen.findByText("人工成本")).toBeInTheDocument();
     expect(screen.queryByText(/提交人：finance-user/)).not.toBeInTheDocument();
     expect(screen.queryByText(/版本：2/)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "历史 1" }));
+    await user.click(screen.getByRole("radio", { name: "历史 1" }));
     expect(await screen.findByText("费用")).toBeInTheDocument();
     expect(screen.queryByText(/撤回人：finance-user/)).not.toBeInTheDocument();
     expect(screen.queryByText(/版本：3/)).not.toBeInTheDocument();
@@ -1348,7 +1348,7 @@ describe("BankFlowRuleBatchPage", () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderPage();
-    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+    await user.click(await screen.findByRole("radio", { name: "已提交 1" }));
     await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
     await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
     await user.click(await screen.findByRole("button", { name: "撤回批次" }));
@@ -1386,7 +1386,7 @@ describe("BankFlowRuleBatchPage", () => {
     installFetchMock(payload);
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+    await user.click(await screen.findByRole("radio", { name: "已提交 1" }));
     await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
     await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
 
@@ -1403,7 +1403,7 @@ describe("BankFlowRuleBatchPage", () => {
     installFetchMock();
     renderPage();
 
-    await user.click(await screen.findByRole("button", { name: "历史 1" }));
+    await user.click(await screen.findByRole("radio", { name: "历史 1" }));
     await user.click(await screen.findByRole("button", { name: "费用 1批 · 1条" }));
     await user.click(await screen.findByRole("button", { name: "手续费 1批 · 1条" }));
 

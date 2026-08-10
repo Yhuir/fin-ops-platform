@@ -394,7 +394,7 @@ describe("BatchAccountingPage", () => {
     });
     const forbiddenLegacySurfaces = batchAccountingSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|IconButton|Tooltip/.test(source)
+      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|IconButton|Tooltip/.test(source)
         ? [path]
         : [];
     });
@@ -431,9 +431,9 @@ describe("BatchAccountingPage", () => {
 
   test("keeps premium compact panels, OA table, stable tags, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const pageSource = readWebSource("src/pages/BatchAccountingPage.tsx");
     const layoutRule = cssRule(styles, ".batch-accounting-layout");
     const buttonRule = cssRule(styles, ".batch-accounting-button");
-    const segmentRule = cssRule(styles, ".batch-accounting-segment__button");
     const yearFieldRule = cssRule(styles, ".batch-accounting-field--year");
     const inputRule = cssRule(styles, ".batch-accounting-field input,\\n.batch-accounting-field textarea");
     const searchRule = cssRule(styles, ".batch-accounting-search");
@@ -458,7 +458,9 @@ describe("BatchAccountingPage", () => {
     const feedbackCloseRule = cssRule(styles, ".batch-accounting-feedback__close");
 
     expect(buttonRule).toContain("var(--motion-fast)");
-    expect(segmentRule).toContain("var(--motion-fast)");
+    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<BusinessPeriodPicker");
+    expect(pageSource).not.toContain("batch-accounting-segment__button");
     expect(inputRule).toContain("var(--motion-fast)");
     expect(searchRule).toContain("var(--motion-fast)");
     expect(searchClearRule).toContain("var(--motion-fast)");
@@ -515,10 +517,10 @@ describe("BatchAccountingPage", () => {
       expect(url.searchParams.get("oa_page_size")).toBe("200");
       expect(url.searchParams.has("oa_year")).toBe(false);
     });
-    expect(screen.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("流水年份")).toHaveValue(2026);
+    expect(screen.getByRole("button", { name: "流水年份：2026年" })).toBeInTheDocument();
     expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
     const tagRulesButton = screen.getByRole("button", { name: "批量账务标签规则" });
     const refreshButton = screen.getByRole("button", { name: "刷新" });
@@ -827,9 +829,9 @@ describe("BatchAccountingPage", () => {
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
-    await user.click(screen.getByRole("button", { name: "已提交 1" }));
+    await user.click(screen.getByRole("radio", { name: "已提交 1" }));
     await screen.findByRole("table", { name: "已关联OA项" });
-    await user.click(screen.getByRole("button", { name: /^未提交/ }));
+    await user.click(screen.getByRole("radio", { name: /^未提交/ }));
     await screen.findByRole("table", { name: "可关联OA项" });
     await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
 
@@ -1008,7 +1010,7 @@ describe("BatchAccountingPage", () => {
     const fetchMock = installFetchMock();
 
     renderPage();
-      await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+      await user.click(await screen.findByRole("radio", { name: "已提交 1" }));
 
       expect(await screen.findByRole("button", { name: /批量账务集中处理.*900.00.*2026-02-10 12:30:00.*支出.*建行 8106/ })).toBeInTheDocument();
       const associatedTable = screen.getByRole("table", { name: "已关联OA项" });

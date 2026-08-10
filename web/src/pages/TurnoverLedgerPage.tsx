@@ -1,4 +1,4 @@
-import { Button, Checkbox } from "@heroui/react";
+import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, RefreshCw } from "lucide-react";
 
@@ -1086,21 +1086,27 @@ export default function TurnoverLedgerPage() {
         <section className="turnover-ledger-table-panel">
           <div className="turnover-ledger-table-panel__inner">
             <div className="turnover-ledger-table-panel__toolbar">
-              <div aria-label="往来款账单范围" className="turnover-ledger-tabs" role="group">
-                {FAMILY_TABS.map((tab) => (
-                  <Button
-                    aria-pressed={family === tab.value}
-                    className={`turnover-ledger-tabs__tab${family === tab.value ? " turnover-ledger-tabs__tab--active" : ""}`}
-                    isDisabled={ledgerNavigationDisabled}
-                    key={tab.value}
-                    onPress={() => handleFamilyChange(tab.value)}
-                    size="sm"
-                    variant={family === tab.value ? "primary" : "secondary"}
-                  >
+              <ToggleButtonGroup
+                aria-label="往来款账单范围"
+                className="turnover-ledger-tabs"
+                disallowEmptySelection
+                isDisabled={ledgerNavigationDisabled}
+                onSelectionChange={(keys) => {
+                  const [next] = Array.from(keys);
+                  const tab = FAMILY_TABS.find((candidate) => candidate.value === next);
+                  if (tab) handleFamilyChange(tab.value);
+                }}
+                selectedKeys={new Set([family])}
+                selectionMode="single"
+                size="sm"
+              >
+                {FAMILY_TABS.map((tab, index) => (
+                  <ToggleButton id={tab.value} key={tab.value}>
+                    {index > 0 ? <ToggleButtonGroup.Separator /> : null}
                     {tab.label}
-                  </Button>
+                  </ToggleButton>
                 ))}
-              </div>
+              </ToggleButtonGroup>
               <div className="turnover-ledger-actions">
                 {selectedClosureRows.length > 0 ? (
                   <span className="turnover-ledger-selection-summary" role="status">

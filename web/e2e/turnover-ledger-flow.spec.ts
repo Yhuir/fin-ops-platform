@@ -483,7 +483,7 @@ test.describe("turnover ledger browser flow", () => {
       await page.getByRole("link", { name: "成本统计" }).click();
       await mark("apiLatencyMs", costExplorerResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "按项目" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "按项目" })).toBeVisible());
     });
     const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
     expect(costPayload).not.toHaveProperty("read_model_status");
@@ -496,7 +496,7 @@ test.describe("turnover ledger browser flow", () => {
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "按项目" }).click();
+      await page.getByRole("radio", { name: "按项目" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /外部往来闭环成本项目/ })).toBeVisible());
     });
     const turnoverCostProject = page.getByRole("button", { name: /外部往来闭环成本项目/ });

@@ -112,7 +112,7 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(oaRow.getByText("候选")).toHaveCount(0);
 
     await page.getByRole("link", { name: "成本统计" }).click();
-    await page.getByRole("button", { name: "按项目" }).click();
+    await page.getByRole("radio", { name: "按项目" }).click();
     await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
   });

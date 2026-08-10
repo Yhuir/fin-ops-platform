@@ -1,19 +1,16 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   Button,
   Chip,
-  PopoverContent,
-  PopoverDialog,
-  PopoverRoot,
-  PopoverTrigger,
-  SearchField,
-  Spinner,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 
-import { formatMonthLabel } from "../components/MonthPicker";
+import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
+import QuerySearch from "../components/common/QuerySearch";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import CostStatisticsTagRulesDrawer from "../components/cost-statistics/CostStatisticsTagRulesDrawer";
 import ExportCenterModal, {
@@ -66,7 +63,6 @@ type ExplorerScopeSelection = {
   year: string;
   month: string;
 };
-type ScopePickerPanel = "scope";
 type EffectiveCostPageState = "fresh" | "loading" | "error";
 type ExplorerTransitionScope = "surface" | "children" | "rows" | null;
 
@@ -135,34 +131,6 @@ type CostStatisticsPageSession = {
   bankTagScopeYear: string;
   bankTagScopeMonth: string;
 };
-
-type ScopeRangePickerProps = {
-  ariaLabel: string;
-  label: string;
-  mode: ExplorerScopeMode;
-  years: string[];
-  year: string;
-  month: string;
-  open: boolean;
-  onToggle: () => void;
-  onChange: (selection: ExplorerScopeSelection) => void;
-  onClose: () => void;
-};
-
-const SCOPE_MONTH_LABELS = [
-  "一月",
-  "二月",
-  "三月",
-  "四月",
-  "五月",
-  "六月",
-  "七月",
-  "八月",
-  "九月",
-  "十月",
-  "十一月",
-  "十二月",
-];
 
 function getCostTimeRowRenderKey(row: CostTimeRow, index: number) {
   return [
@@ -239,55 +207,6 @@ function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
       <span />
       <span />
     </div>
-  );
-}
-
-function CostViewSearch({
-  composing,
-  pending,
-  value,
-  onChange,
-  onCompositionChange,
-  onSubmit,
-}: {
-  composing: boolean;
-  pending: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  onCompositionChange: (value: boolean) => void;
-  onSubmit: () => void;
-}) {
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    onSubmit();
-  };
-
-  return (
-    <form className="cost-view-search-form" onSubmit={handleSubmit} role="search">
-      <SearchField
-        aria-label="搜索当前成本统计表格"
-        className="cost-view-search"
-        maxLength={200}
-        onChange={onChange}
-        value={value}
-      >
-        <SearchField.Group className="cost-view-search-group">
-          {pending && !composing ? (
-            <Spinner aria-label="搜索中" className="cost-view-search-spinner" color="current" size="sm" />
-          ) : (
-            <SearchField.SearchIcon className="cost-view-search-icon" />
-          )}
-          <SearchField.Input
-            className="cost-view-search-input"
-            onCompositionEnd={() => onCompositionChange(false)}
-            onCompositionStart={() => onCompositionChange(true)}
-            placeholder="搜索当前表格"
-          />
-          <SearchField.ClearButton aria-label="清空搜索" className="cost-view-search-clear" />
-        </SearchField.Group>
-      </SearchField>
-      <Button size="sm" type="submit" variant="secondary">查询</Button>
-    </form>
   );
 }
 
@@ -371,115 +290,6 @@ function getCostStatisticsActionErrorMessage(error: unknown) {
   return "成本统计规则保存失败，请稍后重试。";
 }
 
-function ScopeRangePicker({
-  ariaLabel,
-  label,
-  mode,
-  years,
-  year,
-  month,
-  open,
-  onToggle,
-  onChange,
-  onClose,
-}: ScopeRangePickerProps) {
-  const pickerYears = years.length > 0 ? years : [DEFAULT_MONTH.slice(0, 4)];
-  const activeYear = mode === "month" ? month.slice(0, 4) || year : year || DEFAULT_MONTH.slice(0, 4);
-  const activeMonth = mode === "month" ? month.slice(5, 7) : "";
-  const selectedLabel = mode === "all" ? "全部时间" : mode === "year" ? `${year}年` : formatMonthLabel(month);
-
-  function selectAll() {
-    onChange({ mode: "all", year, month });
-    onClose();
-  }
-
-  function selectYear(nextYear: string) {
-    onChange({ mode: "year", year: nextYear, month });
-    onClose();
-  }
-
-  function selectMonth(monthNumber: number) {
-    const nextMonth = `${activeYear}-${String(monthNumber).padStart(2, "0")}`;
-    onChange({ mode: "month", year: activeYear, month: nextMonth });
-    onClose();
-  }
-
-  return (
-    <PopoverRoot
-      isOpen={open}
-      onOpenChange={(nextOpen) => {
-        if (nextOpen === open) return;
-        if (nextOpen) onToggle();
-        else onClose();
-      }}
-    >
-      <PopoverTrigger
-        aria-label={`${ariaLabel}：${selectedLabel}`}
-        className={open ? "cost-scope-trigger is-open" : "cost-scope-trigger"}
-      >
-        <span className="cost-scope-trigger-label">
-          <span>{label}</span>
-          <strong>{selectedLabel}</strong>
-        </span>
-        <span aria-hidden="true" className="cost-scope-trigger-icon">
-          ▾
-        </span>
-      </PopoverTrigger>
-      <PopoverContent className="cost-scope-popover" containerPadding={12} maxHeight={440} offset={8} placement="bottom end">
-        <PopoverDialog aria-label={`${ariaLabel}选择器`}>
-          <Button
-            aria-pressed={mode === "all"}
-            className={mode === "all" ? "cost-scope-option all active" : "cost-scope-option all"}
-            onPress={selectAll}
-            size="sm"
-            variant={mode === "all" ? "primary" : "tertiary"}
-          >
-            全部时间
-          </Button>
-          <div className="cost-scope-panel-section">
-            <span>年份</span>
-            <div className="cost-scope-option-grid years">
-              {pickerYears.map((candidateYear) => (
-                <Button
-                  key={candidateYear}
-                  aria-pressed={mode === "year" && candidateYear === year}
-                  className={mode === "year" && candidateYear === year ? "cost-scope-option active" : "cost-scope-option"}
-                  onPress={() => selectYear(candidateYear)}
-                  size="sm"
-                  variant={mode === "year" && candidateYear === year ? "primary" : "tertiary"}
-                >
-                  {candidateYear}年
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="cost-scope-panel-section">
-            <span>月份</span>
-            <div className="cost-scope-option-grid months">
-              {SCOPE_MONTH_LABELS.map((monthLabel, index) => {
-                const monthNumber = index + 1;
-                const isActive = activeMonth === String(monthNumber).padStart(2, "0");
-                return (
-                  <Button
-                    key={monthLabel}
-                    aria-pressed={mode === "month" && isActive}
-                    className={mode === "month" && isActive ? "cost-scope-option active" : "cost-scope-option"}
-                    onPress={() => selectMonth(monthNumber)}
-                    size="sm"
-                    variant={mode === "month" && isActive ? "primary" : "tertiary"}
-                  >
-                    {monthLabel}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        </PopoverDialog>
-      </PopoverContent>
-    </PopoverRoot>
-  );
-}
-
 function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPageSession {
   if (!value || typeof value !== "object") {
     return false;
@@ -553,7 +363,6 @@ export default function CostStatisticsPage() {
   const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
   const costProjectScope: CostProjectScope = "active";
   const timeScopeMode = costSession.timeScopeMode;
-  const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>(null);
   const timeScopeYear = costSession.timeScopeYear;
   const timeScopeMonth = costSession.timeScopeMonth;
 
@@ -594,16 +403,13 @@ export default function CostStatisticsPage() {
   const [projectAggregateBy, setProjectAggregateBy] = useState<"month" | "year">("month");
   const [projectExpenseTypes, setProjectExpenseTypes] = useState<string[]>([]);
   const projectScopeMode = costSession.projectScopeMode;
-  const [projectScopePanel, setProjectScopePanel] = useState<ScopePickerPanel | null>(null);
   const projectScopeYear = costSession.projectScopeYear;
   const projectScopeMonth = costSession.projectScopeMonth;
   const bankScopeMode = costSession.bankScopeMode;
-  const [bankScopePanel, setBankScopePanel] = useState<ScopePickerPanel | null>(null);
   const bankScopeYear = costSession.bankScopeYear;
   const bankScopeMonth = costSession.bankScopeMonth;
 
   const expenseTypeScopeMode = costSession.expenseTypeScopeMode;
-  const [expenseTypeScopePanel, setExpenseTypeScopePanel] = useState<ScopePickerPanel | null>(null);
   const expenseTypeScopeYear = costSession.expenseTypeScopeYear;
   const expenseTypeScopeMonth = costSession.expenseTypeScopeMonth;
   const [expenseTypeRangeMode, setExpenseTypeRangeMode] = useState<ExportRangeMode>("month");
@@ -612,7 +418,6 @@ export default function CostStatisticsPage() {
   const [expenseTypeEndDate, setExpenseTypeEndDate] = useState(defaultMonthBounds.endDate);
   const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
   const bankTagScopeMode = costSession.bankTagScopeMode;
-  const [bankTagScopePanel, setBankTagScopePanel] = useState<ScopePickerPanel | null>(null);
   const bankTagScopeYear = costSession.bankTagScopeYear;
   const bankTagScopeMonth = costSession.bankTagScopeMonth;
 
@@ -628,7 +433,6 @@ export default function CostStatisticsPage() {
   const [selectedBankTagPrimaryLabel, setSelectedBankTagPrimaryLabel] = useState<string | null>(null);
   const [selectedBankTagSubLabel, setSelectedBankTagSubLabel] = useState<string | null>(null);
   const [selectedBankTagTransactionId, setSelectedBankTagTransactionId] = useState<string | null>(null);
-  const scopeControlsRef = useRef<HTMLDivElement | null>(null);
   const pageTitleRef = useRef<HTMLHeadingElement | null>(null);
   const headerControlsRef = useRef<HTMLDivElement | null>(null);
   const headerActionsRef = useRef<HTMLDivElement | null>(null);
@@ -1199,11 +1003,6 @@ export default function CostStatisticsPage() {
       }
       setIsExportCenterOpen(false);
       setExportPreview(null);
-      setTimeScopePanel(null);
-      setProjectScopePanel(null);
-      setBankScopePanel(null);
-      setExpenseTypeScopePanel(null);
-      setBankTagScopePanel(null);
       invalidateExportReferenceData();
       resetDetailSelection();
       return;
@@ -1322,52 +1121,10 @@ export default function CostStatisticsPage() {
     setSearchQuery("");
     setIsSearchComposing(false);
     resetExplorerSelection(nextViewMode);
-    setTimeScopePanel(null);
-    setProjectScopePanel(null);
-    setBankScopePanel(null);
-    setExpenseTypeScopePanel(null);
-    setBankTagScopePanel(null);
     startTransition(() => {
       setViewMode(nextViewMode);
     });
   }
-
-  function toggleScopeSelection(
-    currentPanel: ScopePickerPanel | null,
-    setPanel: (panel: ScopePickerPanel | null) => void,
-  ) {
-    setPanel(currentPanel === "scope" ? null : "scope");
-  }
-
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (!scopeControlsRef.current) {
-        return;
-      }
-      if (scopeControlsRef.current.contains(event.target as Node)) {
-        return;
-      }
-      setTimeScopePanel(null);
-      setProjectScopePanel(null);
-      setBankScopePanel(null);
-      setExpenseTypeScopePanel(null);
-      setBankTagScopePanel(null);
-    }
-
-    const hasOpenPanel =
-      (viewMode === "time" && timeScopePanel !== null) ||
-      (viewMode === "project" && projectScopePanel !== null) ||
-      (viewMode === "bank" && bankScopePanel !== null) ||
-      (viewMode === "expenseType" && expenseTypeScopePanel !== null) ||
-      (viewMode === "bankTag" && bankTagScopePanel !== null);
-
-    if (!hasOpenPanel) {
-      return;
-    }
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel, bankTagScopePanel]);
 
   function updateProjectExportSelection(
     projectNames: string[],
@@ -1452,31 +1209,31 @@ export default function CostStatisticsPage() {
             ? [selectedProjectName]
             : projectOptions.slice(0, 1);
       updateProjectExportSelection(nextProjectNames, referenceData);
-	    } else if (viewMode === "expenseType") {
-	      setExportCenterMode("expense_type");
-	      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
-	      const bounds = getScopeDateRange(
-	        expenseTypeScopeMode,
-	        expenseTypeScopeYear,
-	        expenseTypeScopeMonth,
-          availableScopeYears,
-	      );
-	      setExpenseTypeRangeMode(rangeMode);
-	      setExpenseTypeMonth(expenseTypeScopeMonth);
-	      setExpenseTypeStartDate(bounds.startDate);
-	      setExpenseTypeEndDate(bounds.endDate);
+    } else if (viewMode === "expenseType") {
+      setExportCenterMode("expense_type");
+      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
+      const bounds = getScopeDateRange(
+        expenseTypeScopeMode,
+        expenseTypeScopeYear,
+        expenseTypeScopeMonth,
+        availableScopeYears,
+      );
+      setExpenseTypeRangeMode(rangeMode);
+      setExpenseTypeMonth(expenseTypeScopeMonth);
+      setExpenseTypeStartDate(bounds.startDate);
+      setExpenseTypeEndDate(bounds.endDate);
       setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
     } else {
       const isBankTagExport = viewMode === "bankTag";
-	      setExportCenterMode(isBankTagExport ? "bank_tag" : "time");
+      setExportCenterMode(isBankTagExport ? "bank_tag" : "time");
       const activeScopeMode = isBankTagExport ? bankTagScopeMode : timeScopeMode;
       const activeScopeYear = isBankTagExport ? bankTagScopeYear : timeScopeYear;
       const activeScopeMonth = isBankTagExport ? bankTagScopeMonth : timeScopeMonth;
-	      const rangeMode = activeScopeMode === "month" ? "month" : "custom";
-	      const bounds = getScopeDateRange(activeScopeMode, activeScopeYear, activeScopeMonth, availableScopeYears);
-	      setTimeRangeMode(rangeMode);
-	      setTimeMonth(activeScopeMonth);
-	      setTimeStartDate(bounds.startDate);
+      const rangeMode = activeScopeMode === "month" ? "month" : "custom";
+      const bounds = getScopeDateRange(activeScopeMode, activeScopeYear, activeScopeMonth, availableScopeYears);
+      setTimeRangeMode(rangeMode);
+      setTimeMonth(activeScopeMonth);
+      setTimeStartDate(bounds.startDate);
       setTimeEndDate(bounds.endDate);
     }
     setIsExportCenterOpen(true);
@@ -1749,17 +1506,21 @@ export default function CostStatisticsPage() {
     ?? selectedExpenseTransactionId
     ?? selectedBankTagTransactionId;
   const costViewSearch = (
-    <CostViewSearch
-      composing={isSearchComposing}
-      pending={isExplorerLoading || searchDraft.trim().replace(/\s+/g, " ") !== searchQuery}
-      value={searchDraft}
+    <QuerySearch
+      ariaLabel="搜索当前成本统计表格"
+      className="cost-view-search-form"
+      maxLength={200}
       onChange={setSearchDraft}
+      onClear={() => setSearchDraft("")}
       onCompositionChange={setIsSearchComposing}
       onSubmit={() => {
         const normalizedQuery = searchDraft.trim().replace(/\s+/g, " ");
         resetExplorerSelection(viewMode);
         setSearchQuery(normalizedQuery);
       }}
+      pending={!isSearchComposing && (isExplorerLoading || searchDraft.trim().replace(/\s+/g, " ") !== searchQuery)}
+      placeholder="搜索当前表格"
+      value={searchDraft}
     />
   );
   const autoLoadTableProps = {
@@ -1818,60 +1579,24 @@ export default function CostStatisticsPage() {
             inert={interactionLocked ? true : undefined}
             ref={headerControlsRef}
           >
-            <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
-              <div className="cost-view-group">
-                <span className="cost-view-group-label">OA配对流水统计</span>
-                <Button
-                  aria-pressed={viewMode === "project"}
-                  className={viewMode === "project" ? "cost-view-tab active" : "cost-view-tab"}
-                  onPress={() => handleViewModeChange("project")}
-                  size="sm"
-                  variant={viewMode === "project" ? "primary" : "secondary"}
-                >
-                  按项目
-                </Button>
-                <Button
-                  aria-pressed={viewMode === "bank"}
-                  className={viewMode === "bank" ? "cost-view-tab active" : "cost-view-tab"}
-                  onPress={() => handleViewModeChange("bank")}
-                  size="sm"
-                  variant={viewMode === "bank" ? "primary" : "secondary"}
-                >
-                  按银行
-                </Button>
-                <Button
-                  aria-pressed={viewMode === "expenseType"}
-                  className={viewMode === "expenseType" ? "cost-view-tab active" : "cost-view-tab"}
-                  onPress={() => handleViewModeChange("expenseType")}
-                  size="sm"
-                  variant={viewMode === "expenseType" ? "primary" : "secondary"}
-                >
-                  按OA费用类型
-                </Button>
-              </div>
-              <span className="cost-view-divider" aria-hidden="true" />
-              <div className="cost-view-group">
-                <span className="cost-view-group-label">流水统计</span>
-                <Button
-                  aria-pressed={viewMode === "bankTag"}
-                  className={viewMode === "bankTag" ? "cost-view-tab active" : "cost-view-tab"}
-                  onPress={() => handleViewModeChange("bankTag")}
-                  size="sm"
-                  variant={viewMode === "bankTag" ? "primary" : "secondary"}
-                >
-                  按标签
-                </Button>
-                <Button
-                  aria-pressed={viewMode === "time"}
-                  className={viewMode === "time" ? "cost-view-tab active" : "cost-view-tab"}
-                  onPress={() => handleViewModeChange("time")}
-                  size="sm"
-                  variant={viewMode === "time" ? "primary" : "secondary"}
-                >
-                  按时间
-                </Button>
-              </div>
-            </div>
+            <ToggleButtonGroup
+              aria-label="成本统计视图切换"
+              className="cost-view-switcher cost-view-tabs"
+              disallowEmptySelection
+              onSelectionChange={(keys) => {
+                const [key] = Array.from(keys);
+                if (key === "project" || key === "bank" || key === "expenseType" || key === "bankTag" || key === "time") handleViewModeChange(key);
+              }}
+              selectedKeys={new Set([viewMode])}
+              selectionMode="single"
+              size="sm"
+            >
+              <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
+              <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
+              <ToggleButton className="cost-view-tab" id="expenseType">按OA费用类型</ToggleButton>
+              <ToggleButton className="cost-view-tab" id="bankTag"><ToggleButtonGroup.Separator />按标签</ToggleButton>
+              <ToggleButton className="cost-view-tab" id="time"><ToggleButtonGroup.Separator />按时间</ToggleButton>
+            </ToggleButtonGroup>
           </div>
         </div>
         <div
@@ -1909,12 +1634,12 @@ export default function CostStatisticsPage() {
             size="sm"
             variant="primary"
           >
-	          {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
-	          </Button>
-	        </div>
-	      </header>
+            {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
+          </Button>
+        </div>
+      </header>
 
-	      <div className="cost-lock-surface" data-lock-state={effectiveCostPageState}>
+      <div className="cost-lock-surface" data-lock-state={effectiveCostPageState}>
         {interactionLocked ? (
           <div
             aria-atomic="true"
@@ -1938,44 +1663,54 @@ export default function CostStatisticsPage() {
           </div>
         ) : null}
         <div className="cost-lock-content">
-	      <section
-          aria-busy={interactionLocked}
-          aria-describedby={interactionLocked ? "cost-statistics-lock-status" : undefined}
-          className={interactionLocked
-            ? "cost-content-shell cost-lock-target is-locked"
-            : "cost-content-shell cost-lock-target"}
-          inert={interactionLocked ? true : undefined}
-          ref={contentShellRef}
-        >
-        {interactionLocked && !explorerData ? (
-          <div className="cost-lock-skeleton" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-        ) : null}
-        {loadError && explorerData ? <div className="state-panel error">{loadError}</div> : null}
-        {exportFeedback && !isExportCenterOpen ? (
-          <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
-        ) : null}
-        {isRootEmpty ? (
-          <div className="state-panel">
-            {viewMode === "project"
-              ? "当前时间范围没有可用于项目成本统计的支出流水。"
-              : viewMode === "bank"
-                ? "当前时间范围没有可用于银行成本统计的支出流水。"
-                : viewMode === "expenseType"
-                  ? "当前时间范围没有可用于 OA 费用类型统计的支出流水。"
-                  : viewMode === "bankTag"
-                    ? "当前时间范围没有可用于标签统计的收入或支出流水。"
-                  : "当前时间范围没有可用于流水统计的收入或支出流水。"}
-          </div>
-        ) : null}
+          <section
+            aria-busy={interactionLocked}
+            aria-describedby={interactionLocked ? "cost-statistics-lock-status" : undefined}
+            className={interactionLocked
+              ? "cost-content-shell cost-lock-target is-locked"
+              : "cost-content-shell cost-lock-target"}
+            inert={interactionLocked ? true : undefined}
+            ref={contentShellRef}
+          >
+            {interactionLocked && !explorerData ? (
+              <div className="cost-lock-skeleton" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
+            ) : null}
+            {loadError && explorerData ? <div className="state-panel error">{loadError}</div> : null}
+            {exportFeedback && !isExportCenterOpen ? (
+              <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
+            ) : null}
+            {isRootEmpty ? (
+              <div className="state-panel">
+                {viewMode === "project"
+                  ? "当前时间范围没有可用于项目成本统计的支出流水。"
+                  : viewMode === "bank"
+                    ? "当前时间范围没有可用于银行成本统计的支出流水。"
+                    : viewMode === "expenseType"
+                      ? "当前时间范围没有可用于 OA 费用类型统计的支出流水。"
+                      : viewMode === "bankTag"
+                        ? "当前时间范围没有可用于标签统计的收入或支出流水。"
+                        : "当前时间范围没有可用于流水统计的收入或支出流水。"}
+              </div>
+            ) : null}
 
         {explorerData ? (
           <>
             {viewMode === "time" ? (
-              <div className="cost-analysis-layout time-layout single-column grid min-h-[520px] grid-cols-1 gap-3">
+              <div className="cost-analysis-layout time-layout cost-time-workspace">
+                <aside className="cost-time-filter-rail">
+                  <h2>时间范围</h2>
+                  <BusinessPeriodPicker
+                    ariaLabel="时间统计时间范围"
+                    inline
+                    onChange={(selection) => updateScopeSelection("time", selection)}
+                    selection={{ mode: timeScopeMode, year: timeScopeYear, month: timeScopeMonth }}
+                    years={availableScopeYears}
+                  />
+                </aside>
                 <section className="cost-table-section">
                   <div className="cost-section-heading cost-view-scope-heading">
                     <div className="cost-section-heading-copy">
@@ -1984,24 +1719,10 @@ export default function CostStatisticsPage() {
                         <DirectionAmount amount={timeDirectionSummary.expenseAmount} label="支出金额" tone="expense" />
                         <DirectionAmount amount={timeDirectionSummary.incomeAmount} label="收入金额" tone="income" />
                       </div>
-	                    </div>
-	                    <div className="cost-section-heading-actions cost-project-scope-actions">
-                        {costViewSearch}
-	                      <div ref={scopeControlsRef} className="cost-scope-controls">
-	                        <ScopeRangePicker
-	                          ariaLabel="时间统计时间范围"
-	                          label="时间范围"
-	                          mode={timeScopeMode}
-	                          years={availableScopeYears}
-	                          year={timeScopeYear}
-	                          month={timeScopeMonth}
-	                          open={timeScopePanel === "scope"}
-	                          onToggle={() => toggleScopeSelection(timeScopePanel, setTimeScopePanel)}
-	                          onChange={(selection) => updateScopeSelection("time", selection)}
-	                          onClose={() => setTimeScopePanel(null)}
-	                        />
-	                      </div>
-	                    </div>
+                    </div>
+                    <div className="cost-section-heading-actions cost-project-scope-actions">
+                      {costViewSearch}
+                    </div>
                   </div>
                   {explorerTransitionScope === "surface" ? (
                     <CostSurfaceSkeleton loading={isExplorerLoading} />
@@ -2027,24 +1748,16 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按项目统计</h2>
                     <DirectionAmount amount={projectTotalAmount} label="支出金额" tone="expense" />
-	                  </div>
-	                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                      {costViewSearch}
-	                    <div ref={scopeControlsRef} className="cost-scope-controls">
-	                      <ScopeRangePicker
-	                        ariaLabel="项目统计时间范围"
-	                        label="时间范围"
-	                        mode={projectScopeMode}
-	                        years={availableScopeYears}
-	                        year={projectScopeYear}
-	                        month={projectScopeMonth}
-	                        open={projectScopePanel === "scope"}
-	                        onToggle={() => toggleScopeSelection(projectScopePanel, setProjectScopePanel)}
-	                        onChange={(selection) => updateScopeSelection("project", selection)}
-	                        onClose={() => setProjectScopePanel(null)}
-	                      />
-	                    </div>
-	                  </div>
+                  </div>
+                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                    {costViewSearch}
+                    <BusinessPeriodPicker
+                      ariaLabel="项目统计时间范围"
+                      onChange={(selection) => updateScopeSelection("project", selection)}
+                      selection={{ mode: projectScopeMode, year: projectScopeYear, month: projectScopeMonth }}
+                      years={availableScopeYears}
+                    />
+                  </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
@@ -2130,24 +1843,16 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按银行统计</h2>
                     <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
-	                  </div>
-	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                  </div>
+                  <div className="cost-section-heading-actions cost-project-scope-actions">
                       {costViewSearch}
-	                    <div ref={scopeControlsRef} className="cost-scope-controls">
-	                      <ScopeRangePicker
-	                        ariaLabel="银行统计时间范围"
-	                        label="时间范围"
-	                        mode={bankScopeMode}
-	                        years={availableScopeYears}
-	                        year={bankScopeYear}
-	                        month={bankScopeMonth}
-	                        open={bankScopePanel === "scope"}
-	                        onToggle={() => toggleScopeSelection(bankScopePanel, setBankScopePanel)}
-	                        onChange={(selection) => updateScopeSelection("bank", selection)}
-	                        onClose={() => setBankScopePanel(null)}
-	                      />
-	                    </div>
-	                  </div>
+                    <BusinessPeriodPicker
+                      ariaLabel="银行统计时间范围"
+                      onChange={(selection) => updateScopeSelection("bank", selection)}
+                      selection={{ mode: bankScopeMode, year: bankScopeYear, month: bankScopeMonth }}
+                      years={availableScopeYears}
+                    />
+                  </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
@@ -2231,24 +1936,16 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy">
                     <h2>按OA费用类型统计</h2>
                     <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
-	                  </div>
-	                  <div className="cost-section-heading-actions cost-project-scope-actions">
+                  </div>
+                  <div className="cost-section-heading-actions cost-project-scope-actions">
                       {costViewSearch}
-	                    <div ref={scopeControlsRef} className="cost-scope-controls">
-	                      <ScopeRangePicker
-	                        ariaLabel="OA费用类型统计时间范围"
-	                        label="时间范围"
-	                        mode={expenseTypeScopeMode}
-	                        years={availableScopeYears}
-	                        year={expenseTypeScopeYear}
-	                        month={expenseTypeScopeMonth}
-	                        open={expenseTypeScopePanel === "scope"}
-	                        onToggle={() => toggleScopeSelection(expenseTypeScopePanel, setExpenseTypeScopePanel)}
-	                        onChange={(selection) => updateScopeSelection("expenseType", selection)}
-	                        onClose={() => setExpenseTypeScopePanel(null)}
-	                      />
-	                    </div>
-	                  </div>
+                    <BusinessPeriodPicker
+                      ariaLabel="OA费用类型统计时间范围"
+                      onChange={(selection) => updateScopeSelection("expenseType", selection)}
+                      selection={{ mode: expenseTypeScopeMode, year: expenseTypeScopeYear, month: expenseTypeScopeMonth }}
+                      years={availableScopeYears}
+                    />
+                  </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
@@ -2315,20 +2012,12 @@ export default function CostStatisticsPage() {
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     {costViewSearch}
-                    <div ref={scopeControlsRef} className="cost-scope-controls">
-                      <ScopeRangePicker
-                        ariaLabel="流水标签统计时间范围"
-                        label="时间范围"
-                        mode={bankTagScopeMode}
-                        years={availableScopeYears}
-                        year={bankTagScopeYear}
-                        month={bankTagScopeMonth}
-                        open={bankTagScopePanel === "scope"}
-                        onToggle={() => toggleScopeSelection(bankTagScopePanel, setBankTagScopePanel)}
-                        onChange={(selection) => updateScopeSelection("bankTag", selection)}
-                        onClose={() => setBankTagScopePanel(null)}
-                      />
-                    </div>
+                    <BusinessPeriodPicker
+                      ariaLabel="流水标签统计时间范围"
+                      onChange={(selection) => updateScopeSelection("bankTag", selection)}
+                      selection={{ mode: bankTagScopeMode, year: bankTagScopeYear, month: bankTagScopeMonth }}
+                      years={availableScopeYears}
+                    />
                   </div>
                 </div>
                 {explorerTransitionScope === "surface" ? (

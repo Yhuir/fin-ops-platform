@@ -768,11 +768,10 @@ describe("OA pending payments page", () => {
 
   test("keeps premium compact table and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const pageSource = readWebSource("src/pages/OaPendingPaymentsPage.tsx");
     const tableSource = readWebSource("src/components/oaPendingPayments/OaPendingPaymentsTable.tsx");
     const button = cssRule(styles, ".oa-pending-payments-button");
     const fieldControls = cssRule(styles, ".oa-pending-payments-field input,\\n.oa-pending-payments-field select");
-    const monthPicker = cssRule(styles, ".oa-pending-payments-month-picker");
-    const monthPickerButton = cssRule(styles, ".oa-pending-payments-month-picker__all");
     const tableShell = cssRule(styles, ".oa-pending-payments-table-shell");
     const table = cssRule(styles, ".oa-pending-payments-table");
     const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
@@ -800,9 +799,9 @@ describe("OA pending payments page", () => {
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
     expect(fieldControls).toContain("var(--motion-fast)");
-    expect(monthPicker).toContain("display: inline-flex");
-    expect(monthPicker).toContain("overflow: hidden");
-    expect(monthPickerButton).toContain("white-space: nowrap");
+    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<BusinessPeriodPicker");
+    expect(pageSource).not.toContain("oa-pending-payments-month-picker");
     expect(tableShell).toContain("min-height: 320px");
     expect(tableShell).toContain("max-height: calc(100vh - 214px)");
     expect(table).toContain("min-width: 1280px");
@@ -994,7 +993,8 @@ describe("OA pending payments page", () => {
     const allMonthsButton = within(page).getByRole("button", { name: "全部" });
     expect(allMonthsButton).toHaveAttribute("aria-pressed", "true");
     expect(initialRowsRequest.searchParams.has("month")).toBe(false);
-    fireEvent.change(within(page).getByLabelText("选择月份"), { target: { value: "2026-04" } });
+    await user.click(within(page).getByRole("button", { name: "OA月份筛选：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "OA月份筛选选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04");
     });
@@ -1661,7 +1661,8 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("张三")).toBeInTheDocument();
-    fireEvent.change(within(page).getByLabelText("选择月份"), { target: { value: "2026-04" } });
+    await userEvent.click(within(page).getByRole("button", { name: "OA月份筛选：年月" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "OA月份筛选选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
     await userEvent.click(within(page).getByRole("button", { name: "全部" }));
     expect(await within(page).findByText("最新查询")).toBeInTheDocument();

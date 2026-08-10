@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lu
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
@@ -11,6 +12,7 @@ import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/Input
 import OaPendingPaymentAuditIcon from "../components/oaPendingPayments/OaPendingPaymentAuditIcon";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
+import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
@@ -351,22 +353,21 @@ export default function OaPendingPaymentsPage() {
                       {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
                     </ToggleButton>
                   </ToggleButtonGroup>
-                  <div aria-label="OA月份筛选" className="oa-pending-payments-month-picker" role="group">
-                    <Button
-                      aria-pressed={query.month === ""}
-                      onPress={() => setQuery((current) => ({ ...current, page: 1, month: "" }))}
-                      size="sm"
-                      variant={query.month === "" ? "primary" : "secondary"}
-                    >
-                      全部
-                    </Button>
-                    <Input
-                      aria-label="选择月份"
-                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
-                      type="month"
-                      value={query.month}
-                    />
-                  </div>
+                  <BusinessPeriodPicker
+                    allowedModes={["month"]}
+                    ariaLabel="OA月份筛选"
+                    onChange={(selection) => setQuery((current) => ({
+                      ...current,
+                      page: 1,
+                      month: selection.mode === "all" ? "" : selection.month,
+                    }))}
+                    selection={{
+                      mode: query.month ? "month" : "all",
+                      year: (query.month || DEFAULT_MONTH).slice(0, 4),
+                      month: query.month || DEFAULT_MONTH,
+                    }}
+                    years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
+                  />
                 </div>
               )}
             />

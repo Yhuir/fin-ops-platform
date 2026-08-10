@@ -1,5 +1,9 @@
 # 销项发票收款情况 实施记录
 
+## 2026-08-10 月份筛选收敛
+
+- 页面月份筛选删除旧 `MonthPicker`，复用共享 HeroUI“全部 + 年/月”控件；销项发票、收入流水与红蓝票关系的 canonical API I/O 不变。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

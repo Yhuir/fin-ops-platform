@@ -6,9 +6,9 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
-import MonthPicker from "../components/MonthPicker";
 import TaxSummaryBand from "../components/tax/TaxSummaryBand";
 import TaxTable from "../components/tax/TaxTable";
 import { useAppChrome } from "../contexts/AppChromeContext";
@@ -406,7 +406,14 @@ export default function TaxOffsetPage() {
               已认证发票导入
             </Button>
           ) : null}
-          <MonthPicker value={currentMonth} onChange={setCurrentMonth} />
+          <BusinessPeriodPicker
+            allowAll={false}
+            allowedModes={["month"]}
+            ariaLabel="税金抵扣月份"
+            onChange={(selection) => setCurrentMonth(selection.month)}
+            selection={{ mode: "month", year: currentMonth.slice(0, 4), month: currentMonth }}
+            years={nearbyBusinessYears(currentMonth)}
+          />
         </div>
       )}
     >
