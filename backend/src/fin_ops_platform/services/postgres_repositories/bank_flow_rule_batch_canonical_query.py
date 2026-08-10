@@ -63,11 +63,58 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 f"""
                 with bank_source as materialized (
                     select
-                        bank.*,
+                        bank.id,
+                        bank.legacy_mongo_id,
+                        bank.account_no,
+                        bank.txn_direction,
+                        bank.normalized_counterparty_name,
+                        bank.counterparty_name_raw,
+                        bank.amount,
+                        bank.txn_date,
+                        bank.txn_month,
+                        bank.trade_time,
+                        bank.pay_receive_time,
+                        bank.summary,
+                        bank.remark,
+                        bank.bank_text_fields,
                         coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
-                        coalesce(
-                            bank.raw_payload->'normalized_payload',
-                            '{{}}'::jsonb
+                        jsonb_strip_nulls(
+                            jsonb_build_object(
+                                'account_key', bank.raw_payload->'normalized_payload'->'account_key',
+                                'account_number', bank.raw_payload->'normalized_payload'->'account_number',
+                                'account_type', bank.raw_payload->'normalized_payload'->'account_type',
+                                'bank_name', bank.raw_payload->'normalized_payload'->'bank_name',
+                                'bank', bank.raw_payload->'normalized_payload'->'bank',
+                                'bank_short_name', bank.raw_payload->'normalized_payload'->'bank_short_name',
+                                'account_bank', bank.raw_payload->'normalized_payload'->'account_bank',
+                                'account_last4', bank.raw_payload->'normalized_payload'->'account_last4',
+                                'imported_bank_name', bank.raw_payload->'normalized_payload'->'imported_bank_name',
+                                'imported_bank_last4', bank.raw_payload->'normalized_payload'->'imported_bank_last4',
+                                'counterparty_account', bank.raw_payload->'normalized_payload'->'counterparty_account',
+                                'counterparty_account_no', bank.raw_payload->'normalized_payload'->'counterparty_account_no',
+                                'counterparty_account_number', bank.raw_payload->'normalized_payload'->'counterparty_account_number',
+                                'counterparty_no', bank.raw_payload->'normalized_payload'->'counterparty_no',
+                                'counterparty_bank', bank.raw_payload->'normalized_payload'->'counterparty_bank',
+                                'counterparty_bank_name', bank.raw_payload->'normalized_payload'->'counterparty_bank_name',
+                                'counterparty_opening_bank', bank.raw_payload->'normalized_payload'->'counterparty_opening_bank',
+                                'purpose', bank.raw_payload->'normalized_payload'->'purpose',
+                                'purpose_text', bank.raw_payload->'normalized_payload'->'purpose_text',
+                                'usage', bank.raw_payload->'normalized_payload'->'usage',
+                                'use', bank.raw_payload->'normalized_payload'->'use',
+                                'summary_text', bank.raw_payload->'normalized_payload'->'summary_text',
+                                'note_text', bank.raw_payload->'normalized_payload'->'note_text',
+                                'note', bank.raw_payload->'normalized_payload'->'note',
+                                'customer_note', bank.raw_payload->'normalized_payload'->'customer_note',
+                                'detail_text', bank.raw_payload->'normalized_payload'->'detail_text',
+                                'detail_fields', bank.raw_payload->'normalized_payload'->'detail_fields',
+                                '_detail_fields', bank.raw_payload->'normalized_payload'->'_detail_fields',
+                                'summary_fields', bank.raw_payload->'normalized_payload'->'summary_fields',
+                                '_summary_fields', bank.raw_payload->'normalized_payload'->'_summary_fields',
+                                'bank_text_fields', coalesce(
+                                    bank.raw_payload->'normalized_payload'->'bank_text_fields',
+                                    bank.bank_text_fields
+                                )
+                            )
                         ) as payload
                     from app.bank_transactions bank
                     where bank.status <> 'deleted'
