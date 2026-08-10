@@ -125,6 +125,11 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(len(job_queries), 2)
         self.assertTrue(all("import_job.id::text as import_job_id" in sql for sql in job_queries))
         self.assertTrue(all("import_job.import_job_id" not in sql for sql in job_queries))
+        history_query = job_queries[0]
+        self.assertIn("with page_batches as", history_query)
+        self.assertIn("latest_files as", history_query)
+        self.assertIn("latest_jobs as", history_query)
+        self.assertNotIn("left join lateral", history_query)
 
 
 if __name__ == "__main__":
