@@ -139,6 +139,12 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest -q tests/test_operations_dashboard_service.py`；`PYTHONPATH=backend/src python3 -m pytest -q tests/test_app_health_api.py`；`cd web && npm test -- --run src/test/AppHealthOperationsPage.test.tsx`。
 - 未测风险：本记录中的 OA 派生导入历史口径已废止；若后续需要独立追踪 OA 附件 promotion 批次，应新增专门 OA 运维记录，不得复用手工导入历史。
 
+## 2026-08-11 导入生命周期查询性能闭环
+
+- 生产实测确认分页导入历史的瓶颈是按 `raw_payload.normalized_payload` 提取 batch 引用并查找最近 file/job，而不是生命周期聚合本身。
+- migration `0143_import_lifecycle_hot_paths.sql` 为既有 batch 引用表达式和 import session 最新 job 增加窄索引；repository 保留有界分页与每批次最近一条 durable fact 的直接查询。
+- 不新增缓存、表、队列、read model 或兼容链路；API response shape、状态机和权限合同不变。
+
 ## 2026-06-21 - App Status outbox 与 ready summary current-effective 口径对齐
 
 - 目标：修复 `/health/ready` 和 ready summary 已显示无 backlog/failed，但左上角 App Status 仍显示一个历史 `oa.sync` failed 的不一致。

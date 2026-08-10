@@ -16,50 +16,6 @@ class PostgresImportLifecycleRepository:
         ) or {}
         rows = self._connection.fetch_all(
             f"""
-            with page_batches as (
-              select batch.*
-              from app.import_batches batch
-              {where_sql}
-              order by batch.imported_at desc, coalesce(batch.legacy_mongo_id, batch.id::text) desc
-              limit %s offset %s
-            ),
-            latest_files as (
-              select distinct on (payload.batch_id)
-                payload.batch_id,
-                coalesce(import_file.legacy_mongo_id, import_file.id::text) as file_id,
-                import_file.session_id,
-                import_file.status as file_status,
-                import_file.uploaded_at,
-                coalesce(payload.data->>'imported_by', import_file.uploaded_by) as imported_by,
-                payload.data->>'session_status' as session_status
-              from app.import_files import_file
-              cross join lateral (
-                select
-                  coalesce(
-                    import_file.raw_payload->'normalized_payload',
-                    import_file.raw_payload,
-                    '{{}}'::jsonb
-                  ) as data,
-                  coalesce(
-                    import_file.raw_payload->'normalized_payload'->>'batch_id',
-                    import_file.raw_payload->'normalized_payload'->>'preview_batch_id'
-                  ) as batch_id
-              ) payload
-              join page_batches batch
-                on payload.batch_id in (batch.legacy_mongo_id, batch.id::text)
-              order by payload.batch_id, import_file.uploaded_at desc, import_file.id desc
-            ),
-            latest_jobs as (
-              select distinct on (import_job.import_session_id)
-                import_job.import_session_id,
-                import_job.id::text as import_job_id,
-                import_job.status,
-                import_job.stage,
-                import_job.last_error
-              from job.import_jobs import_job
-              join latest_files file on file.session_id = import_job.import_session_id
-              order by import_job.import_session_id, import_job.created_at desc, import_job.id desc
-            )
             select
               coalesce(batch.legacy_mongo_id, batch.id::text) as event_id,
               case when batch.batch_type = 'bank_transaction' then 'bank_transactions' else 'manual' end as source_key,
@@ -78,11 +34,36 @@ class PostgresImportLifecycleRepository:
               latest_job.status as job_status,
               latest_job.stage as job_stage,
               latest_job.last_error as job_error
-            from page_batches batch
-            left join latest_files file
-              on file.batch_id in (batch.legacy_mongo_id, batch.id::text)
-            left join latest_jobs latest_job on latest_job.import_session_id = file.session_id
+            from app.import_batches batch
+            left join lateral (
+              select
+                coalesce(import_file.legacy_mongo_id, import_file.id::text) as file_id,
+                import_file.session_id,
+                import_file.status as file_status,
+                import_file.uploaded_at,
+                coalesce(
+                  import_file.raw_payload->'normalized_payload'->>'imported_by',
+                  import_file.uploaded_by
+                ) as imported_by,
+                import_file.raw_payload->'normalized_payload'->>'session_status' as session_status
+              from app.import_files import_file
+              where coalesce(
+                import_file.raw_payload->'normalized_payload'->>'batch_id',
+                import_file.raw_payload->'normalized_payload'->>'preview_batch_id'
+              ) in (batch.legacy_mongo_id, batch.id::text)
+              order by import_file.uploaded_at desc, import_file.id desc
+              limit 1
+            ) file on true
+            left join lateral (
+              select import_job.id::text as import_job_id, status, stage, last_error
+              from job.import_jobs import_job
+              where import_job.import_session_id = file.session_id
+              order by import_job.created_at desc, import_job.id desc
+              limit 1
+            ) latest_job on true
+            {where_sql}
             order by coalesce(file.uploaded_at, batch.imported_at) desc, event_id desc
+            limit %s offset %s
             """,
             (limit, offset),
         ) or []

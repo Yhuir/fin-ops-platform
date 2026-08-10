@@ -70,7 +70,7 @@
 | Shell | `web/src/components/shell/AppStatusIndicator.tsx` |
 | Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/page-audit` in `server.py` |
 | Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py`、`operations_audit_service.py`、`page_audit_registry.py`、`operations_dashboard.py`、`import_lifecycle_service.py` |
-| Import lifecycle query | `services/postgres_repositories/import_lifecycle.py`；只聚合现有 durable facts，不创建 AppHealth 专用 read model。 |
+| Import lifecycle query | `services/postgres_repositories/import_lifecycle.py`、`postgres/migrations/0143_import_lifecycle_hot_paths.sql`；只聚合现有 durable facts，使用 batch/session 索引读取最近 file/job，不创建 AppHealth 专用 read model。 |
 | Backend audit repository | `services/postgres_repositories/operations_audit.py`、`audit_report.py`、`app_health_system_audit.py`、`workbench_relation_audit.py`、`page_business_audit.py`、各 direct page audit repository、`external_control_evidence.py`、`external_control_evidence_audit.py` |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`page_audit_registry.py` |
 | Tools/tests | `tools/app_status_readiness_backfill.py`、`tools/audit_page_business_read_model.py`、`tests/test_app_health*.py`、`tests/test_app_status*.py`、`tests/test_audit_page_business_read_model_tool.py` |

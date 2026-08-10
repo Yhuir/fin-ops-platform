@@ -155,6 +155,7 @@ EXPECTED_MIGRATIONS = [
     "0140_bank_transaction_identity_strength.sql",
     "0141_settings_data_reset_recovery_guard.sql",
     "0142_operation_history_logical_operations.sql",
+    "0143_import_lifecycle_hot_paths.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -313,7 +314,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 143)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 144)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -365,6 +366,18 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("audit_events_request_time_idx", sql)
         self.assertIn("add column if not exists request_id text", sql)
         self.assertIn("workbench_pair_relation_history_request_time_idx", sql)
+
+    def test_import_lifecycle_hot_path_indexes_match_query_contract(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0143_import_lifecycle_hot_paths.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("import_files_lifecycle_batch_idx", sql)
+        self.assertIn("raw_payload->'normalized_payload'->>'batch_id'", sql)
+        self.assertIn("raw_payload->'normalized_payload'->>'preview_batch_id'", sql)
+        self.assertIn("uploaded_at desc", sql)
+        self.assertIn("import_jobs_session_latest_idx", sql)
+        self.assertIn("(import_session_id, created_at desc, id desc)", sql)
 
     def test_batch_accounting_relation_count_hot_path_index_matches_query_contract(self) -> None:
         sql = (
