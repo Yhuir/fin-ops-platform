@@ -288,7 +288,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(
             policy_by_page["bank-flow-rule-batches"]["scenario_operations"],
-            ["bank_flow_rule_batch_submit"],
+            ["bank_flow_rule_batch_submit", "bank_flow_rule_batch_withdraw"],
         )
         self.assertEqual(policy_by_page["bank-flow-rule-batches"]["apply_policy"], "standing_apply")
         self.assertNotIn("no-oa-bank-batches", policy_by_page)
@@ -301,6 +301,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
                 "pending_invoice_attach_existing_invoice",
                 "pending_invoice_attach_existing_invoice_with_oa",
                 "bank_flow_rule_batch_submit",
+                "bank_flow_rule_batch_withdraw",
             ],
         )
         self.assertEqual(policy_by_page["settings"]["apply_policy"], "no_standing_production_apply")

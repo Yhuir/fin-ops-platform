@@ -49,6 +49,10 @@ WITHDRAW_PREVIEW_PATH = "/api/workbench/actions/withdraw-link/preview"
 WITHDRAW_MUTATION_PATH = "/api/workbench/actions/withdraw-link"
 
 REVERSIBLE_RELATION_CONSUMER_CONTRACTS: dict[str, dict[str, object]] = {
+    "bank-flow-rule-batches": {
+        "path": "/api/bank-flow-rule-batches",
+        "business_roots": ("batches",),
+    },
     "reconciliation-workbench": {
         "path": "/api/workbench",
         "business_roots": ("paired", "unpaired"),
@@ -115,6 +119,24 @@ REVERSIBLE_RELATION_SHAPE_CONTRACTS: dict[str, dict[str, object]] = {
         ),
         "non_consumer_isolation_page_keys": ("output-invoice-collections", "tax-offset"),
     },
+    "bank_flow_rule_batch": {
+        "mutation_contract": "bank_flow_rule_batch",
+        "confirm_profile": "bank_flow_rule_batch_submit",
+        "withdraw_profile": "bank_flow_rule_batch_withdraw",
+        "affected_consumer_page_keys": (
+            "bank-flow-rule-batches",
+            "reconciliation-workbench",
+            "bank-details",
+            "pending-invoices",
+            "cost-statistics",
+        ),
+        "non_consumer_isolation_page_keys": (
+            "input-invoice-usage",
+            "output-invoice-collections",
+            "oa-pending-payments",
+            "tax-offset",
+        ),
+    },
 }
 
 RequestFn = Callable[[str, str, Mapping[str, str], bytes | None, float], http_slo_probe.HttpProbeResponse]
@@ -179,6 +201,7 @@ class WriteCheckpoint:
     system_audit_path: str | None = None
     relation_state_after: str | None = None
     fixture_row_ids: tuple[str, ...] = ()
+    request_idempotency_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -344,6 +367,7 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
             if shape not in relation_contracts:
                 raise ValueError(f"scenario {name!r} must declare a registered reversible relation shape.")
             relation_contract = relation_contracts[shape]
+            request_idempotency_required = relation_contract.get("mutation_contract") != "bank_flow_rule_batch"
             if raw.get("fixture_ownership") != "test_owned":
                 raise ValueError(f"scenario {name!r} checkpoints require fixture_ownership='test_owned'.")
             consumer_roles = {
@@ -366,6 +390,7 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
                     http_target_ms=http_target_ms,
                     strict=True,
                     consumer_roles=consumer_roles,
+                    request_idempotency_required=request_idempotency_required,
                 )
                 for checkpoint_index, item in enumerate(raw_checkpoints, start=1)
             )
@@ -378,6 +403,7 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
                     http_target_ms=http_target_ms,
                     strict=True,
                     consumer_roles=consumer_roles,
+                    request_idempotency_required=request_idempotency_required,
                 )
                 if recovery_raw is not None
                 else None
@@ -402,6 +428,7 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
                 for checkpoint in all_checkpoints
                 for step in checkpoint.steps
                 if step.mutation
+                and (step.json_body or {}).get("idempotency_key")
             ]
             if len(idempotency_keys) != len(set(idempotency_keys)):
                 raise ValueError(f"scenario {name!r} mutation idempotency_key values must be unique.")
@@ -979,7 +1006,7 @@ def _run_checkpoint(
             break
         if resolved_step.mutation:
             key = str((resolved_step.json_body or {}).get("idempotency_key") or "").strip()
-            if strict and not key:
+            if strict and checkpoint.request_idempotency_required and not key:
                 step_results.append(
                     WriteStepResult(
                         name=resolved_step.name,
@@ -2366,16 +2393,25 @@ def _validate_reversible_checkpoint_contract(
     recovery_checkpoint: WriteCheckpoint | None,
     relation_contract: Mapping[str, Any],
 ) -> None:
-    if len(checkpoints) != 2:
-        raise ValueError(f"scenario {scenario_name!r} must contain confirm and withdraw checkpoints.")
-    expected_profiles = (
-        str(relation_contract.get("confirm_profile") or ""),
-        str(relation_contract.get("withdraw_profile") or ""),
-    )
-    expected_states = ("active", "inactive")
     mutation_contract = str(relation_contract.get("mutation_contract") or "").strip()
-    if mutation_contract not in {"workbench_relation", "turnover_closure"}:
+    if mutation_contract not in {"workbench_relation", "turnover_closure", "bank_flow_rule_batch"}:
         raise ValueError(f"scenario {scenario_name!r} has an unsupported mutation contract.")
+    confirm_profile = str(relation_contract.get("confirm_profile") or "")
+    withdraw_profile = str(relation_contract.get("withdraw_profile") or "")
+    if mutation_contract == "bank_flow_rule_batch":
+        expected_profiles = (confirm_profile, withdraw_profile, confirm_profile)
+        expected_states = ("active", "inactive", "active")
+        directions = ("submit", "withdraw", "submit")
+        if len(checkpoints) != 3:
+            raise ValueError(
+                f"scenario {scenario_name!r} must contain submit, withdraw, and resubmit checkpoints."
+            )
+    else:
+        expected_profiles = (confirm_profile, withdraw_profile)
+        expected_states = ("active", "inactive")
+        directions = ("confirm", "withdraw")
+        if len(checkpoints) != 2:
+            raise ValueError(f"scenario {scenario_name!r} must contain confirm and withdraw checkpoints.")
     expected_roles = {
         **{
             str(page_key): "affected"
@@ -2408,7 +2444,7 @@ def _validate_reversible_checkpoint_contract(
         checkpoints,
         expected_profiles,
         expected_states,
-        ("confirm", "withdraw"),
+        directions,
         strict=True,
     ):
         if checkpoint.operations != (expected_profile,) or checkpoint.relation_state_after != expected_state:
@@ -2430,13 +2466,19 @@ def _validate_reversible_checkpoint_contract(
                 checkpoint=checkpoint,
                 direction=direction,
             )
-        else:
+        elif mutation_contract == "turnover_closure":
             _validate_turnover_closure_steps(
                 scenario_name=scenario_name,
                 checkpoint=checkpoint,
                 direction=direction,
             )
-    if recovery_checkpoint is None or recovery_checkpoint.operations != (expected_profiles[1],):
+        else:
+            _validate_bank_flow_rule_batch_steps(
+                scenario_name=scenario_name,
+                checkpoint=checkpoint,
+                direction=direction,
+            )
+    if recovery_checkpoint is None or recovery_checkpoint.operations != (withdraw_profile,):
         raise ValueError(f"scenario {scenario_name!r} recovery checkpoint must use the registered withdraw profile.")
     _validate_checkpoint_consumers_and_rows(
         scenario_name=scenario_name,
@@ -2453,7 +2495,7 @@ def _validate_reversible_checkpoint_contract(
             checkpoint=recovery_checkpoint,
             direction="withdraw",
         )
-    else:
+    elif mutation_contract == "turnover_closure":
         _validate_turnover_closure_steps(
             scenario_name=scenario_name,
             checkpoint=recovery_checkpoint,
@@ -2477,6 +2519,19 @@ def _validate_reversible_checkpoint_contract(
         ):
             raise ValueError(
                 f"scenario {scenario_name!r} turnover withdraw checkpoints must consume the canonical closure case_id."
+            )
+    else:
+        _validate_bank_flow_rule_batch_steps(
+            scenario_name=scenario_name,
+            checkpoint=recovery_checkpoint,
+            direction="withdraw",
+        )
+        if not checkpoints[0].fixture_row_ids or any(
+            checkpoint.fixture_row_ids != checkpoints[0].fixture_row_ids
+            for checkpoint in (*checkpoints, recovery_checkpoint)
+        ):
+            raise ValueError(
+                f"scenario {scenario_name!r} bank-flow checkpoints must use the same fixture_row_ids."
             )
 
 
@@ -2557,6 +2612,7 @@ def _validate_checkpoint_consumers_and_rows(
             "/case_id",
             "/active_relation/case_id",
             "/workbench_pair_relation/case_id",
+            "/batch/batch_id",
         }
     }
     for page_key in {
@@ -2837,6 +2893,48 @@ def _validate_turnover_closure_steps(
         )
 
 
+def _validate_bank_flow_rule_batch_steps(
+    *,
+    scenario_name: str,
+    checkpoint: WriteCheckpoint,
+    direction: str,
+) -> None:
+    if len(checkpoint.steps) != 1 or not checkpoint.steps[0].mutation:
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} bank-flow mutation must contain one step."
+        )
+    mutation = checkpoint.steps[0]
+    body = mutation.json_body or {}
+    if mutation.method != "POST" or mutation.expected_statuses != (200,) or "idempotency_key" in body:
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must use the canonical service-idempotent POST contract."
+        )
+    if direction == "submit":
+        captures = dict(mutation.captures)
+        if (
+            mutation.path != "/api/bank-flow-rule-batches/submit-selection"
+            or body.get("transaction_ids") != list(checkpoint.fixture_row_ids)
+            or not str(body.get("scope_month") or "").strip()
+            or set(body) - {"transaction_ids", "scope_month", "note"}
+            or captures.get("active_batch_id") != "/batch/batch_id"
+            or captures.get("active_batch_version") != "/batch/version"
+        ):
+            raise ValueError(
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must submit the exact fixture rows and capture batch identity."
+            )
+        return
+    if (
+        direction != "withdraw"
+        or mutation.path != "/api/bank-flow-rule-batches/${active_batch_id}/withdraw"
+        or body.get("expected_version") != "${active_batch_version}"
+        or not str(body.get("reason") or "").strip()
+        or set(body) - {"expected_version", "reason"}
+    ):
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must withdraw the captured active batch version."
+        )
+
+
 def _assertion_binds_fixture_identity(
     assertion: JsonPointerAssertion,
     *,
@@ -2871,6 +2969,7 @@ def _load_checkpoint(
     http_target_ms: float,
     strict: bool,
     consumer_roles: Mapping[str, str] | None = None,
+    request_idempotency_required: bool = True,
 ) -> WriteCheckpoint:
     if not isinstance(raw, dict):
         raise ValueError(f"scenario {scenario_name!r} checkpoint #{checkpoint_index} must be an object.")
@@ -2886,7 +2985,7 @@ def _load_checkpoint(
     mutations = [step for step in steps if step.mutation]
     if strict and len(mutations) != 1:
         raise ValueError(f"checkpoint {name!r} must contain exactly one mutation step.")
-    if strict:
+    if strict and request_idempotency_required:
         idempotency_key = str((mutations[0].json_body or {}).get("idempotency_key") or "").strip()
         if not idempotency_key or "${" in idempotency_key:
             raise ValueError(f"checkpoint {name!r} mutation must include a static idempotency_key.")
@@ -2921,6 +3020,7 @@ def _load_checkpoint(
         system_audit_path=system_audit_path,
         relation_state_after=relation_state_after,
         fixture_row_ids=fixture_row_ids,
+        request_idempotency_required=request_idempotency_required,
     )
 
 

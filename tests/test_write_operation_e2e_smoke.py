@@ -163,6 +163,7 @@ _BANK_INVOICE_CONSUMER_PAGES = (
 )
 
 _CONSUMER_PATHS = {
+    "bank-flow-rule-batches": "/api/bank-flow-rule-batches?month=2026-07&bucket=submitted&page=1&page_size=20",
     "reconciliation-workbench": "/api/workbench?month=all",
     "bank-details": "/api/bank-details/transactions?year=2026&page=1&page_size=20",
     "pending-invoices": "/api/pending-invoices/rows?page=1&page_size=20",
@@ -425,6 +426,113 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
         "fixture_ownership": "test_owned",
         "checkpoints": [confirm, withdraw("turnover-withdraw", f"{key_prefix}-withdraw")],
         "recovery_checkpoint": withdraw("turnover-recovery", f"{key_prefix}-recovery"),
+    }
+
+
+def _raw_bank_flow_rule_batch_scenario(name: str) -> dict[str, object]:
+    fixture_row_ids = ["bank-flow-test-1", "bank-flow-test-2"]
+
+    def consumers() -> list[dict[str, object]]:
+        affected = (
+            "bank-flow-rule-batches",
+            "reconciliation-workbench",
+            "bank-details",
+            "pending-invoices",
+            "cost-statistics",
+        )
+        isolation = (
+            "input-invoice-usage",
+            "output-invoice-collections",
+            "oa-pending-payments",
+            "tax-offset",
+        )
+        return [
+            {
+                "name": page_key,
+                "page_key": page_key,
+                "path": _CONSUMER_PATHS[page_key],
+                "assertions": [
+                    {
+                        "pointer": (
+                            "/batches/0/batch_id"
+                            if page_key == "bank-flow-rule-batches"
+                            else "/paired"
+                            if page_key == "reconciliation-workbench"
+                            else "/rows"
+                        ),
+                        "excludes": [fixture_row_ids[0]],
+                    }
+                ],
+            }
+            for page_key in affected
+        ] + [
+            {
+                "name": page_key,
+                "page_key": page_key,
+                "path": _CONSUMER_PATHS[page_key],
+                "assertions": [
+                    {
+                        "pointer": "/input_plan_items" if page_key == "tax-offset" else "/rows",
+                        "equals": [],
+                    }
+                ],
+            }
+            for page_key in isolation
+        ]
+
+    def submit(checkpoint_name: str) -> dict[str, object]:
+        return {
+            "name": checkpoint_name,
+            "operation": "bank_flow_rule_batch_submit",
+            "fixture_row_ids": fixture_row_ids,
+            "steps": [
+                {
+                    "name": checkpoint_name,
+                    "method": "POST",
+                    "path": "/api/bank-flow-rule-batches/submit-selection",
+                    "json": {
+                        "transaction_ids": fixture_row_ids,
+                        "scope_month": "2026-07",
+                        "note": "controlled test-owned bank-flow smoke",
+                    },
+                    "captures": {
+                        "active_batch_id": "/batch/batch_id",
+                        "active_batch_version": "/batch/version",
+                    },
+                }
+            ],
+            "consumers": consumers(),
+            "system_audit": True,
+            "relation_state_after": "active",
+        }
+
+    def withdraw(checkpoint_name: str) -> dict[str, object]:
+        return {
+            "name": checkpoint_name,
+            "operation": "bank_flow_rule_batch_withdraw",
+            "fixture_row_ids": fixture_row_ids,
+            "steps": [
+                {
+                    "name": checkpoint_name,
+                    "method": "POST",
+                    "path": "/api/bank-flow-rule-batches/${active_batch_id}/withdraw",
+                    "json": {
+                        "expected_version": "${active_batch_version}",
+                        "reason": "restore test-owned bank-flow smoke fixture",
+                    },
+                }
+            ],
+            "consumers": consumers(),
+            "system_audit": True,
+            "relation_state_after": "inactive",
+        }
+
+    return {
+        "name": name,
+        "shape": "bank_flow_rule_batch",
+        "fixture_ownership": "test_owned",
+        "checkpoints": [submit("bank-flow-submit"), withdraw("bank-flow-withdraw"), submit("bank-flow-resubmit")],
+        "recovery_checkpoint": withdraw("bank-flow-recovery"),
     }
 
 
@@ -1740,6 +1848,34 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             "${cash_closure_case_id}",
         )
         self.assertEqual(scenario.checkpoints[0].fixture_row_ids, scenario.checkpoints[1].fixture_row_ids)
+
+    def test_bank_flow_rule_batch_scenario_requires_submit_withdraw_resubmit_and_recovery(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "scenario.json"
+            path.write_text(
+                json.dumps([_raw_bank_flow_rule_batch_scenario("bank-flow-rule-batch")]),
+                encoding="utf-8",
+            )
+            scenario = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        self.assertEqual(scenario.shape, "bank_flow_rule_batch")
+        self.assertEqual(
+            [checkpoint.relation_state_after for checkpoint in scenario.checkpoints],
+            ["active", "inactive", "active"],
+        )
+        self.assertTrue(all(not checkpoint.request_idempotency_required for checkpoint in scenario.checkpoints))
+        self.assertEqual(
+            scenario.recovery_checkpoint.steps[0].path,
+            "/api/bank-flow-rule-batches/${active_batch_id}/withdraw",
+        )
+
+        invalid = _raw_bank_flow_rule_batch_scenario("bank-flow-incomplete")
+        invalid["checkpoints"] = invalid["checkpoints"][:2]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            path.write_text(json.dumps([invalid]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "submit, withdraw, and resubmit"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
 
     def test_reversible_scenario_allows_two_exact_scopes_for_one_affected_page(self) -> None:
         scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")

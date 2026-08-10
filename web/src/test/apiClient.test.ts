@@ -136,7 +136,7 @@ describe("apiClient", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ error: "category_version_conflict", message: "银行明细标签已更新" }), {
         status: 409,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Request-ID": "request-from-header" },
       }),
     ));
 
@@ -147,9 +147,25 @@ describe("apiClient", () => {
       status: 409,
       code: "category_version_conflict",
       message: "银行明细标签已更新",
+      payload: expect.objectContaining({ requestId: "request-from-header" }),
     });
     await expect(apiRequestJson("/api/bank-details/categories")).rejects.toBeInstanceOf(ApiClientError);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps the response request id when a server error body is empty", async () => {
+    vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops-api/");
+    vi.resetModules();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 500, headers: { "X-Request-ID": "request-empty-body" } }),
+    );
+
+    const { apiRequestJson } = await import("../features/apiClient");
+
+    await expect(apiRequestJson("/api/bank-flow-rule-batches/submit-selection")).rejects.toMatchObject({
+      status: 500,
+      payload: { requestId: "request-empty-body" },
+    });
   });
 
   test("turns an explicit request timeout into a structured API error", async () => {

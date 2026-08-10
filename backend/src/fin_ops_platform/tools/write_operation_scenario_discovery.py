@@ -28,6 +28,7 @@ STANDARD_WRITE_OPERATIONS = (
     "pending_invoice_attach_existing_invoice",
     "pending_invoice_attach_existing_invoice_with_oa",
     "bank_flow_rule_batch_submit",
+    "bank_flow_rule_batch_withdraw",
 )
 STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
     {
@@ -48,7 +49,7 @@ STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
     {
         "page_key": "bank-flow-rule-batches",
         "apply_policy": "standing_apply",
-        "scenario_operations": ("bank_flow_rule_batch_submit",),
+        "scenario_operations": ("bank_flow_rule_batch_submit", "bank_flow_rule_batch_withdraw"),
     },
     {
         "page_key": "bank-details",

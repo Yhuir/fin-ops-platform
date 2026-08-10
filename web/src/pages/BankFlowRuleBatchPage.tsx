@@ -110,6 +110,20 @@ function isCandidateConflict(caught: unknown) {
   return caught instanceof ApiClientError && caught.code === CANDIDATE_CONFLICT_CODE;
 }
 
+function mutationErrorMessage(caught: unknown, fallback: string) {
+  if (isCandidateConflict(caught)) {
+    return CANDIDATE_CONFLICT_MESSAGE;
+  }
+  const message = caught instanceof Error ? caught.message : fallback;
+  if (!(caught instanceof ApiClientError) || caught.status < 500 || !caught.payload || typeof caught.payload !== "object") {
+    return message;
+  }
+  const requestId = "requestId" in caught.payload && typeof caught.payload.requestId === "string"
+    ? caught.payload.requestId.trim()
+    : "";
+  return requestId ? `${message}（请求编号：${requestId}）` : message;
+}
+
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
@@ -511,19 +525,10 @@ export default function BankFlowRuleBatchPage() {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => isCandidateConflict(caught)
-        ? CANDIDATE_CONFLICT_MESSAGE
-        : caught instanceof Error ? caught.message : "提交选中流水失败",
+      errorMessage: (caught) => mutationErrorMessage(caught, "提交选中流水失败"),
     });
     if (result.status === "success") {
       handleMutationComplete("选中流水已提交");
-    } else {
-      setFeedback({
-        severity: "error",
-        message: isCandidateConflict(result.error)
-          ? CANDIDATE_CONFLICT_MESSAGE
-          : result.error instanceof Error ? result.error.message : "提交选中流水失败",
-      });
     }
   };
 
@@ -554,12 +559,10 @@ export default function BankFlowRuleBatchPage() {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "提交内部往来批次失败",
+      errorMessage: (caught) => mutationErrorMessage(caught, "提交内部往来批次失败"),
     });
     if (result.status === "success") {
       handleMutationComplete("内部往来批次已提交");
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交内部往来批次失败" });
     }
   };
 
@@ -588,12 +591,10 @@ export default function BankFlowRuleBatchPage() {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "撤回批次失败",
+      errorMessage: (caught) => mutationErrorMessage(caught, "撤回批次失败"),
     });
     if (result.status === "success") {
       handleMutationComplete("批次已撤回");
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "撤回批次失败" });
     }
   };
 
@@ -632,12 +633,10 @@ export default function BankFlowRuleBatchPage() {
           setMutating(false);
         }
       },
-      errorMessage: (caught) => caught instanceof Error ? caught.message : "保存流水规则失败",
+      errorMessage: (caught) => mutationErrorMessage(caught, "保存流水规则失败"),
     });
     if (result.status === "success") {
       setFeedback({ severity: "success", message: "流水规则已保存" });
-    } else {
-      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "保存流水规则失败" });
     }
   };
 

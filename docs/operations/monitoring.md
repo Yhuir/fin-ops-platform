@@ -725,7 +725,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
   workflow 应先准备已审批、可回滚的测试对象，再重新 discovery。
 - 生成的 bank-flow scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。
 
-可逆关系 runtime contract 随 backend release 发布，定义三个 shape、正式 consumer API 与允许的业务数据根；`docs/dev/write-operation-impact-matrix.json` 是测试约束的文档镜像，runner 不在生产读取 `docs/`。mutation 返回非预期 HTTP/HTML 时先视为 ambiguous，并只读查询 durable idempotency record：明确 committed 才允许按正式 recovery checkpoint 清理，明确 failed 才可判定未提交；missing/reserved/冲突保持 `recovery_required`，禁止盲重试或盲撤回。
+可逆关系 runtime contract 随 backend release 发布，定义四个 shape（含 `bank_flow_rule_batch` 的 submit -> withdraw -> resubmit -> recovery）、正式 consumer API 与允许的业务数据根；`docs/dev/write-operation-impact-matrix.json` 是测试约束的文档镜像，runner 不在生产读取 `docs/`。Workbench/Turnover mutation 返回非预期 HTTP/HTML 时先视为 ambiguous，并只读查询 durable idempotency record：明确 committed 才允许按正式 recovery checkpoint 清理，明确 failed 才可判定未提交；missing/reserved/冲突保持 `recovery_required`，禁止盲重试或盲撤回。bank-flow 顶层 command 使用自身 batch/version 幂等合同且不接受伪造的外部 idempotency key；其响应歧义同样 fail closed 并要求人工按 request ID 核实，不能盲撤回。
 
 没有可下发 PostgreSQL DSN 的生产环境通过 root-owned helper 执行同一 runner。scenario 必须位于
 `/tmp/finops-write-e2e-*.json`、由 `finops-deploy` 持有、不可 group/world write 且不超过 1 MiB；helper

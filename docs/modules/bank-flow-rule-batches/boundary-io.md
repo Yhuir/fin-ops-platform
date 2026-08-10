@@ -56,6 +56,7 @@
 | 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
 | 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
+| 失败反馈 | Mutation 失败只由全局操作弹窗显示一次；后端 5xx 的 `requestId` 必须附在错误消息中用于精确查日志，页面不得再叠加第二个 feedback。 |
 | 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 只在银行栏使用 bank-flow summary；1 到 3 行直接完整展示。 |
 
 ## 一致性与查询预算
@@ -139,6 +140,7 @@ Canonical facts：
 - Read-model cleanup：页面不读 projection、不 enqueue、不 polling。
 - Frontend：loading/empty/error、交互、一次写后 GET。
 - E2E：提交 -> canonical relation/batch -> 当前页 GET -> 关联台。
+- 生产可逆门禁：只接受 `fixture_ownership=test_owned` 的固定流水，执行 submit -> withdraw -> resubmit，并以 withdraw recovery 保证最终 inactive；同时验证五个受影响页面和四个隔离页面。
 - Regression：no-OA legacy、bank-details、Workbench、成本、外部往来款、权限/审计。
 
 详见 `tests.md`。

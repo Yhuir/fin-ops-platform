@@ -612,6 +612,7 @@ idempotency 边界，禁止 SQL 直写、cancel/recreate 或扫描其它 relatio
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
 `write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 接受 root-owned `0600`
 标准文件 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json`，或受限 `/tmp` JSON，
+并登记 `bank_flow_rule_batch` 的 submit -> withdraw -> resubmit 三个 checkpoint 与 inactive recovery；该 shape 只接受显式 `test_owned` 流水，最终必须恢复未提交状态。
 apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固定走公网 `/fin-ops-api`，
 不提供任意命令或 SQL 能力；第二行为空时在任何业务写请求前失败。可选第四参数只接受 `1..20`
 的 preview sample count（默认 1），只重复只读 canonical preview，不重复正式 mutation。standing correctness helper

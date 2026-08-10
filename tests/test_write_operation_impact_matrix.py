@@ -44,6 +44,10 @@ REVERSIBLE_RELATION_PROFILE_PAIRS = {
         "workbench_relation_confirm_cross_page",
         "workbench_relation_withdraw_cross_page",
     ),
+    "bank_flow_rule_batch": (
+        "bank_flow_rule_batch_submit",
+        "bank_flow_rule_batch_withdraw",
+    ),
 }
 
 
@@ -148,19 +152,23 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
             )
             self.assertIn("workbench_relation", row["target_read_model_keys"], operation)
 
-    def test_reversible_relation_registry_has_exactly_three_safe_profile_pairs(self) -> None:
+    def test_reversible_relation_registry_has_exactly_four_safe_profile_pairs(self) -> None:
         pairs = list(self.matrix["reversible_relation_profile_pairs"])
         pairs_by_shape = {str(pair["shape"]): pair for pair in pairs}
         consumer_probe_paths = dict(self.matrix["reversible_relation_consumer_probe_paths"])
         consumer_business_roots = dict(self.matrix["reversible_relation_consumer_business_roots"])
 
-        self.assertEqual(len(pairs), 3)
+        self.assertEqual(len(pairs), 4)
         self.assertEqual(set(pairs_by_shape), set(REVERSIBLE_RELATION_PROFILE_PAIRS))
         for shape, expected_profiles in REVERSIBLE_RELATION_PROFILE_PAIRS.items():
             pair = pairs_by_shape[shape]
             self.assertEqual(
                 pair["mutation_contract"],
-                "turnover_closure" if shape == "bank_turnover" else "workbench_relation",
+                "turnover_closure"
+                if shape == "bank_turnover"
+                else "bank_flow_rule_batch"
+                if shape == "bank_flow_rule_batch"
+                else "workbench_relation",
             )
             profiles = (str(pair["confirm_profile"]), str(pair["withdraw_profile"]))
             self.assertEqual(profiles, expected_profiles, shape)
@@ -182,19 +190,24 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                     row["operation"],
                 )
 
-            self.assertEqual(
-                pair["safety_contract"],
-                {
-                    "fixture_ownership": "test_owned",
-                    "bounded_row_ids": True,
-                    "approval_required": True,
-                    "checkpoints": ["confirm", "withdraw"],
-                    "cleanup": "withdraw",
-                    "unique_idempotency_key_per_mutation": True,
-                    "discovery_candidate_policy": "read_only_context_only",
-                },
-                shape,
-            )
+            expected_safety_contract = {
+                "fixture_ownership": "test_owned",
+                "bounded_row_ids": True,
+                "approval_required": True,
+                "checkpoints": ["confirm", "withdraw"],
+                "cleanup": "withdraw",
+                "unique_idempotency_key_per_mutation": True,
+                "discovery_candidate_policy": "read_only_context_only",
+            }
+            if shape == "bank_flow_rule_batch":
+                expected_safety_contract.update(
+                    {
+                        "checkpoints": ["submit", "withdraw", "resubmit"],
+                        "unique_idempotency_key_per_mutation": False,
+                        "service_managed_idempotency": True,
+                    }
+                )
+            self.assertEqual(pair["safety_contract"], expected_safety_contract, shape)
         registered_pages = {
             str(page_key)
             for pair in pairs

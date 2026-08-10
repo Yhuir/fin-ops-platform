@@ -1212,6 +1212,40 @@ describe("BankFlowRuleBatchPage", () => {
     });
   });
 
+  test("shows one actionable server error with its request id", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withPagination(listPayload, url));
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/submit-selection") {
+        return jsonResponse({
+          error: "bank_flow_rule_batch_persistence_failed",
+          message: "流水规则批次保存失败，请稍后重试。",
+          requestId: "req-bank-flow-500",
+        }, 500);
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ }));
+    await user.click(screen.getByRole("button", { name: "提交批次" }));
+
+    const message = "流水规则批次保存失败，请稍后重试。（请求编号：req-bank-flow-500）";
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "关闭提示" })).not.toBeInTheDocument();
+  });
+
   test("keeps draft row selection available when legacy read model rows omit can_submit", async () => {
     const legacyDraftBatch = { ...listPayload.batches[0] };
     delete (legacyDraftBatch as Partial<typeof legacyDraftBatch>).can_submit;

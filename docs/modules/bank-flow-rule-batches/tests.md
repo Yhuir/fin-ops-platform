@@ -61,6 +61,8 @@
 - 5 月 31 日与 6 月 1 日的 ±2 天跨月内部转账只由最早成员月份返回一个稳定 candidate；相邻月份不得重复返回。
 - 缺少 `scope_month`、规则漂移、成员漂移或 active relation 新占用必须返回 candidate conflict；遗留 persisted draft 不得被恢复提交。
 - selected-row guard 必须接受 `2026-08-01 15:24:03` 与 `2026-08-01T15:24:03+08:00` 的等价时刻，并继续拒绝真实秒级时间漂移；前端冲突恢复只允许一次 GET、零自动重提。
+- 后端 5xx 只显示一个错误弹窗并携带 `requestId`，不得同时出现底部重复错误提示。
+- 可逆生产 scenario 必须是 `test_owned`，严格执行 submit -> withdraw -> resubmit，且声明 withdraw recovery；缺任一 checkpoint、跨 checkpoint 换流水或缺少受影响/隔离 consumer 必须拒绝加载。
 - 列表生成的 live candidate 必须能用相同 `scope_month` 读取详情；submitted bucket 的 summary、列表 batch count 和 row count 必须来自同一完整 canonical 集合。
 - Audit 必须调用共享 builder；故意过滤 188500 候选时 expected-set gate 必须失败。
 - 空列表必须来自已完成的 canonical snapshot，不能由 missing/stale 投影伪造。

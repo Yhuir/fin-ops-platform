@@ -187,7 +187,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 | `reconciliation-workbench` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `workbench-relations` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `no-oa-bank-batches` | standing apply | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `bank-flow-rule-batches` | access convergence evidence | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-flow-rule-batches` | access convergence evidence | `bank_flow_rule_batch_submit` + `bank_flow_rule_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `bank-details` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `bank-account-balance` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `pending-invoices` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |

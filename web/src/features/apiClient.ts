@@ -257,10 +257,16 @@ export async function apiRequestJson<T>(
   if (!response.ok) {
     const fallbackMessage = options.defaultErrorMessage ?? (trimmedText || "request failed");
     const message = errorMessageFromPayload(payload, fallbackMessage);
+    const responseRequestId = response.headers?.get?.("X-Request-ID")?.trim() ?? "";
+    const errorPayload = responseRequestId
+      ? payload && typeof payload === "object" && !Array.isArray(payload)
+        ? "requestId" in payload ? payload : { ...payload, requestId: responseRequestId }
+        : { requestId: responseRequestId }
+      : payload;
     throw new ApiClientError(message, {
       status: response.status,
       code: errorCodeFromPayload(payload),
-      payload,
+      payload: errorPayload,
       responseText: rawText,
       url: result.resolvedUrl,
     });
