@@ -235,11 +235,12 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
     assert any("from app.bank_flow_rule_batches batch" in sql for sql in all_sql)
     assert any("from app.workbench_pair_relations" in sql for sql in all_sql)
     assert any("from app.bank_transaction_category_confirmations" in sql for sql in all_sql)
-    source_params = next(
-        params
+    source_sql, source_params = next(
+        (sql, params)
         for sql, params in connection.fetched_one
         if "candidate_rows" in sql and "formal_items" in sql
     )
+    assert "coalesce(candidate.txn_date, candidate.txn_month)" in source_sql
     assert "2026-05-01" in source_params
     assert "2026-05-31" in source_params
     assert source_params[-1] == "2026-05-01"
@@ -285,7 +286,8 @@ def test_all_page_query_reads_the_complete_canonical_source_without_a_month_pred
         if "candidate_rows" in sql and "formal_items" in sql
     )
     assert "where bank.status <> 'deleted' and false" not in source_sql
-    assert "%s::date is null or coalesce(bank.txn_date, bank.txn_month)" in source_sql
+    assert "coalesce(candidate.txn_date, candidate.txn_month)" not in source_sql
+    assert "or bank.txn_date >= %s::date" in source_sql
     assert "bank.*" not in source_sql.split("), bank_identities", 1)[0]
     assert "confirmed_category_candidates" not in source_sql
     assert "manual_category_candidates" not in source_sql

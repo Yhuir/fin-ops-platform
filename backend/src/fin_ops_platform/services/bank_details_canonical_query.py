@@ -1128,6 +1128,7 @@ def bank_category_classification_cte(
             bank.balance,
             bank.currency,
             bank.txn_date,
+            bank.txn_month,
             bank.trade_time,
             bank.pay_receive_time,
             coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort,
@@ -1180,11 +1181,11 @@ def bank_category_classification_cte(
           where coalesce(nullif(bank.status, ''), 'active') <> all(%s::text[])
             and (
               %s::date is null
-              or coalesce(bank.txn_date, bank.txn_month) >= %s::date - interval '2 days'
+              or bank.txn_date >= %s::date - interval '2 days'
             )
             and (
               %s::date is null
-              or coalesce(bank.txn_date, bank.txn_month) <= %s::date + interval '2 days'
+              or bank.txn_date <= %s::date + interval '2 days'
             )
             and (
               %s::text[] is null

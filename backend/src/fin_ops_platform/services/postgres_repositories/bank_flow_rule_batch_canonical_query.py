@@ -43,6 +43,10 @@ _CLASSIFIED_CANDIDATE_ROWS_SQL = """
         'canonical_sql'::text as category_resolution_authority
     from classified_with_semantics candidate
 """
+_CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL = _CLASSIFIED_CANDIDATE_ROWS_SQL + """
+    where coalesce(candidate.txn_date, candidate.txn_month) >= %s::date - interval '2 days'
+      and coalesce(candidate.txn_date, candidate.txn_month) <= %s::date + interval '2 days'
+"""
 
 
 class BankFlowRuleBatchCanonicalQueryRepository:
@@ -106,16 +110,26 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             )
             classification_sql, classification_params = bank_category_classification_cte(
                 definitions=definitions,
-                date_from=scope_start.isoformat() if scope_start is not None else None,
-                date_to=scope_end.isoformat() if scope_end is not None else None,
+                date_from=None,
+                date_to=None,
                 defer_full_payload=True,
+            )
+            candidate_rows_sql = (
+                _CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL
+                if scope_start is not None and scope_end is not None
+                else _CLASSIFIED_CANDIDATE_ROWS_SQL
+            )
+            candidate_scope_params = (
+                [scope_start.isoformat(), scope_end.isoformat()]
+                if scope_start is not None and scope_end is not None
+                else []
             )
             transaction.execute("set local jit = off")
             source_result = transaction.fetch_one(
                 f"""
                 with {classification_sql},
                 bank_source as materialized (
-                    {_CLASSIFIED_CANDIDATE_ROWS_SQL}
+                    {candidate_rows_sql}
                 ),
                 bank_identities as materialized (
                     select bank.id as bank_id, bank.transaction_id as identity
@@ -211,7 +225,13 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         '[]'::jsonb
                     ) as formal_items
                 """,
-                tuple([*classification_params, *formal_scope_params]),
+                tuple(
+                    [
+                        *classification_params,
+                        *candidate_scope_params,
+                        *formal_scope_params,
+                    ]
+                ),
             ) or {}
         candidate_rows = source_result.get("candidate_rows")
         candidate_rows = candidate_rows if isinstance(candidate_rows, list) else []
@@ -283,8 +303,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         ]
         classification_sql, classification_params = bank_category_classification_cte(
             definitions=definitions,
-            date_from=scope_start.isoformat(),
-            date_to=scope_end.isoformat(),
+            date_from=None,
+            date_to=None,
             defer_full_payload=True,
         )
         transaction.execute("set local jit = off")
@@ -292,7 +312,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             f"""
             with {classification_sql},
             candidate_rows as materialized (
-                {_CLASSIFIED_CANDIDATE_ROWS_SQL}
+                {_CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL}
             ),
             candidate_identities as materialized (
                 select candidate.transaction_id as identity
@@ -332,7 +352,13 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     '[]'::jsonb
                 ) as active_relations
             """,
-            tuple(classification_params),
+            tuple(
+                [
+                    *classification_params,
+                    scope_start.isoformat(),
+                    scope_end.isoformat(),
+                ]
+            ),
         ) or {}
         candidate_rows = result.get("candidate_rows")
         active_relations = result.get("active_relations")
