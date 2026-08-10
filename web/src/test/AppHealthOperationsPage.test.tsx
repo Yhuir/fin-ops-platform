@@ -96,7 +96,8 @@ describe("AppHealthOperationsPage", () => {
     const audit = screen.getByTestId("app-health-system-audit");
     expectProjectSection(audit);
     expect(audit).toHaveTextContent("System Audit");
-    expect(audit).toHaveTextContent("17 页 App 内部合同");
+    expect(audit).toHaveTextContent("App 内部合同");
+    expect(audit).not.toHaveTextContent("0 页 App 内部合同");
     expect(audit).toHaveTextContent("未验证");
     const auditButton = within(audit).getByRole("button", { name: "Audit 全系统 App 内部合同" });
     expect(auditButton).toHaveClass("app-health-audit-button");
@@ -105,6 +106,7 @@ describe("AppHealthOperationsPage", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health/page-audit?page=app-health-operations"))).toBe(true);
     });
     expect(audit).toHaveTextContent("pass");
+    expect(audit).toHaveTextContent("18 页 App 内部合同");
     expect(audit).toHaveTextContent("业务页面通过");
     expect(audit).toHaveTextContent("App 内部 pass");
     expect(audit).toHaveTextContent("外部域 unknown");
@@ -208,7 +210,7 @@ describe("AppHealthOperationsPage", () => {
           contract_revision: "page-audit-contract.v22",
         },
         summary: {
-          registered_page_count: 17,
+          registered_page_count: 18,
           audited_business_page_count: 16,
           passed_business_page_count: 16,
           database_internal_contracts: "pass",

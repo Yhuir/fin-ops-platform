@@ -67,6 +67,9 @@ export default function SettingsDataResetDialogs({
     );
   }
 
+  const trimmedReasonLength = reason.trim().length;
+  const reasonInvalid = reason.length > 0 && trimmedReasonLength < 5;
+
   return (
     <AppDialog
       open
@@ -95,23 +98,37 @@ export default function SettingsDataResetDialogs({
         <label className="settings-field settings-field--wide">
           <span>当前 OA 用户密码</span>
           <input
+            aria-required="true"
             autoComplete="current-password"
             autoFocus
             disabled={isBusy}
+            required
             type="password"
             value={password}
             onChange={(event) => onPasswordChange(event.currentTarget.value)}
           />
         </label>
         <label className="settings-field settings-field--wide">
-          <span>操作原因</span>
+          <span>操作原因（必填）</span>
           <textarea
+            aria-label="操作原因（必填）"
+            aria-describedby="settings-data-reset-reason-help"
+            aria-invalid={reasonInvalid || undefined}
+            aria-required="true"
             disabled={isBusy}
             maxLength={500}
+            minLength={5}
+            required
             rows={3}
             value={reason}
             onChange={(event) => onReasonChange(event.currentTarget.value)}
           />
+          <small
+            className={reasonInvalid ? "settings-field-help settings-field-help--error" : "settings-field-help"}
+            id="settings-data-reset-reason-help"
+          >
+            {reasonInvalid ? `还需输入 ${5 - trimmedReasonLength} 个字。` : "至少输入 5 个字。"}
+          </small>
         </label>
       </div>
     </AppDialog>

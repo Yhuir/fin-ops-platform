@@ -211,3 +211,7 @@ cd web && npm run build
 - 未运行生产等量级 EXPLAIN/endpoint benchmark，无法声明当前 direct-query p95/p99。
 - MySQL 与 PostgreSQL 无分布式事务；依赖既有幂等重试与 OA sync，仍需生产故障演练。
 - 历史 OA read-model 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。
+
+## 2026-08-10 移动端宽表回归
+
+- `web/src/test/OaPendingPaymentsPage.test.tsx` 锁定分组表最小宽度并复用既有内部横向滚动，避免 OA、流水、发票和支付状态在窄屏逐字挤压；桌面结构与 direct API 查询链不变。

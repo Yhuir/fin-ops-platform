@@ -61,7 +61,17 @@ test.describe("workbench large dataset browser flow", () => {
       scrollWidth: document.documentElement.scrollWidth,
     }));
     expect(documentSize.scrollWidth).toBeLessThanOrEqual(documentSize.clientWidth + 1);
-    await expect(page.getByTestId("pane-scrollbar-unpaired-bank")).toBeVisible();
+    await expect(page.getByTestId("pane-scrollbar-unpaired-bank")).toBeHidden();
+
+    const firstGroup = page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001");
+    const oaPane = await firstGroup.locator('[data-pane-id="oa"]').first().boundingBox();
+    const bankPane = await firstGroup.locator('[data-pane-id="bank"]').first().boundingBox();
+    const invoicePane = await firstGroup.locator('[data-pane-id="invoice"]').first().boundingBox();
+    expect(oaPane).not.toBeNull();
+    expect(bankPane).not.toBeNull();
+    expect(invoicePane).not.toBeNull();
+    expect(oaPane!.y).toBeLessThan(bankPane!.y);
+    expect(bankPane!.y).toBeLessThan(invoicePane!.y);
   });
 
   test("keeps automatic pagination, full search, tri-pane scroll, detail drawer, and selection controls usable", async ({ page }) => {

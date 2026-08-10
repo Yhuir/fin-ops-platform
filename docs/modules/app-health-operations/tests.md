@@ -179,3 +179,4 @@ Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests�
 ## 2026-08-10 视觉回归
 
 - `web/src/test/AppHealthOperationsPage.test.tsx` 继续保护状态、异常和操作入口；共享 token 完整性由 `DesignTokens.test.ts` 保护。
+- 同一测试保护 System Audit 标题只读取 `summary.registered_page_count`；结果未加载或失败时不显示 `0` 或历史硬编码页数。

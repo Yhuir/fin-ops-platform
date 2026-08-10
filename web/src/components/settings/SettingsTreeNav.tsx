@@ -1,3 +1,5 @@
+import { ListBox, Select } from "@heroui/react";
+
 import type { SettingsNavigationItem, SettingsSectionId } from "./types";
 
 type SettingsTreeNavProps = {
@@ -40,6 +42,26 @@ export default function SettingsTreeNav({
 
   return (
     <aside aria-label="设置导航" className="settings-tree-nav">
+      <Select
+        aria-label="移动端设置分类"
+        className="settings-mobile-section-select"
+        selectedKey={activeSectionId}
+        onSelectionChange={(key) => onSelect(String(key) as SettingsSectionId)}
+      >
+        <Select.Trigger className="settings-mobile-section-select__trigger">
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {items.map((item) => (
+              <ListBox.Item id={item.id} key={item.id} textValue={item.label}>
+                {item.label}
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
       <div className="settings-tree-nav__header">
         <h2>
           设置分类

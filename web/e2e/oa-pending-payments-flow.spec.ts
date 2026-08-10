@@ -114,7 +114,12 @@ test.describe("OA pending payments browser flow", () => {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
     }));
-    expect(tableShellSize.scrollWidth).toBeLessThanOrEqual(tableShellSize.clientWidth + 1);
+    expect(tableShellSize.scrollWidth).toBeGreaterThan(tableShellSize.clientWidth);
+    const documentSize = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(documentSize.scrollWidth).toBeLessThanOrEqual(documentSize.clientWidth + 1);
     await expect(row).toContainText("浏览器待付款项目");
     await expect(row).toContainText("已支付");
     await expect(row).toContainText("浏览器待付款供应商");

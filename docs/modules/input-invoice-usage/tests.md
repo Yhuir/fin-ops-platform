@@ -71,3 +71,7 @@ cd web && npm run build
 - fake transaction 测试保护查询上界、snapshot 命令和 SQL 边界；一次性本地 PostgreSQL 17 测试库另以 20,002 张进项发票验证 20,001 个聚合行：200 行页面请求稳定约 1.0–1.3 秒，精确 20,000 行 DTO 导出约 6.9 秒。
 - 本地数据不等价于生产分布；生产 `EXPLAIN (ANALYZE, BUFFERS)`、锁等待、真实 XLSX 下载耗时和 OA 外部草稿联调仍需主控在 staging/生产只读验证。
 - 历史 invoice-usage/lifecycle 表仍存在但无运行时 reader/writer；物理 drop 留给单独可回滚 migration。
+
+## 2026-08-10 移动端宽表回归
+
+- `web/src/test/InputInvoiceUsagePage.test.tsx` 锁定表格最小宽度与既有内部滚动容器，避免窄屏把十列压成逐字竖排；桌面列、筛选、分页、详情和 direct API 合同不变。

@@ -889,6 +889,19 @@ describe("Workbench candidate grouping layout", () => {
     expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/word-break:\s*break-word/);
   });
 
+  test("keeps one workbench DOM while stacking its three panes on narrow screens", () => {
+    const gridSource = readFileSync("src/components/workbench/RelationGroupGrid.tsx", "utf8");
+
+    expect(gridSource).toContain("data-pane-id={paneId}");
+    expect(appStyles).toMatch(/@media \(max-width: 720px\)[\s\S]*\.workbench-zone-slot \.candidate-group-row\s*\{[\s\S]*flex-direction:\s*column/);
+    expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="oa"\][\s\S]*order:\s*1/);
+    expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="bank"\][\s\S]*order:\s*2/);
+    expect(appStyles).toMatch(/\.candidate-group-pane-slot\[data-pane-id="invoice"\][\s\S]*order:\s*3/);
+    expect(appStyles).toMatch(/@media \(max-width: 1560px\)[\s\S]*\.zone\[data-layout="compact"\] \.zone-selection-toolbar[\s\S]*flex-basis:\s*100%/);
+    expect(appStyles).not.toMatch(/\.workbench-import-(?:modal|dropzone|file-|body|preview)/);
+    expect(appStyles).not.toContain(".workbench-settings-modal");
+  });
+
   test("keeps candidate expand controls inline with the first visible row", () => {
     const controlRule = getCssRuleBody(".candidate-group-collapse-control");
     const inlineRule = getCssRuleBody(".record-card-cell-content-with-inline-control");

@@ -459,6 +459,7 @@ describe("Input invoice usage page", () => {
     const styles = readWebSource("src/app/styles.css");
     const tableFrame = cssRule(styles, ".input-invoice-usage-table-frame");
     const tableShell = cssRule(styles, ".input-invoice-usage-table-shell");
+    const table = cssRule(styles, ".input-invoice-usage-table");
     const button = cssRule(styles, ".input-invoice-usage-button");
     const tableAction = cssRule(styles, ".input-invoice-usage-table-action,\\n.input-invoice-usage-expandable-cell-text__button");
     const drawerBody = cssRule(styles, ".input-invoice-usage-drawer-body");
@@ -476,6 +477,7 @@ describe("Input invoice usage page", () => {
     expect(tableFrame).toContain("border-radius: var(--fp-radius-sm)");
     expect(tableShell).toContain("max-height: calc(100vh - 150px)");
     expect(tableShell).toContain("min-height: 360px");
+    expect(table).toContain("min-width: 1440px");
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
     expect(tableAction).toContain("var(--motion-fast)");

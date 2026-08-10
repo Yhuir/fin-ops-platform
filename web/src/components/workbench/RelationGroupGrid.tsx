@@ -539,6 +539,7 @@ function RelationGroupGrid({
                       <div
                         key={`${group.id}-${segment.id}-${pane.id}`}
                         className={`candidate-group-pane-slot candidate-group-pane-slot-sheet candidate-group-segment-pane-slot${segmentIndex === 0 ? " first" : ""}`}
+                        data-pane-id={paneId}
                         style={{
                           gridColumn: paneIndex * 2 + 1,
                           gridRow: segmentIndex + 1,
@@ -579,6 +580,7 @@ function RelationGroupGrid({
                   <div
                     key={`${group.id}-${pane.id}`}
                     className="candidate-group-pane-slot candidate-group-pane-slot-sheet"
+                    data-pane-id={paneId}
                     style={{
                       gridColumn: paneIndex * 2 + 1,
                       gridRow: `1 / span ${segmentCount}`,
@@ -657,7 +659,7 @@ function RelationGroupGrid({
               const requirementLabel = missingRequirementLabel(group, paneId);
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
-                  <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                  <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet" data-pane-id={paneId}>
                     {requirementLabel ? (
                       <span
                         aria-label={requirementLabel}

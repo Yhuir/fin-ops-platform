@@ -21,9 +21,9 @@
 | 2. Service/repository | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`：ACL critical section、generic-preserve-ACL、durable audit、commit recovery、OA target/compensation |
 | 3. API contract | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_job.py`：direct URL/API 403、generic 400、dedicated admin-only、409/502/503 shape |
 | 4. Read model/cache/worker | 适用（负向/共享） | 唯一 inventory owner `tests/test_permissions_write_entry_inventory.py` + `tests/test_settings_data_reset_job.py`：每次 evaluator 一次 provider、generic save 零 OA、ACL no-op 早于 OA/commit、零 cache/outbox/dirty/read-model path，并锁定现有两个 read models/六个 workers |
-| 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`：hostile OA evidence 不授予 tier、direct route gate、精确 17-route、独立 ACL 状态 |
+| 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`：hostile OA evidence 不授予 tier、direct route gate、权威路由注册、独立 ACL 状态、移动端 HeroUI 分类选择器与重置原因校验 |
 | 6. 端到端 | 适用 | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`：admin/full/read/denied、direct protected API、admin-only controls、ACL save/restore/即时撤权及 reset 主链 |
-| 7. 既有功能回归 | 适用 | 13-09 backend/inventory 与 13-11 frontend/Browser 证据；唯一 scanner 继续保护 AppHealth、OA credentials、data reset、17-route、现有两个 read models/六个 workers和普通页面 I/O 不变 |
+| 7. 既有功能回归 | 适用 | 13-09 backend/inventory 与 13-11 frontend/Browser 证据；唯一 scanner 继续保护 AppHealth、OA credentials、data reset、权威路由注册、现有两个 read models/六个 workers和普通页面 I/O 不变 |
 
 ## 必须保留的负向断言
 
@@ -37,7 +37,7 @@
 
 - 13-09 的 backend matrix 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 与 admin-only API tests 提供；`YNSYLP006` fixture 刻意保留 OA business/dedicated roles 和 `finops:app:view`，但 canonical ACL 缺席仍 denied。
 - `tests/test_permissions_write_entry_inventory.py` 是退役 authority、fixed OA selector 与 no-new-runtime 的唯一 whole-repo scanner；本模块不复制 scanner 或 allowlist。
-- 13-11 的 frontend/Browser matrix 由四个 session/router component tests 和 `web/e2e/permissions-role-matrix.spec.ts` 提供，锁定 direct `/fin-ops/`、protected API 403、17-route、AppHealth/OA credentials/data reset admin-only，以及管理员 ACL restore 后目标账号即时回到 denied。
+- 13-11 的 frontend/Browser matrix 由四个 session/router component tests 和 `web/e2e/permissions-role-matrix.spec.ts` 提供，锁定 direct `/fin-ops/`、protected API 403、权威路由注册、AppHealth/OA credentials/data reset admin-only，以及管理员 ACL restore 后目标账号即时回到 denied。
 - 真实 OA router/menu、fresh production token/session 和 post-deploy role matrix 只由 13-05 production checkpoint 证明；本地 deterministic mock 不替代该证据，本计划不声称已部署。
 
 ## 验证

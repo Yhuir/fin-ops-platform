@@ -342,3 +342,4 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 ## 2026-08-10 视觉回归
 
 - `web/src/test/ReconciliationWorkbenchPage.test.tsx` 继续保护关联台交互；共享对话框/抽屉与 token 由前端组件测试和 `DesignTokens.test.ts` 保护。
+- `web/src/test/RelationGroupGrid.test.tsx` 保护同一三栏 DOM 在窄屏按 OA、银行流水、进销项发票纵向重排，1440px 级宽度下工具栏换行；不新增 API、read model 请求或第二份页面状态。

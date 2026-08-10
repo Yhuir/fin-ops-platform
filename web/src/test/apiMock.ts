@@ -5232,7 +5232,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               contract_revision: "page-audit-contract.v22",
             },
             summary: {
-              registered_page_count: 17,
+              registered_page_count: 18,
               audited_business_page_count: 16,
               passed_business_page_count: 16,
               database_internal_contracts: "pass",

@@ -290,6 +290,9 @@ function AppHealthSystemAuditPanel({
 }) {
   const state = auditStatus(payload);
   const summary = payload?.summary;
+  const registeredPageLabel = typeof summary?.registered_page_count === "number"
+    ? `${summary.registered_page_count} 页 App 内部合同`
+    : "App 内部合同";
   const externalStatus = payload?.external_evidence?.status ?? "unknown";
   const externalTone = externalStatus === "pass" ? "success" : externalStatus === "fail" ? "danger" : externalStatus === "unknown" ? "warning" : "neutral";
   const issueCodeEntries = Object.entries(summary?.issue_sample_counts_by_code ?? {})
@@ -301,7 +304,7 @@ function AppHealthSystemAuditPanel({
       <div className="app-health-audit-card">
         <div className="app-health-audit-header">
           <div className="app-health-audit-heading">
-            <h3>17 页 App 内部合同</h3>
+            <h3>{registeredPageLabel}</h3>
             <p>{payload?.database_system_snapshot?.snapshot_generated_at ? formatTimestamp(payload.database_system_snapshot.snapshot_generated_at) : "未验证"}</p>
           </div>
           <div className="app-health-audit-actions">

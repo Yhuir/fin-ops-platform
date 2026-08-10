@@ -774,6 +774,7 @@ describe("OA pending payments page", () => {
     const monthPicker = cssRule(styles, ".oa-pending-payments-month-picker");
     const monthPickerButton = cssRule(styles, ".oa-pending-payments-month-picker__all");
     const tableShell = cssRule(styles, ".oa-pending-payments-table-shell");
+    const table = cssRule(styles, ".oa-pending-payments-table");
     const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
@@ -804,6 +805,7 @@ describe("OA pending payments page", () => {
     expect(monthPickerButton).toContain("white-space: nowrap");
     expect(tableShell).toContain("min-height: 320px");
     expect(tableShell).toContain("max-height: calc(100vh - 214px)");
+    expect(table).toContain("min-width: 1280px");
     expect(loading).toContain("border-radius: var(--fp-radius-sm)");
     expect(detailButton).toContain("var(--motion-fast)");
     expect(sortButton).toContain("var(--motion-fast)");

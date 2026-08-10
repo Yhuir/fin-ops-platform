@@ -160,8 +160,10 @@ describe("Settings page", () => {
       pageSource.includes("SettingsPageContent") ? null : "SettingsPage.tsx should keep SettingsPageContent",
       contentSource.includes("SettingsTreeNav") ? null : "SettingsPageContent.tsx should keep SettingsTreeNav",
       /role=["']treeitem["']/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should preserve treeitem semantics",
+      /ListBox, Select/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should use the HeroUI mobile section selector",
       /aria-label=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
       /确认数据重置/.test(dataResetDialogsSource) && /OA 密码复核/.test(dataResetDialogsSource) ? null : "Data reset should keep two modal dialog labels",
+      /minLength=\{5\}/.test(dataResetDialogsSource) && /至少输入 5 个字/.test(dataResetDialogsSource) ? null : "Data reset should expose its reason requirement",
     ].filter(Boolean);
 
     expect(missingPrimitiveTargets).toEqual([]);
@@ -229,6 +231,7 @@ describe("Settings page", () => {
     expect(screen.queryByRole("dialog", { name: "关联台设置" })).not.toBeInTheDocument();
 
     const tree = await screen.findByRole("tree", { name: "设置分类" });
+    expect(screen.getByLabelText("移动端设置分类")).toBeInTheDocument();
     expect(within(tree).getByRole("treeitem", { name: /项目状态/ })).toHaveAttribute("aria-selected", "true");
     expect(within(tree).getByRole("treeitem", { name: /银行账户/ })).toHaveAttribute("aria-controls", "settings-section-bank-accounts");
     expect(screen.getByRole("region", { name: "项目状态管理" })).toHaveAttribute("id", "settings-section-projects");
@@ -429,7 +432,11 @@ describe("Settings page", () => {
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(await screen.findByRole("dialog", { name: "OA 密码复核" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("当前 OA 用户密码"), "oa-password");
-    await user.type(screen.getByLabelText("操作原因"), "生产数据修复验证");
+    await user.type(screen.getByLabelText(/操作原因/), "修复");
+    expect(screen.getByText("还需输入 3 个字。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认清理" })).toBeDisabled();
+    await user.clear(screen.getByLabelText(/操作原因/));
+    await user.type(screen.getByLabelText(/操作原因/), "生产数据修复验证");
     await user.click(screen.getByRole("button", { name: "确认清理" }));
 
     expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
