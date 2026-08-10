@@ -6,6 +6,14 @@ import type {
   OutputInvoiceCollectionExportPreview,
 } from "../../features/outputInvoiceCollections/types";
 import AppDrawer from "../common/AppDrawer";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 
 type OutputInvoiceCollectionExportDrawerProps = {
   open: boolean;
@@ -118,28 +126,26 @@ export default function OutputInvoiceCollectionExportDrawer({
               <p>{preview.fileName}</p>
             </section>
             <section className="output-invoice-collections-export-sample">
-              <table aria-label="销项发票收款情况导出样例" className="output-invoice-collections-simple-table">
-                <thead>
-                  <tr>
-                    {preview.columns.map((column) => (
-                      <th key={column} scope="col">{column}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.sampleRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={Math.max(1, preview.columns.length)}>暂无样例。</td>
-                    </tr>
-                  ) : preview.sampleRows.map((row, index) => (
-                    <tr key={index}>
-                      {preview.columns.map((column) => (
-                        <td key={`${index}-${column}`}>{row[column] ?? "-"}</td>
-                      ))}
-                    </tr>
+              <FinanceTable ariaLabel="销项发票收款情况导出样例" className="output-invoice-collections-simple-table" minWidth={720}>
+                <FinanceTableHeader>
+                  {preview.columns.map((column, index) => (
+                    <FinanceTableColumn id={column} isRowHeader={index === 0} key={column} columnRole={index === 0 ? "identity" : "description"}>{column}</FinanceTableColumn>
                   ))}
-                </tbody>
-              </table>
+                </FinanceTableHeader>
+                <FinanceTableBody>
+                  {preview.sampleRows.length === 0 ? (
+                    <FinanceTableRow id="empty">
+                      {preview.columns.map((column, index) => <FinanceTableCell columnRole={index === 0 ? "identity" : "description"} key={column}>{index === 0 ? "暂无样例。" : "-"}</FinanceTableCell>)}
+                    </FinanceTableRow>
+                  ) : preview.sampleRows.map((row, index) => (
+                    <FinanceTableRow id={index} key={index}>
+                      {preview.columns.map((column, columnIndex) => (
+                        <FinanceTableCell columnRole={columnIndex === 0 ? "identity" : "description"} key={`${index}-${column}`}>{row[column] ?? "-"}</FinanceTableCell>
+                      ))}
+                    </FinanceTableRow>
+                  ))}
+                </FinanceTableBody>
+              </FinanceTable>
             </section>
           </>
         ) : null}

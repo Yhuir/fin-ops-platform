@@ -961,10 +961,9 @@ describe("Pending invoices page", () => {
       sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageScaffold") ? null : "PendingInvoicesPage.tsx should use PageScaffold or equivalent project shell",
       sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageToolbar") ? null : "PendingInvoicesPage.tsx should use PageToolbar or equivalent project toolbar",
       pendingInvoicesTableSource.includes("@heroui/react") ? null : "PendingInvoicesTable.tsx should use HeroUI React primitives",
-      pendingInvoicesTableSource.includes("Table.ScrollContainer") && pendingInvoicesTableSource.includes("<table") ? null : "PendingInvoicesTable.tsx should keep the HeroUI shell with native table content",
-      pendingInvoicesTableSource.includes("<colgroup>") ? null : "PendingInvoicesTable.tsx should keep a colgroup so group headers and body columns share widths",
-      !pendingInvoicesTableSource.includes("Table.Content") && !pendingInvoicesTableSource.includes("Table.Column") ? null : "PendingInvoicesTable.tsx should not use RAC table content because it blocks body text selection",
-      pendingInvoicesTableSource.includes("aria-sort") && pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep native accessible sorting",
+      pendingInvoicesTableSource.includes("<FinanceTable") && pendingInvoicesTableSource.includes('scrollMode="contained"') ? null : "PendingInvoicesTable.tsx should use the contained HeroUI FinanceTable contract",
+      !pendingInvoicesTableSource.includes("<table") && pendingInvoicesTableSource.includes("FinanceTableColumn") ? null : "PendingInvoicesTable.tsx should remove the native table path",
+      pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep accessible header sorting controls",
       pendingInvoicesTableSource.includes("createPortal") && pendingInvoicesTableSource.includes('role="menuitemcheckbox"') ? null : "PendingInvoicesTable.tsx should use the project portal pattern for reliable multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
       !sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should keep object details in the right drawer",
@@ -985,15 +984,16 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*padding:\s*var\(--fp-space-4\) var\(--fp-space-5\)/s);
     expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:\s*var\(--fp-radius-sm\) var\(--fp-radius-sm\) 0 0/s);
-    expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*max-height:\s*calc\(100vh - 176px\);[^}]*min-height:\s*292px/s);
+    expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden/s);
+    expect(css).toMatch(/\.finance-table--contained \.finance-table__scroll\s*{[^}]*overflow:\s*auto;[^}]*overscroll-behavior:\s*contain/s);
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*user-select:\s*text/s);
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).not.toMatch(/\.pending-invoices-sort-button\s*{[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pending-invoices-selection-toolbar\s*{[^}]*display:\s*inline-flex;[^}]*min-height:\s*30px/s);
     expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*--pending-invoices-table-columns:/s);
-    expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*var\(--pending-invoices-table-columns\);[^}]*position:\s*sticky/s);
-    expect(css).toMatch(/\.pending-invoices-table-sub-header\s*{[^}]*top:\s*33px/s);
+    expect(css).toMatch(/\.pending-invoices-table-column-heading\s*{[^}]*display:\s*grid/s);
+    expect(css).toMatch(/\.finance-table__column\s*{[^}]*position:\s*sticky;[^}]*top:\s*0/s);
     expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*var\(--fp-space-2\) var\(--fp-space-4\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__title\s*{[^}]*font-size:\s*var\(--fp-text-body\)/s);
@@ -1051,24 +1051,24 @@ describe("Pending invoices page", () => {
     const page = await findPendingInvoicesPage();
     expect(within(page).getByRole("grid", { name: "待找发票四区表" })).toBeInTheDocument();
     expect(within(page).queryByRole("table", { name: "待找发票四区表" })).not.toBeInTheDocument();
-    expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveClass("pending-invoices-table-shell");
+    expect(within(page).getByRole("grid", { name: "待找发票四区表" }).closest(".pending-invoices-table-shell")).not.toBeNull();
     expect(readWebSource("src/app/styles.css")).toMatch(
-      /\.pending-invoices-table-shell\s*{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s,
+      /\.pending-invoices-table-shell\s*{[^}]*overflow:\s*hidden;/s,
     );
 
-    expect(within(page).getByText("支出流水")).toHaveClass("pending-invoices-table-group-header");
-    expect(within(page).getByText("发票获取状态")).toHaveClass("pending-invoices-table-group-header");
-    expect(within(page).getByText("进项发票")).toHaveClass("pending-invoices-table-group-header");
-    expect(within(page).getByText("OA")).toHaveClass("pending-invoices-table-group-header");
-    expect(within(page).getByRole("columnheader", { name: "对方户名" })).toBeInTheDocument();
+    expect(within(page).getByText("支出流水")).toBeInTheDocument();
+    expect(within(page).getByText("发票获取状态")).toBeInTheDocument();
+    expect(within(page).getByText("进项发票")).toBeInTheDocument();
+    expect(within(page).getByText("OA")).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: /对方户名/ })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "状态" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: /发票号码 \/ 开票日期/ })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "供应商 / 识别号" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 支付差额" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "申请人 / 类型" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "OA 申请人 / 类型" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "项目" })).toBeInTheDocument();
 
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
@@ -1297,9 +1297,9 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "查看全部发票关系" }));
     expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭关系明细抽屉" })).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "已关联发票" })).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "已关联发票" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "历史支付流水" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "已关联 OA" })).not.toBeInTheDocument();
     expect(await screen.findByText("已付合计")).toBeInTheDocument();
     expect(screen.getAllByText("1500.00").length).toBeGreaterThan(0);
     expect(screen.getByText("DIG-002")).toBeInTheDocument();
@@ -1307,15 +1307,15 @@ describe("Pending invoices page", () => {
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: /查看全部流水关系/ }));
-    expect(await screen.findByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "已关联发票" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "已关联 OA" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "历史支付流水" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "已关联发票" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "已关联 OA" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看全部 OA 关系" }));
-    expect(await screen.findByRole("table", { name: "已关联 OA" })).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "已关联发票" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "历史支付流水" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "已关联 OA" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "已关联发票" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "历史支付流水" })).not.toBeInTheDocument();
     expect(screen.getByText("王五")).toBeInTheDocument();
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
     expect(screen.queryByText("case-old")).not.toBeInTheDocument();
@@ -1350,7 +1350,7 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
     expect(await screen.findByRole("heading", { name: "导出预览" })).toBeInTheDocument();
     expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "导出样例" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "导出样例" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
   }, 45_000);
@@ -1564,7 +1564,7 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
-    const candidateTable = await screen.findByRole("table", { name: "发票候选" });
+    const candidateTable = await screen.findByRole("grid", { name: "发票候选" });
     expect(within(candidateTable).getByRole("columnheader", { name: "流水关联" })).toBeInTheDocument();
     expect(within(candidateTable).queryByRole("columnheader", { name: "待支付" })).not.toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();

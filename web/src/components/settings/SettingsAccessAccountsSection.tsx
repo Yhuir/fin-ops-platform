@@ -1,6 +1,14 @@
 import { Trash2 } from "lucide-react";
 
 import type { WorkbenchAccessRole } from "../../features/workbench/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type { SettingsAccessAccountsSectionProps } from "./types";
 
 const ACCESS_ROLE_OPTIONS: Array<{ value: WorkbenchAccessRole; label: string }> = [
@@ -104,18 +112,16 @@ export default function SettingsAccessAccountsSection({
           </div>
         ) : (
           <div className="settings-native-table-shell">
-            <table className="settings-native-table" aria-label="访问账户">
-              <thead>
-                <tr>
-                  <th scope="col">账户</th>
-                  <th scope="col">权限级别</th>
-                  <th scope="col">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="访问账户" className="settings-native-table" minWidth={560}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="account" isRowHeader columnRole="identity">账户</FinanceTableColumn>
+                <FinanceTableColumn id="role" columnRole="status">权限级别</FinanceTableColumn>
+                <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {managedAccessAccounts.map((account) => (
-                  <tr key={account.id}>
-                    <td>
+                  <FinanceTableRow id={account.id} key={account.id}>
+                    <FinanceTableCell columnRole="identity">
                       <input
                         aria-label={`${account.username} 账户`}
                         className="settings-table-input"
@@ -130,8 +136,8 @@ export default function SettingsAccessAccountsSection({
                           }));
                         }}
                       />
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="status">
                       <select
                         aria-label={`${account.username} 权限级别`}
                         className="settings-select-control settings-table-select"
@@ -149,8 +155,8 @@ export default function SettingsAccessAccountsSection({
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
                       <button
                         aria-label={`${account.username} 删除`}
                         className="settings-icon-button settings-icon-button--danger"
@@ -160,11 +166,11 @@ export default function SettingsAccessAccountsSection({
                       >
                         <Trash2 aria-hidden="true" size={16} />
                       </button>
-                    </td>
-                  </tr>
+                    </FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </div>
         )}
         <button

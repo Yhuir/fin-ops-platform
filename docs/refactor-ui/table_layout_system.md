@@ -44,6 +44,8 @@
 - 接收列角色配置。
 - 统一 header、row、cell、empty、loading、error 样式。
 - 支持固定高度滚动容器。
+- 固定高度表格使用 `scrollMode="contained"`：滚动只发生在当前表格，`overscroll-behavior: contain` 阻止整页或相邻栏被带动，表头在该滚动容器内 sticky。
+- 双栏/三栏页面由每一栏自己的有界容器承载表格，禁止把滚动交给页面根节点。
 - 支持页面提供分页组件。
 - 支持选择列和行点击，但不得改变旧业务行为。
 - 支持旧行点击/操作按钮进入详情的方式；旧右侧抽屉不得改成弹窗、inline 展开或新路由。
@@ -122,6 +124,8 @@
 - 列显示开关只在旧页面有用户可见列配置时实现。
 - 虚拟滚动只在行数和性能证明需要时使用 HeroUI Table virtualization。
 - 内置 toolbar 不作为默认方案，优先使用页面 toolbar。
+- 表格行使用轻量分割线；不恢复大卡片、重边框或海报式行块。
+- header 内的全选 Checkbox 使用 HeroUI selection slot；普通业务行 Checkbox 保持页面受控状态。
 
 ## Migration Checklist
 
@@ -145,6 +149,7 @@
 - 旧页面功能入口未丢失。
 - 旧表格的右侧详情抽屉、导出抽屉、规则抽屉等 overlay 形态未改变。
 - 旧测试或新 characterization tests 覆盖关键表格行为。
+- 除冻结的 Workbench `PaneTable`/详情表外，生产 TSX 不保留原生 `<table>` 路径；静态迁移测试必须保持通过。
 
 ## Do Not
 

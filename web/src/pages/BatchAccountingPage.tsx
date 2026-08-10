@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
-import { Button, Chip, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Checkbox, Chip, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 
 import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
 import AppDialog from "../components/common/AppDialog";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
+import {
+  EmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
@@ -843,56 +852,66 @@ export default function BatchAccountingPage() {
             )}
           </div>
           <div className="batch-accounting-oa-panel__divider" />
-          <div className="batch-accounting-oa-table-wrap">
-            <table className="batch-accounting-oa-table" aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"}>
-              <thead>
-                <tr>
-                  {bucket === "unsubmitted" ? <th className="batch-accounting-oa-table__check" scope="col">选择</th> : null}
-                  <th scope="col">申请人</th>
-                  <th scope="col">项目名称</th>
-                  <th className="batch-accounting-oa-table__amount" scope="col">金额</th>
-                  <th scope="col">申请事由</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleOaRows.map((row) => (
-                  <tr className={cx(selectedOaRowIds.has(row.id) && "batch-accounting-oa-table__row--selected")} key={row.id}>
-                    {bucket === "unsubmitted" ? (
-                      <td className="batch-accounting-oa-table__check">
-                        <input
-                          aria-label={`选择 ${row.applicant} ${row.applyTime}`}
-                          className="batch-accounting-checkbox"
-                          checked={selectedOaRowIds.has(row.id)}
-                          onChange={(event) => handleOaToggle(row, event.target.checked)}
-                          type="checkbox"
-                        />
-                      </td>
-                    ) : null}
-                    <td className="batch-accounting-oa-table__identity">
-                      <span className="batch-accounting-oa-table__applicant">{row.applicant || "-"}</span>
-                      <span className="batch-accounting-tag batch-accounting-tag--meta">{row.applyTime || "-"}</span>
-                    </td>
-                    <td className="batch-accounting-oa-table__description">
-                      <ExpandableText text={row.projectName} />
-                    </td>
-                    <td className="batch-accounting-oa-table__amount">
-                      {formatMoney(row.amount)}
-                    </td>
-                    <td className="batch-accounting-oa-table__description">
-                      <ExpandableText text={row.reason} />
-                    </td>
-                  </tr>
-                ))}
-                {visibleOaRows.length === 0 ? (
-                  <tr>
-                    <td className="batch-accounting-oa-table__empty" colSpan={bucket === "unsubmitted" ? 5 : 4}>
-                      <StatePanel compact tone="empty" title={bucket === "unsubmitted" ? "暂无可关联 OA" : "暂无已关联 OA"} />
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+          <FinanceTable
+            ariaLabel={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"}
+            className="batch-accounting-oa-table"
+            minWidth={760}
+            scrollMode="contained"
+          >
+            <FinanceTableHeader>
+              {bucket === "unsubmitted" ? <FinanceTableColumn className="batch-accounting-oa-table__check" columnRole="selection" id="selection">选择</FinanceTableColumn> : null}
+              <FinanceTableColumn columnRole="identity" id="applicant" isRowHeader>申请人</FinanceTableColumn>
+              <FinanceTableColumn columnRole="description" id="project">项目名称</FinanceTableColumn>
+              <FinanceTableColumn className="batch-accounting-oa-table__amount" columnRole="amount" id="amount">金额</FinanceTableColumn>
+              <FinanceTableColumn columnRole="description" id="reason">申请事由</FinanceTableColumn>
+            </FinanceTableHeader>
+            <FinanceTableBody>
+              {visibleOaRows.map((row) => (
+                <FinanceTableRow
+                  className={cx(selectedOaRowIds.has(row.id) && "batch-accounting-oa-table__row--selected")}
+                  id={row.id}
+                  key={row.id}
+                  textValue={`${row.applicant} ${row.projectName} ${row.reason}`}
+                >
+                  {bucket === "unsubmitted" ? (
+                    <FinanceTableCell className="batch-accounting-oa-table__check" columnRole="selection" textValue={selectedOaRowIds.has(row.id) ? "已选择" : "未选择"}>
+                      <Checkbox
+                        aria-label={`选择 ${row.applicant} ${row.applyTime}`}
+                        isSelected={selectedOaRowIds.has(row.id)}
+                        onChange={(selected) => handleOaToggle(row, selected)}
+                      >
+                        <Checkbox.Control className="batch-accounting-checkbox"><Checkbox.Indicator /></Checkbox.Control>
+                      </Checkbox>
+                    </FinanceTableCell>
+                  ) : null}
+                  <FinanceTableCell className="batch-accounting-oa-table__identity" columnRole="identity" textValue={row.applicant || "-"}>
+                    <span className="batch-accounting-oa-table__applicant">{row.applicant || "-"}</span>
+                    <span className="batch-accounting-tag batch-accounting-tag--meta">{row.applyTime || "-"}</span>
+                  </FinanceTableCell>
+                  <FinanceTableCell className="batch-accounting-oa-table__description" columnRole="description" textValue={row.projectName}>
+                    <ExpandableText text={row.projectName} />
+                  </FinanceTableCell>
+                  <FinanceTableCell className="batch-accounting-oa-table__amount" columnRole="amount" textValue={String(row.amount)}>
+                    {formatMoney(row.amount)}
+                  </FinanceTableCell>
+                  <FinanceTableCell className="batch-accounting-oa-table__description" columnRole="description" textValue={row.reason}>
+                    <ExpandableText text={row.reason} />
+                  </FinanceTableCell>
+                </FinanceTableRow>
+              ))}
+              {visibleOaRows.length === 0 ? (
+                <FinanceTableRow id="empty" textValue={bucket === "unsubmitted" ? "暂无可关联 OA" : "暂无已关联 OA"}>
+                  {bucket === "unsubmitted" ? <FinanceTableCell columnRole="selection" textValue="—"><EmptyValue /></FinanceTableCell> : null}
+                  <FinanceTableCell columnRole="identity" textValue={bucket === "unsubmitted" ? "暂无可关联 OA" : "暂无已关联 OA"}>
+                    {bucket === "unsubmitted" ? "暂无可关联 OA" : "暂无已关联 OA"}
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue="—"><EmptyValue /></FinanceTableCell>
+                  <FinanceTableCell columnRole="amount" textValue="—"><EmptyValue /></FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue="—"><EmptyValue /></FinanceTableCell>
+                </FinanceTableRow>
+              ) : null}
+            </FinanceTableBody>
+          </FinanceTable>
         </section>
       </div>
 

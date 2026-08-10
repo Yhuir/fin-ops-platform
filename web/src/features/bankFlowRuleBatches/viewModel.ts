@@ -25,13 +25,7 @@ export type TagDrawerRow = {
   tag: BankFlowRuleBatchTagDefinition;
   direction: string;
   directionKey: string;
-  directionRowSpan: number;
-  isDirectionStart: boolean;
   primaryLabel: string;
-  primaryKey: string;
-  primaryRowSpan: number;
-  primaryGroupIndex: number;
-  isPrimaryStart: boolean;
   subLabel: string;
 };
 
@@ -156,10 +150,6 @@ function drawerDirectionSortKey(value: string) {
   return 3;
 }
 
-export function tagDrawerGroupColor(index: number) {
-  return `hsl(${(198 + index * 43) % 360} 56% 94%)`;
-}
-
 export function buildTagDrawerRows(tags: BankFlowRuleBatchTagDefinition[]): TagDrawerRow[] {
   const baseRows = tags.map((tag, index) => {
     const directionKey = normalizeDrawerDirection(tag.direction);
@@ -181,7 +171,6 @@ export function buildTagDrawerRows(tags: BankFlowRuleBatchTagDefinition[]): TagD
     }
   });
 
-  const primaryColorIndexByLabel = new Map<string, number>();
   const sortedRows = [...baseRows].sort((left, right) => {
     const directionDelta = drawerDirectionSortKey(left.directionKey) - drawerDirectionSortKey(right.directionKey);
     if (directionDelta !== 0) {
@@ -191,42 +180,13 @@ export function buildTagDrawerRows(tags: BankFlowRuleBatchTagDefinition[]): TagD
       - (firstPrimaryIndexByKey.get(right.primaryKey) ?? right.index);
     return primaryDelta !== 0 ? primaryDelta : left.index - right.index;
   });
-  const rows: TagDrawerRow[] = sortedRows.map((row) => {
-    if (!primaryColorIndexByLabel.has(row.primaryLabel)) {
-      primaryColorIndexByLabel.set(row.primaryLabel, primaryColorIndexByLabel.size);
-    }
-    return {
-      tag: row.tag,
-      direction: row.direction,
-      directionKey: row.directionKey,
-      directionRowSpan: 0,
-      isDirectionStart: false,
-      primaryLabel: row.primaryLabel,
-      primaryKey: row.primaryKey,
-      primaryRowSpan: 0,
-      primaryGroupIndex: primaryColorIndexByLabel.get(row.primaryLabel) ?? 0,
-      isPrimaryStart: false,
-      subLabel: row.subLabel,
-    };
-  });
-
-  rows.forEach((row, index) => {
-    if (index === 0 || rows[index - 1].directionKey !== row.directionKey) {
-      row.isDirectionStart = true;
-      row.directionRowSpan = rows.slice(index).findIndex((candidate) => candidate.directionKey !== row.directionKey);
-      if (row.directionRowSpan === -1) {
-        row.directionRowSpan = rows.length - index;
-      }
-    }
-    if (index === 0 || rows[index - 1].primaryKey !== row.primaryKey) {
-      row.isPrimaryStart = true;
-      row.primaryRowSpan = rows.slice(index).findIndex((candidate) => candidate.primaryKey !== row.primaryKey);
-      if (row.primaryRowSpan === -1) {
-        row.primaryRowSpan = rows.length - index;
-      }
-    }
-  });
-  return rows;
+  return sortedRows.map((row) => ({
+    tag: row.tag,
+    direction: row.direction,
+    directionKey: row.directionKey,
+    primaryLabel: row.primaryLabel,
+    subLabel: row.subLabel,
+  }));
 }
 
 export function requirementsFromSelection(selection: BankFlowRuleBatchTagSelection): BankFlowRuleDraftRequirements {

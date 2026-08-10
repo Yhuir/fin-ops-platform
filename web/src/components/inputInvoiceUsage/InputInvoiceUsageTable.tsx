@@ -1,4 +1,5 @@
 import { ArrowUpDown, Filter, Info } from "lucide-react";
+import { ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useId, useMemo, useState } from "react";
 
@@ -15,7 +16,17 @@ import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
-import { FinanceStatusTag } from "../common/FinanceTable";
+import {
+  EmptyValue,
+  FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTablePagination,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
   rows: InputInvoiceUsageRow[];
@@ -99,15 +110,17 @@ function HeaderCell({
   separated,
   strongSeparated,
   emphasized,
+  isRowHeader,
 }: {
   label: ReactNode;
   align?: "left" | "right" | "center";
   separated?: boolean;
   strongSeparated?: boolean;
   emphasized?: boolean;
+  isRowHeader?: boolean;
 }) {
   return (
-    <th
+    <FinanceTableColumn
       className={classNames(
         "input-invoice-usage-table-sub-header",
         align && `input-invoice-usage-table-sub-header--${align}`,
@@ -115,10 +128,11 @@ function HeaderCell({
         strongSeparated && "input-invoice-usage-table-cell--strong-separator",
         emphasized && "input-invoice-usage-table-cell--payment",
       )}
-      scope="col"
+      columnRole={align === "right" ? "amount" : emphasized ? "status" : "description"}
+      isRowHeader={isRowHeader}
     >
       <span className="input-invoice-usage-table-header-stack">{label}</span>
-    </th>
+    </FinanceTableColumn>
   );
 }
 
@@ -185,8 +199,8 @@ function CompositeFilterMenu({
   };
 
   return (
-    <span className="input-invoice-usage-filter-menu">
-      <button
+    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -195,63 +209,63 @@ function CompositeFilterMenu({
           "input-invoice-usage-filter-menu__trigger",
           hasActive && "input-invoice-usage-filter-menu__trigger--active",
         )}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
       >
         <Filter aria-hidden="true" size={14} />
         <span>{label}</span>
-      </button>
+      </PopoverTrigger>
       {open ? (
-        <div
-          aria-label={`${label}组合筛选`}
-          className="input-invoice-usage-filter-menu__panel input-invoice-usage-filter-menu__panel--composite"
-          id={menuId}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setOpen(false);
-            }
-          }}
-          role="menu"
-        >
-          {columns.map((column) => {
-            const selected = new Set(selectedByField.get(column.field) ?? []);
-            return (
-              <div className="input-invoice-usage-filter-menu__column" key={column.field}>
-                <div className="input-invoice-usage-filter-menu__column-title">{column.label}</div>
-                <button
-                  className="input-invoice-usage-filter-menu__item"
-                  onClick={() => onClear(column.field)}
-                  role="menuitem"
-                  type="button"
-                >
-                  清空
-                </button>
-                {column.options.length === 0 ? (
-                  <div aria-disabled="true" className="input-invoice-usage-filter-menu__item input-invoice-usage-filter-menu__item--disabled" role="menuitem">
-                    暂无可选项
+        <PopoverContent className="input-invoice-usage-filter-menu__popover" containerPadding={12} offset={4} placement="bottom start">
+          <PopoverDialog aria-label={`${label}组合筛选`} className="input-invoice-usage-filter-menu__dialog">
+            <div
+              aria-label={`${label}组合筛选`}
+              className="input-invoice-usage-filter-menu__panel input-invoice-usage-filter-menu__panel--composite"
+              id={menuId}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setOpen(false);
+              }}
+              role="menu"
+            >
+              {columns.map((column) => {
+                const selected = new Set(selectedByField.get(column.field) ?? []);
+                return (
+                  <div className="input-invoice-usage-filter-menu__column" key={column.field}>
+                    <div className="input-invoice-usage-filter-menu__column-title">{column.label}</div>
+                    <button
+                      className="input-invoice-usage-filter-menu__item"
+                      onClick={() => onClear(column.field)}
+                      role="menuitem"
+                      type="button"
+                    >
+                      清空
+                    </button>
+                    {column.options.length === 0 ? (
+                      <div aria-disabled="true" className="input-invoice-usage-filter-menu__item input-invoice-usage-filter-menu__item--disabled" role="menuitem">
+                        暂无可选项
+                      </div>
+                    ) : null}
+                    {column.options.map((option) => (
+                      <button
+                        aria-checked={selected.has(option.value)}
+                        className="input-invoice-usage-filter-menu__item"
+                        key={`${column.field}:${option.value}`}
+                        onClick={() => toggle(column.field, option.value)}
+                        role="menuitemcheckbox"
+                        type="button"
+                      >
+                        <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
+                          {selected.has(option.value) ? "✓" : ""}
+                        </span>
+                        <span>{option.count === undefined ? option.label : `${option.label} ${option.count}`}</span>
+                      </button>
+                    ))}
                   </div>
-                ) : null}
-                {column.options.map((option) => (
-                  <button
-                    aria-checked={selected.has(option.value)}
-                    className="input-invoice-usage-filter-menu__item"
-                    key={`${column.field}:${option.value}`}
-                    onClick={() => toggle(column.field, option.value)}
-                    role="menuitemcheckbox"
-                    type="button"
-                  >
-                    <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
-                      {selected.has(option.value) ? "✓" : ""}
-                    </span>
-                    <span>{option.count === undefined ? option.label : `${option.label} ${option.count}`}</span>
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          </PopoverDialog>
+        </PopoverContent>
       ) : null}
-    </span>
+    </PopoverRoot>
   );
 }
 
@@ -346,17 +360,6 @@ function relationListTarget(
   return null;
 }
 
-function displayedRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) {
-    return "0-0 / 0";
-  }
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
-  const from = (currentPage - 1) * pageSize + 1;
-  const to = Math.min(currentPage * pageSize, total);
-  return `${from}-${to} / ${total}`;
-}
-
 export default function InputInvoiceUsageTable({
   rows,
   page,
@@ -378,9 +381,6 @@ export default function InputInvoiceUsageTable({
   emptyStateMessage = "当前条件下没有进项发票使用记录。",
   tableWrapRef,
 }: InputInvoiceUsageTableProps) {
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
-  const canGoPrevious = page > 1;
-  const canGoNext = page < totalPages;
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
   const filterFor = (field: string) => filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined;
   const filterMenu = (field: string, label: string) => {
@@ -405,45 +405,27 @@ export default function InputInvoiceUsageTable({
 
   return (
     <div className="input-invoice-usage-table-frame">
-      <div ref={tableWrapRef} className="input-invoice-usage-table-shell">
-        <table aria-label="进项发票使用情况表" className="input-invoice-usage-table">
-          <colgroup>
-            <col className="input-invoice-usage-col-invoice-no" />
-            <col className="input-invoice-usage-col-seller" />
-            <col className="input-invoice-usage-col-invoice-amount" />
-            <col className="input-invoice-usage-col-business" />
-            <col className="input-invoice-usage-col-payment" />
-            <col className="input-invoice-usage-col-oa-applicant" />
-            <col className="input-invoice-usage-col-oa-project" />
-            <col className="input-invoice-usage-col-bank-name" />
-            <col className="input-invoice-usage-col-bank-amount" />
-            <col className="input-invoice-usage-col-bank-remark" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--invoice" colSpan={4} scope="colgroup">
-                进项发票
-              </th>
-              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--payment input-invoice-usage-table-cell--strong-separator" colSpan={1} scope="colgroup">
-                支付状态
-              </th>
-              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--oa input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">
-                OA
-              </th>
-              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--bank input-invoice-usage-table-cell--strong-separator" colSpan={3} scope="colgroup">
-                流水
-              </th>
-            </tr>
-            <tr>
+      <FinanceTable
+        ariaLabel="进项发票使用情况表"
+        className="input-invoice-usage-table input-invoice-usage-table-shell"
+        footer={(
+          <div className="input-invoice-usage-pagination">
+            <Select aria-label="每页行数" className="input-invoice-usage-pagination-size" onChange={(key) => onPageSizeChange(Number(key))} value={String(pageSize)}>
+              <Select.Trigger><Select.Value /></Select.Trigger>
+              <Select.Popover><ListBox>{PAGE_SIZE_OPTIONS.map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}</ListBox></Select.Popover>
+            </Select>
+            <FinanceTablePagination compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
+          </div>
+        )}
+        minWidth={1480}
+        scrollMode="contained"
+        scrollRef={tableWrapRef}
+      >
+          <FinanceTableHeader>
               <HeaderCell
+                isRowHeader
                 label={(
-                  <SortHeaderButton
-                    active={sortField === "invoice_date"}
-                    direction={sortField === "invoice_date" ? sortDirection : ""}
-                    label="发票号码"
-                    sortLabel="开票日期"
-                    onClick={() => onSortChange("invoice_date")}
-                  />
+                  <span className="input-invoice-usage-table-column-heading"><span>进项发票</span><SortHeaderButton active={sortField === "invoice_date"} direction={sortField === "invoice_date" ? sortDirection : ""} label="发票号码" sortLabel="开票日期" onClick={() => onSortChange("invoice_date")} /></span>
                 )}
               />
               <HeaderCell label={filterMenu("seller_name", "销方名称")} separated />
@@ -458,7 +440,7 @@ export default function InputInvoiceUsageTable({
                 separated
               />
               <HeaderCell label="货物或应税劳务名称" separated />
-              <HeaderCell label={filterMenu("payment_status", "支付状态")} strongSeparated emphasized />
+              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span>{filterMenu("payment_status", "支付状态")}</span>} strongSeparated emphasized />
               <HeaderCell
                 label={(
                   <CompositeFilterMenu
@@ -467,7 +449,7 @@ export default function InputInvoiceUsageTable({
                       { field: "oa_application_type", label: "类型", options: filterOptions.oa_application_type ?? [] },
                     ]}
                     currentFilters={filters}
-                    label="OA申请人"
+                    label="OA / OA申请人"
                     onApply={onFilterApply}
                     onClear={onFilterClear}
                   />
@@ -475,7 +457,7 @@ export default function InputInvoiceUsageTable({
                 strongSeparated
               />
               <HeaderCell label={filterMenu("oa_project_name", "项目名称")} separated />
-              <HeaderCell label={filterMenu("bank_counterparty_name", "对方户名")} strongSeparated />
+              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>流水</span>{filterMenu("bank_counterparty_name", "对方户名")}</span>} strongSeparated />
               <HeaderCell
                 align="right"
                 label={(
@@ -493,15 +475,13 @@ export default function InputInvoiceUsageTable({
                 separated
               />
               <HeaderCell label="摘要/备注" separated />
-            </tr>
-          </thead>
-          <tbody>
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td className="input-invoice-usage-table-state-cell" colSpan={10}>
-                  {emptyStateMessage}
-                </td>
-              </tr>
+              <FinanceTableRow id="input-invoice-usage-empty">
+                <FinanceTableCell className="input-invoice-usage-table-state-cell" columnRole="identity">{emptyStateMessage}</FinanceTableCell>
+                {Array.from({ length: 9 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}
+              </FinanceTableRow>
             ) : rows.map((row) => {
               const invoiceNo = displayInvoiceNo(row);
               const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
@@ -518,8 +498,8 @@ export default function InputInvoiceUsageTable({
               const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
 
               return (
-                <tr className="input-invoice-usage-table-row" key={row.id}>
-                  <td className="input-invoice-usage-table-cell">
+                <FinanceTableRow className="input-invoice-usage-table-row" id={row.id} key={row.id}>
+                  <FinanceTableCell className="input-invoice-usage-table-cell" columnRole="identity">
                     <div className="input-invoice-usage-inline-row">
                       <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
                       <DetailButton
@@ -538,28 +518,28 @@ export default function InputInvoiceUsageTable({
                     <div className="input-invoice-usage-tag-row">
                       <Tag>{dateOnly(row.invoice.issueDate)}</Tag>
                     </div>
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="identity">
                     <div className="input-invoice-usage-cell-primary">{row.invoice.sellerName || "-"}</div>
                     <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
                     <div className="input-invoice-usage-money-primary">{formatMoney(row.invoice.totalWithTax)}</div>
                     <div className="input-invoice-usage-cell-secondary">
                       {`${formatMoney(row.invoice.amountWithoutTax)} ${row.invoice.taxRate || "-"} (${formatMoney(row.invoice.taxAmount)})`}
                     </div>
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
                     <ExpandableCellText
                       text={row.invoice.taxableItemName}
                       expanded={invoiceCellExpanded}
                       onToggle={() => onToggleCellExpand(row.id, "invoice-business")}
                     />
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--payment input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--payment input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" columnRole="status">
                     <Tag tone="warning">{row.paymentStatus.label || "待处理"}</Tag>
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" columnRole="identity">
                     {oa ? (
                       <>
                         <div className="input-invoice-usage-inline-row">
@@ -588,8 +568,8 @@ export default function InputInvoiceUsageTable({
                         </div>
                       </>
                     ) : <EmptyCell />}
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
                     {oa ? (
                       <ExpandableCellText
                         text={oa.projectName}
@@ -597,8 +577,8 @@ export default function InputInvoiceUsageTable({
                         onToggle={() => onToggleCellExpand(row.id, "oa-project")}
                       />
                     ) : <EmptyCell />}
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" columnRole="identity">
                     {bank ? (
                       <>
                         <ExpandableCellText
@@ -619,8 +599,8 @@ export default function InputInvoiceUsageTable({
                         </div>
                       </>
                     ) : <EmptyCell />}
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
                     {bank ? (
                       <>
                         <div className="input-invoice-usage-bank-amount-line">
@@ -641,8 +621,8 @@ export default function InputInvoiceUsageTable({
                         </div>
                       </>
                     ) : <EmptyCell />}
-                  </td>
-                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
                     {bank ? (
                       <>
                         <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
@@ -653,35 +633,12 @@ export default function InputInvoiceUsageTable({
                         />
                       </>
                     ) : <EmptyCell />}
-                  </td>
-                </tr>
+                  </FinanceTableCell>
+                </FinanceTableRow>
               );
             })}
-          </tbody>
-        </table>
-      </div>
-      <div className="input-invoice-usage-pagination">
-        <label className="input-invoice-usage-pagination-size">
-          <span>每页行数</span>
-          <select
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-          >
-            {PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-        </label>
-        <span className="input-invoice-usage-pagination-range">{displayedRange(page, pageSize, total)}</span>
-        <div className="input-invoice-usage-pagination-actions">
-          <button disabled={!canGoPrevious} onClick={() => onPageChange(page - 1)} type="button">
-            上一页
-          </button>
-          <button disabled={!canGoNext} onClick={() => onPageChange(page + 1)} type="button">
-            下一页
-          </button>
-        </div>
-      </div>
+          </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
 }

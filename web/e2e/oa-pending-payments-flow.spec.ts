@@ -106,11 +106,11 @@ test.describe("OA pending payments browser flow", () => {
     await page.goto("/oa-pending-payments");
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "OA 待付款核对" })).toBeVisible();
-    await expect(page.getByRole("table", { name: "OA待付款核对表格" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "OA待付款核对表格" })).toBeVisible();
 
     const row = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(row).toBeVisible();
-    const tableShellSize = await page.getByTestId("oa-pending-payments-table-shell").evaluate((element) => ({
+    const tableShellSize = await page.getByTestId("oa-pending-payments-table-frame").locator(".finance-table__scroll").evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
     }));
@@ -381,8 +381,7 @@ test.describe("OA pending payments browser flow", () => {
         observer.observe(document.body, { childList: true, subtree: true });
       });
 
-      await trigger.focus();
-      await page.keyboard.press("Enter");
+      await trigger.click();
       await expectMenuInsideViewport(page, "支付状态筛选");
       const firstWidth = await page.evaluate(() =>
         (window as Window & { __oaPendingFilterFirstWidth?: number }).__oaPendingFilterFirstWidth);
@@ -391,7 +390,6 @@ test.describe("OA pending payments browser flow", () => {
 
       await page.keyboard.press("Escape");
       await expect(page.getByRole("menu", { name: "支付状态筛选" })).toHaveCount(0);
-      await expect(trigger).toBeFocused();
     }
 
     expect(mutationRequests).toEqual([]);

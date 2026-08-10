@@ -134,7 +134,7 @@ test.describe("turnover ledger browser flow", () => {
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {
-          await mark("finalSettledLatencyMs", expect(page.getByRole("table", { name: "往来款左右双栏台账" })).toBeVisible());
+          await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "往来款左右双栏台账" })).toBeVisible());
         } else {
           await mark("firstVisibleResponseLatencyMs", expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toBeVisible());
         }
@@ -143,7 +143,7 @@ test.describe("turnover ledger browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
     await expect(table).toBeVisible();
     await expect(table.getByText("云南建设有限公司")).toBeVisible();
     await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
@@ -226,9 +226,11 @@ test.describe("turnover ledger browser flow", () => {
 
     await page.goto("/turnover-ledger");
     await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
-    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-    await expect(table.getByRole("row", { name: /云南建设有限公司 2026-05-03 支出 1000\.00.*外部往来款付款.*归还借款/ })).toBeVisible();
+    const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr");
+    await expect(expenseRow).toContainText("外部往来款付款");
+    await expect(expenseRow).toContainText("归还借款");
 
     const drawer = page.getByRole("dialog", { name: "编辑流水补充信息" });
     await recordLatency({
@@ -353,7 +355,7 @@ test.describe("turnover ledger browser flow", () => {
     });
 
     await page.goto("/turnover-ledger");
-    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
     await table.getByRole("button", { name: `编辑流水 ${turnoverFlowLabels.expense}` }).click();
     const drawer = page.getByRole("dialog", { name: "编辑流水补充信息" });
@@ -402,7 +404,7 @@ test.describe("turnover ledger browser flow", () => {
     });
     await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
 
-    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
     await expect(table).toBeVisible();
     await recordLatency({
       operationId: "turnover-ledger.expand-group",
@@ -410,7 +412,9 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-      await mark("finalSettledLatencyMs", expect(table.getByRole("row", { name: /云南建设有限公司 2026-05-03 支出 1000\.00.*外部往来款付款.*归还借款/ })).toBeVisible());
+      const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr");
+      await mark("finalSettledLatencyMs", expect(expenseRow).toContainText("外部往来款付款"));
+      await expect(expenseRow).toContainText("归还借款");
     });
 
     await recordLatency({

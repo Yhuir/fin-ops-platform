@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
+import { expect, setCheckbox, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
@@ -97,17 +97,17 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     });
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+    await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }));
     await expect(page.getByText("已选 1 条流水")).toBeVisible();
     await expect(page.getByText("流水合计 7540.00")).toBeVisible();
-    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).uncheck();
+    await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }), false);
 
     await recordLatency({
       operationId: "pending-invoices.select-attach-row-primary",
       visibleLabel: "选择流水 智能工厂设备商",
       actionType: "check",
     }, async (mark) => {
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 1 条流水")).toBeVisible());
     });
     await recordLatency({
@@ -115,7 +115,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       visibleLabel: "选择流水 智能工厂设备商二号",
       actionType: "check",
     }, async (mark) => {
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     await expect(page.getByText("已选 2 条流水")).toBeVisible();
@@ -129,10 +129,10 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "选择发票" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(picker).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(picker.getByRole("table", { name: "发票候选" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(picker.getByRole("grid", { name: "发票候选" })).toBeVisible());
     });
     await expect(picker).toBeVisible();
-    await expect(picker.getByRole("table", { name: "发票候选" })).toBeVisible();
+    await expect(picker.getByRole("grid", { name: "发票候选" })).toBeVisible();
     await expect(picker.getByRole("columnheader", { name: "流水关联" })).toBeVisible();
     await expect(picker.getByText("未关联流水")).toBeVisible();
     await expect(picker.getByText("已关联流水", { exact: true })).toBeVisible();
@@ -258,8 +258,8 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       visibleLabel: "选择流水",
       actionType: "check",
     }, async (mark) => {
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }));
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });
@@ -370,7 +370,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       visibleLabel: "选择流水 智能工厂设备商",
       actionType: "check",
     }, async (mark) => {
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 1 条流水")).toBeVisible());
     });
     const picker = page.getByRole("dialog", { name: "选择已有进项发票" });

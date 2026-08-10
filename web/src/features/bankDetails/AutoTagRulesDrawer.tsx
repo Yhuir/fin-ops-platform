@@ -14,6 +14,14 @@ import { Plus, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import AppDialog from "../../components/common/AppDialog";
 import AppDrawer from "../../components/common/AppDrawer";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../../components/common/FinanceTable";
 import { fetchBankAutoTagRules, reapplyBankAutoTagRules, saveBankAutoTagRules } from "./api";
 import type {
   BankAutoTagDirection,
@@ -564,66 +572,49 @@ export default function AutoTagRulesDrawer({
           {feedback ? <div className="bank-auto-tag-alert bank-auto-tag-alert--success" role="status">{feedback}</div> : null}
           {tab === "active" ? (
             <div className="bank-auto-tag-table-container">
-              <table className="bank-auto-tag-rule-table" aria-label="自动标签规则表格">
-                <colgroup>
-                  <col className="bank-auto-tag-col-primary" />
-                  <col className="bank-auto-tag-col-sub" />
-                  <col className="bank-auto-tag-col-direction" />
-                  <col className="bank-auto-tag-col-fields" />
-                  <col className="bank-auto-tag-col-contains" />
-                  <col className="bank-auto-tag-col-contains-all" />
-                  <col className="bank-auto-tag-col-exact" />
-                  <col className="bank-auto-tag-col-none" />
-                  <col className="bank-auto-tag-col-priority" />
-                  <col className="bank-auto-tag-col-actions" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th className="finance-table__column" scope="col">主标签</th>
-                    <th className="finance-table__column" scope="col">子标签</th>
-                    <th className="finance-table__column" scope="col">流水类型</th>
-                    <th className="finance-table__column" scope="col">查询项</th>
-                    <th className="finance-table__column" scope="col">包含</th>
-                    <th className="finance-table__column" scope="col">必须同时包含</th>
-                    <th className="finance-table__column" scope="col">精准命中</th>
-                    <th className="finance-table__column" scope="col">不包含字样</th>
-                    <th className="finance-table__column" scope="col">优先级</th>
-                    <th className="finance-table__column bank-auto-tag-actions-column" scope="col">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <FinanceTable ariaLabel="自动标签规则表格" className="bank-auto-tag-rule-table" minWidth={1540} scrollMode="contained">
+                <FinanceTableHeader>
+                  <FinanceTableColumn id="primary" isRowHeader columnRole="identity">主标签</FinanceTableColumn>
+                  <FinanceTableColumn id="sub" columnRole="identity">子标签</FinanceTableColumn>
+                  <FinanceTableColumn id="direction" columnRole="direction">流水类型</FinanceTableColumn>
+                  <FinanceTableColumn id="fields" columnRole="description">查询项</FinanceTableColumn>
+                  <FinanceTableColumn id="contains" columnRole="description">包含</FinanceTableColumn>
+                  <FinanceTableColumn id="containsAll" columnRole="description">必须同时包含</FinanceTableColumn>
+                  <FinanceTableColumn id="exact" columnRole="description">精准命中</FinanceTableColumn>
+                  <FinanceTableColumn id="none" columnRole="description">不包含字样</FinanceTableColumn>
+                  <FinanceTableColumn id="priority" columnRole="quantity">优先级</FinanceTableColumn>
+                  <FinanceTableColumn id="action" className="bank-auto-tag-actions-column" columnRole="action">操作</FinanceTableColumn>
+                </FinanceTableHeader>
+                <FinanceTableBody>
                   {systemRule ? (
-                    <tr className="bank-auto-tag-system-row">
-                      <td className="finance-table__cell">{systemRule.label}</td>
-                      <td className="finance-table__cell">系统规则</td>
-                      <td className="finance-table__cell">不限</td>
-                      <td className="finance-table__cell">-</td>
-                      <td className="finance-table__cell">-</td>
-                      <td className="finance-table__cell">-</td>
-                      <td className="finance-table__cell">-</td>
-                      <td className="finance-table__cell">-</td>
-                      <td className="finance-table__cell">1</td>
-                      <td className="finance-table__cell bank-auto-tag-actions-cell">-</td>
-                    </tr>
+                    <FinanceTableRow id="system-rule" className="bank-auto-tag-system-row">
+                      <FinanceTableCell columnRole="identity">{systemRule.label}</FinanceTableCell>
+                      <FinanceTableCell columnRole="identity">系统规则</FinanceTableCell>
+                      <FinanceTableCell columnRole="direction">不限</FinanceTableCell>
+                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
+                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
+                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
+                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
+                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
+                      <FinanceTableCell columnRole="quantity">1</FinanceTableCell>
+                      <FinanceTableCell className="bank-auto-tag-actions-cell" columnRole="action">-</FinanceTableCell>
+                    </FinanceTableRow>
                   ) : null}
-                  {activeRuleGroups.flatMap((group) => group.rules.map((rule, rowIndex) => (
-                    <tr key={rule.localId} className={`bank-auto-tag-rule-row ${group.colorClass}`}>
-                      {rowIndex === 0 ? (
-                        <td
-                          rowSpan={group.rules.length}
-                          className={`finance-table__cell bank-auto-tag-primary-cell ${group.colorClass}`}
-                        >
-                          <Input
-                            className="bank-auto-tag-input"
-                            placeholder="主标签名称"
-                            value={group.primaryLabel === "未命名主标签" ? "" : group.primaryLabel}
-                            disabled={readonly}
-                            aria-label={`${group.primaryLabel} 主标签`}
-                            onChange={(event) => updateGroupPrimaryLabel(group, event.target.value)}
-                          />
-                        </td>
-                      ) : null}
-                      <td className="finance-table__cell">
+                  {activeRuleGroups.flatMap((group) => group.rules.map((rule, ruleIndex) => (
+                    <FinanceTableRow id={rule.localId} key={rule.localId} className={`bank-auto-tag-rule-row ${group.colorClass}`}>
+                        <FinanceTableCell columnRole="identity" className={`bank-auto-tag-primary-cell ${group.colorClass}`}>
+                          {ruleIndex === 0 ? (
+                            <Input
+                              className="bank-auto-tag-input"
+                              placeholder="主标签名称"
+                              value={group.primaryLabel === "未命名主标签" ? "" : group.primaryLabel}
+                              disabled={readonly}
+                              aria-label={`${group.primaryLabel} 主标签`}
+                              onChange={(event) => updateGroupPrimaryLabel(group, event.target.value)}
+                            />
+                          ) : <span className="bank-auto-tag-primary-repeat">{group.primaryLabel}</span>}
+                        </FinanceTableCell>
+                      <FinanceTableCell columnRole="identity">
                         <div className="bank-auto-tag-cell-stack">
                           <Input
                             className="bank-auto-tag-input"
@@ -646,8 +637,8 @@ export default function AutoTagRulesDrawer({
                             />
                           ) : null}
                         </div>
-                      </td>
-                      <td className="finance-table__cell">
+                      </FinanceTableCell>
+                      <FinanceTableCell columnRole="direction">
                         <div className="bank-auto-tag-cell-stack">
                           <SingleSelect
                             ariaLabel={`${ruleDisplayLabel(rule)} 流水类型`}
@@ -673,8 +664,8 @@ export default function AutoTagRulesDrawer({
                             />
                           ) : null}
                         </div>
-                      </td>
-                      <td className="finance-table__cell">
+                      </FinanceTableCell>
+                      <FinanceTableCell columnRole="description">
                         <MatchFieldPicker
                           ariaLabel={`${ruleDisplayLabel(rule)} 查询项`}
                           disabled={readonly}
@@ -686,7 +677,7 @@ export default function AutoTagRulesDrawer({
                             rules: { ...current.rules, matchFields: selectedValues },
                           }))}
                         />
-                      </td>
+                      </FinanceTableCell>
                       <ConditionCell
                         ruleLabel={ruleDisplayLabel(rule)}
                         label="包含"
@@ -715,7 +706,7 @@ export default function AutoTagRulesDrawer({
                         disabled={readonly}
                         onEdit={() => setConditionEditor({ localId: rule.localId, key: "noneOf", label: "不包含字样", values: rule.rules.noneOf })}
                       />
-                      <td className="finance-table__cell bank-auto-tag-priority-cell">
+                      <FinanceTableCell columnRole="quantity" className="bank-auto-tag-priority-cell">
                         <Input
                           className="bank-auto-tag-input bank-auto-tag-priority-value"
                           type="number"
@@ -729,8 +720,8 @@ export default function AutoTagRulesDrawer({
                             priority: event.target.value === "" ? "" : Number(event.target.value),
                           }))}
                         />
-                      </td>
-                      <td className="finance-table__cell bank-auto-tag-actions-cell">
+                      </FinanceTableCell>
+                      <FinanceTableCell columnRole="action" className="bank-auto-tag-actions-cell">
                         <Button
                           className="bank-auto-tag-icon-button"
                           aria-label={`停用 ${ruleDisplayLabel(rule)}`}
@@ -742,11 +733,11 @@ export default function AutoTagRulesDrawer({
                         >
                           <Trash2 aria-hidden="true" size={14} />
                         </Button>
-                      </td>
-                    </tr>
+                      </FinanceTableCell>
+                    </FinanceTableRow>
                   )))}
-                </tbody>
-              </table>
+                </FinanceTableBody>
+              </FinanceTable>
             </div>
           ) : (
             <div className="bank-auto-tag-archived-list">
@@ -964,7 +955,7 @@ function ConditionCell({
   onEdit: () => void;
 }) {
   return (
-    <td className="finance-table__cell">
+    <FinanceTableCell columnRole="description">
       <Button
         className="bank-auto-tag-condition-field-button"
         aria-label={`编辑${ruleLabel}${label}`}
@@ -981,6 +972,6 @@ function ConditionCell({
           ))}
         </span>
       </Button>
-    </td>
+    </FinanceTableCell>
   );
 }

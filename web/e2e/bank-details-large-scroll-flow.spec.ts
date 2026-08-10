@@ -105,11 +105,12 @@ test.describe("bank details large table and overlay browser flow", () => {
     await expect(page.getByRole("row", { name: /长字段浏览器供应商120有限公司/ })).toBeVisible();
 
     const tableContainer = page.locator(".bank-transaction-table-container");
-    await scrollToTableBottom(tableContainer);
+    const tableScroll = page.locator(".bank-transaction-table .finance-table__scroll");
+    await scrollToTableBottom(tableScroll);
     await expectVisibleAndUncovered(page.getByLabel("下一页"), "desktop next-page button");
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出" }), "desktop export button");
 
-    await tableContainer.evaluate((element) => {
+    await tableScroll.evaluate((element) => {
       element.scrollTop = 0;
     });
     await page.getByRole("button", { name: /标签筛选/ }).click();
@@ -151,8 +152,11 @@ test.describe("bank details large table and overlay browser flow", () => {
     }, { menu: menuBox!, table: tableBox! });
     expect(outsidePoint).not.toBeNull();
     await page.mouse.move(outsidePoint!.x, outsidePoint!.y);
-    await page.mouse.wheel(0, 520);
-    await expect.poll(() => tableContainer.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await tableScroll.evaluate((element) => {
+      element.scrollTop = 520;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect.poll(() => tableScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     await expect(filterMenu).toBeVisible();
     await page.keyboard.press("Escape");
 
@@ -174,7 +178,6 @@ test.describe("bank details large table and overlay browser flow", () => {
     await page.keyboard.press("Escape");
     await expect(exportMenu).toBeHidden();
 
-    const tableScroll = page.locator(".bank-transaction-table .finance-table__scroll");
     await scrollTableHorizontally(tableScroll);
     await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "备注/附言/客户附言" }), "narrow rightmost table column");
 

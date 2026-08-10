@@ -2,6 +2,14 @@ import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import type { PendingInvoiceExportDownload, PendingInvoiceExportPreview } from "../../features/pendingInvoices/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceExportDrawerProps = {
@@ -105,28 +113,24 @@ export default function PendingInvoiceExportDrawer({
             <p className="pending-invoice-panel__description">{preview.fileName}</p>
           </section>
           <section className="pending-invoice-panel">
-            <table aria-label="导出样例" className="pending-invoice-simple-table">
-              <thead>
-                <tr>
-                  {preview.columns.map((column) => (
-                    <th key={column} scope="col">{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="导出样例" className="pending-invoice-simple-table" minWidth={720}>
+              <FinanceTableHeader>
+                {preview.columns.map((column, index) => <FinanceTableColumn id={column} isRowHeader={index === 0} key={column} columnRole={index === 0 ? "identity" : "description"}>{column}</FinanceTableColumn>)}
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {preview.sampleRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={Math.max(1, preview.columns.length)}>暂无样例。</td>
-                  </tr>
+                  <FinanceTableRow id="empty">
+                    {preview.columns.map((column, index) => <FinanceTableCell columnRole={index === 0 ? "identity" : "description"} key={column}>{index === 0 ? "暂无样例。" : "-"}</FinanceTableCell>)}
+                  </FinanceTableRow>
                 ) : preview.sampleRows.map((row, index) => (
-                  <tr key={index}>
-                    {preview.columns.map((column) => (
-                      <td key={`${index}-${column}`}>{row[column] ?? row[toCamel(column)] ?? "-"}</td>
+                  <FinanceTableRow id={index} key={index}>
+                    {preview.columns.map((column, columnIndex) => (
+                      <FinanceTableCell columnRole={columnIndex === 0 ? "identity" : "description"} key={`${index}-${column}`}>{row[column] ?? row[toCamel(column)] ?? "-"}</FinanceTableCell>
                     ))}
-                  </tr>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </section>
         </>
       ) : null}

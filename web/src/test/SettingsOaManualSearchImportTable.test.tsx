@@ -180,13 +180,13 @@ afterEach(() => {
 });
 
 describe("OaManualSearchImportTable", () => {
-  test("searches OA rows with native table semantics and no DataGrid surface", async () => {
+  test("searches OA rows with the shared HeroUI table and no DataGrid surface", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderTable();
 
     expect(screen.getByRole("heading", { name: "OA全量搜索导入" })).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "OA全量搜索导入结果" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "OA全量搜索导入结果" })).toBeInTheDocument();
     expect(document.querySelector(".MuiDataGrid-root")).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("搜索关键字"), "陈雄兵");
@@ -194,10 +194,10 @@ describe("OaManualSearchImportTable", () => {
     await user.type(screen.getByLabelText("结束日期"), "2025-12-31");
     await user.click(screen.getByRole("button", { name: "搜索" }));
 
-    const completedRow = await screen.findByRole("row", { name: /1981.*陈雄兵/ });
+    const completedRow = await screen.findByRole("row", { name: "1981" });
     expect(completedRow).toBeInTheDocument();
     expect(within(completedRow).getByText("1981")).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /2001.*吴云江/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "2001" })).toBeInTheDocument();
     const searchCall = fetchMock.mock.calls.find(([input]) => String(input).startsWith("/api/workbench/settings/oa/manual-search?"));
     expect(searchCall).toBeTruthy();
     const url = new URL(String(searchCall?.[0]), "http://localhost");
@@ -215,8 +215,8 @@ describe("OaManualSearchImportTable", () => {
 
     await user.click(screen.getByRole("button", { name: "搜索" }));
 
-    const completedRow = await screen.findByRole("row", { name: /1981.*陈雄兵/ });
-    const inProgressRow = screen.getByRole("row", { name: /2001.*吴云江/ });
+    const completedRow = await screen.findByRole("row", { name: "1981" });
+    const inProgressRow = screen.getByRole("row", { name: "2001" });
     expect(within(inProgressRow).getByLabelText("选择 OA 2001")).toBeDisabled();
     expect(inProgressRow).toHaveTextContent("流程未完成");
 
@@ -258,7 +258,7 @@ describe("OaManualSearchImportTable", () => {
     renderTable({ withSidebar: true });
 
     await user.click(screen.getByRole("button", { name: "搜索" }));
-    const completedRow = await screen.findByRole("row", { name: /1981.*陈雄兵/ });
+    const completedRow = await screen.findByRole("row", { name: "1981" });
     await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
 
@@ -290,7 +290,7 @@ describe("OaManualSearchImportTable", () => {
     await user.click(await screen.findByLabelText("选择当前页可导入OA"));
 
     expect(screen.getByText("已选 1 个OA")).toBeInTheDocument();
-    expect(within(screen.getByRole("row", { name: /2001.*吴云江/ })).getByLabelText("选择 OA 2001")).not.toBeChecked();
+    expect(within(screen.getByRole("row", { name: "2001" })).getByLabelText("选择 OA 2001")).not.toBeChecked();
   });
 
   test("does not broaden search when all status filters are cleared", async () => {

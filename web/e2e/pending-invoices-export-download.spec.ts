@@ -124,7 +124,7 @@ test.describe("pending invoices export browser download", () => {
     expect(previewUrl.searchParams.get("page")).toBeNull();
     expect(previewUrl.searchParams.get("page_size")).toBeNull();
 
-    const previewTable = previewDialog.getByRole("table", { name: "导出样例" });
+    const previewTable = previewDialog.getByRole("grid", { name: "导出样例" });
     await expect(previewTable).toContainText("OA申请人");
     await expect(previewTable).toContainText("进项发票号码");
     await expect(previewTable).toContainText("陈涛");
@@ -212,9 +212,9 @@ test.describe("pending invoices export browser download", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "筛选内容导出" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(previewDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(previewDialog.getByRole("table", { name: "导出样例" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(previewDialog.getByRole("grid", { name: "导出样例" })).toBeVisible());
     });
-    await expect(previewDialog.getByRole("table", { name: "导出样例" })).toBeVisible();
+    await expect(previewDialog.getByRole("grid", { name: "导出样例" })).toBeVisible();
 
     const exportRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());

@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 
 export type InputInvoiceUsageDetailTarget = {
   kind: "invoice" | "bank" | "oa" | "relationList";
@@ -148,30 +156,23 @@ function DetailTable({
   }
   return (
     <div className="input-invoice-usage-detail-table-shell">
-      <table aria-label={`${title}明细表`} className="input-invoice-usage-detail-table">
-        <tbody>
-          {sections.map((section) => (
-            <TableSection key={section.title} section={section} />
-          ))}
-        </tbody>
-      </table>
+      <FinanceTable ariaLabel={`${title}明细表`} className="input-invoice-usage-detail-table" minWidth={520}>
+        <FinanceTableHeader>
+          <FinanceTableColumn id="section" columnRole="status">分组</FinanceTableColumn>
+          <FinanceTableColumn id="field" isRowHeader columnRole="identity">字段</FinanceTableColumn>
+          <FinanceTableColumn id="value" columnRole="description">内容</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {sections.flatMap((section) => section.fields.map((field) => (
+            <FinanceTableRow id={`${section.title}-${field.label}`} key={`${section.title}-${field.label}`}>
+              <FinanceTableCell columnRole="status">{section.title}</FinanceTableCell>
+              <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{formatDetailValue(field.value)}</FinanceTableCell>
+            </FinanceTableRow>
+          )))}
+        </FinanceTableBody>
+      </FinanceTable>
     </div>
-  );
-}
-
-function TableSection({ section }: { section: InputInvoiceUsageDetailSection }) {
-  return (
-    <>
-      <tr className="input-invoice-usage-detail-table__section-row">
-        <th colSpan={2} scope="colgroup">{section.title}</th>
-      </tr>
-      {section.fields.map((field) => (
-        <tr key={`${section.title}-${field.label}`}>
-          <th scope="row">{field.label}</th>
-          <td>{formatDetailValue(field.value)}</td>
-        </tr>
-      ))}
-    </>
   );
 }
 

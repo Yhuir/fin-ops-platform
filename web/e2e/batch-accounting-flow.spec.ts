@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
+import { expect, setCheckbox, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
@@ -88,7 +88,7 @@ test.describe("batch accounting browser flow", () => {
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {
-          await mark("finalSettledLatencyMs", expect(page.getByRole("table", { name: "可关联OA项" })).toBeVisible());
+          await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "可关联OA项" })).toBeVisible());
         } else {
           await mark("firstVisibleResponseLatencyMs", expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible());
         }
@@ -99,7 +99,7 @@ test.describe("batch accounting browser flow", () => {
     await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toHaveCount(0);
     const bankPanel = page.getByRole("region", { name: "批量账务流水" });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-    const oaTable = page.getByRole("table", { name: "可关联OA项" });
+    const oaTable = page.getByRole("grid", { name: "可关联OA项" });
     await expect(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
     await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
     expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(3);
@@ -243,13 +243,13 @@ test.describe("batch accounting browser flow", () => {
     const bankPanel = page.getByRole("region", { name: "批量账务流水" });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
-    const oaTable = page.getByRole("table", { name: "可关联OA项" });
+    const oaTable = page.getByRole("grid", { name: "可关联OA项" });
     await recordLatency({
       operationId: "batch-accounting.select-oa-liu",
       visibleLabel: "选择 刘晨 2026-04-02",
       actionType: "check",
     }, async (mark) => {
-      await oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }).check();
+      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 1 项")).toBeVisible());
     });
     await recordLatency({
@@ -257,7 +257,7 @@ test.describe("batch accounting browser flow", () => {
       visibleLabel: "选择 王青 2026-04-03",
       actionType: "check",
     }, async (mark) => {
-      await oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }).check();
+      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 2 项")).toBeVisible());
     });
     await expect(page.getByText("已选 OA 2 项")).toBeVisible();
@@ -292,14 +292,18 @@ test.describe("batch accounting browser flow", () => {
     }, async (mark) => {
       await page.getByRole("radio", { name: "已提交 1" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("table", { name: "已关联OA项" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "已关联OA项" })).toBeVisible());
     });
     await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
-    const submittedTable = page.getByRole("table", { name: "已关联OA项" });
-    await expect(submittedTable.getByRole("row", { name: /刘晨.*品牌广告投放.*700.00/ })).toBeVisible();
-    await expect(submittedTable.getByRole("row", { name: /王青.*客户拜访差旅报销.*500.00/ })).toBeVisible();
+    const submittedTable = page.getByRole("grid", { name: "已关联OA项" });
+    await expect(submittedTable.getByRole("rowheader", { name: /刘晨 2026-04-02/ })).toBeVisible();
+    await expect(submittedTable.getByRole("gridcell", { name: "品牌广告投放" })).toBeVisible();
+    await expect(submittedTable.getByRole("gridcell", { name: "700.00" })).toBeVisible();
+    await expect(submittedTable.getByRole("rowheader", { name: /王青 2026-04-03/ })).toBeVisible();
+    await expect(submittedTable.getByRole("gridcell", { name: "客户拜访差旅报销" })).toBeVisible();
+    await expect(submittedTable.getByRole("gridcell", { name: "500.00" })).toBeVisible();
     await expect(page.getByText("银行流水金额 1200.00")).toBeVisible();
     await expect(page.getByText("已选 OA 2 项")).toBeVisible();
     await expect(page.getByText("差额 0.00")).toBeVisible();
@@ -353,7 +357,7 @@ test.describe("batch accounting browser flow", () => {
       await mark("finalSettledLatencyMs", expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true"));
     });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("table", { name: "可关联OA项" }).getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "可关联OA项" }).getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

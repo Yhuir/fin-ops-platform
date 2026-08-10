@@ -1,3 +1,4 @@
+import { PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
 import { ArrowDown, ArrowUp, Filter } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
@@ -141,8 +142,8 @@ export default function OutputInvoiceCollectionFilterMenu({
   };
 
   return (
-    <span className="output-invoice-collection-filter-menu">
-      <button
+    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -150,24 +151,22 @@ export default function OutputInvoiceCollectionFilterMenu({
         className={hasActiveFilter || selectedValues.length > 0
           ? "output-invoice-collection-filter-menu__trigger output-invoice-collection-filter-menu__trigger--active"
           : "output-invoice-collection-filter-menu__trigger"}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
       >
         <Filter aria-hidden="true" size={14} />
         <span>{fieldConfig.label}</span>
-      </button>
+      </PopoverTrigger>
       {open ? (
-      <div
-        aria-label={`${fieldConfig.label}筛选与排序`}
-        className="output-invoice-collection-filter-menu__panel"
-        id={menuId}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-        role="menu"
-      >
+      <PopoverContent className="output-invoice-collection-filter-menu__popover" containerPadding={12} offset={4} placement="bottom start">
+        <PopoverDialog aria-label={`${fieldConfig.label}筛选与排序`} className="output-invoice-collection-filter-menu__dialog">
+          <div
+            aria-label={`${fieldConfig.label}筛选与排序`}
+            className="output-invoice-collection-filter-menu__panel"
+            id={menuId}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false);
+            }}
+            role="menu"
+          >
         <div className="output-invoice-collection-filter-menu__header">
           <div className="output-invoice-collection-filter-menu__title">{fieldConfig.label}</div>
           <div className="output-invoice-collection-filter-menu__subtitle">筛选项来自当前后端查询上下文</div>
@@ -307,9 +306,11 @@ export default function OutputInvoiceCollectionFilterMenu({
             </button>
           </div>
         ) : null}
-      </div>
+          </div>
+        </PopoverDialog>
+      </PopoverContent>
       ) : null}
-    </span>
+    </PopoverRoot>
   );
 }
 

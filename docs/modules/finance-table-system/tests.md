@@ -13,12 +13,13 @@
 | 影响面 | 当前测试入口 | 必须保护的行为 |
 | --- | --- | --- |
 | Shared primitives | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`TableLayoutTokens.test.ts` | 分页摘要/边界、金额/方向/状态/空值 primitive、列角色对齐、密度 token |
+| Shared contained scrolling | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts` | `contained` class/ref contract、内部 overflow、sticky 表头、overscroll 隔离、轻量行分割线 |
 | Shared browser layout | `web/e2e/finance-table-system-flow.spec.ts`、`web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts` | 窄屏/宽表横向滚动、右侧列可见、操作入口不被遮挡、真实浏览器无 console/page error |
 | Table session hook | `useFinanceTableSession.test.tsx`、`PageSessionStateContext.test.tsx` | 分页、排序、选择、滚动恢复；columnsVersion 变化清理；user/page/state 隔离 |
-| Legacy table runtime guard | `MuiContainment.test.ts`、`CommonPlatformComponents.test.tsx` | 非 workbench runtime 无 MUI/DataGrid/provider/theme；旧 `useMuiDataGridPageSession` hook/test 不得回归；common primitives 不再以 MUI 命名 |
+| Legacy table runtime guard | `MuiContainment.test.ts`、`FinanceTableMigration.test.ts`、`CommonPlatformComponents.test.tsx` | 非 workbench runtime 无 MUI/DataGrid/provider/theme 或原生表格；旧 `useMuiDataGridPageSession` hook/test 不得回归；仅保留冻结 Workbench 表格例外 |
 | Bank details table | `BankDetailsPage.test.tsx`、`BankDetailsApi.test.ts` | HeroUI table migration、列清单、分页、搜索、标签筛选、导出、refreshing/stale |
 | Tax tables | `TaxOffsetPage.test.tsx`、`TaxApi.test.ts` | 发票选择、认证导入预览、税金表格、loading/error、导入反馈 |
-| Invoice usage / pending / collections tables | `InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx` | header filter、sort、pagination、read model refreshing/stale、export drawers |
+| Invoice usage / pending / collections tables | `InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts` | header filter Portal、sort、pagination、read model refreshing/stale、export drawers |
 | OA / turnover / cost tables | `OaPendingPaymentsPage.test.tsx`、`TurnoverLedgerPage.test.tsx`、`CostStatisticsPage.test.tsx` | grouped table、详情 dialog/drawer、export dialog、stale disable、large layout CSS |
 | Import preview tables | `ImportCenterPage.test.tsx`、`EtcTicketManagementPage.test.tsx` | preview stale/error、行级状态 tag、确认前预览 |
 | App Health tables | `AppHealthOperationsPage.test.tsx` | runtime dashboard 只读表、admin-only、unknown 不等于 0 |
@@ -38,6 +39,8 @@
 | 页面级筛选/排序/分页请求参数 | 已覆盖于具体页面 | `BankDetailsPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx` |
 | 页面级导出抽屉/下载使用当前 filters | 已覆盖于具体页面 | `BankDetailsPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`CostStatisticsPage.test.tsx`、`TurnoverLedgerPage.test.tsx` |
 | read model refreshing/stale 表格状态 | 已覆盖于具体页面 | `BankDetailsPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`PendingInvoicesPage.test.tsx`、`TurnoverLedgerPage.test.tsx` |
+| 固定高度、内部滚动、sticky 表头、相邻栏滚动隔离 | 已覆盖共享合同与页面 CSS，2026-08-10 补强 | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`FinanceTableMigration.test.ts`、页面级 tests |
+| 非关联台原生表格旧路径删除 | 已覆盖，2026-08-10 新增 | `FinanceTableMigration.test.ts` |
 
 ## 七类测试适用性
 
@@ -47,7 +50,7 @@
 | 2. Service-layer tests | 不适用 | N/A | 本模块不触碰后端 service、repository、audit 或状态写入。 |
 | 3. API contract tests | 间接适用 | 各页面 `*Api.test.ts` / `*Page.test.tsx` | 表格 query params、pagination、sort、filters、export contract 由页面/API 模块负责；共享 primitive 不发 HTTP。 |
 | 4. Read model/cache/background job tests | 间接适用 | 页面级 refreshing/stale tests | 表格只展示 read model 状态；freshness 来源仍由页面 API 和 read model 模块负责。 |
-| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`useFinanceTableSession.test.tsx`、`MuiContainment.test.ts`、页面级 tests、`web/e2e/finance-table-system-flow.spec.ts` | 覆盖共享 primitive、session hook、旧 MUI/DataGrid 删除防回归、页面级筛选/排序/分页/导出/状态，并用真实 Chromium 代表性覆盖 AppHealth 宽表窄屏横向滚动、右侧列可见、read model/worker 表格可读和无浏览器错误。 |
+| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`FinanceTableMigration.test.ts`、`useFinanceTableSession.test.tsx`、`MuiContainment.test.ts`、页面级 tests、`web/e2e/finance-table-system-flow.spec.ts` | 覆盖共享 primitive、contained scroll/sticky header、session hook、旧 MUI/DataGrid/原生表格删除防回归、页面级筛选/排序/分页/导出/状态。 |
 | 6. End-to-end business-flow integration tests | 间接适用 | 具体页面/业务流 tests | 本模块不承载业务链路；端到端链路在导入、关联台、发票、成本、税金等模块保护。 |
 | 7. Existing feature regression tests | 适用，已补 | 同上 | 新增共享 primitive 回归测试；页面级旧表格功能由各模块继续保护。 |
 
@@ -59,6 +62,8 @@
 | 2026-06-11 | 防止共享金额、方向、状态、空值 primitive class/data contract 被重构破坏 | `FinanceTable.test.tsx` `keeps shared finance cell primitives semantically stable` |
 | 2026-06-19 | 防止共享 `FinanceTable` 宽表在窄屏下右侧列不可达、刷新按钮被遮挡或 AppHealth read model/worker 表格在真实浏览器中出现 console/page error。 | `web/e2e/finance-table-system-flow.spec.ts` |
 | 2026-07-05 | 防止旧 MUI/DataGrid runtime、provider/theme 和 `useMuiDataGridPageSession` 回归污染 Finance Table session 边界 | `MuiContainment.test.ts` |
+| 2026-08-10 | 防止表格滚动带动整页、表头随内容滚走、相邻栏互相影响，以及非关联台旧原生表格回归 | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`FinanceTableMigration.test.ts` |
+| 2026-08-10 | 防止固定表头内的筛选菜单被内部滚动容器裁切或拦截点击 | `web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts` |
 
 ## 关键 smoke flows
 
@@ -74,6 +79,7 @@
 ```bash
 cd web && npm test -- --run \
   src/test/FinanceTable.test.tsx \
+  src/test/FinanceTableMigration.test.ts \
   src/test/TableLayoutTokens.test.ts \
   src/test/TableAlignmentStyles.test.ts \
   src/test/useFinanceTableSession.test.tsx \
@@ -103,5 +109,5 @@ bash scripts/verify.sh docs
 ## 未测风险
 
 - AppHealth 代表性宽表已覆盖真实 Chromium 窄屏横向滚动；真实生产大数据、更多页面 wrapper、超宽列、下载文件名/浏览器保存行为仍需 Playwright 或手工 smoke。
-- 页面级表格 wrapper 没有完全统一到 `FinanceTable`，因此共享 primitive 测试不能替代每个页面的筛选/排序/导出/状态测试。
+- 关联台 `PaneTable` 和详情表仍是冻结的原生表格例外，其滚动和性能由 Workbench 浏览器回归单独保护；其余页面已经由静态门禁收敛到 `FinanceTable`。
 - `useFinanceTableSession` 当前未被大多数页面直接调用；页面若自建 session，必须在页面模块里单独覆盖恢复和隔离。

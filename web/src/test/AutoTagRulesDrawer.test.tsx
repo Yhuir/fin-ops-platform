@@ -69,20 +69,7 @@ function matchFieldSelect(row: HTMLElement) {
 }
 
 async function findAutoTagRuleSurface(drawer: HTMLElement) {
-  const scope = within(drawer);
-  const currentTable = scope.queryByRole("table", { name: "自动标签规则表格" });
-  if (currentTable) {
-    return currentTable;
-  }
-  const currentGrid = scope.queryByRole("grid", { name: "自动标签规则表格" });
-  if (currentGrid) {
-    return currentGrid;
-  }
-  try {
-    return await scope.findByRole("table", { name: "自动标签规则表格" }, { timeout: 500 });
-  } catch {
-    return scope.findByRole("grid", { name: "自动标签规则表格" });
-  }
+  return within(drawer).findByRole("grid", { name: "自动标签规则表格" });
 }
 
 function lastEditableRow(drawer: HTMLElement) {
@@ -492,9 +479,9 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*80vw/s);
     expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s+\.finance-drawer__header\s*\{[^}]*padding:\s*8px 16px/s);
     expect(source).toMatch(/\.bank-auto-tag-drawer-toolbar\s*\{[^}]*padding:\s*8px 16px/s);
-    expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*width:\s*100%/s);
+    expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow:\s*hidden/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table \.finance-table__content\s*\{[^}]*table-layout:\s*fixed/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table \.finance-table__content\s*\{[^}]*width:\s*100%/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.finance-table__cell\s*\{[^}]*white-space:\s*normal/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-field-button\s*\{[^}]*min-height:\s*30px/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-field-button\s*\{[^}]*background:\s*transparent/s);

@@ -150,9 +150,10 @@ function expectInlineTimeSelection(optionName: string) {
 }
 
 describe("Cost statistics page", () => {
-  test("loads the next page near the table bottom and keeps retry local", async () => {
+  test("loads only from an overflowing table near its bottom and keeps retry local", async () => {
     const user = userEvent.setup();
     const onRequestNextPage = vi.fn();
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
     const props = {
       ariaLabel: "自动加载测试表",
       columns: [{ key: "label", header: "内容", render: (row: { id: string }) => row.id }],
@@ -162,12 +163,24 @@ describe("Cost statistics page", () => {
       onRequestNextPage,
     };
     const rendered = render(<CostStatisticsTable {...props} />);
+    const scrollSurface = screen.getByRole("grid", { name: "自动加载测试表" }).closest(".finance-table__scroll");
+    expect(scrollSurface).not.toBeNull();
+    const scrollElement = scrollSurface as HTMLElement;
+    expect(onRequestNextPage).not.toHaveBeenCalled();
+
+    Object.defineProperties(scrollElement, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, value: 500 },
+    });
+    fireEvent.scroll(scrollElement);
 
     await waitFor(() => expect(onRequestNextPage).toHaveBeenCalledTimes(1));
 
     rendered.rerender(<CostStatisticsTable {...props} loadMoreError="下一页加载失败" />);
     await user.click(screen.getByRole("button", { name: "重试" }));
     expect(onRequestNextPage).toHaveBeenCalledTimes(2);
+    requestAnimationFrame.mockRestore();
   });
 
   test("locks compact premium surface and motion styling contracts", () => {

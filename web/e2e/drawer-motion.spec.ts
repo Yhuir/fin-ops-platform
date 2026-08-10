@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "./fixtures/strictTest";
+import { expect, setCheckbox, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
@@ -227,7 +227,7 @@ test.describe("right drawer motion", () => {
     await page.getByRole("radio", { name: /进行中 OA/ }).click();
     const row = page.getByRole("row", { name: /进行中关联申请人/ });
     await expect(row).toBeVisible();
-    await row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }).check();
+    await setCheckbox(row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }));
     const opener = page.getByRole("button", { name: "关联支出流水" });
     await expect(opener).toBeEnabled();
 

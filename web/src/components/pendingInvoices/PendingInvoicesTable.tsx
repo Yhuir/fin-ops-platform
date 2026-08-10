@@ -1,4 +1,4 @@
-import { Button, Table } from "@heroui/react";
+import { Button, Checkbox } from "@heroui/react";
 import { Filter, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -7,6 +7,12 @@ import {
   AmountCell,
   EmptyValue,
   FinanceDirectionTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
   FinanceStatusTag,
   type FinanceTone,
 } from "../common/FinanceTable";
@@ -433,10 +439,6 @@ export default function PendingInvoicesTable({
     return config.sortField === field ? (config.sortDirection === "asc" ? "ascending" : "descending") : undefined;
   }
 
-  function ariaSortFor(field: PendingInvoiceSortField) {
-    return sortDirectionFor(field) ?? "none";
-  }
-
   function handleNativeSort(field: PendingInvoiceSortField) {
     const nextDirection = config.sortField === field && config.sortDirection === "asc" ? "desc" : "asc";
     onSortChange(field, nextDirection);
@@ -453,66 +455,40 @@ export default function PendingInvoicesTable({
 
   return (
     <div className="pending-invoices-table-frame">
-      <Table variant="secondary">
-        <Table.ScrollContainer ref={tableWrapRef} className="pending-invoices-table-shell" data-testid="pending-invoices-table-shell">
-          <div aria-hidden="true" className="pending-invoices-table-zone-header-grid">
-            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--bank">{bankGroupLabel}</div>
-            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--status pending-invoices-table-cell--left-border">发票获取状态</div>
-            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--invoice pending-invoices-table-cell--left-border">{invoiceGroupLabel}</div>
-            <div className="pending-invoices-table-group-header pending-invoices-table-group-header--oa pending-invoices-table-cell--left-border">OA</div>
-          </div>
-          <table
-            aria-label="待找发票四区表"
-            className="pending-invoices-table"
-            role="grid"
-          >
-            <colgroup>
-              <col className="pending-invoices-col-counterparty" />
-              <col className="pending-invoices-col-amount" />
-              <col className="pending-invoices-col-summary" />
-              <col className="pending-invoices-col-status" />
-              <col className="pending-invoices-col-invoice-no" />
-              <col className="pending-invoices-col-seller" />
-              <col className="pending-invoices-col-invoice-amount" />
-              <col className="pending-invoices-col-oa-applicant" />
-              <col className="pending-invoices-col-oa-project" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th aria-label="对方户名" aria-sort={ariaSortFor("counterparty_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" id="counterparty_name" scope="col">
-                  {renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
-                </th>
-                <th aria-label="金额 / 银行账户" aria-sort={ariaSortFor("amount")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-table-cell--amount pending-invoices-col-amount" id="amount" scope="col">
+      <FinanceTable ariaLabel="待找发票四区表" className="pending-invoices-table pending-invoices-table-shell" minWidth={1380} scrollMode="contained" scrollRef={tableWrapRef}>
+            <FinanceTableHeader>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" columnRole="identity" id="counterparty_name" isRowHeader>
+                  <span className="pending-invoices-table-column-heading"><span>{bankGroupLabel}</span>{renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}</span>
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-table-cell--amount pending-invoices-col-amount" columnRole="amount" id="amount">
                   {renderSortableHeader("amount", "金额 / 银行账户", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={amountFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
-                </th>
-                <th aria-label="摘要 / 凭证" className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-summary" id="summary" scope="col">摘要 / 凭证</th>
-                <th aria-label="全部" className="pending-invoices-table-sub-header pending-invoices-table-sub-header--status pending-invoices-table-cell--left-border pending-invoices-col-status" id="invoice_status" scope="col">
-                  <div className="pending-invoices-status-filter-cell">{statusFilterControl}</div>
-                </th>
-                <th aria-label="发票号码 / 开票日期" aria-sort={ariaSortFor("trade_date")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" id="trade_date" scope="col">
-                  {renderSortableHeader("trade_date", "发票号码 / 开票日期")}
-                </th>
-                <th aria-label={invoicePartyLabel} aria-sort={ariaSortFor("seller_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-col-seller" id="seller_name" scope="col">
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-summary" columnRole="description" id="summary">摘要 / 凭证</FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--status pending-invoices-table-cell--left-border pending-invoices-col-status" columnRole="status" id="invoice_status">
+                  <span className="pending-invoices-table-column-heading"><span>发票获取状态</span><span className="pending-invoices-status-filter-cell">{statusFilterControl}</span></span>
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" columnRole="identity" id="trade_date">
+                  <span className="pending-invoices-table-column-heading"><span>{invoiceGroupLabel}</span>{renderSortableHeader("trade_date", "发票号码 / 开票日期")}</span>
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-col-seller" columnRole="identity" id="seller_name">
                   {renderSortableHeader("seller_name", invoicePartyLabel, <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={invoicePartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
-                </th>
-                <th aria-label="金额 / 支付差额" aria-sort={ariaSortFor("invoice_total")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" id="invoice_total" scope="col">
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" columnRole="amount" id="invoice_total">
                   {renderSortableHeader("invoice_total", "金额 / 支付差额")}
-                </th>
-                <th aria-label="申请人 / 类型" aria-sort={ariaSortFor("oa_applicant")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" id="oa_applicant" scope="col">
-                  {renderSortableHeader("oa_applicant", "申请人 / 类型", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={oaFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
-                </th>
-                <th aria-label="项目" aria-sort={ariaSortFor("project_name")} className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-col-oa-project" id="project_name" scope="col">
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" columnRole="identity" id="oa_applicant">
+                  <span className="pending-invoices-table-column-heading"><span>OA</span>{renderSortableHeader("oa_applicant", "申请人 / 类型", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={oaFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}</span>
+                </FinanceTableColumn>
+                <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-col-oa-project" columnRole="description" id="project_name">
                   {renderSortableHeader("project_name", "项目", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={projectFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </FinanceTableColumn>
+            </FinanceTableHeader>
+            <FinanceTableBody>
               {rows.length === 0 ? (
-                <tr id="pending-invoices-empty">
-                  <td className="pending-invoices-table-state-cell" colSpan={9}>
-                    {emptyStateMessage}
-                  </td>
-                </tr>
+                <FinanceTableRow id="pending-invoices-empty">
+                  <FinanceTableCell className="pending-invoices-table-state-cell" columnRole="identity">{emptyStateMessage}</FinanceTableCell>
+                  {Array.from({ length: 8 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}
+                </FinanceTableRow>
               ) : rows.map((row) => (
                 <PendingInvoiceTableRow
                   direction={direction}
@@ -525,10 +501,8 @@ export default function PendingInvoicesTable({
                   isTransactionSelectable={isTransactionSelectable}
                 />
               ))}
-            </tbody>
-          </table>
-        </Table.ScrollContainer>
-      </Table>
+            </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
 }
@@ -596,17 +570,16 @@ function PendingInvoiceTableRow({
   const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
   return (
-    <tr className="pending-invoices-table-row" id={row.id}>
-      <td className="pending-invoices-table-cell pending-invoices-col-counterparty" data-column-role="identity" role="rowheader">
+    <FinanceTableRow className="pending-invoices-table-row" id={row.id}>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-col-counterparty" columnRole="identity">
         <span className="pending-invoices-counterparty-cell pending-invoices-counterparty-cell--selectable">
           <span className="pending-invoices-row-select-slot">
             {transactionSelectable ? (
-              <input
+              <Checkbox
                 aria-label={`选择流水 ${row.bankTransaction.counterpartyName || "未知对方"}`}
-                checked={transactionSelected}
                 className="pending-invoices-row-select"
+                isSelected={transactionSelected}
                 onChange={() => onToggleTransactionSelection?.(row)}
-                type="checkbox"
               />
             ) : null}
           </span>
@@ -649,16 +622,16 @@ function PendingInvoiceTableRow({
             )}
           </span>
         </span>
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-amount" data-column-role="amount" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-amount" columnRole="amount">
         <AmountCell
           account={bankHasMultiple ? `${bankRelationCount} 笔流水` : bankAccountLabel(row.bankTransaction)}
           amount={formatMoney(bankTotal)}
           className="pending-invoices-amount-cell"
           direction={<FinanceDirectionTag direction={moneyDirection}>{moneyDirection === "income" ? "收" : "支"}</FinanceDirectionTag>}
         />
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--summary pending-invoices-col-summary" data-column-role="description" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--summary pending-invoices-col-summary" columnRole="description">
         {bankHasMultiple ? <EmptyValue /> : (
           <TextCell
             primary={row.bankTransaction.summary || <EmptyValue />}
@@ -666,15 +639,15 @@ function PendingInvoiceTableRow({
             title={row.bankTransaction.summary}
           />
         )}
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--status pending-invoices-table-cell--left-border pending-invoices-col-status" data-column-role="status" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--status pending-invoices-table-cell--left-border pending-invoices-col-status" columnRole="status">
         <span className="pending-invoices-status-cell">
           <FinanceStatusTag tone={severityTone(row.invoiceAcquisitionStatus.severity)}>
             {row.invoiceAcquisitionStatus.label}
           </FinanceStatusTag>
         </span>
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" data-column-role="identity" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" columnRole="identity">
         {invoiceHasMultiple ? (
           <DetailButton label="查看全部发票关系" onClick={() => onOpenRelation(row, "invoice")}>
             +{invoiceRelationCount}
@@ -697,8 +670,8 @@ function PendingInvoiceTableRow({
             title={invoiceNumberLabel}
           />
         ) : <EmptyValue />}
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-col-seller" data-column-role="identity" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-col-seller" columnRole="identity">
         {!invoiceHasMultiple && primaryInvoice ? (
           <TextCell
             primary={primaryInvoice.sellerName || <EmptyValue />}
@@ -706,8 +679,8 @@ function PendingInvoiceTableRow({
             title={primaryInvoice.sellerName}
           />
         ) : <EmptyValue />}
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" data-column-role="amount" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" columnRole="amount">
         {primaryInvoice || invoiceHasMultiple ? (
           <span className="pending-invoices-money-stack">
             <span className="pending-invoices-money-primary">
@@ -721,8 +694,8 @@ function PendingInvoiceTableRow({
             ) : null}
           </span>
         ) : <EmptyValue />}
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" data-column-role="identity" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" columnRole="identity">
         {oaHasMultiple ? (
           <DetailButton label="查看全部 OA 关系" onClick={() => onOpenRelation(row, "oa")}>
             +{oaRelationCount}
@@ -739,8 +712,8 @@ function PendingInvoiceTableRow({
             title={primaryOa.applicant}
           />
         ) : <EmptyValue />}
-      </td>
-      <td className="pending-invoices-table-cell pending-invoices-col-oa-project" data-column-role="description" role="gridcell">
+      </FinanceTableCell>
+      <FinanceTableCell className="pending-invoices-table-cell pending-invoices-col-oa-project" columnRole="description">
         {!oaHasMultiple && primaryOa ? (
           <TextCell
             primary={primaryOa.projectName || <EmptyValue />}
@@ -758,7 +731,7 @@ function PendingInvoiceTableRow({
             title={primaryOa.projectName}
           />
         ) : <EmptyValue />}
-      </td>
-    </tr>
+      </FinanceTableCell>
+    </FinanceTableRow>
   );
 }

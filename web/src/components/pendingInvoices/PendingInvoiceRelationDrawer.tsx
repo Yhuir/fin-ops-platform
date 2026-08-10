@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 
 import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
 import { formatMoney } from "../../features/money";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceRelationDrawerProps = {
@@ -86,81 +94,73 @@ export default function PendingInvoiceRelationDrawer({
           </section>
           {detailKind === "all" || detailKind === "invoice" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
             <h3 className="pending-invoice-panel__title" id="pending-invoice-related-invoices-title">已关联发票</h3>
-            <table aria-label="已关联发票" className="pending-invoice-simple-table">
-              <thead>
-                <tr>
-                  <th scope="col">号码</th>
-                  <th scope="col">对方</th>
-                  <th scope="col">开票日期</th>
-                  <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
-                  <th scope="col">状态</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="已关联发票" className="pending-invoice-simple-table" minWidth={720}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="number" isRowHeader columnRole="identity">号码</FinanceTableColumn>
+                <FinanceTableColumn id="counterparty" columnRole="identity">对方</FinanceTableColumn>
+                <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
+                <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
+                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {detail.relatedInvoices.length === 0 ? (
-                  <tr><td colSpan={5}>暂无关联发票。</td></tr>
+                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="identity">暂无关联发票。</FinanceTableCell><FinanceTableCell columnRole="identity">-</FinanceTableCell><FinanceTableCell columnRole="date">-</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
                 ) : detail.relatedInvoices.map((invoice) => (
-                  <tr key={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo}>
-                    <td>{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</td>
-                    <td>{invoice.sellerName || invoice.buyerName || "-"}</td>
-                    <td>{invoice.issueDate || "-"}</td>
-                    <td className="pending-invoice-simple-table__amount">{formatMoney(invoice.totalWithTax)}</td>
-                    <td><RelationStatusChip status={invoice.relationStatus} /></td>
-                  </tr>
+                  <FinanceTableRow id={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo} key={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo}>
+                    <FinanceTableCell columnRole="identity">{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{invoice.sellerName || invoice.buyerName || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="date">{invoice.issueDate || "-"}</FinanceTableCell>
+                    <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status"><RelationStatusChip status={invoice.relationStatus} /></FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </section> : null}
           {detailKind === "all" || detailKind === "oa" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-oa-title">
             <h3 className="pending-invoice-panel__title" id="pending-invoice-related-oa-title">已关联 OA</h3>
-            <table aria-label="已关联 OA" className="pending-invoice-simple-table">
-              <thead>
-                <tr>
-                  <th scope="col">申请人</th>
-                  <th scope="col">类型</th>
-                  <th scope="col">项目</th>
-                  <th scope="col">状态</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="已关联 OA" className="pending-invoice-simple-table" minWidth={620}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="applicant" isRowHeader columnRole="identity">申请人</FinanceTableColumn>
+                <FinanceTableColumn id="type" columnRole="description">类型</FinanceTableColumn>
+                <FinanceTableColumn id="project" columnRole="description">项目</FinanceTableColumn>
+                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {detail.relatedOa.length === 0 ? (
-                  <tr><td colSpan={4}>暂无关联 OA。</td></tr>
+                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="identity">暂无关联 OA。</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
                 ) : detail.relatedOa.map((oa) => (
-                  <tr key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
-                    <td>{oa.applicant || "-"}</td>
-                    <td>{oa.applicationType || "-"}</td>
-                    <td>{oa.projectName || "-"}</td>
-                    <td><RelationStatusChip status={oa.relationStatus} /></td>
-                  </tr>
+                  <FinanceTableRow id={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`} key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
+                    <FinanceTableCell columnRole="identity">{oa.applicant || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="description">{oa.applicationType || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="description">{oa.projectName || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status"><RelationStatusChip status={oa.relationStatus} /></FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </section> : null}
           {detailKind === "all" || detailKind === "bank" ? <section className="pending-invoice-panel">
-            <table aria-label="历史支付流水" className="pending-invoice-simple-table">
-              <thead>
-                <tr>
-                  <th scope="col">支付日期</th>
-                  <th scope="col">对方</th>
-                  <th className="pending-invoice-simple-table__amount" scope="col">金额</th>
-                  <th scope="col">状态</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="历史支付流水" className="pending-invoice-simple-table" minWidth={620}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="date" isRowHeader columnRole="date">支付日期</FinanceTableColumn>
+                <FinanceTableColumn id="counterparty" columnRole="identity">对方</FinanceTableColumn>
+                <FinanceTableColumn id="amount" columnRole="amount">金额</FinanceTableColumn>
+                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {detail.paymentRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={4}>暂无历史支付。</td>
-                  </tr>
+                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="date">暂无历史支付。</FinanceTableCell><FinanceTableCell columnRole="identity">-</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
                 ) : detail.paymentRows.map((row) => (
-                  <tr key={row.id || row.relationCaseId}>
-                    <td>{row.tradeTime || "-"}</td>
-                    <td>{row.counterpartyName || "-"}</td>
-                    <td className="pending-invoice-simple-table__amount">{formatMoney(row.debitAmount)}</td>
-                    <td><RelationStatusChip status={row.relationStatus} /></td>
-                  </tr>
+                  <FinanceTableRow id={row.id || row.relationCaseId} key={row.id || row.relationCaseId}>
+                    <FinanceTableCell columnRole="date">{row.tradeTime || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{row.counterpartyName || "-"}</FinanceTableCell>
+                    <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(row.debitAmount)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status"><RelationStatusChip status={row.relationStatus} /></FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </section> : null}
         </>
       ) : null}

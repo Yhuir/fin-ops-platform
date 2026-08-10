@@ -1,5 +1,6 @@
+import { ListBox, Select } from "@heroui/react";
 import { ArrowUpDown, Info } from "lucide-react";
-import type { MutableRefObject, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -10,6 +11,17 @@ import type {
   OutputInvoiceCollectionSortDirection,
 } from "../../features/outputInvoiceCollections/types";
 import { formatMoney } from "../../features/money";
+import {
+  EmptyValue as FinanceEmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTablePagination,
+  FinanceTableRow,
+  type FinanceTableColumnRole,
+} from "../common/FinanceTable";
 import ExpandableCellText from "./ExpandableCellText";
 import OutputInvoiceCollectionFilterMenu, { type OutputInvoiceCollectionFilterValue } from "./OutputInvoiceCollectionFilterMenu";
 
@@ -32,7 +44,6 @@ type OutputInvoiceCollectionsTableProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   emptyStateMessage?: string;
-  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 type Column = {
@@ -43,15 +54,16 @@ type Column = {
   field?: string;
   extraFilters?: Array<{ field: string; label: string }>;
   group: "invoice" | "status" | "bank";
+  groupLabel?: string;
 };
 
 const columns: Column[] = [
-  { id: "invoiceNo", label: "发票号码", field: "invoice_no", extraFilters: [{ field: "invoice_date", label: "开票日期" }], group: "invoice" },
+  { id: "invoiceNo", label: "发票号码", field: "invoice_no", extraFilters: [{ field: "invoice_date", label: "开票日期" }], group: "invoice", groupLabel: "销项发票" },
   { id: "buyer", label: "购方", field: "buyer_name", group: "invoice" },
   { id: "totalWithTax", label: "价税合计", subLabel: "税额/税率", field: "total_with_tax", align: "right", group: "invoice" },
   { id: "business", label: "业务/货物劳务", field: "taxable_item_name", group: "invoice" },
-  { id: "collectionStatus", label: "收款状态", field: "collection_status", group: "status" },
-  { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank" },
+  { id: "collectionStatus", label: "状态", field: "collection_status", group: "status", groupLabel: "收款状态" },
+  { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank", groupLabel: "收入流水" },
   { id: "bankAmount", label: "收款金额", field: "bank_amount", align: "right", group: "bank" },
   { id: "bankSummary", label: "摘要", field: "bank_summary", group: "bank" },
 ];
@@ -91,7 +103,6 @@ export default function OutputInvoiceCollectionsTable({
   onPageChange,
   onPageSizeChange,
   emptyStateMessage = "当前条件下没有销项发票收款记录。",
-  tableWrapRef,
 }: OutputInvoiceCollectionsTableProps) {
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
   const fieldConfig = (field: string) => configsByField.get(field) ?? defaultFilterConfigs[field];
@@ -99,88 +110,96 @@ export default function OutputInvoiceCollectionsTable({
 
   return (
     <div className="output-invoice-collections-table-frame">
-      <div ref={tableWrapRef} className="output-invoice-collections-table-shell" data-testid="output-invoice-collections-table-shell">
-        <table aria-label="销项发票收款情况表" className="output-invoice-collections-table">
-          <colgroup>
-            {columns.map((column) => <col className={`output-invoice-collections-col-${column.id}`} key={column.id} />)}
-          </colgroup>
-          <thead>
-            <tr>
-              <GroupHeader group="invoice" label="销项发票" span={4} />
-              <GroupHeader group="status" label="收款状态" span={1} />
-              <GroupHeader group="bank" label="收入流水" span={3} />
-            </tr>
-            <tr aria-label={sortField && sortDirection ? `${sortField} ${sortDirection}` : undefined}>
-              {columns.map((column) => {
-                const config = column.field ? fieldConfig(column.field) : undefined;
-                return (
-                  <th
-                    className={cx(
-                      "output-invoice-collections-table-sub-header",
-                      `output-invoice-collections-table-sub-header--${column.group}`,
-                      column.align === "right" && "output-invoice-collections-table-cell--amount",
-                      firstColumnInGroup(column.id) && "output-invoice-collections-table-cell--left-border",
-                    )}
-                    key={column.id}
-                    scope="col"
-                  >
-                    <span className={cx("output-invoice-collections-table-header-stack", column.align === "right" && "output-invoice-collections-table-header-stack--right")}>
-                      {column.field && config ? (
+      <FinanceTable
+        ariaLabel="销项发票收款情况表"
+        className="output-invoice-collections-table"
+        footer={(
+          <PaginationControls
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            page={page}
+            pageSize={pageSize}
+            total={total}
+          />
+        )}
+        minWidth={1240}
+        scrollMode="contained"
+      >
+        <FinanceTableHeader>
+          {columns.map((column, columnIndex) => {
+            const config = column.field ? fieldConfig(column.field) : undefined;
+            return (
+              <FinanceTableColumn
+                className={cx(
+                  "output-invoice-collections-table-sub-header",
+                  `output-invoice-collections-table-sub-header--${column.group}`,
+                  `output-invoice-collections-col-${column.id}`,
+                  firstColumnInGroup(column.id) && "output-invoice-collections-table-cell--left-border",
+                )}
+                columnRole={columnRole(column)}
+                id={column.id}
+                isRowHeader={columnIndex === 0}
+                key={column.id}
+              >
+                <span className="output-invoice-collections-table-column-heading">
+                  <span aria-hidden={!column.groupLabel} className="output-invoice-collections-table-column-group">
+                    {column.groupLabel ?? "\u00a0"}
+                  </span>
+                  <span className={cx("output-invoice-collections-table-header-stack", column.align === "right" && "output-invoice-collections-table-header-stack--right")}>
+                    {column.field && config ? (
+                      <OutputInvoiceCollectionFilterMenu
+                        currentFilter={currentFilter(column.field) as OutputInvoiceCollectionFilterValue | null}
+                        fieldConfig={{ ...config, label: column.label }}
+                        onApply={onFilterApply}
+                        onClear={onFilterClear}
+                        onSort={(direction) => onSortChange(column.field!, direction)}
+                        options={filterOptions[column.field] ?? []}
+                      />
+                    ) : <span>{column.label}</span>}
+                    {column.field && config?.sortable !== false ? (
+                      <SortButton label={column.label} onClick={() => onSortChange(column.field!)} />
+                    ) : null}
+                    {column.extraFilters?.map((extra) => {
+                      const extraConfig = fieldConfig(extra.field);
+                      return extraConfig ? (
                         <OutputInvoiceCollectionFilterMenu
-                          currentFilter={currentFilter(column.field) as OutputInvoiceCollectionFilterValue | null}
-                          fieldConfig={{ ...config, label: column.label }}
+                          key={extra.field}
+                          currentFilter={currentFilter(extra.field) as OutputInvoiceCollectionFilterValue | null}
+                          fieldConfig={{ ...extraConfig, label: extra.label }}
                           onApply={onFilterApply}
                           onClear={onFilterClear}
-                          onSort={(direction) => onSortChange(column.field!, direction)}
-                          options={filterOptions[column.field] ?? []}
+                          onSort={(direction) => onSortChange(extra.field, direction)}
+                          options={filterOptions[extra.field] ?? []}
                         />
-                      ) : <span>{column.label}</span>}
-                      {column.field && config?.sortable !== false ? (
-                        <SortButton label={column.label} onClick={() => onSortChange(column.field!)} />
-                      ) : null}
-                      {column.extraFilters?.map((extra) => {
-                        const extraConfig = fieldConfig(extra.field);
-                        return extraConfig ? (
-                          <OutputInvoiceCollectionFilterMenu
-                            key={extra.field}
-                            currentFilter={currentFilter(extra.field) as OutputInvoiceCollectionFilterValue | null}
-                            fieldConfig={{ ...extraConfig, label: extra.label }}
-                            onApply={onFilterApply}
-                            onClear={onFilterClear}
-                            onSort={(direction) => onSortChange(extra.field, direction)}
-                            options={filterOptions[extra.field] ?? []}
-                          />
-                        ) : null;
-                      })}
-                      {column.subLabel ? <span className="output-invoice-collections-table-header-sub-label">{column.subLabel}</span> : null}
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td className="output-invoice-collections-table-state-cell" colSpan={columns.length}>{emptyStateMessage}</td></tr>
-            ) : rows.map((row) => (
-              <DataRow
-                expandedCells={expandedCells}
-                key={row.id}
-                onOpenDetail={onOpenDetail}
-                onToggleCellExpand={onToggleCellExpand}
-                row={row}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <PaginationControls
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-        page={page}
-        pageSize={pageSize}
-        total={total}
-      />
+                      ) : null;
+                    })}
+                    {column.subLabel ? <span className="output-invoice-collections-table-header-sub-label">{column.subLabel}</span> : null}
+                  </span>
+                </span>
+              </FinanceTableColumn>
+            );
+          })}
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {rows.length === 0 ? (
+            <FinanceTableRow id="empty" textValue={emptyStateMessage}>
+              {columns.map((column, index) => (
+                <FinanceTableCell columnRole={columnRole(column)} key={column.id} textValue={index === 0 ? emptyStateMessage : "—"}>
+                  {index === 0 ? emptyStateMessage : <FinanceEmptyValue />}
+                </FinanceTableCell>
+              ))}
+            </FinanceTableRow>
+          ) : rows.map((row) => (
+            <DataRow
+              expandedCells={expandedCells}
+              key={row.id}
+              onOpenDetail={onOpenDetail}
+              onToggleCellExpand={onToggleCellExpand}
+              row={row}
+            />
+          ))}
+        </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
 }
@@ -203,8 +222,8 @@ function DataRow({
   const showCollectionAmounts = ["pending_collection", "partial_collected", "collected"].includes(statusCode);
 
   return (
-    <tr className="output-invoice-collections-table-row">
-      <td className="output-invoice-collections-table-cell" data-column-role="identity">
+    <FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
+      <FinanceTableCell className="output-invoice-collections-table-cell" columnRole="identity" textValue={displayInvoiceNo(row)}>
         <span className="output-invoice-collections-inline-row">
           <TextLine strong value={displayInvoiceNo(row)} />
           <IconDetailButton
@@ -221,16 +240,16 @@ function DataRow({
             />
           ) : null}
         </span>
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="identity">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="identity" textValue={row.invoice.buyerName}>
         <TextLine strong value={row.invoice.buyerName} />
         <TextLine muted value={row.invoice.buyerTaxNo} />
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" data-column-role="amount">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.invoice.totalWithTax}>
         <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax)} />
         <TextLine muted numeric value={taxSummary(row.invoice.taxAmount, row.invoice.taxRate)} />
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={row.invoice.taxableItemName}>
         <TextLine strong value={row.invoice.specificBusinessType} />
         <ExpandableCellText
           expanded={expandedCells.has(`${row.id}:invoice-business`)}
@@ -238,13 +257,13 @@ function DataRow({
           text={row.invoice.taxableItemName}
           threshold={18}
         />
-      </td>
-      <td className={cx(
+      </FinanceTableCell>
+      <FinanceTableCell className={cx(
         "output-invoice-collections-table-cell",
         "output-invoice-collections-table-cell--left-border",
         "output-invoice-collections-table-cell--status",
         "output-invoice-collection-status-cell",
-      )} data-column-role="status">
+      )} columnRole="status" textValue={row.collectionStatus.label}>
         <span className={`output-invoice-collection-status output-invoice-collection-status--${statusCode}`}>
           {row.collectionStatus.label || "待收款"}
         </span>
@@ -256,8 +275,8 @@ function DataRow({
             value={`已收 ${formatMoney(row.collectionStatus.collectedAmount)} / 待收 ${formatMoney(row.collectionStatus.pendingAmount)}`}
           />
         ) : null}
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--left-border" data-column-role="identity">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--left-border" columnRole="identity" textValue={bank?.counterpartyName ?? "—"}>
         {bank ? (
           <>
             <span className="output-invoice-collections-inline-row">
@@ -284,8 +303,8 @@ function DataRow({
             </span>
           </>
         ) : <EmptyValue />}
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" data-column-role="amount">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.bank.receivedTotal || bank?.amount || "—"}>
         {bank ? (
           <>
             <TextLine numeric strong value={formatMoney(row.bank.receivedTotal || bank.amount)} />
@@ -295,8 +314,8 @@ function DataRow({
             </span>
           </>
         ) : <EmptyValue />}
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
+      </FinanceTableCell>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={bank?.summary || bank?.remark || "—"}>
         {bank ? (
           <ExpandableCellText
             expanded={expandedCells.has(`${row.id}:bank-summary`)}
@@ -304,24 +323,8 @@ function DataRow({
             text={bank.summary || bank.remark}
           />
         ) : <EmptyValue />}
-      </td>
-    </tr>
-  );
-}
-
-function GroupHeader({ label, span, group }: { label: string; span: number; group: "invoice" | "status" | "bank" }) {
-  return (
-    <th
-      className={cx(
-        "output-invoice-collections-table-group-header",
-        `output-invoice-collections-table-group-header--${group}`,
-        group !== "invoice" && "output-invoice-collections-table-cell--left-border",
-      )}
-      colSpan={span}
-      scope="colgroup"
-    >
-      {label}
-    </th>
+      </FinanceTableCell>
+    </FinanceTableRow>
   );
 }
 
@@ -387,21 +390,24 @@ function PaginationControls({ page, pageSize, total, onPageChange, onPageSizeCha
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
 }) {
-  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
   return (
     <div className="output-invoice-collections-pagination">
-      <label className="output-invoice-collections-pagination-size">
-        <span>每页行数</span>
-        <select aria-label="每页行数" onChange={(event) => onPageSizeChange(Number(event.target.value))} value={pageSize}>
-          {[20, 50, 100].map((option) => <option key={option} value={option}>{option}</option>)}
-        </select>
-      </label>
-      <span className="output-invoice-collections-pagination-range">{displayedRange(currentPage, pageSize, total)}</span>
-      <span className="output-invoice-collections-pagination-actions">
-        <button disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)} type="button">上一页</button>
-        <button disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)} type="button">下一页</button>
-      </span>
+      <Select aria-label="每页行数" onSelectionChange={(key) => onPageSizeChange(Number(key))} selectedKey={String(pageSize)}>
+        <Select.Trigger className="output-invoice-collections-pagination-size">
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {[20, 50, 100].map((option) => (
+              <ListBox.Item id={String(option)} key={option} textValue={`${option} 条/页`}>
+                {option} 条/页
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+      <FinanceTablePagination compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
     </div>
   );
 }
@@ -422,14 +428,15 @@ function relationListTarget(
   };
 }
 
-function displayedRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) return "0-0 / 0";
-  const from = (page - 1) * pageSize + 1;
-  return `${from}-${Math.min(page * pageSize, total)} / ${total}`;
-}
-
 function firstColumnInGroup(columnId: string) {
   return columnId === "collectionStatus" || columnId === "bankCounterparty";
+}
+
+function columnRole(column: Column): FinanceTableColumnRole {
+  if (column.align === "right") return "amount";
+  if (column.group === "status") return "status";
+  if (column.id === "invoiceNo" || column.id === "buyer" || column.id === "bankCounterparty") return "identity";
+  return "description";
 }
 
 function accountLabel(bankName: string, accountLast4: string) {

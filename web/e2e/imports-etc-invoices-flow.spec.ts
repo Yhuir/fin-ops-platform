@@ -234,7 +234,7 @@ test.describe("ETC invoice import browser flow", () => {
     await expect(importedBatchRow).toContainText("已导入");
     await expect(importedBatchRow).toContainText("2 张 · 32.26 元");
     await expect(importedBatchRow).not.toContainText("ETC-E2E-2026-03");
-    await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
+    await expect(page.getByRole("rowheader", { name: "ETC-E2E-001" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     let taxOffsetPayload: { json(): Promise<unknown> } | undefined;

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
+import { expect, setCheckbox, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
@@ -93,8 +93,8 @@ test.describe("pending invoices income status browser flow", () => {
       visibleLabel: "选择收入流水",
       actionType: "check",
     }, async (mark) => {
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }).check();
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }));
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     await expect(page.getByText("已选 2 条流水")).toBeVisible();
@@ -154,8 +154,8 @@ test.describe("pending invoices income status browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await openIncomeDirection(page);
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }).check();
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }));
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     const rowsBeforeSubmit = api.count("GET /api/pending-invoices/rows");
@@ -230,8 +230,8 @@ test.describe("pending invoices income status browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await openIncomeDirection(page);
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }).check();
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }));
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }));
       await mark("finalSettledLatencyMs", expect(page.getByText("已选 2 条流水")).toBeVisible());
     });
     const rowsBeforeSubmit = api.count("GET /api/pending-invoices/rows");

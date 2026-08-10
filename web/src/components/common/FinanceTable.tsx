@@ -48,16 +48,25 @@ type FinanceTableProps = {
   footer?: ReactNode;
   className?: string;
   minWidth?: number | string;
+  scrollMode?: "natural" | "contained";
   scrollRef?: Ref<HTMLDivElement>;
 };
 
-export function FinanceTable({ ariaLabel, children, footer, className, minWidth = 720, scrollRef }: FinanceTableProps) {
+export function FinanceTable({
+  ariaLabel,
+  children,
+  footer,
+  className,
+  minWidth = 720,
+  scrollMode = "natural",
+  scrollRef,
+}: FinanceTableProps) {
   const style: FinanceTableStyle = {
     "--finance-table-min-width": typeof minWidth === "number" ? `${minWidth}px` : minWidth,
   };
 
   return (
-    <Table className={cx("finance-table", className)}>
+    <Table className={cx("finance-table", scrollMode === "contained" && "finance-table--contained", className)}>
       <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
         <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style}>
           {children}
@@ -104,14 +113,20 @@ type FinanceTableCellProps = {
   className?: string;
   dataTone?: string;
   textValue?: string;
+  dataTestId?: string;
+  dataHighlight?: string;
+  onClick?: () => void;
 };
 
-export function FinanceTableCell({ children, columnRole, className, dataTone, textValue }: FinanceTableCellProps) {
+export function FinanceTableCell({ children, columnRole, className, dataHighlight, dataTone, dataTestId, onClick, textValue }: FinanceTableCellProps) {
   return (
     <Table.Cell
       className={cx("finance-table__cell", className)}
       data-column-role={columnRole}
+      data-testid={dataTestId}
+      data-highlight={dataHighlight}
       data-tone={dataTone}
+      onClick={onClick}
       textValue={textValue}
     >
       {children}
@@ -129,6 +144,8 @@ type FinanceTableRowProps = {
   dataCertifiedHighlighted?: boolean;
   onClick?: () => void;
   textValue?: string;
+  dataTestId?: string;
+  dataHighlight?: string;
 };
 
 export function FinanceTableRow({
@@ -136,6 +153,8 @@ export function FinanceTableRow({
   id,
   className,
   dataCertifiedHighlighted,
+  dataHighlight,
+  dataTestId,
   onClick,
   textValue,
 }: FinanceTableRowProps) {
@@ -143,6 +162,8 @@ export function FinanceTableRow({
     <Table.Row
       className={cx("finance-table__row", className)}
       data-certified-highlighted={dataCertifiedHighlighted === undefined ? undefined : String(dataCertifiedHighlighted)}
+      data-highlight={dataHighlight}
+      data-testid={dataTestId}
       id={id}
       onClick={onClick}
       textValue={textValue}

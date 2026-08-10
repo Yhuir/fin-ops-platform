@@ -137,10 +137,10 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByRole("link", { name: "系统状态" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByRole("heading", { name: "AppHealth 运维状态" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toBeVisible();
-    await expect(page.getByRole("table", { name: "发票统计" })).toContainText("按类型分");
-    await expect(page.getByRole("table", { name: "发票统计" })).toContainText("按导入方式分");
-    await expect(page.getByRole("table", { name: "OA 状态" })).not.toContainText("单据");
-    await expect(page.getByRole("table", { name: "OA 状态" })).not.toContainText("明细");
+    await expect(page.getByRole("grid", { name: "发票统计" })).toContainText("按类型分");
+    await expect(page.getByRole("grid", { name: "发票统计" })).toContainText("按导入方式分");
+    await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("单据");
+    await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("明细");
     await expect(page.getByTestId("app-health-requests")).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
     expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
@@ -165,7 +165,7 @@ test.describe("app shell browser smoke", () => {
     await expect(auditPanel).toContainText("Blocking samples");
     await expect(auditPanel).toContainText("外部证据 unknown");
     await expect(auditPanel).not.toContainText("Blocking issues");
-    await expect(page.getByRole("table", { name: "发票统计" })).not.toContainText("口径未闭合");
+    await expect(page.getByRole("grid", { name: "发票统计" })).not.toContainText("口径未闭合");
     expect(api.count("GET /api/operations/app-health/page-audit")).toBe(1);
     expect(api.count("POST /api/operations/app-health/page-audit")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model/gi });

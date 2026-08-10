@@ -256,8 +256,8 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(projectsRegion).toBeVisible());
     });
     await expect(projectsRegion).toBeVisible();
-    const activeProjects = page.getByRole("table", { name: "进行中项目" });
-    const completedProjects = page.getByRole("table", { name: "已完成项目" });
+    const activeProjects = page.getByRole("grid", { name: "进行中项目" });
+    const completedProjects = page.getByRole("grid", { name: "已完成项目" });
     await expect(activeProjects.getByText(projectName)).toBeVisible();
 
     await recordLatency({

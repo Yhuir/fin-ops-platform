@@ -62,12 +62,12 @@ export default function CostStatisticsTable<Row extends object>({
   onRequestNextPage,
 }: CostStatisticsTableProps<Row>) {
   const minWidth = columns.reduce((total, column) => total + (column.width ?? (column.flex ? 180 : 140)), 0);
-  const shellRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const requestNextPageRef = useRef(onRequestNextPage);
   requestNextPageRef.current = onRequestNextPage;
 
   useEffect(() => {
-    const scrollElement = shellRef.current?.querySelector<HTMLDivElement>(".finance-table__scroll");
+    const scrollElement = scrollRef.current;
     if (
       !scrollElement
       || rows.length === 0
@@ -79,6 +79,9 @@ export default function CostStatisticsTable<Row extends object>({
     }
     let requested = false;
     const requestIfNearBottom = () => {
+      if (scrollElement.scrollHeight <= scrollElement.clientHeight) {
+        return;
+      }
       const remaining = scrollElement.scrollHeight
         - scrollElement.scrollTop
         - scrollElement.clientHeight;
@@ -96,11 +99,13 @@ export default function CostStatisticsTable<Row extends object>({
   }, [hasNextPage, loadMoreError, loadingMore, rows.length]);
 
   return (
-    <div ref={shellRef} className="cost-table-shell cost-finance-table-shell">
+    <div className="cost-table-shell cost-finance-table-shell">
       <FinanceTable
         ariaLabel={ariaLabel}
         className={fitContainer ? "cost-finance-table cost-finance-table--fit" : "cost-finance-table"}
         minWidth={fitContainer ? "100%" : Math.max(720, minWidth)}
+        scrollMode="contained"
+        scrollRef={scrollRef}
       >
         <FinanceTableHeader>
           {columns.map((column, columnIndex) => (

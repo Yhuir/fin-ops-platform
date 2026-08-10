@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "./fixtures/strictTest";
+import { expect, setCheckbox, type Page, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
@@ -318,7 +318,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await page.goto("/pending-invoices");
       await expect(page.getByRole("heading", { name: "待找发票" })).toBeVisible();
       await expect(page.getByText("当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。")).toBeVisible();
-      await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true }));
       await expect(page.getByRole("button", { name: "选择发票" })).toBeDisabled();
       await page.getByRole("button", { name: "支出待找发票规则设置" }).click();
       const expenseRulesDrawer = page.getByRole("dialog", { name: "支出待找发票规则设置" });
@@ -357,8 +357,8 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await expect(page.getByText("当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。")).toBeVisible();
       await page.getByRole("radio", { name: /^收入 / }).click();
       await expect(page.getByRole("row", { name: /收入批量客户A/ })).toBeVisible();
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }).check();
-      await page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }).check();
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户A" }));
+      await setCheckbox(page.getByRole("checkbox", { name: "选择流水 收入批量客户B" }));
       await expect(page.getByRole("button", { name: "标记无需开票" })).toBeDisabled();
       await expect(page.getByRole("button", { name: "标记现金收入" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
@@ -485,9 +485,9 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await page.goto("/batch-accounting");
       await expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible();
       await expect(page.getByText("当前账号仅支持查看和导出，不能提交或撤回批量账务关联。")).toBeVisible();
-      const oaTable = page.getByRole("table", { name: "可关联OA项" });
-      await oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }).check();
-      await oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }).check();
+      const oaTable = page.getByRole("grid", { name: "可关联OA项" });
+      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }));
+      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }));
       await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },
@@ -587,7 +587,7 @@ const readExportSubmittedStateWriteControlOpeners: DynamicWriteControlOpener[] =
       await expect(page.getByText("当前账号仅支持查看和导出，不能提交或撤回批量账务关联。")).toBeVisible();
       await page.getByRole("radio", { name: "已提交 1" }).click();
       await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
-      await expect(page.getByRole("table", { name: "已关联OA项" })).toBeVisible();
+      await expect(page.getByRole("grid", { name: "已关联OA项" })).toBeVisible();
       await expect(page.getByRole("button", { name: "撤回关联" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },
@@ -833,7 +833,7 @@ test.describe("permissions browser role matrix", () => {
     expect(api.count("GET /api/workbench/settings/oa-applicant-credentials")).toBe(0);
     expect(api.count("GET /api/workbench/settings/data-reset/jobs/active")).toBe(0);
     await settingsTree.getByRole("treeitem", { name: /项目状态/ }).click();
-    const activeProjects = page.getByRole("table", { name: "进行中项目" });
+    const activeProjects = page.getByRole("grid", { name: "进行中项目" });
     await expect(activeProjects.getByText(projectName)).toBeVisible();
     await activeProjects.getByLabel(`${projectName} 标记完成`).click();
     const saveRequest = page.waitForRequest((request) =>

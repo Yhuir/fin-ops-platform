@@ -992,26 +992,24 @@ function StagedDraftsPanel({
             <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{formatMoney(item.totalWithTax, "-")}</span>
           </div>
           <div className="input-invoice-usage-rules-table-shell">
-            <table aria-label={`${item.targetApplicantName || "目标申请人"}暂存发票`} className="input-invoice-usage-oa-table">
-              <thead>
-                <tr>
-                  <th scope="col">发票号码</th>
-                  <th scope="col">销方</th>
-                  <th scope="col">开票日期</th>
-                  <th scope="col">价税合计</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel={`${item.targetApplicantName || "目标申请人"}暂存发票`} className="input-invoice-usage-oa-table" minWidth={620}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="number" isRowHeader columnRole="identity">发票号码</FinanceTableColumn>
+                <FinanceTableColumn id="seller" columnRole="identity">销方</FinanceTableColumn>
+                <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
+                <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {item.invoiceRows.map((invoice) => (
-                  <tr key={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`}>
-                    <td>{invoice.displayNo || invoice.invoiceNumber || "未识别号码"}</td>
-                    <td>{invoice.sellerName || "-"}</td>
-                    <td>{invoice.issueDate || "-"}</td>
-                    <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
-                  </tr>
+                  <FinanceTableRow id={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`} key={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`}>
+                    <FinanceTableCell columnRole="identity">{invoice.displayNo || invoice.invoiceNumber || "未识别号码"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="date">{invoice.issueDate || "-"}</FinanceTableCell>
+                    <FinanceTableCell className="input-invoice-usage-oa-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax, "-")}</FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </div>
           <div className="input-invoice-usage-oa-actions">
             <Button
@@ -1089,26 +1087,24 @@ function SubmittedHistoryPanel({
             <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{formatMoney(item.totalWithTax, "-")}</span>
           </div>
           <div className="input-invoice-usage-rules-table-shell">
-            <table aria-label={`${item.targetApplicantName || "目标申请人"}已提交发票`} className="input-invoice-usage-oa-table">
-              <thead>
-                <tr>
-                  <th scope="col">发票号码</th>
-                  <th scope="col">销方</th>
-                  <th scope="col">开票日期</th>
-                  <th scope="col">价税合计</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel={`${item.targetApplicantName || "目标申请人"}已提交发票`} className="input-invoice-usage-oa-table" minWidth={620}>
+              <FinanceTableHeader>
+                <FinanceTableColumn id="number" isRowHeader columnRole="identity">发票号码</FinanceTableColumn>
+                <FinanceTableColumn id="seller" columnRole="identity">销方</FinanceTableColumn>
+                <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
+                <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {item.invoices.map((invoice) => (
-                  <tr key={`${invoice.invoiceNo}:${invoice.sellerName}:${invoice.invoiceDate}`}>
-                    <td>{invoice.invoiceNo || "-"}</td>
-                    <td>{invoice.sellerName || "-"}</td>
-                    <td>{invoice.invoiceDate || "-"}</td>
-                    <td className="input-invoice-usage-oa-table__amount">{formatMoney(invoice.totalWithTax, "-")}</td>
-                  </tr>
+                  <FinanceTableRow id={`${invoice.invoiceNo}:${invoice.sellerName}:${invoice.invoiceDate}`} key={`${invoice.invoiceNo}:${invoice.sellerName}:${invoice.invoiceDate}`}>
+                    <FinanceTableCell columnRole="identity">{invoice.invoiceNo || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="date">{invoice.invoiceDate || "-"}</FinanceTableCell>
+                    <FinanceTableCell className="input-invoice-usage-oa-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax, "-")}</FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </div>
         </article>
       ))}

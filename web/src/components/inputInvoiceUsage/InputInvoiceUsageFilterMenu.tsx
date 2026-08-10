@@ -1,3 +1,4 @@
+import { PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
 import { ArrowDown, ArrowUp, Filter } from "lucide-react";
 import type { ReactNode } from "react";
 import { useId, useMemo, useState } from "react";
@@ -65,97 +66,102 @@ export default function InputInvoiceUsageFilterMenu({
   };
 
   return (
-    <span className="input-invoice-usage-filter-menu">
-      <button
+    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`筛选 ${fieldConfig.label}`}
         className={selectedValues.length > 0 ? "input-invoice-usage-filter-menu__trigger input-invoice-usage-filter-menu__trigger--active" : "input-invoice-usage-filter-menu__trigger"}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
       >
         <Filter aria-hidden="true" size={14} />
         <span>{fieldConfig.label}</span>
-      </button>
+      </PopoverTrigger>
       {open ? (
-        <div
-          aria-label={`${fieldConfig.label}筛选与排序`}
-          className="input-invoice-usage-filter-menu__panel"
-          id={menuId}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setOpen(false);
-            }
-          }}
-          role="menu"
+        <PopoverContent
+          className="input-invoice-usage-filter-menu__popover"
+          containerPadding={12}
+          offset={4}
+          placement="bottom start"
         >
-          <div className="input-invoice-usage-filter-menu__header">
-            <div className="input-invoice-usage-filter-menu__title">{fieldConfig.label}</div>
-          </div>
-          <MenuAction onClick={() => onSort("asc")}>
-            <ArrowUp aria-hidden="true" size={14} />
-            <span>升序排序</span>
-          </MenuAction>
-          <MenuAction onClick={() => onSort("desc")}>
-            <ArrowDown aria-hidden="true" size={14} />
-            <span>降序排序</span>
-          </MenuAction>
-          <div className="input-invoice-usage-filter-menu__divider" role="separator" />
-          {fieldConfig.mode === "enum_multi" ? (
-            <>
-              <MenuAction onClick={() => applyMulti(options.map((option) => option.value))}>全选</MenuAction>
-              <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+          <PopoverDialog aria-label={`${fieldConfig.label}筛选与排序`} className="input-invoice-usage-filter-menu__dialog">
+            <div
+              aria-label={`${fieldConfig.label}筛选与排序`}
+              className="input-invoice-usage-filter-menu__panel"
+              id={menuId}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setOpen(false);
+              }}
+              role="menu"
+            >
+              <div className="input-invoice-usage-filter-menu__header">
+                <div className="input-invoice-usage-filter-menu__title">{fieldConfig.label}</div>
+              </div>
+              <MenuAction onClick={() => onSort("asc")}>
+                <ArrowUp aria-hidden="true" size={14} />
+                <span>升序排序</span>
+              </MenuAction>
+              <MenuAction onClick={() => onSort("desc")}>
+                <ArrowDown aria-hidden="true" size={14} />
+                <span>降序排序</span>
+              </MenuAction>
               <div className="input-invoice-usage-filter-menu__divider" role="separator" />
-              {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
-              {options.map((option) => (
-                <button
-                  key={option.value}
-                  aria-checked={selectedSet.has(option.value)}
-                  className="input-invoice-usage-filter-menu__item"
-                  onClick={() => toggleMulti(option.value)}
-                  role="menuitemcheckbox"
-                  type="button"
-                >
-                  <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
-                    {selectedSet.has(option.value) ? "✓" : ""}
-                  </span>
-                  <span>{optionLabel(option)}</span>
-                </button>
-              ))}
-            </>
-          ) : null}
-          {fieldConfig.mode === "enum_single" ? (
-            <>
-              <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
-              <div className="input-invoice-usage-filter-menu__divider" role="separator" />
-              {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
-              {options.map((option) => (
-                <button
-                  key={option.value}
-                  aria-checked={selectedSet.has(option.value)}
-                  className="input-invoice-usage-filter-menu__item"
-                  onClick={() => applySingle(option.value)}
-                  role="menuitemradio"
-                  type="button"
-                >
-                  <span aria-hidden="true" className="input-invoice-usage-filter-menu__radio">
-                    {selectedSet.has(option.value) ? "●" : ""}
-                  </span>
-                  <span>{optionLabel(option)}</span>
-                </button>
-              ))}
-            </>
-          ) : null}
-          {fieldConfig.mode !== "enum_multi" && fieldConfig.mode !== "enum_single" ? (
-            <>
-              <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
-              <DisabledChoice>该字段的输入控件由页面查询区提供</DisabledChoice>
-            </>
-          ) : null}
-        </div>
+              {fieldConfig.mode === "enum_multi" ? (
+                <>
+                  <MenuAction onClick={() => applyMulti(options.map((option) => option.value))}>全选</MenuAction>
+                  <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+                  <div className="input-invoice-usage-filter-menu__divider" role="separator" />
+                  {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
+                  {options.map((option) => (
+                    <button
+                      key={option.value}
+                      aria-checked={selectedSet.has(option.value)}
+                      className="input-invoice-usage-filter-menu__item"
+                      onClick={() => toggleMulti(option.value)}
+                      role="menuitemcheckbox"
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
+                        {selectedSet.has(option.value) ? "✓" : ""}
+                      </span>
+                      <span>{optionLabel(option)}</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+              {fieldConfig.mode === "enum_single" ? (
+                <>
+                  <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+                  <div className="input-invoice-usage-filter-menu__divider" role="separator" />
+                  {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
+                  {options.map((option) => (
+                    <button
+                      key={option.value}
+                      aria-checked={selectedSet.has(option.value)}
+                      className="input-invoice-usage-filter-menu__item"
+                      onClick={() => applySingle(option.value)}
+                      role="menuitemradio"
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="input-invoice-usage-filter-menu__radio">
+                        {selectedSet.has(option.value) ? "●" : ""}
+                      </span>
+                      <span>{optionLabel(option)}</span>
+                    </button>
+                  ))}
+                </>
+              ) : null}
+              {fieldConfig.mode !== "enum_multi" && fieldConfig.mode !== "enum_single" ? (
+                <>
+                  <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+                  <DisabledChoice>该字段的输入控件由页面查询区提供</DisabledChoice>
+                </>
+              ) : null}
+            </div>
+          </PopoverDialog>
+        </PopoverContent>
       ) : null}
-    </span>
+    </PopoverRoot>
   );
 }
 

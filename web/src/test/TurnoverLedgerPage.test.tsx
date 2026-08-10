@@ -1105,7 +1105,7 @@ describe("Turnover ledger page", () => {
     expect(summaryMetricRule).toContain("min-height: 84px");
     expect(summaryMetricRule).toContain("var(--fp-space-2) var(--fp-space-3)");
     expect(panelRule).toContain("var(--fp-space-2)");
-    expect(tableWrapRule).toContain("calc(100vh - 244px)");
+    expect(tableWrapRule).toContain("height: clamp(520px, calc(100dvh - 244px), 720px)");
     expect(tableCellRule).toContain("--motion-fast");
     expect(tableHeaderRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(stickyCellRule).toContain("color-mix(in srgb, var(--fp-primary-soft)");
@@ -1174,7 +1174,7 @@ describe("Turnover ledger page", () => {
     ]);
   });
 
-  test("renders grouped MUI table with collapsed summary rows, sticky left cells, and no status column", async () => {
+  test("renders the grouped HeroUI table with collapsed summary rows, sticky left cells, and no status column", async () => {
     const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
 
@@ -1211,7 +1211,7 @@ describe("Turnover ledger page", () => {
       expect(request?.searchParams.get("direction")).toBe("all");
     });
 
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
     expect(within(table).queryByRole("columnheader", { name: "银行明细标签" })).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "往来发生" })).toBeInTheDocument();
@@ -1238,7 +1238,7 @@ describe("Turnover ledger page", () => {
     expect(within(summaryRow).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(within(summaryRow).queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
     expect(groupCell).toHaveClass("turnover-sticky-left-cell");
-    expect(groupCell).toHaveAttribute("rowspan", "1");
+    expect(groupCell).not.toHaveAttribute("rowspan");
     expect(within(groupCell).getByText("张三")).toBeInTheDocument();
     expect(within(groupCell).getByText("个人往来")).toBeInTheDocument();
     expect(within(groupCell).queryByText("待还款合计：800.00")).not.toBeInTheDocument();
@@ -1308,7 +1308,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     await userEvent.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
@@ -1343,7 +1343,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     const openButton = within(page).getByRole("button", { name: "确认闭环" });
     expect(openButton).toBeDisabled();
@@ -1391,7 +1391,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
@@ -1428,7 +1428,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-02 10:00:00 支出 1000.00" }));
@@ -1460,7 +1460,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
 
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
@@ -1487,7 +1487,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     const openButton = within(page).getByRole("button", { name: "确认闭环" });
     expect(openButton).toBeDisabled();
@@ -1538,7 +1538,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
@@ -1580,7 +1580,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
 
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
@@ -1621,7 +1621,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1659,7 +1659,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1699,7 +1699,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
 
@@ -1737,7 +1737,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     expect(within(table).queryByRole("button", { name: "确认归并" })).not.toBeInTheDocument();
 
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
@@ -1809,7 +1809,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1882,7 +1882,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1933,7 +1933,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1966,7 +1966,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -1999,7 +1999,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -2042,7 +2042,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
     await user.click(within(table).getByRole("button", { name: "编辑流水 贾小花 2026-02-04 13:20:48 收入 200000.00" }));
@@ -2064,7 +2064,7 @@ describe("Turnover ledger page", () => {
 
     await user.click(within(page).getByRole("button", { name: "刷新台账" }));
 
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     expect(await within(table).findByText("贾小花")).toBeInTheDocument();
     expect(within(page).queryByText("往来款台账加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
   });
@@ -2075,7 +2075,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
@@ -2124,7 +2124,7 @@ describe("Turnover ledger page", () => {
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
-    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await within(page).findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
     expect(within(groupCell).getByText("收支闭环")).toBeInTheDocument();
@@ -2161,7 +2161,7 @@ describe("Turnover ledger page", () => {
     });
     renderTurnoverLedgerPage();
 
-    const table = await screen.findByRole("table", { name: "往来款左右双栏台账" });
+    const table = await screen.findByRole("grid", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
     expect(within(groupCell).getByText("已配对未结清")).toBeInTheDocument();
 

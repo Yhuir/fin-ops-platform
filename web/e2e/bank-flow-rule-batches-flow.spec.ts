@@ -70,10 +70,8 @@ function putResponse(pathname: string) {
 }
 
 async function clickCheckbox(checkbox: Locator) {
-  const control = checkbox
-    .locator("xpath=ancestor::*[descendant::*[@data-slot='checkbox-control']][1]")
-    .locator("[data-slot='checkbox-control']");
-  await (await control.count() ? control : checkbox).click();
+  const label = checkbox.locator("xpath=ancestor::label[1]");
+  await (await label.count() ? label : checkbox).click();
 }
 
 const ordinaryBankFlowRuleCheckboxCases = [
@@ -321,7 +319,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
-    const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
+    const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
@@ -343,7 +341,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
-    const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
+    const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
@@ -377,7 +375,7 @@ test.describe("bank flow rule batches browser flow", () => {
       await page.getByRole("button", { name: item.primaryButton, exact: true }).click();
       await page.getByRole("button", { name: item.subButton, exact: true }).click();
 
-      const table = page.getByRole("table", { name: item.tableName });
+      const table = page.getByRole("grid", { name: item.tableName });
       await expect(table).toBeVisible();
       const checkbox = table.getByRole("checkbox", { name: item.accessibleName });
       await expect(checkbox).toBeVisible();
@@ -386,7 +384,7 @@ test.describe("bank flow rule batches browser flow", () => {
         await clickCheckbox(checkbox);
         await expect(checkbox).toBeChecked();
         const refreshedCheckbox = page
-          .getByRole("table", { name: item.tableName })
+          .getByRole("grid", { name: item.tableName })
           .getByRole("checkbox", { name: item.accessibleName });
         await clickCheckbox(refreshedCheckbox);
         await expect(refreshedCheckbox).not.toBeChecked();
@@ -524,7 +522,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const firstBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "光大银行8826" });
     await expect(firstBatch).toBeVisible();
     await expect(firstBatch.getByText("2 条 · 合计 50000.00")).toBeVisible();
-    await expect(page.getByRole("table", { name: "光大银行8826流水" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "光大银行8826流水" })).toBeVisible();
     const secondBatch = page
       .locator(".bank-flow-rule-batches-batch")
       .filter({ hasText: "建设银行8106" })
@@ -582,7 +580,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
 
-    const draftTable = page.getByRole("table", { name: "建设银行8106流水" });
+    const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
@@ -692,7 +690,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1批 · 1条" })).toBeVisible();
     await expect(page.getByRole("button", { name: "手续费 1批 · 1条" })).toBeVisible();
-    await expect(page.getByRole("table", { name: "建设银行8106流水" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "建设银行8106流水" })).toBeVisible();
     await expect(page.getByRole("button", { name: "撤回批次" })).toBeVisible();
 
     const withdrawDialog = page.getByRole("dialog", { name: "撤回批次" });

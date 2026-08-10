@@ -7,11 +7,36 @@ import {
   EmptyValue,
   FinanceDirectionTag,
   FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
   FinanceTablePagination,
+  FinanceTableRow,
   TableCellStack,
 } from "../components/common/FinanceTable";
 
 describe("FinanceTable shared primitives", () => {
+  test("exposes one contained scroll surface while keeping HeroUI table semantics", () => {
+    render(
+      <FinanceTable ariaLabel="测试表格" scrollMode="contained">
+        <FinanceTableHeader>
+          <FinanceTableColumn id="name" isRowHeader>名称</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          <FinanceTableRow id="row-1" textValue="测试行">
+            <FinanceTableCell columnRole="identity" textValue="测试行">测试行</FinanceTableCell>
+          </FinanceTableRow>
+        </FinanceTableBody>
+      </FinanceTable>,
+    );
+
+    const table = screen.getByRole("grid", { name: "测试表格" });
+    expect(table.closest(".finance-table")).toHaveClass("finance-table--contained");
+    expect(table.closest(".finance-table__scroll")).toBeInTheDocument();
+  });
+
   test("clamps pagination display to valid ranges and disables unavailable navigation", () => {
     const onPageChange = vi.fn();
 

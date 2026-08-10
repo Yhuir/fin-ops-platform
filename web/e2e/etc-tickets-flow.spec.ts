@@ -241,8 +241,8 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(lifecycle.getByText("确认核对结果", { exact: true })).toBeVisible();
     await expect(lifecycle.getByText("导入 ETC 发票", { exact: true })).toBeVisible();
     await expect(lifecycle.getByText("提交 OA 审批", { exact: true })).toBeVisible();
-    await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
-    await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "ETC发票明细" })).toBeVisible();
+    await expect(page.getByRole("rowheader", { name: "ETC-E2E-001" })).toBeVisible();
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
     expect(api.count("GET /api/etc/business-batches")).toBeGreaterThanOrEqual(3);
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -793,8 +793,8 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row).toContainText("2026-06-17 09:00");
     await expect(row).toContainText("2 张 · 32.26 元");
-    await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
-    await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "ETC发票明细" })).toBeVisible();
+    await expect(page.getByRole("rowheader", { name: "ETC-E2E-001" })).toBeVisible();
 
     const submitButton = page.getByRole("button", { name: "提交审批" });
     await expect(submitButton).toBeEnabled();

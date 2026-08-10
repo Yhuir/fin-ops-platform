@@ -1,6 +1,14 @@
 import { Button, ListBox, Select } from "@heroui/react";
 
 import AppDialog from "../common/AppDialog";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type {
   TurnoverLedgerExportPreview,
   TurnoverLedgerExportRow,
@@ -116,47 +124,41 @@ export default function TurnoverLedgerExportDialog({
         {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
         <h3 className="turnover-ledger-extra-section__title">正式字段预览</h3>
         <div className="turnover-ledger-export-dialog__table-wrap">
-          <table aria-label="往来款导出预览" className="turnover-ledger-export-dialog__table">
-            <thead>
-              <tr>
-                {PREVIEW_COLUMNS.map((column) => (
-                  <th key={column.key} scope="col">
-                    {column.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
+          <FinanceTable ariaLabel="往来款导出预览" className="turnover-ledger-export-dialog__table" minWidth={2200} scrollMode="contained">
+            <FinanceTableHeader>
+              {PREVIEW_COLUMNS.map((column, index) => (
+                <FinanceTableColumn id={column.key} isRowHeader={index === 0} key={column.key} columnRole={column.money ? "amount" : index === 0 ? "identity" : "description"}>
+                  {column.label}
+                </FinanceTableColumn>
+              ))}
+            </FinanceTableHeader>
+            <FinanceTableBody>
               {loading ? (
-                <tr>
-                  <td className="turnover-ledger-export-dialog__state-cell" colSpan={PREVIEW_COLUMNS.length}>
-                    正在加载导出预览
-                  </td>
-                </tr>
+                <FinanceTableRow id="loading">
+                  {PREVIEW_COLUMNS.map((column, index) => <FinanceTableCell className={index === 0 ? "turnover-ledger-export-dialog__state-cell" : undefined} columnRole={column.money ? "amount" : index === 0 ? "identity" : "description"} key={column.key}>{index === 0 ? "正在加载导出预览" : "-"}</FinanceTableCell>)}
+                </FinanceTableRow>
               ) : null}
               {!loading && (preview?.rows.length ?? 0) === 0 ? (
-                <tr>
-                  <td className="turnover-ledger-export-dialog__state-cell" colSpan={PREVIEW_COLUMNS.length}>
-                    当前范围没有可导出的台账行
-                  </td>
-                </tr>
+                <FinanceTableRow id="empty">
+                  {PREVIEW_COLUMNS.map((column, index) => <FinanceTableCell className={index === 0 ? "turnover-ledger-export-dialog__state-cell" : undefined} columnRole={column.money ? "amount" : index === 0 ? "identity" : "description"} key={column.key}>{index === 0 ? "当前范围没有可导出的台账行" : "-"}</FinanceTableCell>)}
+                </FinanceTableRow>
               ) : null}
               {!loading
                 ? (preview?.rows ?? []).map((row) => (
-                    <tr key={`${row.sequenceNo}-${row.rowType}-${row.lotId}-${row.counterpartyName}`}>
-                      {PREVIEW_COLUMNS.map((column) => {
+                    <FinanceTableRow id={`${row.sequenceNo}-${row.rowType}-${row.lotId}-${row.counterpartyName}`} key={`${row.sequenceNo}-${row.rowType}-${row.lotId}-${row.counterpartyName}`}>
+                      {PREVIEW_COLUMNS.map((column, index) => {
                         const value = formatPreviewValue(row, column);
                         return (
-                          <td className={column.money ? "turnover-ledger-export-dialog__money-cell" : undefined} key={column.key}>
+                          <FinanceTableCell className={column.money ? "turnover-ledger-export-dialog__money-cell" : undefined} columnRole={column.money ? "amount" : index === 0 ? "identity" : "description"} key={column.key}>
                             {value}
-                          </td>
+                          </FinanceTableCell>
                         );
                       })}
-                    </tr>
+                    </FinanceTableRow>
                   ))
                 : null}
-            </tbody>
-          </table>
+            </FinanceTableBody>
+          </FinanceTable>
         </div>
           {preview ? (
             <p className="turnover-ledger-export-dialog__summary">

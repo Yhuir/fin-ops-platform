@@ -89,20 +89,7 @@ function getCategoryFilterTrigger(page: HTMLElement) {
 }
 
 async function findBankTransactionSurface(page: HTMLElement) {
-  const scope = within(page);
-  const currentTable = scope.queryByRole("table", { name: "交易流水" });
-  if (currentTable) {
-    return currentTable;
-  }
-  const currentGrid = scope.queryByRole("grid", { name: "交易流水" });
-  if (currentGrid) {
-    return currentGrid;
-  }
-  try {
-    return await scope.findByRole("table", { name: "交易流水" }, { timeout: 500 });
-  } catch {
-    return scope.findByRole("grid", { name: "交易流水" });
-  }
+  return within(page).findByRole("grid", { name: "交易流水" });
 }
 
 async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
@@ -249,6 +236,7 @@ describe("Bank details page", () => {
     expect(within(table).queryByRole("columnheader", { name: "交易时间" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
     expect(table.closest(".bank-transaction-grid")).toHaveClass("bank-transaction-grid-readable");
+    expect(table.closest(".finance-table")).toHaveClass("finance-table--contained");
     expect(await within(table).findByText("云南溯源科技有限公司")).toBeInTheDocument();
     const tradeTimeText = within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-text");
     expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
@@ -301,8 +289,11 @@ describe("Bank details page", () => {
 
   test("keeps pagination outside the table scroll area", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+    const pageSource = readFileSync(resolve(process.cwd(), "src/pages/BankDetailsPage.tsx"), "utf8");
 
-    expect(source).toMatch(/\.bank-transaction-table-container\s*\{[^}]*flex:\s*1 1 0[^}]*overflow-y:\s*auto/s);
+    expect(source).toMatch(/\.bank-transaction-table-container\s*\{[^}]*flex:\s*1 1 0[^}]*overflow:\s*hidden/s);
+    expect(source).toMatch(/\.finance-table--contained \.finance-table__scroll\s*\{[^}]*overflow:\s*auto[^}]*overscroll-behavior:\s*contain/s);
+    expect(pageSource).toContain('scrollMode="contained"');
     expect(source).toMatch(/\.bank-transaction-pagination\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 

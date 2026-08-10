@@ -161,7 +161,7 @@ describe("Settings page", () => {
       contentSource.includes("SettingsTreeNav") ? null : "SettingsPageContent.tsx should keep SettingsTreeNav",
       /role=["']treeitem["']/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should preserve treeitem semantics",
       /ListBox, Select/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should use the HeroUI mobile section selector",
-      /aria-label=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
+      /ariaLabel=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
       /确认数据重置/.test(dataResetDialogsSource) && /OA 密码复核/.test(dataResetDialogsSource) ? null : "Data reset should keep two modal dialog labels",
       /minLength=\{5\}/.test(dataResetDialogsSource) && /至少输入 5 个字/.test(dataResetDialogsSource) ? null : "Data reset should expose its reason requirement",
     ].filter(Boolean);

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
+import { expect, setCheckbox, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder, type OperationLatencyRecorder } from "./fixtures/operationLatency";
@@ -93,7 +93,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "选择 OA 进行中关联申请人",
       actionType: "check",
     }, async (mark) => {
-      await row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }).check();
+      await setCheckbox(row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }));
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "关联支出流水" })).toBeEnabled());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "关联支出流水" })).toBeEnabled());
     });
@@ -214,7 +214,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "选择 OA 进行中关联申请人",
       actionType: "check",
     }, async (mark) => {
-      await row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }).check();
+      await setCheckbox(row.getByRole("checkbox", { name: /选择 OA 进行中关联申请人/ }));
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: "关联支出流水" })).toBeEnabled());
     });
     const rowsBeforeLink = api.count(ROWS_PATH);

@@ -436,20 +436,16 @@ function InventoryPanel({
 function BankInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
   return (
     <InventoryPanel title="流水" syncedAt={block.latest_synced_at}>
-      <table aria-label="银行流水来源" className="app-health-inventory-table">
-        <thead>
-          <tr><th scope="col">来源</th><th scope="col">数量</th><th scope="col">最近同步</th></tr>
-        </thead>
-        <tbody>
+      <FinanceTable ariaLabel="银行流水来源" className="app-health-inventory-table" minWidth={420}>
+        <FinanceTableHeader><FinanceTableColumn columnRole="identity" isRowHeader>来源</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
+        <FinanceTableBody>
           {block.sources.map((source) => (
-            <tr key={source.key}>
-              <th scope="row">{source.label}</th>
-              <td className="app-health-inventory-table__number">{formatNumber(source.count)}</td>
-              <td>{formatTimestamp(source.latest_synced_at)}</td>
-            </tr>
+            <FinanceTableRow id={source.key} key={source.key}>
+              <FinanceTableCell columnRole="identity">{source.label}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(source.count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </tbody>
-      </table>
+        </FinanceTableBody>
+      </FinanceTable>
     </InventoryPanel>
   );
 }
@@ -463,48 +459,26 @@ function InvoiceInventory({ block }: { block: OperationsDashboardInventoryBlock 
   const importDifference = partitionDifference(block.total_count, [manual?.count, oa?.supplementary_count]);
 
   const dimensionCell = (label: string, difference: number | null) => (
-    <th className="app-health-inventory-table__dimension" rowSpan={2} scope="rowgroup">
+    <span className="app-health-inventory-table__dimension">
       <span>{label}</span>
       {difference !== null ? <small role="status">口径未闭合 · 差异 {formatNumber(difference)}</small> : null}
-    </th>
+    </span>
   );
 
   return (
     <InventoryPanel title="发票统计" syncedAt={block.latest_synced_at}>
-      <table aria-label="发票统计" className="app-health-inventory-table app-health-inventory-table--invoice">
-        <thead>
-          <tr><th scope="col">统计维度</th><th scope="col">分类</th><th scope="col">数量</th><th scope="col">合计</th><th scope="col">最近同步</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            {dimensionCell("按类型分", typeDifference)}
-            <th scope="row">{input?.label ?? "进项发票"}</th>
-            <td className="app-health-inventory-table__number">{formatNumber(input?.count)}</td>
-            <td className="app-health-inventory-table__total" rowSpan={2}>{formatNumber(block.total_count)}</td>
-            <td>{formatTimestamp(input?.latest_synced_at)}</td>
-          </tr>
-          <tr>
-            <th scope="row">{output?.label ?? "销项发票"}</th>
-            <td className="app-health-inventory-table__number">{formatNumber(output?.count)}</td>
-            <td>{formatTimestamp(output?.latest_synced_at)}</td>
-          </tr>
-          <tr>
-            {dimensionCell("按导入方式分", importDifference)}
-            <th scope="row">{manual?.label ?? "手工导入"}</th>
-            <td className="app-health-inventory-table__number">{formatNumber(manual?.count)}</td>
-            <td className="app-health-inventory-table__total" rowSpan={2}>{formatNumber(block.total_count)}</td>
-            <td>{formatTimestamp(manual?.latest_synced_at)}</td>
-          </tr>
-          <tr>
-            <th scope="row">
+      <FinanceTable ariaLabel="发票统计" className="app-health-inventory-table app-health-inventory-table--invoice" minWidth={620}>
+        <FinanceTableHeader><FinanceTableColumn columnRole="identity">统计维度</FinanceTableColumn><FinanceTableColumn columnRole="identity" isRowHeader>分类</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="quantity">合计</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
+        <FinanceTableBody>
+          <FinanceTableRow id="invoice-type-input"><FinanceTableCell columnRole="identity">{dimensionCell("按类型分", typeDifference)}</FinanceTableCell><FinanceTableCell columnRole="identity">{input?.label ?? "进项发票"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(input?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(input?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
+          <FinanceTableRow id="invoice-type-output"><FinanceTableCell columnRole="identity">{dimensionCell("按类型分", null)}</FinanceTableCell><FinanceTableCell columnRole="identity">{output?.label ?? "销项发票"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(output?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(output?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
+          <FinanceTableRow id="invoice-mode-manual"><FinanceTableCell columnRole="identity">{dimensionCell("按导入方式分", importDifference)}</FinanceTableCell><FinanceTableCell columnRole="identity">{manual?.label ?? "手工导入"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(manual?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(manual?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
+          <FinanceTableRow id="invoice-mode-oa"><FinanceTableCell columnRole="identity">{dimensionCell("按导入方式分", null)}</FinanceTableCell><FinanceTableCell columnRole="identity">
               <span>{oa?.label ?? "OA 解析"}</span>
               <small className="app-health-inventory-table__annotation">仅新增入池</small>
-            </th>
-            <td className="app-health-inventory-table__number">{formatNumber(oa?.supplementary_count)}</td>
-            <td>{formatTimestamp(oa?.latest_synced_at)}</td>
-          </tr>
-        </tbody>
-      </table>
+            </FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(oa?.supplementary_count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(oa?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
+        </FinanceTableBody>
+      </FinanceTable>
     </InventoryPanel>
   );
 }
@@ -517,20 +491,16 @@ function OaInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
 
   return (
     <InventoryPanel title="OA 状态" syncedAt={block.latest_synced_at}>
-      <table aria-label="OA 状态" className="app-health-inventory-table">
-        <thead>
-          <tr><th scope="col">状态</th><th scope="col">数量</th><th scope="col">最近同步</th></tr>
-        </thead>
-        <tbody>
+      <FinanceTable ariaLabel="OA 状态" className="app-health-inventory-table" minWidth={420}>
+        <FinanceTableHeader><FinanceTableColumn columnRole="status" isRowHeader>状态</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
+        <FinanceTableBody>
           {rows.map((source, index) => (
-            <tr key={source?.key ?? index}>
-              <th scope="row">{source?.label ?? (index === 0 ? "已完成 OA" : "进行中 OA")}</th>
-              <td className="app-health-inventory-table__number">{formatNumber(source?.count)}</td>
-              <td>{formatTimestamp(source?.latest_synced_at)}</td>
-            </tr>
+            <FinanceTableRow id={source?.key ?? index} key={source?.key ?? index}>
+              <FinanceTableCell columnRole="status">{source?.label ?? (index === 0 ? "已完成 OA" : "进行中 OA")}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(source?.count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(source?.latest_synced_at)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </tbody>
-      </table>
+        </FinanceTableBody>
+      </FinanceTable>
     </InventoryPanel>
   );
 }

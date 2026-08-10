@@ -750,7 +750,9 @@ textarea {
 
 .input-invoice-usage-table-frame {
   width: 100%;
+  height: clamp(520px, calc(100dvh - 176px), 720px);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -759,54 +761,48 @@ textarea {
 
 .input-invoice-usage-table-shell {
   width: 100%;
-  max-height: calc(100vh - 150px);
-  min-height: 360px;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
-.input-invoice-usage-table {
-  width: 100%;
-  min-width: 1440px;
+.input-invoice-usage-table .finance-table__content {
   table-layout: fixed;
-  border-collapse: separate;
-  border-spacing: 0;
-  color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
 }
 
-.input-invoice-usage-col-invoice-no {
+.input-invoice-usage-table .finance-table__column:nth-child(1) {
   width: 11%;
 }
 
-.input-invoice-usage-col-seller,
-.input-invoice-usage-col-invoice-amount {
+.input-invoice-usage-table .finance-table__column:nth-child(2),
+.input-invoice-usage-table .finance-table__column:nth-child(3) {
   width: 10%;
 }
 
-.input-invoice-usage-col-business,
-.input-invoice-usage-col-payment,
-.input-invoice-usage-col-bank-name {
+.input-invoice-usage-table .finance-table__column:nth-child(4),
+.input-invoice-usage-table .finance-table__column:nth-child(5),
+.input-invoice-usage-table .finance-table__column:nth-child(8) {
   width: 11%;
 }
 
-.input-invoice-usage-col-oa-applicant {
+.input-invoice-usage-table .finance-table__column:nth-child(6) {
   width: 8%;
 }
 
-.input-invoice-usage-col-oa-project {
+.input-invoice-usage-table .finance-table__column:nth-child(7) {
   width: 9%;
 }
 
-.input-invoice-usage-col-bank-amount {
+.input-invoice-usage-table .finance-table__column:nth-child(9) {
   width: 7%;
 }
 
-.input-invoice-usage-col-bank-remark {
+.input-invoice-usage-table .finance-table__column:nth-child(10) {
   width: 12%;
 }
 
-.input-invoice-usage-table-group-header,
 .input-invoice-usage-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
@@ -816,23 +812,6 @@ textarea {
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
-}
-
-.input-invoice-usage-table thead tr:first-child th {
-  position: sticky;
-  top: 0;
-  z-index: 8;
-}
-
-.input-invoice-usage-table thead tr:nth-child(2) th {
-  position: sticky;
-  top: 38px;
-  z-index: 7;
-  background: var(--fp-table-header-bg);
-}
-
-.input-invoice-usage-table-group-header {
-  font-size: var(--fp-text-body);
 }
 
 .input-invoice-usage-table-sub-header {
@@ -861,21 +840,13 @@ textarea {
   text-align: center;
 }
 
-.input-invoice-usage-table-group-header--invoice {
-  background: color-mix(in srgb, var(--fp-success-soft) 58%, var(--fp-surface));
-}
-
-.input-invoice-usage-table-group-header--payment,
 .input-invoice-usage-table-cell--payment {
   background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
 }
 
-.input-invoice-usage-table-group-header--oa {
-  background: color-mix(in srgb, var(--fp-info-soft) 72%, var(--fp-surface));
-}
-
-.input-invoice-usage-table-group-header--bank {
-  background: color-mix(in srgb, var(--fp-primary-soft) 64%, var(--fp-surface));
+.input-invoice-usage-table-column-heading {
+  display: grid;
+  gap: 3px;
 }
 
 .input-invoice-usage-table-cell {
@@ -1144,70 +1115,14 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-3);
-  border-top: 1px solid var(--fp-border);
-  padding: var(--fp-space-2) var(--fp-space-3);
+  padding: 0;
 }
 
 .input-invoice-usage-pagination-size {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-2);
+  width: 92px;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 700;
-}
-
-.input-invoice-usage-pagination-size select {
-  min-height: 30px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  font: inherit;
-  padding: 0 var(--fp-space-2);
-  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
-}
-
-.input-invoice-usage-pagination-range {
-  color: var(--fp-text-secondary);
-  font-family: var(--fp-font-data);
-  font-size: var(--fp-text-label);
-  font-variant-numeric: tabular-nums;
-}
-
-.input-invoice-usage-pagination-actions {
-  display: inline-flex;
-  gap: var(--fp-space-1);
-}
-
-.input-invoice-usage-pagination-actions button {
-  min-height: 30px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  padding: 0 var(--fp-space-2);
-  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.input-invoice-usage-pagination-actions button:hover:not(:disabled),
-.input-invoice-usage-pagination-actions button:focus-visible {
-  border-color: var(--fp-primary);
-  background: var(--fp-primary-soft);
-  color: var(--fp-primary-hover);
-  outline: none;
-}
-
-.input-invoice-usage-pagination-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.input-invoice-usage-pagination-actions button:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 .input-invoice-usage-filter-menu {
@@ -1273,6 +1188,22 @@ textarea {
   padding: var(--fp-space-1) 0;
   text-align: left;
   animation: input-invoice-usage-menu-in var(--motion-base) var(--ease-out-quart);
+}
+
+.input-invoice-usage-filter-menu__popover {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.input-invoice-usage-filter-menu__dialog {
+  outline: none;
+}
+
+.input-invoice-usage-filter-menu__popover .input-invoice-usage-filter-menu__panel {
+  position: static;
 }
 
 .input-invoice-usage-filter-menu__panel--composite {
@@ -2631,6 +2562,10 @@ textarea {
 .oa-pending-payments-table-frame {
   position: relative;
   overflow: hidden;
+  display: grid;
+  height: clamp(520px, calc(100dvh - 188px), 720px);
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
@@ -2652,75 +2587,51 @@ textarea {
 }
 
 .oa-pending-payments-table-shell {
-  min-height: 320px;
-  max-height: calc(100vh - 214px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
 }
 
-.oa-pending-payments-table {
-  width: 100%;
-  min-width: 1280px;
-  border-collapse: separate;
-  border-spacing: 0;
+.oa-pending-payments-table .finance-table__content {
   table-layout: fixed;
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
 }
 
-.oa-pending-payments-col-oa {
+.oa-pending-payments-table-sub-header--oa {
   width: 40%;
 }
 
-.oa-pending-payments-col-bank {
+.oa-pending-payments-table-sub-header--bank {
   width: 39%;
 }
 
-.oa-pending-payments-col-invoice {
+.oa-pending-payments-table-sub-header--invoice {
   width: 13%;
 }
 
-.oa-pending-payments-col-paymentStatus {
+.oa-pending-payments-table-sub-header--status {
   width: 8%;
 }
 
-.oa-pending-payments-table-group-header,
 .oa-pending-payments-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   line-height: 1.2;
-  position: sticky;
   text-align: center;
 }
 
-.oa-pending-payments-table-group-header {
-  top: 0;
-  z-index: 4;
-  height: 30px;
+.oa-pending-payments-table-column-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.oa-pending-payments-table-column-group {
+  color: var(--fp-text-primary);
   font-weight: 700;
 }
 
-.oa-pending-payments-table-group-header--oa {
-  background: color-mix(in srgb, var(--fp-surface-muted) 64%, var(--fp-surface));
-}
-
-.oa-pending-payments-table-group-header--status {
-  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
-}
-
-.oa-pending-payments-table-group-header--bank {
-  background: color-mix(in srgb, var(--fp-primary-soft) 64%, var(--fp-surface));
-}
-
-.oa-pending-payments-table-group-header--invoice {
-  background: color-mix(in srgb, var(--fp-success-soft) 64%, var(--fp-surface));
-}
-
 .oa-pending-payments-table-sub-header {
-  top: 30px;
-  z-index: 3;
   min-height: 32px;
   padding: 4px 4px;
   color: var(--fp-text-secondary);
@@ -3278,72 +3189,14 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-3);
-  border-top: 1px solid var(--fp-border);
-  padding: var(--fp-space-2) var(--fp-space-3);
+  padding: 0;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 700;
 }
 
 .oa-pending-payments-pagination-size {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-2);
-}
-
-.oa-pending-payments-pagination-size select {
-  min-height: 30px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  font: inherit;
-  padding: 4px 26px 4px 8px;
-  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
-}
-
-.oa-pending-payments-pagination-range {
-  min-width: 92px;
-  color: var(--fp-text-primary);
-  font-family: var(--fp-font-data);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.oa-pending-payments-pagination-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-1);
-}
-
-.oa-pending-payments-pagination-actions button {
-  min-height: 30px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  padding: 0 var(--fp-space-3);
-  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.oa-pending-payments-pagination-actions button:hover:not(:disabled),
-.oa-pending-payments-pagination-actions button:focus-visible {
-  border-color: var(--fp-accent);
-  background: var(--fp-accent-soft);
-  color: var(--fp-accent);
-  outline: none;
-}
-
-.oa-pending-payments-pagination-actions button:disabled {
-  color: var(--fp-text-disabled);
-  cursor: default;
-}
-
-.oa-pending-payments-pagination-actions button:active:not(:disabled) {
-  transform: translateY(1px);
+  width: 82px;
 }
 
 .output-invoice-collections-page {
@@ -3647,6 +3500,22 @@ textarea {
   text-align: left;
 }
 
+.output-invoice-collection-filter-menu__popover {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  padding: 0;
+}
+
+.output-invoice-collection-filter-menu__dialog {
+  outline: none;
+}
+
+.output-invoice-collection-filter-menu__popover .output-invoice-collection-filter-menu__panel {
+  position: static;
+}
+
 .output-invoice-collection-filter-menu__header {
   display: grid;
   gap: 2px;
@@ -3871,28 +3740,27 @@ textarea {
 }
 
 .output-invoice-collections-table-frame {
+  height: clamp(520px, calc(100dvh - 220px), 720px);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
-.output-invoice-collections-table-shell {
-  min-height: 640px;
-  max-height: calc(200vh - 428px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
 .output-invoice-collections-table {
   width: 100%;
-  min-width: 1240px;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
+  height: 100%;
   background: var(--fp-surface);
   color: var(--fp-text-primary);
+}
+
+.output-invoice-collections-table .finance-table__content {
+  table-layout: fixed;
+}
+
+.output-invoice-collections-table .finance-table__footer {
+  padding: 0;
 }
 
 .output-invoice-collections-col-invoiceNo {
@@ -3927,39 +3795,19 @@ textarea {
   width: 150px;
 }
 
-.output-invoice-collections-table-group-header,
 .output-invoice-collections-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   line-height: 1.2;
-  position: sticky;
   text-align: center;
 }
 
-.output-invoice-collections-table-group-header {
-  top: 0;
-  z-index: 4;
-  height: 33px;
-  font-weight: 700;
-}
-
-.output-invoice-collections-table-group-header--invoice {
-  background: color-mix(in srgb, var(--fp-success-soft) 70%, var(--fp-surface));
-}
-
-.output-invoice-collections-table-group-header--status,
 .output-invoice-collections-table-cell--status {
   background: color-mix(in srgb, var(--fp-warning-soft) 66%, var(--fp-surface));
 }
 
-.output-invoice-collections-table-group-header--bank {
-  background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
-}
-
 .output-invoice-collections-table-sub-header {
-  top: 33px;
-  z-index: 3;
   min-height: 36px;
   padding: 6px 8px;
   color: var(--fp-text-secondary);
@@ -3977,6 +3825,20 @@ textarea {
 
 .output-invoice-collections-table-sub-header--bank {
   background: color-mix(in srgb, var(--fp-primary-soft) 42%, var(--fp-surface));
+}
+
+.output-invoice-collections-table-column-heading {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.output-invoice-collections-table-column-group {
+  min-height: 16px;
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .output-invoice-collection-status-cell {
@@ -4095,13 +3957,6 @@ textarea {
 
 .output-invoice-collections-table-row:hover .output-invoice-collections-table-cell--status {
   background: color-mix(in srgb, var(--fp-primary-soft) 70%, var(--fp-surface-muted));
-}
-
-.output-invoice-collections-table-state-cell {
-  padding: var(--fp-space-8);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-body);
-  text-align: center;
 }
 
 .output-invoice-collections-inline-row,
@@ -4530,7 +4385,6 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-3);
-  border-top: 1px solid var(--fp-border);
   padding: var(--fp-space-2) var(--fp-space-3);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
@@ -4538,72 +4392,18 @@ textarea {
 }
 
 .output-invoice-collections-pagination-size {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-2);
-}
-
-.output-invoice-collections-pagination-size select {
+  width: 108px;
   min-height: 30px;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font: inherit;
-  padding: 4px 26px 4px 8px;
+  padding: 4px 8px;
   transition:
     border-color var(--motion-fast) var(--ease-out-quart),
     box-shadow var(--motion-fast) var(--ease-out-quart),
     background-color var(--motion-fast) var(--ease-out-quart);
-}
-
-.output-invoice-collections-pagination-range {
-  min-width: 92px;
-  color: var(--fp-text-primary);
-  font-family: var(--fp-font-data);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.output-invoice-collections-pagination-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-1);
-}
-
-.output-invoice-collections-pagination-actions button {
-  min-height: 30px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  padding: 0 var(--fp-space-3);
-  transition:
-    background-color var(--motion-fast) var(--ease-out-quart),
-    border-color var(--motion-fast) var(--ease-out-quart),
-    color var(--motion-fast) var(--ease-out-quart),
-    box-shadow var(--motion-fast) var(--ease-out-quart),
-    transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.output-invoice-collections-pagination-actions button:hover:not(:disabled),
-.output-invoice-collections-pagination-actions button:focus-visible {
-  border-color: var(--fp-primary);
-  background: var(--fp-primary-soft);
-  color: var(--fp-primary-hover);
-  outline: none;
-}
-
-.output-invoice-collections-pagination-actions button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.output-invoice-collections-pagination-actions button:disabled {
-  color: var(--fp-text-disabled);
-  cursor: default;
 }
 
 .output-invoice-collection-drawer {
@@ -5087,7 +4887,9 @@ textarea {
 
 .batch-accounting-layout {
   display: grid;
-  align-items: start;
+  height: clamp(520px, calc(100dvh - 190px), 720px);
+  min-height: 0;
+  align-items: stretch;
   gap: var(--fp-space-3);
   grid-template-columns: minmax(360px, clamp(360px, 32vw, 520px)) minmax(0, 1fr);
 }
@@ -5286,6 +5088,9 @@ textarea {
 }
 
 .batch-accounting-bank-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
@@ -5379,6 +5184,11 @@ textarea {
 }
 
 .batch-accounting-bank-list {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border-top: 1px solid var(--fp-border-subtle);
 }
 
@@ -5592,6 +5402,9 @@ textarea {
 }
 
 .batch-accounting-oa-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -5620,45 +5433,18 @@ textarea {
   background: var(--fp-border-subtle);
 }
 
-.batch-accounting-oa-table-wrap {
-  overflow-x: auto;
-  overflow-y: auto;
-  max-height: calc(100vh - 252px);
-}
-
 .batch-accounting-oa-table {
   width: 100%;
-  min-width: 760px;
-  border-collapse: separate;
-  border-spacing: 0;
+  height: 100%;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
 }
 
-.batch-accounting-oa-table th,
-.batch-accounting-oa-table td {
-  border-bottom: 1px solid var(--fp-border-subtle);
-  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
-  text-align: left;
-  transition: background-color var(--motion-fast) var(--ease-out-quart);
-  vertical-align: top;
+.batch-accounting-oa-table .finance-table__content {
+  table-layout: fixed;
 }
 
-.batch-accounting-oa-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-}
-
-.batch-accounting-oa-table tr:last-child td {
-  border-bottom: 0;
-}
-
-.batch-accounting-oa-table__row--selected td {
+.batch-accounting-oa-table__row--selected .finance-table__cell {
   background: color-mix(in srgb, var(--fp-primary-soft) 52%, var(--fp-surface));
 }
 
@@ -5689,10 +5475,6 @@ textarea {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-}
-
-.batch-accounting-oa-table__empty {
-  padding: var(--fp-space-3) !important;
 }
 
 .batch-accounting-checkbox {
@@ -5894,7 +5676,13 @@ textarea {
 
 @media (max-width: 1100px) {
   .batch-accounting-layout {
+    height: auto;
     grid-template-columns: 1fr;
+  }
+
+  .batch-accounting-bank-panel,
+  .batch-accounting-oa-panel {
+    height: clamp(480px, calc(100dvh - 220px), 680px);
   }
 
   .batch-accounting-oa-panel__toolbar {
@@ -6107,18 +5895,15 @@ textarea {
 }
 
 .turnover-ledger-table-wrap {
-  max-height: calc(100vh - 244px);
-  overflow: auto;
+  height: clamp(520px, calc(100dvh - 244px), 720px);
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
-.turnover-ledger-table {
-  width: 100%;
-  min-width: 1080px;
-  border-collapse: separate;
-  border-spacing: 0;
+.turnover-ledger-table .finance-table__content {
   table-layout: fixed;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
@@ -6134,9 +5919,6 @@ textarea {
 }
 
 .turnover-ledger-table th {
-  position: sticky;
-  top: 0;
-  z-index: 3;
   background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
@@ -6150,6 +5932,12 @@ textarea {
   width: 176px;
   min-width: 176px;
   border-right: 1px solid var(--fp-border);
+}
+
+.turnover-sticky-left-cell--flow {
+  background: var(--fp-surface-raised);
+  color: var(--fp-text-secondary);
+  font-weight: 600;
 }
 
 .turnover-sticky-left-header {
@@ -6812,8 +6600,9 @@ textarea {
 }
 
 .turnover-ledger-export-dialog__table-wrap {
-  max-height: calc(100vh - 280px);
-  overflow: auto;
+  height: min(560px, calc(100vh - 280px));
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
@@ -7442,17 +7231,15 @@ textarea {
 }
 
 .bank-flow-rule-batches-table-wrap {
-  overflow: auto;
+  height: clamp(220px, 36dvh, 360px);
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
-.bank-flow-rule-batches-table {
-  width: 100%;
-  min-width: 640px;
-  border-collapse: separate;
-  border-spacing: 0;
+.bank-flow-rule-batches-table .finance-table__content {
   font-size: var(--fp-text-body);
 }
 
@@ -7563,7 +7350,7 @@ textarea {
   min-height: 0;
   height: 100%;
   gap: var(--fp-space-3);
-  overflow: auto;
+  overflow: hidden;
   padding: var(--fp-space-3);
 }
 
@@ -7576,14 +7363,13 @@ textarea {
 }
 
 .bank-flow-rule-batches-drawer__grid-wrap {
-  overflow: auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--fp-border);
 }
 
-.bank-flow-rule-batches-drawer__grid {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
+.bank-flow-rule-batches-drawer__grid .finance-table__content {
   background: var(--fp-surface);
   font-size: var(--fp-text-caption);
 }
@@ -7602,14 +7388,7 @@ textarea {
   white-space: nowrap;
 }
 
-.bank-flow-rule-batches-drawer__grid tbody tr > td:not(.bank-flow-rule-batches-drawer__direction-cell) {
-  background: var(--bank-flow-rule-batches-drawer-group-bg, var(--fp-surface));
-}
-
 .bank-flow-rule-batches-drawer__grid th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-weight: 700;
@@ -8175,34 +7954,24 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm) var(--fp-radius-sm) 0 0;
   background: var(--fp-surface);
+  height: clamp(520px, calc(100dvh - 176px), 720px);
+  min-height: 0;
   overflow: hidden;
 }
 
 .pending-invoices-table-shell {
-  max-height: calc(100vh - 176px);
-  min-height: 292px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.pending-invoices-table {
-  width: 100%;
-  min-width: 980px;
-  border-collapse: separate;
-  border-spacing: 0;
+.pending-invoices-table .finance-table__content {
   table-layout: fixed;
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
 }
 
-.pending-invoices-table-zone-header-grid {
+.pending-invoices-table-column-heading {
   display: grid;
-  grid-template-columns: var(--pending-invoices-table-columns);
-  min-width: 980px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  gap: 4px;
 }
 
 .pending-invoices-col-counterparty {
@@ -8241,56 +8010,19 @@ textarea {
   width: var(--pending-invoices-col-oa-project);
 }
 
-.pending-invoices-table-group-header,
 .pending-invoices-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   line-height: 1.2;
-  position: sticky;
   text-align: center;
-  z-index: 4;
-}
-
-.pending-invoices-table-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 33px;
-  font-weight: 700;
-  position: static;
-}
-
-.pending-invoices-table-group-header--bank {
-  grid-column: 1 / span 3;
-}
-
-.pending-invoices-table-group-header--bank {
-  background: color-mix(in srgb, var(--fp-primary-soft) 68%, var(--fp-surface));
-}
-
-.pending-invoices-table-group-header--status {
-  grid-column: 4 / span 1;
-  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
-}
-
-.pending-invoices-table-group-header--invoice {
-  grid-column: 5 / span 3;
-  background: color-mix(in srgb, var(--fp-success-soft) 72%, var(--fp-surface));
-}
-
-.pending-invoices-table-group-header--oa {
-  grid-column: 8 / span 2;
-  background: var(--fp-surface-muted);
 }
 
 .pending-invoices-table-sub-header {
-  top: 33px;
   min-height: 36px;
   padding: 6px 7px;
   color: var(--fp-text-secondary);
   font-weight: 700;
-  z-index: 3;
   white-space: normal;
 }
 
@@ -10573,6 +10305,19 @@ textarea {
   overflow-x: auto;
 }
 
+.finance-table--contained {
+  height: 100%;
+  min-height: 0;
+}
+
+.finance-table--contained .finance-table__scroll {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .finance-table__content {
   min-width: var(--finance-table-min-width, 720px);
 }
@@ -10589,6 +10334,10 @@ textarea {
 }
 
 .finance-table__column {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  overflow: visible;
   background: var(--fp-table-header-bg);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
@@ -10596,9 +10345,18 @@ textarea {
   line-height: 1.35;
 }
 
+.finance-table__column:has([aria-expanded="true"]) {
+  z-index: 20;
+}
+
 .finance-table__cell {
+  border-bottom: 1px solid var(--fp-border-subtle);
   padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
   vertical-align: middle;
+}
+
+.finance-table__row:last-child .finance-table__cell {
+  border-bottom: 0;
 }
 
 .finance-table__cell[data-column-role="identity"] {
@@ -17586,8 +17344,9 @@ body.column-layout-dragging {
 }
 
 .settings-native-table-shell--scroll {
-  max-height: 420px;
-  overflow: auto;
+  height: min(420px, 52vh);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-native-table {
@@ -19418,7 +19177,10 @@ body.column-layout-dragging {
 }
 
 .cost-finance-table-shell {
-  min-height: 180px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
 }
 
 .cost-finance-table {
@@ -21425,59 +21187,17 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-table-container {
+  height: 100%;
   min-height: 0;
-  max-height: 100%;
-  overflow-x: hidden !important;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid #dfe4ea;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.bank-auto-tag-rule-table {
+.bank-auto-tag-rule-table .finance-table__content {
   table-layout: fixed;
   width: 100%;
-  min-width: 0;
-}
-
-.bank-auto-tag-col-direction {
-  width: 6%;
-}
-
-.bank-auto-tag-col-primary {
-  width: 10%;
-}
-
-.bank-auto-tag-col-sub {
-  width: 9%;
-}
-
-.bank-auto-tag-col-fields {
-  width: 11%;
-}
-
-.bank-auto-tag-col-contains {
-  width: 16%;
-}
-
-.bank-auto-tag-col-contains-all {
-  width: 12%;
-}
-
-.bank-auto-tag-col-exact {
-  width: 9%;
-}
-
-.bank-auto-tag-col-none {
-  width: 15%;
-}
-
-.bank-auto-tag-col-priority {
-  width: 8%;
-}
-
-.bank-auto-tag-col-actions {
-  width: 4%;
 }
 
 .bank-auto-tag-rule-table .finance-table__column {
@@ -22401,8 +22121,7 @@ body.column-layout-dragging {
   flex: 1 1 0;
   width: 100%;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .bank-transaction-pagination {
@@ -22475,6 +22194,7 @@ body.column-layout-dragging {
 
 .bank-transaction-table {
   width: 100%;
+  height: 100%;
   background: var(--bank-surface);
   color: var(--bank-text);
   table-layout: fixed;
@@ -24713,17 +24433,16 @@ body.column-layout-dragging {
 
 .etc-invoice-table-container {
   width: 100%;
-  max-height: 460px;
-  overflow-x: hidden;
+  height: clamp(260px, 42dvh, 460px);
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid #d5dde8;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.etc-invoice-table {
-  width: 100%;
+.etc-invoice-table .finance-table__content {
   table-layout: fixed;
-  border-collapse: collapse;
 }
 
 .etc-invoice-table th,
@@ -24737,9 +24456,6 @@ body.column-layout-dragging {
 }
 
 .etc-invoice-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   color: #172033;
   font-weight: 700;
   text-align: left;
@@ -24825,17 +24541,17 @@ body.column-layout-dragging {
 
 .etc-reconciliation-table-container {
   width: 100%;
+  height: clamp(260px, 42dvh, 460px);
+  min-height: 0;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow: hidden;
   border: 1px solid #d5dde8;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.etc-reconciliation-table {
+.etc-reconciliation-table .finance-table__content {
   table-layout: fixed;
-  width: 100%;
-  border-collapse: collapse;
 }
 
 .etc-reconciliation-table th,

@@ -30,7 +30,7 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
   const open = async () => {
     await page.getByRole("button", { name: /自动标签规则/ }).click();
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible();
+    await expect(drawer.getByRole("grid", { name: "自动标签规则表格" })).toBeVisible();
   };
   if (recordLatency) {
     await recordLatency({
@@ -40,7 +40,7 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
     }, async (mark) => {
       await page.getByRole("button", { name: /自动标签规则/ }).click();
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("grid", { name: "自动标签规则表格" })).toBeVisible());
     });
   } else {
     await open();

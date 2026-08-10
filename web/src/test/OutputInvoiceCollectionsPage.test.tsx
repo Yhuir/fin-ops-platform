@@ -205,14 +205,11 @@ describe("销项发票收款情况", () => {
 
     renderAuthenticatedAppAt("/output-invoice-collections");
 
-    const table = await screen.findByRole("table", { name: "销项发票收款情况表" });
-    expect(within(table).getByRole("columnheader", { name: "销项发票" })).toHaveAttribute("colspan", "4");
-    expect(
-      within(table)
-        .getAllByRole("columnheader", { name: "收款状态" })
-        .find((header) => header.getAttribute("scope") === "colgroup"),
-    ).toHaveAttribute("colspan", "1");
-    expect(within(table).getByRole("columnheader", { name: "收入流水" })).toHaveAttribute("colspan", "3");
+    const table = await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    expect(table.closest(".finance-table")).toHaveClass("finance-table--contained");
+    expect(within(table).getByText("销项发票")).toBeVisible();
+    expect(within(table).getByText("收款状态")).toBeVisible();
+    expect(within(table).getByText("收入流水")).toBeVisible();
     expect(within(table).getByText("已被红冲")).toBeVisible();
     expect(within(table).getByText("已冲销蓝票")).toBeVisible();
     expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();

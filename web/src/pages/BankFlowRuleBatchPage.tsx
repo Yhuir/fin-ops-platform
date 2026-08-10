@@ -1,6 +1,5 @@
 import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
@@ -8,6 +7,14 @@ import AppDrawer from "../components/common/AppDrawer";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../components/common/FinanceTable";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -46,7 +53,6 @@ import {
   relationContextLabels,
   requirementFor,
   requirementsFromSelection,
-  tagDrawerGroupColor,
   tagPrimaryLabel,
   tagSubLabel,
 } from "../features/bankFlowRuleBatches/viewModel";
@@ -937,49 +943,45 @@ export default function BankFlowRuleBatchPage() {
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
-                      <div className="bank-flow-rule-batches-table-wrap">
-                        <table className="bank-flow-rule-batches-table" aria-label={`${accountLabel(batch)}流水`}>
-                          <thead>
-                            <tr>
+                      <FinanceTable ariaLabel={`${accountLabel(batch)}流水`} className="bank-flow-rule-batches-table bank-flow-rule-batches-table-wrap" minWidth={820} scrollMode="contained">
+                          <FinanceTableHeader>
                               {rowSelectionEnabled ? (
-                                <th className="bank-flow-rule-batches-table__check" scope="col">
-                                  <input
+                                <FinanceTableColumn className="bank-flow-rule-batches-table__check" columnRole="selection">
+                                  <Checkbox
                                     aria-label={`${accountLabel(batch)}全选`}
-                                    checked={regionChecked}
                                     className="bank-flow-rule-batches-checkbox"
-                                    disabled={!canMutateData}
-                                    onChange={(event) => setRegionSelection(rows, event.target.checked)}
-                                    type="checkbox"
+                                    isDisabled={!canMutateData}
+                                    isSelected={regionChecked}
+                                    slot="selection"
+                                    onChange={(selected) => setRegionSelection(rows, selected)}
                                   />
-                                </th>
+                                </FinanceTableColumn>
                               ) : null}
-                              <th scope="col">交易时间</th>
-                              <th scope="col">对方户名</th>
-                              <th className="bank-flow-rule-batches-table__amount" scope="col">金额</th>
-                              <th scope="col">摘要/用途/备注</th>
-                            </tr>
-                          </thead>
-                          <tbody>
+                              <FinanceTableColumn columnRole="date">交易时间</FinanceTableColumn>
+                              <FinanceTableColumn columnRole="identity" isRowHeader>对方户名</FinanceTableColumn>
+                              <FinanceTableColumn className="bank-flow-rule-batches-table__amount" columnRole="amount">金额</FinanceTableColumn>
+                              <FinanceTableColumn columnRole="description">摘要/用途/备注</FinanceTableColumn>
+                          </FinanceTableHeader>
+                          <FinanceTableBody>
                             {rows.map((row) => {
                               const rowTagLabels = bankDetailTagLabels(row);
                               const relationLabels = relationContextLabels(row);
                               return (
-                                <tr key={row.transactionId}>
+                                <FinanceTableRow id={row.transactionId} key={row.transactionId}>
                                   {rowSelectionEnabled ? (
-                                    <td className="bank-flow-rule-batches-table__check">
-                                      <input
+                                    <FinanceTableCell className="bank-flow-rule-batches-table__check" columnRole="selection">
+                                      <Checkbox
                                         aria-label={`选择流水 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${formatMoney(row.amount)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`}
-                                        checked={selectedTransactionIds.has(row.transactionId)}
                                         className="bank-flow-rule-batches-checkbox"
-                                        disabled={!canMutateData}
-                                        onChange={(event) => toggleTransaction(row, event.target.checked)}
-                                        type="checkbox"
+                                        isDisabled={!canMutateData}
+                                        isSelected={selectedTransactionIds.has(row.transactionId)}
+                                        onChange={(selected) => toggleTransaction(row, selected)}
                                       />
-                                    </td>
+                                    </FinanceTableCell>
                                   ) : null}
-                                  <td>{formatDateTimeText(row.tradeTime)}</td>
-                                  <td>{row.counterpartyName || "-"}</td>
-                                  <td className="bank-flow-rule-batches-table__amount">
+                                  <FinanceTableCell columnRole="date">{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
+                                  <FinanceTableCell columnRole="identity">{row.counterpartyName || "-"}</FinanceTableCell>
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__amount" columnRole="amount">
                                     <div className="bank-flow-rule-batches-amount-cell">
                                       <div className="bank-flow-rule-batches-amount-cell__main">
                                         <span className="bank-flow-rule-batches-tag bank-flow-rule-batches-tag--direction">
@@ -991,8 +993,8 @@ export default function BankFlowRuleBatchPage() {
                                         {bankTagLabel(row)}
                                       </span>
                                     </div>
-                                  </td>
-                                  <td>
+                                  </FinanceTableCell>
+                                  <FinanceTableCell columnRole="description">
                                     <div className="bank-flow-rule-batches-summary-cell">
                                       <span className="bank-flow-rule-batches-summary-cell__summary">{row.summary || "-"}</span>
                                       <span className="bank-flow-rule-batches-summary-cell__memo">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
@@ -1011,13 +1013,12 @@ export default function BankFlowRuleBatchPage() {
                                         </div>
                                       ) : null}
                                     </div>
-                                  </td>
-                                </tr>
+                                  </FinanceTableCell>
+                                </FinanceTableRow>
                               );
                             })}
-                          </tbody>
-                        </table>
-                      </div>
+                          </FinanceTableBody>
+                      </FinanceTable>
                     ) : null}
                   </div>
                 </section>
@@ -1052,67 +1053,44 @@ export default function BankFlowRuleBatchPage() {
         width="min(960px, 92vw)"
       >
             <div className="bank-flow-rule-batches-drawer__body">
-              <div className="bank-flow-rule-batches-drawer__grid-wrap">
-                <table className="bank-flow-rule-batches-drawer__grid">
-                  <colgroup>
-                    <col className="bank-flow-rule-batches-drawer__direction-col" />
-                    <col />
-                    <col />
-                    <col className="bank-flow-rule-batches-drawer__check-col" />
-                    <col className="bank-flow-rule-batches-drawer__check-col" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th scope="col">收支类型</th>
-                      <th scope="col">流水主标签</th>
-                      <th scope="col">流水子标签</th>
-                      <th className="bank-flow-rule-batches-drawer__check-col" scope="col">OA</th>
-                      <th className="bank-flow-rule-batches-drawer__check-col" scope="col">发票</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+              <FinanceTable ariaLabel="流水规则标签配置" className="bank-flow-rule-batches-drawer__grid bank-flow-rule-batches-drawer__grid-wrap" minWidth={720} scrollMode="contained">
+                  <FinanceTableHeader>
+                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__direction-col" columnRole="direction">收支类型</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="identity" isRowHeader>流水主标签</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="description">流水子标签</FinanceTableColumn>
+                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">OA</FinanceTableColumn>
+                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">发票</FinanceTableColumn>
+                  </FinanceTableHeader>
+                  <FinanceTableBody>
                     {drawerRows.map(({
                       tag,
                       direction,
                       directionKey,
-                      directionRowSpan,
-                      isDirectionStart,
                       primaryLabel,
-                      primaryRowSpan,
-                      primaryGroupIndex,
-                      isPrimaryStart,
                       subLabel,
                     }) => {
                       const rule = requirementFor(draftTagRequirements, tag.code);
                       const rowLabel = subLabel === SELF_SUB_LABEL ? primaryLabel : `${primaryLabel} / ${subLabel}`;
                       return (
-                        <tr
+                        <FinanceTableRow
                           className="bank-flow-rule-batches-drawer__grid-row"
-                          data-primary-label={primaryLabel}
-                          data-tag-code={tag.code}
+                          id={tag.code}
                           key={tag.code}
-                          style={{
-                            "--bank-flow-rule-batches-drawer-group-bg": tagDrawerGroupColor(primaryGroupIndex),
-                          } as CSSProperties}
                         >
-                          {isDirectionStart ? (
-                            <td
+                            <FinanceTableCell
                               className={cx(
                                 "bank-flow-rule-batches-drawer__direction-cell",
                                 `bank-flow-rule-batches-drawer__direction-cell--${directionKey}`,
                               )}
-                              rowSpan={directionRowSpan}
+                              columnRole="direction"
                             >
                               {direction}
-                            </td>
-                          ) : null}
-                          {isPrimaryStart ? (
-                            <td className="bank-flow-rule-batches-drawer__primary-cell" rowSpan={primaryRowSpan}>
+                            </FinanceTableCell>
+                            <FinanceTableCell className="bank-flow-rule-batches-drawer__primary-cell" columnRole="identity">
                               {primaryLabel}
-                            </td>
-                          ) : null}
-                          <td>{subLabel}</td>
-                          <td className="bank-flow-rule-batches-drawer__check-col">
+                            </FinanceTableCell>
+                          <FinanceTableCell columnRole="description">{subLabel}</FinanceTableCell>
+                          <FinanceTableCell className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">
                             <Checkbox
                               aria-label={`${rowLabel} 需要OA`}
                               className="bank-flow-rule-batches-checkbox"
@@ -1122,8 +1100,8 @@ export default function BankFlowRuleBatchPage() {
                             >
                               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                             </Checkbox>
-                          </td>
-                          <td className="bank-flow-rule-batches-drawer__check-col">
+                          </FinanceTableCell>
+                          <FinanceTableCell className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">
                             <Checkbox
                               aria-label={`${rowLabel} 需要发票`}
                               className="bank-flow-rule-batches-checkbox"
@@ -1133,13 +1111,12 @@ export default function BankFlowRuleBatchPage() {
                             >
                               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                             </Checkbox>
-                          </td>
-                        </tr>
+                          </FinanceTableCell>
+                        </FinanceTableRow>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </FinanceTableBody>
+              </FinanceTable>
             </div>
       </AppDrawer>
 

@@ -20,9 +20,16 @@ describe("finance table alignment styles", () => {
   test("defines the shared HeroUI finance table shell contract", () => {
     expectDeclaration(".finance-table", /--finance-table-row-height:\s*var\(--fp-table-row-height\)/);
     expectDeclaration(".finance-table__scroll", /overflow-x:\s*auto/);
+    expectDeclaration(".finance-table--contained", /height:\s*100%/);
+    expectDeclaration(".finance-table--contained .finance-table__scroll", /overflow:\s*auto/);
+    expectDeclaration(".finance-table--contained .finance-table__scroll", /overscroll-behavior:\s*contain/);
+    expectDeclaration(".finance-table--contained .finance-table__scroll", /scrollbar-gutter:\s*stable/);
     expectDeclaration(".finance-table__content", /min-width:\s*var\(--finance-table-min-width/);
     expectDeclaration(".finance-table__row", /min-height:\s*var\(--fp-table-row-height\)/);
     expectDeclaration(".finance-table__row", /transition:[^;]*background-color var\(--motion-fast\) var\(--ease-standard\)/);
+    expectDeclaration(".finance-table__column", /position:\s*sticky/);
+    expectDeclaration(".finance-table__column", /top:\s*0/);
+    expectDeclaration(".finance-table__cell", /border-bottom:\s*1px solid var\(--fp-border-subtle\)/);
   });
 
   test("aligns cells by column role instead of globally centering every table cell", () => {

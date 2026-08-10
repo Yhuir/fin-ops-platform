@@ -320,11 +320,11 @@ test.describe("cost statistics browser flow", () => {
       await mark("apiLatencyMs", previewResponsePromise);
       await mark(
         "firstVisibleResponseLatencyMs",
-        expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("云南溯源科技"),
+        expect(exportDialog.getByRole("grid", { name: "导出预览表" })).toContainText("云南溯源科技"),
       );
       await mark(
         "finalSettledLatencyMs",
-        expect(exportDialog.getByRole("table", { name: "导出预览表" })).toContainText("设备货款及材料费"),
+        expect(exportDialog.getByRole("grid", { name: "导出预览表" })).toContainText("设备货款及材料费"),
       );
     });
     const previewResponse = await previewResponsePromise;
@@ -637,7 +637,7 @@ test.describe("cost statistics browser flow", () => {
     }, async (mark) => {
       await exportDialog.getByRole("button", { name: "仅预览" }).click();
       await mark("apiLatencyMs", previewResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByRole("table", { name: "导出预览表" })).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(exportDialog.getByRole("grid", { name: "导出预览表" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(exportDialog.getByText("预计导出 3 条流水")).toBeVisible());
     });
     const previewUrl = new URL((await previewRequest).url());

@@ -14,7 +14,7 @@
 
 ## 代码入口
 
-- `web/src/components/common/FinanceTable.tsx`：HeroUI Table 外壳、列/行/单元格 primitive、分页、金额/方向/状态/空值/截断文本 primitive。
+- `web/src/components/common/FinanceTable.tsx`：HeroUI Table 外壳、自然/受限滚动模式、列/行/单元格 primitive、分页、金额/方向/状态/空值/截断文本 primitive。
 - `web/src/hooks/useFinanceTableSession.ts`：表格分页、排序、选择、滚动位置的轻量 session hook。
 - `web/src/components/*Table*`、`web/src/pages/*Page.tsx`：页面级业务表格、筛选、排序、分页、导出、详情 drawer/dialog。
 - `web/src/app/styles.css`：共享表格 token、列角色对齐、行高、tag 高度和 motion contract。
@@ -27,6 +27,8 @@
 - 表格 session 只保存轻量 UI 状态，不保存 read model payload、rows、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `useFinanceTableSession` 当前主要由专项测试覆盖；并非所有页面都已统一接入该 hook。已经接入或自行实现 session 的页面必须在页面模块测试中保护恢复语义。
 - 列对齐由 `columnRole` 决定：金额/数量右对齐，日期/状态/方向/选择居中，主体/账户/说明左对齐。禁止全局把所有 cell 居中。
+- 页面需要固定表格高度时使用 `scrollMode="contained"`，并由页面外壳提供有界高度；滚动、sticky 表头和 overscroll 隔离由共享 `FinanceTable` 负责，同一双栏/三栏中的各表格互不带动。
+- 非关联台生产表格必须使用共享 `FinanceTable`。关联台 `PaneTable` 与详情表是当前唯一冻结例外，其独立高性能滚动合同由 Workbench 模块负责。
 - 表格 migration 不能删除旧页面的导出、确认、刷新、筛选、选择、右侧详情抽屉或现有分页语义。
 
 ## 主要使用点
@@ -44,6 +46,7 @@
 - `web/src/test/FinanceTable.test.tsx`
 - `web/src/test/TableLayoutTokens.test.ts`
 - `web/src/test/TableAlignmentStyles.test.ts`
+- `web/src/test/FinanceTableMigration.test.ts`
 - `web/src/test/useFinanceTableSession.test.tsx`
 - `web/src/test/MuiContainment.test.ts`
 - `web/src/test/CommonPlatformComponents.test.tsx`

@@ -30,11 +30,12 @@ test.describe("销项发票收款情况", () => {
     });
 
     await page.goto("/output-invoice-collections");
-    const table = page.getByRole("table", { name: "销项发票收款情况表" });
+    const table = page.getByRole("grid", { name: "销项发票收款情况表" });
     await expect(table).toBeVisible();
-    await expect(table.getByRole("columnheader", { name: "销项发票" })).toHaveAttribute("colspan", "4");
-    await expect(table.locator('th[scope="colgroup"]', { hasText: "收款状态" })).toHaveCount(1);
-    await expect(table.getByRole("columnheader", { name: "收入流水" })).toHaveAttribute("colspan", "3");
+    await expect(table.getByRole("columnheader")).toHaveCount(8);
+    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "销项发票" })).toHaveCount(1);
+    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收款状态" })).toHaveCount(1);
+    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收入流水" })).toHaveCount(1);
     await expect(table.getByText("已被红冲")).toBeVisible();
     await expect(table.getByText("已冲销蓝票")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
@@ -58,7 +59,7 @@ test.describe("销项发票收款情况", () => {
     expect((await previewResponse).status()).toBe(200);
     const exportDrawer = page.getByRole("dialog", { name: "筛选内容导出" });
     await expect(exportDrawer).toBeVisible();
-    await expect(exportDrawer.getByRole("table", { name: "销项发票收款情况导出样例" }))
+    await expect(exportDrawer.getByRole("grid", { name: "销项发票收款情况导出样例" }))
       .toContainText("自动红蓝票关系");
 
     let download: Download | undefined;
@@ -97,5 +98,27 @@ test.describe("销项发票收款情况", () => {
     expect(recovered).toBe(true);
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
     expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThanOrEqual(2);
+  });
+
+  test("固定表头内的收款状态筛选使用可点击的 Portal 并刷新结果", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      outputInvoiceCollectionListInteractions: true,
+      sessionMode: "read_export_only",
+    });
+
+    await page.goto("/output-invoice-collections");
+    await page.getByRole("button", { name: "筛选 状态" }).click();
+    const menu = page.getByRole("menu", { name: "状态筛选与排序" });
+    const reversedOption = menu.getByRole("menuitemcheckbox", { name: "已被红冲 1" });
+    await expect(reversedOption).toBeVisible();
+
+    const filteredRowsPromise = page.waitForResponse(rowsResponse);
+    await reversedOption.click();
+    const filteredRowsUrl = new URL((await filteredRowsPromise).url());
+    expect(JSON.parse(decodeURIComponent(filteredRowsUrl.searchParams.get("filters") ?? "[]"))).toEqual([
+      { field: "collection_status", operator: "in", values: ["reversed_by_red"] },
+    ]);
+    await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /XSFP-E2E-0002/ })).toHaveCount(0);
   });
 });

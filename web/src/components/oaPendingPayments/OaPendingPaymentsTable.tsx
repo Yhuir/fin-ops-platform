@@ -1,8 +1,11 @@
 import {
+  Checkbox,
+  ListBox,
   PopoverContent,
   PopoverDialog,
   PopoverRoot,
   PopoverTrigger,
+  Select,
 } from "@heroui/react";
 import { ArrowUpDown, Filter, Info } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
@@ -11,6 +14,13 @@ import { useMemo, useState } from "react";
 import {
   EmptyValue,
   FinanceDirectionTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTablePagination,
+  FinanceTableRow,
   FinanceStatusTag,
   type FinanceTone,
 } from "../common/FinanceTable";
@@ -166,32 +176,38 @@ export default function OaPendingPaymentsTable({
           value={keywordDraft}
         />
       </div>
-      <div ref={tableWrapRef} className="oa-pending-payments-table-shell" data-testid="oa-pending-payments-table-shell">
-        <table aria-label="OA待付款核对表格" className="oa-pending-payments-table">
-          <colgroup>
+      <FinanceTable
+        ariaLabel="OA待付款核对表格"
+        className="oa-pending-payments-table oa-pending-payments-table-shell"
+        footer={(
+          <PaginationControls
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            page={page}
+            pageSize={pageSize}
+            total={total}
+          />
+        )}
+        minWidth={1320}
+        scrollMode="contained"
+        scrollRef={tableWrapRef}
+      >
+          <FinanceTableHeader>
             {columns.map((column) => (
-              <col className={`oa-pending-payments-col-${column.id}`} key={column.id} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <GroupHeader group="oa" label="OA" span={1} />
-              <GroupHeader group="status" label="支付状态" span={1} />
-              <GroupHeader group="bank" label="流水" span={1} />
-              <GroupHeader group="invoice" label="发票" span={1} />
-            </tr>
-            <tr>
-              {columns.map((column) => (
-                <th
-                  className={cx(
-                    "oa-pending-payments-table-sub-header",
-                    `oa-pending-payments-table-sub-header--${column.group}`,
-                    column.align === "right" && "oa-pending-payments-table-cell--amount",
-                    ["status", "bank", "invoice"].includes(column.group) && firstColumnInGroup(column.id) && "oa-pending-payments-table-cell--left-border",
-                  )}
-                  key={column.id}
-                  scope="col"
-                >
+              <FinanceTableColumn
+                className={cx(
+                  "oa-pending-payments-table-sub-header",
+                  `oa-pending-payments-table-sub-header--${column.group}`,
+                  column.align === "right" && "oa-pending-payments-table-cell--amount",
+                  ["status", "bank", "invoice"].includes(column.group) && firstColumnInGroup(column.id) && "oa-pending-payments-table-cell--left-border",
+                )}
+                columnRole={column.group === "status" ? "status" : "identity"}
+                id={column.id}
+                isRowHeader={column.id === "oa"}
+                key={column.id}
+              >
+                <span className={`oa-pending-payments-table-column-heading oa-pending-payments-table-column-heading--${column.group}`}>
+                  <span className="oa-pending-payments-table-column-group">{column.label}</span>
                   <GroupedSubHeader
                     column={column}
                     configsByField={configsByField}
@@ -201,17 +217,18 @@ export default function OaPendingPaymentsTable({
                     onFilterClear={onFilterClear}
                     onSortChange={onSortChange}
                   />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
+                </span>
+              </FinanceTableColumn>
+            ))}
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td className="oa-pending-payments-table-state-cell" colSpan={columns.length}>
-                  {emptyStateMessage}
-                </td>
-              </tr>
+              <FinanceTableRow id="oa-pending-payments-empty">
+                <FinanceTableCell className="oa-pending-payments-table-state-cell" columnRole="identity">{emptyStateMessage}</FinanceTableCell>
+                <FinanceTableCell columnRole="status"><EmptyValue /></FinanceTableCell>
+                <FinanceTableCell columnRole="identity"><EmptyValue /></FinanceTableCell>
+                <FinanceTableCell columnRole="identity"><EmptyValue /></FinanceTableCell>
+              </FinanceTableRow>
             ) : rows.map((row) => {
               const hasBank = hasBankTransaction(row);
               const bankTarget = bankDetailTarget(row);
@@ -221,18 +238,17 @@ export default function OaPendingPaymentsTable({
               const canWriteback = Boolean(onWritebackPaid) && canWritebackPaid(row);
               const writingBack = rowOaIds.some((oaId) => writingBackOaRowIds.has(oaId));
               return (
-                <tr className="oa-pending-payments-table-row" key={row.id}>
-                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" data-column-role="identity">
+                <FinanceTableRow className="oa-pending-payments-table-row" id={row.id} key={row.id}>
+                  <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" columnRole="identity">
                     <div className="oa-pending-payments-oa-grid">
                       <div className="oa-pending-payments-oa-grid__applicant">
                         <span className="oa-pending-payments-inline-row">
                           {selectable ? (
-                            <input
+                            <Checkbox
                               aria-label={`选择 OA ${row.oa.applicantName || "未填写申请人"}`}
-                              checked={selected}
                               className="oa-pending-payments-row-checkbox"
+                              isSelected={selected}
                               onChange={() => onToggleOaSelection?.(row)}
-                              type="checkbox"
                             />
                           ) : null}
                           <TextLine strong value={row.oa.applicantName} />
@@ -284,10 +300,10 @@ export default function OaPendingPaymentsTable({
                         </span>
                       </div>
                     </div>
-                  </td>
-                  <td
+                  </FinanceTableCell>
+                  <FinanceTableCell
                     className="oa-pending-payments-table-cell oa-pending-payments-table-cell--status oa-pending-payments-table-cell--left-border oa-pending-payment-status-cell"
-                    data-column-role="status"
+                    columnRole="status"
                   >
                     <span className="oa-pending-payments-status-stack">
                       <span className="oa-pending-payments-status-action-line">
@@ -310,8 +326,8 @@ export default function OaPendingPaymentsTable({
                         ) : null}
                       </span>
                     </span>
-                  </td>
-                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--bank oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--bank oa-pending-payments-table-cell--left-border" columnRole="identity">
                     {hasBank ? (
                       <div className="oa-pending-payments-bank-grid">
                         <div className="oa-pending-payments-bank-grid__counterparty">
@@ -350,23 +366,15 @@ export default function OaPendingPaymentsTable({
                         <EmptyValue />
                       </span>
                     )}
-                  </td>
-                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                  </FinanceTableCell>
+                  <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" columnRole="identity">
                     <InvoiceCell row={row} onOpenDetail={onOpenDetail} />
-                  </td>
-                </tr>
+                  </FinanceTableCell>
+                </FinanceTableRow>
               );
             })}
-          </tbody>
-        </table>
-      </div>
-      <PaginationControls
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-        page={page}
-        pageSize={pageSize}
-        total={total}
-      />
+          </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
 }
@@ -703,22 +711,6 @@ function OaColumnFilterMenu({
   );
 }
 
-function GroupHeader({ label, span, group }: { label: string; span: number; group: "oa" | "status" | "bank" | "invoice" }) {
-  return (
-    <th
-      className={cx(
-        "oa-pending-payments-table-group-header",
-        `oa-pending-payments-table-group-header--${group}`,
-        group !== "oa" && "oa-pending-payments-table-cell--left-border",
-      )}
-      colSpan={span}
-      scope="colgroup"
-    >
-      {label}
-    </th>
-  );
-}
-
 function SortButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -829,23 +821,17 @@ function PaginationControls({
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   return (
     <div className="oa-pending-payments-pagination">
-      <label className="oa-pending-payments-pagination-size">
-        <span>每页</span>
-        <select
-          aria-label="每页"
-          onChange={(event) => onPageSizeChange(Number(event.target.value))}
-          value={pageSize}
-        >
-          {[20, 50, 100].map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
-      </label>
-      <span className="oa-pending-payments-pagination-range">{displayedRange(currentPage, pageSize, safeTotal)}</span>
-      <span className="oa-pending-payments-pagination-actions">
-        <button disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)} type="button">上一页</button>
-        <button disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)} type="button">下一页</button>
-      </span>
+      <Select
+        aria-label="每页"
+        className="oa-pending-payments-pagination-size"
+        onChange={(key) => onPageSizeChange(Number(key))}
+        placeholder="每页"
+        value={String(pageSize)}
+      >
+        <Select.Trigger><Select.Value /></Select.Trigger>
+        <Select.Popover><ListBox>{[20, 50, 100].map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}</ListBox></Select.Popover>
+      </Select>
+      <FinanceTablePagination compact onPageChange={onPageChange} page={currentPage} pageSize={pageSize} total={safeTotal} />
     </div>
   );
 }
@@ -876,18 +862,6 @@ function selectedValues(filters: OaPendingPaymentFilter[], field: string) {
 
 function optionLabel(option: OaPendingPaymentFilterOption) {
   return option.count === undefined ? option.label : `${option.label} ${option.count}`;
-}
-
-function displayedRange(page: number, pageSize: number, total: number) {
-  const safeTotal = safeCount(total);
-  if (safeTotal <= 0) {
-    return "0-0 / 0";
-  }
-  const totalPages = Math.max(1, Math.ceil(safeTotal / Math.max(pageSize, 1)));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
-  const from = (currentPage - 1) * pageSize + 1;
-  const to = Math.min(currentPage * pageSize, safeTotal);
-  return `${from}-${to} / ${safeTotal}`;
 }
 
 function safeCount(value: number) {

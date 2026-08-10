@@ -1,6 +1,14 @@
 import { Save, Trash2 } from "lucide-react";
 
 import type { OaApplicantCredentialSummary } from "../../features/workbench/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type { SettingsOaApplicantCredentialsSectionProps } from "./types";
 
 function credentialStatusLabel(credential: OaApplicantCredentialSummary) {
@@ -127,19 +135,17 @@ export default function SettingsOaApplicantCredentialsSection({
           </div>
         ) : (
           <div className="settings-native-table-shell settings-native-table-shell--scroll">
-            <table className="settings-native-table" aria-label="OA申请人凭据">
-              <thead>
-                <tr>
-                  <th scope="col">目标 OA 申请人</th>
-                  <th scope="col">OA 登录账号</th>
-                  <th scope="col">凭据状态</th>
-                  <th scope="col">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="OA申请人凭据" className="settings-native-table" minWidth={640} scrollMode="contained">
+              <FinanceTableHeader>
+                <FinanceTableColumn id="applicant" isRowHeader columnRole="identity">目标 OA 申请人</FinanceTableColumn>
+                <FinanceTableColumn id="account" columnRole="account">OA 登录账号</FinanceTableColumn>
+                <FinanceTableColumn id="status" columnRole="status">凭据状态</FinanceTableColumn>
+                <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {rows.map((credential) => (
-                  <tr key={credential.targetApplicantCode || credential.targetApplicantName}>
-                    <td>
+                  <FinanceTableRow id={credential.targetApplicantCode || credential.targetApplicantName} key={credential.targetApplicantCode || credential.targetApplicantName}>
+                    <FinanceTableCell columnRole="identity">
                       <button
                         className="settings-secondary-button"
                         disabled={sectionDisabled}
@@ -148,14 +154,14 @@ export default function SettingsOaApplicantCredentialsSection({
                       >
                         {credential.targetApplicantName || credential.targetApplicantCode}
                       </button>
-                    </td>
-                    <td>{credential.oaUsername || "-"}</td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="account">{credential.oaUsername || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status">
                       <span className={`settings-selected-tag settings-selected-tag--${credentialStatusTone(credential)}`}>
                         {credentialStatusLabel(credential)}
                       </span>
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
                       <div className="settings-table-actions">
                         <button
                           aria-label={`${credential.targetApplicantName || credential.targetApplicantCode} 清空密码`}
@@ -167,11 +173,11 @@ export default function SettingsOaApplicantCredentialsSection({
                           <Trash2 aria-hidden="true" size={16} />
                         </button>
                       </div>
-                    </td>
-                  </tr>
+                    </FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </div>
         )}
       </div>

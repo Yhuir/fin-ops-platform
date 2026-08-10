@@ -1,5 +1,13 @@
 import { Trash2 } from "lucide-react";
 
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type { SettingsBankAccountsSectionProps } from "./types";
 
 function normalizeLast4(value: string) {
@@ -77,19 +85,17 @@ export default function SettingsBankAccountsSection({
           </div>
         ) : (
           <div className="settings-native-table-shell settings-native-table-shell--scroll">
-            <table className="settings-native-table" aria-label="银行账户映射">
-              <thead>
-                <tr>
-                  <th scope="col">银行名称</th>
-                  <th scope="col">后四位</th>
-                  <th scope="col">简称</th>
-                  <th scope="col">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+            <FinanceTable ariaLabel="银行账户映射" className="settings-native-table" minWidth={640} scrollMode="contained">
+              <FinanceTableHeader>
+                <FinanceTableColumn id="bank" isRowHeader columnRole="identity">银行名称</FinanceTableColumn>
+                <FinanceTableColumn id="last4" columnRole="account">后四位</FinanceTableColumn>
+                <FinanceTableColumn id="short" columnRole="identity">简称</FinanceTableColumn>
+                <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+              </FinanceTableHeader>
+              <FinanceTableBody>
                 {mappings.map((mapping) => (
-                  <tr key={mapping.id}>
-                    <td>
+                  <FinanceTableRow id={mapping.id} key={mapping.id}>
+                    <FinanceTableCell columnRole="identity">
                       <input
                         aria-label={`${mapping.bankName || mapping.last4} 银行名称`}
                         className="settings-table-input"
@@ -104,8 +110,8 @@ export default function SettingsBankAccountsSection({
                           }));
                         }}
                       />
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="account">
                       <input
                         aria-label={`${mapping.bankName || mapping.last4} 后四位`}
                         className="settings-table-input settings-table-input--code"
@@ -122,8 +128,8 @@ export default function SettingsBankAccountsSection({
                           }));
                         }}
                       />
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">
                       <input
                         aria-label={`${mapping.bankName || mapping.last4} 简称`}
                         className="settings-table-input"
@@ -138,8 +144,8 @@ export default function SettingsBankAccountsSection({
                           }));
                         }}
                       />
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
                       <button
                         aria-label={`${mapping.bankName} 删除`}
                         className="settings-icon-button settings-icon-button--danger"
@@ -149,11 +155,11 @@ export default function SettingsBankAccountsSection({
                       >
                         <Trash2 aria-hidden="true" size={16} />
                       </button>
-                    </td>
-                  </tr>
+                    </FinanceTableCell>
+                  </FinanceTableRow>
                 ))}
-              </tbody>
-            </table>
+              </FinanceTableBody>
+            </FinanceTable>
           </div>
         )}
       </div>

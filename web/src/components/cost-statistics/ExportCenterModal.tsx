@@ -2,6 +2,14 @@ import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
 
 import AppDialog from "../common/AppDialog";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../common/BusinessPeriodPicker";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
@@ -371,34 +379,30 @@ export default function ExportCenterModal({
                 </div>
                 <div className="export-center-file-name">{preview.fileName}</div>
                 <div className="cost-table-shell">
-                  <table aria-label="导出预览表" className="cost-table">
-                    <thead>
-                      <tr>
-                        {preview.columns.map((column) => (
-                          <th key={column}>{column}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <FinanceTable ariaLabel="导出预览表" className="cost-table" minWidth={720}>
+                    <FinanceTableHeader>
+                      {preview.columns.map((column, index) => (
+                        <FinanceTableColumn id={column} isRowHeader={index === 0} key={column} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"}>{column}</FinanceTableColumn>
+                      ))}
+                    </FinanceTableHeader>
+                    <FinanceTableBody>
                       {preview.rows.length === 0 ? (
-                        <tr>
-                          <td className="cost-table-empty" colSpan={preview.columns.length}>
-                            当前条件下没有可导出的成本数据。
-                          </td>
-                        </tr>
+                        <FinanceTableRow id="empty">
+                          {preview.columns.map((column, index) => <FinanceTableCell className={index === 0 ? "cost-table-empty" : undefined} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"} key={column}>{index === 0 ? "当前条件下没有可导出的成本数据。" : "-"}</FinanceTableCell>)}
+                        </FinanceTableRow>
                       ) : (
                         preview.rows.map((row, rowIndex) => (
-                          <tr key={`${rowIndex}-${row.join("-")}`} className="cost-table-row">
+                          <FinanceTableRow id={`${rowIndex}-${row.join("-")}`} key={`${rowIndex}-${row.join("-")}`} className="cost-table-row">
                             {row.map((cell, cellIndex) => (
-                              <td key={`${rowIndex}-${cellIndex}`}>
+                              <FinanceTableCell columnRole={preview.columns[cellIndex]?.includes("金额") ? "amount" : cellIndex === 0 ? "identity" : "description"} key={`${rowIndex}-${cellIndex}`}>
                                 {preview.columns[cellIndex]?.includes("金额") ? formatCostAmount(cell) : cell}
-                              </td>
+                              </FinanceTableCell>
                             ))}
-                          </tr>
+                          </FinanceTableRow>
                         ))
                       )}
-                    </tbody>
-                  </table>
+                    </FinanceTableBody>
+                  </FinanceTable>
                 </div>
               </div>
             ) : (

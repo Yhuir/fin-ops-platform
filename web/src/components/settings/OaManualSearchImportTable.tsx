@@ -1,6 +1,6 @@
 import { Button, Checkbox, Input, ListBox, Select } from "@heroui/react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppChrome } from "../../contexts/AppChromeContext";
 import { formatMoney } from "../../features/money";
@@ -10,6 +10,14 @@ import {
   searchManualOaImports,
 } from "../../features/workbench/api";
 import type { OaManualSearchFilters, OaManualSearchRow } from "../../features/workbench/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 
 const formTypeOptions = [
   { value: "payment_request", label: "支付申请" },
@@ -392,53 +400,45 @@ export default function OaManualSearchImportTable() {
       {error ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{error}</div> : null}
 
       <div className="settings-native-table-shell settings-native-table-shell--scroll">
-        <table className="settings-native-table oa-manual-import__table" aria-label="OA全量搜索导入结果">
-          <thead>
-            <tr>
-              <th scope="col">
+        <FinanceTable ariaLabel="OA全量搜索导入结果" className="settings-native-table oa-manual-import__table" minWidth={1680} scrollMode="contained">
+          <FinanceTableHeader>
+              <FinanceTableColumn id="selection" columnRole="selection">
                 <Checkbox
                   aria-label="选择当前页可导入OA"
                   isDisabled={importablePageRows.length === 0}
                   isIndeterminate={someCurrentPageImportableSelected}
                   isSelected={allCurrentPageImportableSelected}
+                  slot="selection"
                   onChange={toggleCurrentPageImportable}
                 >
                   <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                 </Checkbox>
-              </th>
-              <th scope="col" aria-label="展开明细" />
-              <th scope="col">OA编号</th>
-              <th scope="col">申请人</th>
-              <th scope="col">申请日期</th>
-              <th scope="col">表单类型</th>
-              <th scope="col">流程状态</th>
-              <th scope="col">项目摘要</th>
-              <th scope="col">整单金额</th>
-              <th scope="col">附件总数</th>
-              <th scope="col">可导入发票</th>
-              <th scope="col">未识别附件</th>
-              <th scope="col">导入状态</th>
-              <th scope="col">禁用原因</th>
-              <th scope="col">操作</th>
-            </tr>
-          </thead>
-          <tbody>
+              </FinanceTableColumn>
+              <FinanceTableColumn id="expand" columnRole="action">明细</FinanceTableColumn>
+              <FinanceTableColumn id="oa" isRowHeader columnRole="identity">OA编号</FinanceTableColumn>
+              <FinanceTableColumn id="applicant" columnRole="identity">申请人</FinanceTableColumn>
+              <FinanceTableColumn id="date" columnRole="date">申请日期</FinanceTableColumn>
+              <FinanceTableColumn id="type" columnRole="description">表单类型</FinanceTableColumn>
+              <FinanceTableColumn id="status" columnRole="status">流程状态</FinanceTableColumn>
+              <FinanceTableColumn id="project" columnRole="description">项目摘要</FinanceTableColumn>
+              <FinanceTableColumn id="amount" columnRole="amount">整单金额</FinanceTableColumn>
+              <FinanceTableColumn id="attachments" columnRole="quantity">附件总数</FinanceTableColumn>
+              <FinanceTableColumn id="invoices" columnRole="quantity">可导入发票</FinanceTableColumn>
+              <FinanceTableColumn id="unrecognized" columnRole="quantity">未识别附件</FinanceTableColumn>
+              <FinanceTableColumn id="importStatus" columnRole="status">导入状态</FinanceTableColumn>
+              <FinanceTableColumn id="reason" columnRole="description">禁用原因</FinanceTableColumn>
+              <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {isLoading ? (
-              <tr>
-                <td className="settings-table-empty" colSpan={15}>正在搜索OA</td>
-              </tr>
+              <OaStateRow label="正在搜索OA" />
             ) : rows.length === 0 ? (
-              <tr>
-                <td className="settings-table-empty" colSpan={15}>
-                  {hasSearched ? "没有符合条件的 OA" : "输入条件后点击搜索"}
-                </td>
-              </tr>
+              <OaStateRow label={hasSearched ? "没有符合条件的 OA" : "输入条件后点击搜索"} />
             ) : rows.map((row) => {
               const expanded = expandedRows[row.rowId] === true;
               return (
-                <Fragment key={row.rowId}>
-                  <tr className={selectedRows[row.rowId] ? "settings-native-table-row--selected" : undefined}>
-                    <td>
+                  <FinanceTableRow id={row.rowId} key={row.rowId} className={selectedRows[row.rowId] ? "settings-native-table-row--selected" : undefined}>
+                    <FinanceTableCell columnRole="selection">
                       <Checkbox
                         aria-label={`选择 OA ${oaDisplayLabel(row)}`}
                         isSelected={Boolean(selectedRows[row.rowId])}
@@ -449,8 +449,8 @@ export default function OaManualSearchImportTable() {
                           <Checkbox.Indicator />
                         </Checkbox.Control>
                       </Checkbox>
-                    </td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
                       <Button
                         aria-label={`${expanded ? "收起" : "展开"} OA ${oaDisplayLabel(row)} 明细`}
                         className="settings-icon-button"
@@ -461,31 +461,32 @@ export default function OaManualSearchImportTable() {
                       >
                         {expanded ? <ChevronDown aria-hidden="true" size={16} /> : <ChevronRight aria-hidden="true" size={16} />}
                       </Button>
-                    </td>
-                    <td>{row.oaNo || "-"}</td>
-                    <td>{row.applicant}</td>
-                    <td>{row.applicationDate}</td>
-                    <td>{row.formTypeLabel}</td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{row.oaNo || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{row.applicant}</FinanceTableCell>
+                    <FinanceTableCell columnRole="date">{row.applicationDate}</FinanceTableCell>
+                    <FinanceTableCell columnRole="description">{row.formTypeLabel}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status">
                       <span className={`settings-selected-tag settings-selected-tag--${row.status === "completed" ? "success" : "warning"}`}>
                         {row.statusLabel}
                       </span>
-                    </td>
-                    <td className="oa-manual-import__project">
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="description" className="oa-manual-import__project">
                       <strong>{row.projectName}</strong>
                       <small>{row.reason}</small>
-                    </td>
-                    <td className="settings-table-amount">{formatMoney(row.amount)}</td>
-                    <td className="settings-table-amount">{row.attachmentFileCount}</td>
-                    <td className="settings-table-amount">{row.importableInvoiceCount}</td>
-                    <td className="settings-table-amount">{row.unrecognizedAttachmentCount}</td>
-                    <td>
+                      {expanded ? <OaDetailTable row={row} /> : null}
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="amount" className="settings-table-amount">{formatMoney(row.amount)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.attachmentFileCount}</FinanceTableCell>
+                    <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.importableInvoiceCount}</FinanceTableCell>
+                    <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.unrecognizedAttachmentCount}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status">
                       <span className={`settings-selected-tag settings-selected-tag--${importStatusTone(row)}`}>
                         {importStatusLabel(row)}
                       </span>
-                    </td>
-                    <td>{row.canImport ? "" : row.disabledReason || "不可导入"}</td>
-                    <td>
+                    </FinanceTableCell>
+                    <FinanceTableCell columnRole="description">{row.canImport ? "" : row.disabledReason || "不可导入"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
                       <Button
                         aria-label={`刷新 OA ${oaDisplayLabel(row)} 附件解析`}
                         className="settings-icon-button"
@@ -497,49 +498,12 @@ export default function OaManualSearchImportTable() {
                       >
                         <RefreshCw aria-hidden="true" size={16} />
                       </Button>
-                    </td>
-                  </tr>
-                  {expanded ? (
-                    <tr>
-                      <td className="oa-manual-import__detail-cell" colSpan={15}>
-                        <table className="settings-native-table oa-manual-import__detail-table" aria-label={`OA ${oaDisplayLabel(row)} 明细`}>
-                          <thead>
-                            <tr>
-                              <th scope="col">明细日期</th>
-                              <th scope="col">金额</th>
-                              <th scope="col">费用/付款内容</th>
-                              <th scope="col">项目名称</th>
-                              <th scope="col">申请事由</th>
-                              <th scope="col">明细附件数量</th>
-                              <th scope="col">明细可识别发票</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {row.items.length === 0 ? (
-                              <tr>
-                                <td className="settings-table-empty" colSpan={7}>暂无明细</td>
-                              </tr>
-                            ) : row.items.map((item, index) => (
-                              <tr key={`${row.rowId}-item-${index}`}>
-                                <td>{item.date}</td>
-                                <td className="settings-table-amount">{formatMoney(item.amount)}</td>
-                                <td>{item.content}</td>
-                                <td>{item.projectName}</td>
-                                <td>{item.reason}</td>
-                                <td className="settings-table-amount">{item.attachmentFileCount}</td>
-                                <td className="settings-table-amount">{item.importableInvoiceCount}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
+                    </FinanceTableCell>
+                  </FinanceTableRow>
               );
             })}
-          </tbody>
-        </table>
+          </FinanceTableBody>
+        </FinanceTable>
       </div>
 
       <div className="settings-table-pagination">
@@ -603,5 +567,47 @@ export default function OaManualSearchImportTable() {
         </div>
       </div>
     </section>
+  );
+}
+
+function OaStateRow({ label }: { label: string }) {
+  const roles = ["selection", "action", "identity", "identity", "date", "description", "status", "description", "amount", "quantity", "quantity", "quantity", "status", "description", "action"] as const;
+  return (
+    <FinanceTableRow id="oa-state">
+      {roles.map((role, index) => <FinanceTableCell className={index === 2 ? "settings-table-empty" : undefined} columnRole={role} key={`${role}-${index}`}>{index === 2 ? label : "-"}</FinanceTableCell>)}
+    </FinanceTableRow>
+  );
+}
+
+function OaDetailTable({ row }: { row: OaManualSearchRow }) {
+  return (
+    <div className="oa-manual-import__detail-cell">
+      <FinanceTable ariaLabel={`OA ${oaDisplayLabel(row)} 明细`} className="settings-native-table oa-manual-import__detail-table" minWidth={900}>
+        <FinanceTableHeader>
+          <FinanceTableColumn id="date" isRowHeader columnRole="date">明细日期</FinanceTableColumn>
+          <FinanceTableColumn id="amount" columnRole="amount">金额</FinanceTableColumn>
+          <FinanceTableColumn id="content" columnRole="description">费用/付款内容</FinanceTableColumn>
+          <FinanceTableColumn id="project" columnRole="description">项目名称</FinanceTableColumn>
+          <FinanceTableColumn id="reason" columnRole="description">申请事由</FinanceTableColumn>
+          <FinanceTableColumn id="attachments" columnRole="quantity">明细附件数量</FinanceTableColumn>
+          <FinanceTableColumn id="invoices" columnRole="quantity">明细可识别发票</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {row.items.length === 0 ? (
+            <FinanceTableRow id="empty"><FinanceTableCell columnRole="date">暂无明细</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="quantity">-</FinanceTableCell><FinanceTableCell columnRole="quantity">-</FinanceTableCell></FinanceTableRow>
+          ) : row.items.map((item, index) => (
+            <FinanceTableRow id={`${row.rowId}-item-${index}`} key={`${row.rowId}-item-${index}`}>
+              <FinanceTableCell columnRole="date">{item.date}</FinanceTableCell>
+              <FinanceTableCell className="settings-table-amount" columnRole="amount">{formatMoney(item.amount)}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{item.content}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{item.projectName}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{item.reason}</FinanceTableCell>
+              <FinanceTableCell className="settings-table-amount" columnRole="quantity">{item.attachmentFileCount}</FinanceTableCell>
+              <FinanceTableCell className="settings-table-amount" columnRole="quantity">{item.importableInvoiceCount}</FinanceTableCell>
+            </FinanceTableRow>
+          ))}
+        </FinanceTableBody>
+      </FinanceTable>
+    </div>
   );
 }

@@ -2242,8 +2242,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
-    const bankMappingTable = within(settingsPage).getByRole("table", { name: "银行账户映射" });
-    const bankMappingRow = within(bankMappingTable).getByRole("row", { name: "建设银行 8826 建行" });
+    const bankMappingTable = within(settingsPage).getByRole("grid", { name: "银行账户映射" });
+    const bankMappingRow = within(bankMappingTable).getByRole("row", { name: "建设银行" });
     const [bankNameInput, last4Input, shortNameInput] = within(bankMappingRow).getAllByRole("textbox");
     await user.clear(bankNameInput);
     await user.type(bankNameInput, "中国建设银行股份有限公司");

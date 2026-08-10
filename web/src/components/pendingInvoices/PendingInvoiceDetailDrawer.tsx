@@ -8,6 +8,14 @@ import type {
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceOaPrintLayout,
 } from "../../features/pendingInvoices/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceDetailDrawerProps = {
@@ -175,40 +183,34 @@ function OaPrintLayout({ layout }: { layout: PendingInvoiceOaPrintLayout }) {
   return (
     <section className="pending-invoice-print-layout">
       <h2 className="pending-invoice-print-layout__title">{layout.formTitle}</h2>
-      <table className="pending-invoice-print-table">
-        <tbody>
+      <FinanceTable ariaLabel={`${layout.formTitle}明细`} className="pending-invoice-print-table" minWidth={520}>
+        <FinanceTableHeader>
+          <FinanceTableColumn id="field" isRowHeader columnRole="identity">字段</FinanceTableColumn>
+          <FinanceTableColumn id="value" columnRole="description">内容</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
           {fields.map((field) => (
-            <tr key={field.label}>
-              <th scope="row">{field.label}</th>
-              <td>{formatValue(field.value)}</td>
-            </tr>
+            <FinanceTableRow id={field.label} key={field.label}>
+              <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
+              <FinanceTableCell columnRole="description">{formatValue(field.value)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-          {layout.approvals.length > 0 ? (
-            <>
-              <tr>
-                <td className="pending-invoice-print-table__section" colSpan={2}>
-                  申请提交/审批意见及评论
-                </td>
-              </tr>
-              <tr>
-                <td className="pending-invoice-print-table__approval-cell" colSpan={2}>
-                  <div className="pending-invoice-print-approvals">
-                    {layout.approvals.map((approval, index) => (
-                      <section className="pending-invoice-print-approval" key={`${approval.title}-${index}`}>
-                        <h3>{approval.title}</h3>
-                        {approval.lines.map((line) => (
-                          <p key={line}>{line}</p>
-                        ))}
-                        {approval.signature ? <p className="pending-invoice-print-approval__signature">{approval.signature}</p> : null}
-                      </section>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            </>
-          ) : null}
-        </tbody>
-      </table>
+        </FinanceTableBody>
+      </FinanceTable>
+      {layout.approvals.length > 0 ? (
+        <section className="pending-invoice-print-table__approval-cell">
+          <h3 className="pending-invoice-print-table__section">申请提交/审批意见及评论</h3>
+          <div className="pending-invoice-print-approvals">
+            {layout.approvals.map((approval, index) => (
+              <section className="pending-invoice-print-approval" key={`${approval.title}-${index}`}>
+                <h3>{approval.title}</h3>
+                {approval.lines.map((line) => <p key={line}>{line}</p>)}
+                {approval.signature ? <p className="pending-invoice-print-approval__signature">{approval.signature}</p> : null}
+              </section>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

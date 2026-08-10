@@ -1,6 +1,14 @@
 import { CheckCircle, RotateCcw, Trash2 } from "lucide-react";
 
 import type { WorkbenchProjectSetting } from "../../features/workbench/types";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import type { SettingsProjectsSectionProps } from "./types";
 
 function projectSourceLabel(source: WorkbenchProjectSetting["source"]) {
@@ -31,35 +39,34 @@ function ProjectTable({
         <span>{projects.length} 个</span>
       </div>
       <div className="settings-native-table-shell">
-        <table className="settings-native-table" aria-label={label}>
-          <thead>
-            <tr>
-              <th scope="col">项目名称</th>
-              <th scope="col">项目编码</th>
-              <th scope="col">来源</th>
-              <th scope="col">操作</th>
-            </tr>
-          </thead>
-          <tbody>
+        <FinanceTable ariaLabel={label} className="settings-native-table" minWidth={560}>
+          <FinanceTableHeader>
+            <FinanceTableColumn id="name" isRowHeader columnRole="identity">项目名称</FinanceTableColumn>
+            <FinanceTableColumn id="code" columnRole="identity">项目编码</FinanceTableColumn>
+            <FinanceTableColumn id="source" columnRole="status">来源</FinanceTableColumn>
+            <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {projects.length === 0 ? (
-              <tr>
-                <td className="settings-table-empty" colSpan={4}>
-                  当前没有{label}。
-                </td>
-              </tr>
+              <FinanceTableRow id="empty">
+                <FinanceTableCell className="settings-table-empty" columnRole="identity">当前没有{label}。</FinanceTableCell>
+                <FinanceTableCell columnRole="identity">-</FinanceTableCell>
+                <FinanceTableCell columnRole="status">-</FinanceTableCell>
+                <FinanceTableCell columnRole="action">-</FinanceTableCell>
+              </FinanceTableRow>
             ) : (
               projects.map((project) => (
-                <tr key={project.id}>
-                  <td>
+                <FinanceTableRow id={project.id} key={project.id}>
+                  <FinanceTableCell columnRole="identity">
                     <span className="settings-table-primary">{project.projectName}</span>
-                  </td>
-                  <td className="settings-table-code">{project.projectCode}</td>
-                  <td>
+                  </FinanceTableCell>
+                  <FinanceTableCell className="settings-table-code" columnRole="identity">{project.projectCode}</FinanceTableCell>
+                  <FinanceTableCell columnRole="status">
                     <span className={`settings-source-tag settings-source-tag--${project.source}`}>
                       {projectSourceLabel(project.source)}
                     </span>
-                  </td>
-                  <td>
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="action">
                     <div className="settings-table-actions">
                       <button
                         aria-label={`${project.projectName} ${isCompleted ? "移回进行中" : "标记完成"}`}
@@ -82,12 +89,12 @@ function ProjectTable({
                         <Trash2 aria-hidden="true" size={16} />
                       </button>
                     </div>
-                  </td>
-                </tr>
+                  </FinanceTableCell>
+                </FinanceTableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </FinanceTableBody>
+        </FinanceTable>
       </div>
     </div>
   );

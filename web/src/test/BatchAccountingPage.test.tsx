@@ -394,7 +394,7 @@ describe("BatchAccountingPage", () => {
     });
     const forbiddenLegacySurfaces = batchAccountingSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|IconButton|Tooltip/.test(source)
+      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|TextField|DialogTitle|DialogContent|DialogActions|Snackbar|IconButton|Tooltip/.test(source)
         ? [path]
         : [];
     });
@@ -445,13 +445,13 @@ describe("BatchAccountingPage", () => {
     const bankRowRule = cssRule(styles, ".batch-accounting-bank-row");
     const bankRowMainRule = cssRule(styles, ".batch-accounting-bank-row__main");
     const bankRowTitleRule = cssRule(styles, ".batch-accounting-bank-row__title");
+    const bankListRule = cssRule(styles, ".batch-accounting-bank-list");
     const selectedBankRowRule = cssRule(styles, ".batch-accounting-bank-row--selected,\\n.batch-accounting-bank-row[aria-pressed=\"true\"]");
     const tagRule = cssRule(styles, ".batch-accounting-tag,\\n.batch-accounting-summary-tag");
     const mismatchRule = cssRule(styles, ".batch-accounting-mismatch-warning__trigger");
     const oaToolbarRule = cssRule(styles, ".batch-accounting-oa-panel__toolbar");
-    const tableWrapRule = cssRule(styles, ".batch-accounting-oa-table-wrap");
-    const tableCellRule = cssRule(styles, ".batch-accounting-oa-table th,\\n.batch-accounting-oa-table td");
-    const tableHeadRule = cssRule(styles, ".batch-accounting-oa-table th");
+    const oaPanelRule = cssRule(styles, ".batch-accounting-oa-panel");
+    const oaTableRule = cssRule(styles, ".batch-accounting-oa-table");
     const amountRule = cssRule(styles, ".batch-accounting-oa-table .batch-accounting-oa-table__amount");
     const checkboxRule = cssRule(styles, ".batch-accounting-checkbox");
     const expandToggleRule = cssRule(styles, ".batch-accounting-expandable__toggle");
@@ -467,18 +467,23 @@ describe("BatchAccountingPage", () => {
     expect(paginationButtonRule).toContain("var(--motion-fast)");
     expect(bankRowRule).toContain("var(--motion-fast)");
     expect(mismatchRule).toContain("var(--motion-fast)");
-    expect(tableCellRule).toContain("var(--motion-fast)");
     expect(checkboxRule).toContain("var(--motion-fast)");
     expect(expandToggleRule).toContain("var(--motion-fast)");
     expect(feedbackCloseRule).toContain("var(--motion-fast)");
 
     expect(layoutRule).toContain("minmax(360px, clamp(360px, 32vw, 520px))");
+    expect(layoutRule).toContain("height: clamp(520px, calc(100dvh - 190px), 720px)");
+    expect(pageSource).toContain("<FinanceTable");
+    expect(pageSource).toContain('scrollMode="contained"');
+    expect(pageSource).not.toContain("<table");
     expect(yearFieldRule).toContain("flex: 0 0 128px");
     expect(paginationRule).toContain("flex: 0 0 auto");
     expect(bankHeaderRule).toContain("flex-wrap: wrap");
     expect(bankHeaderTitleRule).toContain("flex: 1 1 220px");
     expect(bankRowMainRule).toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(bankRowTitleRule).toContain("text-overflow: ellipsis");
+    expect(bankListRule).toContain("overflow: auto");
+    expect(bankListRule).toContain("overscroll-behavior: contain");
     expect(styles).toContain("@media (max-width: 640px)");
     expect(styles).toContain(".batch-accounting-pagination {\n    justify-content: space-between;");
     expect(bankRowRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
@@ -489,14 +494,13 @@ describe("BatchAccountingPage", () => {
     expect(oaToolbarRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
     expect(paginationButtonRule).toContain("width: 30px");
     expect(paginationButtonRule).toContain("height: 30px");
-    expect(tableWrapRule).toContain("max-height: calc(100vh - 252px)");
-    expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(oaPanelRule).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(oaTableRule).toContain("height: 100%");
     expect(amountRule).toContain("text-align: right");
     expect(amountRule).toContain("font-variant-numeric: tabular-nums");
     expect(tagRule).not.toContain("min-height: 22px");
     expect(buttonRule).not.toContain("120ms ease");
     expect(bankRowRule).not.toContain("120ms ease");
-    expect(tableCellRule).not.toContain("120ms ease");
   });
 
   test("renders controls, bank list, and selectable OA table for unsubmitted rows", async () => {
@@ -538,8 +542,8 @@ describe("BatchAccountingPage", () => {
     expect(within(bankList).queryByText("2026-01-07T15:54:00+08")).not.toBeInTheDocument();
     expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
-    const oaTable = screen.getByRole("table", { name: "可关联OA项" });
-    expect(within(oaTable).getByRole("checkbox", { name: "选择 刘晨 2026-01-06" })).toBeInTheDocument();
+    const oaTable = screen.getByRole("grid", { name: "可关联OA项" });
+    expect(within(oaTable).getByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ })).toBeInTheDocument();
     expect(within(oaTable).getByText("刘晨")).toBeInTheDocument();
     expect(within(oaTable).getByText("2026-01-06")).toBeInTheDocument();
     expect(within(oaTable).getByText("品牌广告投放；市场活动项目")).toBeInTheDocument();
@@ -739,7 +743,7 @@ describe("BatchAccountingPage", () => {
       await screen.findByRole("heading", { name: "日常报销批量账务管理" });
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
 
-      await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+      await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
       expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
       expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
       expect(screen.getByText("差额 500.00")).toBeInTheDocument();
@@ -777,7 +781,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     const noteInput = screen.getByLabelText("差额说明");
     expect(noteInput.tagName).toBe("INPUT");
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
@@ -808,12 +812,12 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
     await user.click(screen.getByRole("button", { name: /批量账务集中处理.*800.00.*2026-01-08 09:00:00.*支出.*招行 1888/ }));
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
 
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
@@ -825,15 +829,15 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
     await user.click(screen.getByRole("radio", { name: "已提交 1" }));
-    await screen.findByRole("table", { name: "已关联OA项" });
+    await screen.findByRole("grid", { name: "已关联OA项" });
     await user.click(screen.getByRole("radio", { name: /^未提交/ }));
-    await screen.findByRole("table", { name: "可关联OA项" });
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await screen.findByRole("grid", { name: "可关联OA项" });
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
 
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
@@ -845,7 +849,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.queryByLabelText("差额说明")).not.toBeInTheDocument();
@@ -883,7 +887,7 @@ describe("BatchAccountingPage", () => {
 
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
 
@@ -906,11 +910,11 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
 
-    const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
+    const oaTable = await screen.findByRole("grid", { name: "可关联OA项" });
     expect(within(oaTable).getByText("陈雄兵")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
@@ -958,7 +962,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择 刘晨 2026-01-06/ }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     const pageReadsBeforeSubmit = fetchMock.mock.calls.filter(([input, init]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -984,7 +988,7 @@ describe("BatchAccountingPage", () => {
     const fetchMock = installFetchMock();
     renderPage();
 
-    const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
+    const oaTable = await screen.findByRole("grid", { name: "可关联OA项" });
     expect(await within(oaTable).findByText("刘晨")).toBeInTheDocument();
     expect(within(oaTable).getByText("王青")).toBeInTheDocument();
 
@@ -1013,7 +1017,7 @@ describe("BatchAccountingPage", () => {
       await user.click(await screen.findByRole("radio", { name: "已提交 1" }));
 
       expect(await screen.findByRole("button", { name: /批量账务集中处理.*900.00.*2026-02-10 12:30:00.*支出.*建行 8106/ })).toBeInTheDocument();
-      const associatedTable = screen.getByRole("table", { name: "已关联OA项" });
+      const associatedTable = screen.getByRole("grid", { name: "已关联OA项" });
       expect(within(associatedTable).queryByRole("checkbox")).not.toBeInTheDocument();
       expect(within(associatedTable).getByText("陈敏")).toBeInTheDocument();
       expect(within(associatedTable).getByText("2月行政耗材日常报销")).toBeInTheDocument();

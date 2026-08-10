@@ -9,14 +9,23 @@ import {
   UploadCloud,
   XCircle,
 } from "lucide-react";
-import { Button, Chip, Disclosure, DisclosureGroup, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Checkbox, Chip, Disclosure, DisclosureGroup, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import type { Key } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
 import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
-import { FinanceTablePagination } from "../components/common/FinanceTable";
+import {
+  EmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTablePagination,
+  FinanceTableRow,
+} from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
@@ -1782,58 +1791,39 @@ export default function EtcTicketManagementPage() {
     const totalTaxAmount = sumInvoiceMoney(rows, "taxAmount");
 
     return (
-      <div className="etc-invoice-table-container">
-        <table
-          key={tableKey}
-          aria-label={ariaLabel}
-          className="etc-invoice-table"
-        >
-          <thead>
-            <tr>
-              <th className="etc-invoice-number-column">发票号码</th>
-              <th className="etc-invoice-issue-column">开票日期</th>
-              <th className="etc-invoice-passage-column">通行日期</th>
-              <th className="etc-invoice-plate-column">车牌</th>
-              <th className="etc-invoice-seller-column">销方</th>
-              <th className="etc-invoice-money-column">
+      <FinanceTable ariaLabel={ariaLabel} className="etc-invoice-table etc-invoice-table-container" key={tableKey} minWidth={920} scrollMode="contained">
+          <FinanceTableHeader>
+              <FinanceTableColumn className="etc-invoice-number-column" columnRole="identity" isRowHeader>发票号码</FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-issue-column" columnRole="date">开票日期</FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-passage-column" columnRole="date">通行日期</FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-plate-column" columnRole="identity">车牌</FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-seller-column" columnRole="identity">销方</FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-money-column" columnRole="amount">
                 <span className="etc-invoice-header-total">
                   <span>金额</span>
                   <span>{totalAmount}</span>
                 </span>
-              </th>
-              <th className="etc-invoice-tax-column">
+              </FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-tax-column" columnRole="amount">
                 <span className="etc-invoice-header-total">
                   <span>税额</span>
                   <span>{totalTaxAmount}</span>
                 </span>
-              </th>
-              <th className="etc-invoice-attachment-column">附件状态</th>
-            </tr>
-          </thead>
-          <tbody>
+              </FinanceTableColumn>
+              <FinanceTableColumn className="etc-invoice-attachment-column" columnRole="status">附件状态</FinanceTableColumn>
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="etc-invoice-table-empty">
-                  {loadingText || emptyText}
-                </td>
-              </tr>
+              <FinanceTableRow id={`${tableKey}-empty`}><FinanceTableCell className="etc-invoice-table-empty" columnRole="identity">{loadingText || emptyText}</FinanceTableCell>{Array.from({ length: 7 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}</FinanceTableRow>
             ) : (
               rows.map((invoice) => (
-                <tr key={invoice.id}>
-                  <td>{invoice.invoiceNumber}</td>
-                  <td>{invoice.issueDate}</td>
-                  <td>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</td>
-                  <td>{invoice.plateNumber || "-"}</td>
-                  <td>{invoice.sellerName || "-"}</td>
-                  <td className="etc-invoice-money-cell">{formatMoney(invoice.totalAmount)}</td>
-                  <td className="etc-invoice-money-cell">{formatMoney(invoice.taxAmount)}</td>
-                  <td>{attachmentLabel(invoice)}</td>
-                </tr>
+                <FinanceTableRow id={invoice.id} key={invoice.id}>
+                  <FinanceTableCell columnRole="identity">{invoice.invoiceNumber}</FinanceTableCell><FinanceTableCell columnRole="date">{invoice.issueDate}</FinanceTableCell><FinanceTableCell columnRole="date">{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.plateNumber || "-"}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{formatMoney(invoice.totalAmount)}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{formatMoney(invoice.taxAmount)}</FinanceTableCell><FinanceTableCell columnRole="status">{attachmentLabel(invoice)}</FinanceTableCell>
+                </FinanceTableRow>
               ))
             )}
-          </tbody>
-        </table>
-      </div>
+          </FinanceTableBody>
+      </FinanceTable>
     );
   };
 
@@ -2452,89 +2442,77 @@ export default function EtcTicketManagementPage() {
                                   刷新匹配
                                 </button>
                               </div>
-                              <div className="etc-reconciliation-table-container">
-                                <table
-                                  aria-label="ETC双侧核对明细"
-                                  className="etc-reconciliation-table"
-                                >
-                                  <thead>
-                                    <tr>
-                                      <th className="etc-reconciliation-select-column" aria-label="选择列" />
-                                      <th className="etc-reconciliation-table-side-heading" colSpan={3}>
-                                        信用卡侧
-                                      </th>
-                                      <th className="etc-reconciliation-table-side-heading etc-reconciliation-divider" colSpan={2}>
-                                        票根/补充凭证侧
-                                      </th>
-                                    </tr>
-                                    <tr>
-                                      <th className="etc-reconciliation-select-column">选择</th>
-                                      <th className="etc-reconciliation-date-column">交易日</th>
-                                      <th className="etc-reconciliation-description-column">交易描述</th>
-                                      <th className="etc-reconciliation-amount-column">金额</th>
-                                      <th className="etc-reconciliation-time-column etc-reconciliation-divider">交易时间</th>
-                                      <th className="etc-reconciliation-evidence-column">金额 / 车牌</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
+                              <FinanceTable ariaLabel="ETC双侧核对明细" className="etc-reconciliation-table etc-reconciliation-table-container" minWidth={980} scrollMode="contained">
+                                  <FinanceTableHeader>
+                                      <FinanceTableColumn className="etc-reconciliation-select-column" columnRole="selection">选择</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-date-column" columnRole="date">信用卡侧 / 交易日</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-description-column" columnRole="description" isRowHeader>信用卡侧 / 交易描述</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-amount-column" columnRole="amount">信用卡侧 / 金额</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-time-column etc-reconciliation-divider" columnRole="date">票根/补充凭证侧 / 交易时间</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-evidence-column" columnRole="description">票根/补充凭证侧 / 金额 / 车牌</FinanceTableColumn>
+                                  </FinanceTableHeader>
+                                  <FinanceTableBody>
                                     {reconciliationRows.map((row) => (
-                                      <tr
+                                      <FinanceTableRow
                                         key={row.id}
                                         className="etc-reconciliation-table-row"
-                                        data-testid={`etc-reconciliation-row-${row.id}`}
-                                        data-highlight={row.highlight || undefined}
+                                        dataHighlight={row.highlight || undefined}
+                                        dataTestId={`etc-reconciliation-row-${row.id}`}
+                                        id={row.id}
                                       >
-                                        <td className="etc-reconciliation-select-column">
-                                          <input
-                                            type="checkbox"
-                                            checked={selectedReconciliationRowIds.has(row.id)}
-                                            onChange={() => handleToggleReconciliationRow(row.id)}
-                                            onClick={(event) => event.stopPropagation()}
+                                        <FinanceTableCell className="etc-reconciliation-select-column" columnRole="selection">
+                                          <Checkbox
                                             aria-label={`选择核对行 ${row.card?.description || row.evidence?.plateOrMerchant || "未命名记录"}`}
+                                            isSelected={selectedReconciliationRowIds.has(row.id)}
+                                            onChange={() => handleToggleReconciliationRow(row.id)}
                                           />
-                                        </td>
-                                        <td
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
                                           className="etc-reconciliation-card-cell etc-reconciliation-date-column"
-                                          data-highlight={row.cardHighlight || undefined}
+                                          columnRole="date"
+                                          dataHighlight={row.cardHighlight || undefined}
                                           onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                         >
                                           {renderCardDateCell(row.card)}
-                                        </td>
-                                        <td
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
                                           className="etc-reconciliation-card-cell etc-reconciliation-description-column"
-                                          data-testid={row.card ? `etc-reconciliation-card-cell-${row.card.itemId}` : undefined}
-                                          data-highlight={row.cardHighlight || undefined}
+                                          columnRole="description"
+                                          dataHighlight={row.cardHighlight || undefined}
+                                          dataTestId={row.card ? `etc-reconciliation-card-cell-${row.card.itemId}` : undefined}
                                           onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                         >
                                           {renderCardDescriptionCell(row.card)}
-                                        </td>
-                                        <td
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
                                           className="etc-reconciliation-card-cell etc-reconciliation-amount-column"
-                                          data-highlight={row.cardHighlight || undefined}
+                                          columnRole="amount"
+                                          dataHighlight={row.cardHighlight || undefined}
                                           onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                         >
                                           {renderCardAmountCell(row.card)}
-                                        </td>
-                                        <td
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
                                           className="etc-reconciliation-evidence-side-cell etc-reconciliation-time-column etc-reconciliation-divider"
-                                          data-highlight={row.evidenceHighlight || undefined}
+                                          columnRole="date"
+                                          dataHighlight={row.evidenceHighlight || undefined}
                                           onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                         >
                                           {renderEvidenceTimeCell(row.evidence)}
-                                        </td>
-                                        <td
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
                                           className="etc-reconciliation-evidence-side-cell etc-reconciliation-evidence-column"
-                                          data-testid={row.evidence ? `etc-reconciliation-evidence-cell-${row.evidence.id}` : undefined}
-                                          data-highlight={row.evidenceHighlight || undefined}
+                                          columnRole="description"
+                                          dataHighlight={row.evidenceHighlight || undefined}
+                                          dataTestId={row.evidence ? `etc-reconciliation-evidence-cell-${row.evidence.id}` : undefined}
                                           onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                         >
                                           {renderEvidenceSummaryCell(row.evidence, row.card)}
-                                        </td>
-                                      </tr>
+                                        </FinanceTableCell>
+                                      </FinanceTableRow>
                                     ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                                  </FinanceTableBody>
+                              </FinanceTable>
                             </div>
                           </EtcDisclosureSection>
 

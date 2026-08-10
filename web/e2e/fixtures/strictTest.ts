@@ -128,4 +128,12 @@ export const test = base.extend<{ browserDiagnostics: BrowserDiagnostic[] }>({
   }, { auto: true }],
 });
 
+export async function setCheckbox(checkbox: Locator, selected = true) {
+  if (await checkbox.isChecked() === selected) {
+    return;
+  }
+  const label = checkbox.locator("xpath=ancestor::label[1]");
+  await (await label.count() ? label : checkbox).click();
+}
+
 export { expect, type Locator, type Page, type Request };

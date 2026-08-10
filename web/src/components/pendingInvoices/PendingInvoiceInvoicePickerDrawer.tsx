@@ -9,6 +9,14 @@ import type {
   PendingInvoiceCandidatesResponse,
 } from "../../features/pendingInvoices/types";
 import { formatMoney } from "../../features/money";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceInvoicePickerDrawerProps = {
@@ -289,26 +297,22 @@ export default function PendingInvoiceInvoicePickerDrawer({
         <Button className="pending-invoices-button" isDisabled={loading || busy} onPress={() => reloadCandidates()} size="sm" variant="secondary">搜索</Button>
       </section>
       <section className="pending-invoice-panel">
-        <table aria-label="发票候选" className="pending-invoice-simple-table">
-          <thead>
-            <tr>
-              <th scope="col">选择</th>
-              <th scope="col">发票号码</th>
-              <th scope="col">销方</th>
-              <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
-              <th scope="col">流水关联</th>
-              <th scope="col">状态</th>
-            </tr>
-          </thead>
-          <tbody>
+        <FinanceTable ariaLabel="发票候选" className="pending-invoice-simple-table" minWidth={820}>
+          <FinanceTableHeader>
+            <FinanceTableColumn id="selection" columnRole="selection">选择</FinanceTableColumn>
+            <FinanceTableColumn id="number" isRowHeader columnRole="identity">发票号码</FinanceTableColumn>
+            <FinanceTableColumn id="seller" columnRole="identity">销方</FinanceTableColumn>
+            <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
+            <FinanceTableColumn id="relation" columnRole="status">流水关联</FinanceTableColumn>
+            <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
+          </FinanceTableHeader>
+          <FinanceTableBody>
             {payload?.rows.length === 0 ? (
-              <tr>
-                <td colSpan={6}>暂无候选发票。</td>
-              </tr>
+              <FinanceTableRow id="empty"><FinanceTableCell columnRole="selection">-</FinanceTableCell><FinanceTableCell columnRole="identity">暂无候选发票。</FinanceTableCell><FinanceTableCell columnRole="identity">-</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
             ) : null}
             {payload?.rows.map((candidate) => (
-              <tr key={candidate.invoiceId || candidate.id}>
-                <td>
+              <FinanceTableRow id={candidate.invoiceId || candidate.id} key={candidate.invoiceId || candidate.id}>
+                <FinanceTableCell columnRole="selection">
                   <Checkbox
                     aria-label={`选择发票 ${invoiceNumber(candidate)}`}
                     className="pending-invoice-candidate-select"
@@ -318,40 +322,40 @@ export default function PendingInvoiceInvoicePickerDrawer({
                   >
                     <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                   </Checkbox>
-                </td>
-                <td>
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="identity">
                   <span className="pending-invoice-table-stack">
                     <strong>{invoiceNumber(candidate)}</strong>
                     <span>{candidate.issueDate || "-"}</span>
                   </span>
-                </td>
-                <td>
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="identity">
                   <span className="pending-invoice-table-stack">
                     <span>{candidate.sellerName || "-"}</span>
                     <span>{candidate.sellerTaxNo || "-"}</span>
                   </span>
-                </td>
-                <td className="pending-invoice-simple-table__amount">{formatMoney(candidate.totalWithTax)}</td>
-                <td>
+                </FinanceTableCell>
+                <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(candidate.totalWithTax)}</FinanceTableCell>
+                <FinanceTableCell columnRole="status">
                   <span className="pending-invoice-table-stack">
                     <span className={`pending-invoice-status-tag pending-invoice-status-tag--${bankRelationStatusTone(candidate.bankRelationStatus)}`}>
                       {bankRelationStatusLabel(candidate.bankRelationStatus)}
                     </span>
                     {linkedBankTransactionText(candidate) ? <span>{linkedBankTransactionText(candidate)}</span> : null}
                   </span>
-                </td>
-                <td>
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="status">
                   <span className="pending-invoice-table-stack">
                     <span className={`pending-invoice-status-tag pending-invoice-status-tag--${candidateStatusTone(candidate.candidateStatus)}`}>
                       {candidateStatusLabel(candidate.candidateStatus)}
                     </span>
                     {candidate.conflictReason ? <span>{candidate.conflictReason}</span> : null}
                   </span>
-                </td>
-              </tr>
+                </FinanceTableCell>
+              </FinanceTableRow>
             ))}
-          </tbody>
-        </table>
+          </FinanceTableBody>
+        </FinanceTable>
         <div className="pending-invoice-picker-pagination">
           <div className="pending-invoice-picker-pagination__size">
             <span>每页发票</span>

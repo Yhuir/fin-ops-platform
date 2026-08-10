@@ -527,7 +527,7 @@ describe("BankFlowRuleBatchPage", () => {
     });
     const forbiddenLegacySurfaces = bankFlowRuleBatchSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /RefreshOutlinedIcon|CloseIcon|TextField|TableCell|TableRow|TableHead|TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
+      return /RefreshOutlinedIcon|CloseIcon|TextField|(?<!Finance)TableCell|(?<!Finance)TableRow|(?<!Finance)TableHead|(?<!Finance)TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
         ? [path]
         : [];
     });
@@ -592,7 +592,7 @@ describe("BankFlowRuleBatchPage", () => {
     const bankTagsRule = cssRule(styles, ".bank-flow-rule-batches-bank-tags,\\n.bank-flow-rule-batches-relation-cell");
     const bankDetailTagRule = cssRule(styles, ".bank-flow-rule-batches-tag--bank-detail");
     const drawerGridWrapRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid-wrap");
-    const drawerGridRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid");
+    const drawerGridRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid .finance-table__content");
     const drawerDirectionColRule = cssRule(styles, ".bank-flow-rule-batches-drawer__direction-col");
     const drawerGridCellRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid th,\\n.bank-flow-rule-batches-drawer__grid td");
     const drawerCheckColRule = cssRule(styles, ".bank-flow-rule-batches-drawer__check-col");
@@ -618,6 +618,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(transactionRule).toContain("border-radius: var(--fp-radius-sm)");
     expect(transactionListRule).toContain("max-height: calc(100vh - 214px)");
     expect(selectedBatchRule).toContain("inset 3px 0 0 var(--fp-primary)");
+    expect(tableWrapRule).toContain("overflow: hidden");
     expect(tableWrapRule).toContain("border-radius: var(--fp-radius-sm)");
     expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(amountRule).toContain("text-align: right");
@@ -625,9 +626,9 @@ describe("BankFlowRuleBatchPage", () => {
     expect(tagRule).toContain("background: var(--fp-surface-muted)");
     expect(bankTagsRule).toContain("flex-wrap: wrap");
     expect(bankDetailTagRule).toContain("var(--fp-primary)");
-    expect(drawerGridWrapRule).toContain("overflow: auto");
-    expect(drawerGridRule).toContain("border-collapse: collapse");
-    expect(drawerGridRule).toContain("min-width: 620px");
+    expect(drawerGridWrapRule).toContain("overflow: hidden");
+    expect(pageSource).toContain('minWidth={720} scrollMode="contained"');
+    expect(drawerGridRule).toContain("background: var(--fp-surface)");
     expect(drawerDirectionColRule).toContain("width: 76px");
     expect(drawerGridCellRule).toContain("white-space: nowrap");
     expect(drawerCheckColRule).toContain("width: 64px");
@@ -690,7 +691,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(bankTagGroup).getByText("费用")).toBeInTheDocument();
     expect(within(bankTagGroup).getByText("手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
-    expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" })).toBeInTheDocument();
+    expect(within(transactionRegion).getByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ })).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
   });
@@ -736,7 +737,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
     expect(rowCheckbox).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "流水规则标签管理" }));
@@ -869,7 +870,7 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ }));
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "福利 1批 · 5条" }));
@@ -988,21 +989,17 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
     const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
 
-    expect(within(drawer).getAllByText("支出")).toHaveLength(1);
+    expect(within(drawer).getAllByText("支出")).toHaveLength(3);
     expect(within(drawer).getAllByText("收入")).toHaveLength(1);
-    expect(within(drawer).getAllByText("费用")).toHaveLength(1);
-    expect(within(drawer).getByText("支出").closest("td")).toHaveAttribute("rowspan", "3");
-    expect(within(drawer).getByText("收入").closest("td")).toHaveAttribute("rowspan", "1");
-    expect(within(drawer).getByText("费用").closest("td")).toHaveAttribute("rowspan", "2");
+    expect(within(drawer).getAllByText("费用")).toHaveLength(2);
+    expect(within(drawer).getAllByRole("gridcell", { name: "支出" }).every((cell) => !cell.hasAttribute("rowspan"))).toBe(true);
 
     const feeRow = within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" }).closest("tr") as HTMLTableRowElement;
     const repairRow = within(drawer).getByRole("checkbox", { name: "费用 / 修理费 需要OA" }).closest("tr") as HTMLTableRowElement;
     const salaryRow = within(drawer).getByRole("checkbox", { name: "人工成本 / 工资 需要OA" }).closest("tr") as HTMLTableRowElement;
-    const feeBackground = feeRow.style.getPropertyValue("--bank-flow-rule-batches-drawer-group-bg");
-
-    expect(feeBackground).toBeTruthy();
-    expect(repairRow.style.getPropertyValue("--bank-flow-rule-batches-drawer-group-bg")).toBe(feeBackground);
-    expect(salaryRow.style.getPropertyValue("--bank-flow-rule-batches-drawer-group-bg")).not.toBe(feeBackground);
+    expect(feeRow).toHaveTextContent("费用");
+    expect(repairRow).toHaveTextContent("费用");
+    expect(salaryRow).toHaveTextContent("人工成本");
   });
 
   test("opening tag drawer refetches the latest bank flow rule tag selection", async () => {
@@ -1089,7 +1086,7 @@ describe("BankFlowRuleBatchPage", () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderPage();
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ }));
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
     await waitFor(() => {
@@ -1158,7 +1155,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     renderPage();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ }));
     const listRequestsBeforeSubmit = listRequestCount;
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
@@ -1201,7 +1198,7 @@ describe("BankFlowRuleBatchPage", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
 
-    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
+    const rowCheckbox = await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
     await user.click(rowCheckbox);
     const listRequestsBeforeSubmit = listRequestCount;
     await user.click(screen.getByRole("button", { name: "提交批次" }));
@@ -1226,7 +1223,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     renderPage();
 
-    const rowCheckbox = await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
+    const rowCheckbox = await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
     expect(rowCheckbox).toBeEnabled();
 
     await user.click(rowCheckbox);
@@ -1258,7 +1255,7 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
     expect(rowCheckbox).toBeEnabled();
 
     await user.click(rowCheckbox);
@@ -1306,7 +1303,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(transactionRegion).queryByText("多账户8106")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("需复核")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("源流水或分类已变化，需要复核后处理。")).not.toBeInTheDocument();
-    expect(within(transactionRegion).queryByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" })).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ })).not.toBeInTheDocument();
   });
 
   test("prevents selecting rows from another bank before clearing the current bank region", async () => {
@@ -1354,14 +1351,14 @@ describe("BankFlowRuleBatchPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ }));
     await user.click(await screen.findByRole("button", { name: "查看中国银行7001流水" }));
-    await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" }));
+    await user.click(await screen.findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 中国银行 7001/ }));
 
     expect(await screen.findByText("请先清空当前选择，再选择其他流水。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭提示" })).toBeInTheDocument();
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 中国银行 7001/ })).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "提交批次" }));
     await waitFor(() => {

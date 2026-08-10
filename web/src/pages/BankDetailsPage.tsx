@@ -2281,7 +2281,7 @@ export default function BankDetailsPage() {
                 onExport={handleExport}
               />
               <div className="bank-transaction-table-container">
-                <FinanceTable ariaLabel="交易流水" className="bank-transaction-table" minWidth={980}>
+                <FinanceTable ariaLabel="交易流水" className="bank-transaction-table" minWidth={980} scrollMode="contained">
                   <FinanceTableHeader>
                     <FinanceTableColumn className="bank-col-counterparty" columnRole="identity" id="counterparty" isRowHeader>对方户名</FinanceTableColumn>
                     <FinanceTableColumn className="bank-col-type" columnRole="status" id="type">类型</FinanceTableColumn>

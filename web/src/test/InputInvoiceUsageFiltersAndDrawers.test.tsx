@@ -1175,7 +1175,7 @@ describe("Input invoice usage workflow drawers", () => {
 
     await user.click(await screen.findByRole("tab", { name: "已提交" }));
 
-    await screen.findByRole("table", { name: "陈秀云已提交发票" });
+    await screen.findByRole("grid", { name: "陈秀云已提交发票" });
     expect(screen.getByText("2026-06-10 10:30")).toBeInTheDocument();
     expect(screen.getByText("陈秀云")).toBeInTheDocument();
     expect(screen.getByText("99.72")).toBeInTheDocument();

@@ -7,6 +7,15 @@ import type {
   TurnoverLedgerGroupedRow,
 } from "../../features/turnoverLedger/types";
 import { formatMoney } from "../../features/money";
+import {
+  EmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 
 export { formatMoney };
 
@@ -372,7 +381,7 @@ function RowCells({
   const relationChips = workbenchRelationChips(row, isFlow);
   return (
     <>
-      <td>
+      <FinanceTableCell columnRole="amount">
         <span className="turnover-ledger-cell-stack">
           {isFlow && !hasBorrowAmount ? (
             <EmptyAmountBlock testId={`amount-empty-${row.relationId}-borrow`} />
@@ -387,8 +396,8 @@ function RowCells({
             />
           )}
         </span>
-      </td>
-      <td>
+      </FinanceTableCell>
+      <FinanceTableCell columnRole="amount">
         {isFlow && !hasRepaymentAmount ? (
           <EmptyAmountBlock testId={`amount-empty-${row.relationId}-repayment`} />
         ) : (
@@ -401,8 +410,8 @@ function RowCells({
             {...(hasRepaymentAmount ? metadata : {})}
           />
         )}
-      </td>
-      <td>
+      </FinanceTableCell>
+      <FinanceTableCell columnRole="description">
         <span className="turnover-ledger-cell-stack">
           <span>{formatNullable(isFlow ? row.repaymentRemark : "")}</span>
           {relationChips.map((chip) => (
@@ -414,8 +423,8 @@ function RowCells({
             </span>
           ))}
         </span>
-      </td>
-      <td>
+      </FinanceTableCell>
+      <FinanceTableCell columnRole="amount">
         <span className="turnover-ledger-interest-cell">
           <span className="turnover-ledger-interest-cell__amount">
             {formatMoney(row.interestPaidAmount)}
@@ -424,19 +433,19 @@ function RowCells({
             {rateText(row)}
           </span>
         </span>
-      </td>
-      <td>{formatNullable(row.loanDays)}</td>
-      <td>{row.accruedInterest ? formatMoney(row.accruedInterest) : "-"}</td>
-      <td>
+      </FinanceTableCell>
+      <FinanceTableCell columnRole="quantity">{formatNullable(row.loanDays)}</FinanceTableCell>
+      <FinanceTableCell columnRole="amount">{row.accruedInterest ? formatMoney(row.accruedInterest) : "-"}</FinanceTableCell>
+      <FinanceTableCell columnRole="date">
         <span className="turnover-ledger-cell-stack">
           <span>{formatNullable(row.interestPaidDate)}</span>
           <span className="turnover-ledger-chip turnover-ledger-chip--outline">
             {formatNullable(row.interestPaymentMethod)}
           </span>
         </span>
-      </td>
-      <td>{formatNullable(row.note)}</td>
-      <td>
+      </FinanceTableCell>
+      <FinanceTableCell columnRole="description">{formatNullable(row.note)}</FinanceTableCell>
+      <FinanceTableCell columnRole="action">
         {isFlow ? (
           <Button
             className="turnover-ledger-table-button"
@@ -449,7 +458,7 @@ function RowCells({
             编辑
           </Button>
         ) : null}
-      </td>
+      </FinanceTableCell>
     </>
   );
 }
@@ -476,39 +485,32 @@ export default function TurnoverLedgerGroupedTable({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
   return (
-    <div className="turnover-ledger-table-wrap" ref={tableWrapRef}>
-      <table className="turnover-ledger-table" aria-label="往来款左右双栏台账">
-        <thead>
-          <tr>
-            <th className="turnover-sticky-left-header" scope="col">
-              对方户名
-            </th>
-            <th className="turnover-ledger-table__check" scope="col">选择</th>
-            <th className="turnover-ledger-table__occurred" scope="col">往来发生</th>
-            <th className="turnover-ledger-table__settled" scope="col">结清发生</th>
-            <th className="turnover-ledger-table__remark" scope="col">还款备注</th>
-            <th className="turnover-ledger-table__interest" scope="col">利息额 / 年息或月息</th>
-            <th className="turnover-ledger-table__days" scope="col">借款天数</th>
-            <th className="turnover-ledger-table__interest-due" scope="col">应还利息</th>
-            <th className="turnover-ledger-table__paid" scope="col">还利息日期 / 方式</th>
-            <th className="turnover-ledger-table__note" scope="col">备注</th>
-            <th className="turnover-ledger-table__action" scope="col">操作</th>
-          </tr>
-        </thead>
-        <tbody>
+    <FinanceTable ariaLabel="往来款左右双栏台账" className="turnover-ledger-table turnover-ledger-table-wrap" minWidth={1320} scrollMode="contained" scrollRef={tableWrapRef}>
+        <FinanceTableHeader>
+            <FinanceTableColumn className="turnover-sticky-left-header" columnRole="identity" isRowHeader>对方户名</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__check" columnRole="selection">选择</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__occurred" columnRole="amount">往来发生</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__settled" columnRole="amount">结清发生</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__remark" columnRole="description">还款备注</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__interest" columnRole="amount">利息额 / 年息或月息</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__days" columnRole="quantity">借款天数</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__interest-due" columnRole="amount">应还利息</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__paid" columnRole="date">还利息日期 / 方式</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__note" columnRole="description">备注</FinanceTableColumn>
+            <FinanceTableColumn className="turnover-ledger-table__action" columnRole="action">操作</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
           {loading ? (
-            <tr>
-              <td className="turnover-ledger-table__empty" colSpan={11}>
-                正在加载往来款台账
-              </td>
-            </tr>
+            <FinanceTableRow id="turnover-loading">
+              <FinanceTableCell className="turnover-ledger-table__empty" columnRole="identity">正在加载往来款台账</FinanceTableCell>
+              {Array.from({ length: 10 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}
+            </FinanceTableRow>
           ) : null}
           {!loading && showEmptyState && !hasRows ? (
-            <tr>
-              <td className="turnover-ledger-table__empty" colSpan={11}>
-                暂无往来款台账
-              </td>
-            </tr>
+            <FinanceTableRow id="turnover-empty">
+              <FinanceTableCell className="turnover-ledger-table__empty" columnRole="identity">暂无往来款台账</FinanceTableCell>
+              {Array.from({ length: 10 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}
+            </FinanceTableRow>
           ) : null}
           {!loading
             ? groups.flatMap((group, groupIndex) => {
@@ -518,7 +520,6 @@ export default function TurnoverLedgerGroupedTable({
                 }
                 const expanded = Boolean(expandedGroups[group.groupId]);
                 const visibleFlowRows = expanded ? flowRows : [];
-                const rowSpan = 1 + visibleFlowRows.length;
                 const toggleGroup = () => {
                   setExpandedGroups((current) => ({
                     ...current,
@@ -526,43 +527,42 @@ export default function TurnoverLedgerGroupedTable({
                   }));
                 };
                 const summary = (
-                  <tr
+                  <FinanceTableRow
                     key={`${group.groupId}:summary:${summaryRow.relationId}`}
-                    data-testid={`turnover-row-${summaryRow.relationId}`}
                     className="turnover-summary-row turnover-group-start-row"
+                    dataTestId={`turnover-row-${summaryRow.relationId}`}
+                    id={`turnover-group-${group.groupId}`}
                   >
-                    <td
-                      data-testid={`turnover-group-cell-${group.groupId}`}
-                      rowSpan={rowSpan}
-                      className="turnover-sticky-left-cell"
-                    >
+                    <FinanceTableCell className="turnover-sticky-left-cell" columnRole="identity" dataTestId={`turnover-group-cell-${group.groupId}`}>
                       <BalanceBlock
                         group={group}
                         expanded={expanded}
                         canExpand={flowRows.length > 0}
                         onToggle={toggleGroup}
                       />
-                    </td>
-                    <td className="turnover-ledger-table__check" />
+                    </FinanceTableCell>
+                    <FinanceTableCell className="turnover-ledger-table__check" columnRole="selection"><EmptyValue /></FinanceTableCell>
                     <RowCells
                       row={{ ...summaryRow, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                       rowKind="summary"
                       onEdit={onEdit}
                       actionsDisabled={actionsDisabled}
                     />
-                  </tr>
+                  </FinanceTableRow>
                 );
                 const flows = visibleFlowRows.map((row, index) => {
                   const rowTone = flowDirectionKey(row);
                   const rowId = runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || String(index);
                   const checked = selectedFlowRowIds.has(rowId);
                   return (
-                    <tr
+                    <FinanceTableRow
                       key={`${group.groupId}:flow:${rowId}`}
-                      data-testid={`turnover-flow-row-${row.relationId}-${index}`}
                       className={`turnover-row-${rowTone} turnover-flow-row`}
+                      dataTestId={`turnover-flow-row-${row.relationId}-${index}`}
+                      id={`turnover-flow-row-${group.groupId}-${rowId}`}
                     >
-                      <td className="turnover-ledger-table__check">
+                      <FinanceTableCell className="turnover-sticky-left-cell turnover-sticky-left-cell--flow" columnRole="identity">{group.counterpartyName || <EmptyValue />}</FinanceTableCell>
+                      <FinanceTableCell className="turnover-ledger-table__check" columnRole="selection">
                         <Checkbox
                           aria-label={`选择流水 ${flowAccessibleName({ ...row, counterpartyName: group.counterpartyName })}`}
                           isDisabled={actionsDisabled}
@@ -573,21 +573,20 @@ export default function TurnoverLedgerGroupedTable({
                             <Checkbox.Indicator />
                           </Checkbox.Control>
                         </Checkbox>
-                      </td>
+                      </FinanceTableCell>
                       <RowCells
                         row={{ ...row, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                         rowKind="flow"
                         onEdit={onEdit}
                         actionsDisabled={actionsDisabled}
                       />
-                    </tr>
+                    </FinanceTableRow>
                   );
                 });
                 return [summary, ...flows];
               })
             : null}
-        </tbody>
-      </table>
-    </div>
+        </FinanceTableBody>
+    </FinanceTable>
   );
 }
