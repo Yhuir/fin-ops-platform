@@ -55,10 +55,10 @@ class PostgresImportLifecycleRepository:
               limit 1
             ) file on true
             left join lateral (
-              select import_job_id::text, status, stage, last_error
+              select import_job.id::text as import_job_id, status, stage, last_error
               from job.import_jobs import_job
               where import_job.import_session_id = file.session_id
-              order by import_job.created_at desc, import_job.import_job_id desc
+              order by import_job.created_at desc, import_job.id desc
               limit 1
             ) latest_job on true
             {where_sql}
@@ -116,10 +116,10 @@ class PostgresImportLifecycleRepository:
               latest_job.last_error as job_error
             from active_sessions
             left join lateral (
-              select import_job_id::text, status, stage, last_error
+              select import_job.id::text as import_job_id, status, stage, last_error
               from job.import_jobs import_job
               where import_job.import_session_id = active_sessions.session_id
-              order by import_job.created_at desc, import_job.import_job_id desc
+              order by import_job.created_at desc, import_job.id desc
               limit 1
             ) latest_job on true
             order by active_sessions.updated_at desc, active_sessions.session_id desc
@@ -160,11 +160,11 @@ class PostgresImportLifecycleRepository:
                 raise ValueError("confirmed import sessions cannot be discarded")
             active_job = transaction.fetch_one(
                 """
-                select import_job_id::text, status
-                from job.import_jobs
+                select import_job.id::text as import_job_id, status
+                from job.import_jobs import_job
                 where import_session_id = %s
                   and status in ('pending', 'processing', 'succeeded')
-                order by created_at desc, import_job_id desc
+                order by created_at desc, import_job.id desc
                 limit 1
                 """,
                 (session_id,),

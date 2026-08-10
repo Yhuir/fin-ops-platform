@@ -23,11 +23,13 @@ class FakeDiscardTransaction:
         self.rows = rows
         self.active_job = active_job
         self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_one_sql = ""
 
     def fetch_all(self, _sql: str, _params: tuple[object, ...]):
         return self.rows
 
-    def fetch_one(self, _sql: str, _params: tuple[object, ...]):
+    def fetch_one(self, sql: str, _params: tuple[object, ...]):
+        self.fetch_one_sql = sql
         return self.active_job
 
     def execute(self, sql: str, params: tuple[object, ...]):
@@ -42,6 +44,19 @@ class FakeDiscardConnection:
     @contextmanager
     def transaction(self):
         yield self.value
+
+
+class RecordingLifecycleConnection:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def fetch_one(self, sql: str, _params: tuple[object, ...] | None = None):
+        self.queries.append(sql)
+        return {"total": 0}
+
+    def fetch_all(self, sql: str, _params: tuple[object, ...]):
+        self.queries.append(sql)
+        return []
 
 
 class ImportLifecycleServiceTests(unittest.TestCase):
@@ -87,6 +102,8 @@ class ImportLifecycleServiceTests(unittest.TestCase):
 
         self.assertEqual(repository.discard_preview_session(session_id="session-1", imported_by="user-1"), 1)
         self.assertEqual(len(transaction.executed), 2)
+        self.assertIn("import_job.id::text as import_job_id", transaction.fetch_one_sql)
+        self.assertNotIn("import_job.import_job_id", transaction.fetch_one_sql)
 
         with self.assertRaises(PermissionError):
             PostgresImportLifecycleRepository(
@@ -96,6 +113,18 @@ class ImportLifecycleServiceTests(unittest.TestCase):
             PostgresImportLifecycleRepository(
                 FakeDiscardConnection(FakeDiscardTransaction(rows=rows, active_job={"status": "pending"}))
             ).discard_preview_session(session_id="session-1", imported_by="user-1")
+
+    def test_postgres_queries_use_import_jobs_primary_key_column(self) -> None:
+        connection = RecordingLifecycleConnection()
+        repository = PostgresImportLifecycleRepository(connection)
+
+        repository.list_events()
+        repository.list_active_sessions(imported_by="user-1", mode="invoice")
+
+        job_queries = [sql for sql in connection.queries if "job.import_jobs" in sql]
+        self.assertEqual(len(job_queries), 2)
+        self.assertTrue(all("import_job.id::text as import_job_id" in sql for sql in job_queries))
+        self.assertTrue(all("import_job.import_job_id" not in sql for sql in job_queries))
 
 
 if __name__ == "__main__":
