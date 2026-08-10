@@ -1238,7 +1238,7 @@ def test_workbench_relation_repository_appends_long_case_history_in_one_statemen
     assert "delete from app.workbench_pair_relation_history" not in history_statements[0][0]
     assert "with input(" in history_statements[0][0]
     assert "on conflict (id) do nothing" in history_statements[0][0]
-    assert len(history_statements[0][1]) == len(histories) * 8
+    assert len(history_statements[0][1]) == len(histories) * 9
 
 
 def test_workbench_relation_repository_deduplicates_reloaded_multi_case_history() -> None:
@@ -1285,7 +1285,7 @@ def test_workbench_relation_repository_deduplicates_reloaded_multi_case_history(
     ]
     assert len(history_statements) == 1
     assert "with input(" in history_statements[0][0]
-    assert len(history_statements[0][1]) == 2 * 8
+    assert len(history_statements[0][1]) == 2 * 9
 
 
 def test_workbench_relation_delta_appends_one_history_event_without_delete() -> None:
@@ -1324,7 +1324,7 @@ def test_workbench_relation_delta_appends_one_history_event_without_delete() -> 
     assert len(history_statements) == 1
     assert "delete from app.workbench_pair_relation_history" not in history_statements[0][0]
     assert "with input(" in history_statements[0][0]
-    assert len(history_statements[0][1]) == 8
+    assert len(history_statements[0][1]) == 9
 
 
 def test_workbench_relation_transaction_does_not_write_page_refresh_scopes() -> None:

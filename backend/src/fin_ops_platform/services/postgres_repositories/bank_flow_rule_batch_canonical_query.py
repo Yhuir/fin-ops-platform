@@ -61,14 +61,101 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             tag_policy = tag_sources["tag_policy"]
             source_result = transaction.fetch_one(
                 f"""
-                with candidate_rows as materialized (
+                with bank_source as materialized (
                     select
                         bank.*,
                         coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
                         coalesce(
                             bank.raw_payload->'normalized_payload',
                             '{{}}'::jsonb
-                        ) as payload,
+                        ) as payload
+                    from app.bank_transactions bank
+                    where bank.status <> 'deleted'
+                      {candidate_scope_sql}
+                ),
+                bank_identities as materialized (
+                    select bank.id as bank_id, bank.transaction_id as identity
+                    from bank_source bank
+                    union
+                    select bank.id as bank_id, bank.id::text as identity
+                    from bank_source bank
+                ),
+                confirmed_category_candidates as materialized (
+                    select
+                        bank.id as bank_id,
+                        confirmation.category_code,
+                        confirmation.version,
+                        confirmation.confirmed_at,
+                        confirmation.id as confirmation_id
+                    from app.bank_transaction_category_confirmations confirmation
+                    join bank_source bank
+                      on bank.id = confirmation.bank_transaction_id
+                    where confirmation.tenant_id = 'default'
+                      and confirmation.status = 'active'
+                    union all
+                    select
+                        identity.bank_id,
+                        confirmation.category_code,
+                        confirmation.version,
+                        confirmation.confirmed_at,
+                        confirmation.id as confirmation_id
+                    from app.bank_transaction_category_confirmations confirmation
+                    join bank_identities identity
+                      on identity.identity = confirmation.legacy_transaction_id
+                    where confirmation.tenant_id = 'default'
+                      and confirmation.status = 'active'
+                ),
+                confirmed_categories as materialized (
+                    select distinct on (candidate.bank_id)
+                        candidate.bank_id,
+                        candidate.category_code,
+                        candidate.version
+                    from confirmed_category_candidates candidate
+                    order by
+                        candidate.bank_id,
+                        candidate.confirmed_at desc,
+                        candidate.confirmation_id desc
+                ),
+                manual_category_candidates as materialized (
+                    select
+                        bank.id as bank_id,
+                        manual.category,
+                        manual.source,
+                        manual.version,
+                        manual.updated_at,
+                        manual.id as manual_category_id
+                    from app.bank_transaction_categories manual
+                    join bank_source bank
+                      on bank.id = manual.bank_transaction_id
+                    where manual.status = 'active'
+                    union all
+                    select
+                        identity.bank_id,
+                        manual.category,
+                        manual.source,
+                        manual.version,
+                        manual.updated_at,
+                        manual.id as manual_category_id
+                    from app.bank_transaction_categories manual
+                    join bank_identities identity
+                      on identity.identity = manual.legacy_transaction_id
+                    where manual.status = 'active'
+                ),
+                manual_categories as materialized (
+                    select distinct on (candidate.bank_id)
+                        candidate.bank_id,
+                        candidate.category,
+                        candidate.source,
+                        candidate.version
+                    from manual_category_candidates candidate
+                    order by
+                        candidate.bank_id,
+                        candidate.updated_at desc,
+                        candidate.manual_category_id desc
+                ),
+                candidate_rows as materialized (
+                    select
+                        bank.*,
                         coalesce(
                             confirmed_category.category_code,
                             manual_category.category,
@@ -84,49 +171,23 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                             manual_category.version,
                             0
                         )::integer as category_version
-                    from app.bank_transactions bank
-                    left join lateral (
-                        select confirmation.category_code, confirmation.version
-                        from app.bank_transaction_category_confirmations confirmation
-                        where confirmation.tenant_id = 'default'
-                          and confirmation.status = 'active'
-                          and (
-                              confirmation.bank_transaction_id = bank.id
-                              or confirmation.legacy_transaction_id in (
-                                  coalesce(bank.legacy_mongo_id, bank.id::text),
-                                  bank.id::text
-                              )
-                          )
-                        order by confirmation.confirmed_at desc, confirmation.id desc
-                        limit 1
-                    ) confirmed_category on true
-                    left join lateral (
-                        select manual.category, manual.source, manual.version
-                        from app.bank_transaction_categories manual
-                        where manual.status = 'active'
-                          and (
-                              manual.bank_transaction_id = bank.id
-                              or manual.legacy_transaction_id in (
-                                  coalesce(bank.legacy_mongo_id, bank.id::text),
-                                  bank.id::text
-                              )
-                          )
-                        order by manual.updated_at desc, manual.id desc
-                        limit 1
-                    ) manual_category on true
-                    where bank.status <> 'deleted'
-                      {candidate_scope_sql}
+                    from bank_source bank
+                    left join confirmed_categories confirmed_category
+                      on confirmed_category.bank_id = bank.id
+                    left join manual_categories manual_category
+                      on manual_category.bank_id = bank.id
+                ),
+                candidate_identity_array as materialized (
+                    select array_agg(identity order by identity) as row_ids
+                    from bank_identities
                 ),
                 active_relations as materialized (
                     select relation.*
                     from app.workbench_pair_relations relation
+                    cross join candidate_identity_array candidate_ids
                     where relation.status = 'active'
-                      and exists (
-                          select 1
-                          from candidate_rows candidate
-                          where candidate.transaction_id = any(relation.row_ids)
-                             or candidate.id::text = any(relation.row_ids)
-                      )
+                      and candidate_ids.row_ids is not null
+                      and relation.row_ids && candidate_ids.row_ids
                 ),
                 formal_items as materialized (
                     select

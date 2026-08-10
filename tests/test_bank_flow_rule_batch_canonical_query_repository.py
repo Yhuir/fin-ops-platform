@@ -282,6 +282,9 @@ def test_all_page_query_reads_the_complete_canonical_source_without_a_month_pred
     )
     assert "where bank.status <> 'deleted' and false" not in source_sql
     assert "coalesce(bank.txn_date, bank.txn_month) >= %s::date" not in source_sql
+    assert "left join lateral" not in source_sql
+    assert "relation.row_ids && candidate_ids.row_ids" in source_sql
+    assert "join bank_identities identity" in source_sql
     assert source_params == ()
     assert connection.transaction_enters == connection.transaction_exits == 1
     assert len(connection.fetched_one) == 2
