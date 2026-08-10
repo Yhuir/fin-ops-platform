@@ -158,7 +158,8 @@ describe("AppSidebar shell contract", () => {
     expect(brandMarkRule).toMatch(/background:\s*transparent;/);
     expect(brandMarkRule).toMatch(/color:\s*#86efac;/);
     expect(appStatusSource).toContain("finance-platform-mark.svg");
-    expect(appStatusSource).toContain("<button");
+    expect(appStatusSource).toContain("PopoverTrigger");
+    expect(appStatusSource).not.toContain("createPortal");
     expect(appStatusSource).not.toContain('role="status"');
     expect(appStatusSource).not.toMatch(/<circle|status-track|status-sweep/);
     expect(brandMarkSource).toContain('fill="#2563EB"');
@@ -170,12 +171,14 @@ describe("AppSidebar shell contract", () => {
   });
 
   test("shows the current OA account and opens its details without a second identity source", async () => {
-    renderSidebar(true);
+    const { container } = renderSidebar(true);
 
     expect(screen.getByText("刘际涛")).toBeInTheDocument();
     expect(screen.getByText("liuji")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "当前账号：刘际涛" }));
+    const accountTrigger = container.querySelector<HTMLElement>(".app-sidebar-account-trigger");
+    expect(accountTrigger).not.toBeNull();
+    fireEvent.click(accountTrigger!);
 
     const dialog = await screen.findByRole("dialog", { name: "当前 OA 账号详情" });
     expect(dialog).toHaveTextContent("当前登录 OA 账号");
@@ -183,6 +186,25 @@ describe("AppSidebar shell contract", () => {
     expect(dialog).toHaveTextContent("财务部");
     expect(appSidebarSource).toContain("AppSidebarAccount");
     expect(appSidebarSource).not.toContain("财务运营管理员");
+  });
+
+  test("keeps runtime status and account popovers mutually exclusive", async () => {
+    const { container } = renderSidebar(true);
+    const statusTrigger = container.querySelector<HTMLButtonElement>(".app-sidebar-brand-mark");
+    expect(statusTrigger).not.toBeNull();
+
+    fireEvent.click(statusTrigger!);
+    expect(await screen.findByRole("dialog", { name: "全局运行状态" })).toBeInTheDocument();
+
+    const accountTrigger = container.querySelector<HTMLElement>(".app-sidebar-account-trigger");
+    expect(accountTrigger).not.toBeNull();
+    fireEvent.click(accountTrigger!);
+    expect(await screen.findByRole("dialog", { name: "当前 OA 账号详情" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "全局运行状态" })).not.toBeInTheDocument();
+
+    fireEvent.click(statusTrigger!);
+    expect(await screen.findByRole("dialog", { name: "全局运行状态" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "当前 OA 账号详情" })).not.toBeInTheDocument();
   });
 
   test("renders the expand control as an icon-only control without visible tooltip copy", () => {

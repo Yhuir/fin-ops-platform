@@ -529,7 +529,7 @@ export default function TurnoverLedgerPage() {
   }, [active, activationGeneration, loadTagSelection]);
 
   useEffect(() => {
-    if (!toast) {
+    if (!toast || toast.severity !== "success") {
       return undefined;
     }
     const timer = window.setTimeout(() => setToast(null), 4000);

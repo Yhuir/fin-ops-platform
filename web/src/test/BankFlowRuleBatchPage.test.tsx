@@ -1328,6 +1328,7 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(await screen.findByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" }));
 
     expect(await screen.findByText("请先清空当前选择，再选择其他流水。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭提示" })).toBeInTheDocument();
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 中国银行 7001" })).not.toBeChecked();
 
@@ -1588,6 +1589,7 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
 
     expect(await screen.findByText("流水规则候选月份缺失，请刷新列表后重试")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭提示" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input, init]) => {
       const url = new URL(
         typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,

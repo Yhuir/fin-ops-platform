@@ -543,7 +543,10 @@ export async function fetchImportReviewRows(
     `/imports/files/sessions/${encodeURIComponent(sessionId)}/review-rows?${query}`,
     { method: "GET", signal },
   );
-  const rows = (payload.rows ?? []).map((row, index) => ({
+  if (!Array.isArray(payload.rows)) {
+    throw new Error("导入复核数据响应格式错误，请刷新后重试。");
+  }
+  const rows = payload.rows.map((row, index) => ({
     ...mapPreviewDetailFields(row),
     id: `${row.file_id ?? "file"}-${row.row_no ?? offset + index}-${index}`,
     fileId: row.file_id ?? "",

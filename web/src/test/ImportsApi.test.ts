@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   confirmImportFiles,
+  fetchImportReviewRows,
   fetchImportSession,
   previewImportFiles,
   resolveImportApiErrorMessage,
@@ -290,5 +291,18 @@ describe("imports api", () => {
       counterpartyName: "云南供应商",
       identityKind: "stable",
     });
+  });
+
+  test("rejects malformed successful review-row responses instead of showing an empty result", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ total: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    await expect(fetchImportReviewRows("import_session_0001", "duplicates", 0)).rejects.toThrow(
+      "导入复核数据响应格式错误，请刷新后重试。",
+    );
   });
 });

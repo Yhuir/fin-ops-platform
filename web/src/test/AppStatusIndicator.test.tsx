@@ -156,7 +156,7 @@ const globalAppStatus = {
 };
 
 describe("global app status indicator", () => {
-  test("renders app_status from the global runtime plane and keeps popover stable across route changes", async () => {
+  test("renders app_status from the global runtime plane and closes after navigation", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       appHealth: {
@@ -208,21 +208,11 @@ describe("global app status indicator", () => {
     await user.click(within(statusDialog).getByRole("link", { name: /银行明细/ }));
 
     await waitFor(() => {
-      const stableDialog = screen.getByRole("dialog", { name: "全局运行状态" });
-      expect(within(stableDialog).getByText("运行状态")).toBeInTheDocument();
-      expect(within(stableDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
-      expect(within(stableDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
-      expect(within(stableDialog).getByText("银行明细")).toBeInTheDocument();
-    });
-
-    await user.keyboard("{Escape}");
-
-    await waitFor(() => {
-      expect(screen.queryByText("全局运行状态")).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "全局运行状态" })).not.toBeInTheDocument();
     });
   });
 
-  test("shows operations link only for admin sessions and closes after pointer leave", async () => {
+  test("shows operations link only for admin sessions and closes from the HeroUI trigger", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       sessionAccessTier: "admin",
@@ -245,7 +235,7 @@ describe("global app status indicator", () => {
 
     expect(await screen.findByRole("link", { name: "App Health" })).toBeInTheDocument();
 
-    await user.unhover(screen.getByRole("dialog", { name: "全局运行状态" }));
+    await user.click(indicator);
 
     await waitFor(() => {
       expect(screen.queryByText("全局运行状态")).not.toBeInTheDocument();

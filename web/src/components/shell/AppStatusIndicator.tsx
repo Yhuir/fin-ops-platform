@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
-import { Chip, ProgressBar, Separator } from "@heroui/react";
+import {
+  Chip,
+  PopoverContent,
+  PopoverDialog,
+  PopoverRoot,
+  PopoverTrigger,
+  ProgressBar,
+  Separator,
+} from "@heroui/react";
 import { Link as RouterLink } from "react-router-dom";
 
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
@@ -175,19 +181,18 @@ function summaryTone(value: number | undefined) {
   return value && value > 0 ? "warning" : "success";
 }
 
-export default function AppStatusIndicator() {
+type AppStatusIndicatorProps = {
+  isOpen: boolean;
+  onOpenChange: (isOpen: boolean) => void;
+};
+
+export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIndicatorProps) {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
   const { canAdminAccess } = useOptionalSessionPermissions();
-  const [open, setOpen] = useState(false);
-  const [popoverPosition, setPopoverPosition] = useState({ left: 0, top: 0 });
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
   const reason = appStatus?.overall.reason ?? healthStatus.reason;
   const level = appStatus?.overall.level ?? healthStatus.level;
   const tone = toneFromLevel(level);
-  const popperId = "global-app-status-popover";
   const tasks = appStatus?.backgroundTasks ?? [];
   const domains = appStatus?.domains ?? [];
   const runtimeSummary = appStatus?.runtimeSummary;
@@ -199,124 +204,19 @@ export default function AppStatusIndicator() {
   const workerIssues = runtimeSummary?.workers.issueCount ?? 0;
   const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog : 0;
 
-  const clearCloseTimer = () => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  };
-
-  const scheduleClose = () => {
-    clearCloseTimer();
-    closeTimerRef.current = window.setTimeout(() => {
-      setOpen(false);
-      closeTimerRef.current = null;
-    }, 120);
-  };
-
-  const updatePopoverPosition = () => {
-    const trigger = triggerRef.current;
-    if (!trigger) {
-      return;
-    }
-    const rect = trigger.getBoundingClientRect();
-    const popoverWidth = 480;
-    const left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - popoverWidth - 16));
-    const top = Math.max(8, Math.min(rect.top - 4, window.innerHeight - 32));
-    setPopoverPosition({ left, top });
-  };
-
-  const openPopover = () => {
-    clearCloseTimer();
-    updatePopoverPosition();
-    setOpen(true);
-  };
-
-  const closePopover = () => {
-    clearCloseTimer();
-    setOpen(false);
-  };
-
-  useEffect(() => () => clearCloseTimer(), []);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    updatePopoverPosition();
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
-        return;
-      }
-      closePopover();
-    };
-    const handlePositionChange = () => updatePopoverPosition();
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("touchstart", handlePointerDown);
-    window.addEventListener("resize", handlePositionChange);
-    window.addEventListener("scroll", handlePositionChange, true);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("touchstart", handlePointerDown);
-      window.removeEventListener("resize", handlePositionChange);
-      window.removeEventListener("scroll", handlePositionChange, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closePopover();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
-
   return (
-    <>
-      <button
-        ref={triggerRef}
+    <PopoverRoot isOpen={isOpen} onOpenChange={onOpenChange}>
+      <PopoverTrigger
         aria-label={reason}
-        aria-controls={open ? popperId : undefined}
-        aria-expanded={open}
-        aria-haspopup="dialog"
         aria-live="polite"
         className={`app-sidebar-brand-mark ${tone}`}
         data-status-reason={reason}
-        type="button"
-        onClick={openPopover}
       >
         <img alt="" className="app-sidebar-brand-status-icon" src={financePlatformMark} />
         <span className="app-sidebar-brand-status-dot" aria-hidden="true" />
-      </button>
-      {open ? createPortal(
-        <div
-          ref={popoverRef}
-          id={popperId}
-          aria-label="全局运行状态"
-          className="app-status-popover"
-          role="dialog"
-          tabIndex={-1}
-          style={{
-            "--app-status-popover-left": `${popoverPosition.left}px`,
-            "--app-status-popover-top": `${popoverPosition.top}px`,
-          } as CSSProperties}
-          onMouseEnter={clearCloseTimer}
-          onMouseLeave={scheduleClose}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              closePopover();
-            }
-          }}
-        >
+      </PopoverTrigger>
+      <PopoverContent className="app-status-popover-content" placement="right top">
+        <PopoverDialog aria-label="全局运行状态" className="app-status-popover">
           <div className="app-status-popover-stack">
             <div className="app-status-popover-header">
               <div className="app-status-popover-heading">
@@ -436,9 +336,8 @@ export default function AppStatusIndicator() {
                 </>
               ) : null}
           </div>
-        </div>,
-        document.body,
-      ) : null}
-    </>
+        </PopoverDialog>
+      </PopoverContent>
+    </PopoverRoot>
   );
 }

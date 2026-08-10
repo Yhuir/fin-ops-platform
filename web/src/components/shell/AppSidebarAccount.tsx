@@ -10,9 +10,11 @@ import { useSession } from "../../contexts/SessionContext";
 
 type AppSidebarAccountProps = {
   showExpandedContent: boolean;
+  isOpen: boolean;
+  onOpenChange: (isOpen: boolean) => void;
 };
 
-export default function AppSidebarAccount({ showExpandedContent }: AppSidebarAccountProps) {
+export default function AppSidebarAccount({ showExpandedContent, isOpen, onOpenChange }: AppSidebarAccountProps) {
   const sessionState = useSession();
   const session = sessionState.status === "authenticated" || sessionState.status === "forbidden"
     ? sessionState.session
@@ -33,7 +35,7 @@ export default function AppSidebarAccount({ showExpandedContent }: AppSidebarAcc
   const initials = Array.from(identity.trim())[0]?.toUpperCase() || "OA";
 
   return (
-    <PopoverRoot>
+    <PopoverRoot isOpen={isOpen} onOpenChange={onOpenChange}>
       <PopoverTrigger
         aria-label={`当前账号：${identity}`}
         className="app-sidebar-account-trigger"

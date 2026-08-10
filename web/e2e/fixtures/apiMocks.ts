@@ -7795,9 +7795,34 @@ function pendingInvoiceIncomeRowsPayload(statusCode: "income_pending_invoice" | 
   };
 }
 
+const pendingInvoiceBankAmountCents: Record<string, number> = {
+  "bk-o-202603-001": 5_800_000,
+  "bk-o-202603-002": 754_000,
+};
+
+const pendingInvoiceAmountCents: Record<string, number> = {
+  "iv-o-202603-001": 5_800_000,
+  "iv-o-202603-002": 754_000,
+};
+
+function sumFixtureAmountCents(ids: string[], amounts: Record<string, number>) {
+  return ids.reduce((total, id) => {
+    const amount = amounts[id];
+    if (amount === undefined) {
+      throw new Error(`Missing deterministic fixture amount for ${id}`);
+    }
+    return total + amount;
+  }, 0);
+}
+
+function formatFixtureAmount(cents: number) {
+  return (cents / 100).toFixed(2);
+}
+
 function pendingInvoiceAttachExistingCandidatesPayload(body: Record<string, unknown>) {
   const transactionIds = Array.isArray(body.transaction_ids) ? body.transaction_ids.map(String) : [];
-  const isBatch = transactionIds.includes("bk-o-202603-002");
+  const bankTotalCents = sumFixtureAmountCents(transactionIds, pendingInvoiceBankAmountCents);
+  const includesSecondTransaction = transactionIds.includes("bk-o-202603-002");
   const rows = [
     {
       invoice_id: "iv-o-202603-001",
@@ -7809,12 +7834,12 @@ function pendingInvoiceAttachExistingCandidatesPayload(body: Record<string, unkn
       total_with_tax: "58000.00",
       related_paid_total: "0.00",
       remaining_amount: "58000.00",
-      amount_difference_abs: isBatch ? "7540.00" : "0.00",
+      amount_difference_abs: formatFixtureAmount(Math.abs(bankTotalCents - pendingInvoiceAmountCents["iv-o-202603-001"])),
       candidate_status: "available",
       bank_relation_status: "unlinked",
       linked_bank_transaction_count: 0,
     },
-    ...(isBatch ? [{
+    ...(includesSecondTransaction ? [{
       invoice_id: "iv-o-202603-002",
       digital_invoice_no: "DIG-EQP-002",
       invoice_no: "12561049",
@@ -7824,7 +7849,7 @@ function pendingInvoiceAttachExistingCandidatesPayload(body: Record<string, unkn
       total_with_tax: "7540.00",
       related_paid_total: "0.00",
       remaining_amount: "7540.00",
-      amount_difference_abs: "58000.00",
+      amount_difference_abs: formatFixtureAmount(Math.abs(bankTotalCents - pendingInvoiceAmountCents["iv-o-202603-002"])),
       candidate_status: "available",
       bank_relation_status: "linked",
       linked_bank_transaction_count: 1,
@@ -7834,7 +7859,7 @@ function pendingInvoiceAttachExistingCandidatesPayload(body: Record<string, unkn
     transaction_ids: transactionIds,
     selection_summary: {
       transaction_count: transactionIds.length,
-      bank_total: isBatch ? "65540.00" : "58000.00",
+      bank_total: formatFixtureAmount(bankTotalCents),
     },
     rows,
     pagination: { page: 1, page_size: 20, total: rows.length },
@@ -7845,6 +7870,9 @@ function pendingInvoiceAttachExistingPreviewPayload(body: Record<string, unknown
   const transactionIds = Array.isArray(body.transaction_ids) ? body.transaction_ids.map(String) : [];
   const invoiceIds = Array.isArray(body.invoice_ids) ? body.invoice_ids.map(String) : [];
   const isBatch = transactionIds.includes("bk-o-202603-002") || invoiceIds.includes("iv-o-202603-002");
+  const bankTotalCents = sumFixtureAmountCents(transactionIds, pendingInvoiceBankAmountCents);
+  const invoiceTotalCents = sumFixtureAmountCents(invoiceIds, pendingInvoiceAmountCents);
+  const differenceCents = Math.abs(bankTotalCents - invoiceTotalCents);
   return {
     preview_id: forceConflict ? "attach-preview-conflict" : isBatch ? "attach-preview-batch" : "attach-preview-001",
     request_key: forceConflict
@@ -7871,16 +7899,16 @@ function pendingInvoiceAttachExistingPreviewPayload(body: Record<string, unknown
     selection_summary: {
       transaction_count: transactionIds.length,
       invoice_count: invoiceIds.length,
-      bank_total: isBatch ? "65540.00" : "58000.00",
-      invoice_total: isBatch ? "65540.00" : "58000.00",
-      difference_amount: "0.00",
+      bank_total: formatFixtureAmount(bankTotalCents),
+      invoice_total: formatFixtureAmount(invoiceTotalCents),
+      difference_amount: formatFixtureAmount(differenceCents),
     },
     payment_impact: {
       paid_total_before: "0.00",
-      paid_total_after: isBatch ? "65540.00" : "58000.00",
-      invoice_total: isBatch ? "65540.00" : "58000.00",
-      remaining_amount_after: "0.00",
-      difference_amount_after: "0.00",
+      paid_total_after: formatFixtureAmount(Math.min(bankTotalCents, invoiceTotalCents)),
+      invoice_total: formatFixtureAmount(invoiceTotalCents),
+      remaining_amount_after: formatFixtureAmount(Math.max(invoiceTotalCents - bankTotalCents, 0)),
+      difference_amount_after: formatFixtureAmount(differenceCents),
     },
     affected_months: ["2026-03"],
     warnings: [],

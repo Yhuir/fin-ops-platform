@@ -82,6 +82,7 @@ export default function AppSidebar({
   const { canAdminAccess } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
   const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports"));
+  const [openPopover, setOpenPopover] = useState<"status" | "account" | null>(null);
 
   const drawerContent = (
     <div className={`app-sidebar-content${showExpandedContent ? " expanded" : " collapsed"}`}>
@@ -91,7 +92,10 @@ export default function AppSidebar({
           className="app-sidebar-brand-lockup"
           inert={showExpandedContent ? undefined : true}
         >
-          <AppStatusIndicator />
+          <AppStatusIndicator
+            isOpen={openPopover === "status"}
+            onOpenChange={(isOpen) => setOpenPopover(isOpen ? "status" : null)}
+          />
           <span className="app-sidebar-brand-text" aria-hidden={!showExpandedContent}>
             <span className="app-sidebar-eyebrow">溯源办公系统</span>
             <span className="app-sidebar-title">财务运营平台</span>
@@ -104,7 +108,10 @@ export default function AppSidebar({
             className="app-sidebar-toggle"
             title={expanded ? "折叠菜单" : "展开菜单"}
             type="button"
-            onClick={onToggleExpanded}
+            onClick={() => {
+              setOpenPopover(null);
+              onToggleExpanded();
+            }}
           >
             {expanded ? (
               <PanelLeftClose aria-hidden="true" className="app-sidebar-toggle-glyph" size={17} strokeWidth={2} />
@@ -202,7 +209,11 @@ export default function AppSidebar({
       </nav>
 
       <div className="app-sidebar-account-footer">
-        <AppSidebarAccount showExpandedContent={showExpandedContent} />
+        <AppSidebarAccount
+          showExpandedContent={showExpandedContent}
+          isOpen={openPopover === "account"}
+          onOpenChange={(isOpen) => setOpenPopover(isOpen ? "account" : null)}
+        />
       </div>
     </div>
   );

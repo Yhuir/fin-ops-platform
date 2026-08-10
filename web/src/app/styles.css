@@ -11375,22 +11375,19 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-status-popover {
-  position: fixed;
-  top: var(--app-status-popover-top);
-  left: var(--app-status-popover-left);
-  z-index: 1301;
-  width: 480px;
-  max-width: calc(100vw - 32px);
   padding: 10px;
-  border: 1px solid #d8e1eb;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 14px 34px rgba(16, 42, 67, 0.14);
   color: #243b53;
+  outline: none;
 }
 
 .app-status-popover-content {
   z-index: 1301;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid #d8e1eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(16, 42, 67, 0.14);
 }
 
 .app-status-popover-stack {

@@ -1628,6 +1628,7 @@ describe("Turnover ledger page", () => {
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 云南建设有限公司 2026-05-04 10:00:00 收入 1000.00" }));
     expect(await screen.findByText("一次只能选择同一往来组内的流水")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭提示" })).toBeInTheDocument();
 
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 贾小花 2026-03-04 15:24:58 支出 300000.00" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));

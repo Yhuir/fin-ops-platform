@@ -406,7 +406,7 @@ export default function BankFlowRuleBatchPage() {
   }, [detailErrors, details, selectedBatch]);
 
   useEffect(() => {
-    if (!feedback) {
+    if (!feedback || feedback.severity !== "success") {
       return undefined;
     }
     const timeout = window.setTimeout(() => setFeedback(null), 3000);

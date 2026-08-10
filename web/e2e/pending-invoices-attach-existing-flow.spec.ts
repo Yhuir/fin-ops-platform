@@ -97,6 +97,11 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     });
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
+    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).check();
+    await expect(page.getByText("已选 1 条流水")).toBeVisible();
+    await expect(page.getByText("流水合计 7540.00")).toBeVisible();
+    await page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }).uncheck();
+
     await recordLatency({
       operationId: "pending-invoices.select-attach-row-primary",
       visibleLabel: "选择流水 智能工厂设备商",
