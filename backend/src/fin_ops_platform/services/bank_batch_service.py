@@ -293,7 +293,7 @@ class BankBatchService:
                 stale["status"] = "stale"
                 stale["version"] = int(stale.get("version") or 1) + 1
                 stale["updated_at"] = self._timestamp()
-                generated[batch_id] = stale
+                generated[batch_id] = self._normalize_batch(stale)
             else:
                 generated[batch_id] = batch
 
@@ -339,10 +339,7 @@ class BankBatchService:
             if self._batch_relation_mode(batch) != normalized_relation_mode
         }
         other_relation_mode_batches.update(generated)
-        self._batches = {
-            batch_id: self._normalize_batch(batch)
-            for batch_id, batch in other_relation_mode_batches.items()
-        }
+        self._batches = other_relation_mode_batches
         return self.list_batches() if return_batches else []
 
     def _build_batches_for_month_scope(
@@ -2755,7 +2752,7 @@ class BankBatchService:
         return normalized
 
     def _enrich_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
-        enriched = self._normalize_batch(batch)
+        enriched = deepcopy(batch)
         has_active_relation = self._has_active_relation_for_batch(enriched)
         if enriched["status"] == "stale" and has_active_relation:
             enriched["status"] = "submitted"
