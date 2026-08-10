@@ -157,6 +157,7 @@ from fin_ops_platform.services.historical_etc_repair_service import HistoricalEt
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
+from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -281,6 +282,7 @@ from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reve
     PostgresInputInvoiceUsageOaReverseBatchRepository,
     input_invoice_usage_oa_reverse_statistics_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
@@ -1776,6 +1778,8 @@ class Application:
             return self._handle_api_operation_barrier_status(body, headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
+        if method == "GET" and route_path == "/api/operations/import-history":
+            return self._handle_api_operations_import_history(query, headers)
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
         if method == "GET" and route_path == "/api/operations/history":
@@ -1969,13 +1973,17 @@ class Application:
         if method == "POST" and route_path == "/imports/files/confirm":
             return self._handle_import_file_confirm(body, owner_user_id=request_actor_id)
         if method == "POST" and route_path == "/imports/files/retry":
-            return self._handle_import_file_retry(body)
+            return self._handle_import_file_retry(body, owner_user_id=request_actor_id)
+        if method == "POST" and route_path == "/imports/files/discard":
+            return self._handle_import_file_discard(body, owner_user_id=request_actor_id)
+        if method == "GET" and route_path == "/imports/files/sessions":
+            return self._handle_import_file_active_sessions(query, owner_user_id=request_actor_id)
         if method == "GET" and route_path.startswith("/imports/files/sessions/"):
             session_path = route_path.removeprefix("/imports/files/sessions/")
             if session_path.endswith("/review-rows"):
                 session_id = session_path.removesuffix("/review-rows").strip("/")
-                return self._handle_import_file_review_rows(session_id, query)
-            return self._handle_import_file_session(session_path)
+                return self._handle_import_file_review_rows(session_id, query, owner_user_id=request_actor_id)
+            return self._handle_import_file_session(session_path, owner_user_id=request_actor_id)
         return self._json_response(
             HTTPStatus.NOT_FOUND,
             {
@@ -3589,6 +3597,34 @@ class Application:
             api_performance_recorder=self._api_performance_recorder,
         )
         return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
+
+    def _handle_api_operations_import_history(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        try:
+            page = max(int((query.get("page") or ["1"])[0] or 1), 1)
+            page_size = min(max(int((query.get("page_size") or ["50"])[0] or 50), 1), 100)
+        except ValueError:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_history_request", "message": "page and page_size must be integers."},
+            )
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "Import history requires PostgreSQL."},
+            )
+        payload = ImportLifecycleService(PostgresImportLifecycleRepository(connection)).list_events(
+            page=page,
+            page_size=page_size,
+        )
+        return self._json_response(HTTPStatus.OK, payload)
 
     def _operations_audit_service(self) -> OperationsAuditService | None:
         repository = getattr(getattr(self, "_runtime_repositories", None), "operations_audit_repository", None)
@@ -7815,6 +7851,11 @@ class Application:
             )
         normalized_session_id = str(session_id)
         normalized_selected_file_ids = [str(item) for item in selected_file_ids]
+        if not normalized_selected_file_ids:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_file_confirm_request", "message": "selected_file_ids cannot be empty."},
+            )
         self._reload_file_import_runtime_state()
         try:
             session = self._file_import_service.get_session(normalized_session_id)
@@ -7823,6 +7864,11 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": str(exc)},
             )
+        if str(session.imported_by) != str(owner_user_id):
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "import_file_session_forbidden", "message": "Import session belongs to another user."},
+            )
 
         selected = set(normalized_selected_file_ids)
         unknown_ids = sorted(selected - {item.id for item in session.files})
@@ -7830,6 +7876,19 @@ class Application:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": f"Unknown selected file ids: {', '.join(unknown_ids)}"},
+            )
+        invalid_ids = sorted(
+            item.id
+            for item in session.files
+            if item.id in selected and item.status not in {"preview_ready", "confirmed"}
+        )
+        if invalid_ids:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "import_file_session_not_confirmable",
+                    "message": f"Selected files are not confirmable: {', '.join(invalid_ids)}",
+                },
             )
         try:
             if any(item.id in selected and item.status == "preview_ready" for item in session.files):
@@ -7843,6 +7902,11 @@ class Application:
                     "preview_audit": exc.preview,
                     "current_audit": exc.current,
                 },
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_file_session_not_confirmable", "message": str(exc)},
             )
         total = len(normalized_selected_file_ids)
         label = ImportProcessingService.file_import_job_label(session, normalized_selected_file_ids)
@@ -7921,7 +7985,7 @@ class Application:
         route = route_by_domain.get(domains[0], "/operations/app-health") if len(domains) == 1 else "/operations/app-health"
         return domains, route
 
-    def _handle_import_file_retry(self, body: str | bytes | None) -> Response:
+    def _handle_import_file_retry(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -7937,6 +8001,10 @@ class Application:
             )
         self._reload_file_import_runtime_state()
         try:
+            self._file_import_service.assert_session_owner(
+                session_id=str(session_id),
+                imported_by=owner_user_id,
+            )
             session = self._file_import_service.retry_session_files(
                 session_id=str(session_id),
                 selected_file_ids=[str(item) for item in selected_file_ids],
@@ -7947,6 +8015,11 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": str(exc)},
             )
+        except PermissionError as exc:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "import_file_session_forbidden", "message": str(exc)},
+            )
         except ValueError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -7955,14 +8028,102 @@ class Application:
         self._persist_import_preview_delta(session.id)
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
-    def _handle_import_file_session(self, session_id: str) -> Response:
-        self._reload_file_import_runtime_state()
+    def _handle_import_file_active_sessions(
+        self,
+        query: dict[str, list[str]],
+        *,
+        owner_user_id: str,
+    ) -> Response:
+        mode = str((query.get("mode") or [""])[0] or "").strip() or None
+        if mode not in {None, "bank_transaction", "invoice"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_session_mode", "message": "mode must be bank_transaction or invoice."},
+            )
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is not None:
+            sessions = ImportLifecycleService(PostgresImportLifecycleRepository(connection)).list_active_sessions(
+                imported_by=owner_user_id,
+                mode=mode,
+            )
+        else:
+            sessions = [
+                {
+                    "session_id": session.id,
+                    "imported_by": session.imported_by,
+                    "file_count": session.file_count,
+                    "created_at": self._serialize_value(session.created_at),
+                    "updated_at": self._serialize_value(session.created_at),
+                    "status": "preview_failed" if session.status == "preview_ready_with_errors" else "awaiting_confirmation",
+                    "job_id": None,
+                    "job_stage": None,
+                    "error": None,
+                }
+                for session in self._file_import_service.list_active_sessions(
+                    imported_by=owner_user_id,
+                    mode=mode,
+                )
+            ]
+        return self._json_response(HTTPStatus.OK, {"sessions": sessions})
+
+    def _handle_import_file_discard(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_file_discard_request", "message": "session_id is required."},
+            )
         try:
-            session = self._file_import_service.get_session(session_id)
+            connection = getattr(self._state_store, "_connection", None)
+            if connection is not None:
+                ImportLifecycleService(PostgresImportLifecycleRepository(connection)).discard_session(
+                    session_id=session_id,
+                    imported_by=owner_user_id,
+                )
+                self._reload_file_import_runtime_state()
+                session = self._file_import_service.get_session(session_id)
+            else:
+                session = self._file_import_service.discard_session(
+                    session_id=session_id,
+                    imported_by=owner_user_id,
+                )
+                self._persist_import_preview_delta(session.id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "session_id": session_id},
+            )
+        except PermissionError as exc:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "import_file_session_forbidden", "message": str(exc)},
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_file_session_not_discardable", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+
+    def _handle_import_file_session(self, session_id: str, *, owner_user_id: str) -> Response:
+        self._reload_file_import_runtime_state()
+        try:
+            session = self._file_import_service.assert_session_owner(
+                session_id=session_id,
+                imported_by=owner_user_id,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "import_file_session_not_found", "session_id": session_id},
+            )
+        except PermissionError as exc:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "import_file_session_forbidden", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
@@ -7970,6 +8131,8 @@ class Application:
         self,
         session_id: str,
         query: dict[str, list[str]],
+        *,
+        owner_user_id: str,
     ) -> Response:
         kind = str((query.get("kind") or [""])[0] or "").strip()
         try:
@@ -7982,6 +8145,10 @@ class Application:
             )
         self._reload_file_import_runtime_state()
         try:
+            self._file_import_service.assert_session_owner(
+                session_id=session_id,
+                imported_by=owner_user_id,
+            )
             payload = self._file_import_service.review_rows(
                 session_id=session_id,
                 kind=kind,
@@ -7992,6 +8159,11 @@ class Application:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "session_id": session_id},
+            )
+        except PermissionError as exc:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "import_file_session_forbidden", "message": str(exc)},
             )
         except ValueError as exc:
             return self._json_response(

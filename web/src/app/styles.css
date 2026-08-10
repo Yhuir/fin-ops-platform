@@ -9291,6 +9291,16 @@ textarea {
   outline: none;
 }
 
+.app-health-import-history-drawer__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+  padding-top: var(--fp-space-2);
+  color: var(--fp-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .app-health-audit-card {
   display: grid;
   gap: var(--fp-space-2);

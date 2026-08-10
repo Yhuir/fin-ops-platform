@@ -56,6 +56,8 @@ class FakeOperationsDashboardConnection:
                 "oa_records_latest_synced_at": "2026-05-20T10:00:00+00:00",
                 "oa_latest_synced_at": "2026-05-20T10:00:00+00:00",
             }
+        if "count(*)::bigint as total from app.import_batches batch" in normalized:
+            return {"total": 1}
         if "from job.outbox_events" in normalized and "pending_count" in normalized:
             return {
                 "pending_count": 0,
@@ -83,7 +85,10 @@ class FakeOperationsDashboardConnection:
                     "count": 1,
                     "supplementary_count": None,
                     "imported_at": "2026-05-20T10:00:00+00:00",
-                    "status": self.import_status,
+                    "batch_status": self.import_status,
+                    "file_status": "preview_ready" if self.import_status == "pending" else "confirmed",
+                    "session_status": "preview_ready" if self.import_status == "pending" else "confirmed",
+                    "job_status": None,
                 }
             ]
         if "oa_attachment_source_links" in normalized:
@@ -820,6 +825,18 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertNotIn("oa_attachment", import_source_keys)
         self.assertNotIn("oa_records", import_source_keys)
 
+    def test_operations_import_history_returns_paginated_lifecycle_for_admin(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = self._build_admin_application(data_dir=Path(temp_dir))
+            setattr(app._state_store, "_connection", FakeOperationsDashboardConnection())
+
+            response = app.handle_request("GET", "/api/operations/import-history?page=1&page_size=50")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 1, "total_pages": 1})
+        self.assertEqual(payload["rows"][0]["status"], "succeeded")
+
     def test_operation_history_is_visible_to_protected_admin_and_supports_detail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self._build_admin_application(data_dir=Path(temp_dir))
@@ -966,9 +983,9 @@ class AppHealthApiTests(unittest.TestCase):
             second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
             second_payload = json.loads(second_response.body)
 
-        self.assertEqual(first_payload["data_inventory"]["import_events"][0]["status"], "pending")
+        self.assertEqual(first_payload["data_inventory"]["import_events"][0]["status"], "awaiting_confirmation")
         self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(second_payload["data_inventory"]["import_events"][0]["status"], "completed")
+        self.assertEqual(second_payload["data_inventory"]["import_events"][0]["status"], "succeeded")
         self.assertEqual(second_payload["runtime_performance"]["read_models"], [])
         self.assertIn("read_model_metrics_unavailable", second_payload["freshness"]["warnings"])
         self.assertNotIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])

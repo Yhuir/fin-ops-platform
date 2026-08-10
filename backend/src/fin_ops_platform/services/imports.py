@@ -371,6 +371,16 @@ class ImportNormalizationService:
             self._counterparty_counter = rollback["counterparty_counter"]
             raise
 
+    def discard_preview(self, batch_id: str) -> ImportedBatch:
+        preview = self._batches[batch_id]
+        if preview.batch.status == BatchStatus.REVERTED:
+            return preview.batch
+        if preview.batch.status != BatchStatus.PENDING:
+            raise ValueError("only pending import previews can be reverted")
+        preview.batch.status = BatchStatus.REVERTED
+        self._batches[batch_id] = preview
+        return preview.batch
+
     def _refresh_row_decision_before_confirm(
         self,
         batch_type: BatchType,

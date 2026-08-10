@@ -160,3 +160,8 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 ## 2026-08-10 视觉回归
 
 - `web/src/test/ImportCenterPage.test.tsx` 保护共享导入汇总、文件/问题/冲突行及银行流水导入交互；后端导入合同测试保持不变。
+
+## 2026-08-11 预览生命周期回归
+
+- `tests/test_import_lifecycle_service.py` 覆盖统一状态、可恢复会话聚合、owner 校验和原子 discard。
+- `tests/test_import_file_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` 共同保护 preview -> recover/discard 以及 preview -> durable confirm 两条互斥路径。

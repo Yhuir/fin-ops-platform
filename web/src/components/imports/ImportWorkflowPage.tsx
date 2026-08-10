@@ -21,6 +21,8 @@ import PageScaffold from "../common/PageScaffold";
 import PageBusinessAuditIcon from "../common/PageBusinessAuditIcon";
 import {
   confirmImportFiles,
+  discardImportSession,
+  fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
   previewImportFiles,
@@ -851,6 +853,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
   const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
+  const [isDiscarding, setIsDiscarding] = useState(false);
   const mountedRef = useRef(false);
 
   const title = TITLES[mode];
@@ -937,32 +940,43 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     if (!pageActive || mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
       return undefined;
     }
-    const sessionId = readPersistedSessionId();
-    if (!sessionId) {
-      return undefined;
-    }
-
     let active = true;
     setIsPreviewing(true);
     setErrorMessage(null);
-    fetchImportSession(sessionId)
-      .then((payload) => {
-        if (!active) {
+    void (async () => {
+      const persistedSessionId = readPersistedSessionId();
+      try {
+        let sessionId = persistedSessionId;
+        if (!sessionId) {
+          sessionId = (await fetchActiveImportSessions(mode))[0]?.sessionId ?? null;
+        }
+        if (!sessionId) {
+          if (active) setIsPreviewing(false);
           return;
         }
-        setIsPreviewing(false);
+        let payload: ImportSessionPayload;
+        try {
+          payload = await fetchImportSession(sessionId);
+        } catch (error) {
+          const fallbackSessionId = (await fetchActiveImportSessions(mode))
+            .find((session) => session.sessionId !== sessionId)?.sessionId;
+          if (!fallbackSessionId) throw error;
+          sessionId = fallbackSessionId;
+          payload = await fetchImportSession(sessionId);
+        }
+        if (!active) return;
+        persistSessionId(sessionId);
         setPreviewPayload(payload);
         setFeedbackMessage(`已恢复上次 ${payload.files.length} 个文件的预览识别。`);
-      })
-      .catch(() => {
-        if (!active) {
-          return;
-        }
-        setIsPreviewing(false);
+      } catch {
+        if (!active) return;
         clearPersistedSession();
         resetDraft();
         setErrorMessage("上次预览会话已失效，请重新选择文件。");
-      });
+      } finally {
+        if (active) setIsPreviewing(false);
+      }
+    })();
 
     return () => {
       active = false;
@@ -981,6 +995,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setFeedbackMessage,
     setIsPreviewing,
     setPreviewPayload,
+    persistSessionId,
   ]);
 
   useEffect(() => {
@@ -1033,6 +1048,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     && allFilesConfigured
     && !isPreviewing
     && !isConfirming
+    && !isDiscarding
     && !settingsLoading
     && !readyEtcTasksLoading;
   const confirmableFileIds = useMemo(
@@ -1226,14 +1242,28 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     resetPreviewState();
   }
 
-  function handleClearFiles() {
+  async function handleClearFiles() {
+    if (mode !== "etc_invoice" && previewPayload?.session.id) {
+      setIsDiscarding(true);
+      setErrorMessage(null);
+      try {
+        await discardImportSession(previewPayload.session.id);
+        resetDraft();
+        setFeedbackMessage("已放弃服务端导入预览。");
+      } catch (error) {
+        setErrorMessage(resolveImportApiErrorMessage(error, "放弃导入预览失败，预览内容已保留。"));
+      } finally {
+        setIsDiscarding(false);
+      }
+      return;
+    }
     setSelectedFiles([]);
     setFileSelections({});
     resetPreviewState();
   }
 
   async function handleRefresh() {
-    if (isRefreshingContext || isPreviewing || isConfirming) return;
+    if (isRefreshingContext || isPreviewing || isConfirming || isDiscarding) return;
     setContextRefreshToken((current) => current + 1);
     if (mode === "etc_invoice" || !previewPayload?.session.id) return;
     setIsRefreshingContext(true);
@@ -1478,7 +1508,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               返回关联台
             </RouterLink>
             <Button
-              isDisabled={isPreviewing || isConfirming || isRefreshingContext || settingsLoading || readyEtcTasksLoading}
+              isDisabled={isPreviewing || isConfirming || isDiscarding || isRefreshingContext || settingsLoading || readyEtcTasksLoading}
               onPress={handleRefresh}
               size="sm"
               type="button"
@@ -1488,13 +1518,13 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               刷新
             </Button>
             <Button
-              isDisabled={!hasDraftContent || isPreviewing || isConfirming}
+              isDisabled={!hasDraftContent || isPreviewing || isConfirming || isDiscarding}
               onPress={handleClearFiles}
               size="sm"
               type="button"
               variant="secondary"
             >
-              清空
+              {isDiscarding ? "放弃中..." : "清空"}
             </Button>
             <Button isDisabled={!canPreview} onPress={handlePreview} size="sm" type="button" variant="secondary">
               {isPreviewing ? "预览中..." : "开始预览"}

@@ -384,6 +384,48 @@ class FileImportService:
     def get_session(self, session_id: str) -> FileImportSession:
         return self._sessions[session_id]
 
+    def assert_session_owner(self, *, session_id: str, imported_by: str) -> FileImportSession:
+        session = self._sessions[session_id]
+        if str(session.imported_by) != str(imported_by):
+            raise PermissionError("import session belongs to another user")
+        return session
+
+    def list_active_sessions(self, *, imported_by: str, mode: str | None = None) -> list[FileImportSession]:
+        def matches_mode(session: FileImportSession) -> bool:
+            batch_types = {item.batch_type for item in session.files if item.batch_type is not None}
+            if mode == "bank_transaction":
+                return BatchType.BANK_TRANSACTION in batch_types
+            if mode == "invoice":
+                return bool(batch_types & {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE})
+            return True
+
+        return sorted(
+            (
+                session
+                for session in self._sessions.values()
+                if session.imported_by == imported_by
+                and session.status in {"preview_ready", "preview_ready_with_errors"}
+                and matches_mode(session)
+            ),
+            key=lambda session: (session.created_at, session.id),
+            reverse=True,
+        )
+
+    def discard_session(self, *, session_id: str, imported_by: str) -> FileImportSession:
+        session = self.assert_session_owner(session_id=session_id, imported_by=imported_by)
+        if session.status == "reverted":
+            return session
+        if any(item.status == "confirmed" for item in session.files):
+            raise ValueError("confirmed import sessions cannot be discarded")
+        for item in session.files:
+            if item.preview_batch_id:
+                self._import_service.discard_preview(item.preview_batch_id)
+            item.status = "reverted"
+            item.batch_id = None
+        session.status = "reverted"
+        self._sessions[session.id] = session
+        return session
+
     def review_rows(
         self,
         *,
@@ -446,6 +488,8 @@ class FileImportService:
     ) -> FileImportSession:
         session = self._sessions[session_id]
         selected = set(selected_file_ids)
+        if not selected:
+            raise ValueError("at least one selected file is required")
         known_ids = {item.id for item in session.files}
         unknown_ids = sorted(selected - known_ids)
         if unknown_ids:
@@ -453,6 +497,9 @@ class FileImportService:
 
         confirmed_any = False
         selected_items = [item for item in session.files if item.id in selected]
+        invalid_items = [item.id for item in selected_items if item.status not in {"preview_ready", "confirmed"}]
+        if invalid_items:
+            raise ValueError(f"selected files are not confirmable: {', '.join(sorted(invalid_items))}")
         if any(item.status == "preview_ready" for item in selected_items):
             self.assert_session_preview_current(session_id=session_id)
         progress_total = len(selected_items)
@@ -491,6 +538,8 @@ class FileImportService:
 
     def assert_session_preview_current(self, *, session_id: str) -> None:
         session = self._sessions[session_id]
+        if session.status == "reverted":
+            raise ValueError("discarded import sessions cannot be confirmed")
         current_audit = self._build_session_audit(session, refresh_existing=True)
         if current_audit.audit.stale_projection() != session.audit.stale_projection():
             raise ImportPreviewStaleError(preview=session.audit, current=current_audit.audit)
@@ -503,6 +552,8 @@ class FileImportService:
         overrides: dict[str, dict[str, Any]] | None = None,
     ) -> FileImportSession:
         session = self._sessions[session_id]
+        if session.status == "reverted":
+            raise ValueError("discarded import sessions cannot be retried")
         override_map = overrides or {}
         selected = set(selected_file_ids)
         for item in session.files:

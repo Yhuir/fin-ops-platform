@@ -88,6 +88,7 @@ describe("AppHealthOperationsPage", () => {
     expect(recentImportEvents).toBeInTheDocument();
     expect(data).toHaveTextContent("bank-5.xlsx");
     expect(data).toHaveTextContent("invoice-4.xlsx");
+    expect(recentImportEvents).toHaveTextContent("已完成");
     expect(recentImportEvents).not.toHaveTextContent("OA 同步");
     expect(recentImportEvents).not.toHaveTextContent("OA 附件解析");
     expect(data).not.toHaveTextContent("bank-6.xlsx");

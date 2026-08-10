@@ -16,13 +16,14 @@ import {
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard, fetchPageAudit } from "../features/appHealth/api";
+import { fetchAppHealthDashboard, fetchImportHistory, fetchPageAudit } from "../features/appHealth/api";
 import type {
   AppHealthSystemAuditPayload,
   OperationsDashboardEndpointPerformance,
   OperationsDashboardImportEvent,
   OperationsDashboardInventoryBlock,
   OperationsDashboardPayload,
+  OperationsImportHistoryPayload,
   OperationsDashboardPercentiles,
   OperationsDashboardReadModelMetric,
 } from "../features/appHealth/types";
@@ -213,18 +214,18 @@ function workerState(row: OperationsDashboardPayload["runtime_performance"]["wor
 }
 
 function importEventState(row: OperationsDashboardImportEvent) {
-  const rawStatus = String(row.status || "");
-  const status = rawStatus.toLowerCase();
-  if (status === "completed" || status === "success" || status === "succeeded" || status === "done") {
-    return { label: rawStatus || "completed", tone: "success" as const };
-  }
-  if (status === "running" || status === "processing" || status === "pending") {
-    return { label: rawStatus, tone: "warning" as const };
-  }
-  if (status === "failed" || status === "error") {
-    return { label: rawStatus, tone: "danger" as const };
-  }
-  return { label: rawStatus || "unknown", tone: "neutral" as const };
+  const states = {
+    awaiting_confirmation: { label: "待确认", tone: "warning" as const },
+    queued: { label: "排队中", tone: "warning" as const },
+    processing: { label: "导入中", tone: "warning" as const },
+    succeeded: { label: "已完成", tone: "success" as const },
+    failed: { label: "导入失败", tone: "danger" as const },
+    discarded: { label: "已放弃", tone: "neutral" as const },
+    preview_failed: { label: "预览失败", tone: "danger" as const },
+    inconsistent: { label: "状态异常", tone: "danger" as const },
+    unknown: { label: "未知", tone: "neutral" as const },
+  };
+  return states[row.status as keyof typeof states] ?? states.unknown;
 }
 
 function auditStatus(payload: AppHealthSystemAuditPayload | null) {
@@ -563,7 +564,6 @@ function DataInventory({ payload, onOpenImportHistory }: { payload: OperationsDa
           <h3 className="app-health-import-events__title">最近导入记录</h3>
           <Button
             className="app-health-history-button"
-            isDisabled={importEvents.length === 0}
             onPress={onOpenImportHistory}
             size="sm"
             variant="tertiary"
@@ -786,8 +786,12 @@ export default function AppHealthOperationsPage() {
   const [auditError, setAuditError] = useState<string | null>(null);
   const [isAuditLoading, setAuditLoading] = useState(false);
   const [isImportHistoryOpen, setImportHistoryOpen] = useState(false);
+  const [importHistory, setImportHistory] = useState<OperationsImportHistoryPayload | null>(null);
+  const [importHistoryError, setImportHistoryError] = useState<string | null>(null);
+  const [isImportHistoryLoading, setImportHistoryLoading] = useState(false);
   const inFlightRef = useRef<AbortController | null>(null);
   const auditInFlightRef = useRef<AbortController | null>(null);
+  const importHistoryInFlightRef = useRef<AbortController | null>(null);
 
   const loadDashboard = useCallback(async () => {
     if (!permissions.canAdminAccess || inFlightRef.current) {
@@ -842,6 +846,26 @@ export default function AppHealthOperationsPage() {
     }
   }, [permissions.canAdminAccess]);
 
+  const loadImportHistory = useCallback(async (page = 1) => {
+    if (!permissions.canAdminAccess) return;
+    importHistoryInFlightRef.current?.abort();
+    const controller = new AbortController();
+    importHistoryInFlightRef.current = controller;
+    setImportHistoryLoading(true);
+    setImportHistoryError(null);
+    try {
+      setImportHistory(await fetchImportHistory(page, 50, controller.signal));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setImportHistoryError(error instanceof Error && error.message.trim() ? error.message : "导入历史加载失败。");
+    } finally {
+      if (importHistoryInFlightRef.current === controller) {
+        importHistoryInFlightRef.current = null;
+        setImportHistoryLoading(false);
+      }
+    }
+  }, [permissions.canAdminAccess]);
+
   useEffect(() => {
     if (!permissions.canAdminAccess || !active) {
       return undefined;
@@ -856,6 +880,8 @@ export default function AppHealthOperationsPage() {
       inFlightRef.current = null;
       auditInFlightRef.current?.abort();
       auditInFlightRef.current = null;
+      importHistoryInFlightRef.current?.abort();
+      importHistoryInFlightRef.current = null;
     };
   }, [active, activationGeneration, loadDashboard, permissions.canAdminAccess]);
 
@@ -904,7 +930,10 @@ export default function AppHealthOperationsPage() {
 
       {payload ? (
         <>
-          <DataInventory payload={payload} onOpenImportHistory={() => setImportHistoryOpen(true)} />
+          <DataInventory payload={payload} onOpenImportHistory={() => {
+            setImportHistoryOpen(true);
+            void loadImportHistory(1);
+          }} />
           <AppHealthSystemAuditPanel
             error={auditError}
             isLoading={isAuditLoading}
@@ -917,11 +946,35 @@ export default function AppHealthOperationsPage() {
             className="app-health-import-history-drawer"
             closeLabel="关闭导入历史"
             open={isImportHistoryOpen}
-            onClose={() => setImportHistoryOpen(false)}
+            onClose={() => {
+              importHistoryInFlightRef.current?.abort();
+              setImportHistoryOpen(false);
+            }}
             title="导入历史"
             width={720}
           >
-            <ImportEventsTable ariaLabel="全部导入历史" rows={payload.data_inventory.import_events ?? []} />
+            {isImportHistoryLoading && !importHistory ? <Spinner aria-label="正在加载导入历史" /> : null}
+            {importHistoryError ? <AppHealthNotice status="danger">{importHistoryError}</AppHealthNotice> : null}
+            {importHistory ? (
+              <>
+                <ImportEventsTable ariaLabel="全部导入历史" rows={importHistory.rows} />
+                <div className="app-health-import-history-drawer__pagination">
+                  <Button
+                    isDisabled={isImportHistoryLoading || importHistory.pagination.page <= 1}
+                    onPress={() => void loadImportHistory(importHistory.pagination.page - 1)}
+                    size="sm"
+                    variant="secondary"
+                  >上一页</Button>
+                  <span>{importHistory.pagination.page} / {Math.max(importHistory.pagination.total_pages, 1)}</span>
+                  <Button
+                    isDisabled={isImportHistoryLoading || importHistory.pagination.page >= importHistory.pagination.total_pages}
+                    onPress={() => void loadImportHistory(importHistory.pagination.page + 1)}
+                    size="sm"
+                    variant="secondary"
+                  >下一页</Button>
+                </div>
+              </>
+            ) : null}
           </AppDrawer>
         </>
       ) : !loadError ? (

@@ -6,6 +6,7 @@ import type {
   AppHealthOaSyncSource,
   AppHealthWorkbenchSource,
   OperationsDashboardPayload,
+  OperationsImportHistoryPayload,
   PageAuditPageKey,
   PageAuditPayload,
 } from "./types";
@@ -89,6 +90,17 @@ export async function fetchAppHealth(signal?: AbortSignal): Promise<ApiAppHealth
 
 export async function fetchAppHealthDashboard(signal?: AbortSignal): Promise<OperationsDashboardPayload> {
   return requestJson<OperationsDashboardPayload>("/api/operations/app-health-dashboard", signal);
+}
+
+export async function fetchImportHistory(
+  page = 1,
+  pageSize = 50,
+  signal?: AbortSignal,
+): Promise<OperationsImportHistoryPayload> {
+  return requestJson<OperationsImportHistoryPayload>(
+    `/api/operations/import-history?page=${page}&page_size=${pageSize}`,
+    signal,
+  );
 }
 
 export async function fetchPageAudit<T extends PageAuditPayload = PageAuditPayload>(

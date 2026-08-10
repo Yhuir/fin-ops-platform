@@ -10,6 +10,7 @@
 | `files_configured` | 每个银行流水文件都选择了银行账户映射。 | 前端 file selections + settings bank account mappings |
 | `previewing` | 正在调用 `/imports/files/preview`。 | 前端请求状态 |
 | `preview_ready` | 后端已创建 import session，文件级 preview 可确认。 | `FileImportSession.files[].status` |
+| `reverted` | 用户在确认前显式放弃 preview，服务端已终结 session/file/pending batch。 | `app.import_files` + `app.import_batches`；不影响 canonical transaction |
 | `mapping_required` / `unrecognized_template` | 已定位银行表头但核心 canonical 字段不完整；后端返回候选列，等待用户补充映射，不生成可确认行。 | `FileImportSession.files[].mapping_fields` |
 | `file_error` / `unrecognized_template` | 文件损坏、无法定位表头或不是支持的文件类型；同 session 其他 ready 文件仍可确认。 | `FileImportService.preview_files` |
 | `preview_stale` | 预览后底层已存在记录或 audit 发生变化；确认被拒绝。 | `ImportPreviewStaleError` / API `409 preview_stale` |
@@ -27,6 +28,7 @@
 - `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
 - `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts 与必要 Workbench matching 领域任务；不触发页面 read model fan-out，消费者访问时按 source version 收敛。
 - `failed -> files_configured/previewing`：用户重试 session files 或重新预览。
+- `preview_ready -> reverted`：只有 session owner 可显式放弃；重复请求幂等。
 
 ### 禁止流转
 
@@ -39,6 +41,7 @@
 - 已有 idempotency key 的 confirm 不得创建重复 import job。
 - 任一银行流水 preview/retry 不得写回其它 session，更不得把其它进程已确认的发票或银行导入降级为 pending。
 - 不能把 `queued` / `processing` 展示成下游 read model 已 fresh。
+- 已 `reverted`、已确认或有 pending/processing/succeeded import job 时禁止 discard/confirm；GET/review/retry/confirm/discard 必须校验 session owner。
 
 ## UI 状态
 
@@ -55,7 +58,8 @@
 | job queued | 返回 `job` 时显示“已开始后台导入”，不立即宣称下游刷新完成。 |
 | success | inline 完成时提示导入完成；仅当响应声明 `operation_barrier_targets` 时等待这些 targets，禁止请求 Workbench 页面探测刷新。后台 job 由 App Status/Health 展示进度。 |
 | error | preview/confirm/retry/session fetch 失败展示错误；`preview_stale` 使用固定“重新预览”提示。 |
-| session restore | 支持通过 session id 恢复 preview；离开/返回页面不能保留 in-flight 请求。 |
+| session restore | 有本地 session id 时精确恢复；本地缺失/失效时从 `GET /imports/files/sessions?mode=bank_transaction` 恢复当前用户最新活跃 preview。离开/返回页面不能保留 in-flight 请求。 |
+| discard | 点击清空已预览内容时先调用服务端 discard；成功后才清本地，失败则保留预览并显示错误。 |
 | permission disabled/hidden | 当前页面通过 App Health `blocksMutations` 做系统不可用防护；若后续接入细粒度权限，需补 API 403 和前端 disabled/hidden。 |
 
 ## Read Model / Worker 状态
@@ -90,6 +94,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-11 | 服务端恢复、owner 隔离和显式放弃闭环 | 预览不再依赖单一浏览器 key；AppHealth 可区分待确认、队列、处理、完成、失败和放弃 | `tests/test_import_lifecycle_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-08-08 | 银行表头统一为 canonical 字段解析与人工映射闭环 | 删除按银行 exact-header 分支；兼容元数据账号、单位/括号差异，未知核心字段 fail closed 并可按表头签名复用人工映射 | `test_ccb_current_export_header_uses_metadata_account_and_unit_aliases`、`test_manual_mapping_is_reused_for_same_header_signature`、`bank transaction import maps an unknown amount header and retries the same file` |
 | 2026-07-22 | preview 持久化改为 session-scoped exact delta | 银行预览不再携带历史 session/batch，避免跨导入域 stale snapshot 丢失更新 | `test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`test_stale_api_preview_cannot_downgrade_another_process_confirmed_import` |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确文件/session/job/worker/read model 状态和禁止流转 | `tests/test_import_*`、`tests/test_import_job_queue.py`、`web/src/test/ImportCenterPage.test.tsx` |

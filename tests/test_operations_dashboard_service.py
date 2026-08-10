@@ -59,6 +59,8 @@ class FakeDashboardConnection:
                 "latest_successful_sync_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
                 "oa_latest_synced_at": datetime(2026, 5, 20, 10, 5, tzinfo=UTC),
             }
+        if "count(*)::bigint as total from app.import_batches batch" in normalized:
+            return {"total": 2}
         raise AssertionError(f"Unexpected fetch_one SQL: {sql}")
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
@@ -77,7 +79,10 @@ class FakeDashboardConnection:
                     "count": 8,
                     "supplementary_count": None,
                     "imported_at": datetime(2026, 5, 23, 10, 5, tzinfo=UTC),
-                    "status": "completed",
+                    "batch_status": "completed",
+                    "file_status": "confirmed",
+                    "session_status": "confirmed",
+                    "job_status": "succeeded",
                 },
                 {
                     "event_id": "invoice-batch-1",
@@ -88,7 +93,10 @@ class FakeDashboardConnection:
                     "count": 6,
                     "supplementary_count": None,
                     "imported_at": datetime(2026, 5, 22, 10, 5, tzinfo=UTC),
-                    "status": "completed",
+                    "batch_status": "completed",
+                    "file_status": "confirmed",
+                    "session_status": "confirmed",
+                    "job_status": "succeeded",
                 },
             ]
         if "oa_attachment_source_links" in normalized:
@@ -181,6 +189,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(oa_sources["oa_items"]["latest_synced_at"], "2026-05-20T10:05:00+00:00")
         import_events = payload["data_inventory"]["import_events"]
         self.assertEqual([row["source_key"] for row in import_events], ["bank_transactions", "manual"])
+        self.assertEqual([row["status"] for row in import_events], ["succeeded", "succeeded"])
         self.assertNotIn("oa_attachment", [row["source_key"] for row in import_events])
         self.assertNotIn("oa_records", [row["source_key"] for row in import_events])
         endpoints = {row["endpoint"]: row for row in payload["request_performance"]["endpoints"]}

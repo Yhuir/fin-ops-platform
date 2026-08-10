@@ -148,6 +148,21 @@ export type OperationsDashboardImportEvent = {
   supplementary_count: number | null;
   imported_at: string | null;
   status: string;
+  session_id?: string | null;
+  file_id?: string | null;
+  job_id?: string | null;
+  job_stage?: string | null;
+  error?: string | null;
+};
+
+export type OperationsImportHistoryPayload = {
+  rows: OperationsDashboardImportEvent[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
 };
 
 export type OperationsDashboardEndpointPerformance = {

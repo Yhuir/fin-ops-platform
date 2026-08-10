@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-08-06
+日期：2026-08-11
 
 ## 模块化状态
 
@@ -18,6 +18,7 @@
 - 将导入结果转化为发票源事实与精确 affected scopes。
 - Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。
+- 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只终结未确认 preview，不改发票 canonical facts。
 
 ### 不负责
 
@@ -31,6 +32,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
+| 预览恢复/放弃 | `GET /imports/files/sessions?mode=invoice`、`POST /imports/files/discard` | 服务端仅列出当前认证用户的活跃预览。放弃校验 owner 并事务化终结 file/session/pending batch；已确认或已创建活跃/成功 job 时拒绝。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。发票行输出发票号码、开票日期、销方、购方、金额、税额、价税合计等用户复核字段；不得套用银行账户/交易方向字段。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 有持久化 preview session 时精确重读 `/imports/files/sessions/{session_id}`；保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Job event | import job queue | 后台可恢复处理；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；活跃 processing lease 不得被并发 worker 接管。 |
@@ -65,7 +67,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx` |
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
-| Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
+| Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
+| Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；聚合既有 import facts/job，不新增表、队列或 read model。 |
 | Controlled repair | `services/import_audit_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明 |
 | Worker/runtime | `runtime_worker_handlers.py` |
 | Tests | `tests/test_import*.py`、`tests/test_invoice_*.py`、`web/e2e/imports-invoices-flow.spec.ts` |
@@ -84,6 +87,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - `tests/test_import_processing_service.py`
 - `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
+- `tests/test_import_lifecycle_service.py`
+- `web/src/test/ImportCenterPage.test.tsx`
 - `web/e2e/imports-invoices-flow.spec.ts`
 
 ## 当前缺口和删除条件
@@ -99,7 +104,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Allowed reads: invoice import facts repository、发票查询/context ports、owner API。
 - Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、OA pending、tax、cost 直接读取 canonical facts；`workbench`、`workbench_relation` 按自身访问/maintenance 合同使用精确 dirty scope。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
-- Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
+- Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、已确认 batch 撤销链和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；仅保留 owner 校验后对未确认 preview 的显式放弃，该路径不触及 canonical invoice。
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
 - 2026-07-22：文件预览保存改为 `FileImportService.preview_session_persistence_payload(session_id)`，只写当前 session 和 `preview_batch_id`；删除 `ImportNormalizationService.snapshot(include_facts=False)` 与无参全量 preview writer。PostgreSQL `save_import_delta` 在同一事务写 batch 与 file/session，防止 stale API 覆盖其它已确认导入或形成半写状态。
 - 2026-07-22：历史上已被 stale preview 降级的单条生命周期事实通过现有 `import-audit-repair` 边界修复；必须显式提供 `--batch-id` 与 `--file-id`，dry-run 指纹和 execute 必须一致，且只允许 `pending/preview_ready -> completed/confirmed` 的精确转换。旧 preview 同时清空的 import row link 只能按 `(batch_id, source_unique_key/data_fingerprint)` 唯一匹配既存 `manual_invoice_import` source-link 后恢复；其它中间态、活跃 job、计数不符、多义匹配或 canonical/source-link 不闭环一律 fail closed。

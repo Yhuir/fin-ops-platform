@@ -1,5 +1,6 @@
 import type {
   ImportFilePreviewOverride,
+  ActiveImportSession,
   ImportBatchType,
   ImportPreviewAuditCounts,
   ImportPreviewDuplicateGroup,
@@ -499,6 +500,46 @@ export async function confirmImportFiles(
 export async function fetchImportSession(sessionId: string): Promise<ImportSessionPayload> {
   const payload = await requestJson<ApiImportSessionPayload>(`/imports/files/sessions/${sessionId}`, {
     method: "GET",
+  });
+  return mapImportPayload(payload);
+}
+
+export async function fetchActiveImportSessions(
+  mode: "bank_transaction" | "invoice",
+): Promise<ActiveImportSession[]> {
+  const payload = await requestJson<{
+    sessions?: Array<{
+      session_id?: string;
+      imported_by?: string;
+      file_count?: number;
+      batch_type?: ImportBatchType | null;
+      created_at?: string;
+      updated_at?: string;
+      status?: string;
+      job_id?: string | null;
+      job_stage?: string | null;
+      error?: string | null;
+    }>;
+  }>(`/imports/files/sessions?mode=${encodeURIComponent(mode)}`, { method: "GET" });
+  return (payload.sessions ?? []).map((session) => ({
+    sessionId: stringOrEmpty(session.session_id),
+    importedBy: stringOrEmpty(session.imported_by),
+    fileCount: numberOrZero(session.file_count),
+    batchType: session.batch_type ?? null,
+    createdAt: stringOrEmpty(session.created_at),
+    updatedAt: stringOrEmpty(session.updated_at),
+    status: stringOrEmpty(session.status),
+    jobId: session.job_id ?? null,
+    jobStage: session.job_stage ?? null,
+    error: session.error ?? null,
+  }));
+}
+
+export async function discardImportSession(sessionId: string): Promise<ImportSessionPayload> {
+  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/discard", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
   });
   return mapImportPayload(payload);
 }

@@ -1,6 +1,6 @@
 # 系统状态模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-08-11
 
 ## 模块化状态
 
@@ -31,7 +31,7 @@
 | 页面读取 | `AppHealthOperationsPage.tsx`、`features/appHealth/api.ts` | 只读 API |
 | Health probe | app health endpoints | `/health` 是轻量 liveness，始终以 HTTP 200 表示进程可响应；`/health/ready` 是流量/发布 readiness，使用单一 `readiness_blockers` 判决，`ready` 返回 200、`not_ready` 返回 503。blocker 仅来自 PostgreSQL 不可用、release/runtime guard 不一致、必需 worker missing/stale/mismatch，以及 `workbench` / `workbench_relation` 当前缺失、失败或超过 300 秒未收敛；普通短暂 pending/processing 和非 critical 历史失败不阻断。该端点实时读取 current-effective outbox/dirty scope 与 critical readiness，不扫描历史 `done`；完整性能指标由 `/health`、`/metrics` 和 Operations dashboard 负责。 |
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态；App Status summary 的 readiness I/O 只读取状态、scope、时间和错误等实际消费列，不读取/解码逐 scope `source_versions`；版本向量只由 Operations dashboard 的 scope-evidence 查询 owner 读取。operations dashboard 默认不等待 RabbitMQ management API，RabbitMQ queue metrics 作为可选 transport 观测以 unknown 降级。每个 read model 额外读取最近 scope 事件与 readiness，区分 `current_scope` 和 `full_history_batch`；该查询按精确 `event_type` 读取最近 5 条并由 `outbox_events_read_model_scope_evidence_idx` 支撑，禁止对每个 model 重复扫描、排序全量 outbox 历史 |
-| Dashboard inventory facts | `app.bank_transactions`、`app.invoices` / `source_links`、`app.import_batches`、`app.oa_*`、`app.oa_sync_runs` | 发票 inventory 按 canonical invoice source link 和 `invoice_type` 统计；OA 上次读取时间优先使用 `app.oa_sync_runs(sync_type='oa_projection')` 的成功 run；导入历史只读 `app.import_batches` 中手工银行流水和发票导入批次 |
+| Dashboard inventory facts | `app.bank_transactions`、`app.invoices` / `source_links`、`app.import_batches`、`app.import_files`、`job.import_jobs`、`app.oa_*`、`app.oa_sync_runs` | 发票 inventory 按 canonical invoice source link 和 `invoice_type` 统计；OA 上次读取时间优先使用成功 sync run；导入历史以 batch/file/session/job 联合生命周期输出待确认、排队、处理、完成、失败、放弃或状态异常，不直接展示原始 `pending`。 |
 | OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |
 | 进项/销项页面全量审计 | `app.invoices`、`app.workbench_pair_relations` | 页面与 App Health 分别调用统一 `/api/operations/app-health/page-audit?page=input-invoice-usage` / `?page=output-invoice-collections`；在同一只读快照内检查 canonical 发票与 active relation。旧 specialized HTTP routes 和页面 projection 审计已删除。 |
 | 已退休页面 refresh routes | 旧 admin request | `input-invoice-usage-refresh`、`output-invoice-collection-refresh`、`pending-invoice-refresh` 已删除并返回 `404`；这些页面直接读取 canonical facts，App Health 只保留只读 page audit，不再代页面写入 runtime queue |
@@ -48,6 +48,7 @@
 | Read model historical diagnostics | App Status details | manifest `fan_out_command` 的 command-only parent readiness 不参与当前 domain/overall severity，输出到 `historical_scopes` 且 `current_effective=false`；同 scope 当前 dirty/outbox failure 和 child shard failure 仍参与 blocked/busy。 |
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
 | Dashboard payload | operations page | 只读聚合 canonical invoice、OA、bank、import、worker 与两个保留 read model runtime；不读取其它已退役 projection。`data_inventory.invoice.sources` 固定为 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`；OA completed/in-progress/items 均由 PostgreSQL canonical OA facts 和最近成功 sync run统计。RabbitMQ 管理指标默认以 unknown 输出，不能阻塞健康探针；任一局部 block 失败只降级该 block 并返回当前其它事实。 |
+| 分页导入历史 | `GET /api/operations/import-history?page&page_size` | admin-only、只读，`page_size<=100`；主页只取最新 5 条，抽屉独立分页，两者共用 `ImportLifecycleService`。 |
 | 进项使用审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`*_sample_count` 是有上限样本，不是全量问题总数 |
 | 销项收款审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`issues_found` 只报告有上限样本，不做自动修复 |
 | 页面业务审计报告 | 页面标题 Audit icon / admin API consumer | 只有 `proof_availability=ready`、非空 `contract_revision`、`audit_status.integrity=pass`、`freshness=fresh`、`queue=drained` 且 `database_snapshot=true` 才显示“此数据库快照内已登记 App 内部合同一致”。relation consumer 页面还要求 registered typed edge equality；非消费者明确 `not_applicable`。任何页面成功都不证明后续写入，也不能证明外部银行/OA/发票/ETC 来源没有遗漏。 |
@@ -68,7 +69,8 @@
 | Frontend feature/context | `web/src/features/appHealth/*`、`features/appStatus/*`、`contexts/AppHealthStatusContext.tsx` |
 | Shell | `web/src/components/shell/AppStatusIndicator.tsx` |
 | Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/page-audit` in `server.py` |
-| Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py`、`operations_audit_service.py`、`page_audit_registry.py` |
+| Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py`、`operations_audit_service.py`、`page_audit_registry.py`、`operations_dashboard.py`、`import_lifecycle_service.py` |
+| Import lifecycle query | `services/postgres_repositories/import_lifecycle.py`；只聚合现有 durable facts，不创建 AppHealth 专用 read model。 |
 | Backend audit repository | `services/postgres_repositories/operations_audit.py`、`audit_report.py`、`app_health_system_audit.py`、`workbench_relation_audit.py`、`page_business_audit.py`、各 direct page audit repository、`external_control_evidence.py`、`external_control_evidence_audit.py` |
 | Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`page_audit_registry.py` |
 | Tools/tests | `tools/app_status_readiness_backfill.py`、`tools/audit_page_business_read_model.py`、`tests/test_app_health*.py`、`tests/test_app_status*.py`、`tests/test_audit_page_business_read_model_tool.py` |
@@ -89,6 +91,7 @@
 - `tests/test_operations_audit_service.py`
 - `tests/test_operations_audit_report.py`
 - `web/src/test/AppHealthOperationsPage.test.tsx`
+- `tests/test_import_lifecycle_service.py`
 - `web/src/test/PageAuditIcon.test.tsx`
 
 ## 当前缺口和删除条件

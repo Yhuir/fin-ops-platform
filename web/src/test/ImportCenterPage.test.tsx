@@ -491,9 +491,19 @@ describe("Import pages", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "清空" })).toBeEnabled();
     });
-    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    await userEvent.click(screen.getByRole("button", { name: "清空" }));
+    expect(await screen.findByText("已放弃服务端导入预览。")).toBeInTheDocument();
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+  });
+
+  test("invoice import recovers an active server preview without browser storage", async () => {
+    const fetchMock = installMockApiFetchWithInvoicePreviewSession();
+    renderAppAt("/imports/invoices");
+
+    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/sessions?mode=invoice")).toBe(true);
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
   });
 
   test("invoice import refreshes the persisted preview without clearing the draft", async () => {
@@ -525,7 +535,8 @@ describe("Import pages", () => {
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
     expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    await userEvent.click(screen.getByRole("button", { name: "清空" }));
+    expect(await screen.findByText("已放弃服务端导入预览。")).toBeInTheDocument();
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
 

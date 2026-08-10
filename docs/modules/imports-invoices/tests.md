@@ -175,3 +175,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 2026-08-10 视觉回归
 
 - `web/src/test/ImportCenterPage.test.tsx` 继续保护发票专用复核字段和共享工作区交互，避免视觉收敛恢复银行流水字段污染。
+
+## 2026-08-11 预览生命周期回归
+
+- `tests/test_import_lifecycle_service.py` 覆盖 batch/file/session/job 状态聚合、分页、可恢复会话和 PostgreSQL 事务化放弃。
+- `tests/test_import_file_service.py` 与 `tests/test_import_file_api.py` 覆盖 owner 隔离、幂等 discard、discard 后禁止 confirm 和 active session API。
+- `web/src/test/ImportCenterPage.test.tsx` 覆盖无浏览器 key 时从服务端恢复，以及放弃成功后才清本地预览。

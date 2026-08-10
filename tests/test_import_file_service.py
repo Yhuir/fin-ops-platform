@@ -1074,6 +1074,26 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.normalized_rows[0]["account_no"], "531899991015003383847")
         self.assertEqual(preview_file.normalized_rows[0]["account_name"], "云南溯源科技有限公司")
 
+    def test_discard_session_is_owned_idempotent_and_not_confirmable(self) -> None:
+        service = FileImportService(ImportNormalizationService())
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+
+        with self.assertRaises(PermissionError):
+            service.discard_session(session_id=session.id, imported_by="another_user")
+
+        discarded = service.discard_session(session_id=session.id, imported_by="user_finance_01")
+        repeated = service.discard_session(session_id=session.id, imported_by="user_finance_01")
+
+        self.assertEqual(discarded.status, "reverted")
+        self.assertEqual(repeated.status, "reverted")
+        self.assertEqual(discarded.files[0].status, "reverted")
+        self.assertEqual(service.list_active_sessions(imported_by="user_finance_01", mode="invoice"), [])
+        with self.assertRaises(ValueError):
+            service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+
 
 if __name__ == "__main__":
     unittest.main()

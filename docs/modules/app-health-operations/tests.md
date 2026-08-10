@@ -180,3 +180,9 @@ Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests�
 
 - `web/src/test/AppHealthOperationsPage.test.tsx` 继续保护状态、异常和操作入口；共享 token 完整性由 `DesignTokens.test.ts` 保护。
 - 同一测试保护 System Audit 标题只读取 `summary.registered_page_count`；结果未加载或失败时不显示 `0` 或历史硬编码页数。
+
+## 2026-08-11 导入生命周期回归
+
+- `tests/test_import_lifecycle_service.py` 锁定统一状态映射和分页合同。
+- `tests/test_operations_dashboard_service.py` 锁定 dashboard 不再直出 raw batch status。
+- `tests/test_app_health_api.py` 覆盖 admin-only `/api/operations/import-history` 分页 I/O；`web/src/test/AppHealthOperationsPage.test.tsx` 覆盖中文生命周期与独立历史抽屉。

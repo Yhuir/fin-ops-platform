@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
+from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
+from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_ALIASES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 
@@ -35,6 +37,7 @@ class OperationsDashboardService:
         self._connection = connection
         self._api_performance_recorder = api_performance_recorder
         self._runtime_repository = runtime_repository or _default_runtime_repository(connection)
+        self._import_lifecycle_service = ImportLifecycleService(PostgresImportLifecycleRepository(connection))
 
     def build_payload(self) -> dict[str, Any]:
         warnings: list[str] = []
@@ -257,37 +260,10 @@ class OperationsDashboardService:
         )
 
     def _import_events(self) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        rows.extend(
-            self._connection.fetch_all(
-                """
-                select
-                  coalesce(legacy_mongo_id, id::text) as event_id,
-                  case
-                    when batch_type = 'bank_transaction' then 'bank_transactions'
-                    else 'manual'
-                  end as source_key,
-                  case
-                    when batch_type = 'bank_transaction' then '流水导入'
-                    else '手工导入'
-                  end as label,
-                  source_name,
-                  imported_by,
-                  success_count::bigint as count,
-                  null::bigint as supplementary_count,
-                  imported_at,
-                  status
-                from app.import_batches
-                where batch_type in ('bank_transaction', 'input_invoice', 'output_invoice')
-                order by imported_at desc, event_id desc
-                """
-            )
-            or []
-        )
-        return [
-            _inventory_event(row)
-            for row in sorted(rows, key=lambda item: _isoformat(item.get("imported_at")) or "", reverse=True)
-        ]
+        return list(self.list_import_events(page=1, page_size=5)["rows"])
+
+    def list_import_events(self, *, page: int, page_size: int) -> dict[str, Any]:
+        return self._import_lifecycle_service.list_events(page=page, page_size=page_size)
 
     def _request_performance(self) -> dict[str, Any]:
         summary = self._api_performance_recorder.summary()
@@ -466,20 +442,6 @@ def _inventory_source(
     if supplementary_count is not None or key == "oa_attachment":
         payload["supplementary_count"] = supplementary_count
     return payload
-
-
-def _inventory_event(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "key": str(row.get("event_id") or ""),
-        "source_key": str(row.get("source_key") or ""),
-        "label": str(row.get("label") or ""),
-        "source_name": str(row.get("source_name") or ""),
-        "imported_by": str(row.get("imported_by") or ""),
-        "count": _optional_int(row.get("count")),
-        "supplementary_count": _optional_int(row.get("supplementary_count")),
-        "imported_at": _isoformat(row.get("imported_at")),
-        "status": str(row.get("status") or "unknown"),
-    }
 
 
 def _percentiles(value: object) -> dict[str, float | None]:

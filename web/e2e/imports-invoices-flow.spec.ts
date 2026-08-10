@@ -318,7 +318,9 @@ test.describe("invoice import browser flow", () => {
     });
     await expect(page.getByTestId("pending-invoices-page")).toBeVisible();
     await expectDirectCanonicalResponse(Promise.resolve(pendingRowsPayload!));
-    const importedPendingRow = page.getByRole("row", { name: /SD-INV-IMPORT-E2E-001/ });
+    const importedPendingRow = page
+      .getByRole("gridcell", { name: /SD-INV-IMPORT-E2E-001/ })
+      .locator("xpath=ancestor::*[@role='row'][1]");
     await expect(importedPendingRow).toBeVisible();
     await expect(importedPendingRow).toContainText("发票导入进项供应商");
     await expect(importedPendingRow).toContainText("已支付已开票");

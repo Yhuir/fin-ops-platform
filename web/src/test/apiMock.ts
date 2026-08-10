@@ -5073,7 +5073,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 42,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:58:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
               {
                 key: "invoice-4",
@@ -5084,7 +5084,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 18,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:54:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
               {
                 key: "bank-4",
@@ -5095,7 +5095,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 16,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:40:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
               {
                 key: "invoice-3",
@@ -5106,7 +5106,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 12,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:30:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
               {
                 key: "bank-3",
@@ -5117,7 +5117,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 10,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:25:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
               {
                 key: "bank-6",
@@ -5128,7 +5128,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 count: 8,
                 supplementary_count: null,
                 imported_at: "2026-05-23T09:20:00+08:00",
-                status: "completed",
+                status: "succeeded",
               },
             ],
           },
@@ -5203,6 +5203,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ],
         next_cursor: null,
         limit: 50,
+      },
+    }),
+    "/api/operations/import-history": () => ({
+      body: {
+        rows: [{
+          key: "bank-6",
+          source_key: "bank_transactions",
+          label: "流水导入",
+          source_name: "bank-6.xlsx",
+          imported_by: "admin.ops",
+          count: 8,
+          supplementary_count: null,
+          imported_at: "2026-05-23T09:20:00+08:00",
+          status: "succeeded",
+        }],
+        pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
       },
     }),
     "/api/operations/history/actors": () => ({
@@ -7387,6 +7403,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
       return { body: latestImportSession };
     },
+    "/imports/files/discard": () => {
+      latestImportSession = {
+        ...latestImportSession,
+        session: { ...latestImportSession.session, status: "reverted" },
+        files: latestImportSession.files.map((file) => ({ ...file, status: "reverted" })),
+      };
+      return { body: latestImportSession };
+    },
   };
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -7640,6 +7664,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       const transactionId = url.pathname.split("/").pop() ?? "";
       return jsonResponse(buildCostStatisticsTransactionPayload(transactionId));
+    }
+    if (url.pathname === "/imports/files/sessions") {
+      const isActive = ["preview_ready", "preview_ready_with_errors"].includes(latestImportSession.session.status);
+      return jsonResponse({
+        body: {
+          sessions: isActive && latestImportSession.files.length > 0
+            ? [{
+                session_id: latestImportSession.session.id,
+                imported_by: latestImportSession.session.imported_by,
+                file_count: latestImportSession.session.file_count,
+                batch_type: latestImportSession.files[0]?.batch_type,
+                created_at: latestImportSession.session.created_at,
+                updated_at: latestImportSession.session.created_at,
+                status: "awaiting_confirmation",
+              }]
+            : [],
+        },
+      });
     }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });

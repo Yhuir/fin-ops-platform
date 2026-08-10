@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   confirmImportFiles,
+  discardImportSession,
+  fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
   previewImportFiles,
@@ -125,6 +127,8 @@ describe("imports api", () => {
     });
     await confirmImportFiles("import_session_0001", ["import_file_0001"]);
     await fetchImportSession("import_session_0001");
+    await fetchActiveImportSessions("invoice");
+    await discardImportSession("import_session_0001");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -152,6 +156,16 @@ describe("imports api", () => {
         credentials: "include",
         headers: expect.any(Headers),
       }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/imports/files/sessions?mode=invoice",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/imports/files/discard",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
     );
 
     fetchMock.mock.calls.forEach(([, init]) => {

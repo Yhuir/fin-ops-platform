@@ -1,6 +1,6 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-08-06
+日期：2026-08-11
 
 ## 模块化状态
 
@@ -17,6 +17,7 @@
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 记录导入预览审计。
+- 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
 - 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。
 - 银行强 identity 仅来自账户与官方参考号；业务字段指纹只产生 `suspected_duplicate` 人工复核，不触发自动跳过。
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
@@ -36,6 +37,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
+| 预览恢复/放弃 | `GET /imports/files/sessions?mode=bank_transaction`、`POST /imports/files/discard` | 只返回当前认证用户的可恢复会话。放弃必须校验 owner，对已确认文件或 pending/processing/succeeded job fail closed，重复放弃幂等。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
@@ -66,6 +68,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | 错误明细 | `/imports/batches/{batch_id}/errors.csv` | 仅输出用户可读字段，不输出内部对象 ID。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
+| 导入生命周期 | AppHealth / 导入页 | 统一输出 `awaiting_confirmation/queued/processing/succeeded/failed/discarded/inconsistent`；页面不得直接展示 batch 原始 `pending/completed` 并猜测含义。 |
 | Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次写入影响的精确月份；不在写路径展开成页面 refresh jobs |
 | Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`，普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作；后续访问页面由该页 freshness/status/enqueue 边界收敛 |
 | Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；下游 read model 只登记为 impact targets，不冒充页面 consumer |
@@ -86,7 +89,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx` |
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
-| Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
+| Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
+| Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；只读聚合既有 import facts，放弃只在单事务内终结未确认 preview，不写 canonical transaction。 |
 | Persistence | `services/postgres_repositories/core.py` 只在既有 `app.import_files.raw_payload` 中保存字段映射、来源和表头签名，用于 session 恢复及相同签名复用；不新增模板事实表。 |
 | Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/postgres_repositories/import_audit_repair.py`、`services/page_audit_registry.py` |
 | Controlled repair | `services/import_audit_repair_service.py` 输出纯 plan；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
@@ -110,6 +114,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 - `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_transaction_import_frontend_uses_file_session_api_only`
 - `web/src/test/BackgroundJobProgress.test.tsx`
 - `web/src/test/ImportsApi.test.ts`
+- `tests/test_import_lifecycle_service.py`
+- `web/src/test/ImportCenterPage.test.tsx`
 - `web/e2e/imports-bank-transactions-flow.spec.ts`
 
 ## 当前缺口和删除条件

@@ -525,6 +525,42 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(job_payload["affected_domains"], ["imports_bank_transactions"])
         self.assertEqual(job_payload["route"], "/imports/bank-transactions")
 
+    def test_preview_session_can_be_recovered_and_discarded_before_confirm(self) -> None:
+        app = build_application()
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[INVOICE_JAN],
+        )
+        preview_payload = json.loads(
+            app.handle_request("POST", "/imports/files/preview", body=preview_body, headers=preview_headers).body
+        )
+        session_id = preview_payload["session"]["id"]
+
+        active_response = app.handle_request("GET", "/imports/files/sessions?mode=invoice")
+        discard_response = app.handle_request(
+            "POST",
+            "/imports/files/discard",
+            json.dumps({"session_id": session_id}),
+        )
+        repeated_response = app.handle_request(
+            "POST",
+            "/imports/files/discard",
+            json.dumps({"session_id": session_id}),
+        )
+        confirm_response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps({"session_id": session_id, "selected_file_ids": [preview_payload["files"][0]["id"]]}),
+        )
+
+        self.assertEqual(active_response.status_code, 200)
+        self.assertEqual(json.loads(active_response.body)["sessions"][0]["session_id"], session_id)
+        self.assertEqual(discard_response.status_code, 200)
+        self.assertEqual(json.loads(discard_response.body)["session"]["status"], "reverted")
+        self.assertEqual(repeated_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 409)
+        self.assertEqual(json.loads(confirm_response.body)["error"], "import_file_session_not_confirmable")
+
 
 if __name__ == "__main__":
     unittest.main()

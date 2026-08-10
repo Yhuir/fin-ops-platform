@@ -28,6 +28,19 @@ export type ImportSessionSummary = {
   audit?: ImportPreviewAuditCounts;
 };
 
+export type ActiveImportSession = {
+  sessionId: string;
+  importedBy: string;
+  fileCount: number;
+  batchType?: ImportBatchType | null;
+  createdAt: string;
+  updatedAt: string;
+  status: "awaiting_confirmation" | "preview_failed" | "failed" | string;
+  jobId?: string | null;
+  jobStage?: string | null;
+  error?: string | null;
+};
+
 export type ImportPreviewAuditCounts = {
   originalCount: number;
   uniqueCount: number;
