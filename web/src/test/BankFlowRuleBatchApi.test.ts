@@ -15,6 +15,29 @@ afterEach(() => {
 });
 
 describe("bank flow rule batch API", () => {
+  test("omits month and all filters when requesting the complete batch scope", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      summary: { categories: [] },
+      batches: [],
+      pagination: { page: 1, page_size: 50, total: 0 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchBankFlowRuleBatches({
+      month: "",
+      type: "all",
+      status: "all",
+      bucket: "all",
+      page: 1,
+      pageSize: 50,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bank-flow-rule-batches?page=1&page_size=50",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   test("maps tag selection rules and saves paired requirements", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

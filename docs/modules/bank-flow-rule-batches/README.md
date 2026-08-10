@@ -25,7 +25,7 @@
 - Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
-- Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 在同一 snapshot 读取当前候选输入与正式历史，不读 persisted draft、Workbench projection 或 no-OA fallback。
+- Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 在同一 snapshot 读取当前候选输入与正式历史，精确月份使用 ±2 天窗口，省略月份时一次读取全部 non-deleted canonical 流水；不读 persisted draft、Workbench projection 或 no-OA fallback。
 - 未提交候选使用 `bank_flow_rule_batch_canonical_query.py` 中的共享 live builder 与 `BankBatchService` 内核；页面读取、提交事务复核和 Audit 不得复制第二套匹配算法。
 - 内部转账的 ±2 天窗口允许发现月末/月初配对，但 candidate 只归最早成员月份所有，相邻月份不得重复生成。
 - submit、submit-selection、withdraw、reset 的 relation/history 与 batch/events 由 `save_bank_flow_rule_batch_mutation(...)` 的单个 caller-owned PostgreSQL transaction 原子提交；本地 StateStore 以单个 `state.pkl` 原子替换提供等价无半写语义。

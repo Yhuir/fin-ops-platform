@@ -2,6 +2,13 @@
 
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
+## 2026-08-10 “全部”范围完整性回归
+
+- `tests/test_bank_flow_rule_batch_canonical_query_repository.py` 保护省略月份时不再拼接旧 `and false`，一次 canonical snapshot 读取完整 non-deleted 候选输入，查询数不随月份增长。
+- `tests/test_bank_flow_rule_batch_application_service.py` 覆盖同一全部范围同时包含跨月 live candidate 与 active relation 支撑的 submitted 批次，summary、rows 和分页使用同一完整集合。
+- `web/src/test/BankFlowRuleBatchApi.test.ts` 与 `web/src/test/BankFlowRuleBatchPage.test.tsx` 保护“全部”通过省略 `month` 表达，不新增 `month=all`、月份循环或第二套前端协议。
+- 第 1、2、3、5、6、7 类适用；第 4 类仅做负向边界回归，因为页面保持 PostgreSQL canonical direct-read，不引入 read model、cache 或 worker。
+
 ## 2026-08-10 撤回后自然归并重提回归
 
 - `tests/test_postgres_state_store.py` 保护 active relation 窄查询把 `row_ids` 与可选 `case_ids` 一起转发到 PostgreSQL repository。

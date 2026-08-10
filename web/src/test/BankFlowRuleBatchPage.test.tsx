@@ -695,6 +695,37 @@ describe("BankFlowRuleBatchPage", () => {
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
   });
 
+  test("requests the complete batch scope when the user switches from a month to all", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderPage();
+
+    expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches"
+          && (!init?.method || init.method === "GET")
+          && url.searchParams.has("month");
+      })).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: "全部" }));
+
+    await waitFor(() => {
+      const listRequests = fetchMock.mock.calls.filter(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
+      });
+      const latestRequest = listRequests.at(-1);
+      expect(latestRequest).toBeTruthy();
+      const latestUrl = new URL(String(latestRequest?.[0]), "http://localhost");
+      expect(latestUrl.searchParams.has("month")).toBe(false);
+      expect(latestUrl.searchParams.get("page")).toBe("1");
+      expect(latestUrl.searchParams.get("page_size")).toBe("50");
+    });
+  });
+
   test("read-export users can view batches but cannot submit, withdraw, or save tag scope", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();

@@ -591,3 +591,10 @@
 - 修复只补齐包装层已有契约并转发 `case_ids`；不改变候选分组、API、SQL、数据库 schema、relation mode 或最终 `SERIALIZABLE` 原子写边界。
 - 删除前端无调用且后端无 route 的旧 `submitBankFlowRuleBatches` 与 `/api/bank-flow-rule-batches/submit` 合同；保留普通流水 `submit-selection` 和内部往来 `/{batch_id}/submit`。
 - 完整回归覆盖三个同账户手续费批次分别提交、撤回、自然归并为一个候选并重提；生产发布后以当前 20 条真实候选执行一次受控写验证并记录性能、批次、关系、历史和审计结果。
+
+# 2026-08-10 “全部”批次范围 canonical 修复
+
+- 根因是页面省略月份后，canonical repository 仍把候选范围初始化为 `and false`；正式 submitted 批次因此在空候选集合上被错误判为 stale 并从公开列表过滤，withdrawn 历史则继续存在，形成“全部只剩历史”的假空结果。
+- 修复只删除该旧空范围分支：精确月份继续使用 ±2 天边界窗口，省略月份时在同一 `REPEATABLE READ / READ ONLY` snapshot 内一次集合读取全部 non-deleted 银行流水、当前分类、正式历史和 active relation；共享 live builder、状态校验、排序、summary 与分页保持唯一实现。
+- 不新增前端月份 fan-out、后端逐月 N+1、缓存、read model、worker、表或兼容 fallback；“全部”继续由前端省略 `month` 表达。
+- 回归保护跨月 draft + submitted 同时可见、固定查询数、API 参数合同和页面从当前月份切换“全部”后的请求；发布必须以生产数据一致性和 p95 性能复测为门禁。

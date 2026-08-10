@@ -338,14 +338,14 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 | 参数 | 说明 |
 | --- | --- |
-| `month` | `YYYY-MM` 月份。 |
+| `month` | 可选；`YYYY-MM` 表示精确月份，省略表示全部月份。 |
 | `bucket` | `unsubmitted`、`submitted`、`withdrawn` 或 `all`。 |
 | `account_key` | 银行账户筛选。 |
 | `type` | 银行标签/批次类型筛选。 |
 | `status` | `draft`、`submitted`、`withdrawn` 或 `all`。 |
 | `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
 
-响应只包含 `summary`、`batches`、`pagination`。标签规则、total、当前页 batches 和 summary aggregates 必须位于同一个显式 `REPEATABLE READ / READ ONLY` snapshot；查询数固定，服务端过滤、固定排序和分页。summary 对完整 summary filter 范围聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 携带冻结 label/primary/sub label，不能由当前页推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。空 batches 是 canonical snapshot 的真实空集；查询错误返回错误，不以 read-model stale/missing 伪装。正式关系只读取 `app.workbench_pair_relations.status='active'`，不得读取 Workbench page projection。详情 payload 可保留 `relation_case_ids` 供机器诊断，但页面只显示“已有未撤回关联”和 OA/发票数量。
+响应只包含 `summary`、`batches`、`pagination`。标签规则、total、当前页 batches 和 summary aggregates 必须位于同一个显式 `REPEATABLE READ / READ ONLY` snapshot；查询数固定，服务端过滤、固定排序和分页。精确月份查询使用内部转账 ±2 天窗口；省略 `month` 时以一次集合式 canonical 查询读取全部 non-deleted 银行流水、当前分类、正式历史和 active relation，禁止前端或后端按月份循环拼接。summary 对完整 summary filter 范围聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 携带冻结 label/primary/sub label，不能由当前页推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。空 batches 是 canonical snapshot 的真实空集；查询错误返回错误，不以 read-model stale/missing 伪装。正式关系只读取 `app.workbench_pair_relations.status='active'`，不得读取 Workbench page projection。详情 payload 可保留 `relation_case_ids` 供机器诊断，但页面只显示“已有未撤回关联”和 OA/发票数量。
 
 `GET /api/bank-flow-rule-batches/{batch_id}`
 

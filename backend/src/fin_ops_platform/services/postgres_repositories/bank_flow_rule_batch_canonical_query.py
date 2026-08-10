@@ -38,7 +38,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             resolved_summary_filters.get("account_key")
             or resolved_filters.get("account_key")
         )
-        candidate_scope_sql = "and false"
+        candidate_scope_sql = ""
         candidate_scope_params: list[object] = []
         formal_scope_sql = ""
         formal_scope_params: list[object] = []

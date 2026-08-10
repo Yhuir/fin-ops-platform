@@ -1769,6 +1769,151 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["submitted_count"], 1)
         self.assertEqual(payload["summary"]["submitted_row_count"], 1)
 
+    def test_all_scope_keeps_live_and_submitted_batches_from_multiple_months(self) -> None:
+        rows = [
+            {
+                "id": "bank-fee-may",
+                "trade_time": "2026-05-14T09:00:00",
+                "account_key": "CCB:8106",
+                "direction": "expense",
+                "amount": "8.80",
+                "category_code": "fee",
+                "category_source": "auto_confirmation",
+            },
+            {
+                "id": "bank-fee-june",
+                "trade_time": "2026-06-14T09:00:00",
+                "account_key": "CCB:8106",
+                "direction": "expense",
+                "amount": "9.90",
+                "category_code": "fee",
+                "category_source": "auto_confirmation",
+            },
+        ]
+        categories = {
+            str(row["id"]): {
+                "category_code": "fee",
+                "category_source": "auto_confirmation",
+            }
+            for row in rows
+        }
+        candidate_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        candidate_service.build_batches(
+            rows,
+            categories,
+            [],
+            {},
+            eligible_batch_types={"fee"},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+        submitted = dict(
+            next(
+                batch
+                for batch in candidate_service.list_batches()
+                if batch["scope_month"] == "2026-05"
+            )
+        )
+        submitted.update(
+            {
+                "status": "submitted",
+                "status_bucket": "submitted",
+                "version": 2,
+            }
+        )
+
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def read_page(
+                self,
+                filters: dict[str, object],
+                *,
+                summary_filters: dict[str, object],
+                page: int,
+                page_size: int | None,
+            ) -> dict[str, object]:
+                self.calls.append(
+                    {
+                        "filters": dict(filters),
+                        "summary_filters": dict(summary_filters),
+                        "page": page,
+                        "page_size": page_size,
+                    }
+                )
+                return {
+                    "candidate_rows": rows,
+                    "active_relations": [
+                        {
+                            "case_id": submitted["batch_id"],
+                            "status": "active",
+                            "row_ids": ["bank-fee-may"],
+                            "row_types": ["bank"],
+                            "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                        }
+                    ],
+                    "formal_items": [submitted],
+                    "tag_policy": {
+                        "active_tags": [{"code": "fee", "label": "手续费"}],
+                        "requirements_by_tag_code": {
+                            "fee": {
+                                "requires_oa": False,
+                                "requires_invoice": False,
+                            }
+                        },
+                    },
+                }
+
+        repository = Repository()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = repository
+        service._bank_batch_service = BankBatchService(
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        payload = service.list_batches_payload(
+            {"bucket": ["all"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(
+            [
+                (batch["scope_month"], batch["status"], batch["row_ids"])
+                for batch in payload["batches"]
+            ],
+            [
+                ("2026-06", "draft", ["bank-fee-june"]),
+                ("2026-05", "submitted", ["bank-fee-may"]),
+            ],
+        )
+        self.assertEqual(payload["summary"]["draft_count"], 1)
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual(payload["summary"]["draft_row_count"], 1)
+        self.assertEqual(payload["summary"]["submitted_row_count"], 1)
+        self.assertEqual(
+            repository.calls,
+            [
+                {
+                    "filters": {
+                        "month": "",
+                        "type": "",
+                        "status": "",
+                        "bucket": "all",
+                        "account_key": "",
+                    },
+                    "summary_filters": {"month": "", "account_key": ""},
+                    "page": 1,
+                    "page_size": None,
+                }
+            ],
+        )
+
     def test_submit_live_candidate_rederives_the_bounded_month_before_write(self) -> None:
         class Repository:
             def __init__(self) -> None:

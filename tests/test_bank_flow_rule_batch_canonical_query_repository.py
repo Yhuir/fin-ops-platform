@@ -263,6 +263,30 @@ def test_submitted_page_query_keeps_candidate_rows_and_active_relations_in_snaps
     assert source_params[:2] == ("2026-05-01", "2026-05-01")
 
 
+def test_all_page_query_reads_the_complete_canonical_source_without_a_month_predicate() -> None:
+    connection = _Connection()
+    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
+
+    result = repository.read_page(
+        {"bucket": "all"},
+        summary_filters={},
+        page=1,
+        page_size=50,
+    )
+
+    assert result["candidate_rows"][0]["id"] == "bank-1"
+    source_sql, source_params = next(
+        (sql, params)
+        for sql, params in connection.fetched_one
+        if "candidate_rows" in sql and "formal_items" in sql
+    )
+    assert "where bank.status <> 'deleted' and false" not in source_sql
+    assert "coalesce(bank.txn_date, bank.txn_month) >= %s::date" not in source_sql
+    assert source_params == ()
+    assert connection.transaction_enters == connection.transaction_exits == 1
+    assert len(connection.fetched_one) == 2
+
+
 def test_page_query_returns_an_explicit_empty_result() -> None:
     repository = BankFlowRuleBatchCanonicalQueryRepository(_Connection(empty_page=True))
 

@@ -33,12 +33,12 @@
 
 | 输入 | 事实源 | 合同 |
 | --- | --- | --- |
-| 页面查询 | `GET /api/bank-flow-rule-batches` | `month`、`type`、`status`、`bucket`、`account_key`、`page`、`page_size`；非法值 fail fast。repository 按请求月份（含内部转账 ±2 天窗口）批量读取候选输入，application service 在共享 live builder 结果上执行过滤、固定排序和分页，`page_size` 上限 200。所有 bucket 都读取同一月份窗口内的候选输入和 active relation，使 submitted/withdrawn 状态重建、summary 与列表使用同一完整集合。 |
+| 页面查询 | `GET /api/bank-flow-rule-batches` | `month`、`type`、`status`、`bucket`、`account_key`、`page`、`page_size`；省略 `month` 表示全部月份，非法值 fail fast。repository 对精确月份使用内部转账 ±2 天窗口，对全部范围使用一次集合式 canonical 查询读取所有 non-deleted 候选输入；application service 在共享 live builder 结果上执行过滤、固定排序和分页，`page_size` 上限 200。所有 bucket 都读取同一范围内的候选输入和 active relation，使 submitted/withdrawn 状态重建、summary 与列表使用同一完整集合。 |
 | 批次详情 | `GET /api/bank-flow-rule-batches/{batch_id}` | 正式批次直接读取持久化 batch、成员、关系和 events；请求内 live candidate 传 `scope_month=YYYY-MM`，由列表与提交共用的 canonical builder 按 batch id 确定性重算。月份非法 fail fast；候选已消失或 identity 改变返回 not-found/conflict，不读取 persisted draft。 |
 | 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
-| 银行流水 | `app.bank_transactions` | 未提交月份边界内批量读取 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
-| 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 返回月份窗口内全部 non-deleted 银行流水及人工/确认事实，不用人工分类 SQL 预筛；application service 复用 `BankTransactionEffectiveCategoryProvider` 与现有自动分类规则批量得出 effective category。confirmation、manual 与 auto 的优先级和银行明细一致。 |
+| 银行流水 | `app.bank_transactions` | 精确月份在边界窗口内批量读取 non-deleted 当前行；省略月份时一次读取全部 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
+| 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 返回请求范围内全部 non-deleted 银行流水及人工/确认事实，不用人工分类 SQL 预筛；application service 复用 `BankTransactionEffectiveCategoryProvider` 与现有自动分类规则批量得出 effective category。confirmation、manual 与 auto 的优先级和银行明细一致。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
@@ -51,7 +51,7 @@
 | 输出 | 合同 |
 | --- | --- |
 | 列表 | 只返回 `summary`、`batches`、`pagination`。不返回 `read_model_status`、`read_model_version`、stale reason、source version、refresh enqueue 或 operation-barrier target。 |
-| Summary | 对完整 summary filter 范围做 SQL 聚合，不能从当前页推算；包含各状态 batch count、row count、金额和冻结历史标签。 |
+| Summary | 对同一 live builder 的完整 summary filter 范围聚合，不能从当前页推算；包含各状态 batch count、row count、金额和冻结历史标签。 |
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
 | 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
@@ -61,9 +61,9 @@
 ## 一致性与查询预算
 
 - 一次列表请求中的 tag policy、total、page rows 和 summary aggregates 位于同一显式 `REPEATABLE READ / READ ONLY` transaction。
-- 列表使用固定数量的集合查询读取 settings、请求月份（内部转账含 ±2 天窗口）内全部 non-deleted 银行流水、人工/确认分类事实、正式历史和 active relation；effective category 在共享 service 内批量计算，批次数、分页深度和每批行数不增加查询次数。
+- 列表使用固定数量的集合查询读取 settings、请求范围内全部 non-deleted 银行流水、人工/确认分类事实、正式历史和 active relation；精确月份包含内部转账 ±2 天窗口，省略月份时一次读取全部月份，禁止按月份循环。effective category 在共享 service 内批量计算，月份数、批次数、分页深度和每批行数不增加查询次数。
 - 正式详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。live candidate 详情先确认不存在正式批次，再执行一次与列表相同的月份 canonical snapshot；不逐行查询、不写 draft。
-- repository 不得加载跨月份全量银行流水；application service 可以对已按月份窗口约束的 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
+- repository 只有在调用方省略 `month`、明确请求全部范围时才允许一次加载跨月份 canonical 流水；精确月份仍必须保持窗口约束。application service 对同一完整 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐月份、逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
 - 未提交 batch 由共享 builder 实时推导，必须同时满足：有效分类命中当前双 false 标签、所有成员仍存在且分类一致、成员未与任一 active relation overlap。禁止在 SQL 层仅按 manual/confirmation category 预筛，否则 auto-only 候选会被静默遗漏。
 - submitted 的可撤回性由 canonical batch 状态决定；active relation 已缺失不能阻断批次收口。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。跨月配对以最早成员所在月份作为唯一 owner month：例如 5 月 31 日与 6 月 1 日配对只属于 5 月请求，6 月请求不得重复生成相邻月份候选。
