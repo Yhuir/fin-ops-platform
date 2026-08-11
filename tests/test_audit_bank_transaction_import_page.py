@@ -507,11 +507,55 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertEqual(
             issue["details"]["controlled_replay_statement_position"],
             {
+                "eligible": True,
                 "row_position_complete": True,
                 "transaction_position_complete": True,
                 "mismatch_fields": ["balance"],
                 "row_currency": "CNY",
                 "transaction_currency": "CNY",
+            },
+        )
+
+    def test_duplicate_reference_reports_unregistered_repair_reason(self) -> None:
+        connection = FakeConnection()
+        connection.rows[0].update(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": "Reclassified by bank identity v3 controlled recovery.",
+                "source_unique_key": "bank-v3:new-reference",
+                "data_fingerprint": "bank:new-reference",
+            }
+        )
+        connection.rows[0]["raw_payload"]["normalized_payload"].update(
+            {
+                "decision": connection.rows[0]["decision"],
+                "decision_reason": connection.rows[0]["decision_reason"],
+                "source_unique_key": connection.rows[0]["source_unique_key"],
+                "data_fingerprint": connection.rows[0]["data_fingerprint"],
+            }
+        )
+        connection.transactions[0].update(
+            {"source_unique_key": "", "data_fingerprint": "bank:old-reference"}
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        issue = next(
+            item
+            for item in report["issues"]
+            if item["code"] == "bank_import_transaction_field_mismatch"
+        )
+        self.assertEqual(
+            issue["details"]["controlled_replay_statement_position"],
+            {
+                "eligible": False,
+                "decision": "duplicate_skipped",
+                "decision_reason": (
+                    "Reclassified by bank identity v3 controlled recovery."
+                ),
+                "row_position_complete": False,
+                "transaction_position_complete": False,
+                "mismatch_fields": ["unregistered_decision_reason"],
             },
         )
 
@@ -671,6 +715,7 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertEqual(
             issue["details"]["controlled_replay_statement_position"],
             {
+                "eligible": True,
                 "row_position_complete": True,
                 "transaction_position_complete": True,
                 "mismatch_fields": ["currency"],

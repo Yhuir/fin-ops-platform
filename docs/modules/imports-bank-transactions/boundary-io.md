@@ -29,7 +29,7 @@
 - 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于受控重放，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
 - 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
-- 受控重放 statement-position 审计失败时，admin-only issue 必须返回无业务原值的完整性标志和字段级 `mismatch_fields`，以区分缺失位置与账户、时间、方向、金额、余额、币种漂移；不得只返回派生 source key 让生产门禁依赖推断。
+- `duplicate_skipped` 的受控重放 statement-position 审计失败时，admin-only issue 必须返回 decision/reason 登记状态、无业务原值的完整性标志和字段级 `mismatch_fields`，以区分未登记 reason、缺失位置与账户、时间、方向、金额、余额、币种漂移；不得只返回派生 source key 让生产门禁依赖推断。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。
 
 ### 不负责

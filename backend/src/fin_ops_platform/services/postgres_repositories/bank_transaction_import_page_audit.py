@@ -620,12 +620,19 @@ def _controlled_replay_statement_position_diagnostics(
     row: dict[str, Any],
     transaction: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if (
-        _text(row.get("decision")) != "duplicate_skipped"
-        or _text(row.get("decision_reason"))
-        not in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values()
-    ):
+    decision = _text(row.get("decision"))
+    if decision != "duplicate_skipped":
         return None
+    decision_reason = _text(row.get("decision_reason"))
+    if decision_reason not in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values():
+        return {
+            "eligible": False,
+            "decision": decision,
+            "decision_reason": decision_reason or "missing",
+            "row_position_complete": False,
+            "transaction_position_complete": False,
+            "mismatch_fields": ["unregistered_decision_reason"],
+        }
     identity_service = BankTransactionIdentityService()
     row_position = identity_service.statement_position_for_mapping(
         _bank_statement_mapping(row, direction_key="direction"),
@@ -637,6 +644,7 @@ def _controlled_replay_statement_position_diagnostics(
     )
     if row_position is None or transaction_position is None:
         return {
+            "eligible": True,
             "row_position_complete": row_position is not None,
             "transaction_position_complete": transaction_position is not None,
             "mismatch_fields": ["incomplete_statement_position"],
@@ -660,6 +668,7 @@ def _controlled_replay_statement_position_diagnostics(
     ):
         mismatch_fields.append("currency")
     return {
+        "eligible": True,
         "row_position_complete": True,
         "transaction_position_complete": True,
         "mismatch_fields": mismatch_fields,
