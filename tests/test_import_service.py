@@ -228,6 +228,13 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                 normalized=normalized,
             )
         )
+        self.assertEqual(
+            service.bank_transaction_strict_statement_evidence_mismatch_fields(
+                transaction_id=transaction.id,
+                normalized=normalized,
+            ),
+            (),
+        )
         self.assertFalse(
             service.bank_transaction_matches_strict_statement_evidence(
                 transaction_id=transaction.id,
@@ -245,6 +252,20 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                 transaction_id="missing-transaction",
                 normalized=normalized,
             )
+        )
+        self.assertEqual(
+            service.bank_transaction_strict_statement_evidence_mismatch_fields(
+                transaction_id=transaction.id,
+                normalized={**normalized, "balance": "949.99", "currency": None},
+            ),
+            ("balance", "currency"),
+        )
+        self.assertEqual(
+            service.bank_transaction_strict_statement_evidence_mismatch_fields(
+                transaction_id="missing-transaction",
+                normalized=normalized,
+            ),
+            ("canonical_transaction",),
         )
 
     def test_invoice_identity_service_uses_tax_amount_canonical_key_and_only_suspects_weak_match(self) -> None:

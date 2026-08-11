@@ -530,10 +530,21 @@ class ImportNormalizationService:
         transaction_id: str,
         normalized: dict[str, Any],
     ) -> bool:
+        return not self.bank_transaction_strict_statement_evidence_mismatch_fields(
+            transaction_id=transaction_id,
+            normalized=normalized,
+        )
+
+    def bank_transaction_strict_statement_evidence_mismatch_fields(
+        self,
+        *,
+        transaction_id: str,
+        normalized: dict[str, Any],
+    ) -> tuple[str, ...]:
         try:
             transaction = self.get_transaction(transaction_id)
         except KeyError:
-            return False
+            return ("canonical_transaction",)
         incoming_identity = self._object_identity_policy.identify_bank_transaction_mapping(
             normalized
         )
@@ -553,15 +564,23 @@ class ImportNormalizationService:
         existing_balance = self._parse_decimal(transaction.balance)
         incoming_currency = self._canonical_currency(normalized.get("currency"))
         existing_currency = self._canonical_currency(transaction.currency)
-        return (
-            all(incoming_components)
-            and all(existing_components)
-            and incoming_components == existing_components
-            and incoming_balance is not None
-            and incoming_balance == existing_balance
-            and incoming_currency is not None
-            and incoming_currency == existing_currency
-        )
+        mismatches = [
+            field_name
+            for field_name, incoming_value, existing_value in zip(
+                required_components,
+                incoming_components,
+                existing_components,
+                strict=True,
+            )
+            if incoming_value in (None, "")
+            or existing_value in (None, "")
+            or incoming_value != existing_value
+        ]
+        if incoming_balance is None or incoming_balance != existing_balance:
+            mismatches.append("balance")
+        if incoming_currency is None or incoming_currency != existing_currency:
+            mismatches.append("currency")
+        return tuple(mismatches)
 
     def list_transactions_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
         normalized_ids = list(

@@ -1499,6 +1499,9 @@ class ImportFileServiceTests(unittest.TestCase):
                 None,
             ),
             bank_transaction_matches_strict_statement_evidence=lambda **_kwargs: False,
+            bank_transaction_strict_statement_evidence_mismatch_fields=lambda **_kwargs: (
+                "balance",
+            ),
         )
         service = FileImportService(import_service)
         row_result = ImportedBatchRowResult(
@@ -1549,8 +1552,15 @@ class ImportFileServiceTests(unittest.TestCase):
         service._refresh_session_audit(session)
         service._sessions[session.id] = session
 
-        with self.assertRaisesRegex(ValueError, "preview_stale"):
-            service.assert_session_preview_current(session_id=session.id)
+        with self.assertLogs(
+            "fin_ops_platform.services.import_file_service",
+            level="WARNING",
+        ) as captured_logs:
+            with self.assertRaisesRegex(ValueError, "preview_stale"):
+                service.assert_session_preview_current(session_id=session.id)
+        self.assertEqual(len(captured_logs.output), 1)
+        self.assertIn("mismatch_fields=balance", captured_logs.output[0])
+        self.assertNotIn("100.00", captured_logs.output[0])
 
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
         import_service = ImportNormalizationService(

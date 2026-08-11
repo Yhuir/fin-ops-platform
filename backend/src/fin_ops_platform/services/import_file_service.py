@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
 import warnings
@@ -31,6 +32,8 @@ from fin_ops_platform.services.import_preview_audit import (
     build_import_preview_session_audit,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
+
+LOGGER = logging.getLogger(__name__)
 
 DATE_ONLY_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})$")
 DATE_TIME_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})$")
@@ -1234,6 +1237,25 @@ class FileImportService:
             "bank_transaction_matches_strict_statement_evidence",
             None,
         )
+        mismatch_reader = getattr(
+            self._import_service,
+            "bank_transaction_strict_statement_evidence_mismatch_fields",
+            None,
+        )
+        if callable(mismatch_reader):
+            mismatch_fields = tuple(
+                mismatch_reader(
+                    transaction_id=str(row_result.linked_object_id),
+                    normalized=normalized,
+                )
+            )
+            if mismatch_fields:
+                LOGGER.warning(
+                    "controlled_replay_statement_evidence_mismatch mismatch_fields=%s",
+                    ",".join(mismatch_fields),
+                )
+                return False
+            return True
         return bool(
             callable(verifier)
             and verifier(
