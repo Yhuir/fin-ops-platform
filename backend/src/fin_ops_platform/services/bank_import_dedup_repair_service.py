@@ -296,7 +296,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     batch_updates = _build_batch_updates(
         snapshot.get("batches") or [], owner_updates_by_batch
     )
-    file_updates = _build_file_updates(files, owner_updates_by_batch, row_updates)
+    file_updates = _build_file_updates(files, batch_updates, row_updates)
 
     plan = {
         "operation": "bank_import_identity_v3_recovery",
@@ -765,7 +765,7 @@ def _build_batch_updates(
 
 def _build_file_updates(
     files: list[dict[str, Any]],
-    owner_update_counts: Counter[str],
+    batch_updates: list[dict[str, Any]],
     row_updates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     by_batch = defaultdict(list)
@@ -774,6 +774,7 @@ def _build_file_updates(
     updates_by_batch: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for update in row_updates:
         updates_by_batch[update["batch_pk"]].append(update)
+    batch_update_by_pk = {update["batch_pk"]: update for update in batch_updates}
     updates: list[dict[str, Any]] = []
     for batch_pk, batch_row_updates in sorted(updates_by_batch.items()):
         file_rows = by_batch.get(batch_pk, [])
@@ -781,7 +782,6 @@ def _build_file_updates(
             raise ValueError(f"Import batch {batch_pk} must resolve to exactly one authorized source file.")
         row = file_rows[0]
         before = deepcopy(row.get("raw_payload") or {})
-        owner_update_count = owner_update_counts[batch_pk]
         counter_payload = (
             before.get("normalized_payload")
             if isinstance(before.get("normalized_payload"), dict)
@@ -804,33 +804,24 @@ def _build_file_updates(
                 )
             )
         after = deepcopy(before)
-        if has_success_count:
-            file_success_count = int(counter_payload.get("success_count") or 0)
-            file_duplicate_count = int(counter_payload.get("duplicate_count") or 0)
-            if file_success_count < owner_update_count:
-                raise ValueError(
-                    "Import file counter cannot accept owner corrections: "
-                    + json.dumps(
-                        {
-                            "file_id": _text(row.get("file_id")),
-                            "batch_pk": batch_pk,
-                            "owner_update_count": owner_update_count,
-                            "success_count": file_success_count,
-                            "duplicate_count": file_duplicate_count,
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    )
-                )
-            after = _rewrite_counter_payload(
-                before,
-                success_delta=-owner_update_count,
-                duplicate_delta=owner_update_count,
-            )
         payload = after.get("normalized_payload") if isinstance(after.get("normalized_payload"), dict) else after
         row_results = payload.get("row_results") if isinstance(payload, dict) else None
         if not isinstance(row_results, list):
             raise ValueError(f"Import file {_text(row.get('file_id'))} has no durable row results.")
+        before_success_count = _count_import_results(
+            row_results, decisions={"created", "status_updated"}
+        )
+        before_duplicate_count = _count_import_results(
+            row_results, decisions={"duplicate_skipped"}
+        )
+        batch_update = batch_update_by_pk.get(batch_pk)
+        if batch_update is None or (
+            before_success_count != batch_update["before_success_count"]
+            or before_duplicate_count != batch_update["before_duplicate_count"]
+        ):
+            raise ValueError(
+                f"Import file {_text(row.get('file_id'))} row-result counters do not match its batch."
+            )
         remaining_updates = list(
             sorted(batch_row_updates, key=lambda item: (item["row_no"], item["row_pk"]))
         )
@@ -868,6 +859,22 @@ def _build_file_updates(
         if changed != len(batch_row_updates) or remaining_updates:
             raise ValueError(f"Import file {_text(row.get('file_id'))} row-result correction is incomplete.")
         payload["row_results"] = rewritten_results
+        after_success_count = _count_import_results(
+            rewritten_results, decisions={"created", "status_updated"}
+        )
+        after_duplicate_count = _count_import_results(
+            rewritten_results, decisions={"duplicate_skipped"}
+        )
+        if (
+            after_success_count != batch_update["after_success_count"]
+            or after_duplicate_count != batch_update["after_duplicate_count"]
+        ):
+            raise ValueError(
+                f"Import file {_text(row.get('file_id'))} corrected counters do not match its batch."
+            )
+        if has_success_count:
+            payload["success_count"] = after_success_count
+            payload["duplicate_count"] = after_duplicate_count
         updates.append(
             {
                 "file_pk": _text(row.get("file_pk")),
@@ -878,6 +885,18 @@ def _build_file_updates(
             }
         )
     return updates
+
+
+def _count_import_results(
+    row_results: list[Any],
+    *,
+    decisions: set[str],
+) -> int:
+    return sum(
+        1
+        for result in row_results
+        if isinstance(result, dict) and _text(result.get("decision")) in decisions
+    )
 
 
 def _rewrite_row_payload(
