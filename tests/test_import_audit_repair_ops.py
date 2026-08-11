@@ -1048,6 +1048,39 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         execute.assert_not_called()
         self.assertEqual(json.loads(output.getvalue())["mode"], "discovery")
 
+    def test_cli_failed_import_recovery_discovery_reports_ineligible_file_facts(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        snapshot = _failed_import_recovery_snapshot()
+        snapshot["files"][0]["canonical_bank_transaction_count"] = 1
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "discover_failed_import_job_recovery_snapshot",
+                return_value=snapshot,
+            ),
+        ):
+            result = import_audit_repair_ops.main(
+                ["--dry-run", "--discover-recover-import-job-id", "import-job-1"],
+                stdout=output,
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 2)
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["target"]["import_job_id"], "import-job-1")
+        self.assertEqual(report["files"][0]["canonical_bank_transaction_count"], 1)
+
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:
             @contextmanager

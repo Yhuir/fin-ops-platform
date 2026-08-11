@@ -75,12 +75,32 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     if discovery_requested:
         with connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
-            plan = build_failed_import_job_recovery_plan(
-                discover_failed_import_job_recovery_snapshot(
-                    transaction,
-                    import_job_id=args.discover_recover_import_job_id,
-                )
+            snapshot = discover_failed_import_job_recovery_snapshot(
+                transaction,
+                import_job_id=args.discover_recover_import_job_id,
             )
+            try:
+                plan = build_failed_import_job_recovery_plan(snapshot)
+            except ValueError as exc:
+                print(
+                    json.dumps(
+                        {
+                            "tool": "import_audit_repair_ops",
+                            "mode": "discovery",
+                            "written": False,
+                            "eligible": False,
+                            "error": str(exc),
+                            "target": (snapshot.get("recovery_requested") or [None])[0],
+                            "files": snapshot.get("files") or [],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                    file=stdout,
+                )
+                return 2
         report = public_failed_import_recovery_report(plan, mode="discovery", written=False)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0
