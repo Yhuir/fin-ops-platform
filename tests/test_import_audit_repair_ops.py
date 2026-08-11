@@ -16,6 +16,7 @@ from fin_ops_platform.services.import_audit_repair_service import (
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
+    discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
 )
@@ -410,6 +411,30 @@ class FailedImportRecoveryTests(unittest.TestCase):
         self.assertEqual(len(connection.calls), 4)
         self.assertEqual(snapshot["recovery_requested"][0]["file_ids"], ["file-bank-1", "file-bank-2"])
         self.assertTrue(all("where" in sql.lower() for sql, _ in connection.calls))
+
+    def test_repository_discovers_exact_recovery_target_from_failed_import_job(self) -> None:
+        source = _failed_import_recovery_snapshot()
+
+        class Connection:
+            def fetch_all(self, sql: str, _params: tuple[object, ...]) -> list[dict[str, object]]:
+                if "from job.import_jobs" in sql:
+                    return deepcopy(source["import_jobs"])
+                if "from job.outbox_events" in sql:
+                    return deepcopy(source["events"])
+                if "from job.background_jobs" in sql:
+                    return deepcopy(source["background_jobs"])
+                if "from app.import_files" in sql:
+                    return deepcopy(source["files"])
+                raise AssertionError(sql)
+
+        plan = build_failed_import_job_recovery_plan(
+            discover_failed_import_job_recovery_snapshot(
+                Connection(),
+                import_job_id="import-job-1",
+            )
+        )
+
+        self.assertEqual(plan["target"], source["recovery_requested"][0])
 
     def test_execute_processes_candidate_before_resolving_exact_dead_letter(self) -> None:
         plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
@@ -991,6 +1016,37 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         )
         global_scan.assert_not_called()
         self.assertEqual(json.loads(output.getvalue())["operation"], "failed_bank_import_recovery")
+
+    def test_cli_failed_import_recovery_discovery_is_read_only(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "discover_failed_import_job_recovery_snapshot",
+                return_value=_failed_import_recovery_snapshot(),
+            ) as discover,
+            patch.object(import_audit_repair_ops, "execute_failed_import_job_recovery") as execute,
+        ):
+            result = import_audit_repair_ops.main(
+                ["--dry-run", "--discover-recover-import-job-id", "import-job-1"],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        discover.assert_called_once_with(connection, import_job_id="import-job-1")
+        execute.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())["mode"], "discovery")
 
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:

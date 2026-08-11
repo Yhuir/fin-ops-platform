@@ -207,3 +207,4 @@
 - 根因修复仍是 background job canonical `job_id` 单行持久化；不增加第二条导入写链。
 - 当前生产旧版本已留下的一条 dead letter 不能由旧 worker安全重试，因此复用候选 release 的正式 import processor，并用显式五类 ID + dry-run fingerprint 限定唯一目标。
 - 只有 untouched preview 与零 canonical 写入可进入恢复；业务完成后再 resolve 原事件。其它历史 pending/failed 记录不扫描、不推断、不自动重放。
+- 发布门禁在首条证据恢复后揭示另一个明确失败 import job；增加只读 discovery 从该 job 的正式 payload/event 解析完整 target，避免人工猜测 background job id，执行白名单与 fingerprint 不放宽。

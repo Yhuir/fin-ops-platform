@@ -100,6 +100,49 @@ def load_failed_import_job_recovery_snapshot(
     }
 
 
+def discover_failed_import_job_recovery_snapshot(
+    connection: Any,
+    *,
+    import_job_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    import_jobs = connection.fetch_all(_FAILED_IMPORT_JOB_SQL, (import_job_id,))
+    job_payload = (
+        dict(import_jobs[0].get("payload") or {})
+        if len(import_jobs) == 1 and isinstance(import_jobs[0].get("payload"), dict)
+        else {}
+    )
+    event_rows = connection.fetch_all(_FAILED_IMPORT_EVENTS_FOR_JOB_SQL, (import_job_id,))
+    event_id = str(event_rows[0].get("event_id") or "").strip() if len(event_rows) == 1 else ""
+    background_job_id = str(job_payload.get("background_job_id") or "").strip()
+    session_id = str(job_payload.get("session_id") or "").strip()
+    file_ids = sorted(
+        {
+            str(value or "").strip()
+            for value in job_payload.get("selected_file_ids") or []
+            if str(value or "").strip()
+        }
+    )
+    return {
+        "recovery_requested": [
+            {
+                "import_job_id": str(import_job_id or "").strip(),
+                "event_id": event_id,
+                "background_job_id": background_job_id,
+                "session_id": session_id,
+                "file_ids": file_ids,
+            }
+        ],
+        "import_jobs": import_jobs,
+        "events": event_rows,
+        "background_jobs": (
+            connection.fetch_all(_FAILED_BACKGROUND_JOB_SQL, (background_job_id,))
+            if background_job_id
+            else []
+        ),
+        "files": connection.fetch_all(_FAILED_IMPORT_FILE_SQL, (file_ids,)) if file_ids else [],
+    }
+
+
 def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
     for row in list(plan.get("bank_rows") or []):
         affected = connection.execute(
@@ -205,6 +248,21 @@ select id::text as event_id,
        raw_payload
 from job.outbox_events
 where id = %s
+"""
+
+
+_FAILED_IMPORT_EVENTS_FOR_JOB_SQL = """
+select id::text as event_id,
+       tenant_id, event_type, aggregate_type, aggregate_id,
+       scope_type, scope_key, dedupe_key, payload, attempts, status,
+       schema_version, source_version, priority, trace_id, last_error,
+       raw_payload
+from job.outbox_events
+where event_type = 'import.process.requested'
+  and aggregate_type = 'import_job'
+  and aggregate_id = %s
+  and status = 'dead_lettered'
+order by created_at, id
 """
 
 

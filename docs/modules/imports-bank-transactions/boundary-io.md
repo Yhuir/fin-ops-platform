@@ -79,7 +79,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 
 worker 更新导入 background job 的 running/progress/terminal 状态时，只允许按 canonical `job_id` 单行读写；不得把全量历史 background job snapshot 回写到 PostgreSQL。历史 raw payload 内的旧 `job_id` 不能覆盖正式表主键，否则下游成本统计、Workbench 等副作用的旧任务会污染本次导入事务。
 
-若已部署旧版本在 background job 全量回写阶段把同一 `file_import.confirm` 事件推进到 dead letter，且 session/file 仍完整停留在 `preview_ready`、对应 preview batch 为 `pending`、正式银行流水写入为零，只允许通过候选 release 的 `import-audit-repair` 精确恢复模式处理。运维必须显式提供 import job、outbox event、background job、session 和全部 file id，并先取得同一 repeatable-read snapshot 的 fingerprint；候选 processor 只有在上述事实全部一一匹配时才复用原 import/background job id 执行。正式 batch/file/job 全部成功后才允许把该条 dead letter 标记完成；任一业务事实不闭环时保留 dead letter，不得假完成或扫描其它失败任务。
+若已部署旧版本在 background job 全量回写阶段把同一 `file_import.confirm` 事件推进到 dead letter，且 session/file 仍完整停留在 `preview_ready`、对应 preview batch 为 `pending`、正式银行流水写入为零，只允许通过候选 release 的 `import-audit-repair` 精确恢复模式处理。只读 discovery 可从一个明确 import job id 推导唯一 outbox/background job/session/file 白名单，但存在多个 dead letter 或任何坐标缺失时必须拒绝；执行时仍必须显式提供完整 target，并先取得同一 repeatable-read snapshot 的 fingerprint。候选 processor 只有在上述事实全部一一匹配时才复用原 import/background job id 执行。正式 batch/file/job 全部成功后才允许把该条 dead letter 标记完成；任一业务事实不闭环时保留 dead letter，不得假完成或扫描其它失败任务。
 
 ## 持久化与投影
 

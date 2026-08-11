@@ -561,6 +561,8 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --normalize-reverted-batch-id <batch-id> [--normalize-reverted-batch-id <batch-id> ...]
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --discover-recover-import-job-id <job-id>
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --recover-import-job-id <job-id> --recover-event-id <event-id> \
   --recover-background-job-id <background-job-id> --recover-session-id <session-id> \
   --recover-file-id <file-id> [--recover-file-id <file-id> ...]
@@ -579,6 +581,8 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 候选银行导入死信恢复模式必须在 dry-run 和 execute 中重复提供同一组完整 job/event/session/file
 白名单。它只处理已知 `background_jobs_idempotency_uidx` 旧错误、仍为 untouched preview 且正式流水
 为零的请求；候选 processor 完成并验证 batch/file/job 后才 resolve 原 dead letter，失败时保留原证据。
+只知道失败 import job id 时，可先运行只读 `--discover-recover-import-job-id`；它只在唯一 dead letter、
+payload 中完整 background job/session/file 坐标且全部预检通过时输出完整 target，不执行写入。
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为

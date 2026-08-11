@@ -16,6 +16,7 @@ from fin_ops_platform.services.import_audit_repair_service import (
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
+    discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
 )
@@ -36,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recover-background-job-id")
     parser.add_argument("--recover-session-id")
     parser.add_argument("--recover-file-id", action="append", default=[])
+    parser.add_argument("--discover-recover-import-job-id")
     return parser
 
 
@@ -58,13 +60,30 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         args.recover_file_id,
     )
     recovery_requested = any(recovery_values)
+    discovery_requested = bool(args.discover_recover_import_job_id)
+    if discovery_requested and args.execute:
+        raise SystemExit("Failed import recovery discovery is read-only and requires --dry-run")
     if recovery_requested and not all(recovery_values):
         raise SystemExit("Failed import recovery requires job, event, background job, session, and file ids")
-    if recovery_requested and (
+    if (recovery_requested or discovery_requested) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
         raise SystemExit("Failed import recovery cannot be combined with another repair mode")
+    if recovery_requested and discovery_requested:
+        raise SystemExit("Failed import recovery discovery cannot be combined with an explicit target")
     connection = PostgresConnection(PostgresSettings.from_env())
+    if discovery_requested:
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_failed_import_job_recovery_plan(
+                discover_failed_import_job_recovery_snapshot(
+                    transaction,
+                    import_job_id=args.discover_recover_import_job_id,
+                )
+            )
+        report = public_failed_import_recovery_report(plan, mode="discovery", written=False)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
     if recovery_requested:
         snapshot_args = {
             "import_job_id": args.recover_import_job_id,
