@@ -74,6 +74,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
 
     duplicate_pairs: list[dict[str, Any]] = []
     ambiguous_target_ids: list[str] = []
+    ambiguous_details: list[dict[str, Any]] = []
     for target in targets:
         target_identity = identity_service.identity_for_mapping(target)
         fingerprint = _text(target.get("data_fingerprint"))
@@ -82,6 +83,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             continue
         incoming_references = _official_reference_values(target_identity.audit_fields)
         exact: list[dict[str, Any]] = []
+        secondary_match_count = 0
         for candidate in candidates:
             candidate_identity = identity_service.identity_for_mapping(candidate)
             candidate_references = _official_reference_values(candidate_identity.audit_fields)
@@ -95,13 +97,26 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     for candidate in candidates
                     if _strict_secondary_evidence(candidate) == target_secondary
                 ]
+                secondary_match_count = len(exact)
         if len(exact) == 1:
             duplicate_pairs.append(_duplicate_pair(target, exact[0]))
         else:
-            ambiguous_target_ids.append(_text(target.get("transaction_id")))
+            transaction_id = _text(target.get("transaction_id"))
+            ambiguous_target_ids.append(transaction_id)
+            ambiguous_details.append(
+                {
+                    "transaction_id": transaction_id,
+                    "fingerprint": fingerprint,
+                    "candidate_count": len(candidates),
+                    "incoming_reference_count": len(incoming_references),
+                    "has_balance": _strict_secondary_evidence(target) is not None,
+                    "secondary_match_count": secondary_match_count,
+                }
+            )
     if ambiguous_target_ids:
         raise ValueError(
-            f"Bank dedup repair found {len(ambiguous_target_ids)} ambiguous fingerprint/reference matches."
+            f"Bank dedup repair found {len(ambiguous_target_ids)} ambiguous fingerprint/reference "
+            f"matches: {ambiguous_details[:5]}."
         )
 
     duplicate_target_pks = {_text(pair.get("delete_transaction_pk")) for pair in duplicate_pairs}
