@@ -217,3 +217,11 @@
 - 当前生产旧版本已留下的一条 dead letter 不能由旧 worker安全重试，因此复用候选 release 的正式 import processor，并用显式五类 ID + dry-run fingerprint 限定唯一目标。
 - 只有 untouched preview 与零 canonical 写入可进入恢复；业务完成后再 resolve 原事件。其它历史 pending/failed 记录不扫描、不推断、不自动重放。
 - 发布门禁在首条证据恢复后揭示另一个明确失败 import job；增加只读 discovery 从该 job 的正式 payload/event 解析完整 target，避免人工猜测 background job id，执行白名单与 fingerprint 不放宽。
+
+## 2026-08-11 - 银行重复修复关系阻断证据结构化
+
+- 目标：生产银行去重 dry-run 因下游引用阻断时，能够逐条核对“错误导入副本 → 受保护原流水”的业务字段和具体引用类型，不再只返回内部流水 UUID。
+- 关键决策：删除资格、零关系门禁和写路径保持不变；`BankImportDedupRelationEvidenceError` 只携带最多本次严格候选集的只读对照证据，CLI 以 `eligible=false`、`written=false` 和 `relationful_delete_candidates` 输出结构化 JSON 后返回非零状态。
+- I/O：每条证据包含副本与 keeper 的账户、时间、方向、金额、余额、对方户名、批次、官方参考号及业务指纹，以及已有的核销金额和各下游引用计数；不新增 SQL、表、API、worker、read model、缓存或写权限。
+- 测试覆盖：service 测试锁定副本/keeper 对照和关系计数；CLI 测试锁定阻断输出不可写且不会调用 apply。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_import_dedup_repair_service.py tests/test_import_audit_repair_ops.py -q`；`bash scripts/verify.sh lint`；`bash scripts/verify.sh docs`。

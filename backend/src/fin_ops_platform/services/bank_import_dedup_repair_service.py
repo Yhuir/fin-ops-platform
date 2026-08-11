@@ -14,6 +14,14 @@ from fin_ops_platform.services.bank_transaction_identity_service import (
 REPAIR_REASON = "Reclassified by bank identity v3 controlled recovery."
 
 
+class BankImportDedupRelationEvidenceError(ValueError):
+    def __init__(self, candidates: list[dict[str, Any]]) -> None:
+        self.candidates = deepcopy(candidates)
+        super().__init__(
+            f"Bank dedup repair found {len(self.candidates)} relationful delete candidates."
+        )
+
+
 def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
     request = dict(snapshot.get("request") or {})
     source_sessions = _normalized_source_sessions(request.get("source_sessions") or [])
@@ -143,11 +151,27 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     }
     if set(relation_by_pk) != duplicate_target_pks:
         raise ValueError("Relationship evidence does not exactly cover duplicate delete candidates.")
+    targets_by_pk = {_text(row.get("transaction_pk")): row for row in targets}
+    protected_by_pk = {_text(row.get("transaction_pk")): row for row in protected}
+    pairs_by_delete_pk = {
+        _text(pair.get("delete_transaction_pk")): pair for pair in duplicate_pairs
+    }
     relationful_candidates: list[dict[str, Any]] = []
     for transaction_pk, evidence in relation_by_pk.items():
+        pair = pairs_by_delete_pk[transaction_pk]
+        detail = {
+            "duplicate_transaction": _transaction_evidence(targets_by_pk[transaction_pk]),
+            "keeper_transaction": _transaction_evidence(
+                protected_by_pk[_text(pair.get("keep_transaction_pk"))]
+            ),
+        }
         if _decimal_nonzero(evidence.get("written_off_amount")):
             relationful_candidates.append(
-                {"transaction_pk": transaction_pk, "written_off_amount": str(evidence.get("written_off_amount"))}
+                {
+                    **detail,
+                    "written_off_amount": str(evidence.get("written_off_amount")),
+                    "relation_counts": {},
+                }
             )
             continue
         relation_counts = {
@@ -157,13 +181,10 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         }
         if relation_counts:
             relationful_candidates.append(
-                {"transaction_pk": transaction_pk, "relation_counts": relation_counts}
+                {**detail, "written_off_amount": "0", "relation_counts": relation_counts}
             )
     if relationful_candidates:
-        raise ValueError(
-            f"Bank dedup repair found {len(relationful_candidates)} relationful delete candidates: "
-            f"{relationful_candidates[:10]}."
-        )
+        raise BankImportDedupRelationEvidenceError(relationful_candidates)
 
     rows = list(snapshot.get("import_rows") or [])
     rows_by_link: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -297,6 +318,30 @@ def _duplicate_pair(target: dict[str, Any], keeper: dict[str, Any]) -> dict[str,
         "keep_transaction_pk": _text(keeper.get("transaction_pk")),
         "keep_transaction_id": _text(keeper.get("transaction_id")),
         "transaction_month": _text(target.get("txn_month")),
+    }
+
+
+def _transaction_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    identity = BankTransactionIdentityService().identity_for_mapping(row)
+    return {
+        "transaction_pk": _text(row.get("transaction_pk")),
+        "transaction_id": _text(row.get("transaction_id")),
+        "batch_pk": _text(row.get("batch_pk")),
+        "legacy_batch_id": _text(row.get("legacy_batch_id")),
+        "account_no": _text(row.get("account_no")),
+        "trade_time": _text(row.get("trade_time") or row.get("pay_receive_time")),
+        "txn_date": _text(row.get("txn_date")),
+        "txn_direction": _text(row.get("txn_direction")),
+        "amount": _text(row.get("amount")),
+        "balance": _text(row.get("balance")),
+        "currency": _text(row.get("currency")),
+        "counterparty_name": _text(row.get("counterparty_name_raw")),
+        "bank_serial_no": _text(row.get("bank_serial_no")),
+        "account_detail_no": _text(row.get("account_detail_no")),
+        "enterprise_serial_no": _text(row.get("enterprise_serial_no")),
+        "voucher_no": _text(row.get("voucher_no")),
+        "data_fingerprint": _text(row.get("data_fingerprint")),
+        "official_references": sorted(_official_reference_values(identity.audit_fields)),
     }
 
 

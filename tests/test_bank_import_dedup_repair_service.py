@@ -4,6 +4,7 @@ import hashlib
 from unittest import TestCase
 
 from fin_ops_platform.services.bank_import_dedup_repair_service import (
+    BankImportDedupRelationEvidenceError,
     build_bank_import_dedup_repair_plan,
     public_bank_import_dedup_repair_report,
     verify_bank_import_repair_source_files,
@@ -212,8 +213,16 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["duplicate_delete_count"], 0)
 
     def test_plan_refuses_candidate_with_any_relation(self) -> None:
-        with self.assertRaisesRegex(ValueError, "category_count.*1"):
+        with self.assertRaises(BankImportDedupRelationEvidenceError) as context:
             build_bank_import_dedup_repair_plan(_snapshot(relation_count=1))
+
+        self.assertEqual(len(context.exception.candidates), 1)
+        candidate = context.exception.candidates[0]
+        self.assertEqual(candidate["relation_counts"], {"category_count": 1})
+        self.assertEqual(candidate["duplicate_transaction"]["transaction_id"], "target-1")
+        self.assertEqual(candidate["keeper_transaction"]["transaction_id"], "keeper-1")
+        self.assertEqual(candidate["duplicate_transaction"]["amount"], "496.20")
+        self.assertEqual(candidate["keeper_transaction"]["official_references"], ["REF-1"])
 
     def test_source_file_verification_is_exact(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_snapshot())

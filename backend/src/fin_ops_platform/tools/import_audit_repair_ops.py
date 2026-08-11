@@ -7,6 +7,7 @@ import sys
 from typing import TextIO
 
 from fin_ops_platform.services.bank_import_dedup_repair_service import (
+    BankImportDedupRelationEvidenceError,
     build_bank_import_dedup_repair_plan,
     public_bank_import_dedup_repair_report,
     verify_bank_import_repair_source_files,
@@ -113,9 +114,32 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         }
         with connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
-            plan = build_bank_import_dedup_repair_plan(
-                load_bank_import_dedup_repair_snapshot(transaction, **snapshot_kwargs)
-            )
+            try:
+                plan = build_bank_import_dedup_repair_plan(
+                    load_bank_import_dedup_repair_snapshot(transaction, **snapshot_kwargs)
+                )
+            except BankImportDedupRelationEvidenceError as exc:
+                print(
+                    json.dumps(
+                        {
+                            "tool": "import_audit_repair_ops",
+                            "operation": "bank_import_identity_v3_recovery",
+                            "mode": "dry_run" if args.dry_run else "execute_preflight",
+                            "written": False,
+                            "eligible": False,
+                            "error_code": "relationful_delete_candidates",
+                            "message": str(exc),
+                            "candidate_count": len(exc.candidates),
+                            "candidates": exc.candidates,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                    file=stdout,
+                )
+                return 2
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
         from fin_ops_platform.services.runtime_paths import default_data_dir
 

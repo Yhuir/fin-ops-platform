@@ -14,6 +14,9 @@ from fin_ops_platform.services.import_audit_repair_service import (
     execute_failed_import_job_recovery,
     public_repair_report,
 )
+from fin_ops_platform.services.bank_import_dedup_repair_service import (
+    BankImportDedupRelationEvidenceError,
+)
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     _FAILED_IMPORT_FILE_SQL,
     apply_import_audit_repair,
@@ -1045,6 +1048,59 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             import_audit_repair_ops.main(
                 ["--dry-run", "--recover-import-job-id", "import-job-1"]
             )
+
+    def test_cli_bank_repair_prints_structured_relation_evidence_without_writing(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        candidates = [
+            {
+                "duplicate_transaction": {"transaction_id": "target-1", "amount": "496.20"},
+                "keeper_transaction": {"transaction_id": "keeper-1", "amount": "496.20"},
+                "written_off_amount": "0",
+                "relation_counts": {"category_count": 1, "category_event_count": 1},
+            }
+        ]
+        arguments = [
+            "--dry-run",
+            "--repair-bank-source",
+            "session-1=file-1",
+            "--expected-bank-target-count",
+            "1",
+            "--expected-bank-protected-count",
+            "1",
+            "--expected-bank-replay-create-count",
+            "0",
+            "--operator-id",
+            "system_repair",
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(import_audit_repair_ops, "load_bank_import_dedup_repair_snapshot", return_value={}),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_dedup_repair_plan",
+                side_effect=BankImportDedupRelationEvidenceError(candidates),
+            ),
+            patch.object(import_audit_repair_ops, "apply_bank_import_dedup_repair") as apply_repair,
+        ):
+            result = import_audit_repair_ops.main(arguments, stdout=output)
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 2)
+        self.assertFalse(report["written"])
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["error_code"], "relationful_delete_candidates")
+        self.assertEqual(report["candidates"], candidates)
+        apply_repair.assert_not_called()
 
     def test_cli_failed_import_recovery_dry_run_bypasses_global_audit_scan(self) -> None:
         class Connection:
