@@ -197,6 +197,23 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             "unique_statement_position_fallback",
         )
 
+    def test_plan_preserves_nullable_identity_fields_for_compare_and_swap(self) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["rows"][0]["source_unique_key"] = None
+        snapshot["rows"][0]["data_fingerprint"] = None
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+
+        action = plan["row_relink_actions"][0]
+        self.assertIsNone(action["source_unique_key"])
+        self.assertIsNone(action["data_fingerprint"])
+        self.assertEqual(action["match_basis"], "unique_statement_position_fallback")
+
     def test_plan_fails_closed_when_strict_position_fallback_is_ambiguous(
         self,
     ) -> None:
@@ -332,6 +349,40 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             if sql.lstrip().startswith("update app.import_batch_rows")
         )
         self.assertEqual(row_write[0], "transaction-correct")
+
+    def test_apply_passes_nullable_identity_fields_to_compare_and_swap(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        snapshot = _mislinked_snapshot()
+        snapshot["rows"][0]["source_unique_key"] = None
+        snapshot["rows"][0]["data_fingerprint"] = None
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+        connection = Connection()
+
+        apply_bank_import_audit_contract_repair(
+            connection,
+            plan,
+            operator_id="system_repair",
+        )
+
+        row_write = next(
+            params
+            for sql, params in connection.calls
+            if sql.lstrip().startswith("update app.import_batch_rows")
+        )
+        self.assertIsNone(row_write[6])
+        self.assertIsNone(row_write[7])
 
     def test_apply_rolls_back_when_row_relink_compare_and_swap_misses(self) -> None:
         class Connection:
