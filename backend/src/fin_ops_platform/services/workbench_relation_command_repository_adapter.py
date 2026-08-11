@@ -144,6 +144,17 @@ class WorkbenchRelationCommandRepositoryAdapter:
             if row_id
         )
 
+    def lock_canonical_relation_members(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str],
+    ) -> list[str]:
+        lock = getattr(self._repository, "lock_canonical_relation_members", None)
+        if not callable(lock):
+            return []
+        return list(lock(list(row_ids or []), row_types=list(row_types or [])) or [])
+
     def _apply_snapshot(
         self,
         snapshot: dict[str, Any],

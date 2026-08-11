@@ -293,6 +293,60 @@ class PostgresWorkbenchRelationRepository:
             )
         return ordered_keys
 
+    def lock_canonical_relation_members(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str],
+    ) -> list[str]:
+        normalized_row_ids = text_list(row_ids)
+        normalized_row_types = text_list(row_types)
+        if len(normalized_row_ids) != len(normalized_row_types):
+            raise ValueError("Workbench relation member ids and types must stay aligned.")
+
+        requested = {
+            (row_type, row_id)
+            for row_id, row_type in zip(normalized_row_ids, normalized_row_types, strict=True)
+            if row_type in {"oa", "bank", "invoice"}
+        }
+        found: set[tuple[str, str]] = set()
+        queries = {
+            "oa": """
+                select row_id
+                from app.oa_applications
+                where row_id = any(%s::text[])
+                  and status <> 'deleted'
+                order by row_id
+                for key share
+            """,
+            "bank": """
+                select coalesce(legacy_mongo_id, id::text) as row_id
+                from app.bank_transactions
+                where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                  and status <> 'deleted'
+                order by coalesce(legacy_mongo_id, id::text)
+                for key share
+            """,
+            "invoice": """
+                select coalesce(legacy_mongo_id, id::text) as row_id
+                from app.invoices
+                where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                  and status <> 'deleted'
+                order by coalesce(legacy_mongo_id, id::text)
+                for key share
+            """,
+        }
+        for row_type, sql in queries.items():
+            typed_row_ids = sorted(row_id for member_type, row_id in requested if member_type == row_type)
+            if not typed_row_ids:
+                continue
+            found.update(
+                (row_type, text(row.get("row_id")))
+                for row in self._connection.fetch_all(sql, (typed_row_ids,))
+                if text(row.get("row_id"))
+            )
+        return sorted(f"{row_type}:{row_id}" for row_type, row_id in requested - found)
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],

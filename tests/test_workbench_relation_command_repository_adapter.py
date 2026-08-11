@@ -17,6 +17,7 @@ class CaptureRepository:
         self.active_scoped_loads: list[dict[str, object]] = []
         self.active_case_loads: list[str] = []
         self.delta_saved: list[dict[str, object]] = []
+        self.canonical_lock_calls: list[dict[str, object]] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         return self.snapshot
@@ -74,6 +75,17 @@ class CaptureRepository:
         relation = dict(self.snapshot.get("pair_relations") or {}).get(case_id)
         return dict(relation) if isinstance(relation, dict) and relation.get("status") == "active" else None
 
+    def lock_canonical_relation_members(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str],
+    ) -> list[str]:
+        self.canonical_lock_calls.append(
+            {"row_ids": list(row_ids), "row_types": list(row_types)}
+        )
+        return ["oa:oa-missing"]
+
 
 class SnapshotBlockingPairRelationService(WorkbenchPairRelationService):
     def snapshot(self) -> dict[str, object]:
@@ -81,6 +93,24 @@ class SnapshotBlockingPairRelationService(WorkbenchPairRelationService):
 
 
 class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
+    def test_canonical_member_lock_delegates_to_durable_repository(self) -> None:
+        repository = CaptureRepository()
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=WorkbenchPairRelationService(),
+            repository=repository,
+        )
+
+        missing = adapter.lock_canonical_relation_members(
+            ["oa-missing", "bank-1"],
+            row_types=["oa", "bank"],
+        )
+
+        self.assertEqual(missing, ["oa:oa-missing"])
+        self.assertEqual(
+            repository.canonical_lock_calls,
+            [{"row_ids": ["oa-missing", "bank-1"], "row_types": ["oa", "bank"]}],
+        )
+
     def test_load_prefers_repository_when_repository_is_configured(self) -> None:
         pair_service = WorkbenchPairRelationService.from_snapshot(
             {

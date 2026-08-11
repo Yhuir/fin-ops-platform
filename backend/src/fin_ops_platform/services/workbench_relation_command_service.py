@@ -267,6 +267,10 @@ class WorkbenchRelationCommandService:
             month_scope=month_scope,
             scope_keys_hint=scope_keys_hint,
         )
+        self._assert_canonical_relation_members_available(
+            normalized_row_ids,
+            row_types=normalized_row_types,
+        )
         self._acquire_relation_member_locks(
             normalized_row_ids,
             row_types=normalized_row_types,
@@ -345,6 +349,10 @@ class WorkbenchRelationCommandService:
                 row_ids=list(row_ids or []),
                 month_scope=month_scope,
             )
+            self._assert_canonical_relation_members_available(
+                list(row_ids or []),
+                row_types=list(row_types or []),
+            )
             self._acquire_relation_member_locks(
                 list(row_ids or []),
                 row_types=list(row_types or []),
@@ -375,6 +383,10 @@ class WorkbenchRelationCommandService:
                     continue
                 additional_row_ids.append(member[0])
                 additional_row_types.append(member[1])
+            self._assert_canonical_relation_members_available(
+                additional_row_ids,
+                row_types=additional_row_types,
+            )
             self._acquire_relation_member_locks(
                 additional_row_ids,
                 row_types=additional_row_types,
@@ -578,6 +590,7 @@ class WorkbenchRelationCommandService:
                 "paired_requirement_plan_mismatch",
                 "Paired requirements must belong to the formal relation plan batch.",
             )
+        self._assert_canonical_relation_members_available(row_ids, row_types=row_types)
         self._acquire_relation_member_locks(row_ids, row_types=row_types, case_ids=case_ids)
         self._validate_etc_batch_links(normalized_links)
         pair_service = self._pair_service_for_row_ids(row_ids, case_ids=case_ids)
@@ -1870,6 +1883,27 @@ class WorkbenchRelationCommandService:
             )
             or []
         )
+
+    def _assert_canonical_relation_members_available(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str],
+    ) -> None:
+        lock = getattr(self._relation_repository, "lock_canonical_relation_members", None)
+        if not callable(lock):
+            return
+        missing_member_keys = sorted(
+            str(item).strip()
+            for item in list(lock(list(row_ids or []), row_types=list(row_types or [])) or [])
+            if str(item).strip()
+        )
+        if missing_member_keys:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_canonical_member_missing",
+                "One or more Workbench relation members no longer exist in canonical facts.",
+                payload={"missing_member_keys": missing_member_keys},
+            )
 
     def _pair_service_for_row_ids(
         self,

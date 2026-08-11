@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -17,7 +18,10 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import Postgres
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
-from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandError,
+    WorkbenchRelationCommandService,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -398,6 +402,88 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 "select status from app.workbench_pair_relations where case_id = 'oa-removal-case'"
             )["status"],
             "cancelled",
+        )
+
+    def test_stale_matching_plan_cannot_recreate_relation_after_oa_disappears(self) -> None:
+        source_snapshot = self._source_snapshot()
+        retained = _record()
+        removed = replace(
+            retained,
+            id="oa-stale-plan-removed",
+            detail_fields={
+                "Mongo文档ID": "flow-stale-plan-removed",
+                "paymentFlowId": "flow-stale-plan-removed",
+            },
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[retained, removed],
+            admission_records=[retained, removed],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(flow_id="flow-integration-1", pay_status=0),
+                "flow-stale-plan-removed": OAPaymentStatusRecord(
+                    flow_id="flow-stale-plan-removed",
+                    pay_status=0,
+                ),
+            },
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status, raw_payload
+            )
+            values (
+                'bank-stale-plan', '622200001234', 'outflow', '集成测试供应商',
+                100, -100, '2026-05-20', '2026-05-01', 'pending', '{}'::jsonb
+            )
+            """
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[retained],
+            admission_records=[retained],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(flow_id="flow-integration-1", pay_status=0)
+            },
+        )
+        stale_plan = SimpleNamespace(
+            case_id="CASE-STALE-PLAN",
+            row_ids=("oa-stale-plan-removed", "bank-stale-plan"),
+            row_types=("oa", "bank"),
+            relation_fingerprint="stale-plan-fingerprint",
+            batch_hash="stale-plan-batch",
+            rule_code="exact_amount",
+            rule_version="1",
+            amount_minor=10000,
+            currency="CNY",
+            scope_keys=("2026-05",),
+            evidence_summary=(),
+            target_case_id=None,
+            oa_attachment_bindings=(),
+        )
+
+        with self.connection.transaction() as transaction:
+            service = WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+            )
+            with self.assertRaises(WorkbenchRelationCommandError) as context:
+                service.confirm_formal_relation_plans(
+                    [stale_plan],
+                    actor_id="system:workbench-matching",
+                )
+
+        self.assertEqual(
+            context.exception.error_code,
+            "workbench_relation_canonical_member_missing",
+        )
+        self.assertIsNone(
+            self.connection.fetch_one(
+                "select case_id from app.workbench_pair_relations where case_id = 'CASE-STALE-PLAN'"
+            )
         )
 
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:

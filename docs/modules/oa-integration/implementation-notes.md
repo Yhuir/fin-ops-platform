@@ -1,5 +1,13 @@
 # OA 集成 实施记录
 
+## 2026-08-11 - OA 删除与自动匹配并发闭环
+
+- 目标：补齐权威快照正确删除 OA 后，已经在事务外读取的自动匹配 plan 仍可能重新创建失效 relation 的并发窗口。
+- 根因：OA 删除事务与 formal relation 创建事务都各自正确，但旧 matching batch 的成员有效性没有在 relation UoW 内重新证明。
+- 关键决策：OA 删除链不增加补偿；由 Workbench 共享 relation command 在写事务内先锁定并验证当前 canonical 成员，再取得 relation advisory lock。无论删除或匹配先取得 canonical 行锁，最终都只允许“成员存在的关系”提交。
+- 测试覆盖：真实 PostgreSQL integration 复现 stale plan，OA 权威快照删除后 formal confirm 返回 `workbench_relation_canonical_member_missing` 且 relation 表无写入。
+- 文档影响：更新 OA 与关联台的 boundary I/O；API、read model、worker、权限和前端合同不变。
+
 ## 2026-08-11 - OA 权威快照统一删除与关联关系清理
 
 - 目标：修复 OA 周期同步删除已失效 completed 投影后，关联台 active relation 偶发保留不存在 OA 成员的问题。

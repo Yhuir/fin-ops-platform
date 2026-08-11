@@ -2,6 +2,14 @@
 
 日期：2026-08-11
 
+## 2026-08-11 自动匹配旧快照并发回归
+
+- Repository：`tests/test_workbench_relation_repository.py::test_canonical_relation_member_lock_reports_deleted_member_and_locks_existing_rows` 保护 OA/流水/发票一次按类型读取、`FOR KEY SHARE` 行锁和缺失 typed identity 输出。
+- Service：`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_formal_plan_fails_before_relation_lock_when_canonical_member_was_deleted` 保护缺失成员在 relation advisory lock 与 snapshot write 之前 fail closed。
+- Adapter：`tests/test_workbench_relation_command_repository_adapter.py::WorkbenchRelationCommandRepositoryAdapterTests::test_canonical_member_lock_delegates_to_durable_repository` 保护 command service 继续通过既有 durable repository 边界读取，不在 service 散落 SQL。
+- PostgreSQL integration：`tests/test_oa_pending_payment_postgres_integration.py::OaPendingPaymentPostgresIntegrationTests::test_stale_matching_plan_cannot_recreate_relation_after_oa_disappears` 复现事务外旧 plan、OA 权威删除和后续 formal confirm，断言错误码稳定且零 active relation 写入。
+- Regression：不改变 API response、generation、queue、worker、Redis 或前端交互；既有 confirm/withdraw、matching orchestrator、runtime boundary 和 OA snapshot 回归必须继续通过。
+
 ## 2026-08-11 固定紧凑三栏与区域时间筛选
 
 - Frontend component：`WorkbenchZone.test.tsx` 保护银行“全部 + 年月”位于区域标题栏、栏显示菜单只包含 OA/银行流水/进销项发票且最后一栏不可隐藏；`WorkbenchSelection.test.tsx` 保护 paired/unpaired 时间筛选独立、筛选仍映射既有银行时间 I/O、两区始终同时可见且无布局/放大入口。

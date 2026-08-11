@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-11 - 自动匹配旧快照重建已删除 OA 关系闭环
+
+- 真实根因：自动匹配先在 relation UoW 外读取 canonical batch，再进入写事务；如果 OA 权威快照恰好在两步之间删除 OA 并清理旧关系，旧 matching plan 仍可创建新的 `CASE-AUTO-*`，因此首次修复后会在后续 worker 周期复发。
+- 修复：复用现有 `WorkbenchRelationCommandService` 作为人工和自动 formal relation 的共享写边界，在 relation advisory lock 之前由 PostgreSQL repository 按 typed identity 重读 OA/流水/发票并 `FOR KEY SHARE` 锁行。缺失成员整条命令 fail closed；删除先发生时匹配等待后看见缺失，匹配先发生时删除等待并在提交后继续清理，两个顺序都不会留下失效 active relation。
+- 旧链处理：不新增第二套 matching、补偿 worker、页面 fallback、cache 或 read model；事务外 batch 只负责规划，不能再单独证明成员仍存在。非 canonical 的既有特殊 relation member 类型保持原边界，不被错误解释为 OA/流水/发票。
+- 测试覆盖：repository SQL 行锁和缺失检测、service 在 advisory lock/写入前失败、adapter delegation，以及真实 PostgreSQL 的“读到旧 plan -> OA 权威删除 -> formal confirm”零关系写入。
+
 ## 2026-08-10 - 栏位时间筛选统一控件
 
 - 银行流水栏位删除私有年月弹层，复用共享 HeroUI“全部 + 年/月”控件；该控件从银行栏表头移到已配对/未配对区域标题栏最右侧，两个区域继续独立使用既有 `timeFilterByPane.bank` 与 `time_filters.bank`，异步年份读取、active generation、选择保留和 Workbench API I/O 不变。

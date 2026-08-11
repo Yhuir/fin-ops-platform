@@ -145,3 +145,27 @@ def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
     all_sql = _normalized_sql(connection.execute_calls + connection.fetch_one_calls + connection.fetch_all_calls)
     assert any("insert into app.workbench_pair_relations" in sql for sql in all_sql)
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in all_sql)
+
+
+def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existing_rows() -> None:
+    class CanonicalLockConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+            self.fetch_all_calls.append((sql, params))
+            normalized_sql = " ".join(sql.lower().split())
+            assert "for key share" in normalized_sql
+            if "from app.oa_applications" in normalized_sql:
+                return [{"row_id": "oa-present"}]
+            if "from app.bank_transactions" in normalized_sql:
+                return [{"row_id": "bank-present"}]
+            if "from app.invoices" in normalized_sql:
+                return [{"row_id": "invoice-present"}]
+            return []
+
+    connection = CanonicalLockConnection()
+    missing = PostgresWorkbenchRelationRepository(connection).lock_canonical_relation_members(
+        ["oa-present", "oa-deleted", "bank-present", "invoice-present"],
+        row_types=["oa", "oa", "bank", "invoice"],
+    )
+
+    assert missing == ["oa:oa-deleted"]
+    assert len(connection.fetch_all_calls) == 3

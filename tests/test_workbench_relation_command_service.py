@@ -20,6 +20,8 @@ class FakeRelationRepository:
         self.active_case_load_calls: list[str] = []
         self.save_calls: list[dict[str, object]] = []
         self.lock_calls: list[dict[str, object]] = []
+        self.canonical_lock_calls: list[dict[str, object]] = []
+        self.missing_canonical_member_keys: list[str] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         self.load_calls += 1
@@ -122,6 +124,17 @@ class FakeRelationRepository:
             }
         )
         return list(row_ids or [])
+
+    def lock_canonical_relation_members(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str],
+    ) -> list[str]:
+        self.canonical_lock_calls.append(
+            {"row_ids": list(row_ids or []), "row_types": list(row_types or [])}
+        )
+        return list(self.missing_canonical_member_keys)
 
 
 class FakeRelationFacade:
@@ -1032,6 +1045,43 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
             month_scope="2026-05",
         )
         self.assertFalse(preview["can_submit"])
+
+    def test_formal_plan_fails_before_relation_lock_when_canonical_member_was_deleted(self) -> None:
+        repository = FakeRelationRepository()
+        repository.missing_canonical_member_keys = ["oa:oa-deleted"]
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+        plan = SimpleNamespace(
+            case_id="CASE-STALE",
+            row_ids=("oa-deleted", "bank-present"),
+            row_types=("oa", "bank"),
+            relation_fingerprint="stale-fingerprint",
+            batch_hash="stale-batch",
+            rule_code="exact_amount",
+            rule_version="1",
+            amount_minor=10000,
+            currency="CNY",
+            scope_keys=("2026-05",),
+            evidence_summary=(),
+            target_case_id=None,
+            oa_attachment_bindings=(),
+        )
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.confirm_formal_relation_plans(
+                [plan],
+                actor_id="system:workbench-matching",
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            "workbench_relation_canonical_member_missing",
+        )
+        self.assertEqual(
+            context.exception.payload["missing_member_keys"],
+            ["oa:oa-deleted"],
+        )
+        self.assertEqual(repository.lock_calls, [])
+        self.assertEqual(repository.save_calls, [])
 
     def test_confirm_relation_preserves_explicit_row_alignment_metadata(self) -> None:
         repository = FakeRelationRepository()
