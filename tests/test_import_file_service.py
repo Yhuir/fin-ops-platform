@@ -1390,6 +1390,14 @@ class ImportFileServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preview_stale"):
             service.assert_session_preview_current(session_id=session.id)
 
+        try:
+            service.assert_session_preview_current(session_id=session.id)
+        except ValueError as error:
+            self.assertIn("existing_duplicate_count", str(error))
+            self.assertIn("suspected_duplicate_count", str(error))
+        else:
+            self.fail("changed canonical transaction must remain stale")
+
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
         import_service = ImportNormalizationService(
             id_registry=FakeImportEntityRegistry(),

@@ -104,7 +104,17 @@ class ImportPreviewSessionAudit:
 
 class ImportPreviewStaleError(ValueError):
     def __init__(self, *, preview: ImportPreviewAuditCounts, current: ImportPreviewAuditCounts) -> None:
-        super().__init__("preview_stale")
+        preview_projection = preview.stale_projection()
+        current_projection = current.stale_projection()
+        changed_fields = {
+            field_name: {
+                "preview": preview_projection[field_name],
+                "current": current_projection[field_name],
+            }
+            for field_name in AUDIT_STALE_FIELDS
+            if preview_projection[field_name] != current_projection[field_name]
+        }
+        super().__init__(f"preview_stale: changed_fields={changed_fields}")
         self.preview = preview
         self.current = current
 

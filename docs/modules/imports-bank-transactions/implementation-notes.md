@@ -269,3 +269,4 @@
 - 生产候选执行证明受控预览持久化成功后，普通 stale gate 会把已由冻结证据确认的 767 条弱指纹 keeper 重新归类为 `suspected_duplicate`，使审计投影变化并整体回滚；生产 canonical 事实未发生半写入。
 - 修复不跳过 stale gate，也不增加恢复专用确认链。只有受控 row 的登记 reason、银行流水类型和 canonical transaction ID 与当前普通去重重算结果完全一致时，才保留权威 `duplicate_skipped`；不同 ID、缺失 ID 或重算为 `created` 仍报 `preview_stale`。
 - 测试同时锁定同 canonical 可确认、canonical 漂移必拒绝和普通 preview 竞争写入仍拒绝，避免受控恢复例外污染普通银行/发票导入。
+- `preview_stale` 异常只记录发生变化的审计计数字段；HTTP 仍返回固定用户文案，不暴露业务行或 canonical ID。该诊断用于候选恢复失败时区分 importable、existing duplicate 与 suspected duplicate 漂移，不改变门禁结果。
