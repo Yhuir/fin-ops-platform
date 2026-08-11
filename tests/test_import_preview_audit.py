@@ -4,6 +4,8 @@ import unittest
 
 from fin_ops_platform.services.import_preview_audit import (
     BankTransactionIdentityStrategy,
+    CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
+    CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
     ImportPreviewAuditRow,
     InvoiceIdentityStrategy,
     build_import_preview_session_audit,
@@ -11,6 +13,12 @@ from fin_ops_platform.services.import_preview_audit import (
 
 
 class ImportPreviewAuditTests(unittest.TestCase):
+    def test_controlled_recovery_reason_is_not_a_runtime_replay_reason(self) -> None:
+        self.assertNotIn(
+            CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
+            CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),
+        )
+
     def test_invoice_placeholder_digital_number_falls_back_to_code_and_number(self) -> None:
         identity = InvoiceIdentityStrategy().identify(
             {

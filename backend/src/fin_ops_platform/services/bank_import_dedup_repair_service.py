@@ -12,6 +12,9 @@ import unicodedata
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
 )
+from fin_ops_platform.services.import_preview_audit import (
+    CONTROLLED_RECOVERY_RECLASSIFICATION_REASON as REPAIR_REASON,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
@@ -25,8 +28,6 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandService,
 )
 
-
-REPAIR_REASON = "Reclassified by bank identity v3 controlled recovery."
 RELATED_CLEANUP_REASON = (
     "Withdraw duplicate-owned Workbench relation and remove duplicate-owned category facts "
     "before bank identity v3 controlled recovery."

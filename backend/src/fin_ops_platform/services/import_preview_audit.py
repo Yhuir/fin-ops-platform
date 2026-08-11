@@ -31,6 +31,15 @@ CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND = {
         "Controlled replay matched an existing canonical duplicate reference."
     ),
 }
+CONTROLLED_RECOVERY_RECLASSIFICATION_REASON = (
+    "Reclassified by bank identity v3 controlled recovery."
+)
+CONTROLLED_DUPLICATE_PROVENANCE_REASONS = frozenset(
+    {
+        *CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),
+        CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

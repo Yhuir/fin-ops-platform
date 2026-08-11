@@ -304,3 +304,9 @@
 - `BankTransactionIdentityService.statement_position_for_mapping` 默认仍要求币种；只有调用方显式声明 `allow_missing_currency=True` 时才允许构造历史缺失位置。银行导入 Page Audit 仅在三类已登记受控重放 reason 下使用该模式，并额外只接受 `row=CNY / canonical=空` 这一种解析器默认值兼容。
 - 账户、时间、方向、金额、余额任一缺失/不同，row 缺失但 canonical 有值、非 CNY 的单边缺失或显式币种不同，仍然失败；普通导入、普通去重 identity、source key/fingerprint 和 stale gate 均不放宽。
 - 不新增 API、表、worker、read model、fallback 或第二条导入链；边界 I/O 只补充受控历史审计语义。
+
+## 2026-08-12 - 去重恢复 owner 转移审计闭环
+
+- 候选发布门禁最终定位到历史正式 row：去重恢复工具把被删除副本的唯一 `created` owner 转为 `duplicate_skipped`，并写入专用 reclassification reason；Page Audit 之前只登记三类 runtime replay reason，因此即使该 row 与 keeper 的 statement position 相同，仍会被误报为 `unregistered_decision_reason`。
+- reclassification reason 现与三类 runtime replay reason 在共享导入审计合同中分开登记。Page Audit 对两类 provenance 都执行相同的账户、秒级时间、方向、金额、余额、币种证明；任一字段漂移继续阻断。普通 preview、confirm 与 stale gate 仍只接受三类 runtime replay reason，repair reason 不获得运行时导入例外。
+- 没有新增 API、表、worker、read model、fallback 或第二条导入链；改动只修正历史正式 row 的只读审计解释。

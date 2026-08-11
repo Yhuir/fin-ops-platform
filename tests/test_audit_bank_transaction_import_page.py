@@ -516,7 +516,66 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
             },
         )
 
-    def test_duplicate_reference_reports_unregistered_repair_reason(self) -> None:
+    def test_reclassified_owner_transition_can_reference_canonical_transaction_by_strict_statement_position(
+        self,
+    ) -> None:
+        connection = FakeConnection()
+        audit = bank_transaction_import_page_audit._zero_audit_counts()
+        audit.update(
+            {
+                "original_count": 1,
+                "unique_count": 1,
+                "existing_duplicate_count": 1,
+                "skipped_count": 1,
+            }
+        )
+        connection.files[0]["raw_payload"]["normalized_payload"].update(
+            {"audit": audit, "session_audit": audit}
+        )
+        connection.batches[0].update({"success_count": 0, "duplicate_count": 1})
+        connection.batches[0]["raw_payload"]["normalized_payload"].update(
+            {"success_count": 0, "duplicate_count": 1}
+        )
+        connection.rows[0].update(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": "Reclassified by bank identity v3 controlled recovery.",
+                "source_unique_key": "bank-v3:new-reference",
+                "data_fingerprint": "bank:new-reference",
+            }
+        )
+        connection.rows[0]["raw_payload"]["normalized_payload"].update(
+            {
+                "decision": connection.rows[0]["decision"],
+                "decision_reason": connection.rows[0]["decision_reason"],
+                "source_unique_key": connection.rows[0]["source_unique_key"],
+                "data_fingerprint": connection.rows[0]["data_fingerprint"],
+                "normalized_row": {"balance": "900.00", "currency": "CNY"},
+            }
+        )
+        connection.transactions[0].update(
+            {
+                "batch_id": "older-batch",
+                "source_unique_key": "",
+                "data_fingerprint": "bank:old-reference",
+                "balance": "900.00",
+                "currency": "CNY",
+                "raw_payload": {
+                    "normalized_payload": {"balance": "900.00", "currency": "CNY"}
+                },
+            }
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(
+            report["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+
+    def test_reclassified_owner_transition_position_mismatch_remains_blocking(
+        self,
+    ) -> None:
         connection = FakeConnection()
         connection.rows[0].update(
             {
@@ -532,10 +591,16 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
                 "decision_reason": connection.rows[0]["decision_reason"],
                 "source_unique_key": connection.rows[0]["source_unique_key"],
                 "data_fingerprint": connection.rows[0]["data_fingerprint"],
+                "normalized_row": {"balance": "900.00", "currency": "CNY"},
             }
         )
         connection.transactions[0].update(
-            {"source_unique_key": "", "data_fingerprint": "bank:old-reference"}
+            {
+                "source_unique_key": "",
+                "data_fingerprint": "bank:old-reference",
+                "balance": "899.00",
+                "currency": "CNY",
+            }
         )
 
         report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
@@ -546,17 +611,8 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
             if item["code"] == "bank_import_transaction_field_mismatch"
         )
         self.assertEqual(
-            issue["details"]["controlled_replay_statement_position"],
-            {
-                "eligible": False,
-                "decision": "duplicate_skipped",
-                "decision_reason": (
-                    "Reclassified by bank identity v3 controlled recovery."
-                ),
-                "row_position_complete": False,
-                "transaction_position_complete": False,
-                "mismatch_fields": ["unregistered_decision_reason"],
-            },
+            issue["details"]["controlled_replay_statement_position"]["mismatch_fields"],
+            ["balance"],
         )
 
     def test_controlled_replay_accepts_equal_missing_legacy_currency(self) -> None:

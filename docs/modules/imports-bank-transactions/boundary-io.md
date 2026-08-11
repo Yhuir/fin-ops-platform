@@ -26,7 +26,7 @@
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - 受控重放必须为新 session/file 生成新的归档对象登记；不得让新 `app.import_files` 复用旧 `stored_file_path` 却缺少 `file_object_id`。历史已存在的缺失链接只能由维护工具按唯一 storage URI、登记 SHA-256、对象大小和非 tombstone 生命周期证明后修复。
-- 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于受控重放，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
+- 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于三类受控重放，或属于去重恢复工具写入的唯一 owner-reclassification reason，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。owner-reclassification reason 只属于历史 page Audit provenance，不进入普通预览、确认或 stale-gate 的受控重放 reason 集合。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
 - 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - `duplicate_skipped` 的受控重放 statement-position 审计失败时，admin-only issue 必须返回 decision/reason 登记状态、无业务原值的完整性标志和字段级 `mismatch_fields`，以区分未登记 reason、缺失位置与账户、时间、方向、金额、余额、币种漂移；不得只返回派生 source key 让生产门禁依赖推断。

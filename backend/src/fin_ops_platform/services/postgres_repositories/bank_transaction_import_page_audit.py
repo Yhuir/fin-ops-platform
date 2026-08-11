@@ -12,7 +12,7 @@ from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
 )
 from fin_ops_platform.services.import_preview_audit import (
-    CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
+    CONTROLLED_DUPLICATE_PROVENANCE_REASONS,
     ImportPreviewAuditRow,
     build_import_preview_session_audit,
 )
@@ -624,7 +624,7 @@ def _controlled_replay_statement_position_diagnostics(
     if decision != "duplicate_skipped":
         return None
     decision_reason = _text(row.get("decision_reason"))
-    if decision_reason not in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values():
+    if decision_reason not in CONTROLLED_DUPLICATE_PROVENANCE_REASONS:
         return {
             "eligible": False,
             "decision": decision,
