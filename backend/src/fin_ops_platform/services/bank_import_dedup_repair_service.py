@@ -82,15 +82,25 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         if not candidates:
             continue
         incoming_references = _official_reference_values(target_identity.audit_fields)
-        exact: list[dict[str, Any]] = []
+        reference_exact: list[dict[str, Any]] = []
+        candidate_reference_sets: list[set[str]] = []
         secondary_match_count = 0
         for candidate in candidates:
             candidate_identity = identity_service.identity_for_mapping(candidate)
             candidate_references = _official_reference_values(candidate_identity.audit_fields)
+            candidate_reference_sets.append(candidate_references)
             if incoming_references and incoming_references.intersection(candidate_references):
-                exact.append(candidate)
-        if not exact:
+                reference_exact.append(candidate)
+        if len(reference_exact) == 1:
+            duplicate_pairs.append(_duplicate_pair(target, reference_exact[0]))
+            continue
+        if len(reference_exact) > 1:
+            exact = reference_exact
+        elif incoming_references and all(candidate_reference_sets):
+            continue
+        else:
             target_secondary = _strict_secondary_evidence(target)
+            exact = []
             if target_secondary is not None:
                 exact = [
                     candidate
