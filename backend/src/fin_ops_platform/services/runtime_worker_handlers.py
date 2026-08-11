@@ -131,6 +131,8 @@ class ImportRuntimeProcessorFactory:
         expected_repaired_duplicate_count: int = 0,
         repaired_duplicate_decision_reason: str | None = None,
         repaired_duplicate_evidence: list[dict[str, object]] | None = None,
+        expected_canonical_owner_count: int = 0,
+        canonical_owner_evidence: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
         replay_session = file_import_service.replay_confirmed_session_files(
@@ -140,6 +142,8 @@ class ImportRuntimeProcessorFactory:
             expected_repaired_duplicate_count=expected_repaired_duplicate_count,
             repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
             repaired_duplicate_evidence=repaired_duplicate_evidence,
+            expected_canonical_owner_count=expected_canonical_owner_count,
+            canonical_owner_evidence=canonical_owner_evidence,
         )
         if replay_session.status != "preview_ready" or any(
             item.error_count or item.suspected_duplicate_count for item in replay_session.files
@@ -184,6 +188,7 @@ class ImportRuntimeProcessorFactory:
                 ),
                 "error_count": sum(item.error_count for item in refreshed_files),
                 "repaired_duplicate_count": int(expected_repaired_duplicate_count),
+                "canonical_owner_count": int(expected_canonical_owner_count),
             },
         }
 

@@ -646,6 +646,8 @@ class FileImportService:
         expected_repaired_duplicate_count: int = 0,
         repaired_duplicate_decision_reason: str | None = None,
         repaired_duplicate_evidence: list[dict[str, Any]] | None = None,
+        expected_canonical_owner_count: int = 0,
+        canonical_owner_evidence: list[dict[str, Any]] | None = None,
     ) -> FileImportSession:
         source_session = self._sessions[source_session_id]
         selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
@@ -670,6 +672,9 @@ class FileImportService:
         evidence_by_file: dict[str, list[dict[str, Any]]] = {
             file_id: [] for file_id in selected_file_ids_set
         }
+        canonical_owner_evidence_by_file: dict[str, list[dict[str, Any]]] = {
+            file_id: [] for file_id in selected_file_ids_set
+        }
         for evidence in repaired_duplicate_evidence or []:
             file_id = str(evidence.get("file_id") or "").strip()
             if file_id not in selected_file_ids_set:
@@ -677,6 +682,17 @@ class FileImportService:
                     "controlled replay repaired evidence references an unselected source file"
                 )
             evidence_by_file[file_id].append(dict(evidence))
+        for evidence in canonical_owner_evidence or []:
+            file_id = str(evidence.get("file_id") or "").strip()
+            if file_id not in selected_file_ids_set:
+                raise ValueError(
+                    "controlled replay canonical owner evidence references an unselected source file"
+                )
+            canonical_owner_evidence_by_file[file_id].append(dict(evidence))
+        if sum(len(items) for items in canonical_owner_evidence_by_file.values()) != int(
+            expected_canonical_owner_count
+        ):
+            raise ValueError("controlled replay canonical owner evidence count changed")
         repaired_duplicate_count = 0
         for source_item in source_items:
             if not source_item.stored_file_path:
@@ -712,6 +728,8 @@ class FileImportService:
                 replay_item=replay_item,
                 repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
                 repaired_duplicate_evidence=evidence_by_file[source_item.id],
+                canonical_owner_evidence=canonical_owner_evidence_by_file[source_item.id],
+                source_file_id=source_item.id,
             )
             replay_session.files.append(replay_item)
 
@@ -734,6 +752,8 @@ class FileImportService:
         replay_item: FileImportPreviewItem,
         repaired_duplicate_decision_reason: str | None,
         repaired_duplicate_evidence: list[dict[str, Any]],
+        canonical_owner_evidence: list[dict[str, Any]] | None = None,
+        source_file_id: str | None = None,
     ) -> int:
         if replay_item.batch_type != BatchType.BANK_TRANSACTION:
             return 0
@@ -742,7 +762,7 @@ class FileImportService:
         ).strip()
         if not normalized_repair_reason:
             return 0
-        evidence_by_row_no: dict[int, dict[str, Any]] = {}
+        evidence_by_row_no: dict[int, tuple[str, dict[str, Any]]] = {}
         for evidence in repaired_duplicate_evidence:
             row_no = int(evidence.get("row_no") or 0)
             if row_no <= 0 or row_no in evidence_by_row_no:
@@ -760,17 +780,38 @@ class FileImportService:
                 raise ValueError(
                     "controlled replay repaired evidence lacks canonical row identity"
                 )
-            evidence_by_row_no[row_no] = evidence
+            evidence_by_row_no[row_no] = ("repaired_duplicate", evidence)
+        for evidence in canonical_owner_evidence or []:
+            row_no = int(evidence.get("row_no") or 0)
+            if row_no <= 0 or row_no in evidence_by_row_no:
+                raise ValueError("controlled replay canonical owner evidence has invalid row numbers")
+            if (
+                str(evidence.get("source_record_type") or "").strip()
+                != "bank_transaction"
+                or not str(evidence.get("data_fingerprint") or "").strip()
+                or str(evidence.get("linked_object_type") or "").strip()
+                != "bank_transaction"
+                or not str(evidence.get("linked_object_id") or "").strip()
+            ):
+                raise ValueError(
+                    "controlled replay canonical owner evidence lacks canonical row identity"
+                )
+            evidence_by_row_no[row_no] = ("canonical_owner", evidence)
 
         resolved_count = 0
         for replay_result in replay_item.row_results:
-            evidence = evidence_by_row_no.pop(replay_result.row_no, None)
-            if evidence is None:
+            evidence_entry = evidence_by_row_no.pop(replay_result.row_no, None)
+            if evidence_entry is None:
                 if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
                     raise ValueError(
-                        "controlled replay suspected duplicate lacks repaired row evidence"
+                        "controlled replay suspected duplicate lacks authoritative row evidence: "
+                        f"source_file_id={source_file_id or ''}; "
+                        f"row_no={replay_result.row_no}; "
+                        f"fingerprint={replay_result.data_fingerprint}; "
+                        f"linked_object_id={replay_result.linked_object_id or ''}"
                     )
                 continue
+            evidence_kind, evidence = evidence_entry
             mismatches = [
                 field_name
                 for field_name, matches in (
@@ -825,7 +866,8 @@ class FileImportService:
             )
             replay_result.linked_object_type = "bank_transaction"
             replay_result.linked_object_id = str(evidence["linked_object_id"])
-            resolved_count += 1
+            if evidence_kind == "repaired_duplicate":
+                resolved_count += 1
         if evidence_by_row_no:
             raise ValueError(
                 "controlled replay repaired evidence rows are missing from the current preview"

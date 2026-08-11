@@ -1214,6 +1214,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "import_row_update_count": 709,
             "created_owner_transition_count": 674,
             "replay_repaired_duplicate_count": 674,
+            "replay_canonical_owner_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "affected_months": ["2026-02"],
             "category_cleanup_actions": [],
@@ -1297,6 +1298,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "import_row_update_count": 709,
             "created_owner_transition_count": 674,
             "replay_repaired_duplicate_count": 674,
+            "replay_canonical_owner_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "replay_sources": [
                 {
@@ -1307,6 +1309,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                         "Reclassified by bank identity v3 controlled recovery."
                     ),
                     "repaired_duplicate_evidence": [],
+                    "expected_canonical_owner_count": 0,
+                    "canonical_owner_evidence": [],
                 }
             ],
             "affected_months": ["2026-02", "2026-05"],
@@ -1319,12 +1323,14 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 "audit_summary": {
                     "created_count": 0,
                     "repaired_duplicate_count": 674,
+                    "canonical_owner_count": 0,
                 }
             },
             {
                 "audit_summary": {
                     "created_count": 0,
                     "repaired_duplicate_count": 674,
+                    "canonical_owner_count": 0,
                 }
             },
         ]

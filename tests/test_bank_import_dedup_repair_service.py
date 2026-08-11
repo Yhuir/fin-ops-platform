@@ -278,6 +278,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["batch_updates"][0]["after_success_count"], 1)
         self.assertEqual(plan["batch_updates"][0]["after_duplicate_count"], 1)
         self.assertEqual(plan["replay_repaired_duplicate_count"], 1)
+        self.assertEqual(plan["replay_canonical_owner_count"], 1)
         self.assertEqual(
             plan["replay_sources"],
             [
@@ -301,6 +302,19 @@ class BankImportDedupRepairServiceTests(TestCase):
                             ),
                             "linked_object_type": "bank_transaction",
                             "linked_object_id": "keeper-1",
+                        }
+                    ],
+                    "expected_canonical_owner_count": 1,
+                    "canonical_owner_evidence": [
+                        {
+                            "file_id": "file-1",
+                            "row_no": 2,
+                            "source_record_type": "bank_transaction",
+                            "data_fingerprint": (
+                                "bank:5300:2026-05-22 16:11:00:outflow:496.20:樊祖芳"
+                            ),
+                            "linked_object_type": "bank_transaction",
+                            "linked_object_id": "target-2",
                         }
                     ],
                 }

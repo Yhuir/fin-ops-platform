@@ -446,6 +446,42 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             f"resolved {len(effective_replay_duplicate_rows)}."
         )
 
+    existing_owner_rows: dict[str, dict[str, Any]] = {}
+    invalid_existing_owners: list[dict[str, Any]] = []
+    for target in targets:
+        transaction_pk = _text(target.get("transaction_pk"))
+        if transaction_pk in duplicate_target_pks:
+            continue
+        transaction_id = _text(target.get("transaction_id"))
+        owners = [
+            row
+            for row in rows_by_link.get(transaction_id, [])
+            if _text(row.get("decision")) == "created"
+            and _text(row.get("source_record_type")) == "bank_transaction"
+            and _text(row.get("data_fingerprint"))
+        ]
+        if len(owners) != 1:
+            invalid_existing_owners.append(
+                {
+                    "transaction_pk": transaction_pk,
+                    "transaction_id": transaction_id,
+                    "created_owner_count": len(owners),
+                }
+            )
+            continue
+        existing_owner_rows[_text(owners[0].get("row_pk"))] = owners[0]
+    expected_existing_owner_count = len(targets) - len(duplicate_pairs)
+    if (
+        invalid_existing_owners
+        or len(existing_owner_rows) != expected_existing_owner_count
+    ):
+        raise ValueError(
+            "Bank replay canonical owners changed: "
+            f"expected {expected_existing_owner_count}, "
+            f"resolved {len(existing_owner_rows)}, "
+            f"invalid={invalid_existing_owners[:5]}."
+        )
+
     replay_sources: list[dict[str, Any]] = []
     replay_batch_pks: set[str] = set()
     for source in request.get("source_sessions") or []:
@@ -477,6 +513,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         if set(source_file_by_batch_pk) != source_batch_pks:
             raise ValueError("Bank repaired replay source files do not own unique batches.")
         repaired_duplicate_evidence: list[dict[str, Any]] = []
+        canonical_owner_evidence: list[dict[str, Any]] = []
         for row in sorted(
             effective_replay_duplicate_rows.values(),
             key=lambda item: (
@@ -505,6 +542,27 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     "linked_object_id": _text(row.get("linked_object_id")),
                 }
             )
+        for row in sorted(
+            existing_owner_rows.values(),
+            key=lambda item: (
+                _text(item.get("batch_pk")),
+                int(item.get("row_no") or 0),
+                _text(item.get("row_pk")),
+            ),
+        ):
+            batch_pk = _text(row.get("batch_pk"))
+            if batch_pk not in source_batch_pks:
+                continue
+            canonical_owner_evidence.append(
+                {
+                    "file_id": source_file_by_batch_pk[batch_pk],
+                    "row_no": int(row.get("row_no") or 0),
+                    "source_record_type": "bank_transaction",
+                    "data_fingerprint": _text(row.get("data_fingerprint")),
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": _text(row.get("linked_object_id")),
+                }
+            )
         repaired_count = len(repaired_duplicate_evidence)
         replay_sources.append(
             {
@@ -513,6 +571,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 "expected_repaired_duplicate_count": repaired_count,
                 "repaired_duplicate_decision_reason": REPAIR_REASON,
                 "repaired_duplicate_evidence": repaired_duplicate_evidence,
+                "expected_canonical_owner_count": len(canonical_owner_evidence),
+                "canonical_owner_evidence": canonical_owner_evidence,
             }
         )
     if sum(
@@ -520,6 +580,11 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         for source in replay_sources
     ) != expected_replay_repaired_duplicate_count:
         raise ValueError("Bank repaired replay rows are not fully owned by the selected source files.")
+    if sum(
+        int(source["expected_canonical_owner_count"])
+        for source in replay_sources
+    ) != expected_existing_owner_count:
+        raise ValueError("Bank canonical owner rows are not fully owned by the selected source files.")
 
     owner_updates_by_batch = Counter(
         update["batch_pk"] for update in row_updates if update["owner_transition"]
@@ -551,6 +616,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "replay_repaired_duplicate_count": len(
             effective_replay_duplicate_rows
         ),
+        "replay_canonical_owner_count": len(existing_owner_rows),
         "replay_sources": replay_sources,
         "duplicate_pairs": duplicate_pairs,
         "category_cleanup_actions": category_cleanup_actions,
@@ -592,6 +658,7 @@ def public_bank_import_dedup_repair_report(
         "replay_repaired_duplicate_count": plan[
             "replay_repaired_duplicate_count"
         ],
+        "replay_canonical_owner_count": plan["replay_canonical_owner_count"],
         "duplicate_match_basis_counts": deepcopy(
             plan.get("duplicate_match_basis_counts") or {}
         ),

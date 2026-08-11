@@ -307,6 +307,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     repaired_duplicate_evidence=entry[
                         "repaired_duplicate_evidence"
                     ],
+                    expected_canonical_owner_count=entry[
+                        "expected_canonical_owner_count"
+                    ],
+                    canonical_owner_evidence=entry["canonical_owner_evidence"],
                 )
                 for entry in locked_plan["replay_sources"]
             ]
@@ -336,6 +340,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 for item in audit_summaries
             ):
                 raise RuntimeError("Bank recovery replay ended with errors or suspected duplicates.")
+            canonical_owner_count = sum(
+                int(item.get("canonical_owner_count") or 0)
+                for item in audit_summaries
+            )
+            if canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
+                raise RuntimeError("Bank recovery replay canonical owner evidence changed.")
             idempotence_replay_results = [
                 runtime.replay_confirmed_file_import_session(
                     source_session_id=entry["session_id"],
@@ -350,6 +360,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     repaired_duplicate_evidence=entry[
                         "repaired_duplicate_evidence"
                     ],
+                    expected_canonical_owner_count=entry[
+                        "expected_canonical_owner_count"
+                    ],
+                    canonical_owner_evidence=entry["canonical_owner_evidence"],
                 )
                 for entry in locked_plan["replay_sources"]
             ]
@@ -376,6 +390,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             ):
                 raise RuntimeError(
                     "Repeated bank recovery replay changed repaired duplicate evidence."
+                )
+            repeated_canonical_owner_count = sum(
+                int(item.get("canonical_owner_count") or 0)
+                for item in idempotence_summaries
+            )
+            if repeated_canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
+                raise RuntimeError(
+                    "Repeated bank recovery replay changed canonical owner evidence."
                 )
             report = public_bank_import_dedup_repair_report(
                 locked_plan,
