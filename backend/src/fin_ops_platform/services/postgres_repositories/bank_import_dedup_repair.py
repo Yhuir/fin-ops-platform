@@ -109,8 +109,10 @@ select file.id::text as file_pk,
 from app.import_files file
 join app.import_batches batch
   on coalesce(batch.legacy_mongo_id, batch.id::text) = coalesce(
-      file.raw_payload->'normalized_payload'->>'batch_id',
-      file.raw_payload->'normalized_payload'->>'preview_batch_id'
+      nullif(file.raw_payload->'normalized_payload'->>'batch_id', ''),
+      nullif(file.raw_payload->>'batch_id', ''),
+      file.raw_payload->'normalized_payload'->>'preview_batch_id',
+      file.raw_payload->>'preview_batch_id'
   )
 left join app.file_objects object on object.id = file.file_object_id
 where file.session_id = any(%s::text[])
@@ -250,8 +252,10 @@ update app.import_files
 set raw_payload = %s::jsonb
 where id = %s::uuid
   and coalesce(
-      raw_payload->'normalized_payload'->>'batch_id',
-      raw_payload->'normalized_payload'->>'preview_batch_id'
+      nullif(raw_payload->'normalized_payload'->>'batch_id', ''),
+      nullif(raw_payload->>'batch_id', ''),
+      raw_payload->'normalized_payload'->>'preview_batch_id',
+      raw_payload->>'preview_batch_id'
   ) = %s
   and status = 'confirmed'
   and raw_payload = %s::jsonb

@@ -224,4 +224,8 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertNotIn("import_batch_id =", _UPDATE_FILE_SQL)
         self.assertIn("normalized_payload'->>'batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'preview_batch_id'", _SOURCE_FILE_SQL)
+        self.assertIn("file.raw_payload->>'batch_id'", _SOURCE_FILE_SQL)
+        self.assertIn("file.raw_payload->>'preview_batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'batch_id'", _UPDATE_FILE_SQL)
+        self.assertIn("raw_payload->>'batch_id'", _UPDATE_FILE_SQL)
+        self.assertIn("raw_payload->>'preview_batch_id'", _UPDATE_FILE_SQL)
