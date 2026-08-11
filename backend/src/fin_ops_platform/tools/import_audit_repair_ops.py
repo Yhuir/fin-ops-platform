@@ -11,7 +11,9 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     build_bank_import_dedup_repair_plan,
     public_bank_import_dedup_repair_report,
     verify_bank_import_repair_source_files,
+    withdraw_bank_import_dedup_workbench_relations,
 )
+from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.import_audit_repair_service import (
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
@@ -25,6 +27,9 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.operations_audit import (
+    PostgresOperationsAuditRepository,
 )
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
     apply_bank_import_dedup_repair,
@@ -57,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-target-count", type=int)
     parser.add_argument("--expected-bank-protected-count", type=int)
     parser.add_argument("--expected-bank-replay-create-count", type=int)
+    parser.add_argument("--cleanup-related-bank-duplicates", action="store_true")
+    parser.add_argument("--expected-bank-category-cleanup-count", type=int)
+    parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
+    parser.add_argument("--expected-bank-workbench-transaction-id")
     parser.add_argument("--operator-id")
     return parser
 
@@ -103,6 +112,27 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         raise SystemExit(
             "Bank dedup repair requires expected target/protected/replay counts and --operator-id"
         )
+    related_cleanup_values = (
+        args.expected_bank_category_cleanup_count,
+        args.expected_bank_workbench_withdraw_count,
+        args.expected_bank_workbench_transaction_id,
+    )
+    if args.cleanup_related_bank_duplicates and (
+        args.expected_bank_category_cleanup_count is None
+        or args.expected_bank_workbench_withdraw_count is None
+        or not args.expected_bank_workbench_transaction_id
+    ):
+        raise SystemExit(
+            "Related bank duplicate cleanup requires exact category/workbench counts and "
+            "the Workbench duplicate transaction id"
+        )
+    if not args.cleanup_related_bank_duplicates and any(
+        value is not None for value in related_cleanup_values
+    ):
+        raise SystemExit(
+            "Related bank duplicate cleanup expectations require "
+            "--cleanup-related-bank-duplicates"
+        )
     connection = PostgresConnection(PostgresSettings.from_env())
     if bank_repair_requested:
         source_sessions = _parse_bank_repair_sources(args.repair_bank_source)
@@ -111,6 +141,16 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "expected_target_count": args.expected_bank_target_count,
             "expected_protected_count": args.expected_bank_protected_count,
             "expected_replay_create_count": args.expected_bank_replay_create_count,
+            "cleanup_related_duplicates": args.cleanup_related_bank_duplicates,
+            "expected_category_cleanup_count": (
+                args.expected_bank_category_cleanup_count or 0
+            ),
+            "expected_workbench_withdraw_count": (
+                args.expected_bank_workbench_withdraw_count or 0
+            ),
+            "expected_workbench_transaction_id": (
+                args.expected_bank_workbench_transaction_id
+            ),
         }
         with connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
@@ -164,7 +204,62 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 )
                 if locked_plan["source_fingerprint"] != args.expected_fingerprint:
                     raise RuntimeError("Bank dedup repair source changed while acquiring the write lock.")
-                apply_bank_import_dedup_repair(transaction, locked_plan)
+                withdraw_results = withdraw_bank_import_dedup_workbench_relations(
+                    transaction,
+                    locked_plan,
+                    operator_id=args.operator_id,
+                )
+                apply_result = apply_bank_import_dedup_repair(
+                    transaction,
+                    locked_plan,
+                    operator_id=args.operator_id,
+                )
+                AuditTrailService(
+                    PostgresOperationsAuditRepository(transaction)
+                ).record_action(
+                    actor_id=args.operator_id,
+                    action="bank_import_identity_v3_recovery",
+                    entity_type="bank_import_dedup_repair",
+                    entity_id=locked_plan["source_fingerprint"],
+                    metadata={
+                        "event_type": "operation.completed",
+                        "page_key": "bank_transaction_import",
+                        "operation_location": "import_audit_repair_ops",
+                        "reason": "authorized_duplicate_cleanup",
+                        "outcome": "success",
+                        "summary": "Authorized bank duplicate cleanup completed.",
+                        "target_count": locked_plan["target_count"],
+                        "duplicate_delete_count": locked_plan["duplicate_delete_count"],
+                        "category_ids": [
+                            item["category_id"]
+                            for item in locked_plan.get("category_cleanup_actions") or []
+                        ],
+                        "workbench_case_ids": [
+                            item["case_id"]
+                            for item in locked_plan.get("workbench_withdraw_actions") or []
+                        ],
+                    },
+                )
+            from fin_ops_platform.services.read_model_refresh_gateway import (
+                ReadModelRefreshGateway,
+            )
+            from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+
+            refresh_gateway = ReadModelRefreshGateway(
+                queue_repository=RuntimeQueueRepository(connection)
+            )
+            refresh_scopes = {
+                scope_type: refresh_gateway.enqueue_many(
+                    scope_type,
+                    locked_plan["affected_months"],
+                    reason="bank_import_identity_v3_recovery",
+                    metadata={
+                        "force_refresh": True,
+                        "source_fingerprint": locked_plan["source_fingerprint"],
+                    },
+                )
+                for scope_type in ("workbench", "workbench_relation")
+            }
             from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
 
             runtime = ImportRuntimeProcessorFactory(
@@ -219,6 +314,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 written=True,
                 replay_results=replay_results,
                 idempotence_replay_results=idempotence_replay_results,
+                apply_result=apply_result,
+                withdraw_results=withdraw_results,
+                refresh_scopes=refresh_scopes,
             )
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0

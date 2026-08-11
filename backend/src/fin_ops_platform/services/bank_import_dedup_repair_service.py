@@ -9,9 +9,25 @@ from typing import Any
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
+from fin_ops_platform.services.workbench_pair_relation_service import (
+    WorkbenchPairRelationService,
+)
+from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
+    WorkbenchRelationCommandRepositoryAdapter,
+)
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandService,
+)
 
 
 REPAIR_REASON = "Reclassified by bank identity v3 controlled recovery."
+RELATED_CLEANUP_REASON = (
+    "Withdraw duplicate-owned Workbench relation and remove duplicate-owned category facts "
+    "before bank identity v3 controlled recovery."
+)
 
 
 class BankImportDedupRelationEvidenceError(ValueError):
@@ -181,10 +197,32 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         }
         if relation_counts:
             relationful_candidates.append(
-                {**detail, "written_off_amount": "0", "relation_counts": relation_counts}
+                {
+                    **detail,
+                    "written_off_amount": "0",
+                    "relation_counts": relation_counts,
+                    "category_details": _json_rows(evidence.get("category_details")),
+                    "category_event_details": _json_rows(
+                        evidence.get("category_event_details")
+                    ),
+                    "workbench_relation_details": _json_rows(
+                        evidence.get("workbench_relation_details")
+                    ),
+                }
             )
-    if relationful_candidates:
+    cleanup_related_duplicates = request.get("cleanup_related_duplicates") is True
+    if relationful_candidates and not cleanup_related_duplicates:
         raise BankImportDedupRelationEvidenceError(relationful_candidates)
+
+    category_cleanup_actions: list[dict[str, Any]] = []
+    workbench_withdraw_actions: list[dict[str, Any]] = []
+    if cleanup_related_duplicates:
+        category_cleanup_actions, workbench_withdraw_actions = _authorized_cleanup_actions(
+            relationful_candidates=relationful_candidates,
+            relation_by_pk=relation_by_pk,
+            snapshot=snapshot,
+            request=request,
+        )
 
     rows = list(snapshot.get("import_rows") or [])
     rows_by_link: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -238,6 +276,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "protected_count": len(protected),
         "duplicate_delete_count": len(duplicate_pairs),
         "duplicate_pairs": duplicate_pairs,
+        "category_cleanup_actions": category_cleanup_actions,
+        "workbench_withdraw_actions": workbench_withdraw_actions,
         "row_updates": row_updates,
         "batch_updates": batch_updates,
         "file_updates": file_updates,
@@ -256,6 +296,9 @@ def public_bank_import_dedup_repair_report(
     written: bool,
     replay_results: list[dict[str, Any]] | None = None,
     idempotence_replay_results: list[dict[str, Any]] | None = None,
+    apply_result: dict[str, Any] | None = None,
+    withdraw_results: list[dict[str, Any]] | None = None,
+    refresh_scopes: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     return {
         "tool": "import_audit_repair_ops",
@@ -266,19 +309,88 @@ def public_bank_import_dedup_repair_report(
         "target_count": plan["target_count"],
         "protected_count": plan["protected_count"],
         "duplicate_delete_count": plan["duplicate_delete_count"],
+        "category_cleanup_count": len(plan.get("category_cleanup_actions") or []),
+        "workbench_withdraw_count": len(plan.get("workbench_withdraw_actions") or []),
+        "related_cleanup_evidence": {
+            "categories": deepcopy(plan.get("category_cleanup_actions") or []),
+            "workbench_relations": deepcopy(plan.get("workbench_withdraw_actions") or []),
+        },
         "source_file_count": len(plan["source_files"]),
         "affected_months": plan["affected_months"],
         "replay_results": replay_results,
         "idempotence_replay_results": idempotence_replay_results,
+        "apply_result": apply_result,
+        "withdraw_results": withdraw_results,
+        "refresh_scopes": refresh_scopes,
         "authorized_write_scope": [
             "app.import_batch_rows",
             "app.import_batches",
             "app.import_files",
+            "app.bank_transaction_category_events (exact duplicate-owned rows only)",
+            "app.bank_transaction_categories (exact duplicate-owned rows only)",
+            "app.workbench_pair_relations (formal withdraw command only)",
+            "app.workbench_pair_relation_history (append-only withdraw audit)",
             "app.bank_transactions",
             "new recovery import sessions/batches/rows",
             "derived read-model scopes",
         ],
     }
+
+
+def withdraw_bank_import_dedup_workbench_relations(
+    transaction: Any,
+    plan: dict[str, Any],
+    *,
+    operator_id: str,
+) -> list[dict[str, Any]]:
+    actions = list(plan.get("workbench_withdraw_actions") or [])
+    if not actions:
+        return []
+    repository = PostgresWorkbenchRelationRepository(transaction)
+    adapter = WorkbenchRelationCommandRepositoryAdapter(
+        pair_relation_service=WorkbenchPairRelationService(),
+        repository=repository,
+    )
+    command_service = WorkbenchRelationCommandService(
+        relation_repository=adapter,
+        require_fresh_relations=False,
+    )
+    results: list[dict[str, Any]] = []
+    for action in actions:
+        preparation = command_service.prepare_withdraw_relation(case_id=action["case_id"])
+        current_contract = _withdraw_preview_contract(preparation.current_preview)
+        if current_contract != action["preview_contract"]:
+            raise RuntimeError(
+                f"Workbench relation {action['case_id']} changed after dry-run."
+            )
+        result = command_service.withdraw_relation(
+            case_id=action["case_id"],
+            actor_id=operator_id,
+            row_ids=list(action["row_ids"]),
+            reason=RELATED_CLEANUP_REASON,
+            history_operation_type="withdraw_link",
+            preview_id=current_contract["preview_id"],
+            operation_type="withdraw_relation",
+            expected_versions=current_contract["submit_expected_versions"],
+            preparation=preparation,
+        )
+        if result.get("status") != "withdrawn" or list(result.get("restored_relations") or []):
+            raise RuntimeError(
+                f"Workbench relation {action['case_id']} did not withdraw cleanly."
+            )
+        results.append(
+            {
+                "case_id": action["case_id"],
+                "bank_row_id": action["bank_row_id"],
+                "invoice_row_id": action["invoice_row_id"],
+                "status": "withdrawn",
+                "history_operation_id": _text(
+                    (result.get("history") or {}).get("operation_id")
+                ),
+                "affected_months": list(result.get("affected_months") or []),
+            }
+        )
+    return results
 
 
 def verify_bank_import_repair_source_files(
@@ -291,6 +403,238 @@ def verify_bank_import_repair_source_files(
         actual = hashlib.sha256(content).hexdigest()
         if actual != source_file["content_sha256"]:
             raise ValueError(f"Recovery source file {source_file['file_id']} checksum changed.")
+
+
+def _authorized_cleanup_actions(
+    *,
+    relationful_candidates: list[dict[str, Any]],
+    relation_by_pk: dict[str, dict[str, Any]],
+    snapshot: dict[str, Any],
+    request: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    expected_category_count = int(request.get("expected_category_cleanup_count") or 0)
+    expected_workbench_count = int(request.get("expected_workbench_withdraw_count") or 0)
+    expected_workbench_transaction_id = _text(
+        request.get("expected_workbench_transaction_id")
+    )
+    if expected_category_count < 0 or expected_workbench_count < 0:
+        raise ValueError("Authorized related-cleanup counts cannot be negative.")
+    if expected_workbench_count and not expected_workbench_transaction_id:
+        raise ValueError(
+            "Authorized Workbench cleanup requires the exact duplicate transaction id."
+        )
+
+    category_actions: list[dict[str, Any]] = []
+    workbench_relation_rows: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for candidate in relationful_candidates:
+        duplicate = dict(candidate.get("duplicate_transaction") or {})
+        transaction_pk = _text(duplicate.get("transaction_pk"))
+        counts = dict(candidate.get("relation_counts") or {})
+        if counts == {"category_count": 1, "category_event_count": 1}:
+            try:
+                category_actions.append(
+                    _category_cleanup_action(
+                        duplicate=duplicate,
+                        evidence=relation_by_pk[transaction_pk],
+                    )
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                rejected.append({**candidate, "rejection_reason": str(exc)})
+            continue
+        if counts == {"workbench_pair_count": 1}:
+            if _text(duplicate.get("transaction_id")) != expected_workbench_transaction_id:
+                rejected.append(
+                    {
+                        **candidate,
+                        "rejection_reason": "Workbench relation belongs to an unexpected transaction.",
+                    }
+                )
+            else:
+                workbench_relation_rows.append(candidate)
+            continue
+        rejected.append(
+            {
+                **candidate,
+                "rejection_reason": "Relation shape is outside the authorized 8+1 cleanup contract.",
+            }
+        )
+    if rejected:
+        raise BankImportDedupRelationEvidenceError(rejected)
+    if len(category_actions) != expected_category_count:
+        raise ValueError(
+            "Authorized category cleanup count changed: "
+            f"expected {expected_category_count}, resolved {len(category_actions)}."
+        )
+    if len(workbench_relation_rows) != expected_workbench_count:
+        raise ValueError(
+            "Authorized Workbench withdraw count changed: "
+            f"expected {expected_workbench_count}, resolved {len(workbench_relation_rows)}."
+        )
+
+    workbench_actions = [
+        _workbench_withdraw_action(candidate=candidate, snapshot=snapshot)
+        for candidate in workbench_relation_rows
+    ]
+    return (
+        sorted(category_actions, key=lambda item: item["transaction_pk"]),
+        sorted(workbench_actions, key=lambda item: item["case_id"]),
+    )
+
+
+def _category_cleanup_action(
+    *,
+    duplicate: dict[str, Any],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    transaction_pk = _required_text(duplicate.get("transaction_pk"), "transaction_pk")
+    categories = _json_rows(evidence.get("category_details"))
+    events = _json_rows(evidence.get("category_event_details"))
+    if len(categories) != 1 or len(events) != 1:
+        raise ValueError("Category cleanup requires exactly one category and one event row.")
+    category = categories[0]
+    event = events[0]
+    category_id = _required_text(category.get("category_id"), "category_id")
+    if _text(category.get("bank_transaction_id")) != transaction_pk:
+        raise ValueError("Category row does not directly belong to the duplicate transaction.")
+    if _text(event.get("category_id")) != category_id:
+        raise ValueError("Category event does not belong to the duplicate-owned category.")
+    if _text(event.get("bank_transaction_id")) != transaction_pk:
+        raise ValueError("Category event does not directly belong to the duplicate transaction.")
+    return {
+        "transaction_pk": transaction_pk,
+        "transaction_id": _required_text(duplicate.get("transaction_id"), "transaction_id"),
+        "category_id": category_id,
+        "legacy_transaction_id": category.get("legacy_transaction_id"),
+        "category": _required_text(category.get("category"), "category"),
+        "source": _required_text(category.get("source"), "source"),
+        "confidence": category.get("confidence"),
+        "status": _required_text(category.get("status"), "status"),
+        "version": int(category.get("version") or 0),
+        "updated_by": category.get("updated_by"),
+        "updated_at": _required_text(category.get("updated_at"), "updated_at"),
+        "raw_payload": deepcopy(category.get("raw_payload") or {}),
+        "event": {
+            "event_id": _required_text(event.get("event_id"), "event_id"),
+            "event_type": _required_text(event.get("event_type"), "event_type"),
+            "actor_id": event.get("actor_id"),
+            "occurred_at": _required_text(event.get("occurred_at"), "occurred_at"),
+            "payload": deepcopy(event.get("payload") or {}),
+            "raw_payload": deepcopy(event.get("raw_payload") or {}),
+        },
+    }
+
+
+def _workbench_withdraw_action(
+    *,
+    candidate: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    duplicate = dict(candidate.get("duplicate_transaction") or {})
+    transaction_pk = _required_text(duplicate.get("transaction_pk"), "transaction_pk")
+    transaction_id = _required_text(duplicate.get("transaction_id"), "transaction_id")
+    aliases = {transaction_pk, transaction_id}
+    details = _json_rows(candidate.get("workbench_relation_details"))
+    if len(details) != 1:
+        raise ValueError("Workbench cleanup requires exactly one active relation detail.")
+    detail = details[0]
+    case_id = _required_text(detail.get("case_id"), "case_id")
+    pair_relations = dict((snapshot.get("workbench_snapshot") or {}).get("pair_relations") or {})
+    relation = pair_relations.get(case_id)
+    if not isinstance(relation, dict) or _text(relation.get("status")) != "active":
+        raise ValueError("Workbench relation snapshot does not contain the active case.")
+    if int(relation.get("version") or 1) != int(detail.get("version") or 1):
+        raise ValueError("Workbench relation detail/version evidence is inconsistent.")
+    row_ids = [_text(value) for value in list(relation.get("row_ids") or [])]
+    row_types = [_text(value) for value in list(relation.get("row_types") or [])]
+    if len(row_ids) != 2 or len(row_types) != 2 or len(row_ids) != len(row_types):
+        raise ValueError("Authorized Workbench cleanup requires exactly two aligned members.")
+    members = list(zip(row_ids, row_types, strict=True))
+    if sorted(row_type for _, row_type in members) != ["bank", "invoice"]:
+        raise ValueError("Authorized Workbench cleanup permits only bank + invoice relations.")
+    bank_rows = [row_id for row_id, row_type in members if row_type == "bank"]
+    invoice_rows = [row_id for row_id, row_type in members if row_type == "invoice"]
+    if len(bank_rows) != 1 or bank_rows[0] not in aliases or len(invoice_rows) != 1:
+        raise ValueError("Workbench members do not resolve to the authorized duplicate and invoice.")
+    invoice_row_id = invoice_rows[0]
+    invoice_members = [
+        dict(row)
+        for row in list(snapshot.get("invoice_relation_members") or [])
+        if invoice_row_id in {_text(row.get("invoice_pk")), _text(row.get("invoice_id"))}
+    ]
+    if len(invoice_members) != 1:
+        raise ValueError("Workbench invoice member does not resolve exactly once.")
+
+    pair_service = WorkbenchPairRelationService.from_snapshot(
+        snapshot.get("workbench_snapshot") or {}
+    )
+    adapter = WorkbenchRelationCommandRepositoryAdapter(
+        pair_relation_service=pair_service,
+        save_repository=False,
+    )
+    command_service = WorkbenchRelationCommandService(
+        relation_repository=adapter,
+        require_fresh_relations=False,
+    )
+    preview = command_service.preview_withdraw_relation(
+        row_ids=[bank_rows[0]],
+        month_scope=_text(relation.get("month_scope")) or "all",
+    )
+    if preview.get("can_submit") is not True or list(preview.get("after_relations") or []):
+        raise ValueError(
+            "Workbench relation cannot be cleanly withdrawn without restoring an older relation."
+        )
+    preview_contract = _withdraw_preview_contract(preview)
+    if preview_contract["active_relation"] != {
+        "case_id": case_id,
+        "version": int(relation.get("version") or 1),
+    }:
+        raise ValueError("Workbench withdraw preview does not match the active case/version.")
+    return {
+        "transaction_pk": transaction_pk,
+        "transaction_id": transaction_id,
+        "bank_row_id": bank_rows[0],
+        "invoice_row_id": invoice_row_id,
+        "case_id": case_id,
+        "relation_id": _text(detail.get("relation_id")),
+        "relation_mode": _text(relation.get("relation_mode") or relation.get("mode")),
+        "relation_version": int(relation.get("version") or 1),
+        "month_scope": _text(relation.get("month_scope")) or "all",
+        "row_ids": row_ids,
+        "row_types": row_types,
+        "invoice": invoice_members[0],
+        "preview_contract": preview_contract,
+    }
+
+
+def _withdraw_preview_contract(preview: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation_type": _text(preview.get("operation_type")),
+        "preview_id": _text(preview.get("preview_id")),
+        "can_submit": preview.get("can_submit") is True,
+        "active_relation": deepcopy(preview.get("active_relation") or {}),
+        "submit_expected_versions": deepcopy(
+            preview.get("submit_expected_versions") or {}
+        ),
+        "before_relations": deepcopy(preview.get("before_relations") or []),
+        "after_relations": deepcopy(preview.get("after_relations") or []),
+    }
+
+
+def _json_rows(value: Any) -> list[dict[str, Any]]:
+    parsed = value
+    if isinstance(parsed, str):
+        parsed = json.loads(parsed)
+    if not isinstance(parsed, list):
+        return []
+    return [dict(row) for row in parsed if isinstance(row, dict)]
+
+
+def _required_text(value: Any, field: str) -> str:
+    normalized = _text(value)
+    if not normalized:
+        raise ValueError(f"Authorized cleanup evidence is missing {field}.")
+    return normalized
 
 
 def _normalized_source_sessions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:

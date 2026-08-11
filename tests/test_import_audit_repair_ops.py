@@ -1102,6 +1102,133 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertEqual(report["candidates"], candidates)
         apply_repair.assert_not_called()
 
+    def test_cli_related_bank_cleanup_requires_exact_8_plus_1_expectations(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "exact category/workbench counts"):
+            import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--repair-bank-source",
+                    "session-1=file-1",
+                    "--expected-bank-target-count",
+                    "731",
+                    "--expected-bank-protected-count",
+                    "1129",
+                    "--expected-bank-replay-create-count",
+                    "0",
+                    "--operator-id",
+                    "system_repair",
+                    "--cleanup-related-bank-duplicates",
+                ]
+            )
+
+    def test_cli_bank_cleanup_executes_withdraw_delete_audit_refresh_and_replay(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, object]:
+                return {"locked": True}
+
+        connection = Connection()
+        output = io.StringIO()
+        plan = {
+            "operation": "bank_import_identity_v3_recovery",
+            "source_fingerprint": "f" * 64,
+            "target_count": 731,
+            "protected_count": 1129,
+            "duplicate_delete_count": 674,
+            "source_files": [{"file_id": "file-1"}],
+            "affected_months": ["2026-02", "2026-05"],
+            "category_cleanup_actions": [{"category_id": "category-1"}],
+            "workbench_withdraw_actions": [{"case_id": "case-1"}],
+        }
+        runtime = Mock()
+        runtime.replay_confirmed_file_import_session.side_effect = [
+            {"audit_summary": {"created_count": 0}},
+            {"audit_summary": {"created_count": 0}},
+        ]
+        refresh_gateway = Mock()
+        refresh_gateway.enqueue_many.side_effect = lambda scope_type, scopes, **_kwargs: list(
+            scopes
+        )
+        arguments = [
+            "--execute",
+            "--expected-fingerprint",
+            "f" * 64,
+            "--repair-bank-source",
+            "session-1=file-1",
+            "--expected-bank-target-count",
+            "731",
+            "--expected-bank-protected-count",
+            "1129",
+            "--expected-bank-replay-create-count",
+            "0",
+            "--operator-id",
+            "system_repair",
+            "--cleanup-related-bank-duplicates",
+            "--expected-bank-category-cleanup-count",
+            "8",
+            "--expected-bank-workbench-withdraw-count",
+            "1",
+            "--expected-bank-workbench-transaction-id",
+            "txn-300",
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_dedup_repair_snapshot",
+                return_value={},
+            ) as load_snapshot,
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_dedup_repair_plan",
+                side_effect=[deepcopy(plan), deepcopy(plan)],
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "verify_bank_import_repair_source_files",
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "withdraw_bank_import_dedup_workbench_relations",
+                return_value=[{"case_id": "case-1", "status": "withdrawn"}],
+            ) as withdraw,
+            patch.object(
+                import_audit_repair_ops,
+                "apply_bank_import_dedup_repair",
+                return_value={"transaction_delete_count": 674},
+            ) as apply_repair,
+            patch.object(import_audit_repair_ops, "AuditTrailService") as audit_service,
+            patch(
+                "fin_ops_platform.services.read_model_refresh_gateway.ReadModelRefreshGateway",
+                return_value=refresh_gateway,
+            ),
+            patch("fin_ops_platform.services.runtime_queue.RuntimeQueueRepository"),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory",
+                return_value=runtime,
+            ),
+        ):
+            result = import_audit_repair_ops.main(arguments, stdout=output)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(load_snapshot.call_count, 2)
+        self.assertTrue(load_snapshot.call_args.kwargs["cleanup_related_duplicates"])
+        self.assertEqual(load_snapshot.call_args.kwargs["expected_category_cleanup_count"], 8)
+        withdraw.assert_called_once_with(connection, plan, operator_id="system_repair")
+        apply_repair.assert_called_once_with(connection, plan, operator_id="system_repair")
+        audit_service.return_value.record_action.assert_called_once()
+        self.assertEqual(refresh_gateway.enqueue_many.call_count, 2)
+        self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["apply_result"]["transaction_delete_count"], 674)
+
     def test_cli_failed_import_recovery_dry_run_bypasses_global_audit_scan(self) -> None:
         class Connection:
             @contextmanager

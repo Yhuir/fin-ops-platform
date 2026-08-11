@@ -27,6 +27,7 @@
 - 不拥有任意 Workbench 配对、撤回或页面查询；只允许分类写闭环把当前标签和同版本规则重新冻结到既有 active 普通关系，ETC/批量账务关系明确排除。
 - 不维护页面 read model、freshness、dirty scope、outbox、worker、Redis 或 RabbitMQ。
 - 不在页面请求热路径读取 MongoDB、MySQL、OA、对象存储或其它页面 payload。
+- 生产 duplicate 恢复工具不是页面分类写入口；它只能在已冻结的 8+1 修复合同中，用完整 CAS 字段删除错误副本独占的单条 category/event，且与 relation 撤回、import 审计修正和 duplicate 删除处于同一 serializable 事务。不得借此转移标签、清理 keeper 标签或绕过正常分类 writer。
 
 ## 输入 I/O
 

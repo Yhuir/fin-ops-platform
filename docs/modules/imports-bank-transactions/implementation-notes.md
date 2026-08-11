@@ -225,3 +225,11 @@
 - I/O：每条证据包含副本与 keeper 的账户、时间、方向、金额、余额、对方户名、批次、官方参考号及业务指纹，以及已有的核销金额和各下游引用计数；不新增 SQL、表、API、worker、read model、缓存或写权限。
 - 测试覆盖：service 测试锁定副本/keeper 对照和关系计数；CLI 测试锁定阻断输出不可写且不会调用 apply。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_bank_import_dedup_repair_service.py tests/test_import_audit_repair_ops.py -q`；`bash scripts/verify.sh lint`；`bash scripts/verify.sh docs`。
+
+## 2026-08-11 - 已授权 8+1 duplicate-owned 关系清理闭环
+
+- 目标：在不删除 keeper 流水、不迁移标签、不直接改 Workbench relation 的前提下，处理严格去重候选中 8 条仅有单标签/单事件的错误副本和 1 条仅有银行流水+进项发票正式关系的错误副本，再清理全部已证明重复项。
+- 边界：默认 repair 仍要求零关系；只有显式 related-cleanup 参数同时锁定 category 数、Workbench 数和唯一 relationful duplicate transaction id 才启用本合同。任何 OA、核销、确认、批次、claim、override、exception、额外标签/event 或多关系仍 fail closed。
+- 写链：dry-run 把 category/event 完整 CAS 字段、relation case/version/preview、发票成员及无历史恢复结论纳入 source fingerprint；execute 在同一 serializable 事务内先走 `WorkbenchRelationCommandService.prepare_withdraw_relation/withdraw_relation`，再删除精确 category/event，修正 import 审计并删除 duplicate。transaction 删除触发 correction/audit，工具另写聚合 operation audit；relation history 保留。
+- Read model：提交后只对受影响月份经 `ReadModelRefreshGateway` 强制入队 `workbench` 与 `workbench_relation`，不恢复跨页面 fan-out；其它页面继续直读 canonical facts。
+- 测试：business core 覆盖严格 8+1 形状、错位 event、错误 transaction、发票成员和撤回后恢复旧关系拒绝；service/repository 覆盖正式 withdraw、append-only history、category/event 删除顺序和全部 CAS 字段；CLI 覆盖参数门禁、单事务编排、audit、精确 refresh scope、重放与二次幂等。

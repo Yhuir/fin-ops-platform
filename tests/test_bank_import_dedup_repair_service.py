@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 from unittest import TestCase
+from unittest.mock import patch
 
 from fin_ops_platform.services.bank_import_dedup_repair_service import (
     BankImportDedupRelationEvidenceError,
     build_bank_import_dedup_repair_plan,
     public_bank_import_dedup_repair_report,
     verify_bank_import_repair_source_files,
+    withdraw_bank_import_dedup_workbench_relations,
 )
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
     _DELETE_TRANSACTION_SQL,
@@ -15,6 +17,9 @@ from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair im
     _TARGET_TRANSACTION_SQL,
     _UPDATE_FILE_SQL,
     apply_bank_import_dedup_repair,
+)
+from fin_ops_platform.services.workbench_pair_relation_service import (
+    WorkbenchPairRelationService,
 )
 
 
@@ -157,6 +162,97 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
     }
 
 
+def _authorized_category_snapshot() -> dict[str, object]:
+    snapshot = _snapshot(relation_count=1)
+    snapshot["request"].update(
+        {
+            "cleanup_related_duplicates": True,
+            "expected_category_cleanup_count": 1,
+            "expected_workbench_withdraw_count": 0,
+            "expected_workbench_transaction_id": None,
+        }
+    )
+    transaction_pk = snapshot["target_transactions"][0]["transaction_pk"]
+    snapshot["relation_evidence"][0].update(
+        {
+            "category_event_count": 1,
+            "category_details": [
+                {
+                    "category_id": "50000000-0000-0000-0000-000000000001",
+                    "bank_transaction_id": transaction_pk,
+                    "legacy_transaction_id": "target-1",
+                    "category": "费用 / 办公",
+                    "source": "manual",
+                    "confidence": "1.0",
+                    "status": "active",
+                    "version": 2,
+                    "updated_by": "user-1",
+                    "updated_at": "2026-08-11T10:00:00+08:00",
+                    "raw_payload": {"source": "manual"},
+                }
+            ],
+            "category_event_details": [
+                {
+                    "event_id": "60000000-0000-0000-0000-000000000001",
+                    "category_id": "50000000-0000-0000-0000-000000000001",
+                    "bank_transaction_id": transaction_pk,
+                    "event_type": "assigned",
+                    "actor_id": "user-1",
+                    "occurred_at": "2026-08-11T10:00:00+08:00",
+                    "payload": {"category": "费用 / 办公"},
+                    "raw_payload": {},
+                }
+            ],
+        }
+    )
+    return snapshot
+
+
+def _authorized_workbench_snapshot() -> dict[str, object]:
+    snapshot = _snapshot()
+    snapshot["request"].update(
+        {
+            "cleanup_related_duplicates": True,
+            "expected_category_cleanup_count": 0,
+            "expected_workbench_withdraw_count": 1,
+            "expected_workbench_transaction_id": "target-1",
+        }
+    )
+    relation = {
+        "case_id": "case-1",
+        "relation_mode": "manual",
+        "status": "active",
+        "version": 3,
+        "month_scope": "2026-05",
+        "row_ids": ["target-1", "invoice-1"],
+        "row_types": ["bank", "invoice"],
+        "amount_check": {"matched": True},
+        "special_metadata": {},
+        "created_by": "user-1",
+        "created_at": "2026-08-11T10:00:00+08:00",
+    }
+    snapshot["relation_evidence"][0].update(
+        {
+            "workbench_pair_count": 1,
+            "workbench_relation_details": [
+                {**relation, "relation_id": "70000000-0000-0000-0000-000000000001"}
+            ],
+        }
+    )
+    snapshot["workbench_snapshot"] = {"pair_relations": {"case-1": relation}}
+    snapshot["invoice_relation_members"] = [
+        {
+            "invoice_pk": "80000000-0000-0000-0000-000000000001",
+            "invoice_id": "invoice-1",
+            "invoice_type": "input_invoice",
+            "invoice_no": "INV-1",
+            "total_with_tax": "496.20",
+            "status": "active",
+        }
+    ]
+    return snapshot
+
+
 class BankImportDedupRepairServiceTests(TestCase):
     def test_plan_deletes_only_exact_fingerprint_and_reference_duplicate(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_snapshot())
@@ -224,6 +320,96 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(candidate["duplicate_transaction"]["amount"], "496.20")
         self.assertEqual(candidate["keeper_transaction"]["official_references"], ["REF-1"])
 
+    def test_plan_authorizes_exact_duplicate_owned_category_and_event(self) -> None:
+        plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
+
+        self.assertEqual(len(plan["category_cleanup_actions"]), 1)
+        self.assertEqual(plan["category_cleanup_actions"][0]["transaction_id"], "target-1")
+        self.assertEqual(plan["workbench_withdraw_actions"], [])
+
+    def test_plan_refuses_misaligned_duplicate_owned_category_event(self) -> None:
+        snapshot = _authorized_category_snapshot()
+        snapshot["relation_evidence"][0]["category_event_details"][0]["category_id"] = (
+            "50000000-0000-0000-0000-000000000099"
+        )
+
+        with self.assertRaises(BankImportDedupRelationEvidenceError):
+            build_bank_import_dedup_repair_plan(snapshot)
+
+    def test_plan_authorizes_exact_bank_invoice_workbench_withdraw(self) -> None:
+        plan = build_bank_import_dedup_repair_plan(_authorized_workbench_snapshot())
+
+        self.assertEqual(len(plan["workbench_withdraw_actions"]), 1)
+        action = plan["workbench_withdraw_actions"][0]
+        self.assertEqual(action["case_id"], "case-1")
+        self.assertEqual(action["relation_version"], 3)
+        self.assertEqual(action["bank_row_id"], "target-1")
+        self.assertEqual(action["invoice"]["invoice_no"], "INV-1")
+        self.assertEqual(action["preview_contract"]["after_relations"], [])
+
+    def test_plan_refuses_workbench_relation_that_would_restore_history(self) -> None:
+        snapshot = _authorized_workbench_snapshot()
+        relation = snapshot["workbench_snapshot"]["pair_relations"]["case-1"]
+        with patch(
+            "fin_ops_platform.services.bank_import_dedup_repair_service."
+            "WorkbenchRelationCommandService.preview_withdraw_relation",
+            return_value={
+                "operation_type": "withdraw_relation",
+                "preview_id": "withdraw_relation:preview",
+                "can_submit": True,
+                "active_relation": {"case_id": "case-1", "version": 3},
+                "submit_expected_versions": {"relation:case-1": 3},
+                "before_relations": [relation],
+                "after_relations": [{**relation, "case_id": "case-prior"}],
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "without restoring"):
+                build_bank_import_dedup_repair_plan(snapshot)
+
+    def test_execute_withdraw_uses_formal_command_and_persists_history(self) -> None:
+        snapshot = _authorized_workbench_snapshot()
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        class Repository:
+            def __init__(self) -> None:
+                self.pairs = WorkbenchPairRelationService.from_snapshot(
+                    snapshot["workbench_snapshot"]
+                )
+
+            def acquire_relation_member_locks(self, *_args, **_kwargs):
+                return []
+
+            def load_workbench_pair_relations_for_row_ids(
+                self, row_ids, *, case_ids=None
+            ):
+                return self.pairs.snapshot_for_row_ids(row_ids, case_ids=case_ids)
+
+            def save_workbench_pair_relation_delta(self, delta, *, changed_case_ids):
+                self.pairs.apply_snapshot_delta(
+                    delta,
+                    changed_case_ids=changed_case_ids,
+                    replace_history=False,
+                )
+
+        repository = Repository()
+        with patch(
+            "fin_ops_platform.services.bank_import_dedup_repair_service."
+            "PostgresWorkbenchRelationRepository",
+            return_value=repository,
+        ):
+            results = withdraw_bank_import_dedup_workbench_relations(
+                object(),
+                plan,
+                operator_id="system_repair",
+            )
+
+        self.assertEqual(results[0]["status"], "withdrawn")
+        self.assertEqual(
+            repository.pairs.snapshot()["pair_relations"]["case-1"]["status"],
+            "cancelled",
+        )
+        self.assertEqual(len(repository.pairs.snapshot()["pair_relation_history"]), 1)
+
     def test_source_file_verification_is_exact(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_snapshot())
         verify_bank_import_repair_source_files(plan, read_file=lambda _: b"source")
@@ -258,15 +444,42 @@ class BankImportDedupRepairServiceTests(TestCase):
                 return 1
 
         connection = Connection()
-        apply_bank_import_dedup_repair(connection, plan)
+        apply_bank_import_dedup_repair(connection, plan, operator_id="system_repair")
 
-        self.assertEqual(len(connection.calls), 4)
-        self.assertIn("decision = 'duplicate_skipped'", connection.calls[0][0])
-        self.assertEqual(connection.calls[0][1][0], "Reclassified by bank identity v3 controlled recovery.")
-        self.assertIn("status = 'completed'", connection.calls[1][0])
-        self.assertIn("status = 'confirmed'", connection.calls[2][0])
-        self.assertIn("delete from app.bank_transactions", connection.calls[3][0])
-        self.assertEqual(connection.calls[3][1][2], "batch-1")
+        self.assertEqual(len(connection.calls), 6)
+        self.assertIn("fin_ops.correction_reason", connection.calls[0][0])
+        self.assertIn("fin_ops.actor_id", connection.calls[1][0])
+        self.assertIn("decision = 'duplicate_skipped'", connection.calls[2][0])
+        self.assertEqual(connection.calls[2][1][0], "Reclassified by bank identity v3 controlled recovery.")
+        self.assertIn("status = 'completed'", connection.calls[3][0])
+        self.assertIn("status = 'confirmed'", connection.calls[4][0])
+        self.assertIn("delete from app.bank_transactions", connection.calls[5][0])
+        self.assertEqual(connection.calls[5][1][2], "batch-1")
+
+    def test_repository_deletes_exact_category_event_before_category(self) -> None:
+        plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
+
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...]) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        result = apply_bank_import_dedup_repair(
+            connection,
+            plan,
+            operator_id="system_repair",
+        )
+
+        self.assertIn("delete from app.bank_transaction_category_events", connection.calls[2][0])
+        self.assertIn("event.payload = %s::jsonb", connection.calls[2][0])
+        self.assertIn("delete from app.bank_transaction_categories", connection.calls[3][0])
+        self.assertIn("category.raw_payload = %s::jsonb", connection.calls[3][0])
+        self.assertEqual(result["category_event_delete_count"], 1)
+        self.assertEqual(result["category_delete_count"], 1)
 
     def test_repository_uses_durable_file_payload_batch_link(self) -> None:
         self.assertNotIn("file.import_batch_id", _SOURCE_FILE_SQL)
