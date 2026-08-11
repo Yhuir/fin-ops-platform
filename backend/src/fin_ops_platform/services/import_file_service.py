@@ -771,22 +771,43 @@ class FileImportService:
                         "controlled replay suspected duplicate lacks repaired row evidence"
                     )
                 continue
-            if (
-                replay_result.source_record_type
-                != str(evidence["source_record_type"])
-                or replay_result.data_fingerprint
-                != str(evidence["data_fingerprint"])
-                or replay_result.linked_object_type != "bank_transaction"
-                or replay_result.linked_object_id
-                != str(evidence["linked_object_id"])
-                or replay_result.decision
-                not in {
-                    ImportDecision.SUSPECTED_DUPLICATE,
-                    ImportDecision.DUPLICATE_SKIPPED,
-                }
-            ):
+            mismatches = [
+                field_name
+                for field_name, matches in (
+                    (
+                        "source_record_type",
+                        replay_result.source_record_type
+                        == str(evidence["source_record_type"]),
+                    ),
+                    (
+                        "data_fingerprint",
+                        replay_result.data_fingerprint
+                        == str(evidence["data_fingerprint"]),
+                    ),
+                    (
+                        "linked_object_type",
+                        replay_result.linked_object_type == "bank_transaction",
+                    ),
+                    (
+                        "linked_object_id",
+                        replay_result.linked_object_id
+                        == str(evidence["linked_object_id"]),
+                    ),
+                    (
+                        "decision",
+                        replay_result.decision
+                        in {
+                            ImportDecision.SUSPECTED_DUPLICATE,
+                            ImportDecision.DUPLICATE_SKIPPED,
+                        },
+                    ),
+                )
+                if not matches
+            ]
+            if mismatches:
                 raise ValueError(
-                    "controlled replay current preview changed from repaired row evidence"
+                    "controlled replay current preview changed from repaired row evidence: "
+                    f"row_no={replay_result.row_no}; fields={','.join(mismatches)}"
                 )
             if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
                 replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
