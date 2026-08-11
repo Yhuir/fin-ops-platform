@@ -577,10 +577,12 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
             _text(transaction.get("counterparty_name_raw")),
         ),
     }
-    if not _identity_matches(row, transaction) and not _controlled_replay_statement_position_matches(
+    identity_matches = _identity_matches(row, transaction)
+    controlled_replay_matches = _controlled_replay_statement_position_matches(
         row,
         transaction,
-    ):
+    )
+    if not identity_matches and not controlled_replay_matches:
         comparisons.update(
             {
                 "source_unique_key": (
@@ -594,19 +596,36 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
             }
         )
     mismatches = {key: {"row": left, "transaction": right} for key, (left, right) in comparisons.items() if left != right}
-    return [_issue("bank_import_transaction_field_mismatch", row_id, {"fields": mismatches})] if mismatches else []
+    if not mismatches:
+        return []
+    details: dict[str, Any] = {"fields": mismatches}
+    controlled_replay_diagnostics = _controlled_replay_statement_position_diagnostics(
+        row,
+        transaction,
+    )
+    if controlled_replay_diagnostics is not None:
+        details["controlled_replay_statement_position"] = controlled_replay_diagnostics
+    return [_issue("bank_import_transaction_field_mismatch", row_id, details)]
 
 
 def _controlled_replay_statement_position_matches(
     row: dict[str, Any],
     transaction: dict[str, Any],
 ) -> bool:
+    diagnostics = _controlled_replay_statement_position_diagnostics(row, transaction)
+    return diagnostics is not None and not diagnostics["mismatch_fields"]
+
+
+def _controlled_replay_statement_position_diagnostics(
+    row: dict[str, Any],
+    transaction: dict[str, Any],
+) -> dict[str, Any] | None:
     if (
         _text(row.get("decision")) != "duplicate_skipped"
         or _text(row.get("decision_reason"))
         not in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values()
     ):
-        return False
+        return None
     identity_service = BankTransactionIdentityService()
     row_position = identity_service.statement_position_for_mapping(
         _bank_statement_mapping(row, direction_key="direction"),
@@ -617,14 +636,36 @@ def _controlled_replay_statement_position_matches(
         allow_missing_currency=True,
     )
     if row_position is None or transaction_position is None:
-        return False
-    if row_position[:5] != transaction_position[:5]:
-        return False
+        return {
+            "row_position_complete": row_position is not None,
+            "transaction_position_complete": transaction_position is not None,
+            "mismatch_fields": ["incomplete_statement_position"],
+        }
+    field_names = ("account_no", "trade_time", "direction", "amount", "balance")
+    mismatch_fields = [
+        field_name
+        for field_name, row_value, transaction_value in zip(
+            field_names,
+            row_position[:5],
+            transaction_position[:5],
+            strict=True,
+        )
+        if row_value != transaction_value
+    ]
     row_currency = row_position[5]
     transaction_currency = transaction_position[5]
-    return row_currency == transaction_currency or (
-        row_currency == "CNY" and transaction_currency == ""
-    )
+    if not (
+        row_currency == transaction_currency
+        or (row_currency == "CNY" and transaction_currency == "")
+    ):
+        mismatch_fields.append("currency")
+    return {
+        "row_position_complete": True,
+        "transaction_position_complete": True,
+        "mismatch_fields": mismatch_fields,
+        "row_currency": row_currency or "missing",
+        "transaction_currency": transaction_currency or "missing",
+    }
 
 
 def _bank_statement_mapping(row: dict[str, Any], *, direction_key: str) -> dict[str, Any]:

@@ -499,6 +499,21 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
             "bank_import_transaction_field_mismatch",
             report["summary"]["issue_sample_counts_by_code"],
         )
+        issue = next(
+            item
+            for item in report["issues"]
+            if item["code"] == "bank_import_transaction_field_mismatch"
+        )
+        self.assertEqual(
+            issue["details"]["controlled_replay_statement_position"],
+            {
+                "row_position_complete": True,
+                "transaction_position_complete": True,
+                "mismatch_fields": ["balance"],
+                "row_currency": "CNY",
+                "transaction_currency": "CNY",
+            },
+        )
 
     def test_controlled_replay_accepts_equal_missing_legacy_currency(self) -> None:
         connection = FakeConnection()
@@ -647,6 +662,21 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertIn(
             "bank_import_transaction_field_mismatch",
             report["summary"]["issue_sample_counts_by_code"],
+        )
+        issue = next(
+            item
+            for item in report["issues"]
+            if item["code"] == "bank_import_transaction_field_mismatch"
+        )
+        self.assertEqual(
+            issue["details"]["controlled_replay_statement_position"],
+            {
+                "row_position_complete": True,
+                "transaction_position_complete": True,
+                "mismatch_fields": ["currency"],
+                "row_currency": "missing",
+                "transaction_currency": "CNY",
+            },
         )
 
     def test_weak_identity_migration_preserves_legacy_import_proof(self) -> None:

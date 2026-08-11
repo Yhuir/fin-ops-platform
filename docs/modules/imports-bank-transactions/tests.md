@@ -85,6 +85,7 @@
 | 2026-08-12 普通确认放行弱指纹疑似流水 | `suspected_duplicate` 在 confirm 后必须保持未写入，batch 为 `completed_with_errors`；受控恢复必须同时匹配固定修复原因、来源 row、同一 keeper 和精确计数，二次重放零新增。 | fixed by `tests/test_import_service.py`、`tests/test_import_file_service.py`、`tests/test_runtime_worker.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-12 受控重放文件无 object link、审计误判与历史计数漂移 | 重放必须生成并登记独立归档对象；source identity 漂移只有在登记受控 reason 和严格 statement-position 证据一致时可引用旧 canonical；历史 link/count 修复必须唯一 hash/URI/lifecycle、精确 action count、fingerprint、serializable lock 和 CAS。 | fixed by `tests/test_import_file_service.py`、`tests/test_audit_bank_transaction_import_page.py`、`tests/test_bank_import_audit_contract_repair.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-12 历史流水币种为空导致受控重放审计误阻断 | 普通 statement position 继续要求币种；仅登记受控 reason 的历史重放允许 row/canonical 币种同时为空，或解析器默认 `row=CNY` 对历史 `canonical=空`，并仍要求账户、秒级时间、方向、金额、余额完整相等；反向缺失、非 CNY 单边缺失或显式币种不同继续阻断。 | fixed by `tests/test_bank_transaction_identity_service.py`、`tests/test_audit_bank_transaction_import_page.py` |
+| 2026-08-12 受控重放门禁缺少字段级诊断 | admin-only Page Audit 必须输出 statement position 双方完整性和字段级 mismatch 名称，不暴露账户、金额、余额等业务原值；非受控行不附加该诊断。 | fixed by `tests/test_audit_bank_transaction_import_page.py` |
 
 ## 关键 Smoke Flows
 
