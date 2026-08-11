@@ -606,6 +606,12 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertIn("'normalized_row'->>'account_detail_no'", _FAILED_IMPORT_FILE_SQL)
         self.assertIn("bank_transaction.bank_serial_no", _FAILED_IMPORT_FILE_SQL)
         self.assertIn(") && array_remove(", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn("like 'bank:%%'", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn("like 'bank-v2:%%'", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn("like 'bank-v3:%%'", _FAILED_IMPORT_FILE_SQL)
+        self.assertNotIn("like 'bank:%'", _FAILED_IMPORT_FILE_SQL)
+        self.assertNotIn("like 'bank-v2:%'", _FAILED_IMPORT_FILE_SQL)
+        self.assertNotIn("like 'bank-v3:%'", _FAILED_IMPORT_FILE_SQL)
 
     def test_plan_normalizes_only_exact_reverted_preview_batch_payloads(self) -> None:
         plan = build_import_audit_repair_plan(_reverted_batch_snapshot())

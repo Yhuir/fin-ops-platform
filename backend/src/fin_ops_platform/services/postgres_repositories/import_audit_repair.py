@@ -391,12 +391,12 @@ left join lateral (
                     )
                     or (
                         nullif(trim(rows.data_fingerprint), '') is null
-                        and coalesce(rows.source_unique_key, '') like 'bank:%'
+                        and coalesce(rows.source_unique_key, '') like 'bank:%%'
                         and rows.source_unique_key = bank_transaction.data_fingerprint
                         and (
                             nullif(trim(bank_transaction.source_unique_key), '') is null
-                            or bank_transaction.source_unique_key like 'bank-v2:%'
-                            or bank_transaction.source_unique_key like 'bank-v3:%'
+                            or bank_transaction.source_unique_key like 'bank-v2:%%'
+                            or bank_transaction.source_unique_key like 'bank-v3:%%'
                         )
                     )
                 )
