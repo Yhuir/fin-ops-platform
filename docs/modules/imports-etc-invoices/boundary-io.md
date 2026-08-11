@@ -20,6 +20,7 @@
 - 为 ETC 票据管理页面提供导入后业务事实。
 - 后台导入 job 完成后，`result_summary` 必须返回精确 affected months；普通导入的页面 read model targets 与 operation barrier targets 为空，queued admission 阶段不得伪造 targets。
 - 相同 import idempotency key 只接受相同 request fingerprint；瞬时失败把业务 job 归还 pending 并由 durable outbox 重试，达到最大次数才终态失败。用户再次确认同一请求时，terminal failed/partial job 必须原子复用原 job id 并重新 queued/pending，禁止新建冲突 job；不同 fingerprint 返回结构化 `409 idempotency_conflict`。processing lease 只有超时后才能被其它 worker 接管。
+- background job 运行状态只按 canonical `job_id` 单行读写；禁止 ETC 导入 worker 全量回写历史 background job snapshot，历史 raw payload 的旧 id 不得污染当前任务。
 
 ### 不负责
 

@@ -1420,11 +1420,43 @@ class PostgresStateStoreTests(unittest.TestCase):
             connection = FakePostgresConnection()
             store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
-            store.save_background_jobs({"job-1": {"job_id": "job-1", "status": "queued"}})
+            store.save_background_job({"job_id": "job-1", "status": "queued"})
             store.save_app_health_alerts({"records": {"alert-1": {"alert_id": "alert-1", "status": "unpaired"}}})
 
         self.assertNotIn("state:background_jobs", connection.settings)
         self.assertNotIn("state:app_health_alerts", connection.settings)
+
+    def test_background_job_point_io_canonicalizes_stale_raw_job_id(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            connection = FakePostgresConnection()
+            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
+            with patch.object(
+                connection,
+                "fetch_one",
+                return_value={
+                    "job_id": "job-canonical",
+                    "raw_payload": {
+                        "normalized_payload": {
+                            "job_id": "job-stale",
+                            "type": "file_import",
+                            "status": "queued",
+                        }
+                    },
+                },
+            ):
+                payload = store.load_background_job("job-canonical")
+
+            store.save_background_job(payload or {})
+
+        self.assertEqual(payload["job_id"], "job-canonical")
+        self.assertFalse(any("order by created_at" in " ".join(sql.lower().split()) for sql in connection.queries))
+        background_job_writes = [
+            params
+            for sql, params in connection.executed
+            if "insert into job.background_jobs" in " ".join(sql.lower().split())
+        ]
+        self.assertEqual(len(background_job_writes), 1)
+        self.assertEqual(background_job_writes[0][0], "job-canonical")
 
     def test_postgres_save_does_not_write_full_state_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:

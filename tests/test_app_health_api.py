@@ -741,7 +741,7 @@ class AppHealthApiTests(unittest.TestCase):
             old_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
             jobs[job.job_id]["finished_at"] = old_time
             jobs[job.job_id]["updated_at"] = old_time
-            app._state_store.save_background_jobs(jobs)
+            app._state_store.save_background_job(jobs[job.job_id])
 
             response = app.handle_request("GET", "/api/app-health")
             payload = json.loads(response.body)

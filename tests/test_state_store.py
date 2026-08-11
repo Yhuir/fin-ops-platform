@@ -768,7 +768,7 @@ class StateStoreTests(unittest.TestCase):
                 }
             }
 
-            store.save_background_jobs(snapshot)
+            store.save_background_job(snapshot["job-1"])
             reloaded_store = ApplicationStateStore(data_dir)
 
             self.assertEqual(reloaded_store.load_background_jobs(), snapshot)

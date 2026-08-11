@@ -77,6 +77,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 
 失败但仍可重试的 import job 必须在 admin-only Audit issue 中返回 `attempt_count/max_attempts`、`last_error`、`session_id` 和 `selected_file_ids`，使运维只能通过正式 file/session retry/confirm I/O 定位和恢复；恢复必须复用同一 import/background job id，重置失败租约与错误并写入新的 durable outbox，且 request fingerprint 不同返回结构化 `409 idempotency_conflict`。不得要求直接查询或改写 `job.import_jobs`。
 
+worker 更新导入 background job 的 running/progress/terminal 状态时，只允许按 canonical `job_id` 单行读写；不得把全量历史 background job snapshot 回写到 PostgreSQL。历史 raw payload 内的旧 `job_id` 不能覆盖正式表主键，否则下游成本统计、Workbench 等副作用的旧任务会污染本次导入事务。
+
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。

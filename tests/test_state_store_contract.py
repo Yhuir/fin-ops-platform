@@ -227,7 +227,7 @@ class StateStoreContractTests(unittest.TestCase):
     def test_state_store_domain_snapshot_contract_round_trips(self) -> None:
         for name, store in self._with_stores():
             with self.subTest(store=name):
-                store.save_background_jobs({"job-1": {"id": "job-1", "status": "running"}})
+                store.save_background_job({"job_id": "job-1", "status": "running"})
                 self.assertEqual(store.load_background_jobs()["job-1"]["status"], "running")
 
                 store.save_app_health_alerts({"records": {"alert-1": {"id": "alert-1", "status": "active"}}})

@@ -128,7 +128,10 @@ class FakeStore:
     def load_background_jobs(self) -> dict:
         return {}
 
-    def save_background_jobs(self, snapshot: dict) -> None:
+    def load_background_job(self, job_id: str) -> dict | None:
+        return None
+
+    def save_background_job(self, job_payload: dict) -> None:
         return None
 
     def load_app_health_alerts(self) -> dict:

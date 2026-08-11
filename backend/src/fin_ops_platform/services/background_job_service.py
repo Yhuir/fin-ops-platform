@@ -139,9 +139,7 @@ class BackgroundJobService:
             affected_months=affected_months,
         )
         with self._lock:
-            jobs = self._load_jobs()
-            jobs[job.job_id] = job.to_payload()
-            self._save_jobs(jobs)
+            self._save_job(job)
         return job
 
     def build_job(
@@ -315,12 +313,10 @@ class BackgroundJobService:
                 if not reuse_any_status and existing.status in IDEMPOTENT_REQUEUEABLE_STATUSES:
                     candidate.job_id = existing.job_id
                     candidate.created_at = existing.created_at
-                    jobs[candidate.job_id] = candidate.to_payload()
-                    self._save_jobs(jobs)
+                    self._save_job(candidate)
                     return candidate, True
                 return existing, False
-            jobs[candidate.job_id] = candidate.to_payload()
-            self._save_jobs(jobs)
+            self._save_job(candidate)
             return candidate, True
 
     def start_job(self, job_id: str) -> BackgroundJob:
@@ -420,10 +416,9 @@ class BackgroundJobService:
         if not normalized_job_ids:
             return []
         with self._lock:
-            jobs = self._load_jobs()
             loaded_jobs: list[BackgroundJob] = []
             for job_id in normalized_job_ids:
-                payload = jobs.get(job_id)
+                payload = self._load_job(job_id)
                 if payload is None:
                     raise BackgroundJobNotFoundError(job_id)
                 job = self._job_from_payload(payload)
@@ -439,9 +434,8 @@ class BackgroundJobService:
                     job.acknowledged_at = now
                     job.updated_at = now
                     job.short_label = self._build_short_label(job)
-                    jobs[job.job_id] = job.to_payload()
+                    self._save_job(job)
                 acknowledged_jobs.append(job)
-            self._save_jobs(jobs)
             return acknowledged_jobs
 
     def supersede_job(
@@ -567,15 +561,13 @@ class BackgroundJobService:
     def _mutate_job(self, job_id: str, mutator: Callable[[BackgroundJob], None]) -> BackgroundJob:
         normalized_job_id = str(job_id or "").strip()
         with self._lock:
-            jobs = self._load_jobs()
-            payload = jobs.get(normalized_job_id)
+            payload = self._load_job(normalized_job_id)
             if payload is None:
                 raise BackgroundJobNotFoundError(normalized_job_id)
             job = self._job_from_payload(payload)
             mutator(job)
             job.short_label = self._build_short_label(job)
-            jobs[job.job_id] = job.to_payload()
-            self._save_jobs(jobs)
+            self._save_job(job)
             return job
 
     def recover_interrupted_jobs(self) -> int:
@@ -583,7 +575,6 @@ class BackgroundJobService:
         recovered = 0
         with self._lock:
             jobs = self._load_jobs()
-            changed = False
             for job_id, payload in list(jobs.items()):
                 job = self._job_from_payload(payload)
                 if job.status not in ACTIVE_BACKGROUND_JOB_STATUSES:
@@ -599,28 +590,28 @@ class BackgroundJobService:
                 job.finished_at = now
                 job.updated_at = now
                 job.short_label = self._build_short_label(job)
-                jobs[job_id] = job.to_payload()
-                changed = True
                 recovered += 1
-            if changed:
-                self._save_jobs(jobs)
+                self._save_job(job)
         return recovered
+
+    def _load_job(self, job_id: str) -> dict[str, object] | None:
+        if self._state_store is not None:
+            payload = self._state_store.load_background_job(job_id)
+            return dict(payload) if isinstance(payload, dict) else None
+        payload = self._memory_jobs.get(job_id)
+        return dict(payload) if isinstance(payload, dict) else None
 
     def _load_jobs(self) -> dict[str, dict[str, object]]:
         if self._state_store is not None:
             return self._state_store.load_background_jobs()
         return {key: dict(value) for key, value in self._memory_jobs.items()}
 
-    def _save_jobs(self, jobs: dict[str, dict[str, object]]) -> None:
-        sanitized = {
-            str(job_id): self._sanitize_mapping(payload)
-            for job_id, payload in jobs.items()
-            if isinstance(payload, dict)
-        }
+    def _save_job(self, job: BackgroundJob) -> None:
+        payload = self._sanitize_mapping(job.to_payload())
         if self._state_store is not None:
-            self._state_store.save_background_jobs(sanitized)
+            self._state_store.save_background_job(payload)
             return
-        self._memory_jobs = sanitized
+        self._memory_jobs[job.job_id] = payload
 
     @classmethod
     def _job_from_payload(cls, payload: dict[str, object]) -> BackgroundJob:

@@ -1774,7 +1774,27 @@ class PostgresOpsTaxEtcRepository:
 
     def load_background_jobs(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select job_id, raw_payload from job.background_jobs order by created_at, job_id")
-        return {str(row.get("job_id")): row_payload(row, "raw_payload") for row in rows}
+        jobs: dict[str, Any] = {}
+        for row in rows:
+            job_id = str(row.get("job_id") or "")
+            payload = row_payload(row, "raw_payload")
+            payload["job_id"] = job_id
+            jobs[job_id] = payload
+        return jobs
+
+    def load_background_job(self, job_id: str) -> dict[str, Any] | None:
+        normalized_job_id = text(job_id)
+        if not normalized_job_id:
+            return None
+        row = self._connection.fetch_one(
+            "select job_id, raw_payload from job.background_jobs where job_id = %s",
+            (normalized_job_id,),
+        )
+        if row is None:
+            return None
+        payload = row_payload(row, "raw_payload")
+        payload["job_id"] = normalized_job_id
+        return payload
 
     def create_or_requeue_background_job(
         self,
@@ -1912,55 +1932,60 @@ class PostgresOpsTaxEtcRepository:
 
         return run_in_transaction(self._connection, write)
 
-    def save_background_jobs(self, snapshot: dict[str, Any]) -> None:
+    def save_background_job(self, job_payload: dict[str, Any]) -> None:
+        payload = serialize_value(job_payload)
+        job_id = text(payload.get("job_id") or payload.get("id"))
+        if not job_id:
+            raise ValueError("job_id is required.")
+        payload["job_id"] = job_id
+
         def write(connection: Any) -> None:
-            for job_id, payload in iter_mapping(snapshot):
-                connection.execute(
-                    """
-                    insert into job.background_jobs(
-                        job_id, job_type, status, owner_id, visibility, source,
-                        affected_months, progress, result_summary, error, retry_mode,
-                        attention, superseded_by_job_id, raw_payload, idempotency_key,
-                        request_fingerprint
-                    )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    on conflict (job_id) do update set
-                        job_type = excluded.job_type,
-                        status = excluded.status,
-                        owner_id = excluded.owner_id,
-                        visibility = excluded.visibility,
-                        source = excluded.source,
-                        affected_months = excluded.affected_months,
-                        progress = excluded.progress,
-                        result_summary = excluded.result_summary,
-                        error = excluded.error,
-                        retry_mode = excluded.retry_mode,
-                        attention = excluded.attention,
-                        superseded_by_job_id = excluded.superseded_by_job_id,
-                        idempotency_key = excluded.idempotency_key,
-                        request_fingerprint = coalesce(excluded.request_fingerprint, job.background_jobs.request_fingerprint),
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        job_id,
-                        text(payload.get("job_type") or payload.get("type") or "unknown"),
-                        text(payload.get("status") or "unknown"),
-                        text(payload.get("owner_id") or payload.get("owner_user_id")),
-                        text(payload.get("visibility")),
-                        text(payload.get("source")),
-                        text_list(payload.get("affected_months") or payload.get("months")),
-                        jsonb(payload.get("progress") if isinstance(payload.get("progress"), dict) else {}),
-                        jsonb(payload.get("result_summary") if isinstance(payload.get("result_summary"), dict) else {}),
-                        text(payload.get("error") or payload.get("last_error")),
-                        text(payload.get("retry_mode")),
-                        jsonb(payload.get("attention") if isinstance(payload.get("attention"), dict) else {}),
-                        text(payload.get("superseded_by_job_id")),
-                        jsonb({"normalized_payload": payload}),
-                        text(payload.get("idempotency_key")),
-                        text(payload.get("request_fingerprint")),
-                    ),
+            connection.execute(
+                """
+                insert into job.background_jobs(
+                    job_id, job_type, status, owner_id, visibility, source,
+                    affected_months, progress, result_summary, error, retry_mode,
+                    attention, superseded_by_job_id, raw_payload, idempotency_key,
+                    request_fingerprint
                 )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                on conflict (job_id) do update set
+                    job_type = excluded.job_type,
+                    status = excluded.status,
+                    owner_id = excluded.owner_id,
+                    visibility = excluded.visibility,
+                    source = excluded.source,
+                    affected_months = excluded.affected_months,
+                    progress = excluded.progress,
+                    result_summary = excluded.result_summary,
+                    error = excluded.error,
+                    retry_mode = excluded.retry_mode,
+                    attention = excluded.attention,
+                    superseded_by_job_id = excluded.superseded_by_job_id,
+                    idempotency_key = excluded.idempotency_key,
+                    request_fingerprint = coalesce(excluded.request_fingerprint, job.background_jobs.request_fingerprint),
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    job_id,
+                    text(payload.get("job_type") or payload.get("type") or "unknown"),
+                    text(payload.get("status") or "unknown"),
+                    text(payload.get("owner_id") or payload.get("owner_user_id")),
+                    text(payload.get("visibility")),
+                    text(payload.get("source")),
+                    text_list(payload.get("affected_months") or payload.get("months")),
+                    jsonb(payload.get("progress") if isinstance(payload.get("progress"), dict) else {}),
+                    jsonb(payload.get("result_summary") if isinstance(payload.get("result_summary"), dict) else {}),
+                    text(payload.get("error") or payload.get("last_error")),
+                    text(payload.get("retry_mode")),
+                    jsonb(payload.get("attention") if isinstance(payload.get("attention"), dict) else {}),
+                    text(payload.get("superseded_by_job_id")),
+                    jsonb({"normalized_payload": payload}),
+                    text(payload.get("idempotency_key")),
+                    text(payload.get("request_fingerprint")),
+                ),
+            )
 
         run_in_transaction(self._connection, write)
 

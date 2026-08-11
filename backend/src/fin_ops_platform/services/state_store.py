@@ -816,7 +816,21 @@ class ApplicationStateStore:
             if isinstance(payload, dict)
         }
 
-    def save_background_jobs(self, snapshot: dict[str, dict[str, Any]]) -> None:
+    def load_background_job(self, job_id: str) -> dict[str, Any] | None:
+        payload = self.load_background_jobs().get(str(job_id or "").strip())
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def save_background_job(self, job_payload: dict[str, Any]) -> None:
+        payload = dict(job_payload)
+        job_id = str(payload.get("job_id") or payload.get("id") or "").strip()
+        if not job_id:
+            raise ValueError("job_id is required.")
+        jobs = self.load_background_jobs()
+        payload["job_id"] = job_id
+        jobs[job_id] = payload
+        self._save_background_jobs_snapshot(jobs)
+
+    def _save_background_jobs_snapshot(self, snapshot: dict[str, dict[str, Any]]) -> None:
         normalized_snapshot = {
             str(job_id): dict(payload)
             for job_id, payload in (snapshot if isinstance(snapshot, dict) else {}).items()
@@ -851,11 +865,11 @@ class ApplicationStateStore:
                 candidate["job_id"] = existing.get("job_id")
                 candidate["created_at"] = existing.get("created_at")
                 jobs[str(candidate["job_id"])] = candidate
-                self.save_background_jobs(jobs)
+                self._save_background_jobs_snapshot(jobs)
                 return candidate, True
             return dict(existing), False
         jobs[str(candidate["job_id"])] = candidate
-        self.save_background_jobs(jobs)
+        self._save_background_jobs_snapshot(jobs)
         return candidate, True
 
     def load_app_health_alerts(self) -> dict[str, Any]:

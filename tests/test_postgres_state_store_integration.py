@@ -351,6 +351,40 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(str(fingerprint_row.get("request_fingerprint") or ""))
 
+    def test_background_job_progress_repairs_stale_raw_job_id_without_replaying_history(self) -> None:
+        service = BackgroundJobService(self.store)
+        job = service.create_or_get_idempotent_job(
+            job_type="file_import",
+            label="导入 银行流水",
+            owner_user_id="integration-user",
+            idempotency_key="file_import_session:stale-raw:file-1",
+            source={"session_id": "stale-raw", "selected_file_ids": ["file-1"]},
+        )
+        self.connection.execute(
+            """
+            update job.background_jobs
+            set raw_payload = jsonb_set(raw_payload, '{normalized_payload,job_id}', to_jsonb(%s::text), true)
+            where job_id = %s
+            """,
+            ("job_stale_legacy_id", job.job_id),
+        )
+
+        started = service.start_job(job.job_id)
+
+        self.assertEqual(started.job_id, job.job_id)
+        self.assertEqual(started.status, "running")
+        row = self.connection.fetch_one(
+            """
+            select job_id, status, raw_payload #>> '{normalized_payload,job_id}' as raw_job_id
+            from job.background_jobs
+            where owner_id = %s and job_type = %s and idempotency_key = %s
+            """,
+            ("integration-user", "file_import", "file_import_session:stale-raw:file-1"),
+        )
+        self.assertEqual(row["job_id"], job.job_id)
+        self.assertEqual(row["raw_job_id"], job.job_id)
+        self.assertEqual(row["status"], "running")
+
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"manual_projects": []})
         self.store.save_pending_invoice_commands(
@@ -369,16 +403,15 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 }
             }
         )
-        self.store.save_background_jobs(
-            {
-                "job-1": {
+        self.store.save_background_job(
+                {
+                    "job_id": "job-1",
                     "job_type": "workbench_rebuild",
                     "status": "running",
                     "owner_id": "tester",
                     "affected_months": ["2026-03"],
                     "progress": {"current": 1, "total": 3},
                 }
-            }
         )
         self.store.save_app_health_alerts({"records": {"alert-1": {"kind": "postgres", "severity": "warning", "status": "active"}}})
         self.store.save_workbench_pair_relations(

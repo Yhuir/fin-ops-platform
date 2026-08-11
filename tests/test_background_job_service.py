@@ -42,8 +42,12 @@ class BackgroundJobServiceTests(unittest.TestCase):
                 self.load_calls += 1
                 return {job_id: dict(payload) for job_id, payload in self.jobs.items()}
 
-            def save_background_jobs(self, snapshot: dict[str, dict[str, object]]) -> None:
-                self.jobs = {job_id: dict(payload) for job_id, payload in snapshot.items()}
+            def load_background_job(self, job_id: str) -> dict[str, object] | None:
+                payload = self.jobs.get(job_id)
+                return dict(payload) if payload is not None else None
+
+            def save_background_job(self, job_payload: dict[str, object]) -> None:
+                self.jobs[str(job_payload["job_id"])] = dict(job_payload)
 
         store = CountingStore()
         service = BackgroundJobService(store, recent_success_seconds=60)
@@ -178,7 +182,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
             old_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
             jobs[job.job_id]["finished_at"] = old_time
             jobs[job.job_id]["updated_at"] = old_time
-            store.save_background_jobs(jobs)
+            store.save_background_job(jobs[job.job_id])
 
             active_jobs = service.list_active_jobs("user-001")
 
@@ -300,9 +304,8 @@ class BackgroundJobServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))
             now = datetime.now(UTC).isoformat()
-            store.save_background_jobs(
-                {
-                    "job_legacy": {
+            store.save_background_job(
+                    {
                         "job_id": "job_legacy",
                         "type": "file_import",
                         "label": "导入 银行流水",
@@ -327,7 +330,6 @@ class BackgroundJobServiceTests(unittest.TestCase):
                         "finished_at": now,
                         "acknowledged_at": None,
                     }
-                }
             )
 
             service = BackgroundJobService(store, recent_success_seconds=60)
@@ -437,9 +439,8 @@ class BackgroundJobServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))
             stale_time = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
-            store.save_background_jobs(
-                {
-                    "job_stale": {
+            store.save_background_job(
+                    {
                         "job_id": "job_stale",
                         "type": "file_import",
                         "label": "导入 银行流水",
@@ -464,7 +465,6 @@ class BackgroundJobServiceTests(unittest.TestCase):
                         "finished_at": None,
                         "acknowledged_at": None,
                     }
-                }
             )
 
             service = BackgroundJobService(store, stale_after_seconds=1)

@@ -640,8 +640,11 @@ class PostgresStateStore:
     def load_background_jobs(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_background_jobs()
 
-    def save_background_jobs(self, snapshot: dict[str, Any]) -> None:
-        self._ops_tax_etc_repository.save_background_jobs(snapshot)
+    def load_background_job(self, job_id: str) -> dict[str, Any] | None:
+        return self._ops_tax_etc_repository.load_background_job(job_id)
+
+    def save_background_job(self, job_payload: dict[str, Any]) -> None:
+        self._ops_tax_etc_repository.save_background_job(job_payload)
 
     def create_or_requeue_background_job(
         self,
