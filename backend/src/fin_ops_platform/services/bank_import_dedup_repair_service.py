@@ -121,25 +121,14 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         fingerprint = _text(target.get("data_fingerprint"))
         candidates = protected_by_fingerprint.get(fingerprint, []) if fingerprint else []
         if not candidates:
-            statement_evidence = _strict_statement_evidence(target, identity_service)
-            statement_candidates = (
-                protected_by_statement.get(statement_evidence, [])
-                if statement_evidence is not None
-                else []
+            statement_pair = _unique_statement_position_pair(
+                target,
+                identity_service=identity_service,
+                target_statement_counts=target_statement_counts,
+                protected_by_statement=protected_by_statement,
             )
-            if (
-                statement_evidence is not None
-                and target_statement_counts[statement_evidence] == 1
-                and len(statement_candidates) == 1
-            ):
-                duplicate_pairs.append(
-                    _duplicate_pair(
-                        target,
-                        statement_candidates[0],
-                        match_basis="statement_position",
-                        matched_official_references=[],
-                    )
-                )
+            if statement_pair is not None:
+                duplicate_pairs.append(statement_pair)
             continue
         incoming_references = _official_reference_values(target_identity.audit_fields)
         reference_exact: list[dict[str, Any]] = []
@@ -172,6 +161,14 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         if len(reference_exact) > 1:
             exact = reference_exact
         elif incoming_references and all(candidate_reference_sets):
+            statement_pair = _unique_statement_position_pair(
+                target,
+                identity_service=identity_service,
+                target_statement_counts=target_statement_counts,
+                protected_by_statement=protected_by_statement,
+            )
+            if statement_pair is not None:
+                duplicate_pairs.append(statement_pair)
             continue
         else:
             target_secondary = _strict_secondary_evidence(target)
@@ -188,6 +185,14 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     and incoming_references
                     and all(_strict_secondary_evidence(candidate) is not None for candidate in candidates)
                 ):
+                    statement_pair = _unique_statement_position_pair(
+                        target,
+                        identity_service=identity_service,
+                        target_statement_counts=target_statement_counts,
+                        protected_by_statement=protected_by_statement,
+                    )
+                    if statement_pair is not None:
+                        duplicate_pairs.append(statement_pair)
                     continue
         if len(exact) == 1:
             duplicate_pairs.append(
@@ -199,6 +204,15 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 )
             )
         else:
+            statement_pair = _unique_statement_position_pair(
+                target,
+                identity_service=identity_service,
+                target_statement_counts=target_statement_counts,
+                protected_by_statement=protected_by_statement,
+            )
+            if statement_pair is not None:
+                duplicate_pairs.append(statement_pair)
+                continue
             transaction_id = _text(target.get("transaction_id"))
             ambiguous_target_ids.append(transaction_id)
             ambiguous_details.append(
@@ -916,6 +930,27 @@ def _strict_statement_evidence(
     if not all(required_components) or balance_currency is None:
         return None
     return (*required_components, *balance_currency)
+
+
+def _unique_statement_position_pair(
+    target: dict[str, Any],
+    *,
+    identity_service: BankTransactionIdentityService,
+    target_statement_counts: Counter[tuple[str, ...]],
+    protected_by_statement: dict[tuple[str, ...], list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    statement_evidence = _strict_statement_evidence(target, identity_service)
+    if statement_evidence is None or target_statement_counts[statement_evidence] != 1:
+        return None
+    statement_candidates = protected_by_statement.get(statement_evidence, [])
+    if len(statement_candidates) != 1:
+        return None
+    return _duplicate_pair(
+        target,
+        statement_candidates[0],
+        match_basis="statement_position",
+        matched_official_references=[],
+    )
 
 
 def _decimal_text(value: Any) -> str | None:
