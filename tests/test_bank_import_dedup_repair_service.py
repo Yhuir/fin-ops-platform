@@ -429,11 +429,10 @@ class BankImportDedupRepairServiceTests(TestCase):
         snapshot = _snapshot()
         snapshot["request"]["expected_duplicate_delete_count"] = 0
 
-        with self.assertRaisesRegex(
-            ValueError,
-            r"expected 0, resolved 1, match_basis_counts=\{'official_reference': 1\}",
-        ):
+        with self.assertRaisesRegex(ValueError, r"expected 0, resolved 1") as context:
             build_bank_import_dedup_repair_plan(snapshot)
+        self.assertIn("unmatched_details=", str(context.exception))
+        self.assertIn('"transaction_id": "target-2"', str(context.exception))
 
     def test_plan_refuses_no_reference_match_when_balance_differs(self) -> None:
         snapshot = _snapshot(ambiguous=True)

@@ -253,10 +253,23 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         _text(pair.get("match_basis")) for pair in duplicate_pairs
     )
     if len(duplicate_pairs) != expected_duplicate_delete_count:
+        matched_target_pks = {
+            _text(pair.get("delete_transaction_pk")) for pair in duplicate_pairs
+        }
+        unmatched_details = [
+            _unmatched_statement_detail(
+                target,
+                identity_service=identity_service,
+                protected_by_statement_position=protected_by_statement_position,
+            )
+            for target in targets
+            if _text(target.get("transaction_pk")) not in matched_target_pks
+        ]
         raise ValueError(
             "Bank dedup repair duplicate delete count changed: "
             f"expected {expected_duplicate_delete_count}, resolved {len(duplicate_pairs)}, "
-            f"match_basis_counts={dict(sorted(match_basis_counts.items()))}."
+            f"match_basis_counts={dict(sorted(match_basis_counts.items()))}, "
+            f"unmatched_details={json.dumps(unmatched_details, ensure_ascii=False, sort_keys=True)}."
         )
 
     duplicate_target_pks = {_text(pair.get("delete_transaction_pk")) for pair in duplicate_pairs}
@@ -1019,6 +1032,43 @@ def _account_identifiers_compatible(left: Any, right: Any) -> bool:
         return True
     shorter, longer = sorted((left_digits, right_digits), key=len)
     return len(shorter) == 4 and longer.endswith(shorter)
+
+
+def _unmatched_statement_detail(
+    target: dict[str, Any],
+    *,
+    identity_service: BankTransactionIdentityService,
+    protected_by_statement_position: dict[tuple[str, ...], list[dict[str, Any]]],
+) -> dict[str, Any]:
+    position_evidence = _strict_statement_position_evidence(target, identity_service)
+    position_candidates = (
+        protected_by_statement_position.get(position_evidence, [])
+        if position_evidence is not None
+        else []
+    )
+
+    def public_fields(row: dict[str, Any]) -> dict[str, Any]:
+        identity = identity_service.identity_for_mapping(row)
+        return {
+            "transaction_id": _text(row.get("transaction_id")),
+            "account_no": _text(row.get("account_no")),
+            "trade_time": _text(identity.components.get("trade_time")),
+            "direction": _text(identity.components.get("direction")),
+            "amount": _text(identity.components.get("amount")),
+            "balance": _decimal_text(row.get("balance")),
+            "currency": _canonical_currency(row.get("currency")),
+            "counterparty_name": _text(row.get("counterparty_name_raw")),
+            "official_references": sorted(_official_reference_values(identity.audit_fields)),
+            "data_fingerprint": _text(row.get("data_fingerprint")),
+        }
+
+    return {
+        "target": public_fields(target),
+        "statement_position_candidate_count": len(position_candidates),
+        "statement_position_candidates": [
+            public_fields(candidate) for candidate in position_candidates[:3]
+        ],
+    }
 
 
 def _decimal_text(value: Any) -> str | None:
