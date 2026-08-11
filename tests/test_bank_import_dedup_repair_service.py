@@ -279,6 +279,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["batch_updates"][0]["after_duplicate_count"], 1)
         self.assertEqual(plan["replay_repaired_duplicate_count"], 1)
         self.assertEqual(plan["replay_canonical_owner_count"], 1)
+        self.assertEqual(plan["replay_canonical_reference_count"], 0)
         self.assertEqual(
             plan["replay_sources"],
             [
@@ -317,12 +318,77 @@ class BankImportDedupRepairServiceTests(TestCase):
                             "linked_object_id": "target-2",
                         }
                     ],
+                    "expected_canonical_reference_count": 0,
+                    "canonical_reference_evidence": [],
                 }
             ],
         )
         first_update = plan["row_updates"][0]
         self.assertEqual(first_update["after_decision"], "duplicate_skipped")
         self.assertEqual(first_update["after_linked_object_id"], "keeper-1")
+
+    def test_plan_freezes_existing_canonical_duplicate_reference_for_replay(self) -> None:
+        snapshot = _snapshot()
+        snapshot["import_rows"].append(
+            {
+                "row_pk": "40000000-0000-0000-0000-000000000003",
+                "batch_pk": "10000000-0000-0000-0000-000000000001",
+                "batch_id": "batch-1",
+                "row_no": 3,
+                "source_record_type": "bank_transaction",
+                "data_fingerprint": "bank:5300:2026-05-22 16:12:00:outflow:1.00:未知对手方",
+                "decision": "duplicate_skipped",
+                "decision_reason": "Exact canonical identity match.",
+                "linked_object_type": "bank_transaction",
+                "linked_object_id": "keeper-1",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "decision": "duplicate_skipped",
+                        "linked_object_id": "keeper-1",
+                    }
+                },
+            }
+        )
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["replay_canonical_reference_count"], 1)
+        self.assertEqual(
+            plan["replay_sources"][0]["canonical_reference_evidence"],
+            [
+                {
+                    "file_id": "file-1",
+                    "row_no": 3,
+                    "source_record_type": "bank_transaction",
+                    "data_fingerprint": (
+                        "bank:5300:2026-05-22 16:12:00:outflow:1.00:未知对手方"
+                    ),
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": "keeper-1",
+                }
+            ],
+        )
+
+    def test_plan_refuses_duplicate_reference_to_unknown_transaction(self) -> None:
+        snapshot = _snapshot()
+        snapshot["import_rows"].append(
+            {
+                "row_pk": "40000000-0000-0000-0000-000000000003",
+                "batch_pk": "10000000-0000-0000-0000-000000000001",
+                "batch_id": "batch-1",
+                "row_no": 3,
+                "source_record_type": "bank_transaction",
+                "data_fingerprint": "bank:5300:2026-05-22 16:12:00:outflow:1.00:未知对手方",
+                "decision": "duplicate_skipped",
+                "decision_reason": "Exact canonical identity match.",
+                "linked_object_type": "bank_transaction",
+                "linked_object_id": "unknown-transaction",
+                "raw_payload": {},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "canonical duplicate references are invalid"):
+            build_bank_import_dedup_repair_plan(snapshot)
 
     def test_plan_normalizes_database_month_date_for_read_model_scope(self) -> None:
         snapshot = _snapshot()
@@ -577,6 +643,8 @@ class BankImportDedupRepairServiceTests(TestCase):
                 "batch_pk": "10000000-0000-0000-0000-000000000001",
                 "batch_id": "batch-1",
                 "row_no": 3,
+                "source_record_type": "bank_transaction",
+                "data_fingerprint": snapshot["target_transactions"][0]["data_fingerprint"],
                 "decision": "duplicate_skipped",
                 "decision_reason": "same-file duplicate",
                 "linked_object_type": "bank_transaction",

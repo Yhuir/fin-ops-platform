@@ -1179,6 +1179,74 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(replay_item.duplicate_count, 1)
         self.assertEqual(replay_item.suspected_duplicate_count, 0)
 
+    def test_controlled_replay_resolves_existing_canonical_duplicate_reference(self) -> None:
+        replay_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="reference-fingerprint",
+            decision=ImportDecision.SUSPECTED_DUPLICATE,
+            decision_reason="Weak identity match.",
+            linked_object_type="bank_transaction",
+            linked_object_id="ambiguous-candidate",
+        )
+        preview = SimpleNamespace(
+            batch=ImportedBatch(
+                id="replay-batch-1",
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="statement.xlsx",
+                imported_by="system-repair",
+                row_count=1,
+                success_count=0,
+                error_count=0,
+                status=BatchStatus.PENDING,
+                suspected_duplicate_count=1,
+            ),
+            row_results=[replay_result],
+        )
+        service = FileImportService(SimpleNamespace(get_batch=lambda _batch_id: preview))
+        replay_item = FileImportPreviewItem(
+            id="replay-file-1",
+            file_name="statement.xlsx",
+            template_code="bank_statement",
+            batch_type=BatchType.BANK_TRANSACTION,
+            status="preview_ready",
+            message="preview",
+            row_count=1,
+            suspected_duplicate_count=1,
+            preview_batch_id="replay-batch-1",
+            row_results=[replay_result],
+        )
+
+        repaired = service._resolve_repaired_replay_duplicates(
+            replay_item=replay_item,
+            repaired_duplicate_decision_reason="Controlled repair reason.",
+            repaired_duplicate_evidence=[],
+            canonical_reference_evidence=[
+                {
+                    "file_id": "source-file-1",
+                    "row_no": 1,
+                    "source_record_type": "bank_transaction",
+                    "data_fingerprint": "reference-fingerprint",
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": "canonical-reference-1",
+                }
+            ],
+            source_file_id="source-file-1",
+        )
+
+        self.assertEqual(repaired, 0)
+        self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(replay_result.linked_object_id, "canonical-reference-1")
+        self.assertEqual(
+            replay_result.decision_reason,
+            "Controlled replay matched an existing canonical duplicate reference.",
+        )
+        self.assertEqual(replay_item.duplicate_count, 1)
+        self.assertEqual(replay_item.suspected_duplicate_count, 0)
+
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
         import_service = ImportNormalizationService(
             id_registry=FakeImportEntityRegistry(),

@@ -1215,6 +1215,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "created_owner_transition_count": 674,
             "replay_repaired_duplicate_count": 674,
             "replay_canonical_owner_count": 0,
+            "replay_canonical_reference_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "affected_months": ["2026-02"],
             "category_cleanup_actions": [],
@@ -1299,6 +1300,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "created_owner_transition_count": 674,
             "replay_repaired_duplicate_count": 674,
             "replay_canonical_owner_count": 0,
+            "replay_canonical_reference_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "replay_sources": [
                 {
@@ -1311,6 +1313,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "repaired_duplicate_evidence": [],
                     "expected_canonical_owner_count": 0,
                     "canonical_owner_evidence": [],
+                    "expected_canonical_reference_count": 0,
+                    "canonical_reference_evidence": [],
                 }
             ],
             "affected_months": ["2026-02", "2026-05"],
@@ -1324,6 +1328,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "created_count": 0,
                     "repaired_duplicate_count": 674,
                     "canonical_owner_count": 0,
+                    "canonical_reference_count": 0,
                 }
             },
             {
@@ -1331,6 +1336,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "created_count": 0,
                     "repaired_duplicate_count": 674,
                     "canonical_owner_count": 0,
+                    "canonical_reference_count": 0,
                 }
             },
         ]

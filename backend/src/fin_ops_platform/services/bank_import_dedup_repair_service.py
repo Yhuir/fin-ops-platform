@@ -482,6 +482,56 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             f"invalid={invalid_existing_owners[:5]}."
         )
 
+    canonical_transaction_ids = {
+        _text(row.get("transaction_id"))
+        for row in [*targets, *protected]
+        if _text(row.get("transaction_id"))
+        and _text(row.get("transaction_pk")) not in duplicate_target_pks
+    }
+    effective_canonical_reference_rows = {
+        _text(row.get("row_pk")): row
+        for row in rows
+        if _text(row.get("decision")) == "duplicate_skipped"
+        and _text(row.get("decision_reason")) != REPAIR_REASON
+    }
+    effective_canonical_reference_rows.update(
+        {
+            _text(update.get("row_pk")): {
+                **update,
+                "decision": update.get("after_decision"),
+                "decision_reason": update.get("after_decision_reason"),
+                "linked_object_type": update.get("after_linked_object_type"),
+                "linked_object_id": update.get("after_linked_object_id"),
+            }
+            for update in row_updates
+            if _text(update.get("before_decision")) == "duplicate_skipped"
+            and _text(update.get("after_decision")) == "duplicate_skipped"
+            and _text(update.get("after_decision_reason")) != REPAIR_REASON
+        }
+    )
+    canonical_reference_rows = {
+        row_pk: row
+        for row_pk, row in effective_canonical_reference_rows.items()
+        if _text(row.get("source_record_type")) == "bank_transaction"
+        and _text(row.get("data_fingerprint"))
+        and _text(row.get("linked_object_type")) == "bank_transaction"
+        and _text(row.get("linked_object_id")) in canonical_transaction_ids
+    }
+    invalid_canonical_references = [
+        {
+            "row_pk": _text(row.get("row_pk")),
+            "row_no": int(row.get("row_no") or 0),
+            "linked_object_id": _text(row.get("linked_object_id")),
+        }
+        for row_pk, row in effective_canonical_reference_rows.items()
+        if row_pk not in canonical_reference_rows
+    ]
+    if invalid_canonical_references:
+        raise ValueError(
+            "Bank replay canonical duplicate references are invalid: "
+            f"{invalid_canonical_references[:5]}."
+        )
+
     replay_sources: list[dict[str, Any]] = []
     replay_batch_pks: set[str] = set()
     for source in request.get("source_sessions") or []:
@@ -514,6 +564,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             raise ValueError("Bank repaired replay source files do not own unique batches.")
         repaired_duplicate_evidence: list[dict[str, Any]] = []
         canonical_owner_evidence: list[dict[str, Any]] = []
+        canonical_reference_evidence: list[dict[str, Any]] = []
         for row in sorted(
             effective_replay_duplicate_rows.values(),
             key=lambda item: (
@@ -563,6 +614,27 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     "linked_object_id": _text(row.get("linked_object_id")),
                 }
             )
+        for row in sorted(
+            canonical_reference_rows.values(),
+            key=lambda item: (
+                _text(item.get("batch_pk")),
+                int(item.get("row_no") or 0),
+                _text(item.get("row_pk")),
+            ),
+        ):
+            batch_pk = _text(row.get("batch_pk"))
+            if batch_pk not in source_batch_pks:
+                continue
+            canonical_reference_evidence.append(
+                {
+                    "file_id": source_file_by_batch_pk[batch_pk],
+                    "row_no": int(row.get("row_no") or 0),
+                    "source_record_type": "bank_transaction",
+                    "data_fingerprint": _text(row.get("data_fingerprint")),
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": _text(row.get("linked_object_id")),
+                }
+            )
         repaired_count = len(repaired_duplicate_evidence)
         replay_sources.append(
             {
@@ -573,6 +645,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 "repaired_duplicate_evidence": repaired_duplicate_evidence,
                 "expected_canonical_owner_count": len(canonical_owner_evidence),
                 "canonical_owner_evidence": canonical_owner_evidence,
+                "expected_canonical_reference_count": len(canonical_reference_evidence),
+                "canonical_reference_evidence": canonical_reference_evidence,
             }
         )
     if sum(
@@ -585,6 +659,13 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         for source in replay_sources
     ) != expected_existing_owner_count:
         raise ValueError("Bank canonical owner rows are not fully owned by the selected source files.")
+    if sum(
+        int(source["expected_canonical_reference_count"])
+        for source in replay_sources
+    ) != len(canonical_reference_rows):
+        raise ValueError(
+            "Bank canonical duplicate references are not fully owned by the selected source files."
+        )
 
     owner_updates_by_batch = Counter(
         update["batch_pk"] for update in row_updates if update["owner_transition"]
@@ -617,6 +698,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             effective_replay_duplicate_rows
         ),
         "replay_canonical_owner_count": len(existing_owner_rows),
+        "replay_canonical_reference_count": len(canonical_reference_rows),
         "replay_sources": replay_sources,
         "duplicate_pairs": duplicate_pairs,
         "category_cleanup_actions": category_cleanup_actions,
@@ -659,6 +741,7 @@ def public_bank_import_dedup_repair_report(
             "replay_repaired_duplicate_count"
         ],
         "replay_canonical_owner_count": plan["replay_canonical_owner_count"],
+        "replay_canonical_reference_count": plan["replay_canonical_reference_count"],
         "duplicate_match_basis_counts": deepcopy(
             plan.get("duplicate_match_basis_counts") or {}
         ),
