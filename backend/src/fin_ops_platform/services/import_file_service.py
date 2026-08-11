@@ -140,6 +140,15 @@ MAX_WORKBOOK_CELLS = 2_000_000
 MAX_XLSX_MEMBERS = 10_000
 MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_XLSX_COMPRESSION_RATIO = 200
+CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND = {
+    "repaired_duplicate": (
+        "Controlled replay matched an explicitly repaired canonical row owner."
+    ),
+    "canonical_owner": "Controlled replay matched an existing canonical row owner.",
+    "canonical_reference": (
+        "Controlled replay matched an existing canonical duplicate reference."
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -899,17 +908,9 @@ class FileImportService:
                     f"row_no={replay_result.row_no}; fields={','.join(mismatches)}"
                 )
             replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
-            replay_result.decision_reason = {
-                "repaired_duplicate": (
-                    "Controlled replay matched an explicitly repaired canonical row owner."
-                ),
-                "canonical_owner": (
-                    "Controlled replay matched an existing canonical row owner."
-                ),
-                "canonical_reference": (
-                    "Controlled replay matched an existing canonical duplicate reference."
-                ),
-            }[evidence_kind]
+            replay_result.decision_reason = (
+                CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND[evidence_kind]
+            )
             replay_result.linked_object_type = "bank_transaction"
             replay_result.linked_object_id = str(evidence["linked_object_id"])
             if evidence_kind == "repaired_duplicate":
@@ -1163,6 +1164,15 @@ class FileImportService:
                         batch_type=item.batch_type,
                         normalized=normalized,
                     )
+                    if self._controlled_replay_duplicate_is_current(
+                        row_result=row_result,
+                        current_decision=decision,
+                        current_linked_object_type=linked_object_type,
+                        current_linked_object_id=linked_object_id,
+                    ):
+                        decision = row_result.decision
+                        linked_object_type = row_result.linked_object_type
+                        linked_object_id = row_result.linked_object_id
                 identity = self._identity_for_row(row_result.source_record_type, normalized)
                 rows.append(
                     ImportPreviewAuditRow(
@@ -1185,6 +1195,29 @@ class FileImportService:
             if item.id not in existing_file_ids:
                 audit.files.append(self._empty_file_audit(item))
         return audit
+
+    @staticmethod
+    def _controlled_replay_duplicate_is_current(
+        *,
+        row_result: ImportedBatchRowResult,
+        current_decision: ImportDecision | None,
+        current_linked_object_type: str | None,
+        current_linked_object_id: str | None,
+    ) -> bool:
+        return (
+            row_result.decision == ImportDecision.DUPLICATE_SKIPPED
+            and row_result.decision_reason
+            in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values()
+            and current_decision
+            in {
+                ImportDecision.DUPLICATE_SKIPPED,
+                ImportDecision.SUSPECTED_DUPLICATE,
+            }
+            and row_result.linked_object_type == "bank_transaction"
+            and current_linked_object_type == row_result.linked_object_type
+            and bool(str(row_result.linked_object_id or "").strip())
+            and current_linked_object_id == row_result.linked_object_id
+        )
 
     @staticmethod
     def _empty_file_audit(item: FileImportPreviewItem) -> ImportPreviewFileAudit:

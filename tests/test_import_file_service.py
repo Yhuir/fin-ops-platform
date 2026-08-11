@@ -12,6 +12,7 @@ from fin_ops_platform.domain.models import ImportedBatch, ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import (
     BankStatementMappingRequired,
     FileImportPreviewItem,
+    FileImportSession,
     FileImportService,
     UploadedImportFile,
     aggregate_invoice_line_rows,
@@ -1246,6 +1247,148 @@ class ImportFileServiceTests(unittest.TestCase):
         )
         self.assertEqual(replay_item.duplicate_count, 1)
         self.assertEqual(replay_item.suspected_duplicate_count, 0)
+
+    def test_controlled_replay_stale_gate_accepts_same_canonical_transaction(self) -> None:
+        confirm_calls: list[str] = []
+
+        def confirm_import(batch_id: str) -> ImportedBatch:
+            confirm_calls.append(batch_id)
+            return ImportedBatch(
+                id=batch_id,
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="statement.xlsx",
+                imported_by="system-repair",
+                row_count=1,
+                success_count=0,
+                error_count=0,
+                duplicate_count=1,
+                status=BatchStatus.COMPLETED,
+            )
+
+        import_service = SimpleNamespace(
+            current_import_decision_for_normalized_row=lambda **_kwargs: (
+                ImportDecision.SUSPECTED_DUPLICATE,
+                "bank_transaction",
+                "canonical-transaction-1",
+            ),
+            confirm_import=confirm_import,
+        )
+        service = FileImportService(import_service)
+        row_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.DUPLICATE_SKIPPED,
+            decision_reason=(
+                "Controlled replay matched an explicitly repaired canonical row owner."
+            ),
+            linked_object_type="bank_transaction",
+            linked_object_id="canonical-transaction-1",
+        )
+        session = FileImportSession(
+            id="replay-session-1",
+            imported_by="system-repair",
+            file_count=1,
+            status="preview_ready",
+            files=[
+                FileImportPreviewItem(
+                    id="replay-file-1",
+                    file_name="statement.xlsx",
+                    template_code="bank_statement",
+                    batch_type=BatchType.BANK_TRANSACTION,
+                    status="preview_ready",
+                    message="preview",
+                    row_count=1,
+                    duplicate_count=1,
+                    preview_batch_id="replay-batch-1",
+                    row_results=[row_result],
+                    normalized_rows=[
+                        {
+                            "account_no": "53001905038050548106",
+                            "trade_time": "2026-06-05 11:03:37",
+                            "txn_direction": "outflow",
+                            "amount": "1.00",
+                            "balance": "100.00",
+                            "currency": "CNY",
+                            "counterparty_name": "未知对手方",
+                        }
+                    ],
+                )
+            ],
+        )
+        service._refresh_session_audit(session)
+        service._sessions[session.id] = session
+
+        confirmed = service.confirm_session(
+            session_id=session.id,
+            selected_file_ids=["replay-file-1"],
+        )
+
+        self.assertEqual(confirmed.status, "confirmed")
+        self.assertEqual(confirm_calls, ["replay-batch-1"])
+
+    def test_controlled_replay_stale_gate_rejects_changed_canonical_transaction(self) -> None:
+        import_service = SimpleNamespace(
+            current_import_decision_for_normalized_row=lambda **_kwargs: (
+                ImportDecision.SUSPECTED_DUPLICATE,
+                "bank_transaction",
+                "different-transaction",
+            )
+        )
+        service = FileImportService(import_service)
+        row_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.DUPLICATE_SKIPPED,
+            decision_reason=(
+                "Controlled replay matched an explicitly repaired canonical row owner."
+            ),
+            linked_object_type="bank_transaction",
+            linked_object_id="canonical-transaction-1",
+        )
+        session = FileImportSession(
+            id="replay-session-1",
+            imported_by="system-repair",
+            file_count=1,
+            status="preview_ready",
+            files=[
+                FileImportPreviewItem(
+                    id="replay-file-1",
+                    file_name="statement.xlsx",
+                    template_code="bank_statement",
+                    batch_type=BatchType.BANK_TRANSACTION,
+                    status="preview_ready",
+                    message="preview",
+                    row_count=1,
+                    duplicate_count=1,
+                    preview_batch_id="replay-batch-1",
+                    row_results=[row_result],
+                    normalized_rows=[
+                        {
+                            "account_no": "53001905038050548106",
+                            "trade_time": "2026-06-05 11:03:37",
+                            "txn_direction": "outflow",
+                            "amount": "1.00",
+                            "balance": "100.00",
+                            "currency": "CNY",
+                            "counterparty_name": "未知对手方",
+                        }
+                    ],
+                )
+            ],
+        )
+        service._refresh_session_audit(session)
+        service._sessions[session.id] = session
+
+        with self.assertRaisesRegex(ValueError, "preview_stale"):
+            service.assert_session_preview_current(session_id=session.id)
 
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
         import_service = ImportNormalizationService(

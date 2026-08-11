@@ -263,3 +263,9 @@
 - 恢复边界：生产恢复工具新增精确受控跳过计数。只有已由本次 repair reason 重定向到 keeper 的来源 row，且重新预览仍命中同一 keeper，才能转换为 `duplicate_skipped`；其余疑似项全部失败。
 - Read model：修复工具把数据库可能返回的月初日期规范为 `YYYY-MM` 后再进入正式 gateway，避免业务事务已提交后刷新 scope 校验失败。
 - 不新增表、API、worker、read model、fallback 或第二条导入写链；继续复用正式 file/session preview-confirm processor。
+
+## 2026-08-12 - 受控恢复 stale gate 精确复核
+
+- 生产候选执行证明受控预览持久化成功后，普通 stale gate 会把已由冻结证据确认的 767 条弱指纹 keeper 重新归类为 `suspected_duplicate`，使审计投影变化并整体回滚；生产 canonical 事实未发生半写入。
+- 修复不跳过 stale gate，也不增加恢复专用确认链。只有受控 row 的登记 reason、银行流水类型和 canonical transaction ID 与当前普通去重重算结果完全一致时，才保留权威 `duplicate_skipped`；不同 ID、缺失 ID 或重算为 `created` 仍报 `preview_stale`。
+- 测试同时锁定同 canonical 可确认、canonical 漂移必拒绝和普通 preview 竞争写入仍拒绝，避免受控恢复例外污染普通银行/发票导入。
