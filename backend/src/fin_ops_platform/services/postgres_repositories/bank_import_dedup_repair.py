@@ -156,11 +156,16 @@ def apply_bank_import_dedup_repair(
         affected = connection.execute(
             _UPDATE_IMPORT_ROW_SQL,
             (
+                update["after_decision"],
                 update["after_decision_reason"],
+                update["after_linked_object_type"],
                 update["after_linked_object_id"],
                 json.dumps(update["after_raw_payload"], ensure_ascii=False, default=str),
                 update["row_pk"],
                 update["batch_pk"],
+                update["before_decision"],
+                update["before_decision_reason"],
+                update["before_linked_object_type"],
                 update["before_linked_object_id"],
                 json.dumps(update["before_raw_payload"], ensure_ascii=False, default=str),
             ),
@@ -211,6 +216,7 @@ def apply_bank_import_dedup_repair(
     return {
         "category_event_delete_count": category_event_delete_count,
         "category_delete_count": category_delete_count,
+        "import_row_update_count": len(plan["row_updates"]),
         "transaction_delete_count": len(plan["duplicate_pairs"]),
     }
 
@@ -290,7 +296,8 @@ order by id
 _IMPORT_ROW_SQL = """
 select row.id::text as row_pk, row.import_batch_id::text as batch_pk,
        coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
-       row.row_no, row.decision, row.linked_object_id, row.raw_payload
+       row.row_no, row.decision, row.decision_reason,
+       row.linked_object_type, row.linked_object_id, row.raw_payload
 from app.import_batch_rows row
 join app.import_batches batch on batch.id = row.import_batch_id
 where row.import_batch_id::text = any(%s::text[])
@@ -466,14 +473,16 @@ where category.id = %s::uuid
 
 _UPDATE_IMPORT_ROW_SQL = """
 update app.import_batch_rows
-set decision = 'duplicate_skipped',
+set decision = %s,
     decision_reason = %s,
-    linked_object_type = 'bank_transaction',
+    linked_object_type = %s,
     linked_object_id = %s,
     raw_payload = %s::jsonb
 where id = %s::uuid
   and import_batch_id = %s::uuid
-  and decision = 'created'
+  and decision = %s
+  and decision_reason is not distinct from %s
+  and linked_object_type is not distinct from %s
   and linked_object_id = %s
   and raw_payload = %s::jsonb
 """

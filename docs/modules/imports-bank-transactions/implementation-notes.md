@@ -233,3 +233,4 @@
 - 写链：dry-run 把 category/event 完整 CAS 字段、relation case/version/preview、发票成员及无历史恢复结论纳入 source fingerprint；execute 在同一 serializable 事务内先走 `WorkbenchRelationCommandService.prepare_withdraw_relation/withdraw_relation`，再删除精确 category/event，修正 import 审计并删除 duplicate。transaction 删除触发 correction/audit，工具另写聚合 operation audit；relation history 保留。
 - Read model：提交后只对受影响月份经 `ReadModelRefreshGateway` 强制入队 `workbench` 与 `workbench_relation`，不恢复跨页面 fan-out；其它页面继续直读 canonical facts。
 - 测试：business core 覆盖严格 8+1 形状、错位 event、错误 transaction、发票成员和撤回后恢复旧关系拒绝；service/repository 覆盖正式 withdraw、append-only history、category/event 删除顺序和全部 CAS 字段；CLI 覆盖参数门禁、单事务编排、audit、精确 refresh scope、重放与二次幂等。
+- 生产 dry-run 进一步发现 35 个待删副本除唯一 `created` owner 外，还各有一条同批次已正确判重的 `duplicate_skipped` 审计引用。修复计划不把这些引用误算成第二个 owner，也不重复调整 batch/file 计数；它们只以完整 CAS 条件把 `linked_object_id` 重定向到 keeper，并保留原 decision/reason，防止删除后留下悬挂导入审计。

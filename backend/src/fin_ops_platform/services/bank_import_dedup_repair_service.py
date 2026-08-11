@@ -232,7 +232,11 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     invalid_row_owners: list[dict[str, Any]] = []
     for pair in duplicate_pairs:
         matches = rows_by_link.get(_text(pair.get("delete_transaction_id")), [])
-        if len(matches) != 1 or _text(matches[0].get("decision")) != "created":
+        created_rows = [row for row in matches if _text(row.get("decision")) == "created"]
+        reference_rows = [
+            row for row in matches if _text(row.get("decision")) == "duplicate_skipped"
+        ]
+        if len(created_rows) != 1 or len(created_rows) + len(reference_rows) != len(matches):
             invalid_row_owners.append(
                 {
                     "transaction_pk": pair["delete_transaction_pk"],
@@ -249,37 +253,50 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 }
             )
             continue
-        row = matches[0]
-        row_updates.append(
-            {
-                "row_pk": _text(row.get("row_pk")),
-                "batch_pk": _text(row.get("batch_pk")),
-                "batch_id": _text(row.get("batch_id")),
-                "row_no": int(row.get("row_no") or 0),
-                "before_linked_object_id": _text(row.get("linked_object_id")),
-                "after_linked_object_id": pair["keep_transaction_id"],
-                "after_decision_reason": REPAIR_REASON,
-                "before_raw_payload": deepcopy(row.get("raw_payload") or {}),
-                "after_raw_payload": _rewrite_row_payload(
-                    row.get("raw_payload"),
-                    linked_object_id=pair["keep_transaction_id"],
-                ),
-            }
-        )
+        for row in sorted(matches, key=lambda item: (int(item.get("row_no") or 0), _text(item.get("row_pk")))):
+            before_decision = _text(row.get("decision"))
+            owner_transition = before_decision == "created"
+            after_decision_reason = (
+                REPAIR_REASON if owner_transition else row.get("decision_reason")
+            )
+            row_updates.append(
+                {
+                    "row_pk": _text(row.get("row_pk")),
+                    "batch_pk": _text(row.get("batch_pk")),
+                    "batch_id": _text(row.get("batch_id")),
+                    "row_no": int(row.get("row_no") or 0),
+                    "owner_transition": owner_transition,
+                    "before_decision": before_decision,
+                    "after_decision": "duplicate_skipped",
+                    "before_decision_reason": row.get("decision_reason"),
+                    "after_decision_reason": after_decision_reason,
+                    "before_linked_object_type": row.get("linked_object_type"),
+                    "after_linked_object_type": "bank_transaction",
+                    "before_linked_object_id": _text(row.get("linked_object_id")),
+                    "after_linked_object_id": pair["keep_transaction_id"],
+                    "before_raw_payload": deepcopy(row.get("raw_payload") or {}),
+                    "after_raw_payload": _rewrite_row_payload(
+                        row.get("raw_payload"),
+                        linked_object_id=pair["keep_transaction_id"],
+                        decision=("duplicate_skipped" if owner_transition else None),
+                        decision_reason=(REPAIR_REASON if owner_transition else None),
+                        linked_object_type=("bank_transaction" if owner_transition else None),
+                    ),
+                }
+            )
     if invalid_row_owners:
         raise ValueError(
             "Duplicate delete candidates have invalid import-row ownership: "
             + json.dumps(invalid_row_owners, ensure_ascii=False, sort_keys=True)
         )
 
-    updates_by_batch = Counter(update["batch_pk"] for update in row_updates)
-    batch_updates = _build_batch_updates(snapshot.get("batches") or [], updates_by_batch)
-    updates_by_file = Counter(update["batch_pk"] for update in row_updates)
-    replacement_by_batch_and_link = {
-        (update["batch_pk"], update["before_linked_object_id"]): update["after_linked_object_id"]
-        for update in row_updates
-    }
-    file_updates = _build_file_updates(files, updates_by_file, replacement_by_batch_and_link)
+    owner_updates_by_batch = Counter(
+        update["batch_pk"] for update in row_updates if update["owner_transition"]
+    )
+    batch_updates = _build_batch_updates(
+        snapshot.get("batches") or [], owner_updates_by_batch
+    )
+    file_updates = _build_file_updates(files, owner_updates_by_batch, row_updates)
 
     plan = {
         "operation": "bank_import_identity_v3_recovery",
@@ -296,6 +313,10 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "target_count": len(targets),
         "protected_count": len(protected),
         "duplicate_delete_count": len(duplicate_pairs),
+        "import_row_update_count": len(row_updates),
+        "created_owner_transition_count": sum(
+            1 for update in row_updates if update["owner_transition"]
+        ),
         "duplicate_pairs": duplicate_pairs,
         "category_cleanup_actions": category_cleanup_actions,
         "workbench_withdraw_actions": workbench_withdraw_actions,
@@ -330,6 +351,8 @@ def public_bank_import_dedup_repair_report(
         "target_count": plan["target_count"],
         "protected_count": plan["protected_count"],
         "duplicate_delete_count": plan["duplicate_delete_count"],
+        "import_row_update_count": plan["import_row_update_count"],
+        "created_owner_transition_count": plan["created_owner_transition_count"],
         "category_cleanup_count": len(plan.get("category_cleanup_actions") or []),
         "workbench_withdraw_count": len(plan.get("workbench_withdraw_actions") or []),
         "related_cleanup_evidence": {
@@ -742,45 +765,67 @@ def _build_batch_updates(
 
 def _build_file_updates(
     files: list[dict[str, Any]],
-    update_counts: Counter[str],
-    replacements: dict[tuple[str, str], str],
+    owner_update_counts: Counter[str],
+    row_updates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     by_batch = defaultdict(list)
     for row in files:
         by_batch[_text(row.get("batch_pk"))].append(row)
+    updates_by_batch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for update in row_updates:
+        updates_by_batch[update["batch_pk"]].append(update)
     updates: list[dict[str, Any]] = []
-    for batch_pk, count in sorted(update_counts.items()):
+    for batch_pk, batch_row_updates in sorted(updates_by_batch.items()):
         file_rows = by_batch.get(batch_pk, [])
         if len(file_rows) != 1:
             raise ValueError(f"Import batch {batch_pk} must resolve to exactly one authorized source file.")
         row = file_rows[0]
         before = deepcopy(row.get("raw_payload") or {})
-        after = _rewrite_counter_payload(before, success_delta=-count, duplicate_delta=count)
+        owner_update_count = owner_update_counts[batch_pk]
+        after = _rewrite_counter_payload(
+            before,
+            success_delta=-owner_update_count,
+            duplicate_delta=owner_update_count,
+        )
         payload = after.get("normalized_payload") if isinstance(after.get("normalized_payload"), dict) else after
         row_results = payload.get("row_results") if isinstance(payload, dict) else None
         if not isinstance(row_results, list):
             raise ValueError(f"Import file {_text(row.get('file_id'))} has no durable row results.")
+        remaining_updates = list(
+            sorted(batch_row_updates, key=lambda item: (item["row_no"], item["row_pk"]))
+        )
         changed = 0
         rewritten_results: list[Any] = []
         for result in row_results:
             if not isinstance(result, dict):
                 rewritten_results.append(result)
                 continue
-            replacement = replacements.get((batch_pk, _text(result.get("linked_object_id"))))
-            if replacement:
-                rewritten_results.append(
+            update_index = next(
+                (
+                    index
+                    for index, candidate in enumerate(remaining_updates)
+                    if _text(result.get("decision")) == candidate["before_decision"]
+                    and _text(result.get("linked_object_id"))
+                    == candidate["before_linked_object_id"]
+                ),
+                None,
+            )
+            if update_index is None:
+                rewritten_results.append(result)
+                continue
+            update = remaining_updates.pop(update_index)
+            rewritten = {**result, "linked_object_id": update["after_linked_object_id"]}
+            if update["owner_transition"]:
+                rewritten.update(
                     {
-                        **result,
-                        "decision": "duplicate_skipped",
-                        "decision_reason": REPAIR_REASON,
-                        "linked_object_type": "bank_transaction",
-                        "linked_object_id": replacement,
+                        "decision": update["after_decision"],
+                        "decision_reason": update["after_decision_reason"],
+                        "linked_object_type": update["after_linked_object_type"],
                     }
                 )
-                changed += 1
-            else:
-                rewritten_results.append(result)
-        if changed != count:
+            rewritten_results.append(rewritten)
+            changed += 1
+        if changed != len(batch_row_updates) or remaining_updates:
             raise ValueError(f"Import file {_text(row.get('file_id'))} row-result correction is incomplete.")
         payload["row_results"] = rewritten_results
         updates.append(
@@ -795,21 +840,27 @@ def _build_file_updates(
     return updates
 
 
-def _rewrite_row_payload(payload: Any, *, linked_object_id: str) -> dict[str, Any]:
+def _rewrite_row_payload(
+    payload: Any,
+    *,
+    linked_object_id: str,
+    decision: str | None,
+    decision_reason: str | None,
+    linked_object_type: str | None,
+) -> dict[str, Any]:
     rewritten = deepcopy(payload or {})
     target = (
         rewritten.get("normalized_payload")
         if isinstance(rewritten.get("normalized_payload"), dict)
         else rewritten
     )
-    target.update(
-        {
-            "decision": "duplicate_skipped",
-            "decision_reason": REPAIR_REASON,
-            "linked_object_type": "bank_transaction",
-            "linked_object_id": linked_object_id,
-        }
-    )
+    target["linked_object_id"] = linked_object_id
+    if decision is not None:
+        target["decision"] = decision
+    if decision_reason is not None:
+        target["decision_reason"] = decision_reason
+    if linked_object_type is not None:
+        target["linked_object_type"] = linked_object_type
     return rewritten
 
 

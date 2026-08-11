@@ -1141,6 +1141,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "target_count": 731,
             "protected_count": 1129,
             "duplicate_delete_count": 674,
+            "import_row_update_count": 709,
+            "created_owner_transition_count": 674,
             "source_files": [{"file_id": "file-1"}],
             "affected_months": ["2026-02", "2026-05"],
             "category_cleanup_actions": [{"category_id": "category-1"}],

@@ -341,6 +341,61 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn('"row_no": 1', message)
         self.assertIn('"row_no": 99', message)
 
+    def test_plan_redirects_existing_duplicate_reference_without_double_counting(self) -> None:
+        snapshot = _snapshot()
+        snapshot["batches"][0]["duplicate_count"] = 1
+        snapshot["batches"][0]["raw_payload"]["normalized_payload"][
+            "duplicate_count"
+        ] = 1
+        file_payload = snapshot["files"][0]["raw_payload"]["normalized_payload"]
+        file_payload["duplicate_count"] = 1
+        file_payload["row_results"].append(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": "same-file duplicate",
+                "linked_object_type": "bank_transaction",
+                "linked_object_id": "target-1",
+            }
+        )
+        snapshot["import_rows"].append(
+            {
+                "row_pk": "40000000-0000-0000-0000-000000000099",
+                "batch_pk": "10000000-0000-0000-0000-000000000001",
+                "batch_id": "batch-1",
+                "row_no": 3,
+                "decision": "duplicate_skipped",
+                "decision_reason": "same-file duplicate",
+                "linked_object_type": "bank_transaction",
+                "linked_object_id": "target-1",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "decision": "duplicate_skipped",
+                        "decision_reason": "same-file duplicate",
+                        "linked_object_type": "bank_transaction",
+                        "linked_object_id": "target-1",
+                    }
+                },
+            }
+        )
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["duplicate_delete_count"], 1)
+        self.assertEqual(plan["import_row_update_count"], 2)
+        self.assertEqual(plan["created_owner_transition_count"], 1)
+        self.assertEqual(plan["batch_updates"][0]["after_success_count"], 1)
+        self.assertEqual(plan["batch_updates"][0]["after_duplicate_count"], 2)
+        reference_update = next(
+            update for update in plan["row_updates"] if not update["owner_transition"]
+        )
+        self.assertEqual(reference_update["after_decision_reason"], "same-file duplicate")
+        file_results = plan["file_updates"][0]["after_raw_payload"][
+            "normalized_payload"
+        ]["row_results"]
+        self.assertEqual(file_results[0]["linked_object_id"], "keeper-1")
+        self.assertEqual(file_results[2]["linked_object_id"], "keeper-1")
+        self.assertEqual(file_results[2]["decision_reason"], "same-file duplicate")
+
     def test_plan_authorizes_exact_duplicate_owned_category_and_event(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
 
@@ -470,8 +525,12 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(len(connection.calls), 6)
         self.assertIn("fin_ops.correction_reason", connection.calls[0][0])
         self.assertIn("fin_ops.actor_id", connection.calls[1][0])
-        self.assertIn("decision = 'duplicate_skipped'", connection.calls[2][0])
-        self.assertEqual(connection.calls[2][1][0], "Reclassified by bank identity v3 controlled recovery.")
+        self.assertIn("decision = %s", connection.calls[2][0])
+        self.assertEqual(connection.calls[2][1][0], "duplicate_skipped")
+        self.assertEqual(
+            connection.calls[2][1][1],
+            "Reclassified by bank identity v3 controlled recovery.",
+        )
         self.assertIn("status = 'completed'", connection.calls[3][0])
         self.assertIn("status = 'confirmed'", connection.calls[4][0])
         self.assertIn("delete from app.bank_transactions", connection.calls[5][0])
