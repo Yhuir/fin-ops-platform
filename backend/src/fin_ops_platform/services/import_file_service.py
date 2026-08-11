@@ -785,21 +785,31 @@ class FileImportService:
                         == str(evidence["data_fingerprint"]),
                     ),
                     (
-                        "linked_object_type",
-                        replay_result.linked_object_type == "bank_transaction",
-                    ),
-                    (
-                        "linked_object_id",
-                        replay_result.linked_object_id
-                        == str(evidence["linked_object_id"]),
-                    ),
-                    (
                         "decision",
                         replay_result.decision
                         in {
+                            ImportDecision.CREATED,
                             ImportDecision.SUSPECTED_DUPLICATE,
                             ImportDecision.DUPLICATE_SKIPPED,
                         },
+                    ),
+                    (
+                        "linked_object_shape",
+                        (
+                            replay_result.decision == ImportDecision.CREATED
+                            and replay_result.linked_object_type is None
+                            and replay_result.linked_object_id is None
+                        )
+                        or (
+                            replay_result.decision
+                            in {
+                                ImportDecision.SUSPECTED_DUPLICATE,
+                                ImportDecision.DUPLICATE_SKIPPED,
+                            }
+                            and replay_result.linked_object_type
+                            == "bank_transaction"
+                            and bool(str(replay_result.linked_object_id or "").strip())
+                        ),
                     ),
                 )
                 if not matches
@@ -809,13 +819,12 @@ class FileImportService:
                     "controlled replay current preview changed from repaired row evidence: "
                     f"row_no={replay_result.row_no}; fields={','.join(mismatches)}"
                 )
-            if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
-                replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
-                replay_result.decision_reason = (
-                    "Controlled replay matched an explicitly repaired source-row owner."
-                )
-                replay_result.linked_object_type = "bank_transaction"
-                replay_result.linked_object_id = str(evidence["linked_object_id"])
+            replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
+            replay_result.decision_reason = (
+                "Controlled replay matched an explicitly repaired canonical row owner."
+            )
+            replay_result.linked_object_type = "bank_transaction"
+            replay_result.linked_object_id = str(evidence["linked_object_id"])
             resolved_count += 1
         if evidence_by_row_no:
             raise ValueError(
@@ -824,6 +833,10 @@ class FileImportService:
 
         if replay_item.preview_batch_id:
             preview = self._import_service.get_batch(replay_item.preview_batch_id)
+            preview.batch.success_count = sum(
+                row.decision == ImportDecision.CREATED
+                for row in preview.row_results
+            )
             preview.batch.duplicate_count = sum(
                 row.decision == ImportDecision.DUPLICATE_SKIPPED
                 for row in preview.row_results
@@ -832,6 +845,7 @@ class FileImportService:
                 row.decision == ImportDecision.SUSPECTED_DUPLICATE
                 for row in preview.row_results
             )
+            replay_item.success_count = preview.batch.success_count
             replay_item.duplicate_count = preview.batch.duplicate_count
             replay_item.suspected_duplicate_count = preview.batch.suspected_duplicate_count
         return resolved_count
