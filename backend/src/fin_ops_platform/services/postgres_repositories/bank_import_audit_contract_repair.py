@@ -7,6 +7,7 @@ from fin_ops_platform.services.postgres_repositories.bank_transaction_import_pag
     BANK_IMPORT_BATCH_SQL,
     BANK_IMPORT_FILE_SQL,
     BANK_IMPORT_ROW_SQL,
+    BANK_IMPORT_TRANSACTION_SQL,
 )
 
 
@@ -15,6 +16,7 @@ def load_bank_import_audit_contract_repair_snapshot(connection: Any) -> dict[str
         "files": connection.fetch_all(BANK_IMPORT_FILE_SQL),
         "batches": connection.fetch_all(BANK_IMPORT_BATCH_SQL),
         "rows": connection.fetch_all(BANK_IMPORT_ROW_SQL),
+        "transactions": connection.fetch_all(BANK_IMPORT_TRANSACTION_SQL),
         "file_objects": connection.fetch_all(_FILE_OBJECT_SQL),
     }
 
@@ -68,9 +70,35 @@ def apply_bank_import_audit_contract_repair(
                 f"Import file {action['file_id']} audit payload changed after dry-run."
             )
         payload_count += affected
+    row_relink_count = 0
+    for action in plan["row_relink_actions"]:
+        affected = connection.execute(
+            _RELINK_ROW_SQL,
+            (
+                action["after_linked_object_id"],
+                json.dumps(
+                    action["after_raw_payload"], ensure_ascii=False, default=str
+                ),
+                action["row_pk"],
+                action["row_id"],
+                action["decision_reason"],
+                action["before_linked_object_id"],
+                action["source_unique_key"],
+                action["data_fingerprint"],
+                json.dumps(
+                    action["before_raw_payload"], ensure_ascii=False, default=str
+                ),
+            ),
+        )
+        if affected != 1:
+            raise RuntimeError(
+                f"Import row {action['row_id']} canonical link changed after dry-run."
+            )
+        row_relink_count += affected
     return {
         "file_object_link_count": linked_count,
         "payload_update_count": payload_count,
+        "row_relink_count": row_relink_count,
     }
 
 
@@ -99,4 +127,19 @@ where id::text = %s
   and coalesce(legacy_mongo_id, id::text) = %s
   and raw_payload = %s::jsonb
   and audit_contract_revision = 'import-page-audit.v1'
+"""
+
+_RELINK_ROW_SQL = """
+update app.import_batch_rows
+set linked_object_id = %s,
+    raw_payload = %s::jsonb
+where id = %s::uuid
+  and coalesce(legacy_mongo_id, id::text) = %s
+  and decision = 'duplicate_skipped'
+  and decision_reason = %s
+  and linked_object_type = 'bank_transaction'
+  and linked_object_id = %s
+  and source_unique_key is not distinct from %s
+  and data_fingerprint is not distinct from %s
+  and raw_payload = %s::jsonb
 """

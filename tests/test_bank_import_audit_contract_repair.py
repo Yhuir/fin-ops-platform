@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
+    MISLINKED_CONFIRM_REASON,
     build_bank_import_audit_contract_repair_plan,
     public_bank_import_audit_contract_repair_report,
 )
@@ -43,6 +44,7 @@ def _snapshot() -> dict[str, list[dict[str, object]]]:
         ],
         "rows": [
             {
+                "row_pk": "00000000-0000-0000-0000-000000000003",
                 "row_id": "row-1",
                 "batch_id": "batch-1",
                 "row_no": 1,
@@ -59,8 +61,15 @@ def _snapshot() -> dict[str, list[dict[str, object]]]:
                 "direction": "outflow",
                 "amount": "100.00",
                 "counterparty_name": "供应商",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "balance": "900.00",
+                        "currency": "CNY",
+                    }
+                },
             }
         ],
+        "transactions": [],
         "file_objects": [
             {
                 "file_object_id": "00000000-0000-0000-0000-000000000002",
@@ -80,6 +89,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             _snapshot(),
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
+            expected_row_relink_count=0,
         )
 
         self.assertEqual(plan["formal_file_count"], 1)
@@ -110,6 +120,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 snapshot,
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
+                expected_row_relink_count=0,
             )
 
     def test_plan_fails_closed_on_archive_hash_mismatch(self) -> None:
@@ -121,6 +132,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 snapshot,
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
+                expected_row_relink_count=0,
             )
 
     def test_plan_requires_exact_action_counts(self) -> None:
@@ -129,6 +141,66 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 _snapshot(),
                 expected_file_object_link_count=2,
                 expected_payload_update_count=1,
+                expected_row_relink_count=0,
+            )
+
+    def test_plan_relinks_one_uniquely_proven_mislinked_confirm_row(self) -> None:
+        snapshot = _mislinked_snapshot()
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+
+        action = plan["row_relink_actions"][0]
+        self.assertEqual(action["before_linked_object_id"], "transaction-wrong")
+        self.assertEqual(action["after_linked_object_id"], "transaction-correct")
+        self.assertEqual(
+            action["after_raw_payload"]["normalized_payload"]["linked_object_id"],
+            "transaction-correct",
+        )
+
+    def test_plan_fails_closed_when_mislinked_row_has_multiple_candidates(self) -> None:
+        snapshot = _mislinked_snapshot()
+        duplicate_candidate = dict(snapshot["transactions"][1])
+        duplicate_candidate["transaction_id"] = "transaction-also-correct"
+        snapshot["transactions"].append(duplicate_candidate)
+
+        with self.assertRaisesRegex(ValueError, "candidate_count"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=1,
+            )
+
+    def test_plan_fails_closed_when_strict_statement_evidence_is_missing(self) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["rows"][0]["raw_payload"]["normalized_payload"].pop("balance")
+
+        with self.assertRaisesRegex(ValueError, "candidate_count"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=1,
+            )
+
+    def test_plan_fails_closed_when_counterparty_evidence_is_missing(self) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["rows"][0]["counterparty_name"] = None
+        snapshot["rows"][0]["raw_payload"]["normalized_payload"].pop(
+            "counterparty_name"
+        )
+
+        with self.assertRaisesRegex(ValueError, "candidate_count"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=1,
             )
 
 
@@ -147,6 +219,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             _snapshot(),
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
+            expected_row_relink_count=0,
         )
 
         result = apply_bank_import_audit_contract_repair(
@@ -157,7 +230,11 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
 
         self.assertEqual(
             result,
-            {"file_object_link_count": 1, "payload_update_count": 1},
+            {
+                "file_object_link_count": 1,
+                "payload_update_count": 1,
+                "row_relink_count": 0,
+            },
         )
         self.assertEqual(len(connection.calls), 4)
 
@@ -176,6 +253,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             _snapshot(),
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
+            expected_row_relink_count=0,
         )
 
         with self.assertRaisesRegex(RuntimeError, "archive link changed"):
@@ -184,6 +262,120 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
                 plan,
                 operator_id="system_repair",
             )
+
+    def test_apply_uses_compare_and_swap_for_proven_row_relink(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        plan = build_bank_import_audit_contract_repair_plan(
+            _mislinked_snapshot(),
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+
+        result = apply_bank_import_audit_contract_repair(
+            connection,
+            plan,
+            operator_id="system_repair",
+        )
+
+        self.assertEqual(result["row_relink_count"], 1)
+        row_write = next(
+            params
+            for sql, params in connection.calls
+            if sql.lstrip().startswith("update app.import_batch_rows")
+        )
+        self.assertEqual(row_write[0], "transaction-correct")
+
+    def test_apply_rolls_back_when_row_relink_compare_and_swap_misses(self) -> None:
+        class Connection:
+            def execute(self, sql: str, _params: tuple[object, ...] = ()) -> int:
+                if sql.lstrip().startswith("update app.import_batch_rows"):
+                    return 0
+                return 1
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            _mislinked_snapshot(),
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "canonical link changed"):
+            apply_bank_import_audit_contract_repair(
+                Connection(),
+                plan,
+                operator_id="system_repair",
+            )
+
+
+def _mislinked_snapshot() -> dict[str, list[dict[str, object]]]:
+    snapshot = _snapshot()
+    snapshot["rows"] = [
+        {
+            "row_pk": "00000000-0000-0000-0000-000000000003",
+            "row_id": "row-mislinked",
+            "batch_id": "batch-1",
+            "row_no": 1,
+            "source_record_type": "bank_transaction",
+            "source_unique_key": "bank-v3:fee",
+            "data_fingerprint": "bank:fee",
+            "decision": "duplicate_skipped",
+            "decision_reason": MISLINKED_CONFIRM_REASON,
+            "linked_object_type": "bank_transaction",
+            "linked_object_id": "transaction-wrong",
+            "identity_kind": "stable",
+            "account_no": "62220001",
+            "trade_time": "2026-07-01 10:00:00",
+            "direction": "outflow",
+            "amount": "0.90",
+            "counterparty_name": "手续费",
+            "raw_payload": {
+                "normalized_payload": {
+                    "account_no": "62220001",
+                    "trade_time": "2026-07-01 10:00:00",
+                    "txn_direction": "outflow",
+                    "amount": "0.90",
+                    "balance": "899.10",
+                    "currency": "CNY",
+                    "counterparty_name": "手续费",
+                    "linked_object_id": "transaction-wrong",
+                }
+            },
+        }
+    ]
+    snapshot["transactions"] = [
+        {
+            "transaction_id": "transaction-wrong",
+            "data_fingerprint": "bank:principal",
+            "account_no": "62220001",
+            "trade_time": "2026-07-01 10:00:00",
+            "txn_direction": "outflow",
+            "amount": "2000.00",
+            "balance": "900.00",
+            "currency": "CNY",
+            "counterparty_name_raw": "供应商",
+        },
+        {
+            "transaction_id": "transaction-correct",
+            "data_fingerprint": "bank:fee",
+            "account_no": "62220001",
+            "trade_time": "2026-07-01 10:00:00",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "balance": "899.10",
+            "currency": "CNY",
+            "counterparty_name_raw": "手续费",
+        },
+    ]
+    return snapshot
 
 
 if __name__ == "__main__":

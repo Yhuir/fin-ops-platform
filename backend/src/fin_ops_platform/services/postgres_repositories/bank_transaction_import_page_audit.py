@@ -45,7 +45,7 @@ def audit_bank_transaction_import_page(
         files = snapshot.connection.fetch_all(BANK_IMPORT_FILE_SQL)
         batches = snapshot.connection.fetch_all(BANK_IMPORT_BATCH_SQL)
         rows = snapshot.connection.fetch_all(BANK_IMPORT_ROW_SQL)
-        transactions = snapshot.connection.fetch_all(_TRANSACTION_SQL)
+        transactions = snapshot.connection.fetch_all(BANK_IMPORT_TRANSACTION_SQL)
         jobs = snapshot.connection.fetch_all(_JOB_SQL, (normalized_tenant,))
         outbox = snapshot.connection.fetch_all(_OUTBOX_SQL, (normalized_tenant,))
         return _audit_snapshot(
@@ -994,7 +994,8 @@ where batch_type = 'bank_transaction'
 order by imported_at, batch_id
 """
 BANK_IMPORT_ROW_SQL = """
-select coalesce(r.legacy_mongo_id, r.id::text) as row_id,
+select r.id::text as row_pk,
+       coalesce(r.legacy_mongo_id, r.id::text) as row_id,
        coalesce(b.legacy_mongo_id, b.id::text, r.legacy_batch_id) as batch_id,
        r.row_no, r.source_record_type, r.source_unique_key, r.data_fingerprint,
        r.decision, r.decision_reason, r.linked_object_type, r.linked_object_id,
@@ -1005,7 +1006,7 @@ join app.import_batches b on b.id = r.import_batch_id
 where b.batch_type = 'bank_transaction'
 order by batch_id, r.row_no, row_id
 """
-_TRANSACTION_SQL = """
+BANK_IMPORT_TRANSACTION_SQL = """
 select coalesce(t.legacy_mongo_id, t.id::text) as transaction_id,
        coalesce(b.legacy_mongo_id, b.id::text, t.legacy_source_batch_id) as batch_id,
        t.account_no, t.account_name, t.txn_direction, t.counterparty_name_raw,

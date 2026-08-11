@@ -944,6 +944,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "session_count": 29,
             "file_object_link_actions": [{"file_id": "file-1"}],
             "payload_update_actions": [{"file_id": "file-2"}],
+            "row_relink_actions": [],
         }
         output = io.StringIO()
         with (
@@ -976,6 +977,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "1",
                     "--expected-bank-audit-payload-update-count",
                     "1",
+                    "--expected-bank-audit-row-relink-count",
+                    "0",
                     "--operator-id",
                     "system_repair",
                 ],
@@ -987,6 +990,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             {},
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
+            expected_row_relink_count=0,
         )
         self.assertFalse(json.loads(output.getvalue())["written"])
 
@@ -1015,6 +1019,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "session_count": 29,
             "file_object_link_actions": [{"file_id": "file-1"}],
             "payload_update_actions": [{"file_id": "file-2"}],
+            "row_relink_actions": [],
         }
         output = io.StringIO()
         audit_service = Mock()
@@ -1045,6 +1050,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 return_value={
                     "file_object_link_count": 1,
                     "payload_update_count": 1,
+                    "row_relink_count": 0,
                 },
             ) as apply_repair,
             patch.object(
@@ -1063,6 +1069,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "1",
                     "--expected-bank-audit-payload-update-count",
                     "1",
+                    "--expected-bank-audit-row-relink-count",
+                    "0",
                     "--operator-id",
                     "system_repair",
                 ],
