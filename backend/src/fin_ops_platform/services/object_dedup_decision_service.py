@@ -6,6 +6,10 @@ from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import ImportDecision
 from fin_ops_platform.domain.models import BankTransaction, Invoice
+from fin_ops_platform.services.bank_transaction_identity_service import (
+    BankTransactionIdentityService,
+    BankTransactionStatementPosition,
+)
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 
 
@@ -52,6 +56,13 @@ class ObjectIdentityRepository(Protocol):
     ) -> list[BankTransaction]:
         ...
 
+    def find_bank_transactions_by_statement_position(
+        self,
+        *,
+        position: BankTransactionStatementPosition,
+    ) -> list[BankTransaction]:
+        ...
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         ...
 
@@ -71,6 +82,7 @@ class ObjectDedupDecisionService:
         source_versions_provider: Any | None = None,
     ) -> None:
         self._identity_policy = identity_policy or FinancialObjectIdentityPolicy()
+        self._bank_identity_service = BankTransactionIdentityService()
         self._repository = object_identity_repository
         self._source_versions_provider = source_versions_provider
 
@@ -244,6 +256,39 @@ class ObjectDedupDecisionService:
                     linked_object_type="bank_transaction",
                     linked_object_id=position_match.id,
                     matched_object=position_match,
+                )
+            statement_position = self._bank_identity_service.statement_position_for_mapping(
+                normalized
+            )
+            legacy_position_matches = (
+                self._repository.find_bank_transactions_by_statement_position(
+                    position=statement_position
+                )
+                if self._repository is not None and statement_position is not None
+                else []
+            )
+            if len(legacy_position_matches) == 1:
+                legacy_position_match = legacy_position_matches[0]
+                return ObjectDedupDecision(
+                    decision=ImportDecision.DUPLICATE_SKIPPED,
+                    decision_reason=(
+                        "Complete statement position matched one legacy transaction without a bank-v4 identity."
+                    ),
+                    identity=position_identity,
+                    linked_object_type="bank_transaction",
+                    linked_object_id=legacy_position_match.id,
+                    matched_object=legacy_position_match,
+                )
+            if legacy_position_matches:
+                return ObjectDedupDecision(
+                    decision=ImportDecision.SUSPECTED_DUPLICATE,
+                    decision_reason=(
+                        "Complete statement position matched multiple legacy transactions; confirmation requires repair."
+                    ),
+                    identity=position_identity,
+                    linked_object_type="bank_transaction",
+                    linked_object_id=legacy_position_matches[0].id,
+                    matched_object=legacy_position_matches[0],
                 )
             return ObjectDedupDecision(
                 decision=ImportDecision.CREATED,

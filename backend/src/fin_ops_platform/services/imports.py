@@ -17,6 +17,10 @@ from fin_ops_platform.domain.models import (
     ImportedBatchRowResult,
     Invoice,
 )
+from fin_ops_platform.services.bank_transaction_identity_service import (
+    BankTransactionIdentityService,
+    BankTransactionStatementPosition,
+)
 from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInvoiceLinkService
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
@@ -130,6 +134,13 @@ class _ImportObjectIdentityRepository:
             data_fingerprint=suspected_key,
         )
 
+    def find_bank_transactions_by_statement_position(
+        self,
+        *,
+        position: BankTransactionStatementPosition,
+    ) -> list[BankTransaction]:
+        return self._import_service._find_transactions_by_statement_position(position=position)
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         return self.find_invoice_by_identity(canonical_key=canonical_key) is not None
 
@@ -153,6 +164,7 @@ class ImportNormalizationService:
         self._id_registry = id_registry
         self._fact_repository = fact_repository
         self._etc_batch_invoice_link_service = etc_batch_invoice_link_service
+        self._bank_identity_service = BankTransactionIdentityService()
         if self._etc_batch_invoice_link_service is None and hasattr(fact_repository, "upsert_etc_batch_invoice_link"):
             self._etc_batch_invoice_link_service = EtcBatchInvoiceLinkService(repository=fact_repository)
         self._object_identity_policy = identity_policy or FinancialObjectIdentityPolicy()
@@ -167,7 +179,7 @@ class ImportNormalizationService:
         self._invoice_identity_cache: dict[tuple[str, str], Invoice] | None = None
         self._transaction_unique_index: dict[str, str] = {}
         self._transaction_fingerprint_index: dict[str, str] = {}
-        self._transaction_identity_cache: dict[tuple[str, str], list[BankTransaction]] | None = None
+        self._transaction_identity_cache: dict[tuple[str, ...], list[BankTransaction]] | None = None
 
         for invoice in existing_invoices or []:
             self._register_invoice(invoice)
@@ -900,6 +912,41 @@ class ImportNormalizationService:
         )
         return matches
 
+    def _find_transactions_by_statement_position(
+        self,
+        *,
+        position: BankTransactionStatementPosition,
+    ) -> list[BankTransaction]:
+        matches: list[BankTransaction] = []
+        seen_ids: set[str] = set()
+
+        def add(transaction: BankTransaction | None) -> None:
+            if transaction is None or transaction.id in seen_ids:
+                return
+            if self._bank_identity_service.statement_position_for_transaction(transaction) != position:
+                return
+            seen_ids.add(transaction.id)
+            matches.append(transaction)
+
+        for transaction in self._transactions_by_id.values():
+            add(transaction)
+
+        if self._transaction_identity_cache is not None:
+            for transaction in self._transaction_identity_cache.get(("position", *position), []):
+                add(transaction)
+            return matches
+
+        finder_many = getattr(
+            self._fact_repository,
+            "find_bank_transactions_by_statement_positions",
+            None,
+        )
+        if callable(finder_many):
+            for transaction in list(finder_many(positions=[position]) or []):
+                if isinstance(transaction, BankTransaction):
+                    add(transaction)
+        return matches
+
     @contextmanager
     def _transaction_identity_cache_for(
         self,
@@ -920,7 +967,7 @@ class ImportNormalizationService:
     def _build_transaction_identity_cache(
         self,
         normalized_rows: list[dict[str, Any]],
-    ) -> dict[tuple[str, str], list[BankTransaction]]:
+    ) -> dict[tuple[str, ...], list[BankTransaction]]:
         canonical_keys = sorted(
             {
                 str(row.get("source_unique_key") or "").strip()
@@ -935,7 +982,15 @@ class ImportNormalizationService:
                 if str(row.get("data_fingerprint") or "").strip()
             }
         )
-        cache: dict[tuple[str, str], list[BankTransaction]] = {}
+        positions = sorted(
+            {
+                position
+                for row in normalized_rows
+                if (position := self._bank_identity_service.statement_position_for_mapping(row))
+                is not None
+            }
+        )
+        cache: dict[tuple[str, ...], list[BankTransaction]] = {}
         finder_many = getattr(self._fact_repository, "find_bank_transactions_by_identity_keys", None)
         if callable(finder_many) and (canonical_keys or suspected_keys):
             for transaction in list(
@@ -943,13 +998,22 @@ class ImportNormalizationService:
             ):
                 if isinstance(transaction, BankTransaction):
                     self._add_transaction_to_identity_cache(cache, transaction)
+        position_finder = getattr(
+            self._fact_repository,
+            "find_bank_transactions_by_statement_positions",
+            None,
+        )
+        if callable(position_finder) and positions:
+            for transaction in list(position_finder(positions=positions) or []):
+                if isinstance(transaction, BankTransaction):
+                    self._add_transaction_to_identity_cache(cache, transaction)
         for transaction in self._transactions_by_id.values():
             self._add_transaction_to_identity_cache(cache, transaction)
         return cache
 
-    @staticmethod
     def _add_transaction_to_identity_cache(
-        cache: dict[tuple[str, str], list[BankTransaction]],
+        self,
+        cache: dict[tuple[str, ...], list[BankTransaction]],
         transaction: BankTransaction,
     ) -> None:
         for key_type, value in (
@@ -960,6 +1024,11 @@ class ImportNormalizationService:
             if not text:
                 continue
             matches = cache.setdefault((key_type, text), [])
+            if all(existing.id != transaction.id for existing in matches):
+                matches.append(transaction)
+        position = self._bank_identity_service.statement_position_for_transaction(transaction)
+        if position is not None:
+            matches = cache.setdefault(("position", *position), [])
             if all(existing.id != transaction.id for existing in matches):
                 matches.append(transaction)
 

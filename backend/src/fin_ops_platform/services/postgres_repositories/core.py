@@ -466,6 +466,54 @@ class PostgresCoreRepository:
         )
         return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
 
+    def find_bank_transactions_by_statement_positions(
+        self,
+        *,
+        positions: list[tuple[str, str, str, str, str, str]],
+    ) -> list[BankTransaction]:
+        normalized_positions = sorted(set(positions))
+        if not normalized_positions:
+            return []
+        payload = [
+            {
+                "account_no": account_no,
+                "trade_time": trade_time,
+                "txn_direction": direction,
+                "amount": amount,
+                "balance": balance,
+            }
+            for account_no, trade_time, direction, amount, balance, _currency in normalized_positions
+        ]
+        rows = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions transaction_row
+            where exists (
+                select 1
+                from jsonb_to_recordset(%s::jsonb) as position_row(
+                    account_no text,
+                    trade_time text,
+                    txn_direction text,
+                    amount text,
+                    balance text
+                )
+                where transaction_row.account_no = position_row.account_no
+                  and transaction_row.trade_time = position_row.trade_time::timestamptz
+                  and transaction_row.txn_direction::text = position_row.txn_direction
+                  and transaction_row.amount = position_row.amount::numeric
+                  and transaction_row.balance = position_row.balance::numeric
+            )
+            order by created_at, id
+            """,
+            (_jsonb(payload),),
+        )
+        return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         normalized_key = self._text(canonical_key)
         if not normalized_key:

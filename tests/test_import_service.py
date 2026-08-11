@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
@@ -99,6 +100,7 @@ class BulkBankIdentityRepository:
         self.bulk_calls = 0
         self.single_calls = 0
         self.many_calls = 0
+        self.position_calls = 0
 
     def find_bank_transactions_by_identity_keys(
         self,
@@ -123,6 +125,20 @@ class BulkBankIdentityRepository:
     def find_bank_transactions_by_identity(self, **_kwargs: object) -> list[BankTransaction]:
         self.many_calls += 1
         return []
+
+    def find_bank_transactions_by_statement_positions(
+        self,
+        *,
+        positions: list[tuple[str, str, str, str, str, str]],
+    ) -> list[BankTransaction]:
+        self.position_calls += 1
+        requested = set(positions)
+        identity_service = BankTransactionIdentityService()
+        return [
+            transaction
+            for transaction in self.transactions
+            if identity_service.statement_position_for_transaction(transaction) in requested
+        ]
 
 
 class ImportNormalizationServiceTests(unittest.TestCase):
@@ -775,6 +791,69 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(replay_preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
         service.confirm_import(replay_preview.batch.id)
         self.assertEqual(len(service.list_transactions()), 2)
+
+    def test_bulk_cache_deduplicates_unique_legacy_statement_position_without_v4_key(self) -> None:
+        incoming = {
+            "account_no": "62229999",
+            "txn_date": "2026-04-16",
+            "trade_time": "2026-04-16 10:51:46",
+            "counterparty_name": "Bank fee",
+            "debit_amount": "0.90",
+            "credit_amount": "",
+            "bank_serial_no": "REUSED-REF",
+            "balance": "979.57",
+            "currency": "CNY",
+        }
+        policy = self.service._object_identity_policy
+        base_identity = policy.identify_bank_transaction_mapping(
+            {
+                **incoming,
+                "txn_direction": "outflow",
+                "amount": "0.90",
+            }
+        )
+        collision = BankTransaction(
+            id="txn-collision",
+            account_no="62229999",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Different fee",
+            amount=Decimal("1.00"),
+            signed_amount=Decimal("-1.00"),
+            trade_time="2026-04-16 10:00:00",
+            bank_serial_no="REUSED-REF",
+            balance=Decimal("980.47"),
+            currency="CNY",
+            source_unique_key=base_identity.canonical_key,
+        )
+        legacy = BankTransaction(
+            id="txn-legacy",
+            account_no="62229999",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Bank fee",
+            amount=Decimal("0.90"),
+            signed_amount=Decimal("-0.90"),
+            trade_time="2026-04-16 10:51:46",
+            bank_serial_no="LEGACY-REF",
+            balance=Decimal("979.57"),
+            currency="CNY",
+            source_unique_key="legacy-key-without-bank-v4",
+        )
+        repository = BulkBankIdentityRepository([collision, legacy])
+        service = ImportNormalizationService(fact_repository=repository)
+
+        preview = service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="legacy-position.xlsx",
+            imported_by="user_finance_01",
+            rows=[incoming],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(preview.row_results[0].linked_object_id, "txn-legacy")
+        self.assertEqual(repository.bulk_calls, 1)
+        self.assertEqual(repository.position_calls, 1)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
 
     def test_bank_transaction_exact_fingerprint_with_different_official_reference_is_created(self) -> None:
         preview = self.service.preview_import(

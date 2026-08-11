@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import json
 import sys
-from typing import TextIO
+from collections.abc import Sequence
+from typing import Any, TextIO
 
+from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_import_dedup_repair_service import (
     BankImportDedupRelationEvidenceError,
     build_bank_import_dedup_repair_plan,
@@ -13,7 +14,6 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     verify_bank_import_repair_source_files,
     withdraw_bank_import_dedup_workbench_relations,
 )
-from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.import_audit_repair_service import (
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
@@ -26,6 +26,10 @@ from fin_ops_platform.services.object_storage import (
     S3ObjectStorageRepository,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
+    apply_bank_import_dedup_repair,
+    load_bank_import_dedup_repair_snapshot,
+)
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
     discover_failed_import_job_recovery_snapshot,
@@ -34,10 +38,6 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
-)
-from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
-    apply_bank_import_dedup_repair,
-    load_bank_import_dedup_repair_snapshot,
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
@@ -276,201 +276,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                         ],
                     },
                 )
-            from fin_ops_platform.services.read_model_refresh_gateway import (
-                ReadModelRefreshGateway,
-            )
-            from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-
-            refresh_gateway = ReadModelRefreshGateway(
-                queue_repository=RuntimeQueueRepository(connection)
-            )
-            refresh_scopes = {
-                scope_type: refresh_gateway.enqueue_many(
-                    scope_type,
-                    locked_plan["affected_months"],
-                    reason="bank_import_identity_v3_recovery",
-                    metadata={
-                        "force_refresh": True,
-                        "source_fingerprint": locked_plan["source_fingerprint"],
-                    },
-                )
-                for scope_type in ("workbench", "workbench_relation")
-            }
-            from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
-
-            runtime = ImportRuntimeProcessorFactory(
-                data_dir=default_data_dir(),
-                connection=connection,
-            )
-            replay_results = [
-                runtime.replay_confirmed_file_import_session(
-                    source_session_id=entry["session_id"],
-                    selected_file_ids=entry["file_ids"],
+                report = _complete_bank_repair_transaction(
+                    transaction=transaction,
+                    locked_plan=locked_plan,
+                    apply_result=apply_result,
+                    withdraw_results=withdraw_results,
                     operator_id=args.operator_id,
-                    expected_repaired_duplicate_count=entry[
-                        "expected_repaired_duplicate_count"
-                    ],
-                    repaired_duplicate_decision_reason=entry[
-                        "repaired_duplicate_decision_reason"
-                    ],
-                    repaired_duplicate_evidence=entry[
-                        "repaired_duplicate_evidence"
-                    ],
-                    expected_canonical_owner_count=entry[
-                        "expected_canonical_owner_count"
-                    ],
-                    canonical_owner_evidence=entry["canonical_owner_evidence"],
-                    expected_canonical_reference_count=entry[
-                        "expected_canonical_reference_count"
-                    ],
-                    canonical_reference_evidence=entry[
-                        "canonical_reference_evidence"
-                    ],
+                    expected_replay_create_count=args.expected_bank_replay_create_count,
+                    expected_replay_repaired_duplicate_count=(
+                        args.expected_bank_replay_repaired_duplicate_count
+                    ),
                 )
-                for entry in locked_plan["replay_sources"]
-            ]
-            audit_summaries = [dict(item.get("audit_summary") or {}) for item in replay_results]
-            created_count = sum(int(item.get("created_count") or 0) for item in audit_summaries)
-            if created_count != args.expected_bank_replay_create_count:
-                raise RuntimeError(
-                    "Bank recovery replay created an unexpected number of transactions: "
-                    f"expected {args.expected_bank_replay_create_count}, got {created_count}."
-                )
-            repaired_duplicate_count = sum(
-                int(item.get("repaired_duplicate_count") or 0)
-                for item in audit_summaries
-            )
-            if (
-                repaired_duplicate_count
-                != args.expected_bank_replay_repaired_duplicate_count
-            ):
-                raise RuntimeError(
-                    "Bank recovery replay resolved an unexpected number of repaired duplicates: "
-                    f"expected {args.expected_bank_replay_repaired_duplicate_count}, "
-                    f"got {repaired_duplicate_count}."
-                )
-            if any(
-                int(item.get("error_count") or 0)
-                or int(item.get("suspected_duplicate_count") or 0)
-                for item in audit_summaries
-            ):
-                raise RuntimeError("Bank recovery replay ended with errors or suspected duplicates.")
-            canonical_owner_count = sum(
-                int(item.get("canonical_owner_count") or 0)
-                for item in audit_summaries
-            )
-            if canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
-                raise RuntimeError("Bank recovery replay canonical owner evidence changed.")
-            canonical_reference_count = sum(
-                int(item.get("canonical_reference_count") or 0)
-                for item in audit_summaries
-            )
-            if canonical_reference_count != locked_plan["replay_canonical_reference_count"]:
-                raise RuntimeError("Bank recovery replay canonical reference evidence changed.")
-            released_canonical_reference_count = sum(
-                int(item.get("released_canonical_reference_count") or 0)
-                for item in audit_summaries
-            )
-            if (
-                released_canonical_reference_count
-                != locked_plan["expected_replay_released_reference_count"]
-            ):
-                raise RuntimeError(
-                    "Bank recovery replay released an unexpected number of canonical references: "
-                    f"expected {locked_plan['expected_replay_released_reference_count']}, "
-                    f"got {released_canonical_reference_count}."
-                )
-            idempotence_replay_results = [
-                runtime.replay_confirmed_file_import_session(
-                    source_session_id=entry["session_id"],
-                    selected_file_ids=entry["file_ids"],
-                    operator_id=args.operator_id,
-                    expected_repaired_duplicate_count=entry[
-                        "expected_repaired_duplicate_count"
-                    ],
-                    repaired_duplicate_decision_reason=entry[
-                        "repaired_duplicate_decision_reason"
-                    ],
-                    repaired_duplicate_evidence=entry[
-                        "repaired_duplicate_evidence"
-                    ],
-                    expected_canonical_owner_count=entry[
-                        "expected_canonical_owner_count"
-                    ],
-                    canonical_owner_evidence=entry["canonical_owner_evidence"],
-                    expected_canonical_reference_count=entry[
-                        "expected_canonical_reference_count"
-                    ],
-                    canonical_reference_evidence=entry[
-                        "canonical_reference_evidence"
-                    ],
-                )
-                for entry in locked_plan["replay_sources"]
-            ]
-            idempotence_summaries = [
-                dict(item.get("audit_summary") or {}) for item in idempotence_replay_results
-            ]
-            if any(
-                int(item.get("created_count") or 0)
-                or int(item.get("updated_count") or 0)
-                or int(item.get("error_count") or 0)
-                or int(item.get("suspected_duplicate_count") or 0)
-                for item in idempotence_summaries
-            ):
-                raise RuntimeError(
-                    "Repeated bank recovery replay was not idempotent or ended with audit issues."
-                )
-            repeated_repaired_duplicate_count = sum(
-                int(item.get("repaired_duplicate_count") or 0)
-                for item in idempotence_summaries
-            )
-            if (
-                repeated_repaired_duplicate_count
-                != args.expected_bank_replay_repaired_duplicate_count
-            ):
-                raise RuntimeError(
-                    "Repeated bank recovery replay changed repaired duplicate evidence."
-                )
-            repeated_canonical_owner_count = sum(
-                int(item.get("canonical_owner_count") or 0)
-                for item in idempotence_summaries
-            )
-            if repeated_canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
-                raise RuntimeError(
-                    "Repeated bank recovery replay changed canonical owner evidence."
-                )
-            repeated_canonical_reference_count = sum(
-                int(item.get("canonical_reference_count") or 0)
-                for item in idempotence_summaries
-            )
-            if (
-                repeated_canonical_reference_count
-                != locked_plan["replay_canonical_reference_count"]
-            ):
-                raise RuntimeError(
-                    "Repeated bank recovery replay changed canonical reference evidence."
-                )
-            repeated_released_canonical_reference_count = sum(
-                int(item.get("released_canonical_reference_count") or 0)
-                for item in idempotence_summaries
-            )
-            if (
-                repeated_released_canonical_reference_count
-                != locked_plan["expected_replay_released_reference_count"]
-            ):
-                raise RuntimeError(
-                    "Repeated bank recovery replay changed released canonical reference evidence."
-                )
-            report = public_bank_import_dedup_repair_report(
-                locked_plan,
-                mode="execute",
-                written=True,
-                replay_results=replay_results,
-                idempotence_replay_results=idempotence_replay_results,
-                apply_result=apply_result,
-                withdraw_results=withdraw_results,
-                refresh_scopes=refresh_scopes,
-            )
         print(
             json.dumps(
                 report,
@@ -573,6 +389,183 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         report = public_repair_report(plan, mode="execute", written=True)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
+
+
+def _complete_bank_repair_transaction(
+    *,
+    transaction: Any,
+    locked_plan: dict[str, Any],
+    apply_result: dict[str, Any],
+    withdraw_results: list[dict[str, Any]],
+    operator_id: str,
+    expected_replay_create_count: int,
+    expected_replay_repaired_duplicate_count: int,
+) -> dict[str, Any]:
+    """Replay, verify, and enqueue refreshes in the repair write transaction."""
+
+    from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+    from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+    from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
+
+    runtime = ImportRuntimeProcessorFactory(
+        data_dir=default_data_dir(),
+        connection=transaction,
+    )
+    replay_results = [
+        runtime.replay_confirmed_file_import_session(
+            source_session_id=entry["session_id"],
+            selected_file_ids=entry["file_ids"],
+            operator_id=operator_id,
+            expected_repaired_duplicate_count=entry[
+                "expected_repaired_duplicate_count"
+            ],
+            repaired_duplicate_decision_reason=entry[
+                "repaired_duplicate_decision_reason"
+            ],
+            repaired_duplicate_evidence=entry["repaired_duplicate_evidence"],
+            expected_canonical_owner_count=entry["expected_canonical_owner_count"],
+            canonical_owner_evidence=entry["canonical_owner_evidence"],
+            expected_canonical_reference_count=entry[
+                "expected_canonical_reference_count"
+            ],
+            canonical_reference_evidence=entry["canonical_reference_evidence"],
+        )
+        for entry in locked_plan["replay_sources"]
+    ]
+    audit_summaries = [dict(item.get("audit_summary") or {}) for item in replay_results]
+    created_count = sum(int(item.get("created_count") or 0) for item in audit_summaries)
+    if created_count != expected_replay_create_count:
+        raise RuntimeError(
+            "Bank recovery replay created an unexpected number of transactions: "
+            f"expected {expected_replay_create_count}, got {created_count}."
+        )
+    repaired_duplicate_count = sum(
+        int(item.get("repaired_duplicate_count") or 0) for item in audit_summaries
+    )
+    if repaired_duplicate_count != expected_replay_repaired_duplicate_count:
+        raise RuntimeError(
+            "Bank recovery replay resolved an unexpected number of repaired duplicates: "
+            f"expected {expected_replay_repaired_duplicate_count}, "
+            f"got {repaired_duplicate_count}."
+        )
+    if any(
+        int(item.get("error_count") or 0)
+        or int(item.get("suspected_duplicate_count") or 0)
+        for item in audit_summaries
+    ):
+        raise RuntimeError("Bank recovery replay ended with errors or suspected duplicates.")
+    canonical_owner_count = sum(
+        int(item.get("canonical_owner_count") or 0) for item in audit_summaries
+    )
+    if canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
+        raise RuntimeError("Bank recovery replay canonical owner evidence changed.")
+    canonical_reference_count = sum(
+        int(item.get("canonical_reference_count") or 0) for item in audit_summaries
+    )
+    if canonical_reference_count != locked_plan["replay_canonical_reference_count"]:
+        raise RuntimeError("Bank recovery replay canonical reference evidence changed.")
+    released_canonical_reference_count = sum(
+        int(item.get("released_canonical_reference_count") or 0)
+        for item in audit_summaries
+    )
+    if (
+        released_canonical_reference_count
+        != locked_plan["expected_replay_released_reference_count"]
+    ):
+        raise RuntimeError(
+            "Bank recovery replay released an unexpected number of canonical references: "
+            f"expected {locked_plan['expected_replay_released_reference_count']}, "
+            f"got {released_canonical_reference_count}."
+        )
+
+    idempotence_replay_results = [
+        runtime.replay_confirmed_file_import_session(
+            source_session_id=entry["session_id"],
+            selected_file_ids=entry["file_ids"],
+            operator_id=operator_id,
+            expected_repaired_duplicate_count=entry[
+                "expected_repaired_duplicate_count"
+            ],
+            repaired_duplicate_decision_reason=entry[
+                "repaired_duplicate_decision_reason"
+            ],
+            repaired_duplicate_evidence=entry["repaired_duplicate_evidence"],
+            expected_canonical_owner_count=entry["expected_canonical_owner_count"],
+            canonical_owner_evidence=entry["canonical_owner_evidence"],
+            expected_canonical_reference_count=entry[
+                "expected_canonical_reference_count"
+            ],
+            canonical_reference_evidence=entry["canonical_reference_evidence"],
+        )
+        for entry in locked_plan["replay_sources"]
+    ]
+    idempotence_summaries = [
+        dict(item.get("audit_summary") or {}) for item in idempotence_replay_results
+    ]
+    if any(
+        int(item.get("created_count") or 0)
+        or int(item.get("updated_count") or 0)
+        or int(item.get("error_count") or 0)
+        or int(item.get("suspected_duplicate_count") or 0)
+        for item in idempotence_summaries
+    ):
+        raise RuntimeError(
+            "Repeated bank recovery replay was not idempotent or ended with audit issues."
+        )
+    repeated_repaired_duplicate_count = sum(
+        int(item.get("repaired_duplicate_count") or 0)
+        for item in idempotence_summaries
+    )
+    if repeated_repaired_duplicate_count != expected_replay_repaired_duplicate_count:
+        raise RuntimeError("Repeated bank recovery replay changed repaired duplicate evidence.")
+    repeated_canonical_owner_count = sum(
+        int(item.get("canonical_owner_count") or 0) for item in idempotence_summaries
+    )
+    if repeated_canonical_owner_count != locked_plan["replay_canonical_owner_count"]:
+        raise RuntimeError("Repeated bank recovery replay changed canonical owner evidence.")
+    repeated_canonical_reference_count = sum(
+        int(item.get("canonical_reference_count") or 0)
+        for item in idempotence_summaries
+    )
+    if repeated_canonical_reference_count != locked_plan["replay_canonical_reference_count"]:
+        raise RuntimeError("Repeated bank recovery replay changed canonical reference evidence.")
+    repeated_released_reference_count = sum(
+        int(item.get("released_canonical_reference_count") or 0)
+        for item in idempotence_summaries
+    )
+    if (
+        repeated_released_reference_count
+        != locked_plan["expected_replay_released_reference_count"]
+    ):
+        raise RuntimeError(
+            "Repeated bank recovery replay changed released canonical reference evidence."
+        )
+
+    refresh_gateway = ReadModelRefreshGateway(
+        queue_repository=RuntimeQueueRepository(transaction)
+    )
+    refresh_scopes = {
+        scope_type: refresh_gateway.enqueue_many(
+            scope_type,
+            locked_plan["affected_months"],
+            reason="bank_import_identity_v3_recovery",
+            metadata={
+                "force_refresh": True,
+                "source_fingerprint": locked_plan["source_fingerprint"],
+            },
+        )
+        for scope_type in ("workbench", "workbench_relation")
+    }
+    return public_bank_import_dedup_repair_report(
+        locked_plan,
+        mode="execute",
+        written=True,
+        replay_results=replay_results,
+        idempotence_replay_results=idempotence_replay_results,
+        apply_result=apply_result,
+        withdraw_results=withdraw_results,
+        refresh_scopes=refresh_scopes,
+    )
 
 
 def _parse_bank_repair_sources(values: list[str]) -> list[dict[str, object]]:

@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from contextlib import contextmanager
-from decimal import Decimal
 import io
 import json
-from types import SimpleNamespace
 import unittest
+from contextlib import contextmanager
+from copy import deepcopy
+from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from fin_ops_platform.services.bank_import_dedup_repair_service import (
+    BankImportDedupRelationEvidenceError,
+)
 from fin_ops_platform.services.import_audit_repair_service import (
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
     execute_failed_import_job_recovery,
     public_repair_report,
-)
-from fin_ops_platform.services.bank_import_dedup_repair_service import (
-    BankImportDedupRelationEvidenceError,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     _FAILED_IMPORT_FILE_SQL,
@@ -1284,16 +1284,30 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         )
 
     def test_cli_bank_cleanup_executes_withdraw_delete_audit_refresh_and_replay(self) -> None:
-        class Connection:
-            @contextmanager
-            def transaction(self):
-                yield self
-
+        class Transaction:
             def execute(self, _sql: str, _params: tuple = ()) -> int:
                 return 0
 
             def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, object]:
                 return {"locked": True}
+
+        class Connection:
+            def __init__(self) -> None:
+                self.transactions: list[Transaction] = []
+                self.commits = 0
+                self.rollbacks = 0
+
+            @contextmanager
+            def transaction(self):
+                transaction = Transaction()
+                self.transactions.append(transaction)
+                try:
+                    yield transaction
+                except Exception:
+                    self.rollbacks += 1
+                    raise
+                else:
+                    self.commits += 1
 
         connection = Connection()
         output = io.StringIO()
@@ -1418,7 +1432,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             patch(
                 "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory",
                 return_value=runtime,
-            ),
+            ) as runtime_factory,
         ):
             result = import_audit_repair_ops.main(arguments, stdout=output)
 
@@ -1426,13 +1440,148 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertEqual(load_snapshot.call_count, 2)
         self.assertTrue(load_snapshot.call_args.kwargs["cleanup_related_duplicates"])
         self.assertEqual(load_snapshot.call_args.kwargs["expected_category_cleanup_count"], 8)
-        withdraw.assert_called_once_with(connection, plan, operator_id="system_repair")
-        apply_repair.assert_called_once_with(connection, plan, operator_id="system_repair")
+        write_transaction = connection.transactions[1]
+        withdraw.assert_called_once_with(write_transaction, plan, operator_id="system_repair")
+        apply_repair.assert_called_once_with(write_transaction, plan, operator_id="system_repair")
         audit_service.return_value.record_action.assert_called_once()
+        self.assertEqual(connection.commits, 2)
+        self.assertEqual(connection.rollbacks, 0)
+        runtime_factory.assert_called_once_with(
+            data_dir=import_audit_repair_ops.default_data_dir(),
+            connection=write_transaction,
+        )
         self.assertEqual(refresh_gateway.enqueue_many.call_count, 2)
         self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
         report = json.loads(output.getvalue())
         self.assertEqual(report["apply_result"]["transaction_delete_count"], 674)
+
+    def test_cli_bank_repair_gate_failure_rolls_back_cleanup_and_replay_together(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, object]:
+                return {"locked": True}
+
+        class Connection:
+            def __init__(self) -> None:
+                self.transactions: list[Transaction] = []
+                self.commits = 0
+                self.rollbacks = 0
+
+            @contextmanager
+            def transaction(self):
+                transaction = Transaction()
+                self.transactions.append(transaction)
+                try:
+                    yield transaction
+                except Exception:
+                    self.rollbacks += 1
+                    raise
+                else:
+                    self.commits += 1
+
+        plan = {
+            "source_fingerprint": "f" * 64,
+            "target_count": 1,
+            "duplicate_delete_count": 1,
+            "replay_repaired_duplicate_count": 1,
+            "replay_canonical_owner_count": 0,
+            "replay_canonical_reference_count": 0,
+            "expected_replay_released_reference_count": 0,
+            "replay_sources": [
+                {
+                    "session_id": "session-1",
+                    "file_ids": ["file-1"],
+                    "expected_repaired_duplicate_count": 1,
+                    "repaired_duplicate_decision_reason": "repair",
+                    "repaired_duplicate_evidence": [],
+                    "expected_canonical_owner_count": 0,
+                    "canonical_owner_evidence": [],
+                    "expected_canonical_reference_count": 0,
+                    "canonical_reference_evidence": [],
+                }
+            ],
+            "affected_months": ["2026-04"],
+            "category_cleanup_actions": [],
+            "workbench_withdraw_actions": [],
+        }
+        runtime = Mock()
+        runtime.replay_confirmed_file_import_session.return_value = {
+            "audit_summary": {
+                "created_count": 1,
+                "repaired_duplicate_count": 1,
+                "canonical_owner_count": 0,
+                "canonical_reference_count": 0,
+                "released_canonical_reference_count": 0,
+            }
+        }
+        connection = Connection()
+        arguments = [
+            "--execute",
+            "--expected-fingerprint",
+            "f" * 64,
+            "--repair-bank-source",
+            "session-1=file-1",
+            "--expected-bank-target-count",
+            "1",
+            "--expected-bank-protected-count",
+            "1",
+            "--expected-bank-duplicate-delete-count",
+            "1",
+            "--expected-bank-replay-create-count",
+            "0",
+            "--expected-bank-replay-repaired-duplicate-count",
+            "1",
+            "--expected-bank-replay-released-reference-count",
+            "0",
+            "--operator-id",
+            "system_repair",
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_dedup_repair_snapshot",
+                return_value={},
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_dedup_repair_plan",
+                side_effect=[deepcopy(plan), deepcopy(plan)],
+            ),
+            patch.object(import_audit_repair_ops, "verify_bank_import_repair_source_files"),
+            patch.object(
+                import_audit_repair_ops,
+                "_build_bank_repair_state_store",
+                return_value=SimpleNamespace(read_import_file=Mock()),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "withdraw_bank_import_dedup_workbench_relations",
+                return_value=[],
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "apply_bank_import_dedup_repair",
+                return_value={"transaction_delete_count": 1},
+            ),
+            patch.object(import_audit_repair_ops, "AuditTrailService"),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory",
+                return_value=runtime,
+            ) as runtime_factory,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "expected 0, got 1"):
+                import_audit_repair_ops.main(arguments, stdout=io.StringIO())
+
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 1)
+        runtime_factory.assert_called_once_with(
+            data_dir=import_audit_repair_ops.default_data_dir(),
+            connection=connection.transactions[1],
+        )
 
     def test_cli_failed_import_recovery_dry_run_bypasses_global_audit_scan(self) -> None:
         class Connection:

@@ -5,6 +5,10 @@ from decimal import Decimal
 
 from fin_ops_platform.domain.enums import ImportDecision, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.bank_transaction_identity_service import (
+    BankTransactionIdentityService,
+    BankTransactionStatementPosition,
+)
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -56,6 +60,18 @@ class FakeObjectIdentityRepository:
             for transaction in self.transactions
             if (canonical_key and transaction.source_unique_key == canonical_key)
             or (suspected_key and transaction.data_fingerprint == suspected_key)
+        ]
+
+    def find_bank_transactions_by_statement_position(
+        self,
+        *,
+        position: BankTransactionStatementPosition,
+    ) -> list[BankTransaction]:
+        identity_service = BankTransactionIdentityService()
+        return [
+            transaction
+            for transaction in self.transactions
+            if identity_service.statement_position_for_transaction(transaction) == position
         ]
 
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
@@ -329,6 +345,87 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
             repo.bank_queries[-1],
             (position_identity.canonical_key, None),
         )
+
+    def test_reused_reference_matches_unique_legacy_statement_position_without_v4_key(self) -> None:
+        incoming = {
+            "account_no": "62220001",
+            "trade_time": "2026-04-16 10:51:46",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "balance": "979.57",
+            "currency": "人民币元",
+            "counterparty_name": "对公网银汇款及转账手续费收入",
+            "bank_serial_no": "REUSED-REF",
+        }
+        base_identity = FinancialObjectIdentityPolicy().identify_bank_transaction_mapping(incoming)
+        self.transaction.source_unique_key = base_identity.canonical_key
+        self.transaction.balance = Decimal("1000.00")
+        self.transaction.currency = "CNY"
+        legacy_match = BankTransaction(
+            id="txn-legacy-position",
+            account_no="62220001",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="对公网银汇款及转账手续费收入",
+            amount=Decimal("0.90"),
+            signed_amount=Decimal("-0.90"),
+            trade_time="2026-04-16 10:51:46",
+            bank_serial_no="LEGACY-REF",
+            balance=Decimal("979.57"),
+            currency="CNY",
+            source_unique_key="legacy-bank-key",
+        )
+        service = ObjectDedupDecisionService(
+            object_identity_repository=FakeObjectIdentityRepository(
+                transactions=[self.transaction, legacy_match]
+            )
+        )
+
+        decision = service.decide_bank_transaction_import(incoming)
+
+        self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(decision.linked_object_id, "txn-legacy-position")
+        self.assertTrue(str(decision.identity.canonical_key).startswith("bank-v4:"))
+
+    def test_reused_reference_refuses_ambiguous_legacy_statement_position(self) -> None:
+        incoming = {
+            "account_no": "62220001",
+            "trade_time": "2026-04-16 10:51:46",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "balance": "979.57",
+            "currency": "CNY",
+            "counterparty_name": "Bank fee",
+            "bank_serial_no": "REUSED-REF",
+        }
+        base_identity = FinancialObjectIdentityPolicy().identify_bank_transaction_mapping(incoming)
+        self.transaction.source_unique_key = base_identity.canonical_key
+        self.transaction.balance = Decimal("1000.00")
+        self.transaction.currency = "CNY"
+        legacy_matches = [
+            BankTransaction(
+                id=f"txn-legacy-{index}",
+                account_no="62220001",
+                txn_direction=TransactionDirection.OUTFLOW,
+                counterparty_name_raw="Bank fee",
+                amount=Decimal("0.90"),
+                signed_amount=Decimal("-0.90"),
+                trade_time="2026-04-16 10:51:46",
+                balance=Decimal("979.57"),
+                currency="CNY",
+                source_unique_key=f"legacy-{index}",
+            )
+            for index in range(2)
+        ]
+        service = ObjectDedupDecisionService(
+            object_identity_repository=FakeObjectIdentityRepository(
+                transactions=[self.transaction, *legacy_matches]
+            )
+        )
+
+        decision = service.decide_bank_transaction_import(incoming)
+
+        self.assertEqual(decision.decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertIn("multiple legacy transactions", decision.decision_reason)
 
     def test_fingerprint_match_without_existing_official_reference_is_suspected(self) -> None:
         self.transaction.bank_serial_no = None

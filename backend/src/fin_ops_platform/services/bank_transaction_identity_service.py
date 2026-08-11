@@ -17,6 +17,8 @@ WHITESPACE_RE = re.compile(r"\s+")
 DATE_TIME_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})$")
 COMPACT_DATE_TIME_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d{2})$")
 
+BankTransactionStatementPosition = tuple[str, str, str, str, str, str]
+
 
 @dataclass(frozen=True, slots=True)
 class BankTransactionIdentity:
@@ -145,6 +147,53 @@ class BankTransactionIdentityService:
                 "account_detail_no": transaction.account_detail_no,
                 "enterprise_serial_no": transaction.enterprise_serial_no,
                 "voucher_no": transaction.voucher_no,
+                "balance": transaction.balance,
+                "currency": transaction.currency,
+            }
+        )
+
+    def statement_position_for_mapping(
+        self,
+        values: dict[str, Any],
+    ) -> BankTransactionStatementPosition | None:
+        """Return the complete statement position used for legacy canonical migration.
+
+        A position is usable only when every field is present.  In particular,
+        balance is mandatory so repeated bank fees at the same second are not
+        collapsed merely because their amount and description are equal.
+        """
+
+        identity = self.identity_for_mapping(values)
+        account_no = identity.components.get("account_no")
+        trade_time = identity.components.get("trade_time")
+        direction = identity.components.get("direction")
+        amount = identity.components.get("amount")
+        balance = self._normalize_position_amount(values.get("balance"))
+        currency = self._normalize_currency(values.get("currency"))
+        if not all((account_no, trade_time, direction, amount, balance, currency)):
+            return None
+        return (
+            account_no,
+            trade_time,
+            direction,
+            amount,
+            balance,
+            currency,
+        )
+
+    def statement_position_for_transaction(
+        self,
+        transaction: BankTransaction,
+    ) -> BankTransactionStatementPosition | None:
+        return self.statement_position_for_mapping(
+            {
+                "account_no": transaction.account_no,
+                "trade_time": transaction.trade_time,
+                "pay_receive_time": transaction.pay_receive_time,
+                "txn_date": transaction.txn_date,
+                "txn_direction": transaction.txn_direction,
+                "amount": transaction.amount,
+                "counterparty_name": transaction.counterparty_name_raw,
                 "balance": transaction.balance,
                 "currency": transaction.currency,
             }

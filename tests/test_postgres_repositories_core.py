@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
+from fin_ops_platform.domain.enums import (
+    BatchStatus,
+    BatchType,
+    ImportDecision,
+    InvoiceStatus,
+    InvoiceType,
+    TransactionDirection,
+)
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatchRowResult, Invoice
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -668,6 +675,49 @@ def test_find_bank_transactions_by_identity_keys_uses_single_bulk_lookup() -> No
     assert params == (["bank-v3:key"], ["bank:fingerprint"])
     assert "source_unique_key = any(%s::text[])" in sql
     assert "data_fingerprint = any(%s::text[])" in sql
+
+
+def test_find_bank_transactions_by_statement_positions_uses_one_strict_bulk_lookup() -> None:
+    class BankPositionConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple]] = []
+
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+            self.calls.append((" ".join(sql.lower().split()), params))
+            return []
+
+    connection = BankPositionConnection()
+    position = (
+        "62229999",
+        "2026-04-16 10:51:46",
+        "outflow",
+        "0.90",
+        "979.57",
+        "CNY",
+    )
+
+    matches = PostgresCoreRepository(connection).find_bank_transactions_by_statement_positions(
+        positions=[position, position]
+    )
+
+    assert matches == []
+    assert len(connection.calls) == 1
+    sql, params = connection.calls[0]
+    assert "jsonb_to_recordset" in sql
+    assert "transaction_row.account_no = position_row.account_no" in sql
+    assert "transaction_row.trade_time = position_row.trade_time::timestamptz" in sql
+    assert "transaction_row.txn_direction::text = position_row.txn_direction" in sql
+    assert "transaction_row.amount = position_row.amount::numeric" in sql
+    assert "transaction_row.balance = position_row.balance::numeric" in sql
+    assert params[0].obj == [
+        {
+            "account_no": "62229999",
+            "trade_time": "2026-04-16 10:51:46",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "balance": "979.57",
+        }
+    ]
 
 
 def test_invoice_read_prefers_canonical_legacy_id_over_stale_raw_payload_id() -> None:

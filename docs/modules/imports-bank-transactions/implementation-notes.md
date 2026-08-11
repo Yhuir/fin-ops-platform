@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-12 - legacy statement-position 重放与恢复事务原子性
+
+- 生产事实：7 个授权附件解析出 1,100 条严格唯一流水；首次受控重放后库内为 1,101 条、1,100 个严格位置，唯一多重项是平安 0093、2026-04-16 10:51:46、支出 0.90、余额 979.57。
+- 根因一：保留的历史 canonical 行没有 `bank-v4` key；重放行因官方参考号冲突生成 v4，旧决策只查 v4 key，没有用六项完整账单位置反向匹配 legacy 行，因此错建一条副本。修复后唯一六项命中判为 duplicate，多义命中判为 suspected，任一字段缺失不自动合并。
+- 根因二：旧恢复 CLI 在一个事务内提交清理，再通过根连接运行自主重放；因此外层计数门禁发现“预期新增 7、实际 8”时，不能回滚已提交的重放写入。修复后清理、两轮重放、审计与 refresh outbox 都使用同一 serializable advisory-lock 事务，门禁失败不会留下半写状态。
+- 性能：完整 statement-position 候选通过一次 `jsonb_to_recordset` 批量查询预取，后续逐行判定只读文件级内存 cache，不增加 N+1 SQL。
+- 数据修复：只允许通过原 source session/file 的 `import-audit-repair --repair-bank-source` dry-run + fingerprint + CAS 门禁删除该一条错建副本，重放必须零新增；禁止手工 SQL 扩大清理范围。
+
 ## 2026-08-12 - statement-position 重放判重与错误引用释放
 
 - 根因：官方参考号复用后首次导入可生成 `bank-v4` statement-position identity，但同一位置再次导入时，旧决策只检查基础 `bank-v3` 冲突，没有直接查询已经存在的 `bank-v4`，在自由文本 fingerprint 漂移时会再次判为新建。生产受控回放另有 38 条旧 canonical reference 指向六项账单证据不一致的流水，旧逻辑会无条件覆盖当前 importer decision。
