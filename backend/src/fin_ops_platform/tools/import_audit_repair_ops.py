@@ -26,7 +26,11 @@ from fin_ops_platform.services.object_storage import (
     ObjectStorageSettings,
     S3ObjectStorageRepository,
 )
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConnection,
+    PostgresSettings,
+    PostgresTransaction,
+)
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
     apply_bank_import_dedup_repair,
     load_bank_import_dedup_repair_snapshot,
@@ -57,7 +61,7 @@ def _build_bank_repair_state_store(connection: PostgresConnection) -> PostgresSt
     return PostgresStateStore(**state_store_kwargs)
 
 
-class _ActiveTransactionConnection:
+class _ActiveTransactionConnection(PostgresTransaction):
     """Expose one active transaction through the connection-shaped repository boundary."""
 
     def __init__(self, transaction: Any) -> None:
@@ -65,6 +69,34 @@ class _ActiveTransactionConnection:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._transaction, name)
+
+    def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+        return self._transaction.fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        return self._transaction.fetch_all(sql, params)
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
+        return self._transaction.execute(sql, params)
+
+    def execute_many(self, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
+        return self._transaction.execute_many(sql, params_seq)
+
+    def execute_many_values(
+        self,
+        sql: str,
+        params_seq: list[tuple[Any, ...]],
+        *,
+        chunk_size: int = 1000,
+    ) -> int:
+        return self._transaction.execute_many_values(
+            sql,
+            params_seq,
+            chunk_size=chunk_size,
+        )
+
+    def copy_rows(self, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
+        return self._transaction.copy_rows(sql, params_seq)
 
     @contextmanager
     def transaction(self):

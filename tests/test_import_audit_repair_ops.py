@@ -1454,6 +1454,16 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         transaction_connection = runtime_factory.call_args.kwargs["connection"]
         with transaction_connection.transaction() as nested_transaction:
             self.assertIs(nested_transaction, write_transaction)
+        from psycopg.types.json import Jsonb
+
+        from fin_ops_platform.services.postgres_connection import PostgresTransaction
+        from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+
+        self.assertIsInstance(transaction_connection, PostgresTransaction)
+        self.assertIsInstance(
+            RuntimeQueueRepository(transaction_connection)._json_param({"scope": "2026-02"}),
+            Jsonb,
+        )
         self.assertEqual(refresh_gateway.enqueue_many.call_count, 2)
         self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
         report = json.loads(output.getvalue())
