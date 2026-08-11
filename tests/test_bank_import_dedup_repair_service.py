@@ -720,6 +720,26 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn("delete from app.bank_transactions", connection.calls[4][0])
         self.assertEqual(connection.calls[4][1][2], "batch-1")
 
+    def test_repository_preserves_null_source_unique_key_for_legacy_delete_cas(self) -> None:
+        snapshot = _snapshot()
+        snapshot["target_transactions"][0]["source_unique_key"] = None
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...]) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        apply_bank_import_dedup_repair(connection, plan, operator_id="system_repair")
+
+        self.assertIsNone(plan["duplicate_pairs"][0]["delete_source_unique_key"])
+        self.assertIsNone(connection.calls[-1][1][3])
+        self.assertIn("source_unique_key is not distinct from %s", connection.calls[-1][0])
+
     def test_repository_deletes_exact_category_event_before_category(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
 

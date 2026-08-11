@@ -827,7 +827,16 @@ def _duplicate_pair(
         "delete_transaction_id": _text(target.get("transaction_id")),
         "delete_batch_pk": _text(target.get("batch_pk")),
         "delete_legacy_batch_id": _text(target.get("legacy_batch_id")),
-        "delete_source_unique_key": _text(target.get("source_unique_key")),
+        # ``source_unique_key`` is nullable for historical imports.  Preserve
+        # SQL NULL here because the repository intentionally uses
+        # ``IS NOT DISTINCT FROM`` as part of its compare-and-swap guard.
+        # Coercing NULL to an empty string makes an otherwise unchanged legacy
+        # transaction impossible to delete after an approved dry-run.
+        "delete_source_unique_key": (
+            _text(target.get("source_unique_key"))
+            if target.get("source_unique_key") is not None
+            else None
+        ),
         "keep_transaction_pk": _text(keeper.get("transaction_pk")),
         "keep_transaction_id": _text(keeper.get("transaction_id")),
         "transaction_month": _text(target.get("txn_month")),
