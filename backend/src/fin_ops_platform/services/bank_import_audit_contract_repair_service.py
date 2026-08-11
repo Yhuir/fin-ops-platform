@@ -221,17 +221,23 @@ def _build_row_relink_actions(
             or not _text(row.get("linked_object_id"))
         ):
             continue
-        current = transaction_by_id.get(_text(row.get("linked_object_id")))
-        if current is not None and _row_matches_transaction(
-            row, current, identity_service=identity_service
-        ):
-            continue
         strict_key = _strict_match_key(
             row,
             direction_key="direction",
             identity_service=identity_service,
             counterparty_key="counterparty_name",
         )
+        current = transaction_by_id.get(_text(row.get("linked_object_id")))
+        if current is not None and _row_matches_transaction(
+            row, current, identity_service=identity_service
+        ):
+            continue
+        if (
+            current is not None
+            and strict_key is not None
+            and transactions_by_strict_key.get(strict_key) == [current]
+        ):
+            continue
         candidates = [
             transaction
             for transaction in transactions_by_fingerprint.get(

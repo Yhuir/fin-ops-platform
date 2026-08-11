@@ -214,6 +214,31 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
         self.assertIsNone(action["data_fingerprint"])
         self.assertEqual(action["match_basis"], "unique_statement_position_fallback")
 
+    def test_plan_is_idempotent_after_unique_strict_position_relink(self) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["transactions"][1]["data_fingerprint"] = "bank:legacy-drift"
+        first_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+        snapshot["rows"][0]["linked_object_id"] = first_plan["row_relink_actions"][0][
+            "after_linked_object_id"
+        ]
+        snapshot["rows"][0]["raw_payload"] = first_plan["row_relink_actions"][0][
+            "after_raw_payload"
+        ]
+
+        second_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+        )
+
+        self.assertEqual(second_plan["row_relink_actions"], [])
+
     def test_plan_fails_closed_when_strict_position_fallback_is_ambiguous(
         self,
     ) -> None:
