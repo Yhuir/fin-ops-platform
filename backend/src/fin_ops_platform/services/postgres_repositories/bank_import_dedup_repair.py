@@ -73,7 +73,7 @@ def apply_bank_import_dedup_repair(connection: Any, plan: dict[str, Any]) -> Non
             (
                 json.dumps(update["after_raw_payload"], ensure_ascii=False, default=str),
                 update["file_pk"],
-                update["batch_pk"],
+                update["batch_id"],
                 json.dumps(update["before_raw_payload"], ensure_ascii=False, default=str),
             ),
         )
@@ -107,7 +107,11 @@ select file.id::text as file_pk,
        coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
        batch.batch_type, batch.status as batch_status
 from app.import_files file
-join app.import_batches batch on batch.id = file.import_batch_id
+join app.import_batches batch
+  on coalesce(batch.legacy_mongo_id, batch.id::text) = coalesce(
+      file.raw_payload->'normalized_payload'->>'batch_id',
+      file.raw_payload->'normalized_payload'->>'preview_batch_id'
+  )
 left join app.file_objects object on object.id = file.file_object_id
 where file.session_id = any(%s::text[])
   and coalesce(file.legacy_mongo_id, file.id::text) = any(%s::text[])
@@ -245,7 +249,10 @@ _UPDATE_FILE_SQL = """
 update app.import_files
 set raw_payload = %s::jsonb
 where id = %s::uuid
-  and import_batch_id = %s::uuid
+  and coalesce(
+      raw_payload->'normalized_payload'->>'batch_id',
+      raw_payload->'normalized_payload'->>'preview_batch_id'
+  ) = %s
   and status = 'confirmed'
   and raw_payload = %s::jsonb
 """

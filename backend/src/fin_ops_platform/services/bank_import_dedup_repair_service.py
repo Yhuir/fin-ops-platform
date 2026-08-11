@@ -323,6 +323,7 @@ def _build_file_updates(
             {
                 "file_pk": _text(row.get("file_pk")),
                 "batch_pk": batch_pk,
+                "batch_id": _text(row.get("batch_id")),
                 "before_raw_payload": before,
                 "after_raw_payload": after,
             }

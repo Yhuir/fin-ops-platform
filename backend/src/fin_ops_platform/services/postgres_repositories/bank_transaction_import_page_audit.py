@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+import unicodedata
 from zoneinfo import ZoneInfo
 
 from fin_ops_platform.services.import_preview_audit import (
@@ -537,12 +538,31 @@ def _identity_matches(row: dict[str, Any], transaction: dict[str, Any]) -> bool:
     transaction_fingerprint = _text(transaction.get("data_fingerprint"))
     if (row_source_key, row_fingerprint) == (transaction_source_key, transaction_fingerprint):
         return True
+    if row_fingerprint and row_fingerprint == transaction_fingerprint:
+        row_references = _official_reference_values(row)
+        transaction_references = _official_reference_values(transaction)
+        if row_references and transaction_references and row_references.intersection(transaction_references):
+            return True
     return (
         not row_fingerprint
         and row_source_key.startswith("bank:")
         and row_source_key == transaction_fingerprint
         and (not transaction_source_key or transaction_source_key.startswith("bank-v2:"))
     )
+
+
+def _official_reference_values(row: dict[str, Any]) -> set[str]:
+    payload = _payload(row)
+    normalized_row = _dict(payload.get("normalized_row"))
+    values = {
+        row.get(field_name) or normalized_row.get(field_name) or payload.get(field_name)
+        for field_name in ("account_detail_no", "bank_serial_no", "enterprise_serial_no")
+    }
+    return {
+        "".join(unicodedata.normalize("NFKC", str(value)).split()).upper()
+        for value in values
+        if _text(value)
+    }
 
 
 def _job_issues(

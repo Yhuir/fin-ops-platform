@@ -9,6 +9,8 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     verify_bank_import_repair_source_files,
 )
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
+    _SOURCE_FILE_SQL,
+    _UPDATE_FILE_SQL,
     apply_bank_import_dedup_repair,
 )
 
@@ -216,3 +218,10 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn("status = 'completed'", connection.calls[1][0])
         self.assertIn("status = 'confirmed'", connection.calls[2][0])
         self.assertIn("delete from app.bank_transactions", connection.calls[3][0])
+
+    def test_repository_uses_durable_file_payload_batch_link(self) -> None:
+        self.assertNotIn("file.import_batch_id", _SOURCE_FILE_SQL)
+        self.assertNotIn("import_batch_id =", _UPDATE_FILE_SQL)
+        self.assertIn("normalized_payload'->>'batch_id'", _SOURCE_FILE_SQL)
+        self.assertIn("normalized_payload'->>'preview_batch_id'", _SOURCE_FILE_SQL)
+        self.assertIn("normalized_payload'->>'batch_id'", _UPDATE_FILE_SQL)
