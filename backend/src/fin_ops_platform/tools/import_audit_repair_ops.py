@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-protected-count", type=int)
     parser.add_argument("--expected-bank-duplicate-delete-count", type=int)
     parser.add_argument("--expected-bank-replay-create-count", type=int)
+    parser.add_argument("--expected-bank-replay-repaired-duplicate-count", type=int)
     parser.add_argument("--cleanup-related-bank-duplicates", action="store_true")
     parser.add_argument("--expected-bank-category-cleanup-count", type=int)
     parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
@@ -128,10 +129,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         or args.expected_bank_protected_count is None
         or args.expected_bank_duplicate_delete_count is None
         or args.expected_bank_replay_create_count is None
+        or args.expected_bank_replay_repaired_duplicate_count is None
         or not args.operator_id
     ):
         raise SystemExit(
-            "Bank dedup repair requires exact target/protected/duplicate-delete/replay counts "
+            "Bank dedup repair requires exact target/protected/duplicate-delete/replay/repaired-duplicate counts "
             "and --operator-id"
         )
     related_cleanup_values = (
@@ -166,6 +168,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 args.expected_bank_duplicate_delete_count
             ),
             "expected_replay_create_count": args.expected_bank_replay_create_count,
+            "expected_replay_repaired_duplicate_count": (
+                args.expected_bank_replay_repaired_duplicate_count
+            ),
             "cleanup_related_duplicates": args.cleanup_related_bank_duplicates,
             "expected_category_cleanup_count": (
                 args.expected_bank_category_cleanup_count or 0
@@ -293,8 +298,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     source_session_id=entry["session_id"],
                     selected_file_ids=entry["file_ids"],
                     operator_id=args.operator_id,
+                    expected_repaired_duplicate_count=entry[
+                        "expected_repaired_duplicate_count"
+                    ],
+                    repaired_duplicate_decision_reason=entry[
+                        "repaired_duplicate_decision_reason"
+                    ],
                 )
-                for entry in source_sessions
+                for entry in locked_plan["replay_sources"]
             ]
             audit_summaries = [dict(item.get("audit_summary") or {}) for item in replay_results]
             created_count = sum(int(item.get("created_count") or 0) for item in audit_summaries)
@@ -302,6 +313,19 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 raise RuntimeError(
                     "Bank recovery replay created an unexpected number of transactions: "
                     f"expected {args.expected_bank_replay_create_count}, got {created_count}."
+                )
+            repaired_duplicate_count = sum(
+                int(item.get("repaired_duplicate_count") or 0)
+                for item in audit_summaries
+            )
+            if (
+                repaired_duplicate_count
+                != args.expected_bank_replay_repaired_duplicate_count
+            ):
+                raise RuntimeError(
+                    "Bank recovery replay resolved an unexpected number of repaired duplicates: "
+                    f"expected {args.expected_bank_replay_repaired_duplicate_count}, "
+                    f"got {repaired_duplicate_count}."
                 )
             if any(
                 int(item.get("error_count") or 0)
@@ -314,8 +338,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     source_session_id=entry["session_id"],
                     selected_file_ids=entry["file_ids"],
                     operator_id=args.operator_id,
+                    expected_repaired_duplicate_count=entry[
+                        "expected_repaired_duplicate_count"
+                    ],
+                    repaired_duplicate_decision_reason=entry[
+                        "repaired_duplicate_decision_reason"
+                    ],
                 )
-                for entry in source_sessions
+                for entry in locked_plan["replay_sources"]
             ]
             idempotence_summaries = [
                 dict(item.get("audit_summary") or {}) for item in idempotence_replay_results
@@ -329,6 +359,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             ):
                 raise RuntimeError(
                     "Repeated bank recovery replay was not idempotent or ended with audit issues."
+                )
+            repeated_repaired_duplicate_count = sum(
+                int(item.get("repaired_duplicate_count") or 0)
+                for item in idempotence_summaries
+            )
+            if (
+                repeated_repaired_duplicate_count
+                != args.expected_bank_replay_repaired_duplicate_count
+            ):
+                raise RuntimeError(
+                    "Repeated bank recovery replay changed repaired duplicate evidence."
                 )
             report = public_bank_import_dedup_repair_report(
                 locked_plan,

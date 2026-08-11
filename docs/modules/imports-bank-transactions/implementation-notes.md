@@ -254,3 +254,11 @@
 - 生产 dry-run 暴露出维护工具直接构造 `PostgresStateStore` 时未注入对象存储 repository，导致已配置在正式 runtime 的归档导入文件无法读取。
 - 修复复用现有 `ObjectStorageSettings` 与 `S3ObjectStorageRepository`，通过与应用相同的 runtime 环境装配对象存储；不新增维护专用凭据、fallback 或第二条文件读取链路。
 - 银行去重恢复仍必须从正式归档文件读取并校验 SHA-256，配置缺失或文件漂移继续 fail closed。
+
+## 2026-08-12 - 普通去重确认与受控恢复闭环
+
+- 真实根因：旧 `ImportNormalizationService.confirm_import` 会把银行弱指纹 `suspected_duplicate` 直接改成 `created`，因此确认操作能够绕过预览去重并制造 canonical 重复项。
+- 删除旧链：移除该强制新建分支；普通 confirm 只持久化 `created/status_updated/duplicate_skipped`，疑似项保持未写入并以 `completed_with_errors` 明确暴露。
+- 恢复边界：生产恢复工具新增精确受控跳过计数。只有已由本次 repair reason 重定向到 keeper 的来源 row，且重新预览仍命中同一 keeper，才能转换为 `duplicate_skipped`；其余疑似项全部失败。
+- Read model：修复工具把数据库可能返回的月初日期规范为 `YYYY-MM` 后再进入正式 gateway，避免业务事务已提交后刷新 scope 校验失败。
+- 不新增表、API、worker、read model、fallback 或第二条导入写链；继续复用正式 file/session preview-confirm processor。

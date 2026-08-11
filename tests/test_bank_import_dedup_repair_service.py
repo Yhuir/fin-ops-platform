@@ -105,6 +105,7 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
             "expected_protected_count": 1,
             "expected_duplicate_delete_count": 1,
             "expected_replay_create_count": 1,
+            "expected_replay_repaired_duplicate_count": 1,
         },
         "files": [
             {
@@ -272,9 +273,31 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["duplicate_pairs"][0]["keep_transaction_id"], "keeper-1")
         self.assertEqual(plan["batch_updates"][0]["after_success_count"], 1)
         self.assertEqual(plan["batch_updates"][0]["after_duplicate_count"], 1)
+        self.assertEqual(plan["replay_repaired_duplicate_count"], 1)
+        self.assertEqual(
+            plan["replay_sources"],
+            [
+                {
+                    "session_id": "session-1",
+                    "file_ids": ["file-1"],
+                    "expected_repaired_duplicate_count": 1,
+                    "repaired_duplicate_decision_reason": (
+                        "Reclassified by bank identity v3 controlled recovery."
+                    ),
+                }
+            ],
+        )
         first_update = plan["row_updates"][0]
         self.assertEqual(first_update["after_decision"], "duplicate_skipped")
         self.assertEqual(first_update["after_linked_object_id"], "keeper-1")
+
+    def test_plan_normalizes_database_month_date_for_read_model_scope(self) -> None:
+        snapshot = _snapshot()
+        snapshot["target_transactions"][0]["txn_month"] = "2026-05-01"
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["affected_months"], ["2026-05"])
 
     def test_plan_refuses_ambiguous_missing_reference_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "ambiguous"):
@@ -389,6 +412,7 @@ class BankImportDedupRepairServiceTests(TestCase):
             }
         )
         snapshot["request"]["expected_duplicate_delete_count"] = 0
+        snapshot["request"]["expected_replay_repaired_duplicate_count"] = 0
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
@@ -428,6 +452,7 @@ class BankImportDedupRepairServiceTests(TestCase):
     def test_plan_fails_closed_when_exact_duplicate_delete_count_changes(self) -> None:
         snapshot = _snapshot()
         snapshot["request"]["expected_duplicate_delete_count"] = 0
+        snapshot["request"]["expected_replay_repaired_duplicate_count"] = 0
 
         with self.assertRaisesRegex(ValueError, r"expected 0, resolved 1") as context:
             build_bank_import_dedup_repair_plan(snapshot)
@@ -447,6 +472,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         snapshot = _snapshot()
         snapshot["target_transactions"][0]["bank_serial_no"] = "REF-DIFFERENT"
         snapshot["request"]["expected_duplicate_delete_count"] = 0
+        snapshot["request"]["expected_replay_repaired_duplicate_count"] = 0
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
@@ -457,6 +483,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         snapshot["target_transactions"][0]["balance"] = "1000.00"
         snapshot["protected_transactions"][0]["balance"] = "2000.00"
         snapshot["request"]["expected_duplicate_delete_count"] = 0
+        snapshot["request"]["expected_replay_repaired_duplicate_count"] = 0
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 

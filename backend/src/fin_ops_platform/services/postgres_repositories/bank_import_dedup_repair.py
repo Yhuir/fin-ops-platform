@@ -16,6 +16,7 @@ def load_bank_import_dedup_repair_snapshot(
     expected_protected_count: int,
     expected_duplicate_delete_count: int,
     expected_replay_create_count: int,
+    expected_replay_repaired_duplicate_count: int,
     cleanup_related_duplicates: bool = False,
     expected_category_cleanup_count: int = 0,
     expected_workbench_withdraw_count: int = 0,
@@ -69,6 +70,9 @@ def load_bank_import_dedup_repair_snapshot(
             "expected_protected_count": expected_protected_count,
             "expected_duplicate_delete_count": expected_duplicate_delete_count,
             "expected_replay_create_count": expected_replay_create_count,
+            "expected_replay_repaired_duplicate_count": (
+                expected_replay_repaired_duplicate_count
+            ),
             "cleanup_related_duplicates": cleanup_related_duplicates,
             "expected_category_cleanup_count": expected_category_cleanup_count,
             "expected_workbench_withdraw_count": expected_workbench_withdraw_count,

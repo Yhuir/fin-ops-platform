@@ -757,7 +757,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(created.txn_date, "2026-03-23")
         self.assertEqual(created.source_unique_key, "bank-v2:62220001:bank_serial_no:SERIAL-DATE-ONLY-001")
 
-    def test_confirm_import_accepts_reviewed_weak_bank_match(self) -> None:
+    def test_confirm_import_does_not_persist_weak_bank_match(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-weak-match-demo.json",
@@ -777,9 +777,13 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.row_results[0].decision, ImportDecision.SUSPECTED_DUPLICATE)
         batch = self.service.confirm_import(preview.id)
 
-        self.assertEqual(batch.status.value, "completed")
-        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
-        self.assertEqual(len(self.service.list_transactions()), 2)
+        self.assertEqual(batch.status.value, "completed_with_errors")
+        self.assertEqual(
+            preview.row_results[0].decision,
+            ImportDecision.SUSPECTED_DUPLICATE,
+        )
+        self.assertEqual(batch.suspected_duplicate_count, 1)
+        self.assertEqual(len(self.service.list_transactions()), 1)
 
     def test_confirm_import_persists_created_rows_and_updates_source_status(self) -> None:
         preview = self.service.preview_import(

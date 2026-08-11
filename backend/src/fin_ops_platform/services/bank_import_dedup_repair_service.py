@@ -78,6 +78,18 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     expected_target_count = int(request.get("expected_target_count") or 0)
     expected_protected_count = int(request.get("expected_protected_count") or 0)
     expected_duplicate_delete_count = request.get("expected_duplicate_delete_count")
+    expected_replay_repaired_duplicate_count = request.get(
+        "expected_replay_repaired_duplicate_count"
+    )
+    if expected_replay_repaired_duplicate_count is None:
+        raise ValueError(
+            "Bank dedup repair requires an exact repaired replay duplicate count."
+        )
+    expected_replay_repaired_duplicate_count = int(
+        expected_replay_repaired_duplicate_count
+    )
+    if expected_replay_repaired_duplicate_count < 0:
+        raise ValueError("Bank repaired replay duplicate count cannot be negative.")
     if expected_duplicate_delete_count is None:
         raise ValueError("Bank dedup repair requires an exact duplicate delete count.")
     expected_duplicate_delete_count = int(expected_duplicate_delete_count)
@@ -404,6 +416,71 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             + json.dumps(invalid_row_owners, ensure_ascii=False, sort_keys=True)
         )
 
+    effective_replay_duplicate_rows = {
+        _text(row.get("row_pk")): row
+        for row in rows
+        if _text(row.get("decision")) == "duplicate_skipped"
+        and _text(row.get("decision_reason")) == REPAIR_REASON
+        and _text(row.get("linked_object_type")) == "bank_transaction"
+        and _text(row.get("linked_object_id"))
+    }
+    effective_replay_duplicate_rows.update(
+        {
+            _text(update.get("row_pk")): update
+            for update in row_updates
+            if _text(update.get("after_decision")) == "duplicate_skipped"
+            and _text(update.get("after_decision_reason")) == REPAIR_REASON
+            and _text(update.get("after_linked_object_type")) == "bank_transaction"
+            and _text(update.get("after_linked_object_id"))
+        }
+    )
+    if len(effective_replay_duplicate_rows) != expected_replay_repaired_duplicate_count:
+        raise ValueError(
+            "Bank repaired replay duplicate count changed: "
+            f"expected {expected_replay_repaired_duplicate_count}, "
+            f"resolved {len(effective_replay_duplicate_rows)}."
+        )
+
+    replay_sources: list[dict[str, Any]] = []
+    replay_batch_pks: set[str] = set()
+    for source in request.get("source_sessions") or []:
+        source_session_id = _text(source.get("session_id"))
+        source_file_ids = sorted(
+            {_text(file_id) for file_id in source.get("file_ids") or [] if _text(file_id)}
+        )
+        source_batch_pks = {
+            _text(file_row.get("batch_pk"))
+            for file_row in files
+            if _text(file_row.get("session_id")) == source_session_id
+            and _text(file_row.get("file_id")) in source_file_ids
+            and _text(file_row.get("batch_pk"))
+        }
+        overlapping_batch_pks = replay_batch_pks & source_batch_pks
+        if overlapping_batch_pks:
+            raise ValueError(
+                "Bank repaired replay source batches overlap: "
+                + ", ".join(sorted(overlapping_batch_pks))
+            )
+        replay_batch_pks.update(source_batch_pks)
+        repaired_count = sum(
+            1
+            for row in effective_replay_duplicate_rows.values()
+            if _text(row.get("batch_pk")) in source_batch_pks
+        )
+        replay_sources.append(
+            {
+                "session_id": source_session_id,
+                "file_ids": source_file_ids,
+                "expected_repaired_duplicate_count": repaired_count,
+                "repaired_duplicate_decision_reason": REPAIR_REASON,
+            }
+        )
+    if sum(
+        int(source["expected_repaired_duplicate_count"])
+        for source in replay_sources
+    ) != expected_replay_repaired_duplicate_count:
+        raise ValueError("Bank repaired replay rows are not fully owned by the selected source files.")
+
     owner_updates_by_batch = Counter(
         update["batch_pk"] for update in row_updates if update["owner_transition"]
     )
@@ -431,13 +508,21 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "created_owner_transition_count": sum(
             1 for update in row_updates if update["owner_transition"]
         ),
+        "replay_repaired_duplicate_count": len(
+            effective_replay_duplicate_rows
+        ),
+        "replay_sources": replay_sources,
         "duplicate_pairs": duplicate_pairs,
         "category_cleanup_actions": category_cleanup_actions,
         "workbench_withdraw_actions": workbench_withdraw_actions,
         "row_updates": row_updates,
         "batch_updates": batch_updates,
         "affected_months": sorted(
-            {_text(pair.get("transaction_month")) for pair in duplicate_pairs if _text(pair.get("transaction_month"))}
+            {
+                _read_model_month_scope(pair.get("transaction_month"))
+                for pair in duplicate_pairs
+                if _text(pair.get("transaction_month"))
+            }
         ),
     }
     plan["source_fingerprint"] = _fingerprint(plan)
@@ -464,6 +549,9 @@ def public_bank_import_dedup_repair_report(
         "target_count": plan["target_count"],
         "protected_count": plan["protected_count"],
         "duplicate_delete_count": plan["duplicate_delete_count"],
+        "replay_repaired_duplicate_count": plan[
+            "replay_repaired_duplicate_count"
+        ],
         "duplicate_match_basis_counts": deepcopy(
             plan.get("duplicate_match_basis_counts") or {}
         ),
@@ -1098,6 +1186,15 @@ def _decimal_text(value: Any) -> str | None:
         return format(Decimal(normalized).normalize(), "f")
     except InvalidOperation:
         return None
+
+
+def _read_model_month_scope(value: Any) -> str:
+    normalized = _text(value)
+    if re.fullmatch(r"\d{4}-\d{2}", normalized):
+        return normalized
+    if re.fullmatch(r"\d{4}-\d{2}-01", normalized):
+        return normalized[:7]
+    raise ValueError(f"Invalid bank repair month scope: {normalized or '<empty>'}")
 
 
 def _canonical_currency(value: Any) -> str:

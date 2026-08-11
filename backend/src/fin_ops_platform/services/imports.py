@@ -358,16 +358,6 @@ class ImportNormalizationService:
                     enabled=preview.batch.batch_type == BatchType.BANK_TRANSACTION,
                 ):
                     for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
-                        if (
-                            preview.batch.batch_type == BatchType.BANK_TRANSACTION
-                            and row_result.decision == ImportDecision.SUSPECTED_DUPLICATE
-                        ):
-                            row_result.decision = ImportDecision.CREATED
-                            row_result.decision_reason = "User confirmed a bank transaction with only a weak fingerprint match."
-                            row_result.linked_object_type = None
-                            row_result.linked_object_id = None
-                            self._persist_created_row(preview.batch.batch_type, row_result, normalized)
-                            continue
                         self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
                         if row_result.decision == ImportDecision.CREATED:
                             self._persist_created_row(preview.batch.batch_type, row_result, normalized)

@@ -27,6 +27,7 @@
 - `preview_ready -> preview_stale`：确认前 audit 检测到底层事实变化。
 - `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
 - `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts 与必要 Workbench matching 领域任务；不触发页面 read model fan-out，消费者访问时按 source version 收敛。
+- `suspected_duplicate -> completed_with_errors`：普通确认保留弱指纹疑似项且不写 canonical 流水；用户点击确认不构成绕过去重的授权。
 - `failed -> files_configured/previewing`：用户重试 session files 或重新预览。
 - `preview_ready -> reverted`：只有 session owner 可显式放弃；重复请求幂等。
 
@@ -95,6 +96,7 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-08-11 | 服务端恢复、owner 隔离和显式放弃闭环 | 预览不再依赖单一浏览器 key；AppHealth 可区分待确认、队列、处理、完成、失败和放弃 | `tests/test_import_lifecycle_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` |
+| 2026-08-12 | 关闭普通 confirm 的弱指纹放行，并收紧生产受控重放 | 疑似流水不再被确认写入；受控重放只接受固定修复原因和同一 keeper 证据 | `tests/test_import_service.py`、`tests/test_import_file_service.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-11 | 候选版本定点恢复旧 background snapshot 污染产生的银行导入死信 | 只对白名单 job/event/session/files 做 dry-run fingerprint 验真；先完成 canonical 导入再 resolve 精确死信 | `tests/test_import_audit_repair_ops.py` |
 | 2026-08-08 | 银行表头统一为 canonical 字段解析与人工映射闭环 | 删除按银行 exact-header 分支；兼容元数据账号、单位/括号差异，未知核心字段 fail closed 并可按表头签名复用人工映射 | `test_ccb_current_export_header_uses_metadata_account_and_unit_aliases`、`test_manual_mapping_is_reused_for_same_header_signature`、`bank transaction import maps an unknown amount header and retries the same file` |
 | 2026-07-22 | preview 持久化改为 session-scoped exact delta | 银行预览不再携带历史 session/batch，避免跨导入域 stale snapshot 丢失更新 | `test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`test_stale_api_preview_cannot_downgrade_another_process_confirmed_import` |

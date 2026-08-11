@@ -81,6 +81,7 @@
 | preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得调用 operation barrier 或 Workbench 页面 API、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | confirm 失败 Browser 回归 | 导入任务创建失败时，页面必须显示错误并保留 preview，不能误报“已确认导入”。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-08-11 生产重复删除授权漂移 | dry-run/execute 必须显式绑定精确重复删除数；候选数变化时在关系撤回、标签清理和流水删除前失败，并在 dry-run 输出官方参考号或余额/币种的逐对证据。 | fixed by `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
+| 2026-08-12 普通确认放行弱指纹疑似流水 | `suspected_duplicate` 在 confirm 后必须保持未写入，batch 为 `completed_with_errors`；受控恢复必须同时匹配固定修复原因、来源 row、同一 keeper 和精确计数，二次重放零新增。 | fixed by `tests/test_import_service.py`、`tests/test_import_file_service.py`、`tests/test_runtime_worker.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 
 ## 关键 Smoke Flows
 

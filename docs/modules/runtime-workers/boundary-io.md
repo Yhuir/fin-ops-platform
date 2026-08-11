@@ -48,7 +48,7 @@
 | Shared relation proof | `workbench_relation` worker / canonical relation repository | `workbench_relation` 作为独立共享 read model 保留；页面自身不再等待或投递已退休的页面 projection。confirm/withdraw/cancel 继续推进 canonical relation version，关系分发状态由共享 relation worker 单独维护。 |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
-| Import processor state | PostgreSQL canonical/import file facts | import worker 只缓存 processor 类型；每个 job 调用必须重新构造 durable processor state，禁止启动时 snapshot 污染后来创建的 file session、canonical dedupe 或确认结果 |
+| Import processor state | PostgreSQL canonical/import file facts | import worker 只缓存 processor 类型；每个 job 调用必须重新构造 durable processor state，禁止启动时 snapshot 污染后来创建的 file session、canonical dedupe 或确认结果。候选版本的受控银行恢复重放还必须显式接收每个 source session 的精确 repaired-duplicate 数和固定 repair reason，只能跳过仍命中同一 keeper 的来源 row；普通 import handler 不携带该授权。 |
 | Import archive object storage | API/worker 共享 object storage env | import worker 构造 `PostgresStateStore` 时必须注入启用的 `S3ObjectStorageRepository`，使 durable ETC session 中的 `minio://` / S3 archive ref 可被独立 worker 重载；不得回退到 Web 进程内 bytes 或本地隐藏副本 |
 | Import persistence delta | import processing service | confirm job 只接收并持久化所选 session/batch 与本次创建或状态更新的 canonical facts；不得从 worker service 实例重取全量 snapshot，也不得回写 ETC、tax-certified 或其它未受影响事实域 |
 | ETC canonical invoice metadata | ETC existing-invoice link service | 只把实际发生 ETC 关联的 invoice 列表交给 `save_invoice_etc_metadata`；禁止借 file import/full-state writer 回写全部 invoice |

@@ -4,11 +4,14 @@ import sys
 import unittest
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision
+from fin_ops_platform.domain.models import ImportedBatch, ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import (
     BankStatementMappingRequired,
+    FileImportPreviewItem,
     FileImportService,
     UploadedImportFile,
     aggregate_invoice_line_rows,
@@ -949,6 +952,125 @@ class ImportFileServiceTests(unittest.TestCase):
                 source_session_id=source.id,
                 selected_file_ids=[source.files[0].id],
                 imported_by="system-repair",
+            )
+
+    def test_controlled_replay_resolves_only_same_repaired_bank_owner(self) -> None:
+        source_result = ImportedBatchRowResult(
+            id="source-row-1",
+            batch_id="source-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.DUPLICATE_SKIPPED,
+            decision_reason="Controlled repair reason.",
+            linked_object_type="bank_transaction",
+            linked_object_id="keeper-1",
+        )
+        replay_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.SUSPECTED_DUPLICATE,
+            decision_reason="Weak identity match.",
+            linked_object_type="bank_transaction",
+            linked_object_id="keeper-1",
+        )
+        preview = SimpleNamespace(
+            batch=ImportedBatch(
+                id="replay-batch-1",
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="statement.xlsx",
+                imported_by="system-repair",
+                row_count=1,
+                success_count=0,
+                error_count=0,
+                status=BatchStatus.PENDING,
+                suspected_duplicate_count=1,
+            ),
+            row_results=[replay_result],
+        )
+        service = FileImportService(
+            SimpleNamespace(get_batch=lambda _batch_id: preview)
+        )
+        source_item = FileImportPreviewItem(
+            id="source-file-1",
+            file_name="statement.xlsx",
+            template_code="bank_statement",
+            batch_type=BatchType.BANK_TRANSACTION,
+            status="confirmed",
+            message="confirmed",
+            row_count=1,
+            row_results=[source_result],
+        )
+        replay_item = FileImportPreviewItem(
+            id="replay-file-1",
+            file_name="statement.xlsx",
+            template_code="bank_statement",
+            batch_type=BatchType.BANK_TRANSACTION,
+            status="preview_ready",
+            message="preview",
+            row_count=1,
+            suspected_duplicate_count=1,
+            preview_batch_id="replay-batch-1",
+            row_results=[replay_result],
+        )
+
+        resolved = service._resolve_repaired_replay_duplicates(
+            source_item=source_item,
+            replay_item=replay_item,
+            repaired_duplicate_decision_reason="Controlled repair reason.",
+        )
+
+        self.assertEqual(resolved, 1)
+        self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(replay_item.duplicate_count, 1)
+        self.assertEqual(replay_item.suspected_duplicate_count, 0)
+
+    def test_controlled_replay_refuses_different_bank_owner(self) -> None:
+        source_result = ImportedBatchRowResult(
+            id="source-row-1",
+            batch_id="source-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.DUPLICATE_SKIPPED,
+            decision_reason="Controlled repair reason.",
+            linked_object_type="bank_transaction",
+            linked_object_id="keeper-1",
+        )
+        replay_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="weak-fingerprint",
+            decision=ImportDecision.SUSPECTED_DUPLICATE,
+            decision_reason="Weak identity match.",
+            linked_object_type="bank_transaction",
+            linked_object_id="keeper-2",
+        )
+        service = FileImportService(SimpleNamespace())
+        source_item = SimpleNamespace(
+            batch_type=BatchType.BANK_TRANSACTION,
+            row_results=[source_result],
+        )
+        replay_item = SimpleNamespace(
+            batch_type=BatchType.BANK_TRANSACTION,
+            row_results=[replay_result],
+            preview_batch_id=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "lacks repaired source-row evidence"):
+            service._resolve_repaired_replay_duplicates(
+                source_item=source_item,
+                replay_item=replay_item,
+                repaired_duplicate_decision_reason="Controlled repair reason.",
             )
 
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:

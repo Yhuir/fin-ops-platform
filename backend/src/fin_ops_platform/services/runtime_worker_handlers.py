@@ -128,12 +128,16 @@ class ImportRuntimeProcessorFactory:
         source_session_id: str,
         selected_file_ids: list[str],
         operator_id: str,
+        expected_repaired_duplicate_count: int = 0,
+        repaired_duplicate_decision_reason: str | None = None,
     ) -> dict[str, object]:
         state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
         replay_session = file_import_service.replay_confirmed_session_files(
             source_session_id=source_session_id,
             selected_file_ids=selected_file_ids,
             imported_by=operator_id,
+            expected_repaired_duplicate_count=expected_repaired_duplicate_count,
+            repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
         )
         if replay_session.status != "preview_ready" or any(
             item.error_count or item.suspected_duplicate_count for item in replay_session.files
@@ -177,6 +181,7 @@ class ImportRuntimeProcessorFactory:
                     item.suspected_duplicate_count for item in refreshed_files
                 ),
                 "error_count": sum(item.error_count for item in refreshed_files),
+                "repaired_duplicate_count": int(expected_repaired_duplicate_count),
             },
         }
 

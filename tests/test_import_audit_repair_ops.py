@@ -1081,6 +1081,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "1",
             "--expected-bank-replay-create-count",
             "0",
+            "--expected-bank-replay-repaired-duplicate-count",
+            "1",
             "--operator-id",
             "system_repair",
         ]
@@ -1184,6 +1186,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "674",
                     "--expected-bank-replay-create-count",
                     "0",
+                    "--expected-bank-replay-repaired-duplicate-count",
+                    "674",
                     "--operator-id",
                     "system_repair",
                     "--cleanup-related-bank-duplicates",
@@ -1209,6 +1213,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "duplicate_delete_count": 674,
             "import_row_update_count": 709,
             "created_owner_transition_count": 674,
+            "replay_repaired_duplicate_count": 674,
             "source_files": [{"file_id": "file-1"}],
             "affected_months": ["2026-02"],
             "category_cleanup_actions": [],
@@ -1228,6 +1233,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "674",
             "--expected-bank-replay-create-count",
             "0",
+            "--expected-bank-replay-repaired-duplicate-count",
+            "674",
             "--operator-id",
             "system_repair",
             "--cleanup-related-bank-duplicates",
@@ -1289,15 +1296,36 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "duplicate_delete_count": 674,
             "import_row_update_count": 709,
             "created_owner_transition_count": 674,
+            "replay_repaired_duplicate_count": 674,
             "source_files": [{"file_id": "file-1"}],
+            "replay_sources": [
+                {
+                    "session_id": "session-1",
+                    "file_ids": ["file-1"],
+                    "expected_repaired_duplicate_count": 674,
+                    "repaired_duplicate_decision_reason": (
+                        "Reclassified by bank identity v3 controlled recovery."
+                    ),
+                }
+            ],
             "affected_months": ["2026-02", "2026-05"],
             "category_cleanup_actions": [{"category_id": "category-1"}],
             "workbench_withdraw_actions": [{"case_id": "case-1"}],
         }
         runtime = Mock()
         runtime.replay_confirmed_file_import_session.side_effect = [
-            {"audit_summary": {"created_count": 0}},
-            {"audit_summary": {"created_count": 0}},
+            {
+                "audit_summary": {
+                    "created_count": 0,
+                    "repaired_duplicate_count": 674,
+                }
+            },
+            {
+                "audit_summary": {
+                    "created_count": 0,
+                    "repaired_duplicate_count": 674,
+                }
+            },
         ]
         refresh_gateway = Mock()
         refresh_gateway.enqueue_many.side_effect = lambda scope_type, scopes, **_kwargs: list(
@@ -1317,6 +1345,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "674",
             "--expected-bank-replay-create-count",
             "0",
+            "--expected-bank-replay-repaired-duplicate-count",
+            "674",
             "--operator-id",
             "system_repair",
             "--cleanup-related-bank-duplicates",

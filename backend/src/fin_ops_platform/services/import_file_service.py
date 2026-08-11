@@ -643,6 +643,8 @@ class FileImportService:
         source_session_id: str,
         selected_file_ids: list[str],
         imported_by: str,
+        expected_repaired_duplicate_count: int = 0,
+        repaired_duplicate_decision_reason: str | None = None,
     ) -> FileImportSession:
         source_session = self._sessions[source_session_id]
         selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
@@ -663,6 +665,7 @@ class FileImportService:
             status="preview_ready",
             files=[],
         )
+        repaired_duplicate_count = 0
         for source_item in source_items:
             if not source_item.stored_file_path:
                 raise ValueError(f"replay source file {source_item.id} is missing stored content")
@@ -693,13 +696,85 @@ class FileImportService:
                 field_mapping=dict(source_item.field_mapping),
                 skip_duplicate_file_guard=True,
             )
+            repaired_duplicate_count += self._resolve_repaired_replay_duplicates(
+                source_item=source_item,
+                replay_item=replay_item,
+                repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
+            )
             replay_session.files.append(replay_item)
+
+        if repaired_duplicate_count != int(expected_repaired_duplicate_count):
+            raise ValueError(
+                "controlled replay repaired duplicate count changed: "
+                f"expected {int(expected_repaired_duplicate_count)}, "
+                f"resolved {repaired_duplicate_count}"
+            )
 
         if any(file.status != "preview_ready" for file in replay_session.files):
             replay_session.status = "preview_ready_with_errors"
         self._refresh_session_audit(replay_session)
         self._sessions[replay_session.id] = replay_session
         return replay_session
+
+    def _resolve_repaired_replay_duplicates(
+        self,
+        *,
+        source_item: FileImportPreviewItem,
+        replay_item: FileImportPreviewItem,
+        repaired_duplicate_decision_reason: str | None,
+    ) -> int:
+        if replay_item.batch_type != BatchType.BANK_TRANSACTION:
+            return 0
+        normalized_repair_reason = str(
+            repaired_duplicate_decision_reason or ""
+        ).strip()
+        if not normalized_repair_reason:
+            return 0
+        if len(source_item.row_results) != len(replay_item.row_results):
+            raise ValueError("controlled replay source and preview row counts changed")
+
+        resolved_count = 0
+        for source_result, replay_result in zip(
+            source_item.row_results,
+            replay_item.row_results,
+            strict=True,
+        ):
+            if replay_result.decision != ImportDecision.SUSPECTED_DUPLICATE:
+                continue
+            if (
+                source_result.row_no != replay_result.row_no
+                or source_result.source_record_type != replay_result.source_record_type
+                or source_result.decision != ImportDecision.DUPLICATE_SKIPPED
+                or source_result.decision_reason != normalized_repair_reason
+                or source_result.linked_object_type != "bank_transaction"
+                or not str(source_result.linked_object_id or "").strip()
+                or replay_result.linked_object_type != "bank_transaction"
+                or replay_result.linked_object_id != source_result.linked_object_id
+            ):
+                raise ValueError(
+                    "controlled replay suspected duplicate lacks repaired source-row evidence"
+                )
+            replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
+            replay_result.decision_reason = (
+                "Controlled replay matched an explicitly repaired source-row owner."
+            )
+            replay_result.linked_object_type = "bank_transaction"
+            replay_result.linked_object_id = source_result.linked_object_id
+            resolved_count += 1
+
+        if replay_item.preview_batch_id:
+            preview = self._import_service.get_batch(replay_item.preview_batch_id)
+            preview.batch.duplicate_count = sum(
+                row.decision == ImportDecision.DUPLICATE_SKIPPED
+                for row in preview.row_results
+            )
+            preview.batch.suspected_duplicate_count = sum(
+                row.decision == ImportDecision.SUSPECTED_DUPLICATE
+                for row in preview.row_results
+            )
+            replay_item.duplicate_count = preview.batch.duplicate_count
+            replay_item.suspected_duplicate_count = preview.batch.suspected_duplicate_count
+        return resolved_count
 
     def _preview_single_file(
         self,
