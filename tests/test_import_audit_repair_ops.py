@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextlib import contextmanager
+from decimal import Decimal
 import io
 import json
 from types import SimpleNamespace
@@ -1184,6 +1185,81 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "--cleanup-related-bank-duplicates",
                 ]
             )
+
+    def test_cli_bank_repair_serializes_decimal_relation_evidence(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        plan = {
+            "operation": "bank_import_identity_v3_recovery",
+            "source_fingerprint": "f" * 64,
+            "target_count": 731,
+            "protected_count": 1129,
+            "duplicate_delete_count": 674,
+            "import_row_update_count": 709,
+            "created_owner_transition_count": 674,
+            "source_files": [{"file_id": "file-1"}],
+            "affected_months": ["2026-02"],
+            "category_cleanup_actions": [],
+            "workbench_withdraw_actions": [
+                {"transaction_id": "txn-300", "invoice": {"amount": Decimal("300.00")}}
+            ],
+        }
+        arguments = [
+            "--dry-run",
+            "--repair-bank-source",
+            "session-1=file-1",
+            "--expected-bank-target-count",
+            "731",
+            "--expected-bank-protected-count",
+            "1129",
+            "--expected-bank-replay-create-count",
+            "0",
+            "--operator-id",
+            "system_repair",
+            "--cleanup-related-bank-duplicates",
+            "--expected-bank-category-cleanup-count",
+            "0",
+            "--expected-bank-workbench-withdraw-count",
+            "1",
+            "--expected-bank-workbench-transaction-id",
+            "txn-300",
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_dedup_repair_snapshot",
+                return_value={},
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_dedup_repair_plan",
+                return_value=plan,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "_build_bank_repair_state_store",
+                return_value=SimpleNamespace(read_import_file=Mock()),
+            ),
+            patch.object(import_audit_repair_ops, "verify_bank_import_repair_source_files"),
+        ):
+            result = import_audit_repair_ops.main(arguments, stdout=output)
+
+        self.assertEqual(result, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(
+            report["related_cleanup_evidence"]["workbench_relations"][0]["invoice"]["amount"],
+            "300.00",
+        )
 
     def test_cli_bank_cleanup_executes_withdraw_delete_audit_refresh_and_replay(self) -> None:
         class Connection:

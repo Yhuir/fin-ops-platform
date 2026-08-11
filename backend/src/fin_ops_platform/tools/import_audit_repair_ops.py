@@ -334,7 +334,16 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 withdraw_results=withdraw_results,
                 refresh_scopes=refresh_scopes,
             )
-        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        print(
+            json.dumps(
+                report,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            ),
+            file=stdout,
+        )
         return 0
     if discovery_requested:
         with connection.transaction() as transaction:
