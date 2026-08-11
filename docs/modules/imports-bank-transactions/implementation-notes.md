@@ -270,3 +270,4 @@
 - 修复不跳过 stale gate，也不增加恢复专用确认链。只有受控 row 的登记 reason、银行流水类型和 canonical transaction ID 与当前普通去重重算结果完全一致时，才保留权威 `duplicate_skipped`；不同 ID、缺失 ID 或重算为 `created` 仍报 `preview_stale`。
 - 测试同时锁定同 canonical 可确认、canonical 漂移必拒绝和普通 preview 竞争写入仍拒绝，避免受控恢复例外污染普通银行/发票导入。
 - `preview_stale` 异常只记录发生变化的审计计数字段；HTTP 仍返回固定用户文案，不暴露业务行或 canonical ID。该诊断用于候选恢复失败时区分 importable、existing duplicate 与 suspected duplicate 漂移，不改变门禁结果。
+- 生产诊断显示 853 条受控回放中有 27 条被通用去重重算为 `created`（`existing_duplicate_count 853→826`、`importable_count 0→27`）。这些是历史 parser/identity 漂移，不得通过放宽 decision 枚举处理；stale gate 只在冻结 canonical ID 仍能读取、且账户/秒级时间/方向/金额/余额/币种六项严格相等时接受，任何缺失或变化继续失败。

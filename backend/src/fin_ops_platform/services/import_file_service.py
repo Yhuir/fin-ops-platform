@@ -1166,6 +1166,7 @@ class FileImportService:
                     )
                     if self._controlled_replay_duplicate_is_current(
                         row_result=row_result,
+                        normalized=normalized,
                         current_decision=decision,
                         current_linked_object_type=linked_object_type,
                         current_linked_object_id=linked_object_id,
@@ -1196,27 +1197,49 @@ class FileImportService:
                 audit.files.append(self._empty_file_audit(item))
         return audit
 
-    @staticmethod
     def _controlled_replay_duplicate_is_current(
+        self,
         *,
         row_result: ImportedBatchRowResult,
+        normalized: dict[str, Any],
         current_decision: ImportDecision | None,
         current_linked_object_type: str | None,
         current_linked_object_id: str | None,
     ) -> bool:
-        return (
+        controlled_evidence = (
             row_result.decision == ImportDecision.DUPLICATE_SKIPPED
             and row_result.decision_reason
             in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values()
-            and current_decision
-            in {
+            and row_result.linked_object_type == "bank_transaction"
+            and bool(str(row_result.linked_object_id or "").strip())
+        )
+        if not controlled_evidence:
+            return False
+        if current_decision in {
                 ImportDecision.DUPLICATE_SKIPPED,
                 ImportDecision.SUSPECTED_DUPLICATE,
-            }
-            and row_result.linked_object_type == "bank_transaction"
-            and current_linked_object_type == row_result.linked_object_type
-            and bool(str(row_result.linked_object_id or "").strip())
-            and current_linked_object_id == row_result.linked_object_id
+        }:
+            return (
+                current_linked_object_type == row_result.linked_object_type
+                and current_linked_object_id == row_result.linked_object_id
+            )
+        if (
+            current_decision != ImportDecision.CREATED
+            or current_linked_object_type is not None
+            or current_linked_object_id is not None
+        ):
+            return False
+        verifier = getattr(
+            self._import_service,
+            "bank_transaction_matches_strict_statement_evidence",
+            None,
+        )
+        return bool(
+            callable(verifier)
+            and verifier(
+                transaction_id=str(row_result.linked_object_id),
+                normalized=normalized,
+            )
         )
 
     @staticmethod

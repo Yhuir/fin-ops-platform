@@ -524,6 +524,45 @@ class ImportNormalizationService:
                 return transaction
         raise KeyError(transaction_id)
 
+    def bank_transaction_matches_strict_statement_evidence(
+        self,
+        *,
+        transaction_id: str,
+        normalized: dict[str, Any],
+    ) -> bool:
+        try:
+            transaction = self.get_transaction(transaction_id)
+        except KeyError:
+            return False
+        incoming_identity = self._object_identity_policy.identify_bank_transaction_mapping(
+            normalized
+        )
+        existing_identity = self._object_identity_policy.identify_bank_transaction(
+            transaction
+        )
+        required_components = ("account_no", "trade_time", "direction", "amount")
+        incoming_components = tuple(
+            incoming_identity.components.get(field_name)
+            for field_name in required_components
+        )
+        existing_components = tuple(
+            existing_identity.components.get(field_name)
+            for field_name in required_components
+        )
+        incoming_balance = self._parse_decimal(normalized.get("balance"))
+        existing_balance = self._parse_decimal(transaction.balance)
+        incoming_currency = self._canonical_currency(normalized.get("currency"))
+        existing_currency = self._canonical_currency(transaction.currency)
+        return (
+            all(incoming_components)
+            and all(existing_components)
+            and incoming_components == existing_components
+            and incoming_balance is not None
+            and incoming_balance == existing_balance
+            and incoming_currency is not None
+            and incoming_currency == existing_currency
+        )
+
     def list_transactions_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
         normalized_ids = list(
             dict.fromkeys(
@@ -2156,6 +2195,16 @@ class ImportNormalizationService:
     @staticmethod
     def _format_decimal(value: Decimal) -> str:
         return f"{value.quantize(CENT)}"
+
+    @staticmethod
+    def _canonical_currency(value: Any) -> str | None:
+        text = ImportNormalizationService._string_or_none(value)
+        if text is None:
+            return None
+        normalized = "".join(text.upper().split())
+        if normalized in {"CNY", "RMB", "人民币", "人民币元"}:
+            return "CNY"
+        return normalized or None
 
     @staticmethod
     def _string_or_none(value: Any) -> str | None:

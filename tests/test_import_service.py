@@ -198,6 +198,55 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual([transaction.id for transaction in result], [second.id, self.existing_transaction.id])
         self.assertEqual(repository.calls, [[second.id, "missing"]])
 
+    def test_bank_transaction_strict_statement_evidence_requires_all_six_fields(self) -> None:
+        transaction = BankTransaction(
+            id="txn-strict-evidence",
+            account_no="62229999",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("50.00"),
+            signed_amount=Decimal("-50.00"),
+            txn_date="2026-03-24",
+            trade_time="2026-03-24 10:00:00",
+            balance=Decimal("950.00"),
+            currency="CNY",
+        )
+        service = ImportNormalizationService(existing_transactions=[transaction])
+        normalized = {
+            "account_no": "62229999",
+            "trade_time": "2026-03-24 10:00:00",
+            "txn_direction": "outflow",
+            "amount": "50.00",
+            "balance": "950.00",
+            "currency": "人民币元",
+            "counterparty_name": "Vendor A",
+        }
+
+        self.assertTrue(
+            service.bank_transaction_matches_strict_statement_evidence(
+                transaction_id=transaction.id,
+                normalized=normalized,
+            )
+        )
+        self.assertFalse(
+            service.bank_transaction_matches_strict_statement_evidence(
+                transaction_id=transaction.id,
+                normalized={**normalized, "balance": "949.99"},
+            )
+        )
+        self.assertFalse(
+            service.bank_transaction_matches_strict_statement_evidence(
+                transaction_id=transaction.id,
+                normalized={**normalized, "trade_time": None},
+            )
+        )
+        self.assertFalse(
+            service.bank_transaction_matches_strict_statement_evidence(
+                transaction_id="missing-transaction",
+                normalized=normalized,
+            )
+        )
+
     def test_invoice_identity_service_uses_tax_amount_canonical_key_and_only_suspects_weak_match(self) -> None:
         identity_service = InvoiceIdentityService()
 
