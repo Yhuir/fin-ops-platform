@@ -158,6 +158,9 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
         self.assertEqual(action["before_linked_object_id"], "transaction-wrong")
         self.assertEqual(action["after_linked_object_id"], "transaction-correct")
         self.assertEqual(
+            action["match_basis"], "data_fingerprint_and_statement_position"
+        )
+        self.assertEqual(
             action["after_raw_payload"]["normalized_payload"]["linked_object_id"],
             "transaction-correct",
         )
@@ -166,6 +169,42 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
         snapshot = _mislinked_snapshot()
         duplicate_candidate = dict(snapshot["transactions"][1])
         duplicate_candidate["transaction_id"] = "transaction-also-correct"
+        snapshot["transactions"].append(duplicate_candidate)
+
+        with self.assertRaisesRegex(ValueError, "candidate_count"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=1,
+            )
+
+    def test_plan_uses_unique_strict_position_when_historical_fingerprint_drifted(
+        self,
+    ) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["transactions"][1]["data_fingerprint"] = "bank:legacy-drift"
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=1,
+        )
+
+        self.assertEqual(
+            plan["row_relink_actions"][0]["match_basis"],
+            "unique_statement_position_fallback",
+        )
+
+    def test_plan_fails_closed_when_strict_position_fallback_is_ambiguous(
+        self,
+    ) -> None:
+        snapshot = _mislinked_snapshot()
+        snapshot["transactions"][1]["data_fingerprint"] = "bank:legacy-drift"
+        duplicate_candidate = dict(snapshot["transactions"][1])
+        duplicate_candidate["transaction_id"] = "transaction-also-correct"
+        duplicate_candidate["data_fingerprint"] = "bank:another-legacy-drift"
         snapshot["transactions"].append(duplicate_candidate)
 
         with self.assertRaisesRegex(ValueError, "candidate_count"):

@@ -594,9 +594,9 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `source_fingerprint` 与 rollback manifest；确认期间数据未变化后，使用
 `--execute --expected-fingerprint <source_fingerprint>`。fingerprint 不一致、batch owner 冲突、
 来源明细冲突或 canonical owner 变化都会在事务写入前失败；禁止跳过 dry-run。
-历史普通确认错误引用的修复还必须冻结精确 row-relink 数；只有数据指纹、账户、秒级时间、
-方向、金额、余额、币种和标准化对方名全部一致且全库唯一命中的 canonical 流水才允许重连，
-否则整次修复在写入前失败。
+历史普通确认错误引用的修复还必须冻结精确 row-relink 数；优先要求数据指纹、账户、秒级时间、
+方向、金额、余额、币种和标准化对方名全部一致。历史 fingerprint 漂移只允许以上严格账单位置
+和对方名在全库唯一命中时作为二级证据；否则整次修复在写入前失败。
 候选银行导入死信恢复模式必须在 dry-run 和 execute 中重复提供同一组完整 job/event/session/file
 白名单。它只处理已知 `background_jobs_idempotency_uidx` 旧错误、仍为 untouched preview 且正式流水
 为零的请求；候选 processor 完成并验证 batch/file/job 后才 resolve 原 dead letter，失败时保留原证据。

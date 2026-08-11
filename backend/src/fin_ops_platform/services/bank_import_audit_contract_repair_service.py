@@ -164,6 +164,7 @@ def public_bank_import_audit_contract_repair_report(
                 "row_no": action["row_no"],
                 "before_linked_object_id": action["before_linked_object_id"],
                 "after_linked_object_id": action["after_linked_object_id"],
+                "match_basis": action["match_basis"],
             }
             for action in plan["row_relink_actions"]
         ],
@@ -198,6 +199,16 @@ def _build_row_relink_actions(
             transactions_by_fingerprint.setdefault(fingerprint, []).append(transaction)
 
     identity_service = BankTransactionIdentityService()
+    transactions_by_strict_key: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for transaction in transactions:
+        strict_key = _strict_match_key(
+            transaction,
+            direction_key="txn_direction",
+            identity_service=identity_service,
+            counterparty_key="counterparty_name_raw",
+        )
+        if strict_key is not None:
+            transactions_by_strict_key.setdefault(strict_key, []).append(transaction)
     actions: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
     for row in rows:
@@ -214,6 +225,12 @@ def _build_row_relink_actions(
             row, current, identity_service=identity_service
         ):
             continue
+        strict_key = _strict_match_key(
+            row,
+            direction_key="direction",
+            identity_service=identity_service,
+            counterparty_key="counterparty_name",
+        )
         candidates = [
             transaction
             for transaction in transactions_by_fingerprint.get(
@@ -226,6 +243,15 @@ def _build_row_relink_actions(
                 row, transaction, identity_service=identity_service
             )
         ]
+        match_basis = "data_fingerprint_and_statement_position"
+        if not candidates and strict_key is not None:
+            candidates = [
+                transaction
+                for transaction in transactions_by_strict_key.get(strict_key, [])
+                if _text(transaction.get("transaction_id"))
+                != _text(row.get("linked_object_id"))
+            ]
+            match_basis = "unique_statement_position_fallback"
         if len(candidates) != 1 or not _text(row.get("row_pk")):
             unresolved.append(
                 {
@@ -234,6 +260,7 @@ def _build_row_relink_actions(
                     "row_no": _int(row.get("row_no")),
                     "candidate_count": len(candidates),
                     "row_pk_present": bool(_text(row.get("row_pk"))),
+                    "strict_position_present": strict_key is not None,
                 }
             )
             continue
@@ -252,6 +279,7 @@ def _build_row_relink_actions(
                 "source_unique_key": _text(row.get("source_unique_key")),
                 "data_fingerprint": _text(row.get("data_fingerprint")),
                 "decision_reason": MISLINKED_CONFIRM_REASON,
+                "match_basis": match_basis,
                 "before_linked_object_id": _text(row.get("linked_object_id")),
                 "after_linked_object_id": _text(candidate.get("transaction_id")),
                 "before_raw_payload": before_raw_payload,
@@ -278,28 +306,38 @@ def _row_matches_transaction(
     fingerprint = _text(row.get("data_fingerprint"))
     if not fingerprint or fingerprint != _text(transaction.get("data_fingerprint")):
         return False
-    row_position = identity_service.statement_position_for_mapping(
-        _statement_mapping(row, direction_key="direction"),
+    row_key = _strict_match_key(
+        row,
+        direction_key="direction",
+        identity_service=identity_service,
+        counterparty_key="counterparty_name",
+    )
+    return row_key is not None and row_key == _strict_match_key(
+        transaction,
+        direction_key="txn_direction",
+        identity_service=identity_service,
+        counterparty_key="counterparty_name_raw",
+    )
+
+
+def _strict_match_key(
+    row: dict[str, Any],
+    *,
+    direction_key: str,
+    identity_service: BankTransactionIdentityService,
+    counterparty_key: str,
+) -> tuple[str, ...] | None:
+    position = identity_service.statement_position_for_mapping(
+        _statement_mapping(row, direction_key=direction_key),
         allow_missing_currency=False,
     )
-    transaction_position = identity_service.statement_position_for_mapping(
-        _statement_mapping(transaction, direction_key="txn_direction"),
-        allow_missing_currency=False,
+    counterparty = _normalized_text(
+        row.get(counterparty_key)
+        or _normalized_payload(row).get(counterparty_key)
     )
-    row_counterparty = _normalized_text(
-        row.get("counterparty_name")
-        or _normalized_payload(row).get("counterparty_name")
-    )
-    transaction_counterparty = _normalized_text(
-        transaction.get("counterparty_name_raw")
-        or _normalized_payload(transaction).get("counterparty_name_raw")
-    )
-    return (
-        row_position is not None
-        and row_position == transaction_position
-        and bool(row_counterparty)
-        and row_counterparty == transaction_counterparty
-    )
+    if position is None or not counterparty:
+        return None
+    return (*position, counterparty)
 
 
 def _statement_mapping(
