@@ -787,30 +787,46 @@ def _build_file_updates(
             if isinstance(before.get("normalized_payload"), dict)
             else before
         )
-        file_success_count = int(counter_payload.get("success_count") or 0)
-        file_duplicate_count = int(counter_payload.get("duplicate_count") or 0)
-        if file_success_count < owner_update_count:
+        has_success_count = "success_count" in counter_payload
+        has_duplicate_count = "duplicate_count" in counter_payload
+        if has_success_count != has_duplicate_count:
             raise ValueError(
-                "Import file counter cannot accept owner corrections: "
+                "Import file has a partial counter contract: "
                 + json.dumps(
                     {
                         "file_id": _text(row.get("file_id")),
                         "batch_pk": batch_pk,
-                        "owner_update_count": owner_update_count,
-                        "success_count": file_success_count,
-                        "duplicate_count": file_duplicate_count,
-                        "top_level_success_count": before.get("success_count"),
-                        "top_level_duplicate_count": before.get("duplicate_count"),
+                        "has_success_count": has_success_count,
+                        "has_duplicate_count": has_duplicate_count,
                     },
                     ensure_ascii=False,
                     sort_keys=True,
                 )
             )
-        after = _rewrite_counter_payload(
-            before,
-            success_delta=-owner_update_count,
-            duplicate_delta=owner_update_count,
-        )
+        after = deepcopy(before)
+        if has_success_count:
+            file_success_count = int(counter_payload.get("success_count") or 0)
+            file_duplicate_count = int(counter_payload.get("duplicate_count") or 0)
+            if file_success_count < owner_update_count:
+                raise ValueError(
+                    "Import file counter cannot accept owner corrections: "
+                    + json.dumps(
+                        {
+                            "file_id": _text(row.get("file_id")),
+                            "batch_pk": batch_pk,
+                            "owner_update_count": owner_update_count,
+                            "success_count": file_success_count,
+                            "duplicate_count": file_duplicate_count,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+            after = _rewrite_counter_payload(
+                before,
+                success_delta=-owner_update_count,
+                duplicate_delta=owner_update_count,
+            )
         payload = after.get("normalized_payload") if isinstance(after.get("normalized_payload"), dict) else after
         row_results = payload.get("row_results") if isinstance(payload, dict) else None
         if not isinstance(row_results, list):

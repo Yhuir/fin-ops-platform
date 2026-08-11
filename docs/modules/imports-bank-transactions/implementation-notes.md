@@ -234,3 +234,4 @@
 - Read model：提交后只对受影响月份经 `ReadModelRefreshGateway` 强制入队 `workbench` 与 `workbench_relation`，不恢复跨页面 fan-out；其它页面继续直读 canonical facts。
 - 测试：business core 覆盖严格 8+1 形状、错位 event、错误 transaction、发票成员和撤回后恢复旧关系拒绝；service/repository 覆盖正式 withdraw、append-only history、category/event 删除顺序和全部 CAS 字段；CLI 覆盖参数门禁、单事务编排、audit、精确 refresh scope、重放与二次幂等。
 - 生产 dry-run 进一步发现 35 个待删副本除唯一 `created` owner 外，还各有一条同批次已正确判重的 `duplicate_skipped` 审计引用。修复计划不把这些引用误算成第二个 owner，也不重复调整 batch/file 计数；它们只以完整 CAS 条件把 `linked_object_id` 重定向到 keeper，并保留原 decision/reason，防止删除后留下悬挂导入审计。
+- 历史 `import_files.raw_payload` 存在不保存文件级 `success_count/duplicate_count`、但保留完整 `row_results` 的正式 schema；修复只在两项计数原本同时存在时同步文件计数，原本都不存在时只重写 row results，缺失其中一项则拒绝。batch 的正式计数迁移始终执行，不从缺失字段推断 0，也不向旧 payload 注入新字段。

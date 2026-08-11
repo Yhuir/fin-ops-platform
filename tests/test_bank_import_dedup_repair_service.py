@@ -396,6 +396,21 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(file_results[2]["linked_object_id"], "keeper-1")
         self.assertEqual(file_results[2]["decision_reason"], "same-file duplicate")
 
+    def test_plan_preserves_absent_file_counters_while_rewriting_row_results(self) -> None:
+        snapshot = _snapshot()
+        file_payload = snapshot["files"][0]["raw_payload"]["normalized_payload"]
+        file_payload.pop("success_count")
+        file_payload.pop("duplicate_count")
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        after_payload = plan["file_updates"][0]["after_raw_payload"][
+            "normalized_payload"
+        ]
+        self.assertNotIn("success_count", after_payload)
+        self.assertNotIn("duplicate_count", after_payload)
+        self.assertEqual(after_payload["row_results"][0]["linked_object_id"], "keeper-1")
+
     def test_plan_authorizes_exact_duplicate_owned_category_and_event(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
 
