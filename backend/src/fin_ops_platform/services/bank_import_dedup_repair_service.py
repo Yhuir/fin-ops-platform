@@ -229,10 +229,26 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     for row in rows:
         rows_by_link[_text(row.get("linked_object_id"))].append(row)
     row_updates: list[dict[str, Any]] = []
+    invalid_row_owners: list[dict[str, Any]] = []
     for pair in duplicate_pairs:
         matches = rows_by_link.get(_text(pair.get("delete_transaction_id")), [])
         if len(matches) != 1 or _text(matches[0].get("decision")) != "created":
-            raise ValueError("Every duplicate delete candidate must own exactly one created import row.")
+            invalid_row_owners.append(
+                {
+                    "transaction_pk": pair["delete_transaction_pk"],
+                    "transaction_id": pair["delete_transaction_id"],
+                    "row_owners": [
+                        {
+                            "row_pk": _text(row.get("row_pk")),
+                            "batch_pk": _text(row.get("batch_pk")),
+                            "row_no": int(row.get("row_no") or 0),
+                            "decision": _text(row.get("decision")),
+                        }
+                        for row in matches
+                    ],
+                }
+            )
+            continue
         row = matches[0]
         row_updates.append(
             {
@@ -249,6 +265,11 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     linked_object_id=pair["keep_transaction_id"],
                 ),
             }
+        )
+    if invalid_row_owners:
+        raise ValueError(
+            "Duplicate delete candidates have invalid import-row ownership: "
+            + json.dumps(invalid_row_owners, ensure_ascii=False, sort_keys=True)
         )
 
     updates_by_batch = Counter(update["batch_pk"] for update in row_updates)

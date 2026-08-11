@@ -320,6 +320,27 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(candidate["duplicate_transaction"]["amount"], "496.20")
         self.assertEqual(candidate["keeper_transaction"]["official_references"], ["REF-1"])
 
+    def test_plan_reports_exact_invalid_import_row_ownership(self) -> None:
+        snapshot = _snapshot()
+        snapshot["import_rows"].append(
+            {
+                "row_pk": "40000000-0000-0000-0000-000000000099",
+                "batch_pk": "10000000-0000-0000-0000-000000000001",
+                "batch_id": "batch-1",
+                "row_no": 99,
+                "decision": "created",
+                "linked_object_id": "target-1",
+                "raw_payload": {},
+            }
+        )
+
+        with self.assertRaises(ValueError) as context:
+            build_bank_import_dedup_repair_plan(snapshot)
+        message = str(context.exception)
+        self.assertIn('"transaction_id": "target-1"', message)
+        self.assertIn('"row_no": 1', message)
+        self.assertIn('"row_no": 99', message)
+
     def test_plan_authorizes_exact_duplicate_owned_category_and_event(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
 
