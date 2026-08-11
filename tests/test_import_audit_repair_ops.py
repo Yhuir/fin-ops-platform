@@ -1083,6 +1083,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "0",
             "--expected-bank-replay-repaired-duplicate-count",
             "1",
+            "--expected-bank-replay-released-reference-count",
+            "0",
             "--operator-id",
             "system_repair",
         ]
@@ -1188,6 +1190,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "0",
                     "--expected-bank-replay-repaired-duplicate-count",
                     "674",
+                    "--expected-bank-replay-released-reference-count",
+                    "0",
                     "--operator-id",
                     "system_repair",
                     "--cleanup-related-bank-duplicates",
@@ -1216,6 +1220,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "replay_repaired_duplicate_count": 674,
             "replay_canonical_owner_count": 0,
             "replay_canonical_reference_count": 0,
+            "expected_replay_released_reference_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "affected_months": ["2026-02"],
             "category_cleanup_actions": [],
@@ -1237,6 +1242,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "0",
             "--expected-bank-replay-repaired-duplicate-count",
             "674",
+            "--expected-bank-replay-released-reference-count",
+            "0",
             "--operator-id",
             "system_repair",
             "--cleanup-related-bank-duplicates",
@@ -1301,6 +1308,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "replay_repaired_duplicate_count": 674,
             "replay_canonical_owner_count": 0,
             "replay_canonical_reference_count": 0,
+            "expected_replay_released_reference_count": 0,
             "source_files": [{"file_id": "file-1"}],
             "replay_sources": [
                 {
@@ -1329,6 +1337,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "repaired_duplicate_count": 674,
                     "canonical_owner_count": 0,
                     "canonical_reference_count": 0,
+                    "released_canonical_reference_count": 0,
                 }
             },
             {
@@ -1337,6 +1346,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "repaired_duplicate_count": 674,
                     "canonical_owner_count": 0,
                     "canonical_reference_count": 0,
+                    "released_canonical_reference_count": 0,
                 }
             },
         ]
@@ -1360,6 +1370,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "0",
             "--expected-bank-replay-repaired-duplicate-count",
             "674",
+            "--expected-bank-replay-released-reference-count",
+            "0",
             "--operator-id",
             "system_repair",
             "--cleanup-related-bank-duplicates",

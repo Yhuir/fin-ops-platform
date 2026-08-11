@@ -100,10 +100,17 @@ class ImportPreviewSessionAudit:
     audit: ImportPreviewAuditCounts = field(default_factory=ImportPreviewAuditCounts)
     files: list[ImportPreviewFileAudit] = field(default_factory=list)
     duplicate_groups: list[ImportPreviewDuplicateGroup] = field(default_factory=list)
+    stale_row_change_counts: dict[str, int] = field(default_factory=dict)
 
 
 class ImportPreviewStaleError(ValueError):
-    def __init__(self, *, preview: ImportPreviewAuditCounts, current: ImportPreviewAuditCounts) -> None:
+    def __init__(
+        self,
+        *,
+        preview: ImportPreviewAuditCounts,
+        current: ImportPreviewAuditCounts,
+        row_change_counts: dict[str, int] | None = None,
+    ) -> None:
         preview_projection = preview.stale_projection()
         current_projection = current.stale_projection()
         changed_fields = {
@@ -114,9 +121,19 @@ class ImportPreviewStaleError(ValueError):
             for field_name in AUDIT_STALE_FIELDS
             if preview_projection[field_name] != current_projection[field_name]
         }
-        super().__init__(f"preview_stale: changed_fields={changed_fields}")
+        normalized_row_change_counts = {
+            str(field_name): int(count)
+            for field_name, count in sorted((row_change_counts or {}).items())
+            if int(count) > 0
+        }
+        super().__init__(
+            "preview_stale: "
+            f"changed_fields={changed_fields}; "
+            f"row_change_counts={normalized_row_change_counts}"
+        )
         self.preview = preview
         self.current = current
+        self.row_change_counts = normalized_row_change_counts
 
 
 class RecordIdentityStrategy(Protocol):

@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-08-11
+日期：2026-08-12
 
 ## 模块化状态
 
@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
+| 预览陈旧校验 | `FileImportService.assert_session_preview_current` | 除汇总 audit counts 外逐行比较 decision、linked object type/id；数量不变但 canonical invoice owner 调换仍返回 `preview_stale`，不得确认旧预览。错误只报告字段名和变化数量。 |
 | 预览恢复/放弃 | `GET /imports/files/sessions?mode=invoice`、`POST /imports/files/discard` | 服务端仅列出当前认证用户的活跃预览。放弃校验 owner 并事务化终结 file/session/pending batch；已确认或已创建活跃/成功 job 时拒绝。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。发票行输出发票号码、开票日期、销方、购方、金额、税额、价税合计等用户复核字段；不得套用银行账户/交易方向字段。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 有持久化 preview session 时精确重读 `/imports/files/sessions/{session_id}`；保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |

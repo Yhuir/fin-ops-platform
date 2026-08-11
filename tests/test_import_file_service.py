@@ -22,6 +22,7 @@ from fin_ops_platform.services.import_file_service import (
     read_xlsx_rows,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from openpyxl import Workbook, load_workbook
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -901,6 +902,76 @@ class ImportFileServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preview_stale"):
             service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
 
+    def test_stale_gate_rejects_link_drift_when_aggregate_counts_are_unchanged(self) -> None:
+        import_service = SimpleNamespace(
+            current_import_decision_for_normalized_row=lambda **_kwargs: (
+                ImportDecision.DUPLICATE_SKIPPED,
+                "bank_transaction",
+                "current-transaction",
+            )
+        )
+        service = FileImportService(import_service)
+        row_result = ImportedBatchRowResult(
+            id="preview-row-1",
+            batch_id="preview-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key="bank-v3:preview",
+            data_fingerprint="bank:preview",
+            decision=ImportDecision.DUPLICATE_SKIPPED,
+            decision_reason="Bank transaction identity matched an existing transaction.",
+            linked_object_type="bank_transaction",
+            linked_object_id="preview-transaction",
+        )
+        session = FileImportSession(
+            id="preview-session-1",
+            imported_by="user_finance_01",
+            file_count=1,
+            status="preview_ready",
+            files=[
+                FileImportPreviewItem(
+                    id="preview-file-1",
+                    file_name="statement.xlsx",
+                    template_code="bank_statement",
+                    batch_type=BatchType.BANK_TRANSACTION,
+                    status="preview_ready",
+                    message="preview",
+                    row_count=1,
+                    duplicate_count=1,
+                    preview_batch_id="preview-batch-1",
+                    row_results=[row_result],
+                    normalized_rows=[
+                        {
+                            "account_no": "62220001",
+                            "trade_time": "2026-03-23 09:15:01",
+                            "txn_direction": "outflow",
+                            "amount": "88.00",
+                            "balance": "912.00",
+                            "currency": "CNY",
+                            "counterparty_name": "Acme",
+                            "bank_serial_no": "SERIAL-001",
+                        }
+                    ],
+                )
+            ],
+        )
+        service._refresh_session_audit(session)
+        service._sessions[session.id] = session
+
+        with self.assertRaises(ImportPreviewStaleError) as captured:
+            service.assert_session_preview_current(session_id=session.id)
+
+        self.assertEqual(
+            captured.exception.preview.stale_projection(),
+            captured.exception.current.stale_projection(),
+        )
+        self.assertEqual(
+            captured.exception.row_change_counts,
+            {"linked_object_id": 1},
+        )
+        self.assertNotIn("preview-transaction", str(captured.exception))
+        self.assertNotIn("current-transaction", str(captured.exception))
+
     def test_replay_confirmed_session_files_reuses_verified_source_and_creates_new_audit_session(self) -> None:
         file_store = FakeImportIdStore()
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
@@ -911,7 +982,7 @@ class ImportFileServiceTests(unittest.TestCase):
         )
         service.confirm_session(session_id=source.id, selected_file_ids=[source.files[0].id])
 
-        replay = service.replay_confirmed_session_files(
+        replay, released_reference_count = service.replay_confirmed_session_files(
             source_session_id=source.id,
             selected_file_ids=[source.files[0].id],
             imported_by="system-repair",
@@ -923,16 +994,18 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(replay.files[0].content_sha256, source.files[0].content_sha256)
         self.assertEqual(replay.files[0].status, "preview_ready")
         self.assertEqual(replay.files[0].duplicate_count, 1)
+        self.assertEqual(released_reference_count, 0)
         self.assertEqual(source.files[0].status, "confirmed")
 
         service.confirm_session(session_id=replay.id, selected_file_ids=[replay.files[0].id])
-        repeated = service.replay_confirmed_session_files(
+        repeated, repeated_released_reference_count = service.replay_confirmed_session_files(
             source_session_id=source.id,
             selected_file_ids=[source.files[0].id],
             imported_by="system-repair",
         )
         self.assertEqual(repeated.files[0].status, "preview_ready")
         self.assertEqual(repeated.files[0].duplicate_count, 1)
+        self.assertEqual(repeated_released_reference_count, 0)
 
     def test_replay_confirmed_session_files_rejects_changed_source_content(self) -> None:
         file_store = FakeImportIdStore()
@@ -996,6 +1069,7 @@ class ImportFileServiceTests(unittest.TestCase):
             suspected_duplicate_count=1,
             preview_batch_id="replay-batch-1",
             row_results=[replay_result],
+            normalized_rows=[{}],
         )
 
         resolved = service._resolve_repaired_replay_duplicates(
@@ -1014,7 +1088,7 @@ class ImportFileServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(resolved, 1)
+        self.assertEqual(resolved, (1, 0))
         self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(replay_item.duplicate_count, 1)
         self.assertEqual(replay_item.suspected_duplicate_count, 0)
@@ -1036,6 +1110,7 @@ class ImportFileServiceTests(unittest.TestCase):
         replay_item = SimpleNamespace(
             batch_type=BatchType.BANK_TRANSACTION,
             row_results=[replay_result],
+            normalized_rows=[{}],
             preview_batch_id=None,
         )
 
@@ -1092,6 +1167,7 @@ class ImportFileServiceTests(unittest.TestCase):
             success_count=1,
             preview_batch_id="replay-batch-1",
             row_results=[replay_result],
+            normalized_rows=[{}],
         )
 
         resolved = service._resolve_repaired_replay_duplicates(
@@ -1110,7 +1186,7 @@ class ImportFileServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(resolved, 1)
+        self.assertEqual(resolved, (1, 0))
         self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(replay_result.linked_object_id, "keeper-1")
         self.assertEqual(replay_item.success_count, 0)
@@ -1155,6 +1231,7 @@ class ImportFileServiceTests(unittest.TestCase):
             suspected_duplicate_count=1,
             preview_batch_id="replay-batch-1",
             row_results=[replay_result],
+            normalized_rows=[{}],
         )
 
         repaired = service._resolve_repaired_replay_duplicates(
@@ -1174,7 +1251,7 @@ class ImportFileServiceTests(unittest.TestCase):
             source_file_id="source-file-1",
         )
 
-        self.assertEqual(repaired, 0)
+        self.assertEqual(repaired, (0, 0))
         self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(replay_result.linked_object_id, "canonical-owner-1")
         self.assertEqual(replay_item.duplicate_count, 1)
@@ -1207,7 +1284,14 @@ class ImportFileServiceTests(unittest.TestCase):
             ),
             row_results=[replay_result],
         )
-        service = FileImportService(SimpleNamespace(get_batch=lambda _batch_id: preview))
+        service = FileImportService(
+            SimpleNamespace(
+                get_batch=lambda _batch_id: preview,
+                bank_transaction_strict_statement_evidence_mismatch_fields=(
+                    lambda **_kwargs: ()
+                ),
+            )
+        )
         replay_item = FileImportPreviewItem(
             id="replay-file-1",
             file_name="statement.xlsx",
@@ -1219,6 +1303,7 @@ class ImportFileServiceTests(unittest.TestCase):
             suspected_duplicate_count=1,
             preview_batch_id="replay-batch-1",
             row_results=[replay_result],
+            normalized_rows=[{}],
         )
 
         repaired = service._resolve_repaired_replay_duplicates(
@@ -1238,7 +1323,7 @@ class ImportFileServiceTests(unittest.TestCase):
             source_file_id="source-file-1",
         )
 
-        self.assertEqual(repaired, 0)
+        self.assertEqual(repaired, (0, 0))
         self.assertEqual(replay_result.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(replay_result.linked_object_id, "canonical-reference-1")
         self.assertEqual(
@@ -1247,6 +1332,144 @@ class ImportFileServiceTests(unittest.TestCase):
         )
         self.assertEqual(replay_item.duplicate_count, 1)
         self.assertEqual(replay_item.suspected_duplicate_count, 0)
+
+    def test_controlled_replay_releases_canonical_reference_with_changed_statement_evidence(self) -> None:
+        normalized = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "balance": "912.00",
+            "currency": "CNY",
+        }
+        replay_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key="bank-v4:current-position",
+            data_fingerprint="reference-fingerprint",
+            decision=ImportDecision.CREATED,
+            decision_reason="Ready to create new bank transaction.",
+        )
+        preview = SimpleNamespace(
+            batch=ImportedBatch(
+                id="replay-batch-1",
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="statement.xlsx",
+                imported_by="system-repair",
+                row_count=1,
+                success_count=1,
+                error_count=0,
+                status=BatchStatus.PENDING,
+            ),
+            row_results=[replay_result],
+        )
+        mismatch_calls: list[tuple[str, dict[str, object]]] = []
+
+        def mismatch_fields(
+            *, transaction_id: str, normalized: dict[str, object]
+        ) -> tuple[str, ...]:
+            mismatch_calls.append((transaction_id, normalized))
+            return ("amount", "balance")
+
+        service = FileImportService(
+            SimpleNamespace(
+                get_batch=lambda _batch_id: preview,
+                bank_transaction_strict_statement_evidence_mismatch_fields=mismatch_fields,
+            )
+        )
+        replay_item = FileImportPreviewItem(
+            id="replay-file-1",
+            file_name="statement.xlsx",
+            template_code="bank_statement",
+            batch_type=BatchType.BANK_TRANSACTION,
+            status="preview_ready",
+            message="preview",
+            row_count=1,
+            success_count=1,
+            preview_batch_id="replay-batch-1",
+            row_results=[replay_result],
+            normalized_rows=[normalized],
+        )
+
+        with self.assertLogs(
+            "fin_ops_platform.services.import_file_service",
+            level="WARNING",
+        ) as captured_logs:
+            resolution = service._resolve_repaired_replay_duplicates(
+                replay_item=replay_item,
+                repaired_duplicate_decision_reason="Controlled repair reason.",
+                repaired_duplicate_evidence=[],
+                canonical_reference_evidence=[
+                    {
+                        "file_id": "source-file-1",
+                        "row_no": 1,
+                        "source_record_type": "bank_transaction",
+                        "data_fingerprint": "reference-fingerprint",
+                        "linked_object_type": "bank_transaction",
+                        "linked_object_id": "stale-canonical-reference",
+                    }
+                ],
+                source_file_id="source-file-1",
+            )
+
+        self.assertEqual(resolution, (0, 1))
+        self.assertEqual(replay_result.decision, ImportDecision.CREATED)
+        self.assertIsNone(replay_result.linked_object_id)
+        self.assertEqual(replay_item.success_count, 1)
+        self.assertEqual(replay_item.duplicate_count, 0)
+        self.assertEqual(
+            mismatch_calls,
+            [("stale-canonical-reference", normalized)],
+        )
+        self.assertEqual(len(captured_logs.output), 1)
+        self.assertIn("mismatch_fields=amount,balance", captured_logs.output[0])
+        self.assertNotIn("0.90", captured_logs.output[0])
+        self.assertNotIn("stale-canonical-reference", captured_logs.output[0])
+
+    def test_controlled_replay_refuses_missing_canonical_reference_target(self) -> None:
+        replay_result = ImportedBatchRowResult(
+            id="replay-row-1",
+            batch_id="replay-batch-1",
+            row_no=1,
+            source_record_type="bank_transaction",
+            source_unique_key=None,
+            data_fingerprint="reference-fingerprint",
+            decision=ImportDecision.CREATED,
+            decision_reason="Ready to create new bank transaction.",
+        )
+        service = FileImportService(
+            SimpleNamespace(
+                bank_transaction_strict_statement_evidence_mismatch_fields=(
+                    lambda **_kwargs: ("canonical_transaction",)
+                )
+            )
+        )
+        replay_item = SimpleNamespace(
+            batch_type=BatchType.BANK_TRANSACTION,
+            row_results=[replay_result],
+            normalized_rows=[{}],
+            preview_batch_id=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "target is missing"):
+            service._resolve_repaired_replay_duplicates(
+                replay_item=replay_item,
+                repaired_duplicate_decision_reason="Controlled repair reason.",
+                repaired_duplicate_evidence=[],
+                canonical_reference_evidence=[
+                    {
+                        "file_id": "source-file-1",
+                        "row_no": 1,
+                        "source_record_type": "bank_transaction",
+                        "data_fingerprint": "reference-fingerprint",
+                        "linked_object_type": "bank_transaction",
+                        "linked_object_id": "missing-canonical-reference",
+                    }
+                ],
+                source_file_id="source-file-1",
+            )
 
     def test_controlled_replay_stale_gate_accepts_same_canonical_transaction(self) -> None:
         confirm_calls: list[str] = []

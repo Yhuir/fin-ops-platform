@@ -106,6 +106,7 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
             "expected_duplicate_delete_count": 1,
             "expected_replay_create_count": 1,
             "expected_replay_repaired_duplicate_count": 1,
+            "expected_replay_released_reference_count": 0,
         },
         "files": [
             {
@@ -516,6 +517,16 @@ class BankImportDedupRepairServiceTests(TestCase):
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
         self.assertEqual(plan["duplicate_delete_count"], 0)
+
+    def test_plan_refuses_released_reference_expectation_above_owned_evidence(self) -> None:
+        snapshot = _snapshot()
+        snapshot["request"]["expected_replay_released_reference_count"] = 2
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "released canonical reference expectation exceeds replay evidence",
+        ):
+            build_bank_import_dedup_repair_plan(snapshot)
 
     def test_plan_does_not_use_ambiguous_statement_position(self) -> None:
         snapshot = _snapshot()

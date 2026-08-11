@@ -222,6 +222,29 @@ class ObjectDedupDecisionService:
             position_identity = self._identity_policy.identify_bank_transaction_position_mapping(normalized)
             if position_identity.canonical_key == identity.canonical_key:
                 raise ValueError("bank transaction canonical collision lacks statement-position evidence")
+            position_match = (
+                self._repository.find_bank_transaction_by_identity(
+                    canonical_key=position_identity.canonical_key,
+                    suspected_key=None,
+                )
+                if self._repository is not None
+                else None
+            )
+            if position_match is not None:
+                if not _bank_position_compatible(normalized, position_match):
+                    raise ValueError(
+                        "bank transaction statement-position identity collision"
+                    )
+                return ObjectDedupDecision(
+                    decision=ImportDecision.DUPLICATE_SKIPPED,
+                    decision_reason=(
+                        "Bank transaction statement-position identity matched an existing transaction."
+                    ),
+                    identity=position_identity,
+                    linked_object_type="bank_transaction",
+                    linked_object_id=position_match.id,
+                    matched_object=position_match,
+                )
             return ObjectDedupDecision(
                 decision=ImportDecision.CREATED,
                 decision_reason="Canonical bank reference was reused for a distinct statement position.",

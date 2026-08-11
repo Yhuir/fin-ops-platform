@@ -25,6 +25,7 @@
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。
 - 路由切换、卸载、重挂载、sessionStorage 恢复时不能丢失已选文件、预览结果或 in-flight preview 结果。
 - `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
+- stale gate 必须逐行比较 decision、linked object type/id；duplicate/importable 汇总不变但 canonical invoice owner 调换时仍必须拒绝确认。
 - confirm API/worker 入队失败必须错误可见，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
 - 损坏 Excel 必须是 file-level `unrecognized_template`，不能让整个 preview 请求崩溃。
 - 发票 `信息汇总表` 模板必须识别 `数电号码`、`购方企业名称`、`购方税号`、`销方企业名称`、`销方税号`、`商品名称` 等表头别名，并跳过末尾 `份数：...金额：...` 汇总页脚。

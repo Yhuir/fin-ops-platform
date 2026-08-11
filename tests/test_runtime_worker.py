@@ -46,7 +46,7 @@ class ImportRuntimeProcessorFactoryTests(unittest.TestCase):
             ],
         )
         file_import_service = SimpleNamespace(
-            replay_confirmed_session_files=Mock(return_value=replay_session)
+            replay_confirmed_session_files=Mock(return_value=(replay_session, 0))
         )
         factory = ImportRuntimeProcessorFactory(data_dir="/tmp", connection=Mock())
         factory._build_file_import_services_from_durable_state = Mock(

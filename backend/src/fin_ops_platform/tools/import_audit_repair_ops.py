@@ -83,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-duplicate-delete-count", type=int)
     parser.add_argument("--expected-bank-replay-create-count", type=int)
     parser.add_argument("--expected-bank-replay-repaired-duplicate-count", type=int)
+    parser.add_argument(
+        "--expected-bank-replay-released-reference-count",
+        type=int,
+    )
     parser.add_argument("--cleanup-related-bank-duplicates", action="store_true")
     parser.add_argument("--expected-bank-category-cleanup-count", type=int)
     parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
@@ -130,10 +134,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         or args.expected_bank_duplicate_delete_count is None
         or args.expected_bank_replay_create_count is None
         or args.expected_bank_replay_repaired_duplicate_count is None
+        or args.expected_bank_replay_released_reference_count is None
         or not args.operator_id
     ):
         raise SystemExit(
-            "Bank dedup repair requires exact target/protected/duplicate-delete/replay/repaired-duplicate counts "
+            "Bank dedup repair requires exact target/protected/duplicate-delete/replay/"
+            "repaired-duplicate/released-reference counts "
             "and --operator-id"
         )
     related_cleanup_values = (
@@ -170,6 +176,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "expected_replay_create_count": args.expected_bank_replay_create_count,
             "expected_replay_repaired_duplicate_count": (
                 args.expected_bank_replay_repaired_duplicate_count
+            ),
+            "expected_replay_released_reference_count": (
+                args.expected_bank_replay_released_reference_count
             ),
             "cleanup_related_duplicates": args.cleanup_related_bank_duplicates,
             "expected_category_cleanup_count": (
@@ -358,6 +367,19 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             )
             if canonical_reference_count != locked_plan["replay_canonical_reference_count"]:
                 raise RuntimeError("Bank recovery replay canonical reference evidence changed.")
+            released_canonical_reference_count = sum(
+                int(item.get("released_canonical_reference_count") or 0)
+                for item in audit_summaries
+            )
+            if (
+                released_canonical_reference_count
+                != locked_plan["expected_replay_released_reference_count"]
+            ):
+                raise RuntimeError(
+                    "Bank recovery replay released an unexpected number of canonical references: "
+                    f"expected {locked_plan['expected_replay_released_reference_count']}, "
+                    f"got {released_canonical_reference_count}."
+                )
             idempotence_replay_results = [
                 runtime.replay_confirmed_file_import_session(
                     source_session_id=entry["session_id"],
@@ -427,6 +449,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             ):
                 raise RuntimeError(
                     "Repeated bank recovery replay changed canonical reference evidence."
+                )
+            repeated_released_canonical_reference_count = sum(
+                int(item.get("released_canonical_reference_count") or 0)
+                for item in idempotence_summaries
+            )
+            if (
+                repeated_released_canonical_reference_count
+                != locked_plan["expected_replay_released_reference_count"]
+            ):
+                raise RuntimeError(
+                    "Repeated bank recovery replay changed released canonical reference evidence."
                 )
             report = public_bank_import_dedup_repair_report(
                 locked_plan,

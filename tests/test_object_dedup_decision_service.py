@@ -281,6 +281,55 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
         self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(decision.linked_object_id, "txn-1")
 
+    def test_reused_canonical_reference_reimport_matches_existing_position_identity(self) -> None:
+        incoming = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "88.00",
+            "balance": "912.00",
+            "currency": "人民币元",
+            "counterparty_name": "Acme",
+            "bank_serial_no": "SERIAL-001",
+        }
+        policy = FinancialObjectIdentityPolicy()
+        base_identity = policy.identify_bank_transaction_mapping(incoming)
+        position_identity = policy.identify_bank_transaction_position_mapping(incoming)
+        self.transaction.source_unique_key = base_identity.canonical_key
+        self.transaction.balance = Decimal("1000.00")
+        self.transaction.currency = "CNY"
+        position_transaction = BankTransaction(
+            id="txn-position-1",
+            account_no="62220001",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Acme",
+            amount=Decimal("88.00"),
+            signed_amount=Decimal("-88.00"),
+            trade_time="2026-03-23 09:15:01",
+            bank_serial_no="SERIAL-001",
+            balance=Decimal("912.00"),
+            currency="CNY",
+            source_unique_key=position_identity.canonical_key,
+            data_fingerprint="legacy-drifted-fingerprint",
+        )
+        repo = FakeObjectIdentityRepository(
+            transactions=[self.transaction, position_transaction]
+        )
+        service = ObjectDedupDecisionService(
+            identity_policy=policy,
+            object_identity_repository=repo,
+        )
+
+        decision = service.decide_bank_transaction_import(incoming)
+
+        self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(decision.linked_object_id, "txn-position-1")
+        self.assertEqual(decision.identity.canonical_key, position_identity.canonical_key)
+        self.assertEqual(
+            repo.bank_queries[-1],
+            (position_identity.canonical_key, None),
+        )
+
     def test_fingerprint_match_without_existing_official_reference_is_suspected(self) -> None:
         self.transaction.bank_serial_no = None
         repo = FakeObjectIdentityRepository(transactions=[self.transaction])

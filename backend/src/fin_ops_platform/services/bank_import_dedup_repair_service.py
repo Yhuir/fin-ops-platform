@@ -81,6 +81,9 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     expected_replay_repaired_duplicate_count = request.get(
         "expected_replay_repaired_duplicate_count"
     )
+    expected_replay_released_reference_count = request.get(
+        "expected_replay_released_reference_count"
+    )
     if expected_replay_repaired_duplicate_count is None:
         raise ValueError(
             "Bank dedup repair requires an exact repaired replay duplicate count."
@@ -90,6 +93,17 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     )
     if expected_replay_repaired_duplicate_count < 0:
         raise ValueError("Bank repaired replay duplicate count cannot be negative.")
+    if expected_replay_released_reference_count is None:
+        raise ValueError(
+            "Bank dedup repair requires an exact released canonical reference count."
+        )
+    expected_replay_released_reference_count = int(
+        expected_replay_released_reference_count
+    )
+    if expected_replay_released_reference_count < 0:
+        raise ValueError(
+            "Bank released canonical reference count cannot be negative."
+        )
     if expected_duplicate_delete_count is None:
         raise ValueError("Bank dedup repair requires an exact duplicate delete count.")
     expected_duplicate_delete_count = int(expected_duplicate_delete_count)
@@ -666,6 +680,12 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         raise ValueError(
             "Bank canonical duplicate references are not fully owned by the selected source files."
         )
+    if expected_replay_released_reference_count > len(canonical_reference_rows):
+        raise ValueError(
+            "Bank released canonical reference expectation exceeds replay evidence: "
+            f"expected {expected_replay_released_reference_count}, "
+            f"available {len(canonical_reference_rows)}."
+        )
 
     owner_updates_by_batch = Counter(
         update["batch_pk"] for update in row_updates if update["owner_transition"]
@@ -699,6 +719,9 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         ),
         "replay_canonical_owner_count": len(existing_owner_rows),
         "replay_canonical_reference_count": len(canonical_reference_rows),
+        "expected_replay_released_reference_count": (
+            expected_replay_released_reference_count
+        ),
         "replay_sources": replay_sources,
         "duplicate_pairs": duplicate_pairs,
         "category_cleanup_actions": category_cleanup_actions,
@@ -742,6 +765,9 @@ def public_bank_import_dedup_repair_report(
         ],
         "replay_canonical_owner_count": plan["replay_canonical_owner_count"],
         "replay_canonical_reference_count": plan["replay_canonical_reference_count"],
+        "expected_replay_released_reference_count": plan[
+            "expected_replay_released_reference_count"
+        ],
         "duplicate_match_basis_counts": deepcopy(
             plan.get("duplicate_match_basis_counts") or {}
         ),

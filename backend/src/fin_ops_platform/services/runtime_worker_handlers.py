@@ -137,7 +137,10 @@ class ImportRuntimeProcessorFactory:
         canonical_reference_evidence: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
-        replay_session = file_import_service.replay_confirmed_session_files(
+        (
+            replay_session,
+            released_canonical_reference_count,
+        ) = file_import_service.replay_confirmed_session_files(
             source_session_id=source_session_id,
             selected_file_ids=selected_file_ids,
             imported_by=operator_id,
@@ -194,6 +197,9 @@ class ImportRuntimeProcessorFactory:
                 "repaired_duplicate_count": int(expected_repaired_duplicate_count),
                 "canonical_owner_count": int(expected_canonical_owner_count),
                 "canonical_reference_count": int(expected_canonical_reference_count),
+                "released_canonical_reference_count": int(
+                    released_canonical_reference_count
+                ),
             },
         }
 

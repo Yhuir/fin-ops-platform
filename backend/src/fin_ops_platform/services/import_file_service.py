@@ -560,8 +560,15 @@ class FileImportService:
         if session.status == "reverted":
             raise ValueError("discarded import sessions cannot be confirmed")
         current_audit = self._build_session_audit(session, refresh_existing=True)
-        if current_audit.audit.stale_projection() != session.audit.stale_projection():
-            raise ImportPreviewStaleError(preview=session.audit, current=current_audit.audit)
+        if (
+            current_audit.audit.stale_projection() != session.audit.stale_projection()
+            or current_audit.stale_row_change_counts
+        ):
+            raise ImportPreviewStaleError(
+                preview=session.audit,
+                current=current_audit.audit,
+                row_change_counts=current_audit.stale_row_change_counts,
+            )
 
     def retry_session_files(
         self,
@@ -662,7 +669,7 @@ class FileImportService:
         canonical_owner_evidence: list[dict[str, Any]] | None = None,
         expected_canonical_reference_count: int = 0,
         canonical_reference_evidence: list[dict[str, Any]] | None = None,
-    ) -> FileImportSession:
+    ) -> tuple[FileImportSession, int]:
         source_session = self._sessions[source_session_id]
         selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
         if not selected:
@@ -722,6 +729,7 @@ class FileImportService:
         ):
             raise ValueError("controlled replay canonical reference evidence count changed")
         repaired_duplicate_count = 0
+        released_canonical_reference_count = 0
         for source_item in source_items:
             if not source_item.stored_file_path:
                 raise ValueError(f"replay source file {source_item.id} is missing stored content")
@@ -752,7 +760,10 @@ class FileImportService:
                 field_mapping=dict(source_item.field_mapping),
                 skip_duplicate_file_guard=True,
             )
-            repaired_duplicate_count += self._resolve_repaired_replay_duplicates(
+            (
+                repaired_count,
+                released_reference_count,
+            ) = self._resolve_repaired_replay_duplicates(
                 replay_item=replay_item,
                 repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
                 repaired_duplicate_evidence=evidence_by_file[source_item.id],
@@ -762,6 +773,8 @@ class FileImportService:
                 ],
                 source_file_id=source_item.id,
             )
+            repaired_duplicate_count += repaired_count
+            released_canonical_reference_count += released_reference_count
             replay_session.files.append(replay_item)
 
         if repaired_duplicate_count != int(expected_repaired_duplicate_count):
@@ -775,7 +788,7 @@ class FileImportService:
             replay_session.status = "preview_ready_with_errors"
         self._refresh_session_audit(replay_session)
         self._sessions[replay_session.id] = replay_session
-        return replay_session
+        return replay_session, released_canonical_reference_count
 
     def _resolve_repaired_replay_duplicates(
         self,
@@ -786,14 +799,14 @@ class FileImportService:
         canonical_owner_evidence: list[dict[str, Any]] | None = None,
         canonical_reference_evidence: list[dict[str, Any]] | None = None,
         source_file_id: str | None = None,
-    ) -> int:
+    ) -> tuple[int, int]:
         if replay_item.batch_type != BatchType.BANK_TRANSACTION:
-            return 0
+            return 0, 0
         normalized_repair_reason = str(
             repaired_duplicate_decision_reason or ""
         ).strip()
         if not normalized_repair_reason:
-            return 0
+            return 0, 0
         evidence_by_row_no: dict[int, tuple[str, dict[str, Any]]] = {}
         for evidence in repaired_duplicate_evidence:
             row_no = int(evidence.get("row_no") or 0)
@@ -849,7 +862,12 @@ class FileImportService:
             evidence_by_row_no[row_no] = ("canonical_reference", evidence)
 
         resolved_count = 0
-        for replay_result in replay_item.row_results:
+        released_canonical_reference_count = 0
+        for replay_result, normalized in zip(
+            replay_item.row_results,
+            replay_item.normalized_rows,
+            strict=True,
+        ):
             evidence_entry = evidence_by_row_no.pop(replay_result.row_no, None)
             if evidence_entry is None:
                 if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
@@ -910,6 +928,33 @@ class FileImportService:
                     "controlled replay current preview changed from repaired row evidence: "
                     f"row_no={replay_result.row_no}; fields={','.join(mismatches)}"
                 )
+            if evidence_kind == "canonical_reference":
+                mismatch_reader = getattr(
+                    self._import_service,
+                    "bank_transaction_strict_statement_evidence_mismatch_fields",
+                    None,
+                )
+                if not callable(mismatch_reader):
+                    raise ValueError(
+                        "controlled replay canonical reference verification is unavailable"
+                    )
+                mismatch_fields = tuple(
+                    mismatch_reader(
+                        transaction_id=str(evidence["linked_object_id"]),
+                        normalized=normalized,
+                    )
+                )
+                if "canonical_transaction" in mismatch_fields:
+                    raise ValueError(
+                        "controlled replay canonical reference target is missing"
+                    )
+                if mismatch_fields:
+                    LOGGER.warning(
+                        "controlled_replay_canonical_reference_released mismatch_fields=%s",
+                        ",".join(mismatch_fields),
+                    )
+                    released_canonical_reference_count += 1
+                    continue
             replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
             replay_result.decision_reason = (
                 CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND[evidence_kind]
@@ -940,7 +985,7 @@ class FileImportService:
             replay_item.success_count = preview.batch.success_count
             replay_item.duplicate_count = preview.batch.duplicate_count
             replay_item.suspected_duplicate_count = preview.batch.suspected_duplicate_count
-        return resolved_count
+        return resolved_count, released_canonical_reference_count
 
     def _preview_single_file(
         self,
@@ -1155,6 +1200,7 @@ class FileImportService:
 
     def _build_session_audit(self, session: FileImportSession, *, refresh_existing: bool) -> ImportPreviewSessionAudit:
         rows: list[ImportPreviewAuditRow] = []
+        stale_row_change_counts: dict[str, int] = {}
         for item in session.files:
             if item.batch_type is None:
                 continue
@@ -1177,6 +1223,23 @@ class FileImportService:
                         decision = row_result.decision
                         linked_object_type = row_result.linked_object_type
                         linked_object_id = row_result.linked_object_id
+                    for field_name, preview_value, current_value in (
+                        ("decision", row_result.decision, decision),
+                        (
+                            "linked_object_type",
+                            row_result.linked_object_type,
+                            linked_object_type,
+                        ),
+                        (
+                            "linked_object_id",
+                            row_result.linked_object_id,
+                            linked_object_id,
+                        ),
+                    ):
+                        if preview_value != current_value:
+                            stale_row_change_counts[field_name] = (
+                                stale_row_change_counts.get(field_name, 0) + 1
+                            )
                 identity = self._identity_for_row(row_result.source_record_type, normalized)
                 rows.append(
                     ImportPreviewAuditRow(
@@ -1198,6 +1261,7 @@ class FileImportService:
         for item in session.files:
             if item.id not in existing_file_ids:
                 audit.files.append(self._empty_file_audit(item))
+        audit.stale_row_change_counts = dict(sorted(stale_row_change_counts.items()))
         return audit
 
     def _controlled_replay_duplicate_is_current(

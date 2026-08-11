@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-12 - statement-position 重放判重与错误引用释放
+
+- 根因：官方参考号复用后首次导入可生成 `bank-v4` statement-position identity，但同一位置再次导入时，旧决策只检查基础 `bank-v3` 冲突，没有直接查询已经存在的 `bank-v4`，在自由文本 fingerprint 漂移时会再次判为新建。生产受控回放另有 38 条旧 canonical reference 指向六项账单证据不一致的流水，旧逻辑会无条件覆盖当前 importer decision。
+- 修复：基础 identity 冲突后直接查询确定性的 statement-position canonical key；相同账单位置返回 duplicate，不同位置才创建。受控 canonical reference 在回放时重读目标并严格比较账户、时间、方向、金额、余额、币种，不一致时释放回普通 importer，目标缺失 fail closed。
+- 门禁：恢复计划新增精确 released-reference count，并纳入 dry-run fingerprint、首轮重放和幂等重放；授权数不得超过 source files 实际拥有的 reference evidence。普通 confirm 的 stale gate 同时逐行比较 decision/type/id，汇总计数相同但 owner 调换仍拒绝。
+- 性能与边界：正常文件仍使用单批 identity preload 和内存 cache；只在已检测到基础 canonical 冲突时追加一次 position-key 查询，不引入扫描、第二 parser、第二导入链或页面 I/O。
+- 测试：`test_reused_canonical_reference_reimport_matches_existing_position_identity`、逐行 owner drift stale 回归、canonical reference 释放/缺失目标回归、CLI 精确释放计数和恢复计划上界门禁。
+
 ## 2026-08-12 - 真实附件解析、statement-position 唯一键与生产去重收口
 
 - 真实原因：部分银行 OOXML 把 worksheet dimension 错写为 `A1`，read-only 读取会把有数据的工作表截成一个单元格；同时部分官方参考号在历史导出中复用，旧 canonical 冲突即使被 service 判定为新事实，仍会撞上 PostgreSQL `source_unique_key` 唯一索引。
