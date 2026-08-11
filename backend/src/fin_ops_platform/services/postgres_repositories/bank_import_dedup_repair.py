@@ -187,18 +187,6 @@ def apply_bank_import_dedup_repair(
         )
         if affected != 1:
             raise RuntimeError(f"Import batch {update['batch_pk']} changed after dry-run.")
-    for update in plan["file_updates"]:
-        affected = connection.execute(
-            _UPDATE_FILE_SQL,
-            (
-                json.dumps(update["after_raw_payload"], ensure_ascii=False, default=str),
-                update["file_pk"],
-                update["batch_id"],
-                json.dumps(update["before_raw_payload"], ensure_ascii=False, default=str),
-            ),
-        )
-        if affected != 1:
-            raise RuntimeError(f"Import file {update['file_pk']} changed after dry-run.")
     for pair in plan["duplicate_pairs"]:
         affected = connection.execute(
             _DELETE_TRANSACTION_SQL,
@@ -497,20 +485,6 @@ where id = %s::uuid
   and status = 'completed'
   and success_count = %s
   and duplicate_count = %s
-  and raw_payload = %s::jsonb
-"""
-
-_UPDATE_FILE_SQL = """
-update app.import_files
-set raw_payload = %s::jsonb
-where id = %s::uuid
-  and coalesce(
-      nullif(raw_payload->'normalized_payload'->>'batch_id', ''),
-      nullif(raw_payload->>'batch_id', ''),
-      raw_payload->'normalized_payload'->>'preview_batch_id',
-      raw_payload->>'preview_batch_id'
-  ) = %s
-  and status = 'confirmed'
   and raw_payload = %s::jsonb
 """
 

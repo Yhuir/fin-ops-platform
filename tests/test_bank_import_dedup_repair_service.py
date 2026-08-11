@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -15,7 +16,6 @@ from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair im
     _DELETE_TRANSACTION_SQL,
     _SOURCE_FILE_SQL,
     _TARGET_TRANSACTION_SQL,
-    _UPDATE_FILE_SQL,
     apply_bank_import_dedup_repair,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import (
@@ -264,9 +264,9 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["duplicate_pairs"][0]["keep_transaction_id"], "keeper-1")
         self.assertEqual(plan["batch_updates"][0]["after_success_count"], 1)
         self.assertEqual(plan["batch_updates"][0]["after_duplicate_count"], 1)
-        row_results = plan["file_updates"][0]["after_raw_payload"]["normalized_payload"]["row_results"]
-        self.assertEqual(row_results[0]["decision"], "duplicate_skipped")
-        self.assertEqual(row_results[1]["decision"], "created")
+        first_update = plan["row_updates"][0]
+        self.assertEqual(first_update["after_decision"], "duplicate_skipped")
+        self.assertEqual(first_update["after_linked_object_id"], "keeper-1")
 
     def test_plan_refuses_ambiguous_missing_reference_evidence(self) -> None:
         with self.assertRaisesRegex(ValueError, "ambiguous"):
@@ -389,41 +389,29 @@ class BankImportDedupRepairServiceTests(TestCase):
             update for update in plan["row_updates"] if not update["owner_transition"]
         )
         self.assertEqual(reference_update["after_decision_reason"], "same-file duplicate")
-        file_results = plan["file_updates"][0]["after_raw_payload"][
-            "normalized_payload"
-        ]["row_results"]
-        self.assertEqual(file_results[0]["linked_object_id"], "keeper-1")
-        self.assertEqual(file_results[2]["linked_object_id"], "keeper-1")
-        self.assertEqual(file_results[2]["decision_reason"], "same-file duplicate")
+        self.assertEqual(reference_update["after_linked_object_id"], "keeper-1")
+        self.assertEqual(
+            reference_update["after_raw_payload"]["normalized_payload"]["linked_object_id"],
+            "keeper-1",
+        )
 
-    def test_plan_preserves_absent_file_counters_while_rewriting_row_results(self) -> None:
+    def test_plan_fingerprints_immutable_file_preview_payload(self) -> None:
         snapshot = _snapshot()
-        file_payload = snapshot["files"][0]["raw_payload"]["normalized_payload"]
-        file_payload.pop("success_count")
-        file_payload.pop("duplicate_count")
+        before_payload = json.loads(json.dumps(snapshot["files"][0]["raw_payload"]))
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
-        after_payload = plan["file_updates"][0]["after_raw_payload"][
-            "normalized_payload"
-        ]
-        self.assertNotIn("success_count", after_payload)
-        self.assertNotIn("duplicate_count", after_payload)
-        self.assertEqual(after_payload["row_results"][0]["linked_object_id"], "keeper-1")
-
-    def test_plan_rebuilds_present_file_counters_from_durable_row_results(self) -> None:
-        snapshot = _snapshot()
-        file_payload = snapshot["files"][0]["raw_payload"]["normalized_payload"]
-        file_payload["success_count"] = 0
-        file_payload["duplicate_count"] = 0
-
-        plan = build_bank_import_dedup_repair_plan(snapshot)
-
-        after_payload = plan["file_updates"][0]["after_raw_payload"][
-            "normalized_payload"
-        ]
-        self.assertEqual(after_payload["success_count"], 1)
-        self.assertEqual(after_payload["duplicate_count"], 1)
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                before_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(plan["source_files"][0]["raw_payload_sha256"], expected_hash)
+        self.assertEqual(snapshot["files"][0]["raw_payload"], before_payload)
+        self.assertNotIn("file_updates", plan)
 
     def test_plan_authorizes_exact_duplicate_owned_category_and_event(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
@@ -551,7 +539,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         connection = Connection()
         apply_bank_import_dedup_repair(connection, plan, operator_id="system_repair")
 
-        self.assertEqual(len(connection.calls), 6)
+        self.assertEqual(len(connection.calls), 5)
         self.assertIn("fin_ops.correction_reason", connection.calls[0][0])
         self.assertIn("fin_ops.actor_id", connection.calls[1][0])
         self.assertIn("decision = %s", connection.calls[2][0])
@@ -561,9 +549,8 @@ class BankImportDedupRepairServiceTests(TestCase):
             "Reclassified by bank identity v3 controlled recovery.",
         )
         self.assertIn("status = 'completed'", connection.calls[3][0])
-        self.assertIn("status = 'confirmed'", connection.calls[4][0])
-        self.assertIn("delete from app.bank_transactions", connection.calls[5][0])
-        self.assertEqual(connection.calls[5][1][2], "batch-1")
+        self.assertIn("delete from app.bank_transactions", connection.calls[4][0])
+        self.assertEqual(connection.calls[4][1][2], "batch-1")
 
     def test_repository_deletes_exact_category_event_before_category(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_authorized_category_snapshot())
@@ -592,15 +579,11 @@ class BankImportDedupRepairServiceTests(TestCase):
 
     def test_repository_uses_durable_file_payload_batch_link(self) -> None:
         self.assertNotIn("file.import_batch_id", _SOURCE_FILE_SQL)
-        self.assertNotIn("import_batch_id =", _UPDATE_FILE_SQL)
         self.assertIn("left join app.import_batches", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'preview_batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("file.raw_payload->>'batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("file.raw_payload->>'preview_batch_id'", _SOURCE_FILE_SQL)
-        self.assertIn("normalized_payload'->>'batch_id'", _UPDATE_FILE_SQL)
-        self.assertIn("raw_payload->>'batch_id'", _UPDATE_FILE_SQL)
-        self.assertIn("raw_payload->>'preview_batch_id'", _UPDATE_FILE_SQL)
         self.assertIn("bt.legacy_source_batch_id = any", _TARGET_TRANSACTION_SQL)
         self.assertIn("bt.legacy_source_batch_id = nullif", _DELETE_TRANSACTION_SQL)
 
