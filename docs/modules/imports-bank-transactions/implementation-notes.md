@@ -7,8 +7,8 @@
 
 - 真实原因：旧 `bank-v2` 把“账户 + 官方参考号”当成唯一强 identity；部分银行在同一文件内复用参考号时，不同交易被错误跳过。后续恢复导入又让已有历史流水以新 batch owner 重建，形成恢复 cohort 中的历史副本。
 - 修复：新记录使用 `bank-v3`（账户 + 官方参考号 + 业务指纹摘要）；历史 v2 只在业务指纹一致且官方参考号唯一相交时判重。preview/confirm 统一一次批量 preload，并在同批创建后更新内存 cache，删除逐行 identity 查询链。
-- Audit 与生产恢复使用同一迁移证据：v3 导入行引用历史 v2 canonical 时，只有业务指纹一致且双方官方参考号存在交集才视为一致；file→batch 关系读取正式 `raw_payload.normalized_payload.batch_id/preview_batch_id`，不假设 schema 中存在 `import_files.import_batch_id`。
-- 生产恢复：显式绑定 source session/file、expected counts 和 dry-run fingerprint。工具只清理唯一匹配且零关系/零核销的错误副本，同步修正原导入审计，再通过正式 processor 重放归档文件；不扫描其它任务、不迁移关系、不修改保护流水。
+- Audit 与生产恢复使用同一迁移证据：v3 导入行引用历史 v2 canonical 时，只有业务指纹一致且双方官方参考号存在交集才视为一致；file→batch 关系兼容正式 nested payload 与既有顶层 `batch_id/preview_batch_id`，流水 batch owner 兼容 canonical UUID 与 `legacy_source_batch_id`，不依赖生产已移除的 `import_files.import_batch_id`。
+- 生产恢复：显式绑定 source session/file、expected counts 和 dry-run fingerprint。工具只清理唯一匹配且零关系/零核销的错误副本；无官方参考号时不会全局放宽 identity，只允许在本次授权 cohort 内以相同业务指纹、唯一保护候选、相同非空余额和完整辅助业务字段作为严格二级恢复证据。同步修正原导入审计后通过正式 processor 重放归档文件；不扫描其它任务、不迁移关系、不修改保护流水。
 - 性能：identity 读取从每行一次数据库查询收敛为每批一次 bulk query；计划构建按 data fingerprint 分桶，避免恢复集合与保护集合做笛卡尔比较。
 - 测试：业务核心、service、repository、受控 replay 和旧 CLI 回归由 `test_bank_transaction_identity_service.py`、`test_object_dedup_decision_service.py`、`test_import_service.py`、`test_import_file_service.py`、`test_postgres_repositories_core.py`、`test_bank_import_dedup_repair_service.py`、`test_import_audit_repair_ops.py` 覆盖。
 

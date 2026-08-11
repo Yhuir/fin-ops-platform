@@ -175,6 +175,25 @@ class BankImportDedupRepairServiceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "ambiguous"):
             build_bank_import_dedup_repair_plan(_snapshot(ambiguous=True))
 
+    def test_plan_repairs_unique_no_reference_match_with_equal_balance_evidence(self) -> None:
+        snapshot = _snapshot(ambiguous=True)
+        snapshot["target_transactions"][0]["bank_serial_no"] = None
+        snapshot["target_transactions"][0]["balance"] = "48952.41"
+        snapshot["protected_transactions"][0]["balance"] = "48952.41"
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["duplicate_delete_count"], 1)
+
+    def test_plan_refuses_no_reference_match_when_balance_differs(self) -> None:
+        snapshot = _snapshot(ambiguous=True)
+        snapshot["target_transactions"][0]["bank_serial_no"] = None
+        snapshot["target_transactions"][0]["balance"] = "48952.41"
+        snapshot["protected_transactions"][0]["balance"] = "49448.61"
+
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            build_bank_import_dedup_repair_plan(snapshot)
+
     def test_plan_refuses_candidate_with_any_relation(self) -> None:
         with self.assertRaisesRegex(ValueError, "owns 1 relations"):
             build_bank_import_dedup_repair_plan(_snapshot(relation_count=1))

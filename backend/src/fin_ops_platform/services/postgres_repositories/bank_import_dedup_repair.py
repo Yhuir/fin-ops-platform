@@ -137,6 +137,19 @@ bt.account_no, bt.txn_direction, bt.counterparty_name_raw,
 bt.normalized_counterparty_name, bt.amount, bt.txn_date,
 bt.txn_month, bt.trade_time, bt.pay_receive_time,
 bt.bank_serial_no,
+bt.balance, bt.currency, bt.summary, bt.remark, bt.account_name, bt.bank_text_fields,
+coalesce(
+    bt.raw_payload->'normalized_payload'->>'counterparty_account_no',
+    bt.raw_payload->>'counterparty_account_no'
+) as counterparty_account_no,
+coalesce(
+    bt.raw_payload->'normalized_payload'->>'counterparty_bank_name',
+    bt.raw_payload->>'counterparty_bank_name'
+) as counterparty_bank_name,
+coalesce(bt.raw_payload->'normalized_payload'->>'booked_date', bt.raw_payload->>'booked_date')
+    as booked_date,
+coalesce(bt.raw_payload->'normalized_payload'->>'voucher_kind', bt.raw_payload->>'voucher_kind')
+    as voucher_kind,
 coalesce(bt.raw_payload->'normalized_payload'->>'account_detail_no', bt.raw_payload->>'account_detail_no')
     as account_detail_no,
 coalesce(bt.raw_payload->'normalized_payload'->>'enterprise_serial_no', bt.raw_payload->>'enterprise_serial_no')

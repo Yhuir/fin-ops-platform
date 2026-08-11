@@ -82,17 +82,22 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             continue
         incoming_references = _official_reference_values(target_identity.audit_fields)
         exact: list[dict[str, Any]] = []
-        missing_reference_evidence = not incoming_references
         for candidate in candidates:
             candidate_identity = identity_service.identity_for_mapping(candidate)
             candidate_references = _official_reference_values(candidate_identity.audit_fields)
-            if not candidate_references:
-                missing_reference_evidence = True
-            elif incoming_references.intersection(candidate_references):
+            if incoming_references and incoming_references.intersection(candidate_references):
                 exact.append(candidate)
+        if not exact:
+            target_secondary = _strict_secondary_evidence(target)
+            if target_secondary is not None:
+                exact = [
+                    candidate
+                    for candidate in candidates
+                    if _strict_secondary_evidence(candidate) == target_secondary
+                ]
         if len(exact) == 1:
             duplicate_pairs.append(_duplicate_pair(target, exact[0]))
-        elif len(exact) > 1 or missing_reference_evidence:
+        else:
             ambiguous_target_ids.append(_text(target.get("transaction_id")))
     if ambiguous_target_ids:
         raise ValueError(
@@ -379,6 +384,27 @@ def _official_reference_values(audit_fields: dict[str, str | None]) -> set[str]:
         if field_name in {"account_detail_no", "bank_serial_no", "enterprise_serial_no"}
         and _text(value)
     }
+
+
+def _strict_secondary_evidence(row: dict[str, Any]) -> tuple[str, ...] | None:
+    balance = _text(row.get("balance"))
+    if not balance:
+        return None
+    values: list[str] = [balance]
+    for field_name in (
+        "currency",
+        "summary",
+        "remark",
+        "account_name",
+        "counterparty_account_no",
+        "counterparty_bank_name",
+        "booked_date",
+        "voucher_kind",
+        "voucher_no",
+    ):
+        values.append(_text(row.get(field_name)))
+    values.append(_fingerprint(row.get("bank_text_fields") or []))
+    return tuple(values)
 
 
 def _decimal_nonzero(value: Any) -> bool:
