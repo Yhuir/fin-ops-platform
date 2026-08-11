@@ -339,6 +339,61 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["duplicate_delete_count"], 1)
         self.assertEqual(plan["duplicate_match_basis_counts"], {"statement_position": 1})
 
+    def test_plan_repairs_unique_statement_position_with_account_suffix_representation(self) -> None:
+        snapshot = _snapshot()
+        target = snapshot["target_transactions"][0]
+        keeper = snapshot["protected_transactions"][0]
+        target.update(
+            {
+                "account_no": "工商银行 6386",
+                "bank_serial_no": "NEW-PARSER-REFERENCE",
+                "balance": "48952.410",
+                "currency": "人民币元",
+            }
+        )
+        keeper.update(
+            {
+                "account_no": "6222000000006386",
+                "bank_serial_no": "LEGACY-PARSER-REFERENCE",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["duplicate_delete_count"], 1)
+        self.assertEqual(
+            plan["duplicate_match_basis_counts"],
+            {"statement_position_account_suffix": 1},
+        )
+
+    def test_plan_does_not_match_two_distinct_full_accounts_with_same_suffix(self) -> None:
+        snapshot = _snapshot()
+        target = snapshot["target_transactions"][0]
+        keeper = snapshot["protected_transactions"][0]
+        target.update(
+            {
+                "account_no": "6222000000006386",
+                "bank_serial_no": "NEW-PARSER-REFERENCE",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+        keeper.update(
+            {
+                "account_no": "9558800000006386",
+                "bank_serial_no": "LEGACY-PARSER-REFERENCE",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+        snapshot["request"]["expected_duplicate_delete_count"] = 0
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["duplicate_delete_count"], 0)
+
     def test_plan_does_not_use_ambiguous_statement_position(self) -> None:
         snapshot = _snapshot()
         target = snapshot["target_transactions"][0]

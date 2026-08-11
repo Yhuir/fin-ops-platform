@@ -5,7 +5,9 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import re
 from typing import Any
+import unicodedata
 
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
@@ -99,6 +101,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     identity_service = BankTransactionIdentityService()
     protected_by_fingerprint: dict[str, list[dict[str, Any]]] = defaultdict(list)
     protected_by_statement: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+    protected_by_statement_position: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in protected:
         fingerprint = _text(row.get("data_fingerprint"))
         if fingerprint:
@@ -106,11 +109,19 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         statement_evidence = _strict_statement_evidence(row, identity_service)
         if statement_evidence is not None:
             protected_by_statement[statement_evidence].append(row)
+        position_evidence = _strict_statement_position_evidence(row, identity_service)
+        if position_evidence is not None:
+            protected_by_statement_position[position_evidence].append(row)
 
     target_statement_counts = Counter(
         evidence
         for row in targets
         if (evidence := _strict_statement_evidence(row, identity_service)) is not None
+    )
+    target_statement_position_counts = Counter(
+        evidence
+        for row in targets
+        if (evidence := _strict_statement_position_evidence(row, identity_service)) is not None
     )
 
     duplicate_pairs: list[dict[str, Any]] = []
@@ -126,6 +137,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 identity_service=identity_service,
                 target_statement_counts=target_statement_counts,
                 protected_by_statement=protected_by_statement,
+                target_statement_position_counts=target_statement_position_counts,
+                protected_by_statement_position=protected_by_statement_position,
             )
             if statement_pair is not None:
                 duplicate_pairs.append(statement_pair)
@@ -166,6 +179,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 identity_service=identity_service,
                 target_statement_counts=target_statement_counts,
                 protected_by_statement=protected_by_statement,
+                target_statement_position_counts=target_statement_position_counts,
+                protected_by_statement_position=protected_by_statement_position,
             )
             if statement_pair is not None:
                 duplicate_pairs.append(statement_pair)
@@ -190,6 +205,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                         identity_service=identity_service,
                         target_statement_counts=target_statement_counts,
                         protected_by_statement=protected_by_statement,
+                        target_statement_position_counts=target_statement_position_counts,
+                        protected_by_statement_position=protected_by_statement_position,
                     )
                     if statement_pair is not None:
                         duplicate_pairs.append(statement_pair)
@@ -209,6 +226,8 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 identity_service=identity_service,
                 target_statement_counts=target_statement_counts,
                 protected_by_statement=protected_by_statement,
+                target_statement_position_counts=target_statement_position_counts,
+                protected_by_statement_position=protected_by_statement_position,
             )
             if statement_pair is not None:
                 duplicate_pairs.append(statement_pair)
@@ -932,25 +951,74 @@ def _strict_statement_evidence(
     return (*required_components, *balance_currency)
 
 
+def _strict_statement_position_evidence(
+    row: dict[str, Any],
+    identity_service: BankTransactionIdentityService,
+) -> tuple[str, ...] | None:
+    identity = identity_service.identity_for_mapping(row)
+    balance_currency = _strict_secondary_evidence(row)
+    required_components = tuple(
+        _text(identity.components.get(field))
+        for field in ("trade_time", "direction", "amount")
+    )
+    if not all(required_components) or balance_currency is None:
+        return None
+    return (*required_components, *balance_currency)
+
+
 def _unique_statement_position_pair(
     target: dict[str, Any],
     *,
     identity_service: BankTransactionIdentityService,
     target_statement_counts: Counter[tuple[str, ...]],
     protected_by_statement: dict[tuple[str, ...], list[dict[str, Any]]],
+    target_statement_position_counts: Counter[tuple[str, ...]],
+    protected_by_statement_position: dict[tuple[str, ...], list[dict[str, Any]]],
 ) -> dict[str, Any] | None:
     statement_evidence = _strict_statement_evidence(target, identity_service)
-    if statement_evidence is None or target_statement_counts[statement_evidence] != 1:
+    if statement_evidence is not None and target_statement_counts[statement_evidence] == 1:
+        statement_candidates = protected_by_statement.get(statement_evidence, [])
+        if len(statement_candidates) == 1:
+            return _duplicate_pair(
+                target,
+                statement_candidates[0],
+                match_basis="statement_position",
+                matched_official_references=[],
+            )
+
+    position_evidence = _strict_statement_position_evidence(target, identity_service)
+    if (
+        position_evidence is None
+        or target_statement_position_counts[position_evidence] != 1
+    ):
         return None
-    statement_candidates = protected_by_statement.get(statement_evidence, [])
-    if len(statement_candidates) != 1:
+    compatible_candidates = [
+        candidate
+        for candidate in protected_by_statement_position.get(position_evidence, [])
+        if _account_identifiers_compatible(
+            target.get("account_no"),
+            candidate.get("account_no"),
+        )
+    ]
+    if len(compatible_candidates) != 1:
         return None
     return _duplicate_pair(
         target,
-        statement_candidates[0],
-        match_basis="statement_position",
+        compatible_candidates[0],
+        match_basis="statement_position_account_suffix",
         matched_official_references=[],
     )
+
+
+def _account_identifiers_compatible(left: Any, right: Any) -> bool:
+    left_digits = re.sub(r"\D", "", unicodedata.normalize("NFKC", _text(left)))
+    right_digits = re.sub(r"\D", "", unicodedata.normalize("NFKC", _text(right)))
+    if not left_digits or not right_digits:
+        return False
+    if left_digits == right_digits:
+        return True
+    shorter, longer = sorted((left_digits, right_digits), key=len)
+    return len(shorter) == 4 and longer.endswith(shorter)
 
 
 def _decimal_text(value: Any) -> str | None:
