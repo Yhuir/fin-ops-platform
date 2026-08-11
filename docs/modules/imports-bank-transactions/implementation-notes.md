@@ -8,6 +8,7 @@
 - 生产事实：7 个授权附件解析出 1,100 条严格唯一流水；首次受控重放后库内为 1,101 条、1,100 个严格位置，唯一多重项是平安 0093、2026-04-16 10:51:46、支出 0.90、余额 979.57。
 - 根因一：保留的历史 canonical 行没有 `bank-v4` key；重放行因官方参考号冲突生成 v4，旧决策只查 v4 key，没有用六项完整账单位置反向匹配 legacy 行，因此错建一条副本。修复后唯一六项命中判为 duplicate，多义命中判为 suspected，任一字段缺失不自动合并。
 - 根因二：旧恢复 CLI 在一个事务内提交清理，再通过根连接运行自主重放；因此外层计数门禁发现“预期新增 7、实际 8”时，不能回滚已提交的重放写入。修复后清理、两轮重放、审计与 refresh outbox 都使用同一 serializable advisory-lock 事务，门禁失败不会留下半写状态。
+- 生产执行补充验证发现正式回放内部 repository 仍会请求 `connection.transaction()`；repair 工具现在用窄 connection-shaped 适配器复用已经打开的事务，避免恢复旧的分段提交，同时保持普通导入 runtime 不变。
 - 性能：完整 statement-position 候选通过一次 `jsonb_to_recordset` 批量查询预取，后续逐行判定只读文件级内存 cache，不增加 N+1 SQL。
 - 数据修复：只允许通过原 source session/file 的 `import-audit-repair --repair-bank-source` dry-run + fingerprint + CAS 门禁删除该一条错建副本，重放必须零新增；禁止手工 SQL 扩大清理范围。
 

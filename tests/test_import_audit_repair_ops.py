@@ -1446,10 +1446,14 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         audit_service.return_value.record_action.assert_called_once()
         self.assertEqual(connection.commits, 2)
         self.assertEqual(connection.rollbacks, 0)
-        runtime_factory.assert_called_once_with(
-            data_dir=import_audit_repair_ops.default_data_dir(),
-            connection=write_transaction,
+        runtime_factory.assert_called_once()
+        self.assertEqual(
+            runtime_factory.call_args.kwargs["data_dir"],
+            import_audit_repair_ops.default_data_dir(),
         )
+        transaction_connection = runtime_factory.call_args.kwargs["connection"]
+        with transaction_connection.transaction() as nested_transaction:
+            self.assertIs(nested_transaction, write_transaction)
         self.assertEqual(refresh_gateway.enqueue_many.call_count, 2)
         self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
         report = json.loads(output.getvalue())
@@ -1578,10 +1582,10 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 1)
-        runtime_factory.assert_called_once_with(
-            data_dir=import_audit_repair_ops.default_data_dir(),
-            connection=connection.transactions[1],
-        )
+        runtime_factory.assert_called_once()
+        transaction_connection = runtime_factory.call_args.kwargs["connection"]
+        with transaction_connection.transaction() as nested_transaction:
+            self.assertIs(nested_transaction, connection.transactions[1])
 
     def test_cli_failed_import_recovery_dry_run_bypasses_global_audit_scan(self) -> None:
         class Connection:

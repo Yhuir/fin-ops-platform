@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from contextlib import contextmanager
 from typing import Any, TextIO
 
 from fin_ops_platform.services.audit import AuditTrailService
@@ -54,6 +55,20 @@ def _build_bank_repair_state_store(connection: PostgresConnection) -> PostgresSt
             object_storage_settings
         )
     return PostgresStateStore(**state_store_kwargs)
+
+
+class _ActiveTransactionConnection:
+    """Expose one active transaction through the connection-shaped repository boundary."""
+
+    def __init__(self, transaction: Any) -> None:
+        self._transaction = transaction
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._transaction, name)
+
+    @contextmanager
+    def transaction(self):
+        yield self._transaction
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -407,9 +422,10 @@ def _complete_bank_repair_transaction(
     from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
     from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
 
+    transaction_connection = _ActiveTransactionConnection(transaction)
     runtime = ImportRuntimeProcessorFactory(
         data_dir=default_data_dir(),
-        connection=transaction,
+        connection=transaction_connection,
     )
     replay_results = [
         runtime.replay_confirmed_file_import_session(
@@ -542,7 +558,7 @@ def _complete_bank_repair_transaction(
         )
 
     refresh_gateway = ReadModelRefreshGateway(
-        queue_repository=RuntimeQueueRepository(transaction)
+        queue_repository=RuntimeQueueRepository(transaction_connection)
     )
     refresh_scopes = {
         scope_type: refresh_gateway.enqueue_many(
