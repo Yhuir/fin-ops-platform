@@ -9,15 +9,16 @@ import unicodedata
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
 )
+from fin_ops_platform.services.import_preview_audit import (
+    BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
+)
 from fin_ops_platform.services.postgres_repositories.bank_transaction_import_page_audit import (
     bank_import_audit_count_expectations,
     formal_bank_import_files,
 )
 
 
-MISLINKED_CONFIRM_REASON = (
-    "Bank transaction identity matched an existing transaction during confirm."
-)
+MISLINKED_CONFIRM_REASON = BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON
 
 
 def build_bank_import_audit_contract_repair_plan(

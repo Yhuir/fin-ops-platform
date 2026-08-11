@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.import_preview_audit import (
+    BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
     BankTransactionIdentityStrategy,
     CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
     CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
@@ -16,6 +17,10 @@ class ImportPreviewAuditTests(unittest.TestCase):
     def test_controlled_recovery_reason_is_not_a_runtime_replay_reason(self) -> None:
         self.assertNotIn(
             CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
+            CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),
+        )
+        self.assertNotIn(
+            BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
             CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),
         )
 

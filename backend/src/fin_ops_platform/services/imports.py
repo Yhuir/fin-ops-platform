@@ -22,6 +22,9 @@ from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionStatementPosition,
 )
 from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInvoiceLinkService
+from fin_ops_platform.services.import_preview_audit import (
+    BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
+)
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -431,7 +434,7 @@ class ImportNormalizationService:
                 row_result.linked_object_type = linked_object_type
                 row_result.linked_object_id = linked_object_id
                 row_result.decision_reason = (
-                    "Bank transaction identity matched an existing transaction during confirm."
+                    BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON
                     if decision == ImportDecision.DUPLICATE_SKIPPED
                     else "Bank transaction fingerprint matched during confirm; review before importing."
                 )
