@@ -121,7 +121,7 @@ commands:
                                       validate or enqueue read-model refresh scopes through the durable gateway
   settings-normalize <release-name> [--dry-run|--execute]
                                       normalize App settings through the canonical service/repository boundary
-  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...]
+  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...]
                                       repair strict import facts through the canonical PostgreSQL boundary
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer

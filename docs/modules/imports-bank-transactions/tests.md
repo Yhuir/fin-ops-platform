@@ -98,6 +98,7 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_import_file_api \
   tests.test_import_preview_audit \
   tests.test_import_job_queue \
+  tests.test_import_audit_repair_ops \
   tests.test_import_formalization_api \
   tests.test_derived_data_lifecycle_service \
   tests.test_runtime_worker_registry \
@@ -165,3 +166,8 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 
 - `tests/test_import_lifecycle_service.py` 覆盖统一状态、可恢复会话聚合、owner 校验和原子 discard。
 - `tests/test_import_file_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` 共同保护 preview -> recover/discard 以及 preview -> durable confirm 两条互斥路径。
+
+## 2026-08-11 候选版本死信恢复回归
+
+- `tests/test_import_audit_repair_ops.py` 证明恢复只接受完整 job/event/background job/session/file 白名单、已知唯一键错误、untouched bank preview 和零 canonical 写入。
+- 候选 processor 处理完成后必须先证明 import/background job、batch/file 和 canonical transaction 计数闭环，才 resolve 原 dead letter；不完整结果保留死信。

@@ -201,3 +201,9 @@
 - 修复：首写和最终 delta 持久化认证 username；`0144` 从已关联 batch 回填现存缺失 owner；discard 只忽略已删除旧文件，权限、terminal/job guard 不放宽。
 - 旧链删除：共享导入新 ID 改为带类型前缀的 UUID，删除运行时“计数器递增 + 先查存在性”分配循环；不新增表、队列、read model、缓存或兼容写链。
 - 验证：共享 service/repository/API 合同、迁移、完整后端回归及生产可逆 preview→recover→discard；银行正式事实不在该 smoke 中写入。
+
+## 2026-08-11 - 旧 background snapshot 污染后的定点恢复
+
+- 根因修复仍是 background job canonical `job_id` 单行持久化；不增加第二条导入写链。
+- 当前生产旧版本已留下的一条 dead letter 不能由旧 worker安全重试，因此复用候选 release 的正式 import processor，并用显式五类 ID + dry-run fingerprint 限定唯一目标。
+- 只有 untouched preview 与零 canonical 写入可进入恢复；业务完成后再 resolve 原事件。其它历史 pending/failed 记录不扫描、不推断、不自动重放。

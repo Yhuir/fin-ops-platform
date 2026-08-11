@@ -560,6 +560,10 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --retire-etc-session-id <session-id> [--retire-etc-session-id <session-id> ...]
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --normalize-reverted-batch-id <batch-id> [--normalize-reverted-batch-id <batch-id> ...]
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --recover-import-job-id <job-id> --recover-event-id <event-id> \
+  --recover-background-job-id <background-job-id> --recover-session-id <session-id> \
+  --recover-file-id <file-id> [--recover-file-id <file-id> ...]
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
@@ -572,6 +576,9 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `source_fingerprint` 与 rollback manifest；确认期间数据未变化后，使用
 `--execute --expected-fingerprint <source_fingerprint>`。fingerprint 不一致、batch owner 冲突、
 来源明细冲突或 canonical owner 变化都会在事务写入前失败；禁止跳过 dry-run。
+候选银行导入死信恢复模式必须在 dry-run 和 execute 中重复提供同一组完整 job/event/session/file
+白名单。它只处理已知 `background_jobs_idempotency_uidx` 旧错误、仍为 untouched preview 且正式流水
+为零的请求；候选 processor 完成并验证 batch/file/job 后才 resolve 原 dead letter，失败时保留原证据。
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为

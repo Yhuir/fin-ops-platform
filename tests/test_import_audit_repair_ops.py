@@ -4,15 +4,19 @@ from copy import deepcopy
 from contextlib import contextmanager
 import io
 import json
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.import_audit_repair_service import (
+    build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
+    execute_failed_import_job_recovery,
     public_repair_report,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
+    load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
 )
 from fin_ops_platform.tools import import_audit_repair_ops
@@ -267,6 +271,241 @@ def _reverted_batch_snapshot(*, payload_status: str = "pending") -> dict[str, li
             for batch_id in ("batch-reverted-1", "batch-reverted-2")
         ],
     }
+
+
+def _failed_import_recovery_snapshot(
+    *,
+    completed: bool = False,
+    event_status: str | None = None,
+) -> dict[str, list[dict[str, object]]]:
+    error = 'duplicate key value violates unique constraint "background_jobs_idempotency_uidx"'
+    file_ids = ["file-bank-1", "file-bank-2"]
+    return {
+        "recovery_requested": [
+            {
+                "import_job_id": "import-job-1",
+                "event_id": "event-1",
+                "background_job_id": "background-job-1",
+                "session_id": "session-bank-1",
+                "file_ids": file_ids,
+            }
+        ],
+        "import_jobs": [
+            {
+                "import_job_id": "import-job-1",
+                "tenant_id": "default",
+                "import_type": "file_import.confirm",
+                "import_session_id": "session-bank-1",
+                "source_file_id": None,
+                "idempotency_key": "file_import.confirm:session-bank-1:file-bank-1,file-bank-2",
+                "request_fingerprint": "fingerprint",
+                "status": "succeeded" if completed else "failed",
+                "stage": "succeeded" if completed else "processor_failed",
+                "priority": "normal",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "last_error": None if completed else error,
+                "payload": {
+                    "session_id": "session-bank-1",
+                    "selected_file_ids": file_ids,
+                    "background_job_id": "background-job-1",
+                    "owner_user_id": "owner-1",
+                },
+                "result_payload": {"confirmed": 2, "selected": 2} if completed else {},
+                "raw_payload": {},
+                "created_by": "owner-1",
+                "trace_id": "trace-1",
+            }
+        ],
+        "events": [
+            {
+                "event_id": "event-1",
+                "event_type": "import.process.requested",
+                "aggregate_type": "import_job",
+                "aggregate_id": "import-job-1",
+                "payload": {"import_job_id": "import-job-1"},
+                "status": event_status or ("done" if completed else "dead_lettered"),
+                "last_error": error,
+                "raw_payload": {
+                    "operator_resolution": {"reason": "candidate_import_recovery_succeeded"}
+                }
+                if completed
+                else {},
+            }
+        ],
+        "background_jobs": [
+            {
+                "job_id": "background-job-1",
+                "job_type": "file_import",
+                "status": "succeeded" if completed else "queued",
+                "owner_id": "owner-1",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "job_id": "background-job-1",
+                        "source": {
+                            "session_id": "session-bank-1",
+                            "selected_file_ids": file_ids,
+                        },
+                    }
+                },
+            }
+        ],
+        "files": [
+            {
+                "file_id": file_id,
+                "session_id": "session-bank-1",
+                "file_status": "confirmed" if completed else "preview_ready",
+                "file_payload_status": "confirmed" if completed else "preview_ready",
+                "session_status": "confirmed" if completed else "preview_ready",
+                "batch_type": "bank_transaction",
+                "preview_batch_id": f"preview-{index}",
+                "batch_id": f"preview-{index}" if completed else None,
+                "batch_status": "completed" if completed else "pending",
+                "row_count": 6 if index == 1 else 24,
+                "success_count": 0 if index == 1 else 8,
+                "error_count": 0,
+                "duplicate_count": 6 if index == 1 else 16,
+                "suspected_duplicate_count": 0,
+                "updated_count": 0,
+                "canonical_bank_transaction_count": 0 if index == 1 or not completed else 8,
+            }
+            for index, file_id in enumerate(file_ids, start=1)
+        ],
+    }
+
+
+class FailedImportRecoveryTests(unittest.TestCase):
+    def test_plan_authorizes_only_exact_untouched_failed_bank_import(self) -> None:
+        plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
+
+        self.assertEqual(plan["target"]["file_ids"], ["file-bank-1", "file-bank-2"])
+        self.assertEqual(plan["import_job"]["status"], "failed")
+        self.assertEqual(len(plan["source_fingerprint"]), 64)
+
+        partial_snapshot = _failed_import_recovery_snapshot()
+        partial_snapshot["files"][0]["canonical_bank_transaction_count"] = 1
+        with self.assertRaisesRegex(ValueError, "not an untouched bank preview"):
+            build_failed_import_job_recovery_plan(partial_snapshot)
+
+    def test_repository_loads_only_explicit_recovery_rows(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+                self.calls.append((sql, params))
+                return []
+
+        connection = Connection()
+
+        snapshot = load_failed_import_job_recovery_snapshot(
+            connection,
+            import_job_id="import-job-1",
+            event_id="event-1",
+            background_job_id="background-job-1",
+            session_id="session-bank-1",
+            file_ids=["file-bank-2", "file-bank-1"],
+        )
+
+        self.assertEqual(len(connection.calls), 4)
+        self.assertEqual(snapshot["recovery_requested"][0]["file_ids"], ["file-bank-1", "file-bank-2"])
+        self.assertTrue(all("where" in sql.lower() for sql, _ in connection.calls))
+
+    def test_execute_processes_candidate_before_resolving_exact_dead_letter(self) -> None:
+        plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
+        import_repository = Mock()
+        import_repository.create_or_get_job.return_value = SimpleNamespace(
+            import_job_id="import-job-1",
+            status="pending",
+        )
+        queue = Mock()
+        queue.get_event.return_value = SimpleNamespace(
+            event_type="import.process.requested",
+            status="dead_lettered",
+        )
+        queue.resolve_dead_letter_event.return_value = True
+        handler = Mock(return_value={"processed": True})
+        processor_factory = Mock()
+        processor_factory.build_processors.return_value = {"file_import.confirm": Mock()}
+        processed = _failed_import_recovery_snapshot(completed=True, event_status="dead_lettered")
+        completed = _failed_import_recovery_snapshot(completed=True)
+
+        with (
+            patch(
+                "fin_ops_platform.services.import_job_queue.ImportJobRepository",
+                return_value=import_repository,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_queue.RuntimeQueueRepository",
+                return_value=queue,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory",
+                return_value=processor_factory,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
+                return_value=SimpleNamespace(
+                    handlers={"import.process.requested": handler}
+                ),
+            ),
+            patch(
+                "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",
+                side_effect=[processed, completed],
+            ),
+        ):
+            result = execute_failed_import_job_recovery(object(), plan)
+
+        self.assertEqual(result["canonical_bank_transaction_count"], 8)
+        handler.assert_called_once_with(queue.get_event.return_value)
+        queue.resolve_dead_letter_event.assert_called_once_with(
+            "event-1",
+            reason="candidate_import_recovery_succeeded",
+        )
+
+    def test_execute_keeps_dead_letter_when_candidate_business_facts_are_incomplete(self) -> None:
+        plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
+        import_repository = Mock()
+        import_repository.create_or_get_job.return_value = SimpleNamespace(
+            import_job_id="import-job-1",
+            status="pending",
+        )
+        queue = Mock()
+        queue.get_event.return_value = SimpleNamespace(
+            event_type="import.process.requested",
+            status="dead_lettered",
+        )
+        incomplete = _failed_import_recovery_snapshot(completed=True, event_status="dead_lettered")
+        incomplete["background_jobs"][0]["status"] = "partial_success"
+
+        with (
+            patch(
+                "fin_ops_platform.services.import_job_queue.ImportJobRepository",
+                return_value=import_repository,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_queue.RuntimeQueueRepository",
+                return_value=queue,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory"
+            ) as processor_factory,
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
+                return_value=SimpleNamespace(
+                    handlers={"import.process.requested": Mock(return_value={"processed": True})}
+                ),
+            ),
+            patch(
+                "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",
+                return_value=incomplete,
+            ),
+            self.assertRaisesRegex(RuntimeError, "background job did not reach succeeded"),
+        ):
+            processor_factory.return_value.build_processors.return_value = {}
+            execute_failed_import_job_recovery(object(), plan)
+
+        queue.resolve_dead_letter_event.assert_not_called()
 
 
 class ImportAuditRepairPlanTests(unittest.TestCase):
@@ -696,6 +935,62 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             reverted_batch_ids=["batch-reverted-1", "batch-reverted-2"],
         )
         self.assertEqual(json.loads(output.getvalue())["reverted_batch_normalization_count"], 2)
+
+    def test_cli_failed_import_recovery_requires_complete_explicit_target(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "requires job, event"):
+            import_audit_repair_ops.main(
+                ["--dry-run", "--recover-import-job-id", "import-job-1"]
+            )
+
+    def test_cli_failed_import_recovery_dry_run_bypasses_global_audit_scan(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        arguments = [
+            "--dry-run",
+            "--recover-import-job-id",
+            "import-job-1",
+            "--recover-event-id",
+            "event-1",
+            "--recover-background-job-id",
+            "background-job-1",
+            "--recover-session-id",
+            "session-bank-1",
+            "--recover-file-id",
+            "file-bank-1",
+            "--recover-file-id",
+            "file-bank-2",
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_failed_import_job_recovery_snapshot",
+                return_value=_failed_import_recovery_snapshot(),
+            ) as load_snapshot,
+            patch.object(import_audit_repair_ops, "load_import_audit_repair_snapshot") as global_scan,
+        ):
+            result = import_audit_repair_ops.main(arguments, stdout=output)
+
+        self.assertEqual(result, 0)
+        load_snapshot.assert_called_once_with(
+            connection,
+            import_job_id="import-job-1",
+            event_id="event-1",
+            background_job_id="background-job-1",
+            session_id="session-bank-1",
+            file_ids=["file-bank-1", "file-bank-2"],
+        )
+        global_scan.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())["operation"], "failed_bank_import_recovery")
 
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:

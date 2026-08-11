@@ -9,6 +9,9 @@ from typing import Any
 from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
 
 
+FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE = "background_jobs_idempotency_uidx"
+
+
 def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     source_fingerprint = _fingerprint(snapshot)
     bank_rows = _bank_row_plan(
@@ -78,6 +81,260 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
             ]
         ),
     }
+
+
+def build_failed_import_job_recovery_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
+    requested = list(snapshot.get("recovery_requested") or [])
+    if len(requested) != 1:
+        raise ValueError("Failed import recovery requires exactly one explicit target.")
+    target = dict(requested[0])
+    target["file_ids"] = sorted({_text(value) for value in target.get("file_ids") or [] if _text(value)})
+    if not all(
+        _text(target.get(key))
+        for key in ("import_job_id", "event_id", "background_job_id", "session_id")
+    ) or not target["file_ids"]:
+        raise ValueError("Failed import recovery target identifiers are incomplete.")
+
+    import_job = _exact_recovery_row(snapshot, "import_jobs", "import_job_id", target["import_job_id"])
+    event = _exact_recovery_row(snapshot, "events", "event_id", target["event_id"])
+    background_job = _exact_recovery_row(
+        snapshot,
+        "background_jobs",
+        "job_id",
+        target["background_job_id"],
+    )
+    files = sorted(list(snapshot.get("files") or []), key=lambda row: _text(row.get("file_id")))
+    if [_text(row.get("file_id")) for row in files] != target["file_ids"]:
+        raise ValueError("Failed import recovery files must resolve exactly once.")
+
+    job_payload = dict(import_job.get("payload") or {})
+    selected_file_ids = sorted({_text(value) for value in job_payload.get("selected_file_ids") or [] if _text(value)})
+    if (
+        _text(import_job.get("import_type")) != "file_import.confirm"
+        or _text(import_job.get("status")) != "failed"
+        or _text(import_job.get("import_session_id")) != target["session_id"]
+        or _text(job_payload.get("session_id")) != target["session_id"]
+        or _text(job_payload.get("background_job_id")) != target["background_job_id"]
+        or selected_file_ids != target["file_ids"]
+        or FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE not in _text(import_job.get("last_error"))
+    ):
+        raise ValueError("Import job does not match the authorized failed bank-import request.")
+
+    event_payload = dict(event.get("payload") or {})
+    if (
+        _text(event.get("event_type")) != "import.process.requested"
+        or _text(event.get("aggregate_type")) != "import_job"
+        or _text(event.get("aggregate_id")) != target["import_job_id"]
+        or _text(event_payload.get("import_job_id")) != target["import_job_id"]
+        or _text(event.get("status")) != "dead_lettered"
+        or FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE not in _text(event.get("last_error"))
+    ):
+        raise ValueError("Runtime event is not the authorized failed import dead letter.")
+
+    background_payload = _payload(background_job.get("raw_payload"))
+    background_source = dict(background_payload.get("source") or {})
+    if (
+        _text(background_job.get("job_type")) != "file_import"
+        or _text(background_job.get("status")) != "queued"
+        or _text(background_payload.get("job_id")) not in {"", target["background_job_id"]}
+        or _text(background_source.get("session_id")) != target["session_id"]
+        or sorted({_text(value) for value in background_source.get("selected_file_ids") or [] if _text(value)})
+        != target["file_ids"]
+    ):
+        raise ValueError("Background job does not match the authorized failed bank-import request.")
+
+    for file_row in files:
+        if (
+            _text(file_row.get("session_id")) != target["session_id"]
+            or _text(file_row.get("file_status")) != "preview_ready"
+            or _text(file_row.get("file_payload_status")) != "preview_ready"
+            or _text(file_row.get("session_status")) != "preview_ready"
+            or _text(file_row.get("batch_type")) != "bank_transaction"
+            or not _text(file_row.get("preview_batch_id"))
+            or _text(file_row.get("batch_id"))
+            or _text(file_row.get("batch_status")) != "pending"
+            or int(file_row.get("error_count") or 0) != 0
+            or int(file_row.get("suspected_duplicate_count") or 0) != 0
+            or int(file_row.get("updated_count") or 0) != 0
+            or int(file_row.get("canonical_bank_transaction_count") or 0) != 0
+        ):
+            raise ValueError(f"Import file {_text(file_row.get('file_id'))} is not an untouched bank preview.")
+
+    return {
+        "source_fingerprint": _fingerprint(snapshot),
+        "target": target,
+        "import_job": import_job,
+        "event": event,
+        "background_job": background_job,
+        "files": files,
+    }
+
+
+def public_failed_import_recovery_report(
+    plan: dict[str, Any],
+    *,
+    mode: str,
+    written: bool,
+    completion: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    target = dict(plan["target"])
+    return {
+        "tool": "import_audit_repair_ops",
+        "operation": "failed_bank_import_recovery",
+        "mode": mode,
+        "written": written,
+        "source_fingerprint": plan["source_fingerprint"],
+        "target": target,
+        "completion": completion,
+        "authorized_write_scope": [
+            "job.import_jobs",
+            "job.background_jobs",
+            "job.outbox_events",
+            "app.import_batches",
+            "app.import_batch_rows",
+            "app.import_files",
+            "app.bank_transactions",
+            "derived import read-model scopes",
+        ],
+    }
+
+
+def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) -> dict[str, Any]:
+    from fin_ops_platform.services.import_job_queue import ImportJobRepository
+    from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+        load_failed_import_job_recovery_snapshot,
+    )
+    from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+    from fin_ops_platform.services.runtime_worker_handlers import (
+        ImportRuntimeProcessorFactory,
+        build_import_job_handler_bundle,
+    )
+    from fin_ops_platform.services.runtime_paths import default_data_dir
+
+    target = dict(plan["target"])
+    job_row = dict(plan["import_job"])
+    import_jobs = ImportJobRepository(connection)
+    recovered_job = import_jobs.create_or_get_job(
+        import_type=job_row["import_type"],
+        tenant_id=job_row.get("tenant_id") or "default",
+        import_session_id=job_row.get("import_session_id"),
+        source_file_id=job_row.get("source_file_id"),
+        idempotency_key=job_row.get("idempotency_key"),
+        payload=dict(job_row.get("payload") or {}),
+        raw_payload=dict(job_row.get("raw_payload") or {}),
+        created_by=job_row.get("created_by"),
+        trace_id=job_row.get("trace_id"),
+        priority=job_row.get("priority") or "normal",
+        max_attempts=int(job_row.get("max_attempts") or 5),
+    )
+    if recovered_job.import_job_id != target["import_job_id"] or recovered_job.status != "pending":
+        raise RuntimeError("Failed import job did not re-enter the exact pending row.")
+
+    queue = RuntimeQueueRepository(connection)
+    event = queue.get_event(target["event_id"])
+    if event is None or event.status != "dead_lettered":
+        raise RuntimeError("Failed import event changed before candidate processing.")
+    handler = build_import_job_handler_bundle(
+        connection=connection,
+        worker_id=f"import-audit-repair:{target['import_job_id']}",
+        processors=ImportRuntimeProcessorFactory(
+            data_dir=default_data_dir(),
+            connection=connection,
+        ).build_processors(),
+    ).handlers[event.event_type]
+    result = handler(event)
+    if not result.get("processed"):
+        raise RuntimeError("Candidate import processor did not process the authorized job.")
+
+    snapshot_args = {
+        "import_job_id": target["import_job_id"],
+        "event_id": target["event_id"],
+        "background_job_id": target["background_job_id"],
+        "session_id": target["session_id"],
+        "file_ids": target["file_ids"],
+    }
+    processed_snapshot = load_failed_import_job_recovery_snapshot(connection, **snapshot_args)
+    _verify_failed_import_job_recovery_completion(
+        processed_snapshot,
+        target=target,
+        expected_event_status="dead_lettered",
+    )
+    if not queue.resolve_dead_letter_event(
+        target["event_id"],
+        reason="candidate_import_recovery_succeeded",
+    ):
+        raise RuntimeError("Authorized import succeeded but its exact dead letter was not resolved.")
+    final_snapshot = load_failed_import_job_recovery_snapshot(connection, **snapshot_args)
+    return _verify_failed_import_job_recovery_completion(
+        final_snapshot,
+        target=target,
+        expected_event_status="done",
+    )
+
+
+def _verify_failed_import_job_recovery_completion(
+    snapshot: dict[str, Any],
+    *,
+    target: dict[str, Any],
+    expected_event_status: str,
+) -> dict[str, Any]:
+    import_job = _exact_recovery_row(snapshot, "import_jobs", "import_job_id", target["import_job_id"])
+    event = _exact_recovery_row(snapshot, "events", "event_id", target["event_id"])
+    background_job = _exact_recovery_row(
+        snapshot,
+        "background_jobs",
+        "job_id",
+        target["background_job_id"],
+    )
+    files = sorted(list(snapshot.get("files") or []), key=lambda row: _text(row.get("file_id")))
+    if [_text(row.get("file_id")) for row in files] != target["file_ids"]:
+        raise RuntimeError("Recovered import files no longer match the authorized target.")
+    if _text(import_job.get("status")) != "succeeded" or _text(import_job.get("stage")) != "succeeded":
+        raise RuntimeError("Recovered import job did not reach succeeded.")
+    if _text(event.get("status")) != expected_event_status:
+        raise RuntimeError("Recovered import event did not reach the expected state.")
+    if _text(background_job.get("status")) != "succeeded":
+        raise RuntimeError("Recovered background job did not reach succeeded.")
+
+    canonical_count = 0
+    for file_row in files:
+        expected_canonical_count = int(file_row.get("success_count") or 0) + int(
+            file_row.get("updated_count") or 0
+        )
+        file_canonical_count = int(file_row.get("canonical_bank_transaction_count") or 0)
+        if (
+            _text(file_row.get("session_id")) != target["session_id"]
+            or _text(file_row.get("file_status")) != "confirmed"
+            or _text(file_row.get("file_payload_status")) != "confirmed"
+            or _text(file_row.get("session_status")) != "confirmed"
+            or _text(file_row.get("batch_type")) != "bank_transaction"
+            or not _text(file_row.get("batch_id"))
+            or _text(file_row.get("batch_status")) != "completed"
+            or int(file_row.get("error_count") or 0) != 0
+            or file_canonical_count != expected_canonical_count
+        ):
+            raise RuntimeError(f"Recovered import file {_text(file_row.get('file_id'))} is incomplete.")
+        canonical_count += file_canonical_count
+    return {
+        "import_job_status": "succeeded",
+        "background_job_status": "succeeded",
+        "event_status": expected_event_status,
+        "session_status": "confirmed",
+        "confirmed_file_count": len(files),
+        "canonical_bank_transaction_count": canonical_count,
+    }
+
+
+def _exact_recovery_row(
+    snapshot: dict[str, Any],
+    collection: str,
+    identity_key: str,
+    expected_id: str,
+) -> dict[str, Any]:
+    rows = list(snapshot.get(collection) or [])
+    if len(rows) != 1 or _text(rows[0].get(identity_key)) != _text(expected_id):
+        raise ValueError(f"Failed import recovery {collection} target must resolve exactly once.")
+    return dict(rows[0])
 
 
 def _reverted_batch_normalization_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

@@ -95,6 +95,7 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-08-11 | 服务端恢复、owner 隔离和显式放弃闭环 | 预览不再依赖单一浏览器 key；AppHealth 可区分待确认、队列、处理、完成、失败和放弃 | `tests/test_import_lifecycle_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` |
+| 2026-08-11 | 候选版本定点恢复旧 background snapshot 污染产生的银行导入死信 | 只对白名单 job/event/session/files 做 dry-run fingerprint 验真；先完成 canonical 导入再 resolve 精确死信 | `tests/test_import_audit_repair_ops.py` |
 | 2026-08-08 | 银行表头统一为 canonical 字段解析与人工映射闭环 | 删除按银行 exact-header 分支；兼容元数据账号、单位/括号差异，未知核心字段 fail closed 并可按表头签名复用人工映射 | `test_ccb_current_export_header_uses_metadata_account_and_unit_aliases`、`test_manual_mapping_is_reused_for_same_header_signature`、`bank transaction import maps an unknown amount header and retries the same file` |
 | 2026-07-22 | preview 持久化改为 session-scoped exact delta | 银行预览不再携带历史 session/batch，避免跨导入域 stale snapshot 丢失更新 | `test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`test_stale_api_preview_cannot_downgrade_another_process_confirmed_import` |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确文件/session/job/worker/read model 状态和禁止流转 | `tests/test_import_*`、`tests/test_import_job_queue.py`、`web/src/test/ImportCenterPage.test.tsx` |

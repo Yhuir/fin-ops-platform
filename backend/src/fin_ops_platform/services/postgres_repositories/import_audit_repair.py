@@ -73,6 +73,33 @@ def load_import_audit_repair_snapshot(
     return snapshot
 
 
+def load_failed_import_job_recovery_snapshot(
+    connection: Any,
+    *,
+    import_job_id: str,
+    event_id: str,
+    background_job_id: str,
+    session_id: str,
+    file_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    normalized_file_ids = sorted({str(value or "").strip() for value in file_ids if str(value or "").strip()})
+    return {
+        "recovery_requested": [
+            {
+                "import_job_id": str(import_job_id or "").strip(),
+                "event_id": str(event_id or "").strip(),
+                "background_job_id": str(background_job_id or "").strip(),
+                "session_id": str(session_id or "").strip(),
+                "file_ids": normalized_file_ids,
+            }
+        ],
+        "import_jobs": connection.fetch_all(_FAILED_IMPORT_JOB_SQL, (import_job_id,)),
+        "events": connection.fetch_all(_FAILED_IMPORT_EVENT_SQL, (event_id,)),
+        "background_jobs": connection.fetch_all(_FAILED_BACKGROUND_JOB_SQL, (background_job_id,)),
+        "files": connection.fetch_all(_FAILED_IMPORT_FILE_SQL, (normalized_file_ids,)),
+    }
+
+
 def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
     for row in list(plan.get("bank_rows") or []):
         affected = connection.execute(
@@ -156,6 +183,90 @@ where file.audit_contract_revision = 'import-page-audit.v1'
   and file.raw_payload->'normalized_payload'->>'batch_type' = 'bank_transaction'
   and file.status = 'confirmed'
 order by batch_id, file_id
+"""
+
+
+_FAILED_IMPORT_JOB_SQL = """
+select id::text as import_job_id,
+       tenant_id, import_type, import_session_id, source_file_id,
+       idempotency_key, request_fingerprint, status, stage, priority,
+       attempt_count, max_attempts, last_error, payload, result_payload,
+       raw_payload, created_by, trace_id
+from job.import_jobs
+where id = %s
+"""
+
+
+_FAILED_IMPORT_EVENT_SQL = """
+select id::text as event_id,
+       tenant_id, event_type, aggregate_type, aggregate_id,
+       scope_type, scope_key, dedupe_key, payload, attempts, status,
+       schema_version, source_version, priority, trace_id, last_error,
+       raw_payload
+from job.outbox_events
+where id = %s
+"""
+
+
+_FAILED_BACKGROUND_JOB_SQL = """
+select job_id, job_type, status, owner_id, raw_payload
+from job.background_jobs
+where job_id = %s
+"""
+
+
+_FAILED_IMPORT_FILE_SQL = """
+select coalesce(file.legacy_mongo_id, file.id::text) as file_id,
+       file.session_id,
+       file.status as file_status,
+       coalesce(
+           file.raw_payload->'normalized_payload'->>'status',
+           file.raw_payload->>'status'
+       ) as file_payload_status,
+       coalesce(
+           file.raw_payload->'normalized_payload'->>'session_status',
+           file.raw_payload->>'session_status'
+       ) as session_status,
+       coalesce(
+           file.raw_payload->'normalized_payload'->>'batch_type',
+           file.raw_payload->>'batch_type'
+       ) as batch_type,
+       coalesce(
+           file.raw_payload->'normalized_payload'->>'preview_batch_id',
+           file.raw_payload->>'preview_batch_id'
+       ) as preview_batch_id,
+       coalesce(
+           file.raw_payload->'normalized_payload'->>'batch_id',
+           file.raw_payload->>'batch_id'
+       ) as batch_id,
+       batch.status as batch_status,
+       batch.row_count,
+       batch.success_count,
+       batch.error_count,
+       batch.duplicate_count,
+       batch.suspected_duplicate_count,
+       batch.updated_count,
+       (
+           select count(*)
+           from app.bank_transactions bank_transaction
+           where bank_transaction.legacy_source_batch_id = coalesce(
+               nullif(file.raw_payload->'normalized_payload'->>'batch_id', ''),
+               nullif(file.raw_payload->>'batch_id', ''),
+               file.raw_payload->'normalized_payload'->>'preview_batch_id',
+               file.raw_payload->>'preview_batch_id'
+           )
+             and bank_transaction.status <> 'deleted'
+       ) as canonical_bank_transaction_count
+from app.import_files file
+left join app.import_batches batch
+  on coalesce(batch.legacy_mongo_id, batch.id::text) = coalesce(
+      nullif(file.raw_payload->'normalized_payload'->>'batch_id', ''),
+      nullif(file.raw_payload->>'batch_id', ''),
+      file.raw_payload->'normalized_payload'->>'preview_batch_id',
+      file.raw_payload->>'preview_batch_id'
+  )
+where coalesce(file.legacy_mongo_id, file.id::text) = any(%s)
+order by file_id
 """
 
 _BANK_TRANSACTION_SQL = """
