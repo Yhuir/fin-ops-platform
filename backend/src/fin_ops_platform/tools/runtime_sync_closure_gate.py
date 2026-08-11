@@ -762,11 +762,25 @@ def _candidate_system_audit(
         request_fn=lambda *_args: response,
     )
     if candidate_audit.get("status") != PASS:
+        page_reports = list(
+            dict(report.get("database_system_snapshot") or {}).get("page_results") or []
+        )
         candidate_audit["diagnostics"] = {
             "overall_status": report.get("overall_status"),
             "audit_status": report.get("audit_status"),
             "summary": report.get("summary"),
             "issues": list(report.get("issues") or [])[:10],
+            "failed_page_reports": [
+                {
+                    "page_key": page_report.get("page_key"),
+                    "overall_status": page_report.get("overall_status"),
+                    "audit_status": page_report.get("audit_status"),
+                    "summary": page_report.get("summary"),
+                    "issues": list(page_report.get("issues") or [])[:10],
+                }
+                for page_report in page_reports
+                if page_report.get("overall_status") != "pass"
+            ][:5],
         }
     return candidate_audit
 

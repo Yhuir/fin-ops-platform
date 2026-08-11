@@ -430,6 +430,22 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
             "audit_status": {"integrity": "issues_found"},
             "summary": {"blocking_issue_sample_count": 12},
             "issues": issues,
+            "database_system_snapshot": {
+                "page_results": [
+                    {
+                        "page_key": "imports.bank-transactions",
+                        "overall_status": "issues_found",
+                        "audit_status": {"integrity": "issues_found"},
+                        "summary": {"blocking_issue_sample_count": 12},
+                        "issues": issues,
+                    },
+                    {
+                        "page_key": "imports.invoices",
+                        "overall_status": "pass",
+                        "issues": [],
+                    },
+                ]
+            },
         }
         with patch.object(
             gate.PostgresOperationsAuditRepository,
@@ -456,6 +472,18 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
             {"blocking_issue_sample_count": 12},
         )
         self.assertEqual(result["diagnostics"]["issues"], issues[:10])
+        self.assertEqual(
+            result["diagnostics"]["failed_page_reports"],
+            [
+                {
+                    "page_key": "imports.bank-transactions",
+                    "overall_status": "issues_found",
+                    "audit_status": {"integrity": "issues_found"},
+                    "summary": {"blocking_issue_sample_count": 12},
+                    "issues": issues[:10],
+                }
+            ],
+        )
 
 
 class RuntimeSyncClosureGateTests(unittest.TestCase):
