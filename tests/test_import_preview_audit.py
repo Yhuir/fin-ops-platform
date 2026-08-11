@@ -4,7 +4,9 @@ import unittest
 
 from fin_ops_platform.services.import_preview_audit import (
     BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
+    BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
     BankTransactionIdentityStrategy,
+    CONTROLLED_DUPLICATE_PROVENANCE_REASONS,
     CONTROLLED_RECOVERY_RECLASSIFICATION_REASON,
     CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
     ImportPreviewAuditRow,
@@ -22,6 +24,10 @@ class ImportPreviewAuditTests(unittest.TestCase):
         self.assertNotIn(
             BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
             CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),
+        )
+        self.assertNotIn(
+            BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
+            CONTROLLED_DUPLICATE_PROVENANCE_REASONS,
         )
 
     def test_invoice_placeholder_digital_number_falls_back_to_code_and_number(self) -> None:

@@ -37,6 +37,9 @@ CONTROLLED_RECOVERY_RECLASSIFICATION_REASON = (
 BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON = (
     "Bank transaction identity matched an existing transaction during confirm."
 )
+BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON = (
+    "Bank transaction identity matched an existing transaction."
+)
 CONTROLLED_DUPLICATE_PROVENANCE_REASONS = frozenset(
     {
         *CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values(),

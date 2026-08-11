@@ -12,6 +12,7 @@ from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
 )
 from fin_ops_platform.services.import_preview_audit import (
+    BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
     CONTROLLED_DUPLICATE_PROVENANCE_REASONS,
     ImportPreviewAuditRow,
     build_import_preview_session_audit,
@@ -117,7 +118,18 @@ def _audit_snapshot(
     issues.extend(_file_issues(formal_files, formal_files, formal_batches))
     issues.extend(_batch_row_issues(formal_batches, formal_rows))
     issues.extend(_session_audit_issues(formal_files, formal_rows))
-    issues.extend(_canonical_transaction_issues(formal_batches, formal_rows, formal_transactions))
+    issues.extend(
+        _canonical_transaction_issues(
+            formal_batches,
+            formal_rows,
+            formal_transactions,
+            fingerprint_owner_counts=Counter(
+                _text(row.get("data_fingerprint"))
+                for row in transactions
+                if _text(row.get("data_fingerprint"))
+            ),
+        )
+    )
     issues.extend(_job_issues(bank_jobs, formal_files, formal_batches))
     issues.extend(_outbox_issues(bank_outbox))
     if legacy_files:
@@ -518,6 +530,8 @@ def _canonical_transaction_issues(
     batches: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     transactions: list[dict[str, Any]],
+    *,
+    fingerprint_owner_counts: Counter[str],
 ) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
     batch_status = {_text(row.get("batch_id")): _text(row.get("status")) for row in batches}
@@ -546,7 +560,15 @@ def _canonical_transaction_issues(
                             {"row_batch_id": batch_id, "transaction_batch_id": transaction.get("batch_id")},
                         )
                     )
-            issues.extend(_transaction_field_issues(row, transaction))
+            issues.extend(
+                _transaction_field_issues(
+                    row,
+                    transaction,
+                    fingerprint_owner_count=fingerprint_owner_counts[
+                        _text(transaction.get("data_fingerprint"))
+                    ],
+                )
+            )
         elif linked_id:
             issues.append(_issue("bank_import_nonlinked_decision_has_transaction", row_id, {"decision": decision, "linked_object_id": linked_id}))
 
@@ -565,7 +587,12 @@ def _canonical_transaction_issues(
     return issues
 
 
-def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) -> list[AuditIssue]:
+def _transaction_field_issues(
+    row: dict[str, Any],
+    transaction: dict[str, Any],
+    *,
+    fingerprint_owner_count: int,
+) -> list[AuditIssue]:
     row_id = _text(row.get("row_id"))
     comparisons = {
         "account_no": (_text(row.get("account_no")), _text(transaction.get("account_no"))),
@@ -577,7 +604,11 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
             _text(transaction.get("counterparty_name_raw")),
         ),
     }
-    identity_matches = _identity_matches(row, transaction)
+    identity_matches = _identity_matches(row, transaction) or _legacy_confirm_identity_matches(
+        row,
+        transaction,
+        fingerprint_owner_count=fingerprint_owner_count,
+    )
     controlled_replay_matches = _controlled_replay_statement_position_matches(
         row,
         transaction,
@@ -732,6 +763,25 @@ def _identity_matches(row: dict[str, Any], transaction: dict[str, Any]) -> bool:
         and row_source_key.startswith("bank:")
         and row_source_key == transaction_fingerprint
         and (not transaction_source_key or transaction_source_key.startswith("bank-v2:"))
+    )
+
+
+def _legacy_confirm_identity_matches(
+    row: dict[str, Any],
+    transaction: dict[str, Any],
+    *,
+    fingerprint_owner_count: int,
+) -> bool:
+    row_fingerprint = _text(row.get("data_fingerprint"))
+    return (
+        _text(row.get("decision")) == "duplicate_skipped"
+        and _text(row.get("decision_reason"))
+        == BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON
+        and bool(_text(row.get("source_unique_key")))
+        and not _text(transaction.get("source_unique_key"))
+        and bool(row_fingerprint)
+        and row_fingerprint == _text(transaction.get("data_fingerprint"))
+        and fingerprint_owner_count == 1
     )
 
 

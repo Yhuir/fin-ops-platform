@@ -5,6 +5,9 @@ from copy import deepcopy
 import json
 import unittest
 
+from fin_ops_platform.services.import_preview_audit import (
+    BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
+)
 from fin_ops_platform.services.postgres_repositories import bank_transaction_import_page_audit
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -181,6 +184,48 @@ class FakeConnection:
         if "from job.outbox_events" in sql:
             return deepcopy(self.outbox)
         raise AssertionError(sql)
+
+
+def _configure_legacy_confirm_duplicate(connection: FakeConnection) -> None:
+    audit = bank_transaction_import_page_audit._zero_audit_counts()
+    audit.update(
+        {
+            "original_count": 1,
+            "unique_count": 1,
+            "existing_duplicate_count": 1,
+            "skipped_count": 1,
+        }
+    )
+    connection.files[0]["raw_payload"]["normalized_payload"].update(
+        {"audit": audit, "session_audit": audit}
+    )
+    connection.batches[0].update({"success_count": 0, "duplicate_count": 1})
+    connection.batches[0]["raw_payload"]["normalized_payload"].update(
+        {"success_count": 0, "duplicate_count": 1}
+    )
+    connection.rows[0].update(
+        {
+            "decision": "duplicate_skipped",
+            "decision_reason": BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
+            "source_unique_key": "bank-v2:62220001:account_detail_no:legacy-1",
+            "data_fingerprint": "fingerprint-1",
+        }
+    )
+    connection.rows[0]["raw_payload"]["normalized_payload"].update(
+        {
+            "decision": connection.rows[0]["decision"],
+            "decision_reason": connection.rows[0]["decision_reason"],
+            "source_unique_key": connection.rows[0]["source_unique_key"],
+            "data_fingerprint": connection.rows[0]["data_fingerprint"],
+        }
+    )
+    connection.transactions[0].update(
+        {
+            "batch_id": "older-batch",
+            "source_unique_key": "",
+            "data_fingerprint": "fingerprint-1",
+        }
+    )
 
 
 class BankTransactionImportPageAuditTests(unittest.TestCase):
@@ -516,6 +561,35 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         self.assertEqual(
             report["audit_status"],
             {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+
+    def test_legacy_confirm_duplicate_accepts_unique_fingerprint_owner(self) -> None:
+        connection = FakeConnection()
+        _configure_legacy_confirm_duplicate(connection)
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(
+            connection
+        )
+
+        self.assertEqual(
+            report["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+
+    def test_legacy_confirm_duplicate_rejects_ambiguous_fingerprint_owner(self) -> None:
+        connection = FakeConnection()
+        _configure_legacy_confirm_duplicate(connection)
+        duplicate = dict(connection.transactions[0])
+        duplicate["transaction_id"] = "txn-2"
+        connection.transactions.append(duplicate)
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(
+            connection
+        )
+
+        self.assertIn(
+            "bank_import_transaction_field_mismatch",
+            report["summary"]["issue_sample_counts_by_code"],
         )
 
     def test_controlled_replay_statement_position_mismatch_remains_blocking(self) -> None:
