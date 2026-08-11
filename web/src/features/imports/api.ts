@@ -167,21 +167,23 @@ type ApiImportTemplatesPayload = {
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  try {
-    return await apiRequestJson<T>(url, init);
-  } catch (error) {
-    if (error instanceof ApiClientError) {
-      throw new Error(
-        error.payload && typeof error.payload === "object"
-          ? JSON.stringify(error.payload)
-          : error.message,
-      );
-    }
-    throw error;
-  }
+  return apiRequestJson<T>(url, init);
 }
 
 export function resolveImportApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiClientError) {
+    const payload = error.payload && typeof error.payload === "object"
+      ? error.payload as { error?: unknown; code?: unknown; message?: unknown; requestId?: unknown }
+      : null;
+    if (error.code === "preview_stale" || payload?.error === "preview_stale" || payload?.code === "preview_stale") {
+      return "预览后数据已变化，请重新预览后再确认。";
+    }
+    const message = typeof payload?.message === "string" && payload.message.trim()
+      ? payload.message.trim()
+      : error.message.trim() || fallback;
+    const requestId = typeof payload?.requestId === "string" ? payload.requestId.trim() : "";
+    return requestId ? `${message}（请求编号：${requestId}）` : message;
+  }
   if (!(error instanceof Error)) {
     return fallback;
   }

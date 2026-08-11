@@ -14,6 +14,7 @@ from fin_ops_platform.postgres import migrate
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
+from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import (
     EtcBatch,
@@ -313,6 +314,42 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(relations["relation-b"]["status"], "confirmed")
         audit_operations = {row.get("operation_id") for row in loaded["audit_log"]}
         self.assertEqual(audit_operations, {"create-a", "create-b", "withdraw-a"})
+
+    def test_idempotent_background_job_retry_is_atomic_and_reuses_job_id(self) -> None:
+        service = BackgroundJobService(self.store)
+        first, first_activated = service.create_or_get_idempotent_job_with_created(
+            job_type="file_import",
+            label="导入 银行流水",
+            owner_user_id="integration-user",
+            idempotency_key="file_import_session:integration-session:file-1",
+            source={"session_id": "integration-session", "selected_file_ids": ["file-1"]},
+        )
+        service.fail_job(first.job_id, "导入失败。", "queue unavailable")
+
+        retried, retry_activated = service.create_or_get_idempotent_job_with_created(
+            job_type="file_import",
+            label="导入 银行流水",
+            owner_user_id="integration-user",
+            idempotency_key="file_import_session:integration-session:file-1",
+            source={"session_id": "integration-session", "selected_file_ids": ["file-1"]},
+        )
+
+        self.assertTrue(first_activated)
+        self.assertTrue(retry_activated)
+        self.assertEqual(retried.job_id, first.job_id)
+        self.assertEqual(retried.status, "queued")
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.background_jobs where idempotency_key = 'file_import_session:integration-session:file-1';",
+            ),
+            "1",
+        )
+        fingerprint_row = self.connection.fetch_one(
+            "select request_fingerprint from job.background_jobs where job_id = %s",
+            (first.job_id,),
+        )
+        self.assertTrue(str(fingerprint_row.get("request_fingerprint") or ""))
 
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"manual_projects": []})

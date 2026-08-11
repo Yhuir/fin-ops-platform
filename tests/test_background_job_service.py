@@ -357,6 +357,55 @@ class BackgroundJobServiceTests(unittest.TestCase):
 
         self.assertEqual(second.job_id, first.job_id)
 
+    def test_idempotent_retry_requeues_same_failed_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            first, first_activated = service.create_or_get_idempotent_job_with_created(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+                idempotency_key="file_import_session:session-001:file-001",
+                source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+            )
+            service.fail_job(first.job_id, "导入失败。", "queue unavailable")
+
+            retried, retry_activated = service.create_or_get_idempotent_job_with_created(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+                idempotency_key="file_import_session:session-001:file-001",
+                source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+            )
+
+        self.assertTrue(first_activated)
+        self.assertTrue(retry_activated)
+        self.assertEqual(retried.job_id, first.job_id)
+        self.assertEqual(retried.status, "queued")
+        self.assertIsNone(retried.error)
+        self.assertEqual(retried.created_at, first.created_at)
+
+    def test_idempotent_create_rejects_same_key_with_different_source(self) -> None:
+        from fin_ops_platform.services.background_job_service import BackgroundJobIdempotencyConflict
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.create_or_get_idempotent_job(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+                idempotency_key="file_import_session:session-001:file-001",
+                source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+            )
+
+            with self.assertRaises(BackgroundJobIdempotencyConflict):
+                service.create_or_get_idempotent_job(
+                    job_type="file_import",
+                    label="导入 银行流水",
+                    owner_user_id="user-001",
+                    idempotency_key="file_import_session:session-001:file-001",
+                    source={"session_id": "session-002", "selected_file_ids": ["file-001"]},
+                )
+
     def test_payload_is_sanitized_before_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))

@@ -366,6 +366,24 @@ class ImportJobRepositoryTests(unittest.TestCase):
                 payload={"session_id": "session-2"},
             )
 
+    def test_create_or_get_job_atomically_requeues_same_failed_request(self) -> None:
+        transaction = FakeTransaction(rows=[job_row(status="pending", stage="queued", attempt_count=0)])
+        repository = ImportJobRepository(FakeConnection(transaction))
+
+        job = repository.create_or_get_job(
+            import_type="bank_transactions.import",
+            import_session_id="session-1",
+            idempotency_key="bank_transactions.import:session-1",
+            payload={"session_id": "session-1"},
+        )
+
+        self.assertEqual(job.status, "pending")
+        _, sql, _params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("when job.import_jobs.status = 'failed' then 'pending'", normalized_sql)
+        self.assertIn("when job.import_jobs.status = 'failed' then 0", normalized_sql)
+        self.assertIn("when job.import_jobs.status in ('pending', 'failed') then excluded.payload", normalized_sql)
+
     def test_mark_processing_only_reclaims_an_expired_processing_lease(self) -> None:
         transaction = FakeTransaction(rows=[job_row(status="processing", attempt_count=2)])
         repository = ImportJobRepository(FakeConnection(transaction))

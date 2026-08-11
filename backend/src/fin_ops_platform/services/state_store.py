@@ -825,6 +825,39 @@ class ApplicationStateStore:
         with self._background_jobs_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
+    def create_or_requeue_background_job(
+        self,
+        job_payload: dict[str, Any],
+        *,
+        reuse_any_status: bool = False,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        candidate = dict(job_payload)
+        jobs = self.load_background_jobs()
+        owner_id = str(candidate.get("owner_user_id") or "")
+        job_type = str(candidate.get("type") or "")
+        idempotency_key = str(candidate.get("idempotency_key") or "")
+        fingerprint = str(candidate.get("request_fingerprint") or "")
+        for existing in jobs.values():
+            if (
+                str(existing.get("owner_user_id") or "") != owner_id
+                or str(existing.get("type") or "") != job_type
+                or str(existing.get("idempotency_key") or "") != idempotency_key
+            ):
+                continue
+            existing_fingerprint = str(existing.get("request_fingerprint") or "")
+            if existing_fingerprint and existing_fingerprint != fingerprint:
+                return None, False
+            if not reuse_any_status and str(existing.get("status") or "") in {"failed", "partial_success"}:
+                candidate["job_id"] = existing.get("job_id")
+                candidate["created_at"] = existing.get("created_at")
+                jobs[str(candidate["job_id"])] = candidate
+                self.save_background_jobs(jobs)
+                return candidate, True
+            return dict(existing), False
+        jobs[str(candidate["job_id"])] = candidate
+        self.save_background_jobs(jobs)
+        return candidate, True
+
     def load_app_health_alerts(self) -> dict[str, Any]:
         if not self._app_health_alerts_path.exists():
             return {}

@@ -10,6 +10,7 @@ import {
   resolveImportApiErrorMessage,
   retryImportFiles,
 } from "../features/imports/api";
+import { ApiClientError } from "../features/apiClient";
 
 const originalFetch = global.fetch;
 
@@ -32,6 +33,18 @@ describe("imports api", () => {
   test("falls back when the error is not a json payload", () => {
     expect(resolveImportApiErrorMessage(new Error("network down"), "文件预览失败，请稍后重试。")).toBe("network down");
     expect(resolveImportApiErrorMessage(null, "文件预览失败，请稍后重试。")).toBe("文件预览失败，请稍后重试。");
+  });
+
+  test("preserves the backend request id in import errors", () => {
+    const error = new ApiClientError("导入任务暂时不可用。", {
+      status: 503,
+      code: "import_queue_unavailable",
+      payload: { message: "导入任务暂时不可用。", requestId: "req-import-001" },
+      url: "/imports/files/confirm",
+    });
+
+    expect(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"))
+      .toBe("导入任务暂时不可用。（请求编号：req-import-001）");
   });
 
   test("sends Authorization header and credentials for preview uploads", async () => {

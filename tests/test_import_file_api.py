@@ -9,6 +9,7 @@ from time import sleep
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
+from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
 
 from tests.app_test_support import build_local_state_application as build_application
 from tests.app_test_support import install_durable_import_queue
@@ -439,7 +440,7 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(session.files[0].status, "preview_ready")
         self.assertIsNone(session.files[0].batch_id)
 
-    def test_confirm_retry_reuses_pending_import_job_and_updates_background_job_reference(self) -> None:
+    def test_confirm_retry_reuses_pending_import_job_and_background_job(self) -> None:
         app = build_application()
         import_queue = install_durable_import_queue(app)
         import_queue.fail_next_enqueue = True
@@ -469,13 +470,50 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 202)
         first_background_job_id = json.loads(first.body)["job"]["job_id"]
         second_background_job_id = json.loads(second.body)["job"]["job_id"]
-        self.assertNotEqual(first_background_job_id, second_background_job_id)
+        self.assertEqual(first_background_job_id, second_background_job_id)
         self.assertEqual(len(import_queue.jobs), 1)
         self.assertEqual(import_queue.jobs[0].payload["background_job_id"], second_background_job_id)
 
         import_queue.process_all()
         session = app._file_import_service.get_session(preview_payload["session"]["id"])
         self.assertEqual(session.files[0].status, "confirmed")
+
+    def test_confirm_returns_structured_conflict_for_mismatched_idempotent_job(self) -> None:
+        app = build_application()
+        install_durable_import_queue(app)
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[INVOICE_JAN],
+        )
+        preview_payload = json.loads(
+            app.handle_request(
+                "POST",
+                "/imports/files/preview",
+                body=preview_body,
+                headers=preview_headers,
+            ).body
+        )
+
+        def conflict(**_kwargs):
+            raise ImportJobIdempotencyConflict("request fingerprint mismatch")
+
+        app._enqueue_import_process_job = conflict
+        response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps(
+                {
+                    "session_id": preview_payload["session"]["id"],
+                    "selected_file_ids": [preview_payload["files"][0]["id"]],
+                }
+            ),
+        )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "import_idempotency_conflict")
+        self.assertEqual(payload["message"], "request fingerprint mismatch")
+        self.assertEqual(payload["job"]["status"], "failed")
 
     def test_confirm_bank_transaction_file_job_reports_bank_import_domain(self) -> None:
         app = build_application()

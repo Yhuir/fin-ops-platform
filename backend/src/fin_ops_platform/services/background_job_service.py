@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+import hashlib
+import json
 from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
@@ -30,7 +32,7 @@ TERMINAL_BACKGROUND_JOB_STATUSES = {
     "acknowledged",
     "superseded",
 }
-IDEMPOTENT_REUSABLE_STATUSES = {"queued", "running", "succeeded"}
+IDEMPOTENT_REQUEUEABLE_STATUSES = {"failed", "partial_success"}
 SENSITIVE_KEY_PARTS = ("password", "token", "secret", "content", "raw_file", "raw")
 
 
@@ -51,6 +53,7 @@ class BackgroundJob:
     result_summary: dict[str, object]
     error: str | None
     idempotency_key: str | None
+    request_fingerprint: str | None
     source: dict[str, object]
     affected_scopes: list[str]
     affected_months: list[str]
@@ -82,6 +85,10 @@ class BackgroundJobNotFoundError(KeyError):
 
 
 class BackgroundJobAccessError(PermissionError):
+    pass
+
+
+class BackgroundJobIdempotencyConflict(RuntimeError):
     pass
 
 
@@ -172,6 +179,7 @@ class BackgroundJobService:
             result_summary=self._sanitize_mapping(result_summary or {}),
             error=None,
             idempotency_key=str(idempotency_key).strip() if idempotency_key else None,
+            request_fingerprint=None,
             source=self._sanitize_mapping(source or {}),
             affected_scopes=[str(item) for item in (affected_scopes or [])],
             affected_months=[str(item) for item in (affected_months or [])],
@@ -184,6 +192,7 @@ class BackgroundJobService:
             superseded_at=None,
         )
         job.short_label = self._build_short_label(job)
+        job.request_fingerprint = self._request_fingerprint(job)
         return job
 
     @classmethod
@@ -260,51 +269,59 @@ class BackgroundJobService:
                 affected_months=affected_months,
             ), True
 
+        candidate = self.build_job(
+            job_type=job_type,
+            label=label,
+            owner_user_id=normalized_owner,
+            visibility=visibility,
+            phase=phase,
+            current=current,
+            total=total,
+            message=message,
+            result_summary=result_summary,
+            idempotency_key=normalized_key,
+            source=source,
+            affected_scopes=affected_scopes,
+            affected_months=affected_months,
+        )
         with self._lock:
-            jobs = self._load_jobs()
-            now_dt = datetime.now(UTC)
-            for payload in jobs.values():
-                job = self._job_from_payload(payload)
-                if (
-                    job.owner_user_id == normalized_owner
-                    and job.idempotency_key == normalized_key
-                    and (reuse_any_status or self._is_idempotent_reusable(job, now_dt))
-                ):
-                    return job, False
+            if self._state_store is not None:
+                payload, activated = self._state_store.create_or_requeue_background_job(
+                    candidate.to_payload(),
+                    reuse_any_status=reuse_any_status,
+                )
+                if payload is None:
+                    raise BackgroundJobIdempotencyConflict(
+                        "The same background job idempotency key was used for a different request."
+                    )
+                return self._job_from_payload(payload), activated
 
-            now = self._now()
-            safe_current, safe_total, percent = self._normalize_progress(current, total)
-            job = BackgroundJob(
-                job_id=self._new_job_id(),
-                type=str(job_type).strip(),
-                label=str(label).strip(),
-                short_label="",
-                owner_user_id=normalized_owner,
-                visibility=self._normalize_visibility(visibility),
-                status="queued",
-                phase=str(phase or "queued").strip() or "queued",
-                current=safe_current,
-                total=safe_total,
-                percent=percent,
-                message=str(message or "后台任务已排队。"),
-                result_summary=self._sanitize_mapping(result_summary or {}),
-                error=None,
-                idempotency_key=normalized_key,
-                source=self._sanitize_mapping(source or {}),
-                affected_scopes=[str(item) for item in (affected_scopes or [])],
-                affected_months=[str(item) for item in (affected_months or [])],
-                created_at=now,
-                started_at=None,
-                updated_at=now,
-                finished_at=None,
-                acknowledged_at=None,
-                superseded_by_job_id=None,
-                superseded_at=None,
-            )
-            job.short_label = self._build_short_label(job)
-            jobs[job.job_id] = job.to_payload()
+            jobs = self._load_jobs()
+            for payload in jobs.values():
+                existing = self._job_from_payload(payload)
+                if (
+                    existing.owner_user_id != normalized_owner
+                    or existing.type != candidate.type
+                    or existing.idempotency_key != normalized_key
+                ):
+                    continue
+                if (
+                    existing.request_fingerprint
+                    and existing.request_fingerprint != candidate.request_fingerprint
+                ):
+                    raise BackgroundJobIdempotencyConflict(
+                        "The same background job idempotency key was used for a different request."
+                    )
+                if not reuse_any_status and existing.status in IDEMPOTENT_REQUEUEABLE_STATUSES:
+                    candidate.job_id = existing.job_id
+                    candidate.created_at = existing.created_at
+                    jobs[candidate.job_id] = candidate.to_payload()
+                    self._save_jobs(jobs)
+                    return candidate, True
+                return existing, False
+            jobs[candidate.job_id] = candidate.to_payload()
             self._save_jobs(jobs)
-            return job, True
+            return candidate, True
 
     def start_job(self, job_id: str) -> BackgroundJob:
         now = self._now()
@@ -478,19 +495,6 @@ class BackgroundJobService:
                 return job
         return None
 
-    def get_reusable_idempotent_job(self, owner_user_id: str, idempotency_key: str) -> BackgroundJob | None:
-        owner = self._normalize_owner(owner_user_id)
-        normalized_key = str(idempotency_key or "").strip()
-        if not normalized_key:
-            return None
-        now = datetime.now(UTC)
-        with self._lock:
-            jobs = [self._job_from_payload(payload) for payload in self._load_jobs().values()]
-        for job in jobs:
-            if job.owner_user_id == owner and job.idempotency_key == normalized_key and self._is_idempotent_reusable(job, now):
-                return job
-        return None
-
     def list_active_jobs(self, owner_user_id: str, *, include_system: bool = True) -> list[BackgroundJob]:
         owner = self._normalize_owner(owner_user_id)
         now = datetime.now(UTC)
@@ -646,6 +650,11 @@ class BackgroundJobService:
             result_summary=cls._sanitize_mapping(payload.get("result_summary") if isinstance(payload.get("result_summary"), dict) else {}),
             error=str(payload.get("error")) if payload.get("error") not in (None, "") else None,
             idempotency_key=str(payload.get("idempotency_key")) if payload.get("idempotency_key") not in (None, "") else None,
+            request_fingerprint=(
+                str(payload.get("request_fingerprint"))
+                if payload.get("request_fingerprint") not in (None, "")
+                else None
+            ),
             source=source,
             affected_scopes=[str(item) for item in payload.get("affected_scopes", [])] if isinstance(payload.get("affected_scopes"), list) else [],
             affected_months=[str(item) for item in payload.get("affected_months", [])] if isinstance(payload.get("affected_months"), list) else [],
@@ -700,12 +709,23 @@ class BackgroundJobService:
             return False
         return not bool(job.acknowledged_at or job.superseded_at)
 
-    def _is_idempotent_reusable(self, job: BackgroundJob, now: datetime) -> bool:
-        if job.status not in IDEMPOTENT_REUSABLE_STATUSES:
-            return False
-        if job.status == "succeeded":
-            return self._is_active(job, now)
-        return True
+    @staticmethod
+    def _request_fingerprint(job: BackgroundJob) -> str | None:
+        if not job.idempotency_key:
+            return None
+        payload = {
+            "type": job.type,
+            "owner_user_id": job.owner_user_id,
+            "visibility": job.visibility,
+            "idempotency_key": job.idempotency_key,
+            "source": job.source,
+            "affected_scopes": job.affected_scopes,
+            "affected_months": job.affected_months,
+            "total": job.total,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
 
     @staticmethod
     def _can_view(job: BackgroundJob, owner_user_id: str, *, include_system: bool) -> bool:

@@ -643,6 +643,17 @@ class PostgresStateStore:
     def save_background_jobs(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_background_jobs(snapshot)
 
+    def create_or_requeue_background_job(
+        self,
+        job_payload: dict[str, Any],
+        *,
+        reuse_any_status: bool = False,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        return self._ops_tax_etc_repository.create_or_requeue_background_job(
+            job_payload,
+            reuse_any_status=reuse_any_status,
+        )
+
     def load_app_health_alerts(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_app_health_alerts()
 

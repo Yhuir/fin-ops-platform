@@ -76,6 +76,7 @@ from fin_ops_platform.services.app_status_overview_service import AppStatusOverv
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import (
     BackgroundJobAccessError,
+    BackgroundJobIdempotencyConflict,
     BackgroundJobNotFoundError,
     BackgroundJobService,
 )
@@ -156,7 +157,7 @@ from fin_ops_platform.services.runtime_monitoring import readiness_blockers
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
-from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
+from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdempotencyConflict, ImportJobRepository
 from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
@@ -7850,7 +7851,7 @@ class Application:
                 },
             )
         normalized_session_id = str(session_id)
-        normalized_selected_file_ids = [str(item) for item in selected_file_ids]
+        normalized_selected_file_ids = sorted({str(item).strip() for item in selected_file_ids if str(item).strip()})
         if not normalized_selected_file_ids:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -7915,24 +7916,30 @@ class Application:
             session,
             normalized_selected_file_ids,
         )
-        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-            job_type="file_import",
-            label=label,
-            owner_user_id=owner_user_id,
-            idempotency_key=f"file_import_session:{normalized_session_id}:{selected_key}",
-            phase="queued",
-            current=0,
-            total=total,
-            message=f"{label}任务已创建。",
-            result_summary={"confirmed": 0, "selected": total, "matching_results": 0},
-            source={
-                "session_id": normalized_session_id,
-                "selected_file_ids": normalized_selected_file_ids,
-                "affected_domains": affected_import_domains,
-                "route": import_route,
-            },
-            affected_scopes=["imports", "workbench"],
-        )
+        try:
+            job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+                job_type="file_import",
+                label=label,
+                owner_user_id=owner_user_id,
+                idempotency_key=f"file_import_session:{normalized_session_id}:{selected_key}",
+                phase="queued",
+                current=0,
+                total=total,
+                message=f"{label}任务已创建。",
+                result_summary={"confirmed": 0, "selected": total, "matching_results": 0},
+                source={
+                    "session_id": normalized_session_id,
+                    "selected_file_ids": normalized_selected_file_ids,
+                    "affected_domains": affected_import_domains,
+                    "route": import_route,
+                },
+                affected_scopes=["imports", "workbench"],
+            )
+        except BackgroundJobIdempotencyConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_idempotency_conflict", "message": str(exc)},
+            )
         try:
             import_job, event = self._enqueue_import_process_job(
                 import_type="file_import.confirm",
@@ -7953,12 +7960,21 @@ class Application:
             response_payload = self._serialize_file_session(session)
             response_payload["job"] = job_payload
             return self._json_response(HTTPStatus.ACCEPTED, response_payload)
-        except RuntimeError as exc:
+        except ImportJobIdempotencyConflict as exc:
+            response_job = job
             if created:
-                self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
+                response_job = self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_idempotency_conflict", "message": str(exc), "job": response_job.to_payload()},
+            )
+        except RuntimeError as exc:
+            response_job = job
+            if created:
+                response_job = self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
+                {"error": "import_queue_unavailable", "message": str(exc), "job": response_job.to_payload()},
             )
 
     @staticmethod

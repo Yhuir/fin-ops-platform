@@ -5550,9 +5550,9 @@ class EtcApiTests(unittest.TestCase):
             session_id = json.loads(preview_response.body)["sessionId"]
             first_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
             first_job = json.loads(first_response.body)["job"]
+            self._wait_for_job(app, first_job["job_id"])
             second_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
             second_job = json.loads(second_response.body)["job"]
-            self._wait_for_job(app, first_job["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
         self.assertEqual(first_response.status_code, 202)
@@ -5593,7 +5593,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 202)
         self.assertEqual(failed_job["status"], "failed")
         self.assertEqual(second_response.status_code, 202)
-        self.assertNotEqual(second_job["job_id"], first_job["job_id"])
+        self.assertEqual(second_job["job_id"], first_job["job_id"])
         self.assertEqual(completed_job["status"], "succeeded")
         self.assertEqual(json.loads(query_response.body)["total"], 1)
 

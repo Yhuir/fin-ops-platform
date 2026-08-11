@@ -3,8 +3,10 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Any, Callable
 
+from fin_ops_platform.services.background_job_service import BackgroundJobIdempotencyConflict
 from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError, EtcServiceError, UploadedEtcZipFile
 from fin_ops_platform.services.etc_reconciliation_zip_filter import StaleReconciliationPreviewError
+from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
 
 
 class EtcImportApiRoutes:
@@ -92,9 +94,6 @@ class EtcImportApiRoutes:
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         normalized_task_id = task_id.strip()
         idempotency_key = f"etc_import_session:{normalized_session_id}"
-        existing_job = self._background_job_service.get_reusable_idempotent_job(owner_user_id, idempotency_key)
-        if existing_job is not None:
-            return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
         try:
             validated_preview = self._preview_service.validate(
                 session_id=normalized_session_id,
@@ -109,6 +108,9 @@ class EtcImportApiRoutes:
         except EtcImportPreviewStaleError as error:
             return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
         except StaleReconciliationPreviewError as error:
+            existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
+            if existing_job is not None and existing_job.status in {"queued", "running", "succeeded"}:
+                return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
             return self._json_response(HTTPStatus.CONFLICT, {"error": "stale_reconciliation_task_preview", "message": str(error)})
         except ValueError as error:
             return self._reconciliation_error_response(error)
@@ -125,24 +127,30 @@ class EtcImportApiRoutes:
             "failed": 0,
             "total": total,
         }
-        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-            job_type="etc_invoice_import",
-            label="导入 ETC发票",
-            owner_user_id=owner_user_id,
-            idempotency_key=idempotency_key,
-            phase="queued",
-            current=0,
-            total=total,
-            message="ETC发票导入任务已创建。",
-            result_summary=initial_summary,
-            source={
-                "session_id": normalized_session_id,
-                "task_id": normalized_task_id,
-                "affected_domains": ["imports_etc_invoices", "etc_tickets"],
-                "route": "/imports/etc-invoices",
-            },
-            affected_scopes=["etc_invoices", "imports", "workbench"],
-        )
+        try:
+            job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+                job_type="etc_invoice_import",
+                label="导入 ETC发票",
+                owner_user_id=owner_user_id,
+                idempotency_key=idempotency_key,
+                phase="queued",
+                current=0,
+                total=total,
+                message="ETC发票导入任务已创建。",
+                result_summary=initial_summary,
+                source={
+                    "session_id": normalized_session_id,
+                    "task_id": normalized_task_id,
+                    "affected_domains": ["imports_etc_invoices", "etc_tickets"],
+                    "route": "/imports/etc-invoices",
+                },
+                affected_scopes=["etc_invoices", "imports", "workbench"],
+            )
+        except BackgroundJobIdempotencyConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_idempotency_conflict", "message": str(exc)},
+            )
         if not created:
             return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
         try:
@@ -166,8 +174,14 @@ class EtcImportApiRoutes:
             job_payload["import_job"] = self._serialize_import_job(import_job)
             job_payload["event_id"] = getattr(event, "event_id", None)
             return self._json_response(HTTPStatus.ACCEPTED, {"job": job_payload})
+        except ImportJobIdempotencyConflict as exc:
+            failed_job = self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "import_idempotency_conflict", "message": str(exc), "job": failed_job.to_payload()},
+            )
         except RuntimeError as exc:
-            self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
+            failed_job = self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
             self._preview_service.mark_status(
                 normalized_session_id,
                 status="failed",
@@ -176,5 +190,5 @@ class EtcImportApiRoutes:
             )
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
+                {"error": "import_queue_unavailable", "message": str(exc), "job": failed_job.to_payload()},
             )

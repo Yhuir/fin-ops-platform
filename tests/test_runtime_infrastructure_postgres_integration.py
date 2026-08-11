@@ -1050,6 +1050,24 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         retried = repository.mark_processing(job.import_job_id, worker_id="integration-import-worker")
         self.assertIsNotNone(retried)
         self.assertEqual(retried.attempt_count, 2)
+        self.assertTrue(
+            repository.mark_failed(
+                job.import_job_id,
+                worker_id="integration-import-worker",
+                error="terminal integration failure",
+            )
+        )
+        manual_retry = repository.create_or_get_job(
+            import_type="bank_transactions.import",
+            import_session_id="integration-session-1",
+            source_file_id="integration-file-1",
+            idempotency_key="integration-import-1",
+            payload={"session_id": "integration-session-1"},
+        )
+        self.assertEqual(manual_retry.import_job_id, job.import_job_id)
+        self.assertEqual(manual_retry.status, "pending")
+        self.assertEqual(manual_retry.attempt_count, 0)
+        self.assertIsNone(manual_retry.last_error)
 
     def test_runtime_queue_claim_next_reclaims_stale_processing_event(self) -> None:
         row = self.connection.fetch_one(

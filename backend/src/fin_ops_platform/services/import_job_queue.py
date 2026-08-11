@@ -106,16 +106,56 @@ class ImportJobRepository:
                 do update set
                     request_fingerprint = coalesce(job.import_jobs.request_fingerprint, excluded.request_fingerprint),
                     payload = case
-                        when job.import_jobs.status = 'pending' then excluded.payload
+                        when job.import_jobs.status in ('pending', 'failed') then excluded.payload
                         else job.import_jobs.payload
                     end,
                     raw_payload = case
-                        when job.import_jobs.status = 'pending' then excluded.raw_payload
+                        when job.import_jobs.status in ('pending', 'failed') then excluded.raw_payload
                         else job.import_jobs.raw_payload
                     end,
                     created_by = case
-                        when job.import_jobs.status = 'pending' then excluded.created_by
+                        when job.import_jobs.status in ('pending', 'failed') then excluded.created_by
                         else job.import_jobs.created_by
+                    end,
+                    status = case
+                        when job.import_jobs.status = 'failed' then 'pending'
+                        else job.import_jobs.status
+                    end,
+                    stage = case
+                        when job.import_jobs.status = 'failed' then 'queued'
+                        else job.import_jobs.stage
+                    end,
+                    attempt_count = case
+                        when job.import_jobs.status = 'failed' then 0
+                        else job.import_jobs.attempt_count
+                    end,
+                    last_error = case
+                        when job.import_jobs.status = 'failed' then null
+                        else job.import_jobs.last_error
+                    end,
+                    result_payload = case
+                        when job.import_jobs.status = 'failed' then '{}'::jsonb
+                        else job.import_jobs.result_payload
+                    end,
+                    available_at = case
+                        when job.import_jobs.status = 'failed' then now()
+                        else job.import_jobs.available_at
+                    end,
+                    started_at = case
+                        when job.import_jobs.status = 'failed' then null
+                        else job.import_jobs.started_at
+                    end,
+                    finished_at = case
+                        when job.import_jobs.status = 'failed' then null
+                        else job.import_jobs.finished_at
+                    end,
+                    locked_by = case
+                        when job.import_jobs.status = 'failed' then null
+                        else job.import_jobs.locked_by
+                    end,
+                    locked_at = case
+                        when job.import_jobs.status = 'failed' then null
+                        else job.import_jobs.locked_at
                     end,
                     updated_at = now()
                 where job.import_jobs.request_fingerprint is null

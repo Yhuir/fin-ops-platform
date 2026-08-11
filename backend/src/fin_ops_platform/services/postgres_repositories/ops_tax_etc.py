@@ -1776,6 +1776,142 @@ class PostgresOpsTaxEtcRepository:
         rows = self._connection.fetch_all("select job_id, raw_payload from job.background_jobs order by created_at, job_id")
         return {str(row.get("job_id")): row_payload(row, "raw_payload") for row in rows}
 
+    def create_or_requeue_background_job(
+        self,
+        job_payload: dict[str, Any],
+        *,
+        reuse_any_status: bool = False,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        candidate = serialize_value(job_payload)
+        job_id = text(candidate.get("job_id"))
+        owner_id = text(candidate.get("owner_user_id"))
+        job_type = text(candidate.get("type"))
+        idempotency_key = text(candidate.get("idempotency_key"))
+        request_fingerprint = text(candidate.get("request_fingerprint"))
+        if not all((job_id, owner_id, job_type, idempotency_key, request_fingerprint)):
+            raise ValueError(
+                "job_id, owner_user_id, type, idempotency_key and request_fingerprint are required."
+            )
+
+        def write(connection: Any) -> tuple[dict[str, Any] | None, bool]:
+            connection.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"background-job:{owner_id}:{job_type}:{idempotency_key}",),
+            )
+            existing_row = connection.fetch_one(
+                """
+                select job_id, status, request_fingerprint, raw_payload
+                from job.background_jobs
+                where owner_id = %s
+                  and job_type = %s
+                  and idempotency_key = %s
+                for update
+                """,
+                (owner_id, job_type, idempotency_key),
+            )
+            if existing_row is not None:
+                existing_fingerprint = text(existing_row.get("request_fingerprint"))
+                if existing_fingerprint and existing_fingerprint != request_fingerprint:
+                    return None, False
+                existing = row_payload(existing_row, "raw_payload")
+                existing["job_id"] = text(existing_row.get("job_id")) or text(existing.get("job_id"))
+                existing["status"] = text(existing_row.get("status")) or text(existing.get("status"))
+                if not existing_fingerprint:
+                    existing["request_fingerprint"] = request_fingerprint
+                    connection.execute(
+                        """
+                        update job.background_jobs
+                        set request_fingerprint = %s,
+                            raw_payload = %s,
+                            updated_at = now()
+                        where job_id = %s
+                        """,
+                        (
+                            request_fingerprint,
+                            jsonb({"normalized_payload": existing}),
+                            existing["job_id"],
+                        ),
+                    )
+                if reuse_any_status or existing["status"] not in {"failed", "partial_success"}:
+                    return existing, False
+
+                candidate["job_id"] = existing["job_id"]
+                candidate["created_at"] = existing.get("created_at") or candidate.get("created_at")
+                connection.execute(
+                    """
+                    update job.background_jobs
+                    set status = 'queued',
+                        visibility = %s,
+                        source = %s,
+                        affected_months = %s,
+                        progress = %s,
+                        result_summary = %s,
+                        error = null,
+                        attention = '{}'::jsonb,
+                        superseded_by_job_id = null,
+                        raw_payload = %s,
+                        request_fingerprint = %s,
+                        updated_at = now()
+                    where job_id = %s
+                    """,
+                    (
+                        text(candidate.get("visibility")),
+                        text(candidate.get("source")),
+                        text_list(candidate.get("affected_months")),
+                        jsonb(
+                            {
+                                "phase": candidate.get("phase"),
+                                "current": candidate.get("current"),
+                                "total": candidate.get("total"),
+                                "percent": candidate.get("percent"),
+                                "message": candidate.get("message"),
+                            }
+                        ),
+                        jsonb(candidate.get("result_summary") if isinstance(candidate.get("result_summary"), dict) else {}),
+                        jsonb({"normalized_payload": candidate}),
+                        request_fingerprint,
+                        candidate["job_id"],
+                    ),
+                )
+                return candidate, True
+
+            connection.execute(
+                """
+                insert into job.background_jobs(
+                    job_id, job_type, status, owner_id, visibility, source,
+                    affected_months, progress, result_summary, error, retry_mode,
+                    attention, superseded_by_job_id, raw_payload, idempotency_key,
+                    request_fingerprint
+                )
+                values (%s, %s, 'queued', %s, %s, %s, %s, %s, %s, null, null, %s, null, %s, %s, %s)
+                """,
+                (
+                    job_id,
+                    job_type,
+                    owner_id,
+                    text(candidate.get("visibility")),
+                    text(candidate.get("source")),
+                    text_list(candidate.get("affected_months")),
+                    jsonb(
+                        {
+                            "phase": candidate.get("phase"),
+                            "current": candidate.get("current"),
+                            "total": candidate.get("total"),
+                            "percent": candidate.get("percent"),
+                            "message": candidate.get("message"),
+                        }
+                    ),
+                    jsonb(candidate.get("result_summary") if isinstance(candidate.get("result_summary"), dict) else {}),
+                    jsonb({}),
+                    jsonb({"normalized_payload": candidate}),
+                    idempotency_key,
+                    request_fingerprint,
+                ),
+            )
+            return candidate, True
+
+        return run_in_transaction(self._connection, write)
+
     def save_background_jobs(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             for job_id, payload in iter_mapping(snapshot):
@@ -1784,9 +1920,10 @@ class PostgresOpsTaxEtcRepository:
                     insert into job.background_jobs(
                         job_id, job_type, status, owner_id, visibility, source,
                         affected_months, progress, result_summary, error, retry_mode,
-                        attention, superseded_by_job_id, raw_payload, idempotency_key
+                        attention, superseded_by_job_id, raw_payload, idempotency_key,
+                        request_fingerprint
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (job_id) do update set
                         job_type = excluded.job_type,
                         status = excluded.status,
@@ -1801,6 +1938,7 @@ class PostgresOpsTaxEtcRepository:
                         attention = excluded.attention,
                         superseded_by_job_id = excluded.superseded_by_job_id,
                         idempotency_key = excluded.idempotency_key,
+                        request_fingerprint = coalesce(excluded.request_fingerprint, job.background_jobs.request_fingerprint),
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
                     """,
@@ -1820,6 +1958,7 @@ class PostgresOpsTaxEtcRepository:
                         text(payload.get("superseded_by_job_id")),
                         jsonb({"normalized_payload": payload}),
                         text(payload.get("idempotency_key")),
+                        text(payload.get("request_fingerprint")),
                     ),
                 )
 

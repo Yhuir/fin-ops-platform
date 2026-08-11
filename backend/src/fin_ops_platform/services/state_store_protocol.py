@@ -345,6 +345,13 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def save_background_jobs(self, snapshot: dict[str, Any]) -> None: ...
 
+    def create_or_requeue_background_job(
+        self,
+        job_payload: dict[str, Any],
+        *,
+        reuse_any_status: bool = False,
+    ) -> tuple[dict[str, Any] | None, bool]: ...
+
     def load_app_health_alerts(self) -> dict[str, Any]: ...
 
     def save_app_health_alerts(self, snapshot: dict[str, Any]) -> None: ...
