@@ -21,6 +21,7 @@ from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_preview_audit import (
     BankTransactionIdentityStrategy,
+    CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
     ImportPreviewAuditCounts,
     ImportPreviewAuditRow,
     ImportPreviewDuplicateGroup,
@@ -143,17 +144,6 @@ MAX_WORKBOOK_CELLS = 2_000_000
 MAX_XLSX_MEMBERS = 10_000
 MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_XLSX_COMPRESSION_RATIO = 200
-CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND = {
-    "repaired_duplicate": (
-        "Controlled replay matched an explicitly repaired canonical row owner."
-    ),
-    "canonical_owner": "Controlled replay matched an existing canonical row owner.",
-    "canonical_reference": (
-        "Controlled replay matched an existing canonical duplicate reference."
-    ),
-}
-
-
 @dataclass(slots=True)
 class UploadedImportFile:
     file_name: str
@@ -746,11 +736,18 @@ class FileImportService:
                 selected_bank_last4=source_item.selected_bank_last4,
                 field_mapping=dict(source_item.field_mapping),
             )
+            replay_file_id = self._next_file_id()
+            replay_stored_file_path = self._store_upload_file(
+                replay_session.id,
+                replay_file_id,
+                upload,
+                imported_by=replay_session.imported_by,
+            )
             replay_item = self._preview_single_file(
                 imported_by=replay_session.imported_by,
                 upload=upload,
-                file_id=self._next_file_id(),
-                stored_file_path=source_item.stored_file_path,
+                file_id=replay_file_id,
+                stored_file_path=replay_stored_file_path,
                 template_code_override=source_item.template_code,
                 batch_type_override=(source_item.batch_type.value if source_item.batch_type else None),
                 selected_bank_mapping_id=source_item.selected_bank_mapping_id,

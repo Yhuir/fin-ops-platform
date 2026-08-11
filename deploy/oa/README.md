@@ -576,6 +576,11 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
    --expected-bank-category-cleanup-count <n> \
    --expected-bank-workbench-withdraw-count <n> \
    --expected-bank-workbench-transaction-id <transaction-id>]
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --repair-bank-audit-contract \
+  --expected-bank-audit-file-object-link-count <n> \
+  --expected-bank-audit-payload-update-count <n> \
+  --operator-id <operator>
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
@@ -603,6 +608,11 @@ CAS 字段、relation case/version/preview、发票成员和“撤回后不恢�
 execute 随后只把这些错误 created 行改为引用原 canonical 的 duplicate、同步 batch/file 审计并删除错误副本，然后通过正式 preview/confirm processor
 创建新恢复审计会话。任何关系、歧义、计数、owner、hash 或 fingerprint 漂移都在删除前失败；执行前必须
 先创建动作绑定的生产恢复点，执行后相同源文件再次受控重放必须新增 0。
+银行导入 Audit 合同修复模式只处理正式银行导入 file：缺失 object link 必须由唯一 storage URI、登记
+SHA-256、size 和非 tombstone lifecycle 证明；file/session audit 只从 durable batch rows 重算。
+dry-run/execute 必须重复提供精确 link/update 数与 operator，execute 还必须提供 dry-run fingerprint；
+工具使用 serializable transaction、advisory lock 和逐行 CAS，任一对象多义、hash、计数或 payload 漂移
+都会整体失败，不修改 canonical 流水、其它导入类型或原上传 row provenance。
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为

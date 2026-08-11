@@ -402,6 +402,104 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
 
         self.assertIn("bank_import_transaction_field_mismatch", report["summary"]["issue_sample_counts_by_code"])
 
+    def test_controlled_replay_can_reference_canonical_transaction_by_strict_statement_position(self) -> None:
+        connection = FakeConnection()
+        audit = bank_transaction_import_page_audit._zero_audit_counts()
+        audit.update(
+            {
+                "original_count": 1,
+                "unique_count": 1,
+                "existing_duplicate_count": 1,
+                "skipped_count": 1,
+            }
+        )
+        connection.files[0]["raw_payload"]["normalized_payload"].update(
+            {"audit": audit, "session_audit": audit}
+        )
+        connection.batches[0].update({"success_count": 0, "duplicate_count": 1})
+        connection.batches[0]["raw_payload"]["normalized_payload"].update(
+            {"success_count": 0, "duplicate_count": 1}
+        )
+        row_payload = connection.rows[0]["raw_payload"]["normalized_payload"]
+        connection.rows[0].update(
+            {
+                "source_unique_key": "bank-v3:62220001:enterprise_serial_no:NEW:abc123",
+                "data_fingerprint": "bank:new-reference",
+                "decision": "duplicate_skipped",
+                "decision_reason": (
+                    "Controlled replay matched an existing canonical duplicate reference."
+                ),
+            }
+        )
+        row_payload.update(
+            {
+                "source_unique_key": connection.rows[0]["source_unique_key"],
+                "data_fingerprint": connection.rows[0]["data_fingerprint"],
+                "decision": connection.rows[0]["decision"],
+                "decision_reason": connection.rows[0]["decision_reason"],
+                "normalized_row": {"balance": "900.00", "currency": "CNY"},
+            }
+        )
+        connection.transactions[0].update(
+            {
+                "batch_id": "older-batch",
+                "source_unique_key": "bank-v2:62220001:bank_serial_no:OLD",
+                "data_fingerprint": "bank:old-reference",
+                "balance": "900.00",
+                "currency": "CNY",
+                "raw_payload": {
+                    "normalized_payload": {"balance": "900.00", "currency": "CNY"}
+                },
+            }
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(
+            report["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+
+    def test_controlled_replay_statement_position_mismatch_remains_blocking(self) -> None:
+        connection = FakeConnection()
+        connection.rows[0].update(
+            {
+                "decision": "duplicate_skipped",
+                "decision_reason": (
+                    "Controlled replay matched an existing canonical duplicate reference."
+                ),
+                "source_unique_key": "bank-v3:new-reference",
+                "data_fingerprint": "bank:new-reference",
+            }
+        )
+        connection.rows[0]["raw_payload"]["normalized_payload"].update(
+            {
+                "decision": connection.rows[0]["decision"],
+                "decision_reason": connection.rows[0]["decision_reason"],
+                "source_unique_key": connection.rows[0]["source_unique_key"],
+                "data_fingerprint": connection.rows[0]["data_fingerprint"],
+                "normalized_row": {"balance": "900.00", "currency": "CNY"},
+            }
+        )
+        connection.transactions[0].update(
+            {
+                "source_unique_key": "bank-v2:old-reference",
+                "data_fingerprint": "bank:old-reference",
+                "balance": "899.10",
+                "currency": "CNY",
+                "raw_payload": {
+                    "normalized_payload": {"balance": "899.10", "currency": "CNY"}
+                },
+            }
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertIn(
+            "bank_import_transaction_field_mismatch",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_weak_identity_migration_preserves_legacy_import_proof(self) -> None:
         connection = FakeConnection()
         legacy_key = "bank:62220001:2026-07-01 10:00:00:outflow:100.00:供应商"

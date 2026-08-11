@@ -25,6 +25,9 @@
 - 普通 confirm 不得把 `suspected_duplicate` 解释为用户授权新建。弱指纹命中必须保持未写入并使 batch 收敛为 `completed_with_errors`；只有稳定 canonical identity 才能自动跳过或新建。
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
+- 受控重放必须为新 session/file 生成新的归档对象登记；不得让新 `app.import_files` 复用旧 `stored_file_path` 却缺少 `file_object_id`。历史已存在的缺失链接只能由维护工具按唯一 storage URI、登记 SHA-256、对象大小和非 tombstone 生命周期证明后修复。
+- 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于受控重放，且账户、秒级交易时间、方向、金额、账后余额、币种六项完整且完全一致时接受该引用。普通导入、缺字段或任一字段漂移仍必须阻断。
+- 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。
 
@@ -108,7 +111,7 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 | Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；只读聚合既有 import facts，放弃只在单事务内终结未确认 preview，不写 canonical transaction。 |
 | Persistence | `services/postgres_repositories/core.py` 保存正式导入事实；`services/postgres_repositories/bank_import_dedup_repair.py` 只服务显式生产恢复计划；不新增模板事实表。 |
 | Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/postgres_repositories/import_audit_repair.py`、`services/page_audit_registry.py` |
-| Controlled repair | `services/import_audit_repair_service.py` 与 `services/bank_import_dedup_repair_service.py` 输出纯 plan；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
+| Controlled repair | `services/import_audit_repair_service.py`、`services/bank_import_dedup_repair_service.py` 与 `services/bank_import_audit_contract_repair_service.py` 输出纯 plan；`services/postgres_repositories/bank_import_audit_contract_repair.py` 只执行精确 CAS；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
 | Worker/runtime | `runtime_worker_handlers.py`、`app_status_job_registry.py` |
 | Tests | `tests/test_import*.py`、`web/src/test/ImportsApi.test.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 

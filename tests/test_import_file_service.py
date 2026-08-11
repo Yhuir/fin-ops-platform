@@ -972,7 +972,7 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertNotIn("preview-transaction", str(captured.exception))
         self.assertNotIn("current-transaction", str(captured.exception))
 
-    def test_replay_confirmed_session_files_reuses_verified_source_and_creates_new_audit_session(self) -> None:
+    def test_replay_confirmed_session_files_registers_verified_copy_for_new_audit_session(self) -> None:
         file_store = FakeImportIdStore()
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service, file_store=file_store)
@@ -990,7 +990,12 @@ class ImportFileServiceTests(unittest.TestCase):
 
         self.assertNotEqual(replay.id, source.id)
         self.assertNotEqual(replay.files[0].id, source.files[0].id)
-        self.assertEqual(replay.files[0].stored_file_path, source.files[0].stored_file_path)
+        self.assertNotEqual(replay.files[0].stored_file_path, source.files[0].stored_file_path)
+        self.assertIn(str(replay.files[0].stored_file_path), file_store._stored_files)
+        self.assertEqual(
+            file_store._stored_files[str(replay.files[0].stored_file_path)],
+            INVOICE_JAN.content,
+        )
         self.assertEqual(replay.files[0].content_sha256, source.files[0].content_sha256)
         self.assertEqual(replay.files[0].status, "preview_ready")
         self.assertEqual(replay.files[0].duplicate_count, 1)
@@ -1006,6 +1011,7 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(repeated.files[0].status, "preview_ready")
         self.assertEqual(repeated.files[0].duplicate_count, 1)
         self.assertEqual(repeated_released_reference_count, 0)
+        self.assertNotEqual(repeated.files[0].stored_file_path, replay.files[0].stored_file_path)
 
     def test_replay_confirmed_session_files_rejects_changed_source_content(self) -> None:
         file_store = FakeImportIdStore()

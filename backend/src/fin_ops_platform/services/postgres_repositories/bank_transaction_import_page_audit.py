@@ -8,7 +8,11 @@ from typing import Any
 import unicodedata
 from zoneinfo import ZoneInfo
 
+from fin_ops_platform.services.bank_transaction_identity_service import (
+    BankTransactionIdentityService,
+)
 from fin_ops_platform.services.import_preview_audit import (
+    CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
     ImportPreviewAuditRow,
     build_import_preview_session_audit,
 )
@@ -38,9 +42,9 @@ def audit_bank_transaction_import_page(
 ) -> dict[str, Any]:
     normalized_tenant = str(tenant_id or "default").strip() or "default"
     with use_audit_snapshot(connection, audit_snapshot) as snapshot:
-        files = snapshot.connection.fetch_all(_FILE_SQL)
-        batches = snapshot.connection.fetch_all(_BATCH_SQL)
-        rows = snapshot.connection.fetch_all(_ROW_SQL)
+        files = snapshot.connection.fetch_all(BANK_IMPORT_FILE_SQL)
+        batches = snapshot.connection.fetch_all(BANK_IMPORT_BATCH_SQL)
+        rows = snapshot.connection.fetch_all(BANK_IMPORT_ROW_SQL)
         transactions = snapshot.connection.fetch_all(_TRANSACTION_SQL)
         jobs = snapshot.connection.fetch_all(_JOB_SQL, (normalized_tenant,))
         outbox = snapshot.connection.fetch_all(_OUTBOX_SQL, (normalized_tenant,))
@@ -71,11 +75,8 @@ def _audit_snapshot(
     snapshot_consistency: str,
     database_snapshot: bool,
 ) -> dict[str, Any]:
-    batch_ids = {_text(row.get("batch_id")) for row in batches if _text(row.get("batch_id"))}
-    bank_files = [row for row in files if _is_bank_file(row, batch_ids=batch_ids)]
-    formal_files = [
-        row for row in bank_files if _text(row.get("audit_contract_revision")) == IMPORT_AUDIT_CONTRACT_REVISION
-    ]
+    bank_files = bank_import_files(files, batches=batches)
+    formal_files = formal_bank_import_files(files, batches=batches)
     legacy_files = [row for row in bank_files if row not in formal_files]
     formal_batch_ids = {
         batch_id
@@ -214,6 +215,30 @@ def _audit_snapshot(
         },
         "generated_at": datetime.now(UTC).isoformat(),
     }
+
+
+def bank_import_files(
+    files: list[dict[str, Any]],
+    *,
+    batches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    batch_ids = {
+        _text(row.get("batch_id")) for row in batches if _text(row.get("batch_id"))
+    }
+    return [row for row in files if _is_bank_file(row, batch_ids=batch_ids)]
+
+
+def formal_bank_import_files(
+    files: list[dict[str, Any]],
+    *,
+    batches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in bank_import_files(files, batches=batches)
+        if _text(row.get("audit_contract_revision"))
+        == IMPORT_AUDIT_CONTRACT_REVISION
+    ]
 
 
 def _file_issues(
@@ -391,7 +416,52 @@ def _batch_row_issues(batches: list[dict[str, Any]], rows: list[dict[str, Any]])
 
 
 def _session_audit_issues(files: list[dict[str, Any]], rows: list[dict[str, Any]]) -> list[AuditIssue]:
+    expectations = bank_import_audit_count_expectations(files, rows)
     issues: list[AuditIssue] = []
+    for file_row in files:
+        if _text(_payload(file_row).get("batch_type")) not in {
+            "",
+            "bank_transaction",
+        }:
+            issues.append(
+                _issue(
+                    "bank_import_mixed_session_batch_type",
+                    _text(file_row.get("session_id")),
+                    None,
+                )
+            )
+    for session_id, session_files in expectations["session_files"].items():
+        expected_session_audit = expectations["sessions"][session_id]
+        registered_session_audits = [
+            _dict(_payload(row).get("session_audit")) for row in session_files
+        ]
+        if any(audit != expected_session_audit for audit in registered_session_audits):
+            issues.append(
+                _issue(
+                    "bank_import_session_audit_count_mismatch",
+                    session_id,
+                    {"expected": expected_session_audit},
+                )
+            )
+        for file_row in session_files:
+            file_id = _text(file_row.get("file_id"))
+            registered = _dict(_payload(file_row).get("audit"))
+            expected = expectations["files"][file_id]
+            if registered != expected:
+                issues.append(
+                    _issue(
+                        "bank_import_file_audit_count_mismatch",
+                        file_id,
+                        {"expected": expected},
+                    )
+                )
+    return issues
+
+
+def bank_import_audit_count_expectations(
+    files: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     files_by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
     file_by_batch: dict[str, dict[str, Any]] = {}
     for file_row in files:
@@ -406,7 +476,6 @@ def _session_audit_issues(files: list[dict[str, Any]], rows: list[dict[str, Any]
         file_row = file_by_batch.get(_text(row.get("batch_id")))
         if file_row is None:
             continue
-        file_payload = _payload(file_row)
         rows_by_session[_text(file_row.get("session_id"))].append(
             ImportPreviewAuditRow(
                 file_id=_text(file_row.get("file_id")),
@@ -426,29 +495,23 @@ def _session_audit_issues(files: list[dict[str, Any]], rows: list[dict[str, Any]
                 counterparty_name=_text(row.get("counterparty_name")) or None,
             )
         )
-        if _text(file_payload.get("batch_type")) not in {"", "bank_transaction"}:
-            issues.append(_issue("bank_import_mixed_session_batch_type", _text(file_row.get("session_id")), None))
-
+    session_expectations: dict[str, dict[str, int]] = {}
+    file_expectations: dict[str, dict[str, int]] = {}
     for session_id, session_files in files_by_session.items():
         recalculated = build_import_preview_session_audit(rows_by_session.get(session_id, []))
         recalculated_by_file = {item.file_id: asdict(item.audit) for item in recalculated.files}
-        registered_session_audits = [_dict(_payload(row).get("session_audit")) for row in session_files]
-        expected_session_audit = asdict(recalculated.audit)
-        if any(audit != expected_session_audit for audit in registered_session_audits):
-            issues.append(
-                _issue(
-                    "bank_import_session_audit_count_mismatch",
-                    session_id,
-                    {"expected": expected_session_audit},
-                )
-            )
+        session_expectations[session_id] = asdict(recalculated.audit)
         for file_row in session_files:
             file_id = _text(file_row.get("file_id"))
-            registered = _dict(_payload(file_row).get("audit"))
-            expected = recalculated_by_file.get(file_id, _zero_audit_counts())
-            if registered != expected:
-                issues.append(_issue("bank_import_file_audit_count_mismatch", file_id, {"expected": expected}))
-    return issues
+            file_expectations[file_id] = recalculated_by_file.get(
+                file_id,
+                _zero_audit_counts(),
+            )
+    return {
+        "sessions": session_expectations,
+        "files": file_expectations,
+        "session_files": files_by_session,
+    }
 
 
 def _canonical_transaction_issues(
@@ -514,7 +577,10 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
             _text(transaction.get("counterparty_name_raw")),
         ),
     }
-    if not _identity_matches(row, transaction):
+    if not _identity_matches(row, transaction) and not _controlled_replay_statement_position_matches(
+        row,
+        transaction,
+    ):
         comparisons.update(
             {
                 "source_unique_key": (
@@ -529,6 +595,64 @@ def _transaction_field_issues(row: dict[str, Any], transaction: dict[str, Any]) 
         )
     mismatches = {key: {"row": left, "transaction": right} for key, (left, right) in comparisons.items() if left != right}
     return [_issue("bank_import_transaction_field_mismatch", row_id, {"fields": mismatches})] if mismatches else []
+
+
+def _controlled_replay_statement_position_matches(
+    row: dict[str, Any],
+    transaction: dict[str, Any],
+) -> bool:
+    if (
+        _text(row.get("decision")) != "duplicate_skipped"
+        or _text(row.get("decision_reason"))
+        not in CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND.values()
+    ):
+        return False
+    identity_service = BankTransactionIdentityService()
+    row_position = identity_service.statement_position_for_mapping(
+        _bank_statement_mapping(row, direction_key="direction")
+    )
+    transaction_position = identity_service.statement_position_for_mapping(
+        _bank_statement_mapping(transaction, direction_key="txn_direction")
+    )
+    return row_position is not None and row_position == transaction_position
+
+
+def _bank_statement_mapping(row: dict[str, Any], *, direction_key: str) -> dict[str, Any]:
+    payload = _payload(row)
+    normalized_row = _dict(payload.get("normalized_row"))
+    merged = {**payload, **normalized_row}
+    return {
+        **merged,
+        "account_no": row.get("account_no") or merged.get("account_no"),
+        "trade_time": _statement_position_time(
+            row.get("trade_time") or merged.get("trade_time")
+        ),
+        "txn_direction": row.get(direction_key) or merged.get("txn_direction") or merged.get("direction"),
+        "amount": row.get("amount") if row.get("amount") is not None else merged.get("amount"),
+        "counterparty_name": (
+            row.get("counterparty_name")
+            or row.get("counterparty_name_raw")
+            or merged.get("counterparty_name")
+            or merged.get("counterparty_name_raw")
+        ),
+        "balance": row.get("balance") if row.get("balance") is not None else merged.get("balance"),
+        "currency": row.get("currency") or merged.get("currency"),
+    }
+
+
+def _statement_position_time(value: Any) -> Any:
+    if value in (None, ""):
+        return value
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(_text(value).replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BANK_IMPORT_LOCAL_TIMEZONE)
+    return parsed.astimezone(BANK_IMPORT_LOCAL_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _identity_matches(row: dict[str, Any], transaction: dict[str, Any]) -> bool:
@@ -790,8 +914,8 @@ def _comparable(value: Any) -> Any:
     return value
 
 
-_FILE_SQL = """
-select coalesce(f.legacy_mongo_id, f.id::text) as file_id,
+BANK_IMPORT_FILE_SQL = """
+select f.id::text as file_pk, coalesce(f.legacy_mongo_id, f.id::text) as file_id,
        f.session_id, f.audit_contract_revision, f.file_object_id::text, f.stored_file_path, f.original_filename, f.template_kind,
        f.status, f.uploaded_by, f.uploaded_at, f.raw_payload,
        o.storage_backend, o.storage_uri, o.bucket_name, o.object_key, o.filename as object_filename,
@@ -800,7 +924,7 @@ from app.import_files f
 left join app.file_objects o on o.id = f.file_object_id
 order by f.session_id, f.uploaded_at, file_id
 """
-_BATCH_SQL = """
+BANK_IMPORT_BATCH_SQL = """
 select coalesce(id::text, legacy_mongo_id) as formal_id,
        coalesce(legacy_mongo_id, id::text) as batch_id,
        batch_type, source_name, imported_by, row_count, success_count, error_count,
@@ -809,7 +933,7 @@ from app.import_batches
 where batch_type = 'bank_transaction'
 order by imported_at, batch_id
 """
-_ROW_SQL = """
+BANK_IMPORT_ROW_SQL = """
 select coalesce(r.legacy_mongo_id, r.id::text) as row_id,
        coalesce(b.legacy_mongo_id, b.id::text, r.legacy_batch_id) as batch_id,
        r.row_no, r.source_record_type, r.source_unique_key, r.data_fingerprint,
@@ -825,7 +949,7 @@ _TRANSACTION_SQL = """
 select coalesce(t.legacy_mongo_id, t.id::text) as transaction_id,
        coalesce(b.legacy_mongo_id, b.id::text, t.legacy_source_batch_id) as batch_id,
        t.account_no, t.account_name, t.txn_direction, t.counterparty_name_raw,
-       t.amount, t.signed_amount, t.txn_date, t.trade_time, t.bank_serial_no,
+       t.amount, t.signed_amount, t.balance, t.currency, t.txn_date, t.trade_time, t.bank_serial_no,
        t.source_unique_key, t.data_fingerprint, t.status, t.raw_payload
 from app.bank_transactions t
 left join app.import_batches b

@@ -30,6 +30,10 @@
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
 - `backend/src/fin_ops_platform/services/import_job_queue.py`
 - `backend/src/fin_ops_platform/services/import_preview_audit.py`
+- `backend/src/fin_ops_platform/services/bank_import_audit_contract_repair_service.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/bank_import_audit_contract_repair.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/bank_transaction_import_page_audit.py`
+- `backend/src/fin_ops_platform/tools/import_audit_repair_ops.py`
 - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - `backend/src/fin_ops_platform/services/app_status_domain_registry.py`

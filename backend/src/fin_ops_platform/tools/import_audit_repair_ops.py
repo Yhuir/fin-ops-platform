@@ -15,6 +15,10 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     verify_bank_import_repair_source_files,
     withdraw_bank_import_dedup_workbench_relations,
 )
+from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
+    build_bank_import_audit_contract_repair_plan,
+    public_bank_import_audit_contract_repair_report,
+)
 from fin_ops_platform.services.import_audit_repair_service import (
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
@@ -34,6 +38,10 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
     apply_bank_import_dedup_repair,
     load_bank_import_dedup_repair_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.bank_import_audit_contract_repair import (
+    apply_bank_import_audit_contract_repair,
+    load_bank_import_audit_contract_repair_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
@@ -138,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-category-cleanup-count", type=int)
     parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
     parser.add_argument("--expected-bank-workbench-transaction-id")
+    parser.add_argument("--repair-bank-audit-contract", action="store_true")
+    parser.add_argument("--expected-bank-audit-file-object-link-count", type=int)
+    parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
     parser.add_argument("--operator-id")
     return parser
 
@@ -163,18 +174,48 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     recovery_requested = any(recovery_values)
     discovery_requested = bool(args.discover_recover_import_job_id)
     bank_repair_requested = bool(args.repair_bank_source)
+    bank_audit_repair_requested = bool(args.repair_bank_audit_contract)
     if discovery_requested and args.execute:
         raise SystemExit("Failed import recovery discovery is read-only and requires --dry-run")
     if recovery_requested and not all(recovery_values):
         raise SystemExit("Failed import recovery requires job, event, background job, session, and file ids")
-    if (recovery_requested or discovery_requested or bank_repair_requested) and (
+    if (
+        recovery_requested
+        or discovery_requested
+        or bank_repair_requested
+        or bank_audit_repair_requested
+    ) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
-        raise SystemExit("Failed import recovery cannot be combined with another repair mode")
+        raise SystemExit("Specialized import repair cannot be combined with another repair mode")
     if recovery_requested and discovery_requested:
         raise SystemExit("Failed import recovery discovery cannot be combined with an explicit target")
     if bank_repair_requested and (recovery_requested or discovery_requested):
         raise SystemExit("Bank dedup repair cannot be combined with failed import recovery")
+    if bank_audit_repair_requested and (
+        recovery_requested or discovery_requested or bank_repair_requested
+    ):
+        raise SystemExit(
+            "Bank import Audit contract repair cannot be combined with another repair mode"
+        )
+    bank_audit_expectations = (
+        args.expected_bank_audit_file_object_link_count,
+        args.expected_bank_audit_payload_update_count,
+    )
+    if bank_audit_repair_requested and (
+        any(value is None for value in bank_audit_expectations) or not args.operator_id
+    ):
+        raise SystemExit(
+            "Bank import Audit contract repair requires exact file-object-link and "
+            "payload-update counts and --operator-id"
+        )
+    if not bank_audit_repair_requested and any(
+        value is not None for value in bank_audit_expectations
+    ):
+        raise SystemExit(
+            "Bank import Audit contract expectations require "
+            "--repair-bank-audit-contract"
+        )
     if bank_repair_requested and (
         args.expected_bank_target_count is None
         or args.expected_bank_protected_count is None
@@ -211,6 +252,88 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "--cleanup-related-bank-duplicates"
         )
     connection = PostgresConnection(PostgresSettings.from_env())
+    if bank_audit_repair_requested:
+        plan_kwargs = {
+            "expected_file_object_link_count": (
+                args.expected_bank_audit_file_object_link_count
+            ),
+            "expected_payload_update_count": (
+                args.expected_bank_audit_payload_update_count
+            ),
+        }
+        with connection.transaction() as transaction:
+            transaction.execute(
+                "set transaction isolation level repeatable read read only"
+            )
+            plan = build_bank_import_audit_contract_repair_plan(
+                load_bank_import_audit_contract_repair_snapshot(transaction),
+                **plan_kwargs,
+            )
+        if args.dry_run:
+            report = public_bank_import_audit_contract_repair_report(
+                plan,
+                mode="dry_run",
+                written=False,
+            )
+        else:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError(
+                    "Bank import Audit contract source changed after dry-run; "
+                    "rerun dry-run."
+                )
+            with connection.transaction() as transaction:
+                transaction.execute("set transaction isolation level serializable")
+                transaction.fetch_one(
+                    "select pg_advisory_xact_lock("
+                    "hashtext('fin_ops_bank_import_audit_contract_repair'))"
+                )
+                locked_plan = build_bank_import_audit_contract_repair_plan(
+                    load_bank_import_audit_contract_repair_snapshot(transaction),
+                    **plan_kwargs,
+                )
+                if locked_plan["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError(
+                        "Bank import Audit contract source changed while acquiring "
+                        "the write lock."
+                    )
+                completion = apply_bank_import_audit_contract_repair(
+                    transaction,
+                    locked_plan,
+                    operator_id=args.operator_id,
+                )
+                AuditTrailService(
+                    PostgresOperationsAuditRepository(transaction)
+                ).record_action(
+                    actor_id=args.operator_id,
+                    action="bank_import_audit_contract_repair",
+                    entity_type="bank_import_audit_contract",
+                    entity_id=locked_plan["source_fingerprint"],
+                    metadata={
+                        "event_type": "operation.completed",
+                        "page_key": "bank_transaction_import",
+                        "operation_location": "import_audit_repair_ops",
+                        "reason": "authorized_audit_contract_repair",
+                        "outcome": "success",
+                        **completion,
+                    },
+                )
+            report = public_bank_import_audit_contract_repair_report(
+                locked_plan,
+                mode="execute",
+                written=True,
+                completion=completion,
+            )
+        print(
+            json.dumps(
+                report,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            ),
+            file=stdout,
+        )
+        return 0
     if bank_repair_requested:
         source_sessions = _parse_bank_repair_sources(args.repair_bank_source)
         snapshot_kwargs = {

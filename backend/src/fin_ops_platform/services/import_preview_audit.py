@@ -22,6 +22,15 @@ AUDIT_STALE_FIELDS = (
     "suspected_duplicate_count",
     "error_count",
 )
+CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND = {
+    "repaired_duplicate": (
+        "Controlled replay matched an explicitly repaired canonical row owner."
+    ),
+    "canonical_owner": "Controlled replay matched an existing canonical row owner.",
+    "canonical_reference": (
+        "Controlled replay matched an existing canonical duplicate reference."
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)

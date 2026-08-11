@@ -927,6 +927,157 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "provided together"):
             import_audit_repair_ops.main(["--dry-run", "--batch-id", "batch-import-1"])
 
+    def test_cli_bank_audit_contract_dry_run_uses_exact_counts(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        plan = {
+            "operation": "bank_import_audit_contract_repair",
+            "source_fingerprint": "a" * 64,
+            "formal_file_count": 62,
+            "session_count": 29,
+            "file_object_link_actions": [{"file_id": "file-1"}],
+            "payload_update_actions": [{"file_id": "file-2"}],
+        }
+        output = io.StringIO()
+        with (
+            patch.object(
+                import_audit_repair_ops.PostgresSettings,
+                "from_env",
+                return_value=object(),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "PostgresConnection",
+                return_value=connection,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_audit_contract_repair_snapshot",
+                return_value={},
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_audit_contract_repair_plan",
+                return_value=plan,
+            ) as build_plan,
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--repair-bank-audit-contract",
+                    "--expected-bank-audit-file-object-link-count",
+                    "1",
+                    "--expected-bank-audit-payload-update-count",
+                    "1",
+                    "--operator-id",
+                    "system_repair",
+                ],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        build_plan.assert_called_once_with(
+            {},
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+        )
+        self.assertFalse(json.loads(output.getvalue())["written"])
+
+    def test_cli_bank_audit_contract_execute_rechecks_fingerprint_and_audits(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, bool]:
+                return {"locked": True}
+
+        class Connection:
+            def __init__(self) -> None:
+                self.commits = 0
+
+            @contextmanager
+            def transaction(self):
+                yield Transaction()
+                self.commits += 1
+
+        connection = Connection()
+        plan = {
+            "operation": "bank_import_audit_contract_repair",
+            "source_fingerprint": "a" * 64,
+            "formal_file_count": 62,
+            "session_count": 29,
+            "file_object_link_actions": [{"file_id": "file-1"}],
+            "payload_update_actions": [{"file_id": "file-2"}],
+        }
+        output = io.StringIO()
+        audit_service = Mock()
+        with (
+            patch.object(
+                import_audit_repair_ops.PostgresSettings,
+                "from_env",
+                return_value=object(),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "PostgresConnection",
+                return_value=connection,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_audit_contract_repair_snapshot",
+                return_value={},
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_audit_contract_repair_plan",
+                return_value=plan,
+            ) as build_plan,
+            patch.object(
+                import_audit_repair_ops,
+                "apply_bank_import_audit_contract_repair",
+                return_value={
+                    "file_object_link_count": 1,
+                    "payload_update_count": 1,
+                },
+            ) as apply_repair,
+            patch.object(
+                import_audit_repair_ops,
+                "AuditTrailService",
+                return_value=audit_service,
+            ),
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--execute",
+                    "--expected-fingerprint",
+                    "a" * 64,
+                    "--repair-bank-audit-contract",
+                    "--expected-bank-audit-file-object-link-count",
+                    "1",
+                    "--expected-bank-audit-payload-update-count",
+                    "1",
+                    "--operator-id",
+                    "system_repair",
+                ],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(connection.commits, 2)
+        self.assertEqual(build_plan.call_count, 2)
+        apply_repair.assert_called_once()
+        audit_service.record_action.assert_called_once()
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["written"])
+        self.assertEqual(report["completion"]["file_object_link_count"], 1)
+
     def test_cli_passes_exact_lifecycle_target_to_snapshot_loader(self) -> None:
         class Connection:
             @contextmanager

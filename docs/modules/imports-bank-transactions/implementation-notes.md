@@ -289,3 +289,11 @@
 - `preview_stale` 异常只记录发生变化的审计计数字段；HTTP 仍返回固定用户文案，不暴露业务行或 canonical ID。该诊断用于候选恢复失败时区分 importable、existing duplicate 与 suspected duplicate 漂移，不改变门禁结果。
 - 生产诊断显示 853 条受控回放中有 27 条被通用去重重算为 `created`（`existing_duplicate_count 853→826`、`importable_count 0→27`）。这些是历史 parser/identity 漂移，不得通过放宽 decision 枚举处理；stale gate 只在冻结 canonical ID 仍能读取、且账户/秒级时间/方向/金额/余额/币种六项严格相等时接受，任何缺失或变化继续失败。
 - 受控回放的六字段失败只记录差异字段名，不记录账号、时间、金额、余额、币种值或 canonical ID；该日志只服务于候选生产恢复诊断，不改变普通导入或 stale gate 的通过条件。
+
+## 2026-08-12 - 重放归档与银行导入 Audit 合同闭环
+
+- 发布门禁暴露出三项同源问题：受控重放创建新 file 行时沿用了来源 `stored_file_path` 却没有登记新 `file_object_id`；page Audit 把已证明的 statement-position 引用误当成 source key 漂移；历史正式 row 决策修正后，file/session audit 计数没有同步重算。
+- 正式重放继续复用共享 file/session preview-confirm service，但每个 replay file 先通过现有 `_store_upload_file` 写入并登记独立对象，再进入 parser；没有新增重放专用存储或 fallback。
+- Audit 只对登记的三类受控 reason开放 statement-position 等价，且复用 `BankTransactionIdentityService`，要求账户、交易时间、方向、金额、余额、币种完整相等；其余字段比较、created owner、batch owner 和 queue 门禁不放宽。
+- 一次性修复拆成纯 plan 与 PostgreSQL CAS repository：dry-run 必须给出精确 link/update 数和 fingerprint；execute 使用 serializable transaction、advisory lock、correction actor/reason 与 operation audit。对象 URI 多义、hash/size/lifecycle 不完整、计数或 payload 漂移均在写前/写中失败。
+- 旧污染链已移除：不再创建“有 file row、无 object link”的 replay 记录；不通过修改 canonical source key 或覆盖原上传证据来让旧 Audit 通过。
