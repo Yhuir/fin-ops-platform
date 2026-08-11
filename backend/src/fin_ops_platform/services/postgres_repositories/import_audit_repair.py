@@ -12,7 +12,25 @@ def load_import_audit_repair_snapshot(
     lifecycle_batch_id: str | None = None,
     lifecycle_file_id: str | None = None,
     etc_deleted_task_session_ids: list[str] | None = None,
+    reverted_batch_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    requested_reverted_batch_ids = sorted(
+        {str(value or "").strip() for value in reverted_batch_ids or [] if str(value or "").strip()}
+    )
+    if requested_reverted_batch_ids:
+        return {
+            "bank_files": [],
+            "bank_transactions": [],
+            "bank_rows": [],
+            "invoice_rows": [],
+            "reverted_batch_normalization_requested": [
+                {"batch_id": batch_id} for batch_id in requested_reverted_batch_ids
+            ],
+            "reverted_batch_normalization_targets": connection.fetch_all(
+                _REVERTED_BATCH_NORMALIZATION_TARGET_SQL,
+                (requested_reverted_batch_ids,),
+            ),
+        }
     requested_session_ids = sorted(
         {
             str(value or "").strip()
@@ -112,6 +130,11 @@ def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
         )
         if affected != 1:
             raise RuntimeError(f"ETC import session {repair['session_id']} retirement precondition changed.")
+    for repair in list(plan.get("reverted_batch_normalizations") or []):
+        if connection.execute(_REVERTED_BATCH_NORMALIZATION_UPDATE_SQL, (repair["batch_id"],)) != 1:
+            raise RuntimeError(
+                f"Reverted import batch {repair['batch_id']} normalization precondition changed."
+            )
 
 
 _BANK_FILE_SQL = """
@@ -369,6 +392,77 @@ where coalesce(legacy_mongo_id, id::text) = %s
   and nullif(raw_payload->'normalized_payload'->>'batch_id', '') is null
   and raw_payload->'normalized_payload'->>'preview_batch_id' = %s
   and raw_payload->'normalized_payload'->>'session_status' = 'preview_ready'
+"""
+
+_REVERTED_BATCH_NORMALIZATION_TARGET_SQL = """
+select coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
+       batch.batch_type,
+       batch.status as batch_status,
+       batch.raw_payload as batch_raw_payload,
+       file_evidence.file_count,
+       file_evidence.strict_reverted_file_count,
+       file_evidence.active_or_succeeded_job_count,
+       row_evidence.linked_row_count,
+       invoice_evidence.canonical_invoice_count
+from app.import_batches batch
+cross join lateral (
+    select count(distinct file.id)::bigint as file_count,
+           count(distinct file.id) filter (
+               where file.audit_contract_revision = 'import-page-audit.v1'
+                 and file.status = 'reverted'
+                 and file.raw_payload->'normalized_payload'->>'status' = 'reverted'
+                 and file.raw_payload->'normalized_payload'->>'session_status' = 'reverted'
+                 and nullif(file.raw_payload->'normalized_payload'->>'batch_id', '') is null
+                 and file.raw_payload->'normalized_payload'->>'preview_batch_id'
+                     = coalesce(batch.legacy_mongo_id, batch.id::text)
+           )::bigint as strict_reverted_file_count,
+           count(distinct job.id) filter (
+               where job.status in ('pending', 'processing', 'succeeded')
+           )::bigint as active_or_succeeded_job_count
+    from app.import_files file
+    left join job.import_jobs job on job.import_session_id = file.session_id
+    where coalesce(
+        file.raw_payload->'normalized_payload'->>'batch_id',
+        file.raw_payload->'normalized_payload'->>'preview_batch_id'
+    ) = coalesce(batch.legacy_mongo_id, batch.id::text)
+) file_evidence
+cross join lateral (
+    select count(*) filter (
+        where nullif(rows.linked_object_type, '') is not null
+           or nullif(rows.linked_object_id, '') is not null
+    )::bigint as linked_row_count
+    from app.import_batch_rows rows
+    where rows.import_batch_id = batch.id
+) row_evidence
+cross join lateral (
+    select count(*)::bigint as canonical_invoice_count
+    from app.invoices invoice
+    where invoice.source_batch_id = batch.id
+       or invoice.legacy_source_batch_id = coalesce(batch.legacy_mongo_id, batch.id::text)
+       or exists (
+           select 1
+           from jsonb_array_elements(coalesce(invoice.source_links, '[]'::jsonb)) source_link
+           where source_link->>'source_type' = 'manual_invoice_import'
+             and source_link->>'batch_id' = coalesce(batch.legacy_mongo_id, batch.id::text)
+       )
+) invoice_evidence
+where coalesce(batch.legacy_mongo_id, batch.id::text) = any(%s)
+order by batch_id
+"""
+
+_REVERTED_BATCH_NORMALIZATION_UPDATE_SQL = """
+update app.import_batches batch
+set raw_payload = jsonb_set(
+        batch.raw_payload,
+        '{normalized_payload,status}',
+        to_jsonb('reverted'::text),
+        true
+    ),
+    updated_at = now()
+where coalesce(batch.legacy_mongo_id, batch.id::text) = %s
+  and batch.batch_type in ('input_invoice', 'output_invoice')
+  and batch.status = 'reverted'
+  and batch.raw_payload->'normalized_payload'->>'status' = 'pending'
 """
 
 _ETC_SESSION_RETIREMENT_TARGET_SQL = """

@@ -104,6 +104,8 @@ class ImportLifecycleServiceTests(unittest.TestCase):
 
         self.assertEqual(repository.discard_preview_session(session_id="session-1", imported_by="user-1"), 1)
         self.assertEqual(len(transaction.executed), 2)
+        self.assertIn("raw_payload = jsonb_set", transaction.executed[0][0])
+        self.assertIn("to_jsonb('reverted'::text)", transaction.executed[0][0])
         self.assertIn("import_job.id::text as import_job_id", transaction.fetch_one_sql)
         self.assertNotIn("import_job.import_job_id", transaction.fetch_one_sql)
         self.assertIn("import_file.status <> 'deleted'", transaction.fetch_all_sql)

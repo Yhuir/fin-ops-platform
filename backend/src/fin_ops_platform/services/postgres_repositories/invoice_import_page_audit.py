@@ -22,7 +22,7 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
 INVOICE_BATCH_TYPES = frozenset({"input_invoice", "output_invoice"})
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 ACTIVE_OUTBOX_STATUSES = frozenset({"pending", "processing", "failed", "dead_lettered"})
-KNOWN_BATCH_STATUSES = frozenset({"pending", "completed", "completed_with_errors", "failed"})
+KNOWN_BATCH_STATUSES = frozenset({"pending", "completed", "completed_with_errors", "failed", "reverted"})
 KNOWN_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"})
 TERMINAL_BATCH_STATUSES = frozenset({"completed", "completed_with_errors"})
 LINKED_TERMINAL_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped"})

@@ -7,7 +7,10 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.import_audit_repair_service import build_import_audit_repair_plan
+from fin_ops_platform.services.import_audit_repair_service import (
+    build_import_audit_repair_plan,
+    public_repair_report,
+)
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
     load_import_audit_repair_snapshot,
@@ -239,7 +242,82 @@ def _etc_session_retirement_snapshot(*, retired: bool = False) -> dict[str, list
     }
 
 
+def _reverted_batch_snapshot(*, payload_status: str = "pending") -> dict[str, list[dict[str, object]]]:
+    return {
+        "bank_files": [],
+        "bank_transactions": [],
+        "bank_rows": [],
+        "invoice_rows": [],
+        "reverted_batch_normalization_requested": [
+            {"batch_id": "batch-reverted-1"},
+            {"batch_id": "batch-reverted-2"},
+        ],
+        "reverted_batch_normalization_targets": [
+            {
+                "batch_id": batch_id,
+                "batch_type": "input_invoice",
+                "batch_status": "reverted",
+                "batch_raw_payload": {"normalized_payload": {"status": payload_status}},
+                "file_count": 1,
+                "strict_reverted_file_count": 1,
+                "active_or_succeeded_job_count": 0,
+                "linked_row_count": 0,
+                "canonical_invoice_count": 0,
+            }
+            for batch_id in ("batch-reverted-1", "batch-reverted-2")
+        ],
+    }
+
+
 class ImportAuditRepairPlanTests(unittest.TestCase):
+    def test_plan_normalizes_only_exact_reverted_preview_batch_payloads(self) -> None:
+        plan = build_import_audit_repair_plan(_reverted_batch_snapshot())
+
+        self.assertEqual(
+            [row["batch_id"] for row in plan["reverted_batch_normalizations"]],
+            ["batch-reverted-1", "batch-reverted-2"],
+        )
+        self.assertEqual(
+            plan["rollback_manifest"]["restore_reverted_import_batches"],
+            [row["before"] for row in plan["reverted_batch_normalizations"]],
+        )
+        self.assertEqual(
+            public_repair_report(plan, mode="dry_run", written=False)["authorized_write_scope"],
+            ["app.import_batches"],
+        )
+
+    def test_reverted_batch_normalization_is_idempotent_and_rejects_runtime_work(self) -> None:
+        self.assertEqual(
+            build_import_audit_repair_plan(_reverted_batch_snapshot(payload_status="reverted"))[
+                "reverted_batch_normalizations"
+            ],
+            [],
+        )
+        snapshot = _reverted_batch_snapshot()
+        snapshot["reverted_batch_normalization_targets"][0]["active_or_succeeded_job_count"] = 1
+
+        with self.assertRaisesRegex(ValueError, "canonical or runtime work"):
+            build_import_audit_repair_plan(snapshot)
+
+    def test_repository_applies_reverted_batch_normalization_with_exact_precondition(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+
+        apply_import_audit_repair(connection, build_import_audit_repair_plan(_reverted_batch_snapshot()))
+
+        self.assertEqual(
+            [params for _, params in connection.calls],
+            [("batch-reverted-1",), ("batch-reverted-2",)],
+        )
+        self.assertTrue(all("batch.status = 'reverted'" in sql for sql, _ in connection.calls))
+
     def test_etc_session_snapshot_does_not_scan_unrelated_import_repair_domains(self) -> None:
         class Connection:
             def __init__(self) -> None:
@@ -533,6 +611,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             lifecycle_batch_id="batch-import-1",
             lifecycle_file_id="file-import-1",
             etc_deleted_task_session_ids=[],
+            reverted_batch_ids=[],
         )
         self.assertEqual(json.loads(output.getvalue())["lifecycle_repair_count"], 1)
 
@@ -573,8 +652,50 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             lifecycle_batch_id=None,
             lifecycle_file_id=None,
             etc_deleted_task_session_ids=["session-deleted-1", "session-deleted-2"],
+            reverted_batch_ids=[],
         )
         self.assertEqual(json.loads(output.getvalue())["etc_session_retirement_count"], 2)
+
+    def test_cli_passes_explicit_reverted_batch_targets_to_snapshot_loader(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_import_audit_repair_snapshot",
+                return_value=_reverted_batch_snapshot(),
+            ) as load_snapshot,
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--normalize-reverted-batch-id",
+                    "batch-reverted-1",
+                    "--normalize-reverted-batch-id",
+                    "batch-reverted-2",
+                ],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        load_snapshot.assert_called_once_with(
+            connection,
+            lifecycle_batch_id=None,
+            lifecycle_file_id=None,
+            etc_deleted_task_session_ids=[],
+            reverted_batch_ids=["batch-reverted-1", "batch-reverted-2"],
+        )
+        self.assertEqual(json.loads(output.getvalue())["reverted_batch_normalization_count"], 2)
 
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:

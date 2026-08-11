@@ -19,6 +19,7 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
     invoice_updates = _invoice_update_plan(snapshot.get("invoice_rows") or [])
     lifecycle_repairs = _lifecycle_repair_plan(snapshot)
     etc_session_retirements = _etc_session_retirement_plan(snapshot)
+    reverted_batch_normalizations = _reverted_batch_normalization_plan(snapshot)
     return {
         "source_fingerprint": source_fingerprint,
         "bank_rows": bank_rows,
@@ -26,6 +27,8 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
         "lifecycle_repairs": lifecycle_repairs,
         "etc_session_retirements": etc_session_retirements,
         "etc_session_retirement_mode": bool(snapshot.get("etc_session_retirement_requested")),
+        "reverted_batch_normalizations": reverted_batch_normalizations,
+        "reverted_batch_normalization_mode": bool(snapshot.get("reverted_batch_normalization_requested")),
         "affected_invoice_months": sorted(
             {_text(update.get("invoice_month")) for update in invoice_updates if _text(update.get("invoice_month"))}
         ),
@@ -34,6 +37,9 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
             "restore_invoices": [update["before"] for update in invoice_updates],
             "restore_import_lifecycle": [repair["before"] for repair in lifecycle_repairs],
             "restore_etc_import_sessions": [repair["before"] for repair in etc_session_retirements],
+            "restore_reverted_import_batches": [
+                repair["before"] for repair in reverted_batch_normalizations
+            ],
             "restore_import_row_links": [
                 row_link["before"]
                 for repair in lifecycle_repairs
@@ -53,6 +59,7 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
         "invoice_update_count": len(plan["invoice_updates"]),
         "lifecycle_repair_count": len(plan["lifecycle_repairs"]),
         "etc_session_retirement_count": len(plan["etc_session_retirements"]),
+        "reverted_batch_normalization_count": len(plan["reverted_batch_normalizations"]),
         "lifecycle_row_link_repair_count": sum(
             len(list(repair.get("row_links") or [])) for repair in plan["lifecycle_repairs"]
         ),
@@ -61,6 +68,8 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
         "authorized_write_scope": (
             ["app.etc_import_sessions"]
             if plan["etc_session_retirement_mode"]
+            else ["app.import_batches"]
+            if plan["reverted_batch_normalization_mode"]
             else [
                 "app.import_batch_rows",
                 "app.invoices",
@@ -69,6 +78,57 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
             ]
         ),
     }
+
+
+def _reverted_batch_normalization_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    requested = sorted(
+        {
+            _text(row.get("batch_id"))
+            for row in snapshot.get("reverted_batch_normalization_requested") or []
+            if _text(row.get("batch_id"))
+        }
+    )
+    if not requested:
+        return []
+    targets = list(snapshot.get("reverted_batch_normalization_targets") or [])
+    targets_by_id = {_text(row.get("batch_id")): row for row in targets}
+    if len(targets_by_id) != len(targets) or set(targets_by_id) != set(requested):
+        raise ValueError("Reverted import batch normalization targets must resolve exactly once.")
+
+    repairs: list[dict[str, Any]] = []
+    for batch_id in requested:
+        target = targets_by_id[batch_id]
+        if _text(target.get("batch_type")) not in {"input_invoice", "output_invoice"}:
+            raise ValueError(f"Reverted import batch {batch_id} is not an invoice preview batch.")
+        if _text(target.get("batch_status")) != "reverted":
+            raise ValueError(f"Import batch {batch_id} is not reverted.")
+        if (
+            int(target.get("file_count") or 0) != 1
+            or int(target.get("strict_reverted_file_count") or 0) != 1
+        ):
+            raise ValueError(f"Reverted import batch {batch_id} file/session evidence is incomplete.")
+        if (
+            int(target.get("active_or_succeeded_job_count") or 0)
+            or int(target.get("linked_row_count") or 0)
+            or int(target.get("canonical_invoice_count") or 0)
+        ):
+            raise ValueError(f"Reverted import batch {batch_id} still owns canonical or runtime work.")
+        payload_status = _text(_payload(target.get("batch_raw_payload")).get("status"))
+        if payload_status == "reverted":
+            continue
+        if payload_status != "pending":
+            raise ValueError(f"Reverted import batch {batch_id} payload is not pending or reverted.")
+        repairs.append(
+            {
+                "batch_id": batch_id,
+                "before": {
+                    "batch_id": batch_id,
+                    "batch_status": "reverted",
+                    "batch_payload_status": payload_status,
+                },
+            }
+        )
+    return repairs
 
 
 def _etc_session_retirement_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

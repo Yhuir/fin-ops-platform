@@ -243,3 +243,9 @@
 - 修复：首写和 delta 使用同一服务端 owner；`0144` 只从已关联 preview batch 回填缺失 owner，不猜测无 batch 文件；discard 忽略已删除旧文件但继续拒绝其它 owner、已确认 session 和活跃 job。
 - 旧链删除：session/file/batch/invoice/transaction 新 ID 不再使用进程内顺序号加存在性预查，统一使用 stdlib UUID 前缀 ID，关闭多 Gunicorn worker 的复用/竞态窗口。
 - 验证：owner 持久化、恢复、active list、discard、UUID 跨实例唯一性、迁移合同与生产 preview→recover→discard；preview 前后 canonical invoice 总数必须相等。
+
+## 2026-08-11 - 放弃预览状态与审计合同闭环
+
+- 根因：旧 discard SQL 只把 `app.import_batches.status` 改为 `reverted`，没有同步 batch formal payload；页面 Audit 同时遗漏了合法 `reverted` 终态，形成 canonical/payload mismatch 并阻断 release gate。
+- 修复：同一事务同步 batch canonical/payload，Audit 接受 `reverted`；复用 `import-audit-repair` 对显式 batch 做 dry-run fingerprint 绑定的单字段历史修复。
+- 写边界：只允许 strict file/session 已 reverted、无 active/succeeded job、无 linked row、无 canonical invoice/source-link 的 batch；仅写 `app.import_batches.raw_payload.normalized_payload.status`，不修改行、发票、来源边、队列或 read model。

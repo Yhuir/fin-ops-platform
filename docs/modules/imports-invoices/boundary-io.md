@@ -71,7 +71,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
 | Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；聚合既有 import facts/job，不新增表、队列或 read model。 |
-| Controlled repair | `services/import_audit_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明 |
+| Controlled repair | `services/import_audit_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明；放弃预览的 payload 修复只接受显式 reverted batch，并证明严格 file/session 已终结且无 job/canonical ownership |
 | Worker/runtime | `runtime_worker_handlers.py` |
 | Tests | `tests/test_import*.py`、`tests/test_invoice_*.py`、`web/e2e/imports-invoices-flow.spec.ts` |
 
@@ -110,6 +110,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
 - 2026-07-22：文件预览保存改为 `FileImportService.preview_session_persistence_payload(session_id)`，只写当前 session 和 `preview_batch_id`；删除 `ImportNormalizationService.snapshot(include_facts=False)` 与无参全量 preview writer。PostgreSQL `save_import_delta` 在同一事务写 batch 与 file/session，防止 stale API 覆盖其它已确认导入或形成半写状态。
 - 2026-07-22：历史上已被 stale preview 降级的单条生命周期事实通过现有 `import-audit-repair` 边界修复；必须显式提供 `--batch-id` 与 `--file-id`，dry-run 指纹和 execute 必须一致，且只允许 `pending/preview_ready -> completed/confirmed` 的精确转换。旧 preview 同时清空的 import row link 只能按 `(batch_id, source_unique_key/data_fingerprint)` 唯一匹配既存 `manual_invoice_import` source-link 后恢复；其它中间态、活跃 job、计数不符、多义匹配或 canonical/source-link 不闭环一律 fail closed。
+- 2026-08-11：放弃 preview 必须在同一事务同步 `app.import_batches.status` 与 batch formal payload status 为 `reverted`；Audit 将该状态视为合法终态。历史上已产生的精确 mismatch 只通过 `import-audit-repair --normalize-reverted-batch-id` 修复 payload 单字段，要求严格 file/session 均已 reverted、无 active/succeeded job、无 linked import row、无 canonical invoice/source-link；dry-run fingerprint 变化或任一前置条件不符时零写入。
 
 ## Audit v19 provenance 版本边界（2026-07-12）
 

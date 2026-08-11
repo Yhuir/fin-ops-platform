@@ -317,6 +317,51 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
         self.assertTrue(report["audit_contract"]["database_snapshot"])
         self.assertEqual(report["summary"]["invoice_import_job_count"], 1)
 
+    def test_formally_reverted_preview_batch_is_not_reported_as_invalid(self) -> None:
+        connection = FakeConnection()
+        connection.files[0]["status"] = "reverted"
+        connection.files[0]["raw_payload"]["normalized_payload"].update(
+            {"status": "reverted", "session_status": "reverted", "batch_id": None}
+        )
+        connection.batches[0]["status"] = "reverted"
+        connection.batches[0]["raw_payload"]["normalized_payload"]["status"] = "reverted"
+        connection.rows = []
+        connection.invoices = []
+        connection.jobs = []
+        connection.outbox = []
+        batch = connection.batches[0]
+        batch.update(
+            {
+                "row_count": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "duplicate_count": 0,
+                "suspected_duplicate_count": 0,
+                "updated_count": 0,
+            }
+        )
+        batch["raw_payload"]["normalized_payload"].update(
+            {
+                "row_count": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "duplicate_count": 0,
+                "suspected_duplicate_count": 0,
+                "updated_count": 0,
+            }
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertNotIn(
+            "invoice_import_batch_status_invalid",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertNotIn(
+            "invoice_import_batch_formal_payload_mismatch",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_legacy_file_is_non_blocking_but_explicitly_unproven(self) -> None:
         connection = FakeConnection()
         connection.files[0]["audit_contract_revision"] = None

@@ -558,6 +558,8 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --batch-id <batch-id> --file-id <file-id>
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --retire-etc-session-id <session-id> [--retire-etc-session-id <session-id> ...]
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --normalize-reverted-batch-id <batch-id> [--normalize-reverted-batch-id <batch-id> ...]
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
@@ -580,6 +582,10 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `etc-import-page-audit.v1.deleted-task-retired`，不删除 session、ZIP 文件关系、对象文件或导入结果；
 task 未处于 canonical/payload 双重 `deleted`、session 非稳定态、存在活动 job/outbox、目标缺失或指纹变化时一律拒绝。
 该模式不得与 batch/file 生命周期修复组合，execute 仍必须复用同一 dry-run fingerprint。
+历史 discard 若只写入 batch canonical `reverted` 而 formal payload 仍为 `pending`，必须显式传入
+`--normalize-reverted-batch-id`。工具只在 strict file/session 已全部 reverted、无 active/succeeded job、
+无 linked import row、无 canonical invoice/source-link 时把该 batch payload status 改为 `reverted`；
+目标缺失、多义、状态漂移或 fingerprint 变化均在写前失败。该模式不得与其它 repair mode 组合。
 
 `etc-submitted-batch-member-repair` 只用于已有 submitted ETC 批次的已证明缺失成员。dry-run 必须同时绑定
 business/submission/external 三个 ID、全部精确发票号与车牌、目标/结果金额；execute 还必须传入同一

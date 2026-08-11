@@ -77,6 +77,7 @@
 | 发票 `信息汇总表` 表头别名不被识别，或汇总页脚被当作错误发票行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_accepts_invoice_summary_header_aliases`、`tests/test_import_file_service.py::ImportFileServiceTests::test_preview_detects_invoice_summary_without_template_override` |
 | 服务器预览完成后 PostgreSQL import-fact outbox 旁路导致刷新风暴 | `tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot` 断言 full snapshot persistence 不再直接写 `job.read_model_dirty_scopes` / `job.outbox_events`；正式刷新必须走 import processing、derived lifecycle 和 read model gateway 边界 |
 | stale API 后续预览把已完成发票状态覆盖回 pending | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`tests/test_import_formalization_api.py::ImportFormalizationApiTests::test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`tests/test_postgres_repositories_core.py::test_save_import_delta_rolls_back_batch_when_file_write_fails`、`tests/test_read_model_architecture_guards.py` |
+| 放弃 preview 后 batch canonical status 为 `reverted`、formal payload 仍为 `pending`，导致系统页面 Audit 阻断发布 | `tests/test_import_lifecycle_service.py::ImportLifecycleServiceTests::test_postgres_discard_is_atomic_owned_and_rejects_active_job`、`tests/test_audit_invoice_import_page.py::InvoiceImportPageAuditTests::test_formally_reverted_preview_batch_is_not_reported_as_invalid`、`tests/test_import_audit_repair_ops.py` 的 reverted batch plan/idempotency/fail-closed/repository/CLI 测试 |
 
 ## 关键 smoke flows
 
@@ -165,6 +166,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_audit_invoice_import_page.py`：历史 component rows 按整票合计比较；完全相同重复行不二次加总。
 - `tests/test_import_audit_repair_ops.py`：canonical 金额恢复、source batch guard、dry-run plan 幂等和 rollback manifest。
 - `tests/test_import_audit_repair_ops.py`：精确生命周期目标、succeeded job 证明、registered row/canonical/source-link 闭环、terminal 幂等、活跃 job/闭环缺失 fail-closed、batch/file 原子事务 precondition。
+- `tests/test_import_audit_repair_ops.py`：精确 reverted batch payload normalization、terminal 幂等、job/canonical ownership fail-closed、fingerprint 与单表写范围。
 - `tests/test_app_postgres_mode_integration.py::test_controlled_import_repair_restores_only_exact_downgraded_lifecycle`：真实 PostgreSQL 上模拟 stale preview 降级，验证受控 repair 恢复并再次 dry-run 幂等；本机未配置 `FIN_OPS_TEST_DATABASE_URL` 时显式 skip。
 
 ## 2026-07-22 Phase 27 写后零 fan-out 回归

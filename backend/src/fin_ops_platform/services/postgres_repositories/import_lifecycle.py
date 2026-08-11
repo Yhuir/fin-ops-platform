@@ -177,7 +177,14 @@ class PostgresImportLifecycleRepository:
                 transaction.execute(
                     """
                     update app.import_batches
-                    set status = 'reverted', updated_at = now()
+                    set status = 'reverted',
+                        raw_payload = jsonb_set(
+                          raw_payload,
+                          '{normalized_payload,status}',
+                          to_jsonb('reverted'::text),
+                          true
+                        ),
+                        updated_at = now()
                     where status = 'pending'
                       and (legacy_mongo_id = any(%s) or id::text = any(%s))
                     """,
