@@ -386,25 +386,11 @@ def _official_reference_values(audit_fields: dict[str, str | None]) -> set[str]:
     }
 
 
-def _strict_secondary_evidence(row: dict[str, Any]) -> tuple[str, ...] | None:
+def _strict_secondary_evidence(row: dict[str, Any]) -> tuple[str, str] | None:
     balance = _text(row.get("balance"))
     if not balance:
         return None
-    values: list[str] = [balance]
-    for field_name in (
-        "currency",
-        "summary",
-        "remark",
-        "account_name",
-        "counterparty_account_no",
-        "counterparty_bank_name",
-        "booked_date",
-        "voucher_kind",
-        "voucher_no",
-    ):
-        values.append(_text(row.get(field_name)))
-    values.append(_fingerprint(row.get("bank_text_fields") or []))
-    return tuple(values)
+    return balance, _text(row.get("currency")).upper()
 
 
 def _decimal_nonzero(value: Any) -> bool:
