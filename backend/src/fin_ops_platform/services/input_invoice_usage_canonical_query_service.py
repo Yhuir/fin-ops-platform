@@ -16,6 +16,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
+    _money,
     input_invoice_usage_relation_details_from_row,
 )
 from fin_ops_platform.services.invoice_relation_query_context import (
@@ -615,7 +616,7 @@ def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:
         "projectName": record.project_name_display or record.project_name,
         "workflowNo": record.case_id or "",
         "status": record.section,
-        "amount": f"{record.amount:.2f}",
+        "amount": _money(record.amount),
         "month": record.month,
         "reason": record.reason,
         "counterpartyName": record.counterparty_name,

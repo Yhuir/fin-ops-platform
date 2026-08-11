@@ -76,3 +76,8 @@ cd web && npm run build
 ## 2026-08-10 移动端宽表回归
 
 - `web/src/test/InputInvoiceUsagePage.test.tsx` 锁定表格最小宽度与既有内部滚动容器，避免窄屏把十列压成逐字竖排；桌面列、筛选、分页、详情和 direct API 合同不变。
+
+## 2026-08-11 OA 详情金额合同回归
+
+- `tests/test_invoice_usage_collection_canonical_query.py` 使用生产真实字符串金额，锁定 canonical OA 详情输出 `120.00`。
+- `tests/test_input_invoice_usage_api.py` 继续覆盖详情 API 成功/失败映射；生产验收补充真实关联 OA 点击、drawer 内容和无 500 验证。

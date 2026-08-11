@@ -743,3 +743,9 @@
 
 - 生产计时显示 `/rows?page_size=20` 每请求执行 31 条数据库语句，而只装配 1 行的 `/filter-options` 为 12 条；差值来自每行支付状态计算重新读取同一份 `app_settings`。
 - repository 已在 `REPEATABLE READ READ ONLY` snapshot 内读取并规范化付款规则；当前页行装配改为复用一个 request-scoped lifecycle policy，旧的逐行 settings I/O 被删除。API shape、规则优先级、详情、导出和写链不变，没有 cache、read model、worker、索引、迁移或新依赖。
+
+## 2026-08-11 - OA 详情金额合同修复
+
+- 生产 `OAApplicationRecord.amount` 的真实合同是字符串；canonical 详情装配曾对它使用浮点格式化，导致已关联 OA 的详情接口返回 500。
+- 详情装配复用现有 `_money` 金额规范化函数，不增加查询、fallback 或并行旧链路；API 输出仍为两位小数字符串。
+- 回归测试使用真实字符串金额，部署后必须通过生产页面点击 OA 详情验证接口 200 且 drawer 正常展示。

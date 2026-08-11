@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from decimal import Decimal
 import unittest
 
 from fin_ops_platform.domain.enums import InvoiceType
@@ -297,7 +296,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             applicant="申请人",
             project_name="项目名称",
             apply_type="报销",
-            amount=Decimal("120.00"),
+            amount="120.00",
             counterparty_name="供应商",
             reason="费用报销",
             relation_code="completed",
