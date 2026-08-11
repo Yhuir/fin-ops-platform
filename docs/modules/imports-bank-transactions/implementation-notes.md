@@ -300,7 +300,7 @@
 
 ## 2026-08-12 - 历史空币种受控重放 Audit 对齐
 
-- 候选发布门禁证明光大等历史 canonical 流水与新重放 row 的账户、秒级时间、方向、金额、余额一致，但双方历史币种字段均为空；普通 statement-position 合同因此正确拒绝，页面 Audit 却没有使用生产 repair 已冻结的“双方同为空”证据语义。
-- `BankTransactionIdentityService.statement_position_for_mapping` 默认仍要求币种；只有调用方显式声明 `allow_missing_currency=True` 时，双方缺失币种才以同一空值比较。银行导入 Page Audit 仅在三类已登记受控重放 reason 下使用该模式。
-- 账户、时间、方向、金额、余额任一缺失/不同，或币种单边缺失、显式值不同，仍然失败；普通导入、普通去重 identity、source key/fingerprint 和 stale gate 均不放宽。
+- 候选发布门禁证明光大等历史 canonical 流水与新重放 row 的账户、秒级时间、方向、金额、余额一致。历史 canonical 币种字段为空；正常文件解析器对未提供逐行币种的文件按既有合同补 `CNY`，因此新重放 row 为 `CNY`。普通 statement-position 合同正确拒绝这一对值，页面 Audit 却没有使用生产 repair 已冻结的历史缺失证据语义。
+- `BankTransactionIdentityService.statement_position_for_mapping` 默认仍要求币种；只有调用方显式声明 `allow_missing_currency=True` 时才允许构造历史缺失位置。银行导入 Page Audit 仅在三类已登记受控重放 reason 下使用该模式，并额外只接受 `row=CNY / canonical=空` 这一种解析器默认值兼容。
+- 账户、时间、方向、金额、余额任一缺失/不同，row 缺失但 canonical 有值、非 CNY 的单边缺失或显式币种不同，仍然失败；普通导入、普通去重 identity、source key/fingerprint 和 stale gate 均不放宽。
 - 不新增 API、表、worker、read model、fallback 或第二条导入链；边界 I/O 只补充受控历史审计语义。

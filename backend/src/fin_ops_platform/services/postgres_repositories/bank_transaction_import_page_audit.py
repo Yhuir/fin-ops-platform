@@ -616,7 +616,15 @@ def _controlled_replay_statement_position_matches(
         _bank_statement_mapping(transaction, direction_key="txn_direction"),
         allow_missing_currency=True,
     )
-    return row_position is not None and row_position == transaction_position
+    if row_position is None or transaction_position is None:
+        return False
+    if row_position[:5] != transaction_position[:5]:
+        return False
+    row_currency = row_position[5]
+    transaction_currency = transaction_position[5]
+    return row_currency == transaction_currency or (
+        row_currency == "CNY" and transaction_currency == ""
+    )
 
 
 def _bank_statement_mapping(row: dict[str, Any], *, direction_key: str) -> dict[str, Any]:

@@ -26,7 +26,7 @@
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - 受控重放必须为新 session/file 生成新的归档对象登记；不得让新 `app.import_files` 复用旧 `stored_file_path` 却缺少 `file_object_id`。历史已存在的缺失链接只能由维护工具按唯一 storage URI、登记 SHA-256、对象大小和非 tombstone 生命周期证明后修复。
-- 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于受控重放，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；只有 row 与历史 canonical 双方币种同时缺失才视为同一历史缺失证据。普通导入、前五项缺字段/漂移、币种单边缺失或显式值不同仍必须阻断。
+- 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于受控重放，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
 - 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。
@@ -79,7 +79,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | 导入生命周期 | AppHealth / 导入页 | 统一输出 `awaiting_confirmation/queued/processing/succeeded/failed/discarded/inconsistent`；页面不得直接展示 batch 原始 `pending/completed` 并猜测含义。 |
 | Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次写入影响的精确月份；不在写路径展开成页面 refresh jobs |
 | Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`，普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作；后续访问页面由该页 freshness/status/enqueue 边界收敛 |
-| Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；受控历史重放允许 row 与 canonical 的币种同时缺失，但账户、秒级时间、方向、金额、余额仍必须完整相等，且币种单边缺失或显式值不同继续失败；下游 read model 只登记为 impact targets，不冒充页面 consumer |
+| Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；受控历史重放允许 row/canonical 币种同时缺失，也允许解析器默认 `row=CNY` 对历史 `canonical=空`，但账户、秒级时间、方向、金额、余额仍必须完整相等，反向缺失、非 CNY 单边缺失或显式值不同继续失败；下游 read model 只登记为 impact targets，不冒充页面 consumer |
 
 失败但仍可重试的 import job 必须在 admin-only Audit issue 中返回 `attempt_count/max_attempts`、`last_error`、`session_id` 和 `selected_file_ids`，使运维只能通过正式 file/session retry/confirm I/O 定位和恢复；恢复必须复用同一 import/background job id，重置失败租约与错误并写入新的 durable outbox，且 request fingerprint 不同返回结构化 `409 idempotency_conflict`。不得要求直接查询或改写 `job.import_jobs`。
 
