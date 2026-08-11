@@ -169,6 +169,6 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 
 ## 2026-08-11 候选版本死信恢复回归
 
-- `tests/test_import_audit_repair_ops.py` 证明恢复只接受完整 job/event/background job/session/file 白名单、已知唯一键错误、untouched bank preview 和零 canonical 写入。
+- `tests/test_import_audit_repair_ops.py` 证明恢复只接受完整 job/event/background job/session/file 白名单、已知唯一键错误、untouched 且可正式确认的 bank preview（含仅有弱指纹疑似重复的 `preview_ready_with_errors`）和零 canonical 写入。
 - 候选 processor 处理完成后必须先证明 import/background job、batch/file 和 canonical transaction 计数闭环，才 resolve 原 dead letter；不完整结果保留死信。
 - 只读 recovery discovery 必须从一个明确 failed import job 推导唯一 event/background job/session/file target；多个 dead letter、缺失坐标或不完整 preview 必须 fail closed。

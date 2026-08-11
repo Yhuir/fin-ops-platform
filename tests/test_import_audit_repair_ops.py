@@ -383,6 +383,17 @@ class FailedImportRecoveryTests(unittest.TestCase):
         self.assertEqual(plan["import_job"]["status"], "failed")
         self.assertEqual(len(plan["source_fingerprint"]), 64)
 
+        suspected_duplicate_snapshot = _failed_import_recovery_snapshot()
+        suspected_duplicate_snapshot["files"][0].update(
+            {
+                "session_status": "preview_ready_with_errors",
+                "duplicate_count": 0,
+                "suspected_duplicate_count": 6,
+            }
+        )
+        suspected_duplicate_plan = build_failed_import_job_recovery_plan(suspected_duplicate_snapshot)
+        self.assertEqual(suspected_duplicate_plan["files"][0]["suspected_duplicate_count"], 6)
+
         partial_snapshot = _failed_import_recovery_snapshot()
         partial_snapshot["files"][0]["canonical_bank_transaction_count"] = 1
         with self.assertRaisesRegex(ValueError, "not an untouched bank preview"):

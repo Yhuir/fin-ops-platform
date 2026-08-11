@@ -148,13 +148,13 @@ def build_failed_import_job_recovery_plan(snapshot: dict[str, Any]) -> dict[str,
             _text(file_row.get("session_id")) != target["session_id"]
             or _text(file_row.get("file_status")) != "preview_ready"
             or _text(file_row.get("file_payload_status")) != "preview_ready"
-            or _text(file_row.get("session_status")) != "preview_ready"
+            or _text(file_row.get("session_status"))
+            not in {"preview_ready", "preview_ready_with_errors"}
             or _text(file_row.get("batch_type")) != "bank_transaction"
             or not _text(file_row.get("preview_batch_id"))
             or _text(file_row.get("batch_id"))
             or _text(file_row.get("batch_status")) != "pending"
             or int(file_row.get("error_count") or 0) != 0
-            or int(file_row.get("suspected_duplicate_count") or 0) != 0
             or int(file_row.get("updated_count") or 0) != 0
             or int(file_row.get("canonical_bank_transaction_count") or 0) != 0
         ):
