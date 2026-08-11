@@ -782,6 +782,30 @@ def _build_file_updates(
         row = file_rows[0]
         before = deepcopy(row.get("raw_payload") or {})
         owner_update_count = owner_update_counts[batch_pk]
+        counter_payload = (
+            before.get("normalized_payload")
+            if isinstance(before.get("normalized_payload"), dict)
+            else before
+        )
+        file_success_count = int(counter_payload.get("success_count") or 0)
+        file_duplicate_count = int(counter_payload.get("duplicate_count") or 0)
+        if file_success_count < owner_update_count:
+            raise ValueError(
+                "Import file counter cannot accept owner corrections: "
+                + json.dumps(
+                    {
+                        "file_id": _text(row.get("file_id")),
+                        "batch_pk": batch_pk,
+                        "owner_update_count": owner_update_count,
+                        "success_count": file_success_count,
+                        "duplicate_count": file_duplicate_count,
+                        "top_level_success_count": before.get("success_count"),
+                        "top_level_duplicate_count": before.get("duplicate_count"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
         after = _rewrite_counter_payload(
             before,
             success_delta=-owner_update_count,
