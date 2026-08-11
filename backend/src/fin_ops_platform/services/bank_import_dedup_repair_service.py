@@ -820,7 +820,37 @@ def _build_file_updates(
             or before_duplicate_count != batch_update["before_duplicate_count"]
         ):
             raise ValueError(
-                f"Import file {_text(row.get('file_id'))} row-result counters do not match its batch."
+                "Import file row-result counters do not match its batch: "
+                + json.dumps(
+                    {
+                        "file_id": _text(row.get("file_id")),
+                        "batch_pk": batch_pk,
+                        "row_result_count": len(row_results),
+                        "decision_counts": dict(
+                            sorted(
+                                Counter(
+                                    _text(result.get("decision"))
+                                    for result in row_results
+                                    if isinstance(result, dict)
+                                ).items()
+                            )
+                        ),
+                        "row_result_success_count": before_success_count,
+                        "row_result_duplicate_count": before_duplicate_count,
+                        "batch_success_count": (
+                            batch_update.get("before_success_count")
+                            if batch_update is not None
+                            else None
+                        ),
+                        "batch_duplicate_count": (
+                            batch_update.get("before_duplicate_count")
+                            if batch_update is not None
+                            else None
+                        ),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             )
         remaining_updates = list(
             sorted(batch_row_updates, key=lambda item: (item["row_no"], item["row_pk"]))
