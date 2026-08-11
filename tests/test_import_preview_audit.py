@@ -98,6 +98,41 @@ class ImportPreviewAuditTests(unittest.TestCase):
         self.assertEqual(second.identity_kind, "stable")
         self.assertNotEqual(first.identity_key, second.identity_key)
 
+    def test_bank_transaction_same_identity_with_different_balance_is_not_grouped(self) -> None:
+        strategy = BankTransactionIdentityStrategy()
+        base = {
+            "account_no": "acct-a",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "counterparty_name": "Bank fee",
+            "enterprise_serial_no": "SERIAL-REUSED",
+            "currency": "RMB",
+        }
+
+        first = strategy.identify({**base, "balance": "100.00"})
+        second = strategy.identify({**base, "balance": "99.10"})
+
+        self.assertEqual(first.identity_kind, "stable")
+        self.assertEqual(second.identity_kind, "stable")
+        self.assertNotEqual(first.identity_key, second.identity_key)
+
+    def test_bank_transaction_position_normalizes_decimal_and_currency_alias(self) -> None:
+        strategy = BankTransactionIdentityStrategy()
+        base = {
+            "account_no": "acct-a",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "0.90",
+            "counterparty_name": "Bank fee",
+            "enterprise_serial_no": "SERIAL-REUSED",
+        }
+
+        first = strategy.identify({**base, "balance": "100.00", "currency": "RMB"})
+        second = strategy.identify({**base, "balance": "100.000", "currency": "人民币元"})
+
+        self.assertEqual(first.identity_key, second.identity_key)
+
     def test_bank_transaction_date_only_time_has_no_identity(self) -> None:
         identity = BankTransactionIdentityStrategy().identify(
             {

@@ -233,6 +233,54 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
         self.assertEqual(decision.decision, ImportDecision.CREATED)
         self.assertEqual(len(repo.bank_queries), 2)
 
+    def test_same_canonical_identity_with_different_balance_is_not_deduplicated(self) -> None:
+        incoming = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "88.00",
+            "balance": "912.00",
+            "currency": "人民币元",
+            "counterparty_name": "Acme",
+            "bank_serial_no": "SERIAL-001",
+        }
+        identity = FinancialObjectIdentityPolicy().identify_bank_transaction_mapping(incoming)
+        self.transaction.source_unique_key = identity.canonical_key
+        self.transaction.balance = Decimal("1000.00")
+        self.transaction.currency = "CNY"
+        repo = FakeObjectIdentityRepository(transactions=[self.transaction])
+        service = ObjectDedupDecisionService(object_identity_repository=repo)
+
+        decision = service.decide_bank_transaction_import(incoming)
+
+        self.assertEqual(decision.decision, ImportDecision.CREATED)
+        self.assertIsNone(decision.linked_object_id)
+        self.assertTrue(str(decision.identity.canonical_key).startswith("bank-v4:"))
+        self.assertEqual(decision.identity.audit_fields["base_canonical_key"], identity.canonical_key)
+
+    def test_same_canonical_identity_with_equal_position_is_deduplicated(self) -> None:
+        incoming = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "88.00",
+            "balance": "1000.000",
+            "currency": "RMB",
+            "counterparty_name": "Acme",
+            "bank_serial_no": "SERIAL-001",
+        }
+        identity = FinancialObjectIdentityPolicy().identify_bank_transaction_mapping(incoming)
+        self.transaction.source_unique_key = identity.canonical_key
+        self.transaction.balance = Decimal("1000.00")
+        self.transaction.currency = "人民币元"
+        repo = FakeObjectIdentityRepository(transactions=[self.transaction])
+        service = ObjectDedupDecisionService(object_identity_repository=repo)
+
+        decision = service.decide_bank_transaction_import(incoming)
+
+        self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(decision.linked_object_id, "txn-1")
+
     def test_fingerprint_match_without_existing_official_reference_is_suspected(self) -> None:
         self.transaction.bank_serial_no = None
         repo = FakeObjectIdentityRepository(transactions=[self.transaction])

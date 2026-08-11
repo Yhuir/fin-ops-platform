@@ -140,6 +140,28 @@ class FinancialObjectIdentityPolicy:
             audit_fields=dict(identity.audit_fields),
         )
 
+    def identify_bank_transaction_position_mapping(
+        self,
+        values: dict[str, Any],
+        *,
+        source_kind: str | None = None,
+        source_row_id: str | None = None,
+    ) -> ObjectIdentity:
+        identity = self._bank_transaction_identity_service.position_identity_for_mapping(values)
+        confidence = "canonical" if identity.identity_key else "suspected" if identity.suspected_key else "missing"
+        return ObjectIdentity(
+            object_type="bank_transaction",
+            source_kind=source_kind,
+            source_row_id=source_row_id,
+            canonical_key=identity.identity_key,
+            canonical_key_kind=identity.canonical_key_kind,
+            suspected_key=identity.suspected_key,
+            missing_fields=tuple(identity.missing_fields),
+            confidence=confidence,
+            components=dict(identity.components),
+            audit_fields=dict(identity.audit_fields),
+        )
+
     def identify_bank_transaction(
         self,
         transaction: BankTransaction,
@@ -160,9 +182,31 @@ class FinancialObjectIdentityPolicy:
                 "account_detail_no": transaction.account_detail_no,
                 "enterprise_serial_no": transaction.enterprise_serial_no,
                 "voucher_no": transaction.voucher_no,
+                "balance": transaction.balance,
+                "currency": transaction.currency,
             },
             source_kind=source_kind,
             source_row_id=source_row_id or transaction.id,
+        )
+
+    def identify_bank_transaction_position(self, transaction: BankTransaction) -> ObjectIdentity:
+        return self.identify_bank_transaction_position_mapping(
+            {
+                "account_no": transaction.account_no,
+                "trade_time": transaction.trade_time,
+                "pay_receive_time": transaction.pay_receive_time,
+                "txn_date": transaction.txn_date,
+                "txn_direction": transaction.txn_direction,
+                "amount": transaction.amount,
+                "counterparty_name": transaction.counterparty_name_raw,
+                "bank_serial_no": transaction.bank_serial_no,
+                "account_detail_no": transaction.account_detail_no,
+                "enterprise_serial_no": transaction.enterprise_serial_no,
+                "voucher_no": transaction.voucher_no,
+                "balance": transaction.balance,
+                "currency": transaction.currency,
+            },
+            source_row_id=transaction.id,
         )
 
     def identify_oa_attachment_invoice(

@@ -15,6 +15,7 @@
 ### 负责
 
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
+- XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
 - 将导入结果转化为发票源事实与精确 affected scopes。
 - Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。

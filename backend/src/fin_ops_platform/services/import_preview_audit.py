@@ -148,11 +148,49 @@ class BankTransactionIdentityStrategy:
 
     def identify(self, values: dict[str, Any]) -> ImportRecordIdentity:
         identity = self._identity_policy.identify_bank_transaction_mapping(values)
+        position = _bank_position_discriminator(values)
         if identity.canonical_key:
-            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.canonical_key, identity_kind="stable")
+            return ImportRecordIdentity(
+                record_type=self.record_type,
+                identity_key=_with_position(identity.canonical_key, position),
+                identity_kind="stable",
+            )
         if identity.suspected_key:
-            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.suspected_key, identity_kind="suspected")
+            return ImportRecordIdentity(
+                record_type=self.record_type,
+                identity_key=_with_position(identity.suspected_key, position),
+                identity_kind="suspected",
+            )
         return ImportRecordIdentity(record_type=self.record_type, identity_key=None, identity_kind=None)
+
+
+def _with_position(identity_key: str, position: str | None) -> str:
+    return f"{identity_key}:position:{position}" if position else identity_key
+
+
+def _bank_position_discriminator(values: dict[str, Any]) -> str | None:
+    balance = _decimal_text(values.get("balance"))
+    if balance is None:
+        return None
+    currency = _canonical_currency(values.get("currency"))
+    return f"{balance}:{currency}"
+
+
+def _decimal_text(value: Any) -> str | None:
+    normalized = (clean_placeholder(value) or "").replace(",", "")
+    if not normalized:
+        return None
+    try:
+        return format(Decimal(normalized).normalize(), "f")
+    except InvalidOperation:
+        return None
+
+
+def _canonical_currency(value: Any) -> str:
+    normalized = "".join((clean_placeholder(value) or "").upper().split())
+    if normalized in {"CNY", "RMB", "人民币", "人民币元"}:
+        return "CNY"
+    return normalized
 
 
 class EtcInvoiceIdentityStrategy(InvoiceIdentityStrategy):

@@ -31,6 +31,8 @@ def _transaction(
     trade_time: str,
     reference: str,
     fingerprint: str,
+    balance: str | None = None,
+    currency: str | None = None,
 ) -> dict[str, object]:
     return {
         "transaction_pk": transaction_pk,
@@ -41,6 +43,8 @@ def _transaction(
         "trade_time": trade_time,
         "txn_direction": "outflow",
         "amount": "496.20",
+        "balance": balance,
+        "currency": currency,
         "counterparty_name_raw": "樊祖芳",
         "bank_serial_no": reference,
         "account_detail_no": None,
@@ -286,6 +290,61 @@ class BankImportDedupRepairServiceTests(TestCase):
 
         self.assertEqual(plan["duplicate_delete_count"], 1)
         self.assertEqual(plan["duplicate_match_basis_counts"], {"balance_currency": 1})
+
+    def test_plan_repairs_unique_statement_position_when_fingerprint_drifted(self) -> None:
+        snapshot = _snapshot()
+        target = snapshot["target_transactions"][0]
+        keeper = snapshot["protected_transactions"][0]
+        target.update(
+            {
+                "data_fingerprint": "bank:new-parser-fingerprint",
+                "balance": "48952.410",
+                "currency": "人民币元",
+            }
+        )
+        keeper.update(
+            {
+                "data_fingerprint": "bank:legacy-parser-fingerprint",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+
+        plan = build_bank_import_dedup_repair_plan(snapshot)
+
+        self.assertEqual(plan["duplicate_delete_count"], 1)
+        self.assertEqual(plan["duplicate_match_basis_counts"], {"statement_position": 1})
+
+    def test_plan_does_not_use_ambiguous_statement_position(self) -> None:
+        snapshot = _snapshot()
+        target = snapshot["target_transactions"][0]
+        keeper = snapshot["protected_transactions"][0]
+        target.update(
+            {
+                "data_fingerprint": "bank:new-parser-fingerprint",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+        keeper.update(
+            {
+                "data_fingerprint": "bank:legacy-parser-fingerprint",
+                "balance": "48952.41",
+                "currency": "CNY",
+            }
+        )
+        second_keeper = dict(keeper)
+        second_keeper.update(
+            {
+                "transaction_pk": "00000000-0000-0000-0000-000000000102",
+                "transaction_id": "keeper-2",
+            }
+        )
+        snapshot["protected_transactions"].append(second_keeper)
+        snapshot["request"]["expected_protected_count"] = 2
+
+        with self.assertRaisesRegex(ValueError, "expected 1, resolved 0"):
+            build_bank_import_dedup_repair_plan(snapshot)
 
     def test_plan_fails_closed_when_exact_duplicate_delete_count_changes(self) -> None:
         snapshot = _snapshot()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import ImportDecision
@@ -182,7 +183,7 @@ class ObjectDedupDecisionService:
 
     def decide_bank_transaction_import(self, normalized: dict[str, Any]) -> ObjectDedupDecision:
         identity = self._identity_policy.identify_bank_transaction_mapping(normalized)
-        existing, match_kind = self._find_bank_transaction(identity)
+        existing, match_kind = self._find_bank_transaction(identity, normalized=normalized)
         if identity.canonical_key and existing is not None and match_kind != "migration_ambiguous":
             return ObjectDedupDecision(
                 decision=ImportDecision.DUPLICATE_SKIPPED,
@@ -217,6 +218,15 @@ class ObjectDedupDecisionService:
                 linked_object_id=existing.id,
                 matched_object=existing,
             )
+        if identity.canonical_key and match_kind == "canonical_position_conflict":
+            position_identity = self._identity_policy.identify_bank_transaction_position_mapping(normalized)
+            if position_identity.canonical_key == identity.canonical_key:
+                raise ValueError("bank transaction canonical collision lacks statement-position evidence")
+            return ObjectDedupDecision(
+                decision=ImportDecision.CREATED,
+                decision_reason="Canonical bank reference was reused for a distinct statement position.",
+                identity=position_identity,
+            )
         return ObjectDedupDecision(
             decision=ImportDecision.CREATED,
             decision_reason="Ready to create new bank transaction.",
@@ -245,15 +255,21 @@ class ObjectDedupDecisionService:
             return self._repository.find_invoice_by_identity(canonical_key=None, suspected_key=identity.suspected_key)
         return None
 
-    def _find_bank_transaction(self, identity: ObjectIdentity) -> tuple[BankTransaction | None, str | None]:
+    def _find_bank_transaction(
+        self,
+        identity: ObjectIdentity,
+        *,
+        normalized: dict[str, Any],
+    ) -> tuple[BankTransaction | None, str | None]:
         if self._repository is None:
             return None, None
         transaction = self._repository.find_bank_transaction_by_identity(
             canonical_key=identity.canonical_key,
             suspected_key=None if identity.canonical_key else identity.suspected_key,
         )
-        if transaction is not None:
+        if transaction is not None and _bank_position_compatible(normalized, transaction):
             return transaction, "canonical" if identity.canonical_key else "suspected"
+        canonical_position_conflict = bool(transaction is not None and identity.canonical_key)
         if identity.canonical_key and identity.suspected_key:
             candidates = self._repository.find_bank_transactions_by_identity(
                 canonical_key=None,
@@ -263,6 +279,8 @@ class ObjectDedupDecisionService:
             ambiguous_matches: list[BankTransaction] = []
             incoming_references = self._official_reference_values(identity)
             for candidate in candidates:
+                if not _bank_position_compatible(normalized, candidate):
+                    continue
                 candidate_identity = self._identity_policy.identify_bank_transaction(candidate)
                 candidate_references = self._official_reference_values(candidate_identity)
                 if incoming_references and candidate_references:
@@ -276,7 +294,7 @@ class ObjectDedupDecisionService:
                 return exact_matches[0], "migration_ambiguous"
             if ambiguous_matches:
                 return ambiguous_matches[0], "migration_ambiguous"
-        return None, None
+        return None, "canonical_position_conflict" if canonical_position_conflict else None
 
     @staticmethod
     def _official_reference_values(identity: ObjectIdentity) -> set[str]:
@@ -299,3 +317,35 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _bank_position_compatible(incoming: dict[str, Any], existing: BankTransaction) -> bool:
+    incoming_balance = _decimal_value(incoming.get("balance"))
+    existing_balance = _decimal_value(getattr(existing, "balance", None))
+    if incoming_balance is not None and existing_balance is not None and incoming_balance != existing_balance:
+        return False
+
+    incoming_currency = _canonical_currency(incoming.get("currency"))
+    existing_currency = _canonical_currency(getattr(existing, "currency", None))
+    return not (
+        incoming_currency
+        and existing_currency
+        and incoming_currency != existing_currency
+    )
+
+
+def _decimal_value(value: Any) -> Decimal | None:
+    normalized = (_text(value) or "").replace(",", "")
+    if not normalized:
+        return None
+    try:
+        return Decimal(normalized)
+    except InvalidOperation:
+        return None
+
+
+def _canonical_currency(value: Any) -> str:
+    normalized = "".join((_text(value) or "").upper().split())
+    if normalized in {"CNY", "RMB", "人民币", "人民币元"}:
+        return "CNY"
+    return normalized

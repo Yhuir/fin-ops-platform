@@ -1226,6 +1226,12 @@ def read_xlsx_rows(content: bytes) -> list[list[str]]:
             raise ValueError(f"Excel 工作表数量必须在 1 到 {MAX_WORKBOOK_SHEETS} 之间。")
         first_rows: list[list[str]] | None = None
         for sheet in workbook.worksheets:
+            # Some bank and invoice exporters write an invalid/underreported
+            # worksheet dimension (for example ``A1``) even though the sheet
+            # contains hundreds of rows.  Read-only openpyxl trusts that value
+            # unless the dimensions are reset, which otherwise makes a valid
+            # file look like it only contains one cell.
+            sheet.reset_dimensions()
             rows = _worksheet_rows(sheet)
             if first_rows is None:
                 first_rows = rows
@@ -1643,11 +1649,35 @@ def build_bank_source_control_evidence(
     parsed_rows: list[dict[str, Any]],
 ) -> SourceControlEvidence:
     metadata = extract_key_value_metadata(source_rows)
-    debit_count_raw = _control_metadata_value(metadata, "借方交易笔数", "借方笔数", "支出笔数")
-    credit_count_raw = _control_metadata_value(metadata, "贷方交易笔数", "贷方笔数", "收入笔数")
+    debit_count_raw = _control_metadata_value(
+        metadata,
+        "借方交易笔数",
+        "借方累计笔数",
+        "借方笔数",
+        "支出笔数",
+    )
+    credit_count_raw = _control_metadata_value(
+        metadata,
+        "贷方交易笔数",
+        "贷方累计笔数",
+        "贷方笔数",
+        "收入笔数",
+    )
     total_count_raw = _control_metadata_value(metadata, "交易总笔数", "交易笔数", "明细笔数", "合计笔数")
-    debit_total_raw = _control_metadata_value(metadata, "借方交易金额", "借方金额合计", "支出金额合计")
-    credit_total_raw = _control_metadata_value(metadata, "贷方交易金额", "贷方金额合计", "收入金额合计")
+    debit_total_raw = _control_metadata_value(
+        metadata,
+        "借方交易金额",
+        "借方累计发生额",
+        "借方金额合计",
+        "支出金额合计",
+    )
+    credit_total_raw = _control_metadata_value(
+        metadata,
+        "贷方交易金额",
+        "贷方累计发生额",
+        "贷方金额合计",
+        "收入金额合计",
+    )
     has_declared_controls = any(
         value is not None
         for value in (debit_count_raw, credit_count_raw, total_count_raw, debit_total_raw, credit_total_raw)

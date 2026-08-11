@@ -3,6 +3,13 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-12 - 真实附件解析、statement-position 唯一键与生产去重收口
+
+- 真实原因：部分银行 OOXML 把 worksheet dimension 错写为 `A1`，read-only 读取会把有数据的工作表截成一个单元格；同时部分官方参考号在历史导出中复用，旧 canonical 冲突即使被 service 判定为新事实，仍会撞上 PostgreSQL `source_unique_key` 唯一索引。
+- 修复：共享 XLSX reader 在逐表读取前重算维度；正常流水默认继续使用 `bank-v3`，只有基础键已存在且余额/币种证明是另一账单位置时生成确定性 `bank-v4`。preview、confirm、内存 identity cache 和最终持久化使用同一个决策 identity，禁止“service 判新建、repository 用旧键写入”的分裂合同。
+- 生产恢复：历史错误 cohort 的 data fingerprint/reference 因旧 parser 漂移时，只允许账户、秒级时间、方向、金额、余额、币种全等且一对一的 statement-position 二级匹配；多义、缺字段或计数漂移继续 fail closed。关系撤回、标签事件删除和重复流水删除仍受同一 dry-run fingerprint/CAS 约束。
+- 测试：新增畸形 dimension 的银行/发票共享 reader 回归、累计控制字段别名、v4 键别名稳定性、基础键冲突的创建与重放判重、恢复匹配唯一/多义门禁；批量 identity 查询和旧 v2/v3 行为保持回归。
+
 ## 2026-08-11 - 银行重复清理数量授权门禁与匹配证据
 
 - 银行 identity v3 受控恢复把 `expected_duplicate_delete_count` 提升为 dry-run/execute 的必填输入；计划解析出的删除数只要与授权数不同，就在任何关系撤回、标签清理或流水删除前失败。

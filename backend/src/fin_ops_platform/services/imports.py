@@ -1303,6 +1303,12 @@ class ImportNormalizationService:
             )
 
         dedup_decision = self._dedup_decision_service.decide_bank_transaction_import(normalized)
+        identity = dedup_decision.identity
+        source_unique_key = identity.canonical_key
+        data_fingerprint = identity.suspected_key
+        normalized["source_unique_key"] = source_unique_key
+        normalized["data_fingerprint"] = data_fingerprint
+        row_display_fields = self._transaction_row_result_display_fields(normalized, identity)
         linked_txn_id = dedup_decision.linked_object_id
         decision = ImportDecision(dedup_decision.decision)
         reason = dedup_decision.decision_reason
@@ -1473,7 +1479,9 @@ class ImportNormalizationService:
     def _register_transaction(self, transaction: BankTransaction) -> None:
         self._ensure_transaction_metadata_fields(transaction)
         canonical_key = self._object_identity_policy.identify_bank_transaction(transaction).canonical_key
-        if canonical_key:
+        position_key = self._object_identity_policy.identify_bank_transaction_position(transaction).canonical_key
+        allowed_keys = {key for key in (canonical_key, position_key) if key}
+        if transaction.source_unique_key not in allowed_keys and canonical_key:
             transaction.source_unique_key = canonical_key
         self._transactions_by_id[transaction.id] = transaction
         if transaction.source_unique_key:

@@ -4,6 +4,7 @@ import sys
 import unittest
 from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import (
@@ -11,8 +12,10 @@ from fin_ops_platform.services.import_file_service import (
     FileImportService,
     UploadedImportFile,
     aggregate_invoice_line_rows,
+    detect_invoice_template,
     is_company_identity,
     parse_bank_statement_rows,
+    read_xlsx_rows,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
 from openpyxl import Workbook, load_workbook
@@ -49,6 +52,22 @@ def append_xlsx_note(content: bytes, note: str) -> bytes:
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+def underreport_xlsx_dimensions(content: bytes) -> bytes:
+    source = BytesIO(content)
+    target = BytesIO()
+    with ZipFile(source) as input_archive, ZipFile(target, "w", ZIP_DEFLATED) as output_archive:
+        for member in input_archive.infolist():
+            data = input_archive.read(member.filename)
+            if member.filename.startswith("xl/worksheets/sheet") and member.filename.endswith(".xml"):
+                dimension_start = data.find(b"<dimension ref=\"")
+                if dimension_start >= 0:
+                    dimension_end = data.find(b"/>", dimension_start)
+                    if dimension_end >= 0:
+                        data = data[:dimension_start] + b'<dimension ref="A1"/>' + data[dimension_end + 2 :]
+            output_archive.writestr(member, data)
+    return target.getvalue()
 
 
 def invoice_export_second_sheet_file() -> bytes:
@@ -831,6 +850,33 @@ class ImportFileServiceTests(unittest.TestCase):
 
         self.assertEqual(parsed.source_control.status, "mismatch")
         self.assertEqual(set(parsed.source_control.mismatch_fields), {"row_count", "debit_total"})
+
+    def test_bank_source_control_accepts_cumulative_count_and_amount_labels(self) -> None:
+        rows = [
+            ["交易时间", "借方发生额", "贷方发生额", "对方户名"],
+            ["2026-08-01 10:00:00", "10.00", "", "供应商"],
+            ["2026-08-01 11:00:00", "", "8.00", "客户"],
+            ["借方累计笔数: 1", "借方累计发生额: 10.00"],
+            ["贷方累计笔数: 1", "贷方累计发生额: 8.00"],
+        ]
+
+        parsed = parse_bank_statement_rows(rows)
+
+        self.assertEqual(parsed.source_control.status, "verified")
+        self.assertEqual(parsed.source_control.declared_row_count, 2)
+        self.assertEqual(parsed.source_control.declared_debit_total, "10.00")
+        self.assertEqual(parsed.source_control.declared_credit_total, "8.00")
+
+    def test_xlsx_reader_recovers_underreported_bank_and_invoice_dimensions(self) -> None:
+        bank_upload = icbc_history_file()
+        invoice_upload = invoice_export_file()
+
+        bank_rows = read_xlsx_rows(underreport_xlsx_dimensions(bank_upload.content))
+        invoice_rows = read_xlsx_rows(underreport_xlsx_dimensions(invoice_upload.content))
+
+        self.assertEqual(len(parse_bank_statement_rows(bank_rows).rows), 1)
+        self.assertEqual(detect_invoice_template(invoice_rows), "invoice_export")
+        self.assertEqual(len(invoice_rows), 2)
 
     def test_confirm_session_rejects_stale_preview_when_existing_records_change(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())

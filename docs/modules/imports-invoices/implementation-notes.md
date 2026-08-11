@@ -3,6 +3,12 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-12 - 共享 XLSX worksheet dimension 修复
+
+- 真实原因：部分银行/业务平台生成的 OOXML 将 worksheet dimension 错写为 `A1`；openpyxl read-only 会据此截断后续真实行。该缺陷位于银行与发票共用的文件 reader，不应在单个模板追加兼容 parser。
+- 修复：共享 reader 在遍历每个 worksheet 前调用维度重算，继续复用既有 120 MiB/文件、32 sheets、20 万 rows、256 columns、200 万 cells、512 MiB 解压体积与压缩比门禁；超限明确拒绝，不承诺无界文件。
+- 回归：同一畸形 XLSX fixture 同时经过银行和发票解析路径，必须恢复全部行；既有模板识别、文件 hash 防重、发票 canonical identity 和批量去重行为不变。
+
 ## 当前决策
 
 - 发票导入不是独立实现；页面入口复用 `ImportWorkflowPage mode="invoice"`，因此任何共享导入工作流改动都必须同时检查银行流水导入和 ETC 发票导入。

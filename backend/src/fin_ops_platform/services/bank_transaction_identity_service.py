@@ -98,6 +98,58 @@ class BankTransactionIdentityService:
         }
         return self.identity_for_mapping(values)
 
+    def position_identity_for_mapping(self, values: dict[str, Any]) -> BankTransactionIdentity:
+        """Qualify a canonical bank identity by its statement position.
+
+        This key is only used when an existing canonical identity collides but
+        balance/currency evidence proves that the incoming row is a different
+        statement fact. Normal imports continue to use the compatible bank-v3
+        identity.
+        """
+
+        identity = self.identity_for_mapping(values)
+        if identity.identity_key is None:
+            return identity
+        balance = self._normalize_position_amount(values.get("balance"))
+        currency = self._normalize_currency(values.get("currency"))
+        if balance is None and currency is None:
+            return identity
+        position_payload = f"{identity.identity_key}|balance={balance or ''}|currency={currency or ''}"
+        return BankTransactionIdentity(
+            identity_key=f"bank-v4:{sha256(position_payload.encode()).hexdigest()}",
+            suspected_key=identity.suspected_key,
+            canonical_key_kind=f"{identity.canonical_key_kind or 'official_reference'}_statement_position",
+            missing_fields=list(identity.missing_fields),
+            components={
+                **identity.components,
+                **({"balance": balance} if balance is not None else {}),
+                **({"currency": currency} if currency is not None else {}),
+            },
+            audit_fields={
+                **identity.audit_fields,
+                "base_canonical_key": identity.identity_key,
+            },
+        )
+
+    def position_identity_for_transaction(self, transaction: BankTransaction) -> BankTransactionIdentity:
+        return self.position_identity_for_mapping(
+            {
+                "account_no": transaction.account_no,
+                "trade_time": transaction.trade_time,
+                "pay_receive_time": transaction.pay_receive_time,
+                "txn_date": transaction.txn_date,
+                "txn_direction": transaction.txn_direction,
+                "amount": transaction.amount,
+                "counterparty_name": transaction.counterparty_name_raw,
+                "bank_serial_no": transaction.bank_serial_no,
+                "account_detail_no": transaction.account_detail_no,
+                "enterprise_serial_no": transaction.enterprise_serial_no,
+                "voucher_no": transaction.voucher_no,
+                "balance": transaction.balance,
+                "currency": transaction.currency,
+            }
+        )
+
     def canonical_key_for_mapping(self, values: dict[str, Any]) -> str | None:
         return self.identity_for_mapping(values).identity_key
 
@@ -174,6 +226,26 @@ class BankTransactionIdentityService:
             return None
         normalized_name = normalize_name(raw_name)
         return normalized_name or None
+
+    @staticmethod
+    def _normalize_position_amount(value: Any) -> str | None:
+        cleaned = clean_placeholder(value)
+        if cleaned is None:
+            return None
+        try:
+            return format(Decimal(cleaned.replace(",", "")).normalize(), "f")
+        except (InvalidOperation, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_currency(value: Any) -> str | None:
+        cleaned = clean_placeholder(value)
+        if cleaned is None:
+            return None
+        normalized = "".join(cleaned.upper().split())
+        if normalized in {"CNY", "RMB", "人民币", "人民币元"}:
+            return "CNY"
+        return normalized or None
 
 
 def clean_placeholder(value: Any) -> str | None:

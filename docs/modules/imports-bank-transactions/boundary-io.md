@@ -19,7 +19,7 @@
 - 记录导入预览审计。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
 - 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。
-- 银行有官方参考号时使用 `bank-v3`：账户、官方参考号种类/值和业务字段指纹摘要共同形成强 identity，避免同一银行复用参考号时误跳过不同流水。历史 `bank-v2` 只在业务指纹一致、双方官方参考号存在唯一交集时迁移判重；缺失或多义证据进入 `suspected_duplicate`。没有官方参考号时业务字段指纹仍只产生人工复核。
+- 银行有官方参考号时默认使用 `bank-v3`：账户、官方参考号种类/值和业务字段指纹摘要共同形成强 identity。若既有 `bank-v3` 键冲突，但双方非空余额或币种明确证明是不同账单位置，只为该冲突事实生成确定性的 `bank-v4` statement-position 键；重放同一位置必须命中同一 `bank-v4`，不得穿透数据库 `source_unique_key` 唯一约束。历史 `bank-v2` 只在业务指纹一致、双方官方参考号存在唯一交集时迁移判重；缺失或多义证据进入 `suspected_duplicate`。没有官方参考号时业务字段指纹仍只产生人工复核。
 - 一个银行文件的 preview/confirm 必须先对当前 canonical 事实做一次批量 identity preload，再在内存中逐行决定并把本批新建事实写入同一批缓存；不得逐行查询数据库，同文件重复项也不得穿透 confirm。
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
@@ -83,6 +83,8 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 若已部署旧版本在 background job 全量回写阶段把同一 `file_import.confirm` 事件推进到 dead letter，且 session/file 仍完整停留在 `preview_ready`、对应 preview batch 为 `pending`、正式银行流水写入为零，只允许通过候选 release 的 `import-audit-repair` 精确恢复模式处理。只读 discovery 可从一个明确 import job id 推导唯一 outbox/background job/session/file 白名单，但存在多个 dead letter 或任何坐标缺失时必须拒绝；执行时仍必须显式提供完整 target，并先取得同一 repeatable-read snapshot 的 fingerprint。候选 processor 只有在上述事实全部一一匹配时才复用原 import/background job id 执行。正式 batch/file/job 全部成功后才允许把该条 dead letter 标记完成；任一业务事实不闭环时保留 dead letter，不得假完成或扫描其它失败任务。
 
 已确认文件的生产恢复只能走 `import-audit-repair --repair-bank-source` 受控模式。dry-run 必须显式绑定全部 source session/file、恢复 cohort 数、保护 cohort 数、精确重复删除数和预期重放新增数，并验证原文件 SHA-256、精确 batch owner、业务指纹与官方参考号唯一匹配、零核销和零 canonical relation。唯一例外是显式 `--cleanup-related-bank-duplicates` 恢复合同：只允许精确数量的 duplicate-owned `单标签 + 单事件`，以及精确一条由指定 duplicate transaction id 拥有的 `银行流水 + 进项发票` active Workbench relation；不得包含 OA、确认、核销、批次、claim、override、exception 或其它关系。dry-run 必须冻结 category/event 全部 CAS 字段、relation case/version/preview、发票成员，并证明撤回不会恢复旧关系。execute 使用相同 fingerprint、serializable transaction 和 advisory lock，先通过正式 Workbench command/repository 撤回关系并追加 history，再删除精确 category/event，最后才处理导入审计：每个待删副本必须恰好有一条 `created` owner，可同时有零到多条已存在的 `duplicate_skipped` 引用；全部引用都重定向到原正确流水，只有 `created` owner 转换计入正式 batch 的 success→duplicate 计数，原 `duplicate_skipped` 的 decision/reason 保持不变。`import_files.raw_payload` 是原始预览证据，不是最终 row audit；工具只冻结其 SHA-256，不得用最终决策覆盖。完成正式 row/batch 审计重定向后才删除错误副本；全部事实写在同一事务内，任何一步漂移整体回滚。随后复用正式 preview/confirm processor 重放归档文件。受控重放创建新的审计 session/file，原已确认会话不可修改；重复重放必须得到零新增。任何歧义、额外关系、hash、计数、preview/version 或 owner 漂移均在删除前失败。
+
+上述恢复合同的二级证据例外仅用于历史 parser 导致 fingerprint/reference 漂移的行：候选与保护事实必须在同一授权 cohort 内按账户、秒级交易时间、方向、金额、余额、币种全部相同且双方唯一地一一对应。任一字段缺失、多义、数量不一或关系超出已授权集合时仍在写入前拒绝。
 
 ## 持久化与投影
 

@@ -150,6 +150,25 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
         self.assertEqual(identity.canonical_key_kind, "account_detail_no")
         self.assertIsNone(identity.suspected_key)
 
+    def test_position_identity_is_stable_across_decimal_and_currency_aliases(self) -> None:
+        values = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "88.00",
+            "counterparty_name": "Acme Supplies",
+            "bank_serial_no": "SERIAL-001",
+            "balance": "1000.000",
+            "currency": "人民币元",
+        }
+
+        first = self.service.position_identity_for_mapping(values)
+        second = self.service.position_identity_for_mapping({**values, "balance": Decimal("1000.00"), "currency": "RMB"})
+
+        self.assertEqual(first.identity_key, second.identity_key)
+        self.assertTrue(str(first.identity_key).startswith("bank-v4:"))
+        self.assertTrue(str(first.audit_fields["base_canonical_key"]).startswith("bank-v3:"))
+
 
 if __name__ == "__main__":
     unittest.main()

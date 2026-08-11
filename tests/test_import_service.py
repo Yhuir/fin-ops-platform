@@ -655,6 +655,57 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(repository.single_calls, 0)
         self.assertEqual(repository.many_calls, 0)
 
+    def test_reused_official_reference_persists_distinct_statement_positions_idempotently(self) -> None:
+        existing = BankTransaction(
+            id="txn-position-1",
+            account_no="62229999",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("50.00"),
+            signed_amount=Decimal("-50.00"),
+            txn_date="2026-03-24",
+            trade_time="2026-03-24 10:00:00",
+            bank_serial_no="REUSED-REF",
+            balance=Decimal("1000.00"),
+            currency="CNY",
+        )
+        service = ImportNormalizationService(existing_transactions=[existing])
+        raw_row = {
+            "account_no": "62229999",
+            "txn_date": "2026-03-24",
+            "trade_time": "2026-03-24 10:00:00",
+            "counterparty_name": "Vendor A",
+            "debit_amount": "50.00",
+            "credit_amount": "",
+            "bank_serial_no": "REUSED-REF",
+            "balance": "950.00",
+            "currency": "人民币元",
+        }
+
+        first_preview = service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-reused-reference-1.json",
+            imported_by="user_finance_01",
+            rows=[raw_row],
+        )
+        self.assertEqual(first_preview.row_results[0].decision, ImportDecision.CREATED)
+        self.assertTrue(str(first_preview.row_results[0].source_unique_key).startswith("bank-v4:"))
+        service.confirm_import(first_preview.batch.id)
+
+        transactions = service.list_transactions()
+        self.assertEqual(len(transactions), 2)
+        self.assertEqual(len({transaction.source_unique_key for transaction in transactions}), 2)
+
+        replay_preview = service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-reused-reference-2.json",
+            imported_by="user_finance_01",
+            rows=[raw_row],
+        )
+        self.assertEqual(replay_preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        service.confirm_import(replay_preview.batch.id)
+        self.assertEqual(len(service.list_transactions()), 2)
+
     def test_bank_transaction_exact_fingerprint_with_different_official_reference_is_created(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,

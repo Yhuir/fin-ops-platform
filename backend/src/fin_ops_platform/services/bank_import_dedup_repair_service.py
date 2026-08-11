@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from typing import Any
@@ -97,10 +98,20 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
 
     identity_service = BankTransactionIdentityService()
     protected_by_fingerprint: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    protected_by_statement: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in protected:
         fingerprint = _text(row.get("data_fingerprint"))
         if fingerprint:
             protected_by_fingerprint[fingerprint].append(row)
+        statement_evidence = _strict_statement_evidence(row, identity_service)
+        if statement_evidence is not None:
+            protected_by_statement[statement_evidence].append(row)
+
+    target_statement_counts = Counter(
+        evidence
+        for row in targets
+        if (evidence := _strict_statement_evidence(row, identity_service)) is not None
+    )
 
     duplicate_pairs: list[dict[str, Any]] = []
     ambiguous_target_ids: list[str] = []
@@ -110,6 +121,25 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         fingerprint = _text(target.get("data_fingerprint"))
         candidates = protected_by_fingerprint.get(fingerprint, []) if fingerprint else []
         if not candidates:
+            statement_evidence = _strict_statement_evidence(target, identity_service)
+            statement_candidates = (
+                protected_by_statement.get(statement_evidence, [])
+                if statement_evidence is not None
+                else []
+            )
+            if (
+                statement_evidence is not None
+                and target_statement_counts[statement_evidence] == 1
+                and len(statement_candidates) == 1
+            ):
+                duplicate_pairs.append(
+                    _duplicate_pair(
+                        target,
+                        statement_candidates[0],
+                        match_basis="statement_position",
+                        matched_official_references=[],
+                    )
+                )
             continue
         incoming_references = _official_reference_values(target_identity.audit_fields)
         reference_exact: list[dict[str, Any]] = []
@@ -867,10 +897,42 @@ def _official_reference_values(audit_fields: dict[str, str | None]) -> set[str]:
 
 
 def _strict_secondary_evidence(row: dict[str, Any]) -> tuple[str, str] | None:
-    balance = _text(row.get("balance"))
-    if not balance:
+    balance = _decimal_text(row.get("balance"))
+    if balance is None:
         return None
-    return balance, _text(row.get("currency")).upper()
+    return balance, _canonical_currency(row.get("currency"))
+
+
+def _strict_statement_evidence(
+    row: dict[str, Any],
+    identity_service: BankTransactionIdentityService,
+) -> tuple[str, ...] | None:
+    identity = identity_service.identity_for_mapping(row)
+    balance_currency = _strict_secondary_evidence(row)
+    required_components = tuple(
+        _text(identity.components.get(field))
+        for field in ("account_no", "trade_time", "direction", "amount")
+    )
+    if not all(required_components) or balance_currency is None:
+        return None
+    return (*required_components, *balance_currency)
+
+
+def _decimal_text(value: Any) -> str | None:
+    normalized = _text(value).replace(",", "")
+    if not normalized:
+        return None
+    try:
+        return format(Decimal(normalized).normalize(), "f")
+    except InvalidOperation:
+        return None
+
+
+def _canonical_currency(value: Any) -> str:
+    normalized = "".join(_text(value).upper().split())
+    if normalized in {"CNY", "RMB", "人民币", "人民币元"}:
+        return "CNY"
+    return normalized
 
 
 def _decimal_nonzero(value: Any) -> bool:
