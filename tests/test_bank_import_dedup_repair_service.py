@@ -139,6 +139,8 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
                 "batch_pk": "10000000-0000-0000-0000-000000000001",
                 "batch_id": "batch-1",
                 "row_no": 1,
+                "source_record_type": "bank_transaction",
+                "data_fingerprint": fingerprint,
                 "decision": "created",
                 "linked_object_id": "target-1",
                 "raw_payload": {"normalized_payload": {"decision": "created", "linked_object_id": "target-1"}},
@@ -148,6 +150,8 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
                 "batch_pk": "10000000-0000-0000-0000-000000000001",
                 "batch_id": "batch-1",
                 "row_no": 2,
+                "source_record_type": "bank_transaction",
+                "data_fingerprint": targets[1]["data_fingerprint"],
                 "decision": "created",
                 "linked_object_id": "target-2",
                 "raw_payload": {"normalized_payload": {"decision": "created", "linked_object_id": "target-2"}},
@@ -284,6 +288,21 @@ class BankImportDedupRepairServiceTests(TestCase):
                     "repaired_duplicate_decision_reason": (
                         "Reclassified by bank identity v3 controlled recovery."
                     ),
+                    "repaired_duplicate_evidence": [
+                        {
+                            "file_id": "file-1",
+                            "row_no": 1,
+                            "source_record_type": "bank_transaction",
+                            "data_fingerprint": (
+                                "bank:5300:2026-05-22 16:10:00:outflow:496.20:樊祖芳"
+                            ),
+                            "decision_reason": (
+                                "Reclassified by bank identity v3 controlled recovery."
+                            ),
+                            "linked_object_type": "bank_transaction",
+                            "linked_object_id": "keeper-1",
+                        }
+                    ],
                 }
             ],
         )

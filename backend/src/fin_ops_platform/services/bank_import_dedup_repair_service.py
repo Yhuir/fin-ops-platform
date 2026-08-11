@@ -391,6 +391,11 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     "batch_pk": _text(row.get("batch_pk")),
                     "batch_id": _text(row.get("batch_id")),
                     "row_no": int(row.get("row_no") or 0),
+                    "source_record_type": _text(row.get("source_record_type")),
+                    "data_fingerprint": _text(row.get("data_fingerprint")),
+                    "decision_reason": after_decision_reason,
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": pair["keep_transaction_id"],
                     "owner_transition": owner_transition,
                     "before_decision": before_decision,
                     "after_decision": "duplicate_skipped",
@@ -462,17 +467,52 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 + ", ".join(sorted(overlapping_batch_pks))
             )
         replay_batch_pks.update(source_batch_pks)
-        repaired_count = sum(
-            1
-            for row in effective_replay_duplicate_rows.values()
-            if _text(row.get("batch_pk")) in source_batch_pks
-        )
+        source_file_by_batch_pk = {
+            _text(file_row.get("batch_pk")): _text(file_row.get("file_id"))
+            for file_row in files
+            if _text(file_row.get("session_id")) == source_session_id
+            and _text(file_row.get("file_id")) in source_file_ids
+            and _text(file_row.get("batch_pk"))
+        }
+        if set(source_file_by_batch_pk) != source_batch_pks:
+            raise ValueError("Bank repaired replay source files do not own unique batches.")
+        repaired_duplicate_evidence: list[dict[str, Any]] = []
+        for row in sorted(
+            effective_replay_duplicate_rows.values(),
+            key=lambda item: (
+                _text(item.get("batch_pk")),
+                int(item.get("row_no") or 0),
+                _text(item.get("row_pk")),
+            ),
+        ):
+            batch_pk = _text(row.get("batch_pk"))
+            if batch_pk not in source_batch_pks:
+                continue
+            source_record_type = _text(row.get("source_record_type"))
+            data_fingerprint = _text(row.get("data_fingerprint"))
+            if source_record_type != "bank_transaction" or not data_fingerprint:
+                raise ValueError(
+                    "Bank repaired replay evidence lacks canonical row identity."
+                )
+            repaired_duplicate_evidence.append(
+                {
+                    "file_id": source_file_by_batch_pk[batch_pk],
+                    "row_no": int(row.get("row_no") or 0),
+                    "source_record_type": source_record_type,
+                    "data_fingerprint": data_fingerprint,
+                    "decision_reason": REPAIR_REASON,
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": _text(row.get("linked_object_id")),
+                }
+            )
+        repaired_count = len(repaired_duplicate_evidence)
         replay_sources.append(
             {
                 "session_id": source_session_id,
                 "file_ids": source_file_ids,
                 "expected_repaired_duplicate_count": repaired_count,
                 "repaired_duplicate_decision_reason": REPAIR_REASON,
+                "repaired_duplicate_evidence": repaired_duplicate_evidence,
             }
         )
     if sum(

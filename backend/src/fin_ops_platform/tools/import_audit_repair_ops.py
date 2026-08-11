@@ -304,6 +304,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     repaired_duplicate_decision_reason=entry[
                         "repaired_duplicate_decision_reason"
                     ],
+                    repaired_duplicate_evidence=entry[
+                        "repaired_duplicate_evidence"
+                    ],
                 )
                 for entry in locked_plan["replay_sources"]
             ]
@@ -343,6 +346,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     ],
                     repaired_duplicate_decision_reason=entry[
                         "repaired_duplicate_decision_reason"
+                    ],
+                    repaired_duplicate_evidence=entry[
+                        "repaired_duplicate_evidence"
                     ],
                 )
                 for entry in locked_plan["replay_sources"]

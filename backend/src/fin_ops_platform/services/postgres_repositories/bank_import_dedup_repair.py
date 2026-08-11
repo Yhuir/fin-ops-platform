@@ -291,7 +291,8 @@ order by id
 _IMPORT_ROW_SQL = """
 select row.id::text as row_pk, row.import_batch_id::text as batch_pk,
        coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
-       row.row_no, row.decision, row.decision_reason,
+       row.row_no, row.source_record_type, row.data_fingerprint,
+       row.decision, row.decision_reason,
        row.linked_object_type, row.linked_object_id, row.raw_payload
 from app.import_batch_rows row
 join app.import_batches batch on batch.id = row.import_batch_id

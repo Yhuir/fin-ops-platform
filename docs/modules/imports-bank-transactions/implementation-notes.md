@@ -258,6 +258,7 @@
 ## 2026-08-12 - 普通去重确认与受控恢复闭环
 
 - 真实根因：旧 `ImportNormalizationService.confirm_import` 会把银行弱指纹 `suspected_duplicate` 直接改成 `created`，因此确认操作能够绕过预览去重并制造 canonical 重复项。
+- 回放事实源：`import_files.raw_payload` 只保存旧预览，不能证明修复后的 decision/owner。生产受控回放由 dry-run 从 `app.import_batch_rows` 冻结 file、row_no、record type、data fingerprint 与 keeper，再由 processor 对当前预览逐行严格核对。
 - 删除旧链：移除该强制新建分支；普通 confirm 只持久化 `created/status_updated/duplicate_skipped`，疑似项保持未写入并以 `completed_with_errors` 明确暴露。
 - 恢复边界：生产恢复工具新增精确受控跳过计数。只有已由本次 repair reason 重定向到 keeper 的来源 row，且重新预览仍命中同一 keeper，才能转换为 `duplicate_skipped`；其余疑似项全部失败。
 - Read model：修复工具把数据库可能返回的月初日期规范为 `YYYY-MM` 后再进入正式 gateway，避免业务事务已提交后刷新 scope 校验失败。

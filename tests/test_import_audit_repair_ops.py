@@ -1306,6 +1306,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "repaired_duplicate_decision_reason": (
                         "Reclassified by bank identity v3 controlled recovery."
                     ),
+                    "repaired_duplicate_evidence": [],
                 }
             ],
             "affected_months": ["2026-02", "2026-05"],

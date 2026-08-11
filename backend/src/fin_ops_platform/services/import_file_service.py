@@ -645,6 +645,7 @@ class FileImportService:
         imported_by: str,
         expected_repaired_duplicate_count: int = 0,
         repaired_duplicate_decision_reason: str | None = None,
+        repaired_duplicate_evidence: list[dict[str, Any]] | None = None,
     ) -> FileImportSession:
         source_session = self._sessions[source_session_id]
         selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
@@ -665,6 +666,17 @@ class FileImportService:
             status="preview_ready",
             files=[],
         )
+        selected_file_ids_set = {item.id for item in source_items}
+        evidence_by_file: dict[str, list[dict[str, Any]]] = {
+            file_id: [] for file_id in selected_file_ids_set
+        }
+        for evidence in repaired_duplicate_evidence or []:
+            file_id = str(evidence.get("file_id") or "").strip()
+            if file_id not in selected_file_ids_set:
+                raise ValueError(
+                    "controlled replay repaired evidence references an unselected source file"
+                )
+            evidence_by_file[file_id].append(dict(evidence))
         repaired_duplicate_count = 0
         for source_item in source_items:
             if not source_item.stored_file_path:
@@ -697,9 +709,9 @@ class FileImportService:
                 skip_duplicate_file_guard=True,
             )
             repaired_duplicate_count += self._resolve_repaired_replay_duplicates(
-                source_item=source_item,
                 replay_item=replay_item,
                 repaired_duplicate_decision_reason=repaired_duplicate_decision_reason,
+                repaired_duplicate_evidence=evidence_by_file[source_item.id],
             )
             replay_session.files.append(replay_item)
 
@@ -719,9 +731,9 @@ class FileImportService:
     def _resolve_repaired_replay_duplicates(
         self,
         *,
-        source_item: FileImportPreviewItem,
         replay_item: FileImportPreviewItem,
         repaired_duplicate_decision_reason: str | None,
+        repaired_duplicate_evidence: list[dict[str, Any]],
     ) -> int:
         if replay_item.batch_type != BatchType.BANK_TRANSACTION:
             return 0
@@ -730,37 +742,64 @@ class FileImportService:
         ).strip()
         if not normalized_repair_reason:
             return 0
-        if len(source_item.row_results) != len(replay_item.row_results):
-            raise ValueError("controlled replay source and preview row counts changed")
-
-        resolved_count = 0
-        for source_result, replay_result in zip(
-            source_item.row_results,
-            replay_item.row_results,
-            strict=True,
-        ):
-            if replay_result.decision != ImportDecision.SUSPECTED_DUPLICATE:
-                continue
+        evidence_by_row_no: dict[int, dict[str, Any]] = {}
+        for evidence in repaired_duplicate_evidence:
+            row_no = int(evidence.get("row_no") or 0)
+            if row_no <= 0 or row_no in evidence_by_row_no:
+                raise ValueError("controlled replay repaired evidence has invalid row numbers")
             if (
-                source_result.row_no != replay_result.row_no
-                or source_result.source_record_type != replay_result.source_record_type
-                or source_result.decision != ImportDecision.DUPLICATE_SKIPPED
-                or source_result.decision_reason != normalized_repair_reason
-                or source_result.linked_object_type != "bank_transaction"
-                or not str(source_result.linked_object_id or "").strip()
-                or replay_result.linked_object_type != "bank_transaction"
-                or replay_result.linked_object_id != source_result.linked_object_id
+                str(evidence.get("decision_reason") or "").strip()
+                != normalized_repair_reason
+                or str(evidence.get("source_record_type") or "").strip()
+                != "bank_transaction"
+                or not str(evidence.get("data_fingerprint") or "").strip()
+                or str(evidence.get("linked_object_type") or "").strip()
+                != "bank_transaction"
+                or not str(evidence.get("linked_object_id") or "").strip()
             ):
                 raise ValueError(
-                    "controlled replay suspected duplicate lacks repaired source-row evidence"
+                    "controlled replay repaired evidence lacks canonical row identity"
                 )
-            replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
-            replay_result.decision_reason = (
-                "Controlled replay matched an explicitly repaired source-row owner."
-            )
-            replay_result.linked_object_type = "bank_transaction"
-            replay_result.linked_object_id = source_result.linked_object_id
+            evidence_by_row_no[row_no] = evidence
+
+        resolved_count = 0
+        for replay_result in replay_item.row_results:
+            evidence = evidence_by_row_no.pop(replay_result.row_no, None)
+            if evidence is None:
+                if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
+                    raise ValueError(
+                        "controlled replay suspected duplicate lacks repaired row evidence"
+                    )
+                continue
+            if (
+                replay_result.source_record_type
+                != str(evidence["source_record_type"])
+                or replay_result.data_fingerprint
+                != str(evidence["data_fingerprint"])
+                or replay_result.linked_object_type != "bank_transaction"
+                or replay_result.linked_object_id
+                != str(evidence["linked_object_id"])
+                or replay_result.decision
+                not in {
+                    ImportDecision.SUSPECTED_DUPLICATE,
+                    ImportDecision.DUPLICATE_SKIPPED,
+                }
+            ):
+                raise ValueError(
+                    "controlled replay current preview changed from repaired row evidence"
+                )
+            if replay_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
+                replay_result.decision = ImportDecision.DUPLICATE_SKIPPED
+                replay_result.decision_reason = (
+                    "Controlled replay matched an explicitly repaired source-row owner."
+                )
+                replay_result.linked_object_type = "bank_transaction"
+                replay_result.linked_object_id = str(evidence["linked_object_id"])
             resolved_count += 1
+        if evidence_by_row_no:
+            raise ValueError(
+                "controlled replay repaired evidence rows are missing from the current preview"
+            )
 
         if replay_item.preview_batch_id:
             preview = self._import_service.get_batch(replay_item.preview_batch_id)
