@@ -570,6 +570,7 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --repair-bank-source <session-id>=<file-id>[,<file-id>...] \
   [--repair-bank-source <session-id>=<file-id>[,<file-id>...] ...] \
   --expected-bank-target-count <n> --expected-bank-protected-count <n> \
+  --expected-bank-duplicate-delete-count <n> \
   --expected-bank-replay-create-count <n> --operator-id <operator> \
   [--cleanup-related-bank-duplicates \
    --expected-bank-category-cleanup-count <n> \
@@ -593,7 +594,7 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 只知道失败 import job id 时，可先运行只读 `--discover-recover-import-job-id`；它只在唯一 dead letter、
 payload 中完整 background job/session/file 坐标且全部预检通过时输出完整 target，不执行写入。
 银行 identity v3 恢复模式必须在 dry-run/execute 中重复提供完整 source session/file、目标/保护 cohort
-数量、预期重放新增数和 operator。dry-run 验证归档文件 SHA-256、cohort 精确不相交、业务指纹与官方
+数量、精确重复删除数、预期重放新增数和 operator。dry-run 验证归档文件 SHA-256、cohort 精确不相交、业务指纹与官方
 参考号唯一匹配、零核销及 OA/发票/标签/批次/关联关系零引用。若一次已授权恢复中，错误副本仅拥有精确的
 `单标签 + 单标签事件` 或精确的 `银行流水 + 进项发票` active Workbench relation，可额外显式提供三项
 related-cleanup 门禁：标签数、Workbench 数和唯一 Workbench duplicate transaction id。dry-run 会把标签/event

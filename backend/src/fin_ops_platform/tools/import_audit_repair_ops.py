@@ -80,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--expected-bank-target-count", type=int)
     parser.add_argument("--expected-bank-protected-count", type=int)
+    parser.add_argument("--expected-bank-duplicate-delete-count", type=int)
     parser.add_argument("--expected-bank-replay-create-count", type=int)
     parser.add_argument("--cleanup-related-bank-duplicates", action="store_true")
     parser.add_argument("--expected-bank-category-cleanup-count", type=int)
@@ -125,11 +126,13 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     if bank_repair_requested and (
         args.expected_bank_target_count is None
         or args.expected_bank_protected_count is None
+        or args.expected_bank_duplicate_delete_count is None
         or args.expected_bank_replay_create_count is None
         or not args.operator_id
     ):
         raise SystemExit(
-            "Bank dedup repair requires expected target/protected/replay counts and --operator-id"
+            "Bank dedup repair requires exact target/protected/duplicate-delete/replay counts "
+            "and --operator-id"
         )
     related_cleanup_values = (
         args.expected_bank_category_cleanup_count,
@@ -159,6 +162,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "source_sessions": source_sessions,
             "expected_target_count": args.expected_bank_target_count,
             "expected_protected_count": args.expected_bank_protected_count,
+            "expected_duplicate_delete_count": (
+                args.expected_bank_duplicate_delete_count
+            ),
             "expected_replay_create_count": args.expected_bank_replay_create_count,
             "cleanup_related_duplicates": args.cleanup_related_bank_duplicates,
             "expected_category_cleanup_count": (

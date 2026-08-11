@@ -99,6 +99,7 @@ def _snapshot(*, relation_count: int = 0, ambiguous: bool = False) -> dict[str, 
             "source_sessions": [{"session_id": "session-1", "file_ids": ["file-1"]}],
             "expected_target_count": 2,
             "expected_protected_count": 1,
+            "expected_duplicate_delete_count": 1,
             "expected_replay_create_count": 1,
         },
         "files": [
@@ -260,6 +261,9 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["target_count"], 2)
         self.assertEqual(plan["protected_count"], 1)
         self.assertEqual(plan["duplicate_delete_count"], 1)
+        self.assertEqual(plan["duplicate_match_basis_counts"], {"official_reference": 1})
+        self.assertEqual(plan["duplicate_pairs"][0]["match_basis"], "official_reference")
+        self.assertEqual(plan["duplicate_pairs"][0]["matched_official_references"], ["REF-1"])
         self.assertEqual(plan["duplicate_pairs"][0]["delete_transaction_id"], "target-1")
         self.assertEqual(plan["duplicate_pairs"][0]["keep_transaction_id"], "keeper-1")
         self.assertEqual(plan["batch_updates"][0]["after_success_count"], 1)
@@ -281,6 +285,17 @@ class BankImportDedupRepairServiceTests(TestCase):
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
         self.assertEqual(plan["duplicate_delete_count"], 1)
+        self.assertEqual(plan["duplicate_match_basis_counts"], {"balance_currency": 1})
+
+    def test_plan_fails_closed_when_exact_duplicate_delete_count_changes(self) -> None:
+        snapshot = _snapshot()
+        snapshot["request"]["expected_duplicate_delete_count"] = 0
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"expected 0, resolved 1, match_basis_counts=\{'official_reference': 1\}",
+        ):
+            build_bank_import_dedup_repair_plan(snapshot)
 
     def test_plan_refuses_no_reference_match_when_balance_differs(self) -> None:
         snapshot = _snapshot(ambiguous=True)
@@ -294,6 +309,7 @@ class BankImportDedupRepairServiceTests(TestCase):
     def test_plan_keeps_same_fingerprint_when_official_references_conflict(self) -> None:
         snapshot = _snapshot()
         snapshot["target_transactions"][0]["bank_serial_no"] = "REF-DIFFERENT"
+        snapshot["request"]["expected_duplicate_delete_count"] = 0
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
@@ -303,6 +319,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         snapshot = _snapshot(ambiguous=True)
         snapshot["target_transactions"][0]["balance"] = "1000.00"
         snapshot["protected_transactions"][0]["balance"] = "2000.00"
+        snapshot["request"]["expected_duplicate_delete_count"] = 0
 
         plan = build_bank_import_dedup_repair_plan(snapshot)
 
@@ -511,6 +528,11 @@ class BankImportDedupRepairServiceTests(TestCase):
 
     def test_public_report_separates_recovery_and_idempotence_replays(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_snapshot())
+        dry_run_report = public_bank_import_dedup_repair_report(
+            plan,
+            mode="dry_run",
+            written=False,
+        )
         report = public_bank_import_dedup_repair_report(
             plan,
             mode="execute",
@@ -524,6 +546,15 @@ class BankImportDedupRepairServiceTests(TestCase):
             report["idempotence_replay_results"][0]["audit_summary"]["created_count"],
             0,
         )
+        self.assertEqual(
+            dry_run_report["duplicate_match_basis_counts"],
+            {"official_reference": 1},
+        )
+        self.assertEqual(
+            dry_run_report["duplicate_pair_evidence"][0]["delete_transaction_id"],
+            "target-1",
+        )
+        self.assertIsNone(report["duplicate_pair_evidence"])
 
     def test_repository_apply_uses_all_compare_and_swap_preconditions(self) -> None:
         plan = build_bank_import_dedup_repair_plan(_snapshot())

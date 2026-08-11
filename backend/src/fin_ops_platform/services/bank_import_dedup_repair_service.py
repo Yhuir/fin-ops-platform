@@ -74,6 +74,12 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     protected = list(snapshot.get("protected_transactions") or [])
     expected_target_count = int(request.get("expected_target_count") or 0)
     expected_protected_count = int(request.get("expected_protected_count") or 0)
+    expected_duplicate_delete_count = request.get("expected_duplicate_delete_count")
+    if expected_duplicate_delete_count is None:
+        raise ValueError("Bank dedup repair requires an exact duplicate delete count.")
+    expected_duplicate_delete_count = int(expected_duplicate_delete_count)
+    if expected_duplicate_delete_count < 0:
+        raise ValueError("Bank dedup repair duplicate delete count cannot be negative.")
     if len(targets) != expected_target_count:
         raise ValueError(
             f"Recovery cohort count changed: expected {expected_target_count}, resolved {len(targets)}."
@@ -116,7 +122,22 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             if incoming_references and incoming_references.intersection(candidate_references):
                 reference_exact.append(candidate)
         if len(reference_exact) == 1:
-            duplicate_pairs.append(_duplicate_pair(target, reference_exact[0]))
+            duplicate_pairs.append(
+                _duplicate_pair(
+                    target,
+                    reference_exact[0],
+                    match_basis="official_reference",
+                    matched_official_references=sorted(
+                        incoming_references.intersection(
+                            _official_reference_values(
+                                identity_service.identity_for_mapping(
+                                    reference_exact[0]
+                                ).audit_fields
+                            )
+                        )
+                    ),
+                )
+            )
             continue
         if len(reference_exact) > 1:
             exact = reference_exact
@@ -139,7 +160,14 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                 ):
                     continue
         if len(exact) == 1:
-            duplicate_pairs.append(_duplicate_pair(target, exact[0]))
+            duplicate_pairs.append(
+                _duplicate_pair(
+                    target,
+                    exact[0],
+                    match_basis="balance_currency",
+                    matched_official_references=[],
+                )
+            )
         else:
             transaction_id = _text(target.get("transaction_id"))
             ambiguous_target_ids.append(transaction_id)
@@ -157,6 +185,15 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         raise ValueError(
             f"Bank dedup repair found {len(ambiguous_target_ids)} ambiguous fingerprint/reference "
             f"matches: {ambiguous_details[:5]}."
+        )
+    match_basis_counts = Counter(
+        _text(pair.get("match_basis")) for pair in duplicate_pairs
+    )
+    if len(duplicate_pairs) != expected_duplicate_delete_count:
+        raise ValueError(
+            "Bank dedup repair duplicate delete count changed: "
+            f"expected {expected_duplicate_delete_count}, resolved {len(duplicate_pairs)}, "
+            f"match_basis_counts={dict(sorted(match_basis_counts.items()))}."
         )
 
     duplicate_target_pks = {_text(pair.get("delete_transaction_pk")) for pair in duplicate_pairs}
@@ -312,6 +349,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "target_count": len(targets),
         "protected_count": len(protected),
         "duplicate_delete_count": len(duplicate_pairs),
+        "duplicate_match_basis_counts": dict(sorted(match_basis_counts.items())),
         "import_row_update_count": len(row_updates),
         "created_owner_transition_count": sum(
             1 for update in row_updates if update["owner_transition"]
@@ -349,6 +387,12 @@ def public_bank_import_dedup_repair_report(
         "target_count": plan["target_count"],
         "protected_count": plan["protected_count"],
         "duplicate_delete_count": plan["duplicate_delete_count"],
+        "duplicate_match_basis_counts": deepcopy(
+            plan.get("duplicate_match_basis_counts") or {}
+        ),
+        "duplicate_pair_evidence": (
+            deepcopy(plan.get("duplicate_pairs") or []) if mode == "dry_run" else None
+        ),
         "import_row_update_count": plan["import_row_update_count"],
         "created_owner_transition_count": plan["created_owner_transition_count"],
         "category_cleanup_count": len(plan.get("category_cleanup_actions") or []),
@@ -694,7 +738,13 @@ def _normalized_source_sessions(values: list[dict[str, Any]]) -> list[dict[str, 
     return sorted(normalized, key=lambda item: item["session_id"])
 
 
-def _duplicate_pair(target: dict[str, Any], keeper: dict[str, Any]) -> dict[str, Any]:
+def _duplicate_pair(
+    target: dict[str, Any],
+    keeper: dict[str, Any],
+    *,
+    match_basis: str,
+    matched_official_references: list[str],
+) -> dict[str, Any]:
     return {
         "delete_transaction_pk": _text(target.get("transaction_pk")),
         "delete_transaction_id": _text(target.get("transaction_id")),
@@ -704,6 +754,10 @@ def _duplicate_pair(target: dict[str, Any], keeper: dict[str, Any]) -> dict[str,
         "keep_transaction_pk": _text(keeper.get("transaction_pk")),
         "keep_transaction_id": _text(keeper.get("transaction_id")),
         "transaction_month": _text(target.get("txn_month")),
+        "match_basis": match_basis,
+        "matched_official_references": list(matched_official_references),
+        "duplicate_transaction": _transaction_evidence(target),
+        "keeper_transaction": _transaction_evidence(keeper),
     }
 
 
@@ -728,6 +782,8 @@ def _transaction_evidence(row: dict[str, Any]) -> dict[str, Any]:
         "voucher_no": _text(row.get("voucher_no")),
         "data_fingerprint": _text(row.get("data_fingerprint")),
         "official_references": sorted(_official_reference_values(identity.audit_fields)),
+        "created_at": _text(row.get("created_at")),
+        "updated_at": _text(row.get("updated_at")),
     }
 
 

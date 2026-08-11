@@ -11,7 +11,7 @@
 | 文件预览 API | 损坏 Excel、模板识别、银行流水模板、per-file override、银行选择冲突、只确认 selected files | `tests/test_import_file_api.py` |
 | 文件预览 service | 文件级错误、session/file/batch id 去重、银行映射冲突与别名、preview stale、真实银行流水模板 | `tests/test_import_file_service.py` |
 | 银行 identity v3 / 批量去重 | 复用官方参考号时不同业务指纹可创建、历史 v2 唯一参考号迁移判重、缺失/多义参考号疑似、preview/confirm 单次批量 preload、同批重复阻断、页面 Audit 对相同业务指纹及相交官方参考号的 v3→v2 引用迁移放行 | `tests/test_bank_transaction_identity_service.py`、`tests/test_object_dedup_decision_service.py`、`tests/test_import_service.py`、`tests/test_postgres_repositories_core.py`、`tests/test_audit_bank_transaction_import_page.py` |
-| 生产 cohort 恢复 | 精确 source session/file、保护集合不相交、唯一 fingerprint/reference duplicate、关系/核销 fail-closed、文件 hash、审计计数 CAS、可重复受控重放 | `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_file_service.py`、`tests/test_import_audit_repair_ops.py` |
+| 生产 cohort 恢复 | 精确 source session/file、目标/保护/重复删除数门禁、保护集合不相交、唯一 fingerprint/reference duplicate、dry-run 匹配证据、关系/核销 fail-closed、文件 hash、审计计数 CAS、可重复受控重放 | `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_file_service.py`、`tests/test_import_audit_repair_ops.py` |
 | 银行流水 parser/normalizer | 原始文本列、真实 Excel text contract、银行流水 identity、不改 identity 的文本字段 | `tests/test_import_api.py`、`tests/test_import_service.py`、`tests/test_import_preview_audit.py` |
 | 确认/持久化 | confirm 持久化、重复跳过、selected bank mapping 字段保留、导入跨重启持久化、batch revert/download | `tests/test_import_service.py`、`tests/test_import_formalization_api.py` |
 | Import worker / queue | idempotency key、small RabbitMQ envelope、unknown processor failure、registered processor success、worker check、RabbitMQ confirm queue | `tests/test_import_job_queue.py`、`tests/test_runtime_worker_registry.py` |
@@ -80,6 +80,7 @@
 | 2026-06-19 Browser e2e | 银行流水导入确认后不能只证明银行明细刷新，还要证明成本统计以 fresh read model 显示导入流水成本证据。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得调用 operation barrier 或 Workbench 页面 API、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | confirm 失败 Browser 回归 | 导入任务创建失败时，页面必须显示错误并保留 preview，不能误报“已确认导入”。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 2026-08-11 生产重复删除授权漂移 | dry-run/execute 必须显式绑定精确重复删除数；候选数变化时在关系撤回、标签清理和流水删除前失败，并在 dry-run 输出官方参考号或余额/币种的逐对证据。 | fixed by `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 
 ## 关键 Smoke Flows
 

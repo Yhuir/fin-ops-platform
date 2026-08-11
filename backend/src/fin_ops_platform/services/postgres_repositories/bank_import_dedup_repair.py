@@ -14,6 +14,7 @@ def load_bank_import_dedup_repair_snapshot(
     source_sessions: list[dict[str, Any]],
     expected_target_count: int,
     expected_protected_count: int,
+    expected_duplicate_delete_count: int,
     expected_replay_create_count: int,
     cleanup_related_duplicates: bool = False,
     expected_category_cleanup_count: int = 0,
@@ -66,6 +67,7 @@ def load_bank_import_dedup_repair_snapshot(
             "source_sessions": source_sessions,
             "expected_target_count": expected_target_count,
             "expected_protected_count": expected_protected_count,
+            "expected_duplicate_delete_count": expected_duplicate_delete_count,
             "expected_replay_create_count": expected_replay_create_count,
             "cleanup_related_duplicates": cleanup_related_duplicates,
             "expected_category_cleanup_count": expected_category_cleanup_count,
@@ -251,7 +253,8 @@ coalesce(bt.raw_payload->'normalized_payload'->>'enterprise_serial_no', bt.raw_p
     as enterprise_serial_no,
 coalesce(bt.raw_payload->'normalized_payload'->>'voucher_no', bt.raw_payload->>'voucher_no') as voucher_no,
 bt.source_unique_key, bt.data_fingerprint,
-bt.written_off_amount, bt.status, bt.raw_payload
+bt.written_off_amount, bt.status, bt.raw_payload,
+bt.created_at, bt.updated_at
 """
 
 _TARGET_TRANSACTION_SQL = f"""
