@@ -28,7 +28,13 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     files = list(snapshot.get("files") or [])
     actual_files = {(_text(row.get("session_id")), _text(row.get("file_id"))) for row in files}
     if actual_files != expected_files or len(actual_files) != len(files):
-        raise ValueError("Authorized recovery files must resolve exactly once.")
+        missing = sorted(expected_files - actual_files)
+        unexpected = sorted(actual_files - expected_files)
+        raise ValueError(
+            "Authorized recovery files must resolve exactly once: "
+            f"expected={len(expected_files)}, rows={len(files)}, unique={len(actual_files)}, "
+            f"missing={missing}, unexpected={unexpected}."
+        )
     for row in files:
         if (
             _text(row.get("status")) != "confirmed"

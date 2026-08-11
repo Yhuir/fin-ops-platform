@@ -107,7 +107,7 @@ select file.id::text as file_pk,
        coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
        batch.batch_type, batch.status as batch_status
 from app.import_files file
-join app.import_batches batch
+left join app.import_batches batch
   on coalesce(batch.legacy_mongo_id, batch.id::text) = coalesce(
       nullif(file.raw_payload->'normalized_payload'->>'batch_id', ''),
       nullif(file.raw_payload->>'batch_id', ''),

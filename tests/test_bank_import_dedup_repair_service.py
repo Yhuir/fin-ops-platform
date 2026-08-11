@@ -222,6 +222,7 @@ class BankImportDedupRepairServiceTests(TestCase):
     def test_repository_uses_durable_file_payload_batch_link(self) -> None:
         self.assertNotIn("file.import_batch_id", _SOURCE_FILE_SQL)
         self.assertNotIn("import_batch_id =", _UPDATE_FILE_SQL)
+        self.assertIn("left join app.import_batches", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("normalized_payload'->>'preview_batch_id'", _SOURCE_FILE_SQL)
         self.assertIn("file.raw_payload->>'batch_id'", _SOURCE_FILE_SQL)
@@ -229,3 +230,10 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn("normalized_payload'->>'batch_id'", _UPDATE_FILE_SQL)
         self.assertIn("raw_payload->>'batch_id'", _UPDATE_FILE_SQL)
         self.assertIn("raw_payload->>'preview_batch_id'", _UPDATE_FILE_SQL)
+
+    def test_plan_reports_the_exact_missing_authorized_file(self) -> None:
+        snapshot = _snapshot()
+        snapshot["files"] = []
+
+        with self.assertRaisesRegex(ValueError, r"missing=\[\('session-1', 'file-1'\)\]"):
+            build_bank_import_dedup_repair_plan(snapshot)
