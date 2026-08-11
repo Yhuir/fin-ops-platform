@@ -104,19 +104,27 @@ class ImportRuntimeProcessorFactory:
 
         return process
 
+    def retry_file_import_preview(
+        self,
+        *,
+        session_id: str,
+        selected_file_ids: list[str],
+    ) -> dict[str, object]:
+        state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
+        session = file_import_service.retry_session_files(
+            session_id=session_id,
+            selected_file_ids=selected_file_ids,
+        )
+        state_store.save_import_delta(file_import_service.preview_session_persistence_payload(session_id))
+        return {
+            "session_id": session.id,
+            "session_status": session.status,
+            "selected_file_count": len(selected_file_ids),
+        }
+
     def _build_processors_from_durable_state(self) -> dict[str, Callable[[Any], dict[str, object]]]:
-        state_store = self._state_store()
-        import_fact_repository = getattr(state_store, "import_fact_repository", None)
-        import_service = ImportNormalizationService.from_snapshot(
-            _call_or_empty(state_store, "load_imports_snapshot"),
-            id_registry=state_store,
-            fact_repository=import_fact_repository,
-        )
-        file_import_service = FileImportService.from_snapshot(
-            import_service,
-            _call_or_empty(state_store, "load_file_imports_snapshot"),
-            file_store=state_store,
-        )
+        state_store, import_service, file_import_service = self._build_file_import_services_from_durable_state()
+
         tax_certified_import_service = TaxCertifiedImportService(state_store=state_store)
         from fin_ops_platform.services.etc_import_preview_service import EtcImportPreviewService
         from fin_ops_platform.services.etc_import_session_store import build_etc_import_session_store
@@ -172,6 +180,23 @@ class ImportRuntimeProcessorFactory:
             oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
         )
         return processing_service.build_import_job_processors()
+
+    def _build_file_import_services_from_durable_state(
+        self,
+    ) -> tuple[Any, ImportNormalizationService, FileImportService]:
+        state_store = self._state_store()
+        import_fact_repository = getattr(state_store, "import_fact_repository", None)
+        import_service = ImportNormalizationService.from_snapshot(
+            _call_or_empty(state_store, "load_imports_snapshot"),
+            id_registry=state_store,
+            fact_repository=import_fact_repository,
+        )
+        file_import_service = FileImportService.from_snapshot(
+            import_service,
+            _call_or_empty(state_store, "load_file_imports_snapshot"),
+            file_store=state_store,
+        )
+        return state_store, import_service, file_import_service
 
     def _state_store(self) -> Any:
         from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository

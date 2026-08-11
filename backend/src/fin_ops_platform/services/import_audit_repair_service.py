@@ -109,6 +109,7 @@ def build_failed_import_job_recovery_plan(snapshot: dict[str, Any]) -> dict[str,
 
     job_payload = dict(import_job.get("payload") or {})
     selected_file_ids = sorted({_text(value) for value in job_payload.get("selected_file_ids") or [] if _text(value)})
+    import_job_error = _text(import_job.get("last_error"))
     if (
         _text(import_job.get("import_type")) != "file_import.confirm"
         or _text(import_job.get("status")) != "failed"
@@ -116,7 +117,10 @@ def build_failed_import_job_recovery_plan(snapshot: dict[str, Any]) -> dict[str,
         or _text(job_payload.get("session_id")) != target["session_id"]
         or _text(job_payload.get("background_job_id")) != target["background_job_id"]
         or selected_file_ids != target["file_ids"]
-        or FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE not in _text(import_job.get("last_error"))
+        or (
+            FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE not in import_job_error
+            and import_job_error != "preview_stale"
+        )
     ):
         raise ValueError("Import job does not match the authorized failed bank-import request.")
 
@@ -135,7 +139,8 @@ def build_failed_import_job_recovery_plan(snapshot: dict[str, Any]) -> dict[str,
     background_source = dict(background_payload.get("source") or {})
     if (
         _text(background_job.get("job_type")) != "file_import"
-        or _text(background_job.get("status")) != "queued"
+        or _text(background_job.get("status")) not in {"queued", "failed"}
+        or (_text(background_job.get("status")) == "failed" and import_job_error != "preview_stale")
         or _text(background_payload.get("job_id")) not in {"", target["background_job_id"]}
         or _text(background_source.get("session_id")) != target["session_id"]
         or sorted({_text(value) for value in background_source.get("selected_file_ids") or [] if _text(value)})
@@ -234,13 +239,18 @@ def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) ->
     event = queue.get_event(target["event_id"])
     if event is None or event.status != "dead_lettered":
         raise RuntimeError("Failed import event changed before candidate processing.")
+    processor_factory = ImportRuntimeProcessorFactory(
+        data_dir=default_data_dir(),
+        connection=connection,
+    )
+    processor_factory.retry_file_import_preview(
+        session_id=target["session_id"],
+        selected_file_ids=target["file_ids"],
+    )
     handler = build_import_job_handler_bundle(
         connection=connection,
         worker_id=f"import-audit-repair:{target['import_job_id']}",
-        processors=ImportRuntimeProcessorFactory(
-            data_dir=default_data_dir(),
-            connection=connection,
-        ).build_processors(),
+        processors=processor_factory.build_processors(),
     ).handlers[event.event_type]
     result = handler(event)
     if not result.get("processed"):

@@ -257,6 +257,32 @@ class ImportJobRepositoryTests(unittest.TestCase):
 
         self.assertEqual(generations, [1, 2])
 
+    def test_runtime_import_processor_retries_and_persists_current_file_preview(self) -> None:
+        state_store = SimpleNamespace(save_import_delta=unittest.mock.Mock())
+        session = SimpleNamespace(id="session-1", status="preview_ready")
+        file_import_service = SimpleNamespace(
+            retry_session_files=unittest.mock.Mock(return_value=session),
+            preview_session_persistence_payload=unittest.mock.Mock(return_value={"file_imports": {}}),
+        )
+        factory = ImportRuntimeProcessorFactory(data_dir="/tmp/finops-test", connection=object())
+
+        with patch.object(
+            factory,
+            "_build_file_import_services_from_durable_state",
+            return_value=(state_store, object(), file_import_service),
+        ):
+            result = factory.retry_file_import_preview(
+                session_id="session-1",
+                selected_file_ids=["file-1"],
+            )
+
+        file_import_service.retry_session_files.assert_called_once_with(
+            session_id="session-1",
+            selected_file_ids=["file-1"],
+        )
+        state_store.save_import_delta.assert_called_once_with({"file_imports": {}})
+        self.assertEqual(result["selected_file_count"], 1)
+
     def test_postgres_import_processing_backend_uses_durable_queue_and_inline_is_rejected(self) -> None:
         app = build_application()
         app._runtime_repositories = SimpleNamespace(  # noqa: SLF001

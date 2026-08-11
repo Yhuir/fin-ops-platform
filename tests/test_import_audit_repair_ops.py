@@ -394,6 +394,12 @@ class FailedImportRecoveryTests(unittest.TestCase):
         suspected_duplicate_plan = build_failed_import_job_recovery_plan(suspected_duplicate_snapshot)
         self.assertEqual(suspected_duplicate_plan["files"][0]["suspected_duplicate_count"], 6)
 
+        stale_preview_snapshot = _failed_import_recovery_snapshot()
+        stale_preview_snapshot["import_jobs"][0]["last_error"] = "preview_stale"
+        stale_preview_snapshot["background_jobs"][0]["status"] = "failed"
+        stale_preview_plan = build_failed_import_job_recovery_plan(stale_preview_snapshot)
+        self.assertEqual(stale_preview_plan["import_job"]["last_error"], "preview_stale")
+
         partial_snapshot = _failed_import_recovery_snapshot()
         partial_snapshot["files"][0]["canonical_bank_transaction_count"] = 1
         with self.assertRaisesRegex(ValueError, "not an untouched bank preview"):
@@ -493,6 +499,10 @@ class FailedImportRecoveryTests(unittest.TestCase):
             result = execute_failed_import_job_recovery(object(), plan)
 
         self.assertEqual(result["canonical_bank_transaction_count"], 8)
+        processor_factory.retry_file_import_preview.assert_called_once_with(
+            session_id="session-bank-1",
+            selected_file_ids=["file-bank-1", "file-bank-2"],
+        )
         handler.assert_called_once_with(queue.get_event.return_value)
         queue.resolve_dead_letter_event.assert_called_once_with(
             "event-1",
