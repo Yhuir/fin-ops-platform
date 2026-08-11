@@ -108,6 +108,12 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
                     if _strict_secondary_evidence(candidate) == target_secondary
                 ]
                 secondary_match_count = len(exact)
+                if (
+                    not exact
+                    and incoming_references
+                    and all(_strict_secondary_evidence(candidate) is not None for candidate in candidates)
+                ):
+                    continue
         if len(exact) == 1:
             duplicate_pairs.append(_duplicate_pair(target, exact[0]))
         else:
