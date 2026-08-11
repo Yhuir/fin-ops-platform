@@ -260,6 +260,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
             _unmatched_statement_detail(
                 target,
                 identity_service=identity_service,
+                protected_by_fingerprint=protected_by_fingerprint,
                 protected_by_statement_position=protected_by_statement_position,
             )
             for target in targets
@@ -1038,6 +1039,7 @@ def _unmatched_statement_detail(
     target: dict[str, Any],
     *,
     identity_service: BankTransactionIdentityService,
+    protected_by_fingerprint: dict[str, list[dict[str, Any]]],
     protected_by_statement_position: dict[tuple[str, ...], list[dict[str, Any]]],
 ) -> dict[str, Any]:
     position_evidence = _strict_statement_position_evidence(target, identity_service)
@@ -1045,6 +1047,10 @@ def _unmatched_statement_detail(
         protected_by_statement_position.get(position_evidence, [])
         if position_evidence is not None
         else []
+    )
+    fingerprint_candidates = protected_by_fingerprint.get(
+        _text(target.get("data_fingerprint")),
+        [],
     )
 
     def public_fields(row: dict[str, Any]) -> dict[str, Any]:
@@ -1064,6 +1070,10 @@ def _unmatched_statement_detail(
 
     return {
         "target": public_fields(target),
+        "fingerprint_candidate_count": len(fingerprint_candidates),
+        "fingerprint_candidates": [
+            public_fields(candidate) for candidate in fingerprint_candidates[:3]
+        ],
         "statement_position_candidate_count": len(position_candidates),
         "statement_position_candidates": [
             public_fields(candidate) for candidate in position_candidates[:3]
