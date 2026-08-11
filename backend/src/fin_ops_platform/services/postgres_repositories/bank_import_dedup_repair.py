@@ -16,7 +16,14 @@ def load_bank_import_dedup_repair_snapshot(
     file_ids = [str(file_id) for item in source_sessions for file_id in item["file_ids"]]
     files = connection.fetch_all(_SOURCE_FILE_SQL, (session_ids, file_ids))
     batch_pks = sorted({str(row.get("batch_pk") or "") for row in files if row.get("batch_pk")})
-    targets = connection.fetch_all(_TARGET_TRANSACTION_SQL, (batch_pks,)) if batch_pks else []
+    legacy_batch_ids = sorted(
+        {str(row.get("batch_id") or "") for row in files if row.get("batch_id")}
+    )
+    targets = (
+        connection.fetch_all(_TARGET_TRANSACTION_SQL, (batch_pks, legacy_batch_ids))
+        if batch_pks or legacy_batch_ids
+        else []
+    )
     target_pks = [str(row["transaction_pk"]) for row in targets]
     return {
         "request": {
@@ -85,6 +92,7 @@ def apply_bank_import_dedup_repair(connection: Any, plan: dict[str, Any]) -> Non
             (
                 pair["delete_transaction_pk"],
                 pair["delete_batch_pk"],
+                pair["delete_legacy_batch_id"],
                 pair["delete_source_unique_key"],
             ),
         )
@@ -124,6 +132,7 @@ _TRANSACTION_FIELDS = """
 bt.id::text as transaction_pk,
 coalesce(bt.legacy_mongo_id, bt.id::text) as transaction_id,
 bt.source_batch_id::text as batch_pk,
+bt.legacy_source_batch_id as legacy_batch_id,
 bt.account_no, bt.txn_direction, bt.counterparty_name_raw,
 bt.normalized_counterparty_name, bt.amount, bt.txn_date,
 bt.txn_month, bt.trade_time, bt.pay_receive_time,
@@ -140,7 +149,10 @@ bt.written_off_amount, bt.status, bt.raw_payload
 _TARGET_TRANSACTION_SQL = f"""
 select {_TRANSACTION_FIELDS}
 from app.bank_transactions bt
-where bt.source_batch_id::text = any(%s::text[])
+where (
+        bt.source_batch_id::text = any(%s::text[])
+        or bt.legacy_source_batch_id = any(%s::text[])
+      )
   and bt.status <> 'deleted'
 order by bt.id
 """
@@ -264,7 +276,10 @@ where id = %s::uuid
 _DELETE_TRANSACTION_SQL = """
 delete from app.bank_transactions bt
 where bt.id = %s::uuid
-  and bt.source_batch_id = %s::uuid
+  and (
+      bt.source_batch_id::text = nullif(%s, '')
+      or bt.legacy_source_batch_id = nullif(%s, '')
+  )
   and bt.source_unique_key is not distinct from %s
   and bt.status <> 'deleted'
   and bt.written_off_amount = 0

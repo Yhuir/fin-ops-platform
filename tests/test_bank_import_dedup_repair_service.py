@@ -9,7 +9,9 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     verify_bank_import_repair_source_files,
 )
 from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
+    _DELETE_TRANSACTION_SQL,
     _SOURCE_FILE_SQL,
+    _TARGET_TRANSACTION_SQL,
     _UPDATE_FILE_SQL,
     apply_bank_import_dedup_repair,
 )
@@ -28,6 +30,7 @@ def _transaction(
         "transaction_pk": transaction_pk,
         "transaction_id": transaction_id,
         "batch_pk": batch_pk,
+        "legacy_batch_id": "batch-1",
         "account_no": "5300",
         "trade_time": trade_time,
         "txn_direction": "outflow",
@@ -218,6 +221,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn("status = 'completed'", connection.calls[1][0])
         self.assertIn("status = 'confirmed'", connection.calls[2][0])
         self.assertIn("delete from app.bank_transactions", connection.calls[3][0])
+        self.assertEqual(connection.calls[3][1][2], "batch-1")
 
     def test_repository_uses_durable_file_payload_batch_link(self) -> None:
         self.assertNotIn("file.import_batch_id", _SOURCE_FILE_SQL)
@@ -230,6 +234,8 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertIn("normalized_payload'->>'batch_id'", _UPDATE_FILE_SQL)
         self.assertIn("raw_payload->>'batch_id'", _UPDATE_FILE_SQL)
         self.assertIn("raw_payload->>'preview_batch_id'", _UPDATE_FILE_SQL)
+        self.assertIn("bt.legacy_source_batch_id = any", _TARGET_TRANSACTION_SQL)
+        self.assertIn("bt.legacy_source_batch_id = nullif", _DELETE_TRANSACTION_SQL)
 
     def test_plan_reports_the_exact_missing_authorized_file(self) -> None:
         snapshot = _snapshot()
