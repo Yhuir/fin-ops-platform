@@ -143,16 +143,27 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
     }
     if set(relation_by_pk) != duplicate_target_pks:
         raise ValueError("Relationship evidence does not exactly cover duplicate delete candidates.")
+    relationful_candidates: list[dict[str, Any]] = []
     for transaction_pk, evidence in relation_by_pk.items():
         if _decimal_nonzero(evidence.get("written_off_amount")):
-            raise ValueError(f"Duplicate candidate {transaction_pk} has a non-zero written-off amount.")
-        relation_count = sum(
-            int(value or 0)
+            relationful_candidates.append(
+                {"transaction_pk": transaction_pk, "written_off_amount": str(evidence.get("written_off_amount"))}
+            )
+            continue
+        relation_counts = {
+            key: int(value or 0)
             for key, value in evidence.items()
-            if key.endswith("_count")
+            if key.endswith("_count") and int(value or 0)
+        }
+        if relation_counts:
+            relationful_candidates.append(
+                {"transaction_pk": transaction_pk, "relation_counts": relation_counts}
+            )
+    if relationful_candidates:
+        raise ValueError(
+            f"Bank dedup repair found {len(relationful_candidates)} relationful delete candidates: "
+            f"{relationful_candidates[:10]}."
         )
-        if relation_count:
-            raise ValueError(f"Duplicate candidate {transaction_pk} still owns {relation_count} relations.")
 
     rows = list(snapshot.get("import_rows") or [])
     rows_by_link: dict[str, list[dict[str, Any]]] = defaultdict(list)

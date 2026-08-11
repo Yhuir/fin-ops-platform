@@ -212,7 +212,7 @@ class BankImportDedupRepairServiceTests(TestCase):
         self.assertEqual(plan["duplicate_delete_count"], 0)
 
     def test_plan_refuses_candidate_with_any_relation(self) -> None:
-        with self.assertRaisesRegex(ValueError, "owns 1 relations"):
+        with self.assertRaisesRegex(ValueError, "category_count.*1"):
             build_bank_import_dedup_repair_plan(_snapshot(relation_count=1))
 
     def test_source_file_verification_is_exact(self) -> None:
