@@ -119,6 +119,27 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.removed_stale_completed_count, 1)
         self.assertEqual(relation_commands.calls[0]["row_ids"], ["oa-completed-gone"])
 
+    def test_commit_preserves_deleted_row_ids_when_other_completed_oa_remains(self) -> None:
+        connection = FakeConnection(
+            application_delete_results=[[{"row_id": "oa-completed-gone"}], []]
+        )
+        relation_commands = FakeRelationCommandService()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: relation_commands,
+        )
+        retained = _oa("oa-completed-retained", "2026-06", workflow_status="completed", flow_id="flow-1")
+
+        result = repository.commit_authoritative_snapshot(
+            scope_key="2026-06",
+            projection_records=[retained],
+            admission_records=[retained],
+            payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
+        )
+
+        self.assertEqual(result.removed_stale_completed_count, 1)
+        self.assertEqual(relation_commands.calls[0]["row_ids"], ["oa-completed-gone"])
+
     def test_payment_status_only_change_does_not_report_completed_projection_change(self) -> None:
         connection = FakeConnection(
             status_rows=[

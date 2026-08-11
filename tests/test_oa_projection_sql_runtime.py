@@ -302,7 +302,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(attachment_inserts[0][7], None)
         self.assertEqual(attachment_inserts[0][9].obj["source_expense_item_id"], "oa-exp-files:item:1")
 
-    def test_postgres_oa_projection_repository_replaces_month_scope_and_migrates_legacy_expense_relations(self) -> None:
+    def test_postgres_oa_projection_repository_migrates_legacy_expense_relations_without_scope_cleanup(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 
         connection = OAProjectionWriteConnection()
@@ -344,9 +344,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             for sql, params in connection.executed
             if "delete from app.oa_applications oa" in sql and "stale" in sql
         ]
-        self.assertEqual(len(stale_delete), 1)
-        self.assertIn("oa.scope_month = %s::date", stale_delete[0][0])
-        self.assertEqual(stale_delete[0][1], ("2026-03-01", ["oa-exp-2007"]))
+        self.assertEqual(stale_delete, [])
 
     def test_workbench_query_service_reads_oa_rows_from_sql_projection_adapter(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter

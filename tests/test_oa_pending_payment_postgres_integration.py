@@ -316,6 +316,90 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(second.upserted_completed_count, 0)
         self.assertEqual(after, before)
 
+    def test_authoritative_snapshot_cancels_relation_when_one_of_multiple_completed_oa_disappears(self) -> None:
+        source_snapshot = self._source_snapshot()
+        retained = _record()
+        removed = replace(
+            retained,
+            id="oa-integration-removed",
+            detail_fields={
+                "Mongo文档ID": "flow-integration-removed",
+                "paymentFlowId": "flow-integration-removed",
+            },
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[retained, removed],
+            admission_records=[retained, removed],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(flow_id="flow-integration-1", pay_status=0),
+                "flow-integration-removed": OAPaymentStatusRecord(
+                    flow_id="flow-integration-removed",
+                    pay_status=0,
+                ),
+            },
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status, raw_payload
+            )
+            values (
+                'bank-oa-removal', '622200001234', 'outflow', '集成测试供应商',
+                100, -100, '2026-05-20', '2026-05-01', 'pending', '{}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, raw_payload
+            )
+            values (
+                'oa-removal-case', 'manual_confirm', 'active', 1, '2026-05-01',
+                array['oa-integration-removed', 'bank-oa-removal'],
+                array['oa', 'bank'],
+                '{
+                    "normalized_payload": {
+                        "case_id": "oa-removal-case",
+                        "status": "active",
+                        "relation_mode": "manual_confirm",
+                        "version": 1,
+                        "row_ids": ["oa-integration-removed", "bank-oa-removal"],
+                        "row_types": ["oa", "bank"]
+                    }
+                }'::jsonb
+            )
+            """
+        )
+
+        result = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[retained],
+            admission_records=[retained],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(flow_id="flow-integration-1", pay_status=0)
+            },
+        )
+
+        self.assertEqual(result.removed_stale_completed_count, 1)
+        self.assertEqual(result.relation_cleanup[0]["changed_case_ids"], ["oa-removal-case"])
+        self.assertIsNone(
+            self.connection.fetch_one(
+                "select row_id from app.oa_applications where row_id = 'oa-integration-removed'"
+            )
+        )
+        self.assertEqual(
+            self.connection.fetch_one(
+                "select status from app.workbench_pair_relations where case_id = 'oa-removal-case'"
+            )["status"],
+            "cancelled",
+        )
+
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
         source_snapshot = self._source_snapshot()
         completed_record = _record()

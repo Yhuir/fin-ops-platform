@@ -1,5 +1,13 @@
 # OA 集成 实施记录
 
+## 2026-08-11 - OA 权威快照统一删除与关联关系清理
+
+- 目标：修复 OA 周期同步删除已失效 completed 投影后，关联台 active relation 偶发保留不存在 OA 成员的问题。
+- 根因：`upsert_application_records(...)` 的旧隐式 scope cleanup 先删除投影但丢弃 row id；随后权威快照的正式删除拿不到已删除 row id，无法调用 `remove_rows_from_active_relations(...)`。
+- 关键决策：删除 upsert 内的隐式 cleanup；由既有 `commit_authoritative_snapshot(...) -> delete_stale_completed_application_records(...)` 唯一负责删除、返回 row id，并在同一事务通过正式 relation command 清理或替换 active relation。不新增 fallback、第二条修复链或页面补偿。
+- 测试覆盖：unit fake 验证保留 OA 与删除 OA 同批时 row id 不丢；SQL runtime 验证 upsert 不再隐式清理；真实 PostgreSQL integration 验证投影删除与 relation 取消同一事务闭环。
+- 文档影响：既有 `boundary-io.md` 已规定权威快照和正式 relation command 的边界，本次只纠正实现并登记回归，不改变 API、read model 或 worker 合同。
+
 ## 2026-08-07 - OA附件身份桥双顺序闭环与历史修复门禁
 
 - 目标：修复 parser cache 先于 `app.oa_attachments` 落库时身份桥缺失，导致已有 canonical 发票只显示“人工导入”且无法恢复 OA 绑定的问题。

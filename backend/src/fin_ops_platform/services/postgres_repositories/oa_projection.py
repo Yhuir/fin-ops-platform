@@ -178,11 +178,6 @@ class PostgresOAProjectionRepository:
                     oa_row_ids=changed_row_ids,
                 )
             self._migrate_legacy_row_references(connection, self._legacy_row_id_alias_pairs(normalized_records))
-            self._delete_scope_records_not_in(
-                connection,
-                records=normalized_records,
-                scope_key=scope_key,
-            )
             self._record_watermark(
                 scope_key=scope_key,
                 status="succeeded",
@@ -192,100 +187,6 @@ class PostgresOAProjectionRepository:
 
         run_in_transaction(self._connection, write)
         return changed_count
-
-    def _delete_scope_records_not_in(
-        self,
-        connection: Any,
-        *,
-        records: list[OAApplicationRecord],
-        scope_key: str,
-    ) -> list[str]:
-        incoming_row_ids = sorted({str(record.id or "").strip() for record in records if str(record.id or "").strip()})
-        if not incoming_row_ids:
-            return []
-        normalized_scope_key = text(scope_key) or "all"
-        if normalized_scope_key == "all":
-            months = sorted({
-                month_start(record.month)
-                for record in records
-                if month_start(record.month)
-            })
-            if not months:
-                return []
-            rows = connection.fetch_all(
-                """
-                with stale as (
-                    select oa.id, oa.row_id, oa.scope_month
-                    from app.oa_applications oa
-                    where oa.scope_month = any(%s::date[])
-                      and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
-                      and not (oa.row_id = any(%s::text[]))
-                      and not exists (
-                          select 1
-                          from app.manual_oa_imports manual
-                          where manual.row_id = oa.row_id
-                            and manual.status = 'active'
-                      )
-                ),
-                deleted_items as (
-                    delete from app.oa_application_items item
-                    using stale
-                    where item.oa_application_id = stale.id
-                    returning item.id
-                ),
-                deleted_attachments as (
-                    delete from app.oa_attachments attachment
-                    using stale
-                    where attachment.oa_application_id = stale.id
-                    returning attachment.id
-                )
-                delete from app.oa_applications oa
-                using stale
-                where oa.id = stale.id
-                returning stale.row_id, to_char(stale.scope_month, 'YYYY-MM') as month
-                """,
-                (months, incoming_row_ids),
-            )
-            return [row_id for row in rows if (row_id := text(row.get("row_id")))]
-
-        scope_month = month_start(normalized_scope_key)
-        if not scope_month:
-            return []
-        rows = connection.fetch_all(
-            """
-            with stale as (
-                select oa.id, oa.row_id, oa.scope_month
-                from app.oa_applications oa
-                where oa.scope_month = %s::date
-                  and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
-                  and not (oa.row_id = any(%s::text[]))
-                  and not exists (
-                      select 1
-                      from app.manual_oa_imports manual
-                      where manual.row_id = oa.row_id
-                        and manual.status = 'active'
-                  )
-            ),
-            deleted_items as (
-                delete from app.oa_application_items item
-                using stale
-                where item.oa_application_id = stale.id
-                returning item.id
-            ),
-            deleted_attachments as (
-                delete from app.oa_attachments attachment
-                using stale
-                where attachment.oa_application_id = stale.id
-                returning attachment.id
-            )
-            delete from app.oa_applications oa
-            using stale
-            where oa.id = stale.id
-            returning stale.row_id, to_char(stale.scope_month, 'YYYY-MM') as month
-            """,
-            (scope_month, incoming_row_ids),
-        )
-        return [row_id for row in rows if (row_id := text(row.get("row_id")))]
 
     def delete_stale_completed_application_records(
         self,
