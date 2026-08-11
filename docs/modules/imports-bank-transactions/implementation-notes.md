@@ -235,3 +235,9 @@
 - 测试：business core 覆盖严格 8+1 形状、错位 event、错误 transaction、发票成员和撤回后恢复旧关系拒绝；service/repository 覆盖正式 withdraw、append-only history、category/event 删除顺序和全部 CAS 字段；CLI 覆盖参数门禁、单事务编排、audit、精确 refresh scope、重放与二次幂等。
 - 生产 dry-run 进一步发现 35 个待删副本除唯一 `created` owner 外，还各有一条同批次已正确判重的 `duplicate_skipped` 审计引用。修复计划不把这些引用误算成第二个 owner，也不重复调整 batch 计数；它们只以完整 CAS 条件把 `linked_object_id` 重定向到 keeper，并保留原 decision/reason，防止删除后留下悬挂导入审计。
 - 后续生产 dry-run 证明 `import_files.raw_payload.normalized_payload.row_results` 保存的是预览阶段证据：对应正式 batch 已完成时，文件内行仍全部是 `suspected_duplicate`，文件级计数仍为初始化 `0/0`。因此删除把最终 row/batch 决策回写到文件 payload 的旧修复链；文件 payload 只以 SHA-256 纳入 source fingerprint 并保持不可变，最终审计只修正 `app.import_batch_rows` 与 `app.import_batches`。这避免用最终状态覆盖预览事实，也消除了旧 file counter 推断分支。
+
+## 2026-08-11 去重恢复工具对象存储装配修复
+
+- 生产 dry-run 暴露出维护工具直接构造 `PostgresStateStore` 时未注入对象存储 repository，导致已配置在正式 runtime 的归档导入文件无法读取。
+- 修复复用现有 `ObjectStorageSettings` 与 `S3ObjectStorageRepository`，通过与应用相同的 runtime 环境装配对象存储；不新增维护专用凭据、fallback 或第二条文件读取链路。
+- 银行去重恢复仍必须从正式归档文件读取并校验 SHA-256，配置缺失或文件漂移继续 fail closed。

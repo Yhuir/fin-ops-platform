@@ -567,7 +567,6 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --recover-background-job-id <background-job-id> --recover-session-id <session-id> \
   --recover-file-id <file-id> [--recover-file-id <file-id> ...]
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
-  [--local-minio-storage-profile] \
   --dry-run --repair-bank-source <session-id>=<file-id>[,<file-id>...] \
   [--repair-bank-source <session-id>=<file-id>[,<file-id>...] ...] \
   --expected-bank-target-count <n> --expected-bank-protected-count <n> \
@@ -603,10 +602,6 @@ CAS 字段、relation case/version/preview、发票成员和“撤回后不恢�
 execute 随后只把这些错误 created 行改为引用原 canonical 的 duplicate、同步 batch/file 审计并删除错误副本，然后通过正式 preview/confirm processor
 创建新恢复审计会话。任何关系、歧义、计数、owner、hash 或 fingerprint 漂移都在删除前失败；执行前必须
 先创建动作绑定的生产恢复点，执行后相同源文件再次受控重放必须新增 0。
-历史 source file 位于本机 MinIO、但 APP runtime 未配置对象存储时，只能显式增加
-`--local-minio-storage-profile`。该 profile 由 root 发布控制器从 `/etc/minio/minio.env` 读取现有凭据，
-仅映射到本次 maintenance 进程；不打印或持久化密钥、不修改 API/worker 环境，并要求 MinIO 服务在线。
-dry-run 与 execute 必须使用相同 profile，禁止通过跳过文件读取来绕过 SHA-256 与重放门禁。
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为

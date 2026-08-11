@@ -16,7 +16,6 @@ LEGACY_CURRENT_DIR="${FINOPS_LEGACY_CURRENT_DIR:-/opt/fin-ops/current}"
 LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/legacy-current-archives}"
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
-LOCAL_MINIO_ENV="/etc/minio/minio.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-$ENV_DIR/fin-ops.rabbitmq-topology.env}"
 RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-$ENV_DIR/fin-ops.rabbitmq-monitoring.env}"
@@ -122,7 +121,7 @@ commands:
                                       validate or enqueue read-model refresh scopes through the durable gateway
   settings-normalize <release-name> [--dry-run|--execute]
                                       normalize App settings through the canonical service/repository boundary
-  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--local-minio-storage-profile] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--discover-recover-import-job-id <id>] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...] [--repair-bank-source <session>=<file,...> ... --expected-bank-target-count <n> --expected-bank-protected-count <n> --expected-bank-replay-create-count <n> --operator-id <id> [--cleanup-related-bank-duplicates --expected-bank-category-cleanup-count <n> --expected-bank-workbench-withdraw-count <n> --expected-bank-workbench-transaction-id <id>]]
+  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--discover-recover-import-job-id <id>] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...] [--repair-bank-source <session>=<file,...> ... --expected-bank-target-count <n> --expected-bank-protected-count <n> --expected-bank-replay-create-count <n> --operator-id <id> [--cleanup-related-bank-duplicates --expected-bank-category-cleanup-count <n> --expected-bank-workbench-withdraw-count <n> --expected-bank-workbench-transaction-id <id>]]
                                       repair strict import facts through the canonical PostgreSQL boundary
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer
@@ -1170,36 +1169,6 @@ run_with_runtime_env() {
   # shellcheck disable=SC1090
   source "$SECRETS_ENV"
   set +a
-  export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-  export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-  (cd "$src" && "$API_PYTHON" "$@")
-}
-
-run_with_local_minio_maintenance_env() {
-  local src="$1"
-  shift
-  [[ -f "$COMMON_ENV" ]] || die "missing common runtime env: $COMMON_ENV"
-  [[ -f "$SECRETS_ENV" ]] || die "missing secret runtime env: $SECRETS_ENV"
-  [[ -f "$LOCAL_MINIO_ENV" ]] || die "missing local MinIO runtime env: $LOCAL_MINIO_ENV"
-  assert_root_owned_runtime_env "$LOCAL_MINIO_ENV"
-  systemctl is-active --quiet minio || die "local MinIO service is not active"
-  set -a
-  # shellcheck disable=SC1090
-  source "$COMMON_ENV"
-  # shellcheck disable=SC1090
-  source "$SECRETS_ENV"
-  # shellcheck disable=SC1090
-  source "$LOCAL_MINIO_ENV"
-  set +a
-  [[ -n "${MINIO_ROOT_USER:-}" && -n "${MINIO_ROOT_PASSWORD:-}" ]] \
-    || die "local MinIO maintenance credentials are incomplete"
-  export OBJECT_STORAGE_BACKEND=minio
-  export S3_ENDPOINT_URL=http://127.0.0.1:9000
-  export S3_BUCKET=fin-ops-files
-  export S3_REGION="${S3_REGION:-us-east-1}"
-  export S3_ACCESS_KEY_ID="$MINIO_ROOT_USER"
-  export S3_SECRET_ACCESS_KEY="$MINIO_ROOT_PASSWORD"
-  unset MINIO_ROOT_USER MINIO_ROOT_PASSWORD
   export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
   export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
   (cd "$src" && "$API_PYTHON" "$@")
@@ -2375,24 +2344,9 @@ import_audit_repair() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "import-audit-repair requires release name"
   shift
-  local src storage_profile="runtime" argument
-  local -a forwarded_arguments=()
-  for argument in "$@"; do
-    if [[ "$argument" == "--local-minio-storage-profile" ]]; then
-      [[ "$storage_profile" == "runtime" ]] \
-        || die "import-audit-repair local MinIO storage profile may be specified only once"
-      storage_profile="local-minio"
-      continue
-    fi
-    forwarded_arguments+=("$argument")
-  done
-  set -- "${forwarded_arguments[@]}"
+  local src
   src="$(release_src "$release")"
   assert_runtime_env_contract
-  if [[ "$storage_profile" == "local-minio" ]]; then
-    run_with_local_minio_maintenance_env "$src" -m fin_ops_platform.tools.import_audit_repair_ops "$@"
-    return 0
-  fi
   run_with_runtime_env "$src" -m fin_ops_platform.tools.import_audit_repair_ops "$@"
 }
 

@@ -1102,6 +1102,70 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertEqual(report["candidates"], candidates)
         apply_repair.assert_not_called()
 
+    def test_bank_repair_state_store_reuses_configured_object_storage(self) -> None:
+        connection = Mock()
+        settings = SimpleNamespace(enabled=True)
+        repository = Mock()
+        state_store = Mock()
+
+        with (
+            patch.object(
+                import_audit_repair_ops.ObjectStorageSettings,
+                "from_env",
+                return_value=settings,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "S3ObjectStorageRepository",
+                return_value=repository,
+            ) as build_repository,
+            patch.object(
+                import_audit_repair_ops,
+                "default_data_dir",
+                return_value="/var/lib/fin-ops",
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "PostgresStateStore",
+                return_value=state_store,
+            ) as build_state_store,
+        ):
+            result = import_audit_repair_ops._build_bank_repair_state_store(connection)
+
+        self.assertIs(result, state_store)
+        build_repository.assert_called_once_with(settings)
+        build_state_store.assert_called_once_with(
+            data_dir="/var/lib/fin-ops",
+            connection=connection,
+            object_storage_repository=repository,
+        )
+
+    def test_bank_repair_state_store_keeps_local_storage_without_adapter(self) -> None:
+        connection = Mock()
+        settings = SimpleNamespace(enabled=False)
+
+        with (
+            patch.object(
+                import_audit_repair_ops.ObjectStorageSettings,
+                "from_env",
+                return_value=settings,
+            ),
+            patch.object(import_audit_repair_ops, "S3ObjectStorageRepository") as build_repository,
+            patch.object(
+                import_audit_repair_ops,
+                "default_data_dir",
+                return_value="/var/lib/fin-ops",
+            ),
+            patch.object(import_audit_repair_ops, "PostgresStateStore") as build_state_store,
+        ):
+            import_audit_repair_ops._build_bank_repair_state_store(connection)
+
+        build_repository.assert_not_called()
+        build_state_store.assert_called_once_with(
+            data_dir="/var/lib/fin-ops",
+            connection=connection,
+        )
+
     def test_cli_related_bank_cleanup_requires_exact_8_plus_1_expectations(self) -> None:
         with self.assertRaisesRegex(SystemExit, "exact category/workbench counts"):
             import_audit_repair_ops.main(

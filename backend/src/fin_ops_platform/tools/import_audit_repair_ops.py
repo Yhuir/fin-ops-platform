@@ -21,6 +21,10 @@ from fin_ops_platform.services.import_audit_repair_service import (
     public_failed_import_recovery_report,
     public_repair_report,
 )
+from fin_ops_platform.services.object_storage import (
+    ObjectStorageSettings,
+    S3ObjectStorageRepository,
+)
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
@@ -35,6 +39,21 @@ from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair im
     apply_bank_import_dedup_repair,
     load_bank_import_dedup_repair_snapshot,
 )
+from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+from fin_ops_platform.services.runtime_paths import default_data_dir
+
+
+def _build_bank_repair_state_store(connection: PostgresConnection) -> PostgresStateStore:
+    object_storage_settings = ObjectStorageSettings.from_env()
+    state_store_kwargs: dict[str, object] = {
+        "data_dir": default_data_dir(),
+        "connection": connection,
+    }
+    if object_storage_settings.enabled:
+        state_store_kwargs["object_storage_repository"] = S3ObjectStorageRepository(
+            object_storage_settings
+        )
+    return PostgresStateStore(**state_store_kwargs)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -180,10 +199,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     file=stdout,
                 )
                 return 2
-        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-        from fin_ops_platform.services.runtime_paths import default_data_dir
-
-        state_store = PostgresStateStore(data_dir=default_data_dir(), connection=connection)
+        state_store = _build_bank_repair_state_store(connection)
         verify_bank_import_repair_source_files(plan, read_file=state_store.read_import_file)
         if args.dry_run:
             report = public_bank_import_dedup_repair_report(
