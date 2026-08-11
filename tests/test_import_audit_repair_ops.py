@@ -15,6 +15,7 @@ from fin_ops_platform.services.import_audit_repair_service import (
     public_repair_report,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+    _FAILED_IMPORT_FILE_SQL,
     apply_import_audit_repair,
     discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
@@ -369,6 +370,7 @@ def _failed_import_recovery_snapshot(
                 "suspected_duplicate_count": 0,
                 "updated_count": 0,
                 "canonical_bank_transaction_count": 0 if index == 1 or not completed else 8,
+                "canonical_audit_issue_count": 0,
             }
             for index, file_id in enumerate(file_ids, start=1)
         ],
@@ -553,8 +555,58 @@ class FailedImportRecoveryTests(unittest.TestCase):
 
         queue.resolve_dead_letter_event.assert_not_called()
 
+    def test_execute_keeps_dead_letter_when_candidate_canonical_fields_do_not_match(self) -> None:
+        plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
+        import_repository = Mock()
+        import_repository.create_or_get_job.return_value = SimpleNamespace(
+            import_job_id="import-job-1",
+            status="pending",
+        )
+        queue = Mock()
+        queue.get_event.return_value = SimpleNamespace(
+            event_type="import.process.requested",
+            status="dead_lettered",
+        )
+        incomplete = _failed_import_recovery_snapshot(completed=True, event_status="dead_lettered")
+        incomplete["files"][1]["canonical_audit_issue_count"] = 38
+
+        with (
+            patch(
+                "fin_ops_platform.services.import_job_queue.ImportJobRepository",
+                return_value=import_repository,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_queue.RuntimeQueueRepository",
+                return_value=queue,
+            ),
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory"
+            ) as processor_factory,
+            patch(
+                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
+                return_value=SimpleNamespace(
+                    handlers={"import.process.requested": Mock(return_value={"processed": True})}
+                ),
+            ),
+            patch(
+                "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",
+                return_value=incomplete,
+            ),
+            self.assertRaisesRegex(RuntimeError, "file-bank-2 is incomplete"),
+        ):
+            processor_factory.return_value.build_processors.return_value = {}
+            execute_failed_import_job_recovery(object(), plan)
+
+        queue.resolve_dead_letter_event.assert_not_called()
+
 
 class ImportAuditRepairPlanTests(unittest.TestCase):
+    def test_canonical_bank_audit_accepts_strict_v3_to_v2_reference_match(self) -> None:
+        self.assertIn("rows.data_fingerprint = bank_transaction.data_fingerprint", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn("'normalized_row'->>'account_detail_no'", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn("bank_transaction.bank_serial_no", _FAILED_IMPORT_FILE_SQL)
+        self.assertIn(") && array_remove(", _FAILED_IMPORT_FILE_SQL)
+
     def test_plan_normalizes_only_exact_reverted_preview_batch_payloads(self) -> None:
         plan = build_import_audit_repair_plan(_reverted_batch_snapshot())
 

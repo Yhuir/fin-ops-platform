@@ -10,7 +10,7 @@
 - `source_unique_key` 保存强 canonical identity；`data_fingerprint` 保存弱疑似指纹。弱指纹只能使用普通索引，禁止唯一约束。
 - Workbench 展示状态由 `WorkbenchObjectIdentityArbitrationService` 在分组前仲裁：正式发票与 OA 附件发票命中同一强发票 identity 时，只允许进入一个最终展示区。
 - 强发票 identity 只包含数电发票号、发票代码+号码。税额指纹、金额、项目、申请人、对方名称等弱字段只用于审计提示，不用于自动跨来源合并。
-- 银行流水强 identity 只使用账户与官方参考号，优先级为账户明细号、银行流水号、企业流水号。交易时间、方向、金额和对方名称只形成弱疑似指纹；命中只提示人工复核，不自动合并、跳过或压制另一条流水。
+- 银行流水有官方参考号时，`bank-v3` 强 identity 使用账户、官方参考号种类/值和业务指纹摘要；官方参考号优先级仍为账户明细号、银行流水号、企业流水号。业务指纹由交易时间、方向、金额和规范化对方名称组成，用于区分同一银行复用参考号的不同流水。历史 `bank-v2` 迁移匹配必须同时满足业务指纹一致、双方存在官方参考号且参考号集合只有一个 canonical 命中；缺失或多义证据只提示人工复核。没有官方参考号时业务指纹仍是弱疑似身份。
 - OA 单据以 `row_id` 为主身份，`form_id`/`workflow_no` 只作为 alias 审计线索，不按金额、申请人或项目推断合并。
 - OA source alias 只能来自 `app.oa_source_aliases.status='active'` 的显式审计事实；用于把同一 OA 生命周期中的旧 source row 归一到 canonical row，不删除 OA 原始投影、附件或 cache。
 - 历史冲突不做破坏性合并。审计输出报告，人工 repair canonical facts 后再重新审计。
@@ -70,7 +70,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relatio
 Blocking issue 包含：
 
 - 同一强发票 identity 下出现多条正式发票。强 identity 只包含数电发票号、发票代码+号码。
-- 同一 `bank-v2:{account}:{official-reference-kind}:{official-reference}` canonical key 下出现多条银行流水。
+- 同一 `bank-v3:{account}:{official-reference-kind}:{official-reference}:{business-fingerprint-hash}` canonical key 下出现多条银行流水；历史 `bank-v2` 只作为唯一迁移匹配的兼容事实，不得继续生成新记录。
 - 同一 OA 附件票强 canonical key 出现在多个不同 OA 报销中。强 key 包含数电票号、发票代码+号码、附件稳定 hash；`seller_tax_no + buyer_tax_no + invoice_date + total_with_tax` 这类弱税额指纹不作为 OA 附件票 blocking key。
 - 历史 `source_unique_key` 与当前强发票或银行 policy canonical key 不一致。正式发票弱税额指纹 mismatch 不阻断发布。
 

@@ -96,7 +96,7 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(first.canonical_key_kind, "bank_serial_no")
-        self.assertEqual(first.canonical_key, "bank-v2:62220001:bank_serial_no:SERIAL-SAME")
+        self.assertTrue(first.canonical_key.startswith("bank-v3:62220001:bank_serial_no:SERIAL-SAME:"))
         self.assertNotEqual(first.canonical_key, second.canonical_key)
 
     def test_oa_attachment_invoice_identity_preserves_existing_stable_hash(self) -> None:

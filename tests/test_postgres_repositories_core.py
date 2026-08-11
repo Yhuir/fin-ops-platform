@@ -647,6 +647,29 @@ def test_find_invoices_by_identity_keys_uses_single_bulk_lookup() -> None:
     assert "data_fingerprint = any(%s::text[])" in connection.fetch_all_sql[0]
 
 
+def test_find_bank_transactions_by_identity_keys_uses_single_bulk_lookup() -> None:
+    class BankIdentityConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple]] = []
+
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+            self.calls.append((" ".join(sql.lower().split()), params))
+            return []
+
+    connection = BankIdentityConnection()
+    matches = PostgresCoreRepository(connection).find_bank_transactions_by_identity_keys(
+        canonical_keys=["bank-v3:key", "bank-v3:key", ""],
+        suspected_keys=["bank:fingerprint", "bank:fingerprint"],
+    )
+
+    assert matches == []
+    assert len(connection.calls) == 1
+    sql, params = connection.calls[0]
+    assert params == (["bank-v3:key"], ["bank:fingerprint"])
+    assert "source_unique_key = any(%s::text[])" in sql
+    assert "data_fingerprint = any(%s::text[])" in sql
+
+
 def test_invoice_read_prefers_canonical_legacy_id_over_stale_raw_payload_id() -> None:
     connection = DuplicateInvoiceIdentityConnection()
     original_fetch_all = connection.fetch_all

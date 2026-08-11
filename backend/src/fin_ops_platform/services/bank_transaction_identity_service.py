@@ -5,6 +5,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
@@ -61,16 +62,17 @@ class BankTransactionIdentityService:
             "enterprise_serial_no": clean_placeholder(values.get("enterprise_serial_no")),
             "voucher_no": clean_placeholder(values.get("voucher_no")),
         }
-        reference_kind, reference = self._official_reference(audit_fields)
-        identity_key = (
-            f"bank-v2:{account_no}:{reference_kind}:{reference}"
-            if account_no and reference_kind and reference
-            else None
-        )
         suspected_key = None if missing_fields else (
             f"bank:{components['account_no']}:{components['trade_time']}:{components['direction']}:"
             f"{components['amount']}:{components['counterparty_name']}"
         )
+        reference_kind, reference = self._official_reference(audit_fields)
+        if account_no and reference_kind and reference:
+            identity_key = f"bank-v2:{account_no}:{reference_kind}:{reference}"
+            if suspected_key:
+                identity_key = f"bank-v3:{account_no}:{reference_kind}:{reference}:{sha256(suspected_key.encode()).hexdigest()[:16]}"
+        else:
+            identity_key = None
         return BankTransactionIdentity(
             identity_key=identity_key,
             suspected_key=suspected_key,

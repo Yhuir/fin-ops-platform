@@ -6,6 +6,11 @@ import json
 import sys
 from typing import TextIO
 
+from fin_ops_platform.services.bank_import_dedup_repair_service import (
+    build_bank_import_dedup_repair_plan,
+    public_bank_import_dedup_repair_report,
+    verify_bank_import_repair_source_files,
+)
 from fin_ops_platform.services.import_audit_repair_service import (
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
@@ -19,6 +24,10 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
+    apply_bank_import_dedup_repair,
+    load_bank_import_dedup_repair_snapshot,
 )
 
 
@@ -38,6 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recover-session-id")
     parser.add_argument("--recover-file-id", action="append", default=[])
     parser.add_argument("--discover-recover-import-job-id")
+    parser.add_argument(
+        "--repair-bank-source",
+        action="append",
+        default=[],
+        help="Confirmed recovery source in session_id=file_id[,file_id] form.",
+    )
+    parser.add_argument("--expected-bank-target-count", type=int)
+    parser.add_argument("--expected-bank-protected-count", type=int)
+    parser.add_argument("--expected-bank-replay-create-count", type=int)
+    parser.add_argument("--operator-id")
     return parser
 
 
@@ -61,17 +80,124 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     )
     recovery_requested = any(recovery_values)
     discovery_requested = bool(args.discover_recover_import_job_id)
+    bank_repair_requested = bool(args.repair_bank_source)
     if discovery_requested and args.execute:
         raise SystemExit("Failed import recovery discovery is read-only and requires --dry-run")
     if recovery_requested and not all(recovery_values):
         raise SystemExit("Failed import recovery requires job, event, background job, session, and file ids")
-    if (recovery_requested or discovery_requested) and (
+    if (recovery_requested or discovery_requested or bank_repair_requested) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
         raise SystemExit("Failed import recovery cannot be combined with another repair mode")
     if recovery_requested and discovery_requested:
         raise SystemExit("Failed import recovery discovery cannot be combined with an explicit target")
+    if bank_repair_requested and (recovery_requested or discovery_requested):
+        raise SystemExit("Bank dedup repair cannot be combined with failed import recovery")
+    if bank_repair_requested and (
+        args.expected_bank_target_count is None
+        or args.expected_bank_protected_count is None
+        or args.expected_bank_replay_create_count is None
+        or not args.operator_id
+    ):
+        raise SystemExit(
+            "Bank dedup repair requires expected target/protected/replay counts and --operator-id"
+        )
     connection = PostgresConnection(PostgresSettings.from_env())
+    if bank_repair_requested:
+        source_sessions = _parse_bank_repair_sources(args.repair_bank_source)
+        snapshot_kwargs = {
+            "source_sessions": source_sessions,
+            "expected_target_count": args.expected_bank_target_count,
+            "expected_protected_count": args.expected_bank_protected_count,
+            "expected_replay_create_count": args.expected_bank_replay_create_count,
+        }
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_bank_import_dedup_repair_plan(
+                load_bank_import_dedup_repair_snapshot(transaction, **snapshot_kwargs)
+            )
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+        from fin_ops_platform.services.runtime_paths import default_data_dir
+
+        state_store = PostgresStateStore(data_dir=default_data_dir(), connection=connection)
+        verify_bank_import_repair_source_files(plan, read_file=state_store.read_import_file)
+        if args.dry_run:
+            report = public_bank_import_dedup_repair_report(
+                plan,
+                mode="dry_run",
+                written=False,
+            )
+        else:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("Bank dedup repair source changed after dry-run; rerun dry-run.")
+            with connection.transaction() as transaction:
+                transaction.execute("set transaction isolation level serializable")
+                transaction.fetch_one(
+                    "select pg_advisory_xact_lock(hashtext('fin_ops_bank_import_identity_v3_repair'))"
+                )
+                locked_plan = build_bank_import_dedup_repair_plan(
+                    load_bank_import_dedup_repair_snapshot(transaction, **snapshot_kwargs)
+                )
+                if locked_plan["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError("Bank dedup repair source changed while acquiring the write lock.")
+                apply_bank_import_dedup_repair(transaction, locked_plan)
+            from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
+
+            runtime = ImportRuntimeProcessorFactory(
+                data_dir=default_data_dir(),
+                connection=connection,
+            )
+            replay_results = [
+                runtime.replay_confirmed_file_import_session(
+                    source_session_id=entry["session_id"],
+                    selected_file_ids=entry["file_ids"],
+                    operator_id=args.operator_id,
+                )
+                for entry in source_sessions
+            ]
+            audit_summaries = [dict(item.get("audit_summary") or {}) for item in replay_results]
+            created_count = sum(int(item.get("created_count") or 0) for item in audit_summaries)
+            if created_count != args.expected_bank_replay_create_count:
+                raise RuntimeError(
+                    "Bank recovery replay created an unexpected number of transactions: "
+                    f"expected {args.expected_bank_replay_create_count}, got {created_count}."
+                )
+            if any(
+                int(item.get("error_count") or 0)
+                or int(item.get("suspected_duplicate_count") or 0)
+                for item in audit_summaries
+            ):
+                raise RuntimeError("Bank recovery replay ended with errors or suspected duplicates.")
+            idempotence_replay_results = [
+                runtime.replay_confirmed_file_import_session(
+                    source_session_id=entry["session_id"],
+                    selected_file_ids=entry["file_ids"],
+                    operator_id=args.operator_id,
+                )
+                for entry in source_sessions
+            ]
+            idempotence_summaries = [
+                dict(item.get("audit_summary") or {}) for item in idempotence_replay_results
+            ]
+            if any(
+                int(item.get("created_count") or 0)
+                or int(item.get("updated_count") or 0)
+                or int(item.get("error_count") or 0)
+                or int(item.get("suspected_duplicate_count") or 0)
+                for item in idempotence_summaries
+            ):
+                raise RuntimeError(
+                    "Repeated bank recovery replay was not idempotent or ended with audit issues."
+                )
+            report = public_bank_import_dedup_repair_report(
+                locked_plan,
+                mode="execute",
+                written=True,
+                replay_results=replay_results,
+                idempotence_replay_results=idempotence_replay_results,
+            )
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
     if discovery_requested:
         with connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
@@ -163,6 +289,17 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         report = public_repair_report(plan, mode="execute", written=True)
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
+
+
+def _parse_bank_repair_sources(values: list[str]) -> list[dict[str, object]]:
+    sources: list[dict[str, object]] = []
+    for value in values:
+        session_id, separator, raw_file_ids = str(value or "").partition("=")
+        file_ids = sorted({item.strip() for item in raw_file_ids.split(",") if item.strip()})
+        if not separator or not session_id.strip() or not file_ids:
+            raise SystemExit("--repair-bank-source must use session_id=file_id[,file_id] form")
+        sources.append({"session_id": session_id.strip(), "file_ids": file_ids})
+    return sources
 
 
 if __name__ == "__main__":

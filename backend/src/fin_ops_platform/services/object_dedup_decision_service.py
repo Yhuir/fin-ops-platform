@@ -43,6 +43,14 @@ class ObjectIdentityRepository(Protocol):
     ) -> BankTransaction | None:
         ...
 
+    def find_bank_transactions_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[BankTransaction]:
+        ...
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         ...
 
@@ -174,11 +182,27 @@ class ObjectDedupDecisionService:
 
     def decide_bank_transaction_import(self, normalized: dict[str, Any]) -> ObjectDedupDecision:
         identity = self._identity_policy.identify_bank_transaction_mapping(normalized)
-        existing = self._find_bank_transaction(identity)
-        if identity.canonical_key and existing is not None:
+        existing, match_kind = self._find_bank_transaction(identity)
+        if identity.canonical_key and existing is not None and match_kind != "migration_ambiguous":
             return ObjectDedupDecision(
                 decision=ImportDecision.DUPLICATE_SKIPPED,
-                decision_reason="Bank transaction identity matched an existing transaction.",
+                decision_reason=(
+                    "Bank transaction business fields and official reference matched a legacy identity."
+                    if match_kind == "migration_exact"
+                    else "Bank transaction identity matched an existing transaction."
+                ),
+                identity=identity,
+                linked_object_type="bank_transaction",
+                linked_object_id=existing.id,
+                matched_object=existing,
+            )
+        if identity.canonical_key and existing is not None and match_kind == "migration_ambiguous":
+            return ObjectDedupDecision(
+                decision=ImportDecision.SUSPECTED_DUPLICATE,
+                decision_reason=(
+                    "Bank transaction business fields matched existing data, but official reference evidence was "
+                    "missing or ambiguous."
+                ),
                 identity=identity,
                 linked_object_type="bank_transaction",
                 linked_object_id=existing.id,
@@ -221,13 +245,46 @@ class ObjectDedupDecisionService:
             return self._repository.find_invoice_by_identity(canonical_key=None, suspected_key=identity.suspected_key)
         return None
 
-    def _find_bank_transaction(self, identity: ObjectIdentity) -> BankTransaction | None:
+    def _find_bank_transaction(self, identity: ObjectIdentity) -> tuple[BankTransaction | None, str | None]:
         if self._repository is None:
-            return None
-        return self._repository.find_bank_transaction_by_identity(
+            return None, None
+        transaction = self._repository.find_bank_transaction_by_identity(
             canonical_key=identity.canonical_key,
             suspected_key=None if identity.canonical_key else identity.suspected_key,
         )
+        if transaction is not None:
+            return transaction, "canonical" if identity.canonical_key else "suspected"
+        if identity.canonical_key and identity.suspected_key:
+            candidates = self._repository.find_bank_transactions_by_identity(
+                canonical_key=None,
+                suspected_key=identity.suspected_key,
+            )
+            exact_matches: list[BankTransaction] = []
+            ambiguous_matches: list[BankTransaction] = []
+            incoming_references = self._official_reference_values(identity)
+            for candidate in candidates:
+                candidate_identity = self._identity_policy.identify_bank_transaction(candidate)
+                candidate_references = self._official_reference_values(candidate_identity)
+                if incoming_references and candidate_references:
+                    if incoming_references.intersection(candidate_references):
+                        exact_matches.append(candidate)
+                    continue
+                ambiguous_matches.append(candidate)
+            if len(exact_matches) == 1:
+                return exact_matches[0], "migration_exact"
+            if exact_matches:
+                return exact_matches[0], "migration_ambiguous"
+            if ambiguous_matches:
+                return ambiguous_matches[0], "migration_ambiguous"
+        return None, None
+
+    @staticmethod
+    def _official_reference_values(identity: ObjectIdentity) -> set[str]:
+        return {
+            "".join(str(value).split()).upper()
+            for field_name, value in identity.audit_fields.items()
+            if field_name in {"account_detail_no", "bank_serial_no", "enterprise_serial_no"} and _text(value)
+        }
 
     @staticmethod
     def _is_etc_invoice(normalized: dict[str, Any]) -> bool:

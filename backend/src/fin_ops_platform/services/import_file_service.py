@@ -536,6 +536,7 @@ class FileImportService:
                     progress_callback(session, progress_current, progress_total)
 
             session.status = "confirmed" if confirmed_any else "skipped"
+            self._refresh_session_audit(session)
             self._sessions[session.id] = session
             return session
         except Exception:
@@ -636,6 +637,70 @@ class FileImportService:
         self._sessions[session.id] = session
         return session
 
+    def replay_confirmed_session_files(
+        self,
+        *,
+        source_session_id: str,
+        selected_file_ids: list[str],
+        imported_by: str,
+    ) -> FileImportSession:
+        source_session = self._sessions[source_session_id]
+        selected = {str(file_id).strip() for file_id in selected_file_ids if str(file_id).strip()}
+        if not selected:
+            raise ValueError("at least one selected source file is required")
+        source_items = [item for item in source_session.files if item.id in selected]
+        if {item.id for item in source_items} != selected:
+            raise KeyError("one or more replay source files do not belong to the source session")
+        if any(item.status != "confirmed" for item in source_items):
+            raise ValueError("only confirmed source files can be replayed")
+        if self._file_store is None:
+            raise ValueError("import file storage is not configured")
+
+        replay_session = FileImportSession(
+            id=self._next_session_id(),
+            imported_by=str(imported_by or "").strip() or "system",
+            file_count=len(source_items),
+            status="preview_ready",
+            files=[],
+        )
+        for source_item in source_items:
+            if not source_item.stored_file_path:
+                raise ValueError(f"replay source file {source_item.id} is missing stored content")
+            content = self._file_store.read_import_file(source_item.stored_file_path)
+            content_sha256 = hashlib.sha256(content).hexdigest()
+            if source_item.content_sha256 and content_sha256 != source_item.content_sha256:
+                raise ValueError(f"replay source file {source_item.id} checksum changed")
+            upload = UploadedImportFile(
+                file_name=source_item.file_name,
+                content=content,
+                selected_bank_mapping_id=source_item.selected_bank_mapping_id,
+                selected_bank_name=source_item.selected_bank_name,
+                selected_bank_short_name=source_item.selected_bank_short_name,
+                selected_bank_last4=source_item.selected_bank_last4,
+                field_mapping=dict(source_item.field_mapping),
+            )
+            replay_item = self._preview_single_file(
+                imported_by=replay_session.imported_by,
+                upload=upload,
+                file_id=self._next_file_id(),
+                stored_file_path=source_item.stored_file_path,
+                template_code_override=source_item.template_code,
+                batch_type_override=(source_item.batch_type.value if source_item.batch_type else None),
+                selected_bank_mapping_id=source_item.selected_bank_mapping_id,
+                selected_bank_name=source_item.selected_bank_name,
+                selected_bank_short_name=source_item.selected_bank_short_name,
+                selected_bank_last4=source_item.selected_bank_last4,
+                field_mapping=dict(source_item.field_mapping),
+                skip_duplicate_file_guard=True,
+            )
+            replay_session.files.append(replay_item)
+
+        if any(file.status != "preview_ready" for file in replay_session.files):
+            replay_session.status = "preview_ready_with_errors"
+        self._refresh_session_audit(replay_session)
+        self._sessions[replay_session.id] = replay_session
+        return replay_session
+
     def _preview_single_file(
         self,
         *,
@@ -650,11 +715,16 @@ class FileImportService:
         selected_bank_short_name: str | None = None,
         selected_bank_last4: str | None = None,
         field_mapping: dict[str, str] | None = None,
+        skip_duplicate_file_guard: bool = False,
     ) -> FileImportPreviewItem:
         content_sha256 = hashlib.sha256(upload.content).hexdigest()
-        duplicate_file_name = self._find_confirmed_duplicate_file(
-            content_sha256=content_sha256,
-            exclude_file_id=file_id,
+        duplicate_file_name = (
+            None
+            if skip_duplicate_file_guard
+            else self._find_confirmed_duplicate_file(
+                content_sha256=content_sha256,
+                exclude_file_id=file_id,
+            )
         )
         if duplicate_file_name:
             return self._build_preview_error_item(

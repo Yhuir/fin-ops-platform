@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import unittest
 from time import sleep
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
 from fin_ops_platform.services.runtime_worker import (
     DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
     RuntimeWorker,
@@ -27,6 +30,37 @@ def event(event_type: str = "runtime.test") -> RuntimeQueueEvent:
         attempts=0,
         status="pending",
     )
+
+
+class ImportRuntimeProcessorFactoryTests(unittest.TestCase):
+    def test_controlled_replay_refuses_suspected_preview_before_persistence(self) -> None:
+        state_store = SimpleNamespace(save_import_delta=Mock())
+        replay_session = SimpleNamespace(
+            status="preview_ready",
+            files=[
+                SimpleNamespace(
+                    id="replay-file-1",
+                    error_count=0,
+                    suspected_duplicate_count=1,
+                )
+            ],
+        )
+        file_import_service = SimpleNamespace(
+            replay_confirmed_session_files=Mock(return_value=replay_session)
+        )
+        factory = ImportRuntimeProcessorFactory(data_dir="/tmp", connection=Mock())
+        factory._build_file_import_services_from_durable_state = Mock(
+            return_value=(state_store, Mock(), file_import_service)
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "refusing confirmation"):
+            factory.replay_confirmed_file_import_session(
+                source_session_id="source-session-1",
+                selected_file_ids=["source-file-1"],
+                operator_id="repair-operator",
+            )
+
+        state_store.save_import_delta.assert_not_called()
 
 
 class FakeQueue:

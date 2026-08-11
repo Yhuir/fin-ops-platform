@@ -851,6 +851,60 @@ class ImportFileServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "preview_stale"):
             service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
 
+    def test_replay_confirmed_session_files_reuses_verified_source_and_creates_new_audit_session(self) -> None:
+        file_store = FakeImportIdStore()
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service, file_store=file_store)
+        source = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        service.confirm_session(session_id=source.id, selected_file_ids=[source.files[0].id])
+
+        replay = service.replay_confirmed_session_files(
+            source_session_id=source.id,
+            selected_file_ids=[source.files[0].id],
+            imported_by="system-repair",
+        )
+
+        self.assertNotEqual(replay.id, source.id)
+        self.assertNotEqual(replay.files[0].id, source.files[0].id)
+        self.assertEqual(replay.files[0].stored_file_path, source.files[0].stored_file_path)
+        self.assertEqual(replay.files[0].content_sha256, source.files[0].content_sha256)
+        self.assertEqual(replay.files[0].status, "preview_ready")
+        self.assertEqual(replay.files[0].duplicate_count, 1)
+        self.assertEqual(source.files[0].status, "confirmed")
+
+        service.confirm_session(session_id=replay.id, selected_file_ids=[replay.files[0].id])
+        repeated = service.replay_confirmed_session_files(
+            source_session_id=source.id,
+            selected_file_ids=[source.files[0].id],
+            imported_by="system-repair",
+        )
+        self.assertEqual(repeated.files[0].status, "preview_ready")
+        self.assertEqual(repeated.files[0].duplicate_count, 1)
+
+    def test_replay_confirmed_session_files_rejects_changed_source_content(self) -> None:
+        file_store = FakeImportIdStore()
+        service = FileImportService(
+            ImportNormalizationService(id_registry=FakeImportEntityRegistry()),
+            file_store=file_store,
+        )
+        source = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        service.confirm_session(session_id=source.id, selected_file_ids=[source.files[0].id])
+        stored_path = str(source.files[0].stored_file_path)
+        file_store._stored_files[stored_path] = b"changed"
+
+        with self.assertRaisesRegex(ValueError, "checksum changed"):
+            service.replay_confirmed_session_files(
+                source_session_id=source.id,
+                selected_file_ids=[source.files[0].id],
+                imported_by="system-repair",
+            )
+
     def test_confirm_session_rolls_back_when_import_confirm_fails(self) -> None:
         import_service = ImportNormalizationService(
             id_registry=FakeImportEntityRegistry(),

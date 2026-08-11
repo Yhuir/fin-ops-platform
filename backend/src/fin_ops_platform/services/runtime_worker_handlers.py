@@ -122,6 +122,64 @@ class ImportRuntimeProcessorFactory:
             "selected_file_count": len(selected_file_ids),
         }
 
+    def replay_confirmed_file_import_session(
+        self,
+        *,
+        source_session_id: str,
+        selected_file_ids: list[str],
+        operator_id: str,
+    ) -> dict[str, object]:
+        state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
+        replay_session = file_import_service.replay_confirmed_session_files(
+            source_session_id=source_session_id,
+            selected_file_ids=selected_file_ids,
+            imported_by=operator_id,
+        )
+        if replay_session.status != "preview_ready" or any(
+            item.error_count or item.suspected_duplicate_count for item in replay_session.files
+        ):
+            raise RuntimeError(
+                "Controlled import replay preview contains errors or suspected duplicates; refusing confirmation."
+            )
+        replay_file_ids = [item.id for item in replay_session.files]
+        state_store.save_import_delta(
+            file_import_service.preview_session_persistence_payload(replay_session.id)
+        )
+        processor = self._build_processors_from_durable_state().get("file_import.confirm")
+        if not callable(processor):
+            raise RuntimeError("File import confirmation processor is not registered.")
+        result = processor(
+            SimpleNamespace(
+                payload={
+                    "session_id": replay_session.id,
+                    "selected_file_ids": replay_file_ids,
+                    "owner_user_id": operator_id,
+                    "background_job_id": "",
+                },
+                created_by=operator_id,
+            )
+        )
+        _, _, refreshed_file_import_service = self._build_file_import_services_from_durable_state()
+        refreshed_session = refreshed_file_import_service.get_session(replay_session.id)
+        refreshed_files = [item for item in refreshed_session.files if item.id in set(replay_file_ids)]
+        return {
+            "source_session_id": source_session_id,
+            "replay_session_id": replay_session.id,
+            "replay_file_ids": replay_file_ids,
+            "result": dict(result or {}),
+            "audit_summary": {
+                "file_count": len(refreshed_files),
+                "row_count": sum(item.row_count for item in refreshed_files),
+                "created_count": sum(item.success_count for item in refreshed_files),
+                "updated_count": sum(item.updated_count for item in refreshed_files),
+                "duplicate_count": sum(item.duplicate_count for item in refreshed_files),
+                "suspected_duplicate_count": sum(
+                    item.suspected_duplicate_count for item in refreshed_files
+                ),
+                "error_count": sum(item.error_count for item in refreshed_files),
+            },
+        }
+
     def _build_processors_from_durable_state(self) -> dict[str, Callable[[Any], dict[str, object]]]:
         state_store, import_service, file_import_service = self._build_file_import_services_from_durable_state()
 

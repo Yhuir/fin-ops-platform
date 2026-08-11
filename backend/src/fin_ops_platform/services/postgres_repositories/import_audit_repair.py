@@ -314,7 +314,9 @@ select coalesce(file.legacy_mongo_id, file.id::text) as file_id,
                file.raw_payload->>'preview_batch_id'
            )
              and bank_transaction.status <> 'deleted'
-       ) as canonical_bank_transaction_count
+       ) as canonical_bank_transaction_count,
+       coalesce(row_audit.issue_count, 0) + coalesce(owner_audit.issue_count, 0)
+           as canonical_audit_issue_count
 from app.import_files file
 left join app.import_batches batch
   on coalesce(batch.legacy_mongo_id, batch.id::text) = coalesce(
@@ -323,6 +325,117 @@ left join app.import_batches batch
       file.raw_payload->'normalized_payload'->>'preview_batch_id',
       file.raw_payload->>'preview_batch_id'
   )
+left join lateral (
+    select count(*) filter (
+        where (
+            rows.decision in ('created', 'duplicate_skipped')
+            and (
+                rows.linked_object_type <> 'bank_transaction'
+                or bank_transaction.id is null
+                or nullif(trim(rows.account_no), '') is distinct from nullif(trim(bank_transaction.account_no), '')
+                or date_trunc('second', rows.trade_time) is distinct from date_trunc('second', bank_transaction.trade_time)
+                or nullif(trim(rows.direction), '') is distinct from nullif(trim(bank_transaction.txn_direction), '')
+                or rows.amount is distinct from bank_transaction.amount
+                or nullif(trim(rows.counterparty_name), '')
+                    is distinct from nullif(trim(bank_transaction.counterparty_name_raw), '')
+                or not (
+                    (
+                        nullif(trim(rows.source_unique_key), '')
+                            is not distinct from nullif(trim(bank_transaction.source_unique_key), '')
+                        and nullif(trim(rows.data_fingerprint), '')
+                            is not distinct from nullif(trim(bank_transaction.data_fingerprint), '')
+                    )
+                    or (
+                        nullif(trim(rows.data_fingerprint), '') is not null
+                        and rows.data_fingerprint = bank_transaction.data_fingerprint
+                        and array_remove(
+                            array[
+                                upper(regexp_replace(coalesce(
+                                    rows.raw_payload->'normalized_payload'->'normalized_row'->>'account_detail_no',
+                                    rows.raw_payload->'normalized_payload'->>'account_detail_no',
+                                    ''
+                                ), '\\s+', '', 'g')),
+                                upper(regexp_replace(coalesce(
+                                    rows.raw_payload->'normalized_payload'->'normalized_row'->>'bank_serial_no',
+                                    rows.raw_payload->'normalized_payload'->>'bank_serial_no',
+                                    ''
+                                ), '\\s+', '', 'g')),
+                                upper(regexp_replace(coalesce(
+                                    rows.raw_payload->'normalized_payload'->'normalized_row'->>'enterprise_serial_no',
+                                    rows.raw_payload->'normalized_payload'->>'enterprise_serial_no',
+                                    ''
+                                ), '\\s+', '', 'g'))
+                            ]::text[],
+                            ''
+                        ) && array_remove(
+                            array[
+                                upper(regexp_replace(coalesce(
+                                    bank_transaction.raw_payload->'normalized_payload'->>'account_detail_no',
+                                    bank_transaction.raw_payload->>'account_detail_no',
+                                    ''
+                                ), '\\s+', '', 'g')),
+                                upper(regexp_replace(coalesce(
+                                    bank_transaction.bank_serial_no,
+                                    bank_transaction.raw_payload->'normalized_payload'->>'bank_serial_no',
+                                    bank_transaction.raw_payload->>'bank_serial_no',
+                                    ''
+                                ), '\\s+', '', 'g')),
+                                upper(regexp_replace(coalesce(
+                                    bank_transaction.raw_payload->'normalized_payload'->>'enterprise_serial_no',
+                                    bank_transaction.raw_payload->>'enterprise_serial_no',
+                                    ''
+                                ), '\\s+', '', 'g'))
+                            ]::text[],
+                            ''
+                        )
+                    )
+                    or (
+                        nullif(trim(rows.data_fingerprint), '') is null
+                        and coalesce(rows.source_unique_key, '') like 'bank:%'
+                        and rows.source_unique_key = bank_transaction.data_fingerprint
+                        and (
+                            nullif(trim(bank_transaction.source_unique_key), '') is null
+                            or bank_transaction.source_unique_key like 'bank-v2:%'
+                            or bank_transaction.source_unique_key like 'bank-v3:%'
+                        )
+                    )
+                )
+                or (
+                    rows.decision = 'created'
+                    and bank_transaction.legacy_source_batch_id
+                        is distinct from coalesce(batch.legacy_mongo_id, batch.id::text)
+                )
+            )
+        )
+        or (
+            rows.decision not in ('created', 'duplicate_skipped')
+            and (
+                nullif(trim(rows.linked_object_type), '') is not null
+                or nullif(trim(rows.linked_object_id), '') is not null
+            )
+        )
+    )::bigint as issue_count
+    from app.import_batch_rows rows
+    left join app.bank_transactions bank_transaction
+      on coalesce(bank_transaction.legacy_mongo_id, bank_transaction.id::text) = rows.linked_object_id
+     and bank_transaction.status <> 'deleted'
+    where rows.import_batch_id = batch.id
+) row_audit on true
+left join lateral (
+    select count(*) filter (where owned.created_row_count <> 1)::bigint as issue_count
+    from (
+        select bank_transaction.id,
+               count(rows.id) filter (where rows.decision = 'created')::bigint as created_row_count
+        from app.bank_transactions bank_transaction
+        left join app.import_batch_rows rows
+          on rows.import_batch_id = batch.id
+         and rows.linked_object_type = 'bank_transaction'
+         and rows.linked_object_id = coalesce(bank_transaction.legacy_mongo_id, bank_transaction.id::text)
+        where bank_transaction.legacy_source_batch_id = coalesce(batch.legacy_mongo_id, batch.id::text)
+          and bank_transaction.status <> 'deleted'
+        group by bank_transaction.id
+    ) owned
+) owner_audit on true
 where coalesce(file.legacy_mongo_id, file.id::text) = any(%s)
 order by file_id
 """

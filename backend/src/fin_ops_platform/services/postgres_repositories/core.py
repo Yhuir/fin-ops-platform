@@ -406,6 +406,66 @@ class PostgresCoreRepository:
         )
         return self._transaction_from_row(row) if row else None
 
+    def find_bank_transactions_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[BankTransaction]:
+        source_unique_key = self._text(canonical_key)
+        data_fingerprint = self._text(suspected_key)
+        if not source_unique_key and not data_fingerprint:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            where source_unique_key = %s or data_fingerprint = %s
+            order by created_at, id
+            """,
+            (source_unique_key, data_fingerprint),
+        )
+        return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
+
+    def find_bank_transactions_by_identity_keys(
+        self,
+        *,
+        canonical_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+        suspected_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+    ) -> list[BankTransaction]:
+        normalized_canonical_keys = self._unique_texts(canonical_keys or [])
+        normalized_suspected_keys = self._unique_texts(suspected_keys or [])
+        clauses: list[str] = []
+        params: list[Any] = []
+        if normalized_canonical_keys:
+            clauses.append("source_unique_key = any(%s::text[])")
+            params.append(normalized_canonical_keys)
+        if normalized_suspected_keys:
+            clauses.append("data_fingerprint = any(%s::text[])")
+            params.append(normalized_suspected_keys)
+        if not clauses:
+            return []
+        rows = self._connection.fetch_all(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            where {" or ".join(clauses)}
+            order by created_at, id
+            """,
+            tuple(params),
+        )
+        return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         normalized_key = self._text(canonical_key)
         if not normalized_key:
@@ -1529,6 +1589,10 @@ class PostgresCoreRepository:
             amount=Decimal(str(payload.get("amount") or row.get("amount") or "0")),
             signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
             bank_serial_no=self._text(payload.get("bank_serial_no") or row.get("bank_serial_no")),
+            account_detail_no=self._text(payload.get("account_detail_no") or row.get("account_detail_no")),
+            enterprise_serial_no=self._text(payload.get("enterprise_serial_no") or row.get("enterprise_serial_no")),
+            voucher_kind=self._text(payload.get("voucher_kind") or row.get("voucher_kind")),
+            voucher_no=self._text(payload.get("voucher_no") or row.get("voucher_no")),
             source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
             data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
             written_off_amount=Decimal(str(payload.get("written_off_amount") or row.get("written_off_amount") or "0")),

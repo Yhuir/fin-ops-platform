@@ -566,6 +566,11 @@ sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --recover-import-job-id <job-id> --recover-event-id <event-id> \
   --recover-background-job-id <background-job-id> --recover-session-id <session-id> \
   --recover-file-id <file-id> [--recover-file-id <file-id> ...]
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
+  --dry-run --repair-bank-source <session-id>=<file-id>[,<file-id>...] \
+  [--repair-bank-source <session-id>=<file-id>[,<file-id>...] ...] \
+  --expected-bank-target-count <n> --expected-bank-protected-count <n> \
+  --expected-bank-replay-create-count <n> --operator-id <operator>
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
@@ -583,6 +588,12 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 为零的请求；候选 processor 完成并验证 batch/file/job 后才 resolve 原 dead letter，失败时保留原证据。
 只知道失败 import job id 时，可先运行只读 `--discover-recover-import-job-id`；它只在唯一 dead letter、
 payload 中完整 background job/session/file 坐标且全部预检通过时输出完整 target，不执行写入。
+银行 identity v3 恢复模式必须在 dry-run/execute 中重复提供完整 source session/file、目标/保护 cohort
+数量、预期重放新增数和 operator。dry-run 验证归档文件 SHA-256、cohort 精确不相交、业务指纹与官方
+参考号唯一匹配、零核销及 OA/发票/标签/批次/关联关系零引用；execute 只把这些错误 created 行改为
+引用原 canonical 的 duplicate、同步 batch/file 审计并删除错误副本，然后通过正式 preview/confirm processor
+创建新恢复审计会话。任何关系、歧义、计数、owner、hash 或 fingerprint 漂移都在删除前失败；执行前必须
+先创建动作绑定的生产恢复点，执行后相同源文件再次受控重放必须新增 0。
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为

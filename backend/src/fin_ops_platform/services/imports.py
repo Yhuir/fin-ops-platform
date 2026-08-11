@@ -119,6 +119,17 @@ class _ImportObjectIdentityRepository:
             data_fingerprint=suspected_key,
         )
 
+    def find_bank_transactions_by_identity(
+        self,
+        *,
+        canonical_key: str | None = None,
+        suspected_key: str | None = None,
+    ) -> list[BankTransaction]:
+        return self._import_service._find_transactions_by_identity(
+            source_unique_key=canonical_key,
+            data_fingerprint=suspected_key,
+        )
+
     def canonical_invoice_key_exists(self, canonical_key: str) -> bool:
         return self.find_invoice_by_identity(canonical_key=canonical_key) is not None
 
@@ -156,6 +167,7 @@ class ImportNormalizationService:
         self._invoice_identity_cache: dict[tuple[str, str], Invoice] | None = None
         self._transaction_unique_index: dict[str, str] = {}
         self._transaction_fingerprint_index: dict[str, str] = {}
+        self._transaction_identity_cache: dict[tuple[str, str], list[BankTransaction]] | None = None
 
         for invoice in existing_invoices or []:
             self._register_invoice(invoice)
@@ -284,15 +296,23 @@ class ImportNormalizationService:
                     normalized_rows.append(normalized)
                     row_results.append(row_result)
         else:
-            for index, raw_row in enumerate(rows, start=1):
-                normalized, row_result = self._preview_transaction_row(
-                    batch_id=batch_id,
-                    row_no=index,
-                    raw_row=raw_row,
-                )
-
-                normalized_rows.append(normalized)
-                row_results.append(row_result)
+            prepared_rows = [
+                (index, raw_row, *self._normalize_transaction_row(raw_row))
+                for index, raw_row in enumerate(rows, start=1)
+            ]
+            with self._transaction_identity_cache_for(
+                [normalized for _, _, normalized, _errors in prepared_rows]
+            ):
+                for index, raw_row, normalized, errors in prepared_rows:
+                    row_result = self._preview_transaction_row_from_normalized(
+                        batch_id=batch_id,
+                        row_no=index,
+                        raw_row=raw_row,
+                        normalized=normalized,
+                        errors=errors,
+                    )
+                    normalized_rows.append(normalized)
+                    row_results.append(row_result)
 
         batch = ImportedBatch(
             id=batch_id,
@@ -329,25 +349,32 @@ class ImportNormalizationService:
             "counterparty_counter": self._counterparty_counter,
         }
         try:
-            with self._invoice_identity_cache_for(preview.normalized_rows, enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE)):
-                for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
-                    if (
-                        preview.batch.batch_type == BatchType.BANK_TRANSACTION
-                        and row_result.decision == ImportDecision.SUSPECTED_DUPLICATE
-                    ):
-                        row_result.decision = ImportDecision.CREATED
-                        row_result.decision_reason = "User confirmed a bank transaction with only a weak fingerprint match."
-                        row_result.linked_object_type = None
-                        row_result.linked_object_id = None
-                        self._persist_created_row(preview.batch.batch_type, row_result, normalized)
-                        continue
-                    self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
-                    if row_result.decision == ImportDecision.CREATED:
-                        self._persist_created_row(preview.batch.batch_type, row_result, normalized)
-                    elif row_result.decision == ImportDecision.STATUS_UPDATED:
-                        self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
-                    elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
-                        self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
+            with self._invoice_identity_cache_for(
+                preview.normalized_rows,
+                enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE),
+            ):
+                with self._transaction_identity_cache_for(
+                    preview.normalized_rows,
+                    enabled=preview.batch.batch_type == BatchType.BANK_TRANSACTION,
+                ):
+                    for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
+                        if (
+                            preview.batch.batch_type == BatchType.BANK_TRANSACTION
+                            and row_result.decision == ImportDecision.SUSPECTED_DUPLICATE
+                        ):
+                            row_result.decision = ImportDecision.CREATED
+                            row_result.decision_reason = "User confirmed a bank transaction with only a weak fingerprint match."
+                            row_result.linked_object_type = None
+                            row_result.linked_object_id = None
+                            self._persist_created_row(preview.batch.batch_type, row_result, normalized)
+                            continue
+                        self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
+                        if row_result.decision == ImportDecision.CREATED:
+                            self._persist_created_row(preview.batch.batch_type, row_result, normalized)
+                        elif row_result.decision == ImportDecision.STATUS_UPDATED:
+                            self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
+                        elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+                            self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
 
             preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
             preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
@@ -756,6 +783,12 @@ class ImportNormalizationService:
             return self._transactions_by_id[self._transaction_unique_index[source_unique_key]]
         if data_fingerprint and data_fingerprint in self._transaction_fingerprint_index:
             return self._transactions_by_id[self._transaction_fingerprint_index[data_fingerprint]]
+        cached = self._find_cached_transaction_identities(
+            source_unique_key=source_unique_key,
+            data_fingerprint=data_fingerprint,
+        )
+        if self._transaction_identity_cache is not None:
+            return cached[0] if cached else None
         identity_finder = getattr(self._fact_repository, "find_bank_transaction_by_identity", None)
         if callable(identity_finder):
             transaction = identity_finder(
@@ -768,6 +801,134 @@ class ImportNormalizationService:
             return None
         transaction = finder(source_unique_key=str(source_unique_key))
         return transaction if isinstance(transaction, BankTransaction) else None
+
+    def _find_transactions_by_identity(
+        self,
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None,
+    ) -> list[BankTransaction]:
+        matches: list[BankTransaction] = []
+        seen_ids: set[str] = set()
+
+        def add(transaction: BankTransaction | None) -> None:
+            if transaction is None or transaction.id in seen_ids:
+                return
+            seen_ids.add(transaction.id)
+            matches.append(transaction)
+
+        for transaction in self._transactions_by_id.values():
+            if source_unique_key and str(transaction.source_unique_key or "") == str(source_unique_key):
+                add(transaction)
+            elif data_fingerprint and str(transaction.data_fingerprint or "") == str(data_fingerprint):
+                add(transaction)
+
+        if self._transaction_identity_cache is not None:
+            for transaction in self._find_cached_transaction_identities(
+                source_unique_key=source_unique_key,
+                data_fingerprint=data_fingerprint,
+            ):
+                add(transaction)
+            return matches
+
+        finder_many = getattr(self._fact_repository, "find_bank_transactions_by_identity", None)
+        if callable(finder_many):
+            for transaction in list(
+                finder_many(
+                    canonical_key=str(source_unique_key) if source_unique_key else None,
+                    suspected_key=str(data_fingerprint) if not source_unique_key and data_fingerprint else None,
+                )
+                or []
+            ):
+                if isinstance(transaction, BankTransaction):
+                    add(transaction)
+            return matches
+
+        add(
+            self._find_transaction_by_identity(
+                source_unique_key=source_unique_key,
+                data_fingerprint=data_fingerprint,
+            )
+        )
+        return matches
+
+    @contextmanager
+    def _transaction_identity_cache_for(
+        self,
+        normalized_rows: list[dict[str, Any]],
+        *,
+        enabled: bool = True,
+    ) -> Iterator[None]:
+        previous_cache = self._transaction_identity_cache
+        if not enabled:
+            yield
+            return
+        self._transaction_identity_cache = self._build_transaction_identity_cache(normalized_rows)
+        try:
+            yield
+        finally:
+            self._transaction_identity_cache = previous_cache
+
+    def _build_transaction_identity_cache(
+        self,
+        normalized_rows: list[dict[str, Any]],
+    ) -> dict[tuple[str, str], list[BankTransaction]]:
+        canonical_keys = sorted(
+            {
+                str(row.get("source_unique_key") or "").strip()
+                for row in normalized_rows
+                if str(row.get("source_unique_key") or "").strip()
+            }
+        )
+        suspected_keys = sorted(
+            {
+                str(row.get("data_fingerprint") or "").strip()
+                for row in normalized_rows
+                if str(row.get("data_fingerprint") or "").strip()
+            }
+        )
+        cache: dict[tuple[str, str], list[BankTransaction]] = {}
+        finder_many = getattr(self._fact_repository, "find_bank_transactions_by_identity_keys", None)
+        if callable(finder_many) and (canonical_keys or suspected_keys):
+            for transaction in list(
+                finder_many(canonical_keys=canonical_keys, suspected_keys=suspected_keys) or []
+            ):
+                if isinstance(transaction, BankTransaction):
+                    self._add_transaction_to_identity_cache(cache, transaction)
+        for transaction in self._transactions_by_id.values():
+            self._add_transaction_to_identity_cache(cache, transaction)
+        return cache
+
+    @staticmethod
+    def _add_transaction_to_identity_cache(
+        cache: dict[tuple[str, str], list[BankTransaction]],
+        transaction: BankTransaction,
+    ) -> None:
+        for key_type, value in (
+            ("canonical", getattr(transaction, "source_unique_key", None)),
+            ("suspected", getattr(transaction, "data_fingerprint", None)),
+        ):
+            text = str(value or "").strip()
+            if not text:
+                continue
+            matches = cache.setdefault((key_type, text), [])
+            if all(existing.id != transaction.id for existing in matches):
+                matches.append(transaction)
+
+    def _find_cached_transaction_identities(
+        self,
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None,
+    ) -> list[BankTransaction]:
+        cache = self._transaction_identity_cache
+        if cache is None:
+            return []
+        if source_unique_key:
+            return list(cache.get(("canonical", str(source_unique_key)), []))
+        if data_fingerprint:
+            return list(cache.get(("suspected", str(data_fingerprint)), []))
+        return []
 
     def _ensure_invoice_loaded(self, invoice_id: str | None) -> Invoice | None:
         normalized_invoice_id = str(invoice_id or "").strip()
@@ -1025,6 +1186,19 @@ class ImportNormalizationService:
         row_no: int,
         raw_row: dict[str, Any],
     ) -> tuple[dict[str, Any], ImportedBatchRowResult]:
+        normalized, errors = self._normalize_transaction_row(raw_row)
+        return normalized, self._preview_transaction_row_from_normalized(
+            batch_id=batch_id,
+            row_no=row_no,
+            raw_row=raw_row,
+            normalized=normalized,
+            errors=errors,
+        )
+
+    def _normalize_transaction_row(
+        self,
+        raw_row: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[str]]:
         normalized_name = normalize_name(raw_row.get("counterparty_name", ""))
         normalized: dict[str, Any] = {
             "account_no": self._string_or_none(raw_row.get("account_no")),
@@ -1098,10 +1272,24 @@ class ImportNormalizationService:
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
 
+        return normalized, errors
+
+    def _preview_transaction_row_from_normalized(
+        self,
+        *,
+        batch_id: str,
+        row_no: int,
+        raw_row: dict[str, Any],
+        normalized: dict[str, Any],
+        errors: list[str],
+    ) -> ImportedBatchRowResult:
+        identity = self._object_identity_policy.identify_bank_transaction_mapping(normalized)
+        source_unique_key = identity.canonical_key
+        data_fingerprint = identity.suspected_key
         row_display_fields = self._transaction_row_result_display_fields(normalized, identity)
 
         if errors:
-            return normalized, ImportedBatchRowResult(
+            return ImportedBatchRowResult(
                 id=self._row_id(batch_id, row_no),
                 batch_id=batch_id,
                 row_no=row_no,
@@ -1119,7 +1307,7 @@ class ImportNormalizationService:
         decision = ImportDecision(dedup_decision.decision)
         reason = dedup_decision.decision_reason
 
-        return normalized, ImportedBatchRowResult(
+        return ImportedBatchRowResult(
             id=self._row_id(batch_id, row_no),
             batch_id=batch_id,
             row_no=row_no,
@@ -1292,6 +1480,8 @@ class ImportNormalizationService:
             self._transaction_unique_index[transaction.source_unique_key] = transaction.id
         if transaction.data_fingerprint:
             self._transaction_fingerprint_index[transaction.data_fingerprint] = transaction.id
+        if self._transaction_identity_cache is not None:
+            self._add_transaction_to_identity_cache(self._transaction_identity_cache, transaction)
 
     def _remove_invoice(self, invoice_id: str) -> None:
         invoice = self._invoices_by_id.pop(invoice_id, None)
@@ -1310,6 +1500,13 @@ class ImportNormalizationService:
             self._transaction_unique_index.pop(transaction.source_unique_key, None)
         if transaction.data_fingerprint:
             self._transaction_fingerprint_index.pop(transaction.data_fingerprint, None)
+        if self._transaction_identity_cache is not None:
+            for key, matches in list(self._transaction_identity_cache.items()):
+                retained = [existing for existing in matches if existing.id != transaction_id]
+                if retained:
+                    self._transaction_identity_cache[key] = retained
+                else:
+                    self._transaction_identity_cache.pop(key, None)
 
     def _get_or_create_counterparty(self, raw_name: str, *, existing: Counterparty | None = None) -> Counterparty:
         normalized_name = normalize_name(raw_name if existing is None else existing.name)

@@ -46,7 +46,7 @@
 | Settings data-reset restore point | operator | `settings-data-reset-restore-point <release> <run-id> <action> <operator>` 复用上述 custom dump；备份前后必须重算同一 action 的目标成员/行版本 fingerprint，并以 migrator transaction 写短时一次性 receipt 与 audit。任一数据漂移、checksum/size/manifest 异常或 receipt 登记失败均 fail closed。 |
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
 | Request traceback lookup | API `requestId` | 同一严格 ID 和两小时时间窗；从异常摘要开始最多返回 64 行，并在 traceback 终止异常行停止；不包含 locals，不开放任意 journal 参数 |
-| Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id` |
+| Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id`；银行恢复必须显式绑定全部 source session/file、cohort counts、预期新增数和 operator |
 | Workbench unavailable OA relation repair | `finops-deploy-control workbench-requirement-repair <release> --dry-run/--execute --expected-fingerprint` | 复用固定 Workbench relation repair 控制入口；dry-run 为每个失效 OA relation 输出包含 case 的独立 fingerprint，execute 只接受其中一个 fingerprint 并重验该单 case，只调用正式 relation command/persist adapter |
 | OA 附件发票恢复 | `finops-deploy-control workbench-rehydrate <release> --promote-oa-attachment-invoices` | 复用生产已批准的 exact-release 固定维护脚本；dry-run 返回候选 SHA-256 fingerprint，apply 必须同时携带该 fingerprint 和显式确认参数；不得开放任意 SQL/shell |
 
@@ -122,7 +122,7 @@
 
 - `read-model-refresh` 只调用 `runtime_queue_ops enqueue-read-model-refresh`，由 scope policy 和 `ReadModelRefreshGateway` 写 durable queue；必须显式 dry-run 或 execute。
 - `settings-normalize` 只调用 canonical settings normalizer/repository tool。
-- `import-audit-repair` 只允许写 `app.import_batch_rows`、`app.invoices`、显式目标的 `app.import_batches` / `app.import_files` 生命周期字段，以及显式 session id 对应的 `app.etc_import_sessions.audit_contract_revision`：dry-run 使用 repeatable-read read-only snapshot；execute 使用 serializable transaction、advisory lock、expected fingerprint 和 owner/precondition guard，并输出 rollback manifest。生命周期修复还必须由唯一 succeeded job、注册行计数、canonical invoice owner 与 `manual_invoice_import` source-link 闭环共同证明；被旧 preview 清空的 row link 只允许按 batch + source identity 一对一恢复，并以单条 bulk SQL 更新。ETC session 归档只接受 canonical/payload 均为 `deleted` 的 task、稳定 session、零活动 job/outbox，并仅写明确的 `deleted-task-retired` revision；不删除会话或附件证据。候选银行导入死信恢复是唯一额外模式：read-only discovery 只从明确 import job 推导唯一 target，执行必须显式提供 import job/event/background job/session/全部 file id，证明 untouched preview 与零 canonical 写入，复用候选 import processor 完成业务后才 resolve 该精确 dead letter；它不扫描其它失败任务。helper 不接受 SQL、通配目标或任意 module 名。
+- `import-audit-repair` 只允许写登记模式内的显式事实。常规模式为 import row、invoice、目标 batch/file 生命周期和明确 ETC session revision；银行 identity v3 恢复模式还可修正目标导入审计、删除已证明零关系的错误 `app.bank_transactions` 副本，并由正式 import processor 创建新的恢复 session/batch/row/canonical facts。所有模式 dry-run 使用 repeatable-read read-only snapshot；execute 使用 serializable transaction、advisory lock、expected fingerprint 和 owner/precondition guard。银行恢复必须校验源文件 hash、cohort 数量/不相交、唯一官方参考号证据、关系零引用和预期重放新增数；它不扫描其它任务、不迁移关系、不修改保护 cohort。生命周期、ETC 和失败死信模式的原约束保持不变。helper 不接受 SQL、通配目标或任意 module 名。
 - `runtime-queue-resolve-covered` 只处理已有 exact-scope fresh/done 覆盖证明的 dead letter，不开放通用 SQL 或任意 queue mutation。
 - `write-operation-e2e-smoke --apply-stdin` 只把两行 stdin 注入固定 relation runner：Admin Token 与 approval ticket；
   缺任一输入都在 mutation 前失败，不依赖 root-owned env 已同步才能保留审批闸门。固定标准 scenario

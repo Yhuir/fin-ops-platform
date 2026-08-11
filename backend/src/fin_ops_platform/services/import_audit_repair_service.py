@@ -322,6 +322,7 @@ def _verify_failed_import_job_recovery_completion(
             or _text(file_row.get("batch_status")) != "completed"
             or int(file_row.get("error_count") or 0) != 0
             or file_canonical_count != expected_canonical_count
+            or int(file_row.get("canonical_audit_issue_count") or 0) != 0
         ):
             raise RuntimeError(f"Recovered import file {_text(file_row.get('file_id'))} is incomplete.")
         canonical_count += file_canonical_count
@@ -332,6 +333,7 @@ def _verify_failed_import_job_recovery_completion(
         "session_status": "confirmed",
         "confirmed_file_count": len(files),
         "canonical_bank_transaction_count": canonical_count,
+        "canonical_audit_issue_count": 0,
     }
 
 

@@ -35,7 +35,7 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
         )
 
         self.assertNotEqual(first.identity_key, second.identity_key)
-        self.assertEqual(first.identity_key, "bank-v2:62220001:bank_serial_no:SERIAL-001")
+        self.assertTrue(first.identity_key.startswith("bank-v3:62220001:bank_serial_no:SERIAL-001:"))
         self.assertEqual(first.suspected_key, second.suspected_key)
         self.assertEqual(first.suspected_key, "bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme supplies")
         self.assertEqual(first.audit_fields["bank_serial_no"], "SERIAL-001")
@@ -81,7 +81,7 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
         self.assertNotEqual(identity.suspected_key, amount.suspected_key)
         self.assertNotEqual(identity.suspected_key, counterparty.suspected_key)
 
-    def test_same_official_serial_is_same_identity_even_when_business_fields_differ(self) -> None:
+    def test_same_official_serial_keeps_distinct_business_transactions(self) -> None:
         first = self.service.identity_for_mapping(
             {
                 "account_no": "62220001",
@@ -103,7 +103,7 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(first.identity_key, second.identity_key)
+        self.assertNotEqual(first.identity_key, second.identity_key)
         self.assertNotEqual(first.suspected_key, second.suspected_key)
 
     def test_bank_transaction_model_is_supported(self) -> None:
@@ -120,7 +120,7 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
 
         identity = self.service.identity_for_transaction(transaction)
 
-        self.assertEqual(identity.identity_key, "bank-v2:62220001:bank_serial_no:SERIAL-001")
+        self.assertTrue(identity.identity_key.startswith("bank-v3:62220001:bank_serial_no:SERIAL-001:"))
         self.assertEqual(identity.suspected_key, "bank:62220001:2026-03-23 09:15:01:outflow:88.00:acme supplies")
 
     def test_date_only_time_does_not_generate_identity(self) -> None:

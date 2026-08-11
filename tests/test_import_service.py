@@ -93,6 +93,38 @@ class BulkBankTransactionRepository:
         return [transaction for transaction in self.transactions if transaction.id in requested]
 
 
+class BulkBankIdentityRepository:
+    def __init__(self, transactions: list[BankTransaction]) -> None:
+        self.transactions = list(transactions)
+        self.bulk_calls = 0
+        self.single_calls = 0
+        self.many_calls = 0
+
+    def find_bank_transactions_by_identity_keys(
+        self,
+        *,
+        canonical_keys: list[str],
+        suspected_keys: list[str],
+    ) -> list[BankTransaction]:
+        self.bulk_calls += 1
+        canonical_set = set(canonical_keys)
+        suspected_set = set(suspected_keys)
+        return [
+            transaction
+            for transaction in self.transactions
+            if (transaction.source_unique_key and transaction.source_unique_key in canonical_set)
+            or (transaction.data_fingerprint and transaction.data_fingerprint in suspected_set)
+        ]
+
+    def find_bank_transaction_by_identity(self, **_kwargs: object) -> BankTransaction | None:
+        self.single_calls += 1
+        return None
+
+    def find_bank_transactions_by_identity(self, **_kwargs: object) -> list[BankTransaction]:
+        self.many_calls += 1
+        return []
+
+
 class ImportNormalizationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.counterparty = Counterparty(
@@ -507,16 +539,17 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
-        self.assertEqual(
-            preview.normalized_rows[0]["source_unique_key"],
-            "bank-v2:62229999:bank_serial_no:SERIAL-001",
+        self.assertTrue(
+            preview.normalized_rows[0]["source_unique_key"].startswith(
+                "bank-v3:62229999:bank_serial_no:SERIAL-001:"
+            )
         )
         self.assertEqual(
             preview.normalized_rows[0]["data_fingerprint"],
             "bank:62229999:2026-03-24 10:00:00:outflow:50.00:vendor a",
         )
 
-    def test_bank_transaction_same_official_serial_is_duplicate(self) -> None:
+    def test_bank_transaction_same_official_serial_with_different_amount_is_created(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-serial-not-key-demo.json",
@@ -534,7 +567,113 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
+
+    def test_bank_transaction_new_identity_version_falls_back_to_exact_fingerprint(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-legacy-identity-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "88.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-001",
+                },
+            ],
+        )
+
         self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(preview.row_results[0].linked_object_id, self.existing_transaction.id)
+
+    def test_bank_transaction_preview_and_confirm_use_one_bulk_identity_read_each(self) -> None:
+        repository = BulkBankIdentityRepository([self.existing_transaction])
+        service = ImportNormalizationService(fact_repository=repository)
+        preview = service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-bulk-identity-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "88.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-001",
+                }
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(repository.bulk_calls, 1)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
+
+        service.confirm_import(preview.batch.id)
+
+        self.assertEqual(repository.bulk_calls, 2)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
+
+    def test_bank_transaction_confirm_cache_detects_duplicate_created_earlier_in_same_batch(self) -> None:
+        repository = BulkBankIdentityRepository([])
+        service = ImportNormalizationService(fact_repository=repository)
+        raw_row = {
+            "account_no": "62229999",
+            "txn_date": "2026-03-24",
+            "trade_time": "2026-03-24 10:00:00",
+            "counterparty_name": "Vendor A",
+            "debit_amount": "50.00",
+            "credit_amount": "",
+            "bank_serial_no": "SERIAL-NEW-001",
+        }
+        preview = service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-same-batch-dedup-demo.json",
+            imported_by="user_finance_01",
+            rows=[dict(raw_row), dict(raw_row)],
+        )
+
+        self.assertEqual(
+            [row.decision for row in preview.row_results],
+            [ImportDecision.CREATED, ImportDecision.CREATED],
+        )
+        service.confirm_import(preview.batch.id)
+
+        self.assertEqual(
+            [row.decision for row in preview.row_results],
+            [ImportDecision.CREATED, ImportDecision.DUPLICATE_SKIPPED],
+        )
+        self.assertEqual(len(service.list_transactions()), 1)
+        self.assertEqual(repository.bulk_calls, 2)
+        self.assertEqual(repository.single_calls, 0)
+        self.assertEqual(repository.many_calls, 0)
+
+    def test_bank_transaction_exact_fingerprint_with_different_official_reference_is_created(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-distinct-reference-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "88.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-002",
+                },
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
 
     def test_bank_transaction_official_reference_is_stable_without_second_level_time(self) -> None:
         preview = self.service.preview_import(
