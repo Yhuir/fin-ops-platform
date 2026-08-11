@@ -294,6 +294,13 @@
 
 - 发布门禁暴露出三项同源问题：受控重放创建新 file 行时沿用了来源 `stored_file_path` 却没有登记新 `file_object_id`；page Audit 把已证明的 statement-position 引用误当成 source key 漂移；历史正式 row 决策修正后，file/session audit 计数没有同步重算。
 - 正式重放继续复用共享 file/session preview-confirm service，但每个 replay file 先通过现有 `_store_upload_file` 写入并登记独立对象，再进入 parser；没有新增重放专用存储或 fallback。
-- Audit 只对登记的三类受控 reason开放 statement-position 等价，且复用 `BankTransactionIdentityService`，要求账户、交易时间、方向、金额、余额、币种完整相等；其余字段比较、created owner、batch owner 和 queue 门禁不放宽。
+- Audit 只对登记的三类受控 reason 开放 statement-position 等价，且复用 `BankTransactionIdentityService`；普通合同要求账户、交易时间、方向、金额、余额、币种完整相等，历史双方币种同时缺失的受控审计规则见下节。其余字段比较、created owner、batch owner 和 queue 门禁不放宽。
 - 一次性修复拆成纯 plan 与 PostgreSQL CAS repository：dry-run 必须给出精确 link/update 数和 fingerprint；execute 使用 serializable transaction、advisory lock、correction actor/reason 与 operation audit。对象 URI 多义、hash/size/lifecycle 不完整、计数或 payload 漂移均在写前/写中失败。
 - 旧污染链已移除：不再创建“有 file row、无 object link”的 replay 记录；不通过修改 canonical source key 或覆盖原上传证据来让旧 Audit 通过。
+
+## 2026-08-12 - 历史空币种受控重放 Audit 对齐
+
+- 候选发布门禁证明光大等历史 canonical 流水与新重放 row 的账户、秒级时间、方向、金额、余额一致，但双方历史币种字段均为空；普通 statement-position 合同因此正确拒绝，页面 Audit 却没有使用生产 repair 已冻结的“双方同为空”证据语义。
+- `BankTransactionIdentityService.statement_position_for_mapping` 默认仍要求币种；只有调用方显式声明 `allow_missing_currency=True` 时，双方缺失币种才以同一空值比较。银行导入 Page Audit 仅在三类已登记受控重放 reason 下使用该模式。
+- 账户、时间、方向、金额、余额任一缺失/不同，或币种单边缺失、显式值不同，仍然失败；普通导入、普通去重 identity、source key/fingerprint 和 stale gate 均不放宽。
+- 不新增 API、表、worker、read model、fallback 或第二条导入链；边界 I/O 只补充受控历史审计语义。

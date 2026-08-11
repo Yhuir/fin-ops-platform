@@ -155,12 +155,16 @@ class BankTransactionIdentityService:
     def statement_position_for_mapping(
         self,
         values: dict[str, Any],
+        *,
+        allow_missing_currency: bool = False,
     ) -> BankTransactionStatementPosition | None:
         """Return the complete statement position used for legacy canonical migration.
 
         A position is usable only when every field is present.  In particular,
         balance is mandatory so repeated bank fees at the same second are not
-        collapsed merely because their amount and description are equal.
+        collapsed merely because their amount and description are equal.  A
+        controlled legacy replay may explicitly compare two equally missing
+        currency values; normal import identity keeps requiring currency.
         """
 
         identity = self.identity_for_mapping(values)
@@ -170,7 +174,9 @@ class BankTransactionIdentityService:
         amount = identity.components.get("amount")
         balance = self._normalize_position_amount(values.get("balance"))
         currency = self._normalize_currency(values.get("currency"))
-        if not all((account_no, trade_time, direction, amount, balance, currency)):
+        if not all((account_no, trade_time, direction, amount, balance)):
+            return None
+        if currency is None and not allow_missing_currency:
             return None
         return (
             account_no,
@@ -178,7 +184,7 @@ class BankTransactionIdentityService:
             direction,
             amount,
             balance,
-            currency,
+            currency or "",
         )
 
     def statement_position_for_transaction(

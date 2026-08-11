@@ -609,10 +609,12 @@ def _controlled_replay_statement_position_matches(
         return False
     identity_service = BankTransactionIdentityService()
     row_position = identity_service.statement_position_for_mapping(
-        _bank_statement_mapping(row, direction_key="direction")
+        _bank_statement_mapping(row, direction_key="direction"),
+        allow_missing_currency=True,
     )
     transaction_position = identity_service.statement_position_for_mapping(
-        _bank_statement_mapping(transaction, direction_key="txn_direction")
+        _bank_statement_mapping(transaction, direction_key="txn_direction"),
+        allow_missing_currency=True,
     )
     return row_position is not None and row_position == transaction_position
 

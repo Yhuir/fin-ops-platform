@@ -169,6 +169,25 @@ class BankTransactionIdentityServiceTests(unittest.TestCase):
         self.assertTrue(str(first.identity_key).startswith("bank-v4:"))
         self.assertTrue(str(first.audit_fields["base_canonical_key"]).startswith("bank-v3:"))
 
+    def test_statement_position_requires_currency_unless_legacy_comparison_is_explicit(self) -> None:
+        values = {
+            "account_no": "62220001",
+            "trade_time": "2026-03-23 09:15:01",
+            "txn_direction": "outflow",
+            "amount": "88.00",
+            "counterparty_name": "Acme Supplies",
+            "balance": "1000.00",
+        }
+
+        self.assertIsNone(self.service.statement_position_for_mapping(values))
+        self.assertEqual(
+            self.service.statement_position_for_mapping(
+                values,
+                allow_missing_currency=True,
+            ),
+            ("62220001", "2026-03-23 09:15:01", "outflow", "88.00", "1000", ""),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
