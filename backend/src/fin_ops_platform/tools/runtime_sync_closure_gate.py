@@ -753,7 +753,7 @@ def _candidate_system_audit(
         steps=(),
         system_audit_path=write_operation_e2e_smoke.SYSTEM_AUDIT_PATH,
     )
-    return write_operation_e2e_smoke._collect_system_audit(
+    candidate_audit = write_operation_e2e_smoke._collect_system_audit(
         checkpoint,
         base_url="https://candidate-release.invalid",
         api_prefix="",
@@ -761,6 +761,14 @@ def _candidate_system_audit(
         timeout_seconds=timeout_seconds,
         request_fn=lambda *_args: response,
     )
+    if candidate_audit.get("status") != PASS:
+        candidate_audit["diagnostics"] = {
+            "overall_status": report.get("overall_status"),
+            "audit_status": report.get("audit_status"),
+            "summary": report.get("summary"),
+            "issues": list(report.get("issues") or [])[:10],
+        }
+    return candidate_audit
 
 
 def _write_operation_audit_check(

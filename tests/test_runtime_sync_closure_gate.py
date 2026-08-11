@@ -423,6 +423,40 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
         self.assertEqual(check.payload["error"], "system_audit_business_pages_failed")
         self.assertEqual(check.payload["system_audits"], [])
 
+    def test_candidate_system_audit_preserves_bounded_failure_diagnostics(self) -> None:
+        issues = [{"code": f"issue-{index}"} for index in range(12)]
+        report = {
+            "overall_status": "issues_found",
+            "audit_status": {"integrity": "issues_found"},
+            "summary": {"blocking_issue_sample_count": 12},
+            "issues": issues,
+        }
+        with patch.object(
+            gate.PostgresOperationsAuditRepository,
+            "audit_system",
+            return_value=report,
+        ), patch.object(
+            gate.write_operation_e2e_smoke,
+            "_collect_system_audit",
+            return_value={
+                "status": "fail",
+                "error": "system_audit_page_count_or_contract_failed",
+            },
+        ):
+            result = gate._candidate_system_audit(
+                object(),
+                tenant_id="default",
+                timeout_seconds=1,
+            )
+
+        self.assertEqual(result["status"], gate.FAIL)
+        self.assertEqual(result["diagnostics"]["overall_status"], "issues_found")
+        self.assertEqual(
+            result["diagnostics"]["summary"],
+            {"blocking_issue_sample_count": 12},
+        )
+        self.assertEqual(result["diagnostics"]["issues"], issues[:10])
+
 
 class RuntimeSyncClosureGateTests(unittest.TestCase):
     def setUp(self) -> None:
