@@ -3,6 +3,15 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-08-12 - 发票基础信息成为多 sheet canonical 事实源
+
+- 根因：共享 reader 按 worksheet 顺序返回第一个可解析模板；税务平台文件的 `信息汇总表` 排在 `发票基础信息` 之前，因而每张票的第一条商品明细曾被写成 canonical 表头金额，后续真正表头 sheet 从未读取。
+- 修复：文件 I/O 先定位唯一的 `发票基础信息`，一票一行生成 canonical facts；`信息汇总表` 只按强身份附着明细证据。表头重名、无有效票、模板畸形或明细身份错配 fail closed；没有表头 sheet 的历史单 sheet 文件继续走共享识别，不增加第二 parser 或隐藏 fallback。
+- 存量数据：受控 repair 只接受批准工作簿 SHA-256 与 11 个号码，保留 invoice ID、source link、关系和明细证据，修正金额/税额/价税合计并清除 canonical 首商品行字段。执行采用只读 dry-run、精确指纹、serializable advisory lock、CAS、审计、rollback manifest 和精确 2026-06 Workbench scope。
+- 性能：sheet 选择和明细索引均为单次有界扫描，复杂度 O(表头行+明细行)，没有逐票 DB 查询或全量 read model 刷新。
+- 测试：`tests/test_import_file_service.py` 覆盖权威表头、畸形表头 fail closed、明细身份错配；`tests/test_invoice_header_fact_repair_service.py` 覆盖 allowlist/hash/幂等/恢复；`tests/test_import_audit_repair_ops.py` 和 repository 测试覆盖 dry-run、CAS 和精确刷新。
+- 未测风险：自动化不依赖真实业务 Excel；发布前以用户文件只读解析核验 1,021 张表头/1,463 条明细，并在生产写入前确认只命中 11 张，写后验证幂等重放、页面/API/队列和性能。
+
 ## 2026-08-12 - 共享 preview stale 逐行 owner 门禁
 
 - 共享 file import stale gate 从仅比较汇总计数扩展为逐行比较 decision、linked object type 和 linked object id；即使 invoice duplicate/importable 总数不变，只要 canonical owner 改变也会拒绝确认并要求重新预览。

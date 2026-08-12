@@ -18,6 +18,10 @@ from fin_ops_platform.services.import_audit_repair_service import (
     execute_failed_import_job_recovery,
     public_repair_report,
 )
+from fin_ops_platform.services.invoice_header_fact_repair_service import (
+    INVOICE_HEADER_REPAIR_FACTS,
+    INVOICE_HEADER_REPAIR_SOURCE_SHA256,
+)
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     _FAILED_IMPORT_FILE_SQL,
     apply_import_audit_repair,
@@ -137,6 +141,23 @@ def _snapshot() -> dict[str, list[dict[str, object]]]:
             ),
         ],
     }
+
+
+def _invoice_header_repair_snapshot() -> list[dict[str, object]]:
+    return [
+        {
+            "invoice_id": f"invoice-{index}",
+            "invoice_type": "input_invoice",
+            "digital_invoice_no": fact["digital_invoice_no"],
+            "invoice_month": "2026-06",
+            "amount": "1.00",
+            "signed_amount": "1.00",
+            "tax_amount": "0.13",
+            "total_with_tax": "1.13",
+            "raw_payload": {"normalized_payload": {}},
+        }
+        for index, fact in enumerate(INVOICE_HEADER_REPAIR_FACTS, start=1)
+    ]
 
 
 def _lifecycle_snapshot(*, terminal: bool = False) -> dict[str, list[dict[str, object]]]:
@@ -1892,6 +1913,51 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         ):
             import_audit_repair_ops.main(["--execute", "--expected-fingerprint", "stale"])
 
+        apply_repair.assert_not_called()
+
+    def test_cli_invoice_header_repair_dry_run_is_read_only_and_exact(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_invoice_header_fact_repair_snapshot",
+                return_value=_invoice_header_repair_snapshot(),
+            ) as load_snapshot,
+            patch.object(
+                import_audit_repair_ops.PostgresCoreRepository,
+                "repair_invoice_header_facts",
+            ) as apply_repair,
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--repair-invoice-header-source-sha256",
+                    INVOICE_HEADER_REPAIR_SOURCE_SHA256,
+                    "--expected-invoice-header-repair-count",
+                    "11",
+                    "--operator-id",
+                    "YNSYLP007",
+                ],
+                stdout=output,
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(report["operation"], "invoice_header_fact_repair")
+        self.assertEqual(report["target_count"], 11)
+        self.assertEqual(report["update_count"], 11)
+        load_snapshot.assert_called_once()
         apply_repair.assert_not_called()
 
 

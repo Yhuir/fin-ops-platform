@@ -16,6 +16,7 @@
 
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
 - XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
+- 多 sheet 税务导出若存在唯一 `发票基础信息`，只从该 sheet 生成 canonical invoice facts；`信息汇总表` 仅提供同票明细证据。表头 sheet 重名、无有效行、模板不合法或明细强身份不能唯一归属时 fail closed，禁止回退到首个可解析 sheet。历史单 sheet 文件仍走共享模板识别。
 - 将导入结果转化为发票源事实与精确 affected scopes。
 - Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。
@@ -74,7 +75,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
 | Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；聚合既有 import facts/job，不新增表、队列或 read model。 |
-| Controlled repair | `services/import_audit_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明；放弃预览的 payload 修复只接受显式 reverted batch，并证明严格 file/session 已终结且无 job/canonical ownership |
+| Controlled repair | `services/import_audit_repair_service.py`、`services/invoice_header_fact_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；发票表头事实修复只接受批准的工作簿 SHA-256 和 11 张精确 allowlist，dry-run/execute 指纹绑定并保留 rollback manifest；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明；放弃预览的 payload 修复只接受显式 reverted batch，并证明严格 file/session 已终结且无 job/canonical ownership |
 | Worker/runtime | `runtime_worker_handlers.py` |
 | Tests | `tests/test_import*.py`、`tests/test_invoice_*.py`、`web/e2e/imports-invoices-flow.spec.ts` |
 
@@ -121,7 +122,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - 当前 revision 的新导入严格证明 file object/hash/session/batch/row/canonical invoice 与 source link；税率按语义归一化比较，例如 `1% == 0.01`。
 - revision 为 NULL 的 pre-contract 历史保留明确 warning，不伪造来源证据；canonical 发票、展示字段和 relation 完整性由对应业务页面 Audit 阻断证明。
 - 当前 revision 发票可能同时保留已登记 strict batch 与已存在 pre-contract invoice batch 的 `manual_invoice_import` source-link。严格双向 equality 只比较当前 revision batch/row 对应的边；已存在 legacy invoice batch 的边继续由 provenance warning 标记为未证明，不伪报 strict orphan。引用不存在的 batch 或非发票 batch 仍必须阻断。
-- 税局导出的一张发票可以包含多条商品/服务/折扣明细。preview 在同一文件内按数电票号或代码+号码聚合互不重复的明细金额、税额和价税合计；完全相同的重复行仍保留给 duplicate audit；“部分重复 + 部分不同”或表头身份冲突必须 fail closed。
-- 当前严格合同 Audit 对历史多行发票按同一 batch + canonical invoice 重算合计后比较；不得把第一条物理明细误当整票金额，也不得把完全相同的重复行二次加总。
-- 历史金额恢复只能更新 source batch 仍一致的 canonical invoice，并由 repeatable-read dry-run fingerprint、serializable transaction 和 rollback manifest 约束；运行时导入链不调用该修复工具。
+- 税务平台标准多 sheet 导出的一张发票可以包含多条商品/服务/折扣明细。唯一 `发票基础信息` 行直接提供整票金额、税额和价税合计；`信息汇总表` 的不同明细仅保存在 `invoice_line_items` 来源证据中，不重算或覆盖表头事实。仅对不含 `发票基础信息` 的历史单 sheet 模板保留原有同票明细聚合合同。
+- 当前严格合同 Audit 必须按导入时记录的 sheet role 选择事实口径：header-driven 导入比较 `发票基础信息`，历史 detail-only 导入才按同一 batch + canonical invoice 重算合计；两者都不得把第一条物理商品明细误当整票金额。
+- 本次 11 张历史表头事实恢复只更新批准号码的 canonical 发票金额、税额、价税合计、空表头税率和 provenance；保留 invoice ID、关系、source link 与明细证据，并由工作簿 hash、精确计数、repeatable-read dry-run fingerprint、serializable transaction、CAS 和 rollback manifest 约束。运行时导入链不调用修复工具。
 - `0134` 是一次性 provenance 修复：仅当 canonical 发票已有 `oa_attachment_invoice`、正式 import row 仍精确指向该发票、对应 `manual_invoice_import(batch_id, source_id)` 却缺失时，从 durable batch/row 事实恢复全部来源边和原 owner。无 OA 交集、无行证据、多义或已完整的发票零写；运行时不保留扫描或 fallback。

@@ -1213,6 +1213,14 @@ class ImportNormalizationService:
             "risk_level": self._string_or_none(raw_row.get("risk_level")),
             "issuer": self._string_or_none(raw_row.get("issuer")),
             "remark": self._string_or_none(raw_row.get("remark")),
+            "source_sheet_name": self._string_or_none(raw_row.get("source_sheet_name")),
+            "source_sheet_role": self._string_or_none(raw_row.get("source_sheet_role")),
+            "source_line_count": int(raw_row.get("source_line_count") or 0),
+            "source_line_items": [
+                dict(item)
+                for item in raw_row.get("source_line_items") or []
+                if isinstance(item, dict)
+            ],
             "project_id": self._string_or_none(raw_row.get("project_id")),
             "oa_form_id": self._string_or_none(raw_row.get("oa_form_id")),
             "pending_invoice_request_key": self._string_or_none(raw_row.get("pending_invoice_request_key")),

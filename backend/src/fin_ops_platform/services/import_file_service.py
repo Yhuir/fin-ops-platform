@@ -144,6 +144,17 @@ MAX_WORKBOOK_CELLS = 2_000_000
 MAX_XLSX_MEMBERS = 10_000
 MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_XLSX_COMPRESSION_RATIO = 200
+INVOICE_HEADER_SHEET_NAME = "发票基础信息"
+INVOICE_DETAIL_SHEET_NAME = "信息汇总表"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbookImportRows:
+    rows: list[list[str]]
+    invoice_header_sheet_name: str | None = None
+    invoice_detail_rows: list[list[str]] | None = None
+
+
 @dataclass(slots=True)
 class UploadedImportFile:
     file_name: str
@@ -1026,10 +1037,12 @@ class FileImportService:
                 selected_bank_last4=selected_bank_last4,
             )
         try:
-            rows = self._read_rows(upload)
+            workbook_rows = self._read_rows(upload)
             try:
                 parsed = self._parse_rows(
-                    rows=rows,
+                    rows=workbook_rows.rows,
+                    invoice_header_sheet_name=workbook_rows.invoice_header_sheet_name,
+                    invoice_detail_rows=workbook_rows.invoice_detail_rows,
                     template_code_override=template_code_override,
                     batch_type_override=batch_type_override,
                     field_mapping=field_mapping,
@@ -1059,7 +1072,7 @@ class FileImportService:
                         detected_bank_name=mapping_error.detected_bank_name,
                     )
                 parsed = self._parse_rows(
-                    rows=rows,
+                    rows=workbook_rows.rows,
                     template_code_override="bank_statement",
                     batch_type_override=BatchType.BANK_TRANSACTION.value,
                     field_mapping=saved_mapping,
@@ -1424,6 +1437,8 @@ class FileImportService:
         self,
         *,
         rows: list[list[str]],
+        invoice_header_sheet_name: str | None = None,
+        invoice_detail_rows: list[list[str]] | None = None,
         template_code_override: str | None = None,
         batch_type_override: str | None = None,
         field_mapping: dict[str, str] | None = None,
@@ -1436,6 +1451,12 @@ class FileImportService:
                 template_code = "bank_statement"
         if template_code == "invoice_export":
             parsed_rows = parse_invoice_rows(rows)
+            if invoice_header_sheet_name:
+                parsed_rows = attach_invoice_line_evidence(
+                    parsed_rows,
+                    invoice_detail_rows or [],
+                    header_sheet_name=invoice_header_sheet_name,
+                )
             resolved_batch_type = self._resolve_invoice_batch_type(parsed_rows, batch_type_override)
             for parsed_row in parsed_rows:
                 parsed_row["counterparty_name"] = (
@@ -1464,12 +1485,12 @@ class FileImportService:
         return {}
 
     @staticmethod
-    def _read_rows(upload: UploadedImportFile) -> list[list[str]]:
+    def _read_rows(upload: UploadedImportFile) -> WorkbookImportRows:
         suffix = upload.file_name.lower().rsplit(".", 1)[-1] if "." in upload.file_name else ""
         if suffix == "xlsx":
-            return read_xlsx_rows(upload.content)
+            return read_xlsx_import_rows(upload.content)
         if suffix == "xls":
-            return read_xls_rows(upload.content)
+            return read_xls_import_rows(upload.content)
         raise ValueError("无法识别文件模板。")
 
     def _next_session_id(self) -> str:
@@ -1591,6 +1612,10 @@ def detect_invoice_template(rows: list[list[str]]) -> str:
 
 
 def read_xlsx_rows(content: bytes) -> list[list[str]]:
+    return read_xlsx_import_rows(content).rows
+
+
+def read_xlsx_import_rows(content: bytes) -> WorkbookImportRows:
     if not content.startswith(b"PK"):
         raise ValueError("文件扩展名为 .xlsx，但文件内容不是有效的 Excel 工作簿。")
     _validate_xlsx_archive(content)
@@ -1600,6 +1625,42 @@ def read_xlsx_rows(content: bytes) -> list[list[str]]:
     try:
         if not workbook.sheetnames or len(workbook.sheetnames) > MAX_WORKBOOK_SHEETS:
             raise ValueError(f"Excel 工作表数量必须在 1 到 {MAX_WORKBOOK_SHEETS} 之间。")
+        authoritative_sheets = [
+            sheet
+            for sheet in workbook.worksheets
+            if _normalized_sheet_name(sheet.title) == INVOICE_HEADER_SHEET_NAME
+        ]
+        if len(authoritative_sheets) > 1:
+            raise ValueError(f"Excel 工作簿包含多个“{INVOICE_HEADER_SHEET_NAME}”工作表，无法确定发票事实源。")
+        if authoritative_sheets:
+            header_sheet = authoritative_sheets[0]
+            header_sheet.reset_dimensions()
+            header_rows = _worksheet_rows(header_sheet)
+            try:
+                detect_invoice_template(header_rows)
+            except ValueError as exc:
+                raise ValueError(f"“{INVOICE_HEADER_SHEET_NAME}”工作表不是有效的发票基础信息。") from exc
+            detail_sheets = [
+                sheet
+                for sheet in workbook.worksheets
+                if _normalized_sheet_name(sheet.title) == INVOICE_DETAIL_SHEET_NAME
+            ]
+            if len(detail_sheets) > 1:
+                raise ValueError(f"Excel 工作簿包含多个“{INVOICE_DETAIL_SHEET_NAME}”工作表，无法确定发票明细证据。")
+            detail_rows = None
+            if detail_sheets:
+                detail_sheets[0].reset_dimensions()
+                detail_rows = _worksheet_rows(detail_sheets[0])
+                try:
+                    detect_invoice_template(detail_rows)
+                except ValueError as exc:
+                    raise ValueError(f"“{INVOICE_DETAIL_SHEET_NAME}”工作表不是有效的发票明细信息。") from exc
+            return WorkbookImportRows(
+                rows=header_rows,
+                invoice_header_sheet_name=INVOICE_HEADER_SHEET_NAME,
+                invoice_detail_rows=detail_rows,
+            )
+
         first_rows: list[list[str]] | None = None
         for sheet in workbook.worksheets:
             # Some bank and invoice exporters write an invalid/underreported
@@ -1613,11 +1674,11 @@ def read_xlsx_rows(content: bytes) -> list[list[str]]:
                 first_rows = rows
             try:
                 detect_invoice_template(rows)
-                return rows
+                return WorkbookImportRows(rows=rows)
             except ValueError:
                 if find_bank_header_candidate(rows) is not None:
-                    return rows
-        return first_rows or []
+                    return WorkbookImportRows(rows=rows)
+        return WorkbookImportRows(rows=first_rows or [])
     finally:
         workbook.close()
 
@@ -1638,33 +1699,77 @@ def _worksheet_rows(sheet: Any) -> list[list[str]]:
 
 
 def read_xls_rows(content: bytes) -> list[list[str]]:
+    return read_xls_import_rows(content).rows
+
+
+def read_xls_import_rows(content: bytes) -> WorkbookImportRows:
     if not content.startswith(XLS_SIGNATURE):
         raise ValueError("文件扩展名为 .xls，但文件内容不是有效的 Excel 工作簿。")
     workbook = xlrd.open_workbook(file_contents=content)
     if workbook.nsheets < 1 or workbook.nsheets > MAX_WORKBOOK_SHEETS:
         raise ValueError(f"Excel 工作表数量必须在 1 到 {MAX_WORKBOOK_SHEETS} 之间。")
+    authoritative_indices = [
+        index
+        for index in range(workbook.nsheets)
+        if _normalized_sheet_name(workbook.sheet_by_index(index).name) == INVOICE_HEADER_SHEET_NAME
+    ]
+    if len(authoritative_indices) > 1:
+        raise ValueError(f"Excel 工作簿包含多个“{INVOICE_HEADER_SHEET_NAME}”工作表，无法确定发票事实源。")
+    if authoritative_indices:
+        header_rows = _xls_sheet_rows(workbook.sheet_by_index(authoritative_indices[0]))
+        try:
+            detect_invoice_template(header_rows)
+        except ValueError as exc:
+            raise ValueError(f"“{INVOICE_HEADER_SHEET_NAME}”工作表不是有效的发票基础信息。") from exc
+        detail_indices = [
+            index
+            for index in range(workbook.nsheets)
+            if _normalized_sheet_name(workbook.sheet_by_index(index).name) == INVOICE_DETAIL_SHEET_NAME
+        ]
+        if len(detail_indices) > 1:
+            raise ValueError(f"Excel 工作簿包含多个“{INVOICE_DETAIL_SHEET_NAME}”工作表，无法确定发票明细证据。")
+        detail_rows = _xls_sheet_rows(workbook.sheet_by_index(detail_indices[0])) if detail_indices else None
+        if detail_rows is not None:
+            try:
+                detect_invoice_template(detail_rows)
+            except ValueError as exc:
+                raise ValueError(f"“{INVOICE_DETAIL_SHEET_NAME}”工作表不是有效的发票明细信息。") from exc
+        return WorkbookImportRows(
+            rows=header_rows,
+            invoice_header_sheet_name=INVOICE_HEADER_SHEET_NAME,
+            invoice_detail_rows=detail_rows,
+        )
+
     first_rows: list[list[str]] = []
     for sheet_index in range(workbook.nsheets):
         sheet = workbook.sheet_by_index(sheet_index)
-        if sheet.nrows > MAX_WORKBOOK_ROWS:
-            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_ROWS} 行限制。")
-        if sheet.ncols > MAX_WORKBOOK_COLUMNS:
-            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_COLUMNS} 列限制。")
-        if sheet.nrows * sheet.ncols > MAX_WORKBOOK_CELLS:
-            raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_CELLS} 个单元格限制。")
-        rows = [
-            [stringify_cell(sheet.cell_value(row_index, column_index)) for column_index in range(sheet.ncols)]
-            for row_index in range(sheet.nrows)
-        ]
+        rows = _xls_sheet_rows(sheet)
         if sheet_index == 0:
             first_rows = rows
         try:
             detect_invoice_template(rows)
-            return rows
+            return WorkbookImportRows(rows=rows)
         except ValueError:
             if find_bank_header_candidate(rows) is not None:
-                return rows
-    return first_rows
+                return WorkbookImportRows(rows=rows)
+    return WorkbookImportRows(rows=first_rows)
+
+
+def _xls_sheet_rows(sheet: Any) -> list[list[str]]:
+    if sheet.nrows > MAX_WORKBOOK_ROWS:
+        raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_ROWS} 行限制。")
+    if sheet.ncols > MAX_WORKBOOK_COLUMNS:
+        raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_COLUMNS} 列限制。")
+    if sheet.nrows * sheet.ncols > MAX_WORKBOOK_CELLS:
+        raise ValueError(f"Excel 明细超过 {MAX_WORKBOOK_CELLS} 个单元格限制。")
+    return [
+        [stringify_cell(sheet.cell_value(row_index, column_index)) for column_index in range(sheet.ncols)]
+        for row_index in range(sheet.nrows)
+    ]
+
+
+def _normalized_sheet_name(value: Any) -> str:
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")))
 
 
 def _validate_xlsx_archive(content: bytes) -> None:
@@ -1692,6 +1797,10 @@ def _validate_xlsx_archive(content: bytes) -> None:
 
 
 def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
+    return aggregate_invoice_line_rows(parse_invoice_source_rows(rows))
+
+
+def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     header_index = find_invoice_header_index(rows)
     header = [canonical_invoice_header(cell) for cell in rows[header_index]]
     data_rows = []
@@ -1700,6 +1809,8 @@ def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
         if not any(mapped.values()):
             continue
         if is_invoice_summary_footer(mapped):
+            continue
+        if not _has_invoice_identity(mapped):
             continue
         data_rows.append(
             {
@@ -1732,16 +1843,97 @@ def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "remark": mapped.get("备注"),
             }
         )
-    return aggregate_invoice_line_rows(data_rows)
+    return data_rows
+
+
+def _has_invoice_identity(mapped: dict[str, Any]) -> bool:
+    return bool(
+        _invoice_identifier(mapped.get("数电发票号码"))
+        or (
+            _invoice_identifier(mapped.get("发票代码"))
+            and _invoice_identifier(mapped.get("发票号码"))
+        )
+    )
+
+
+def attach_invoice_line_evidence(
+    authoritative_rows: list[dict[str, Any]],
+    detail_sheet_rows: list[list[str]],
+    *,
+    header_sheet_name: str,
+) -> list[dict[str, Any]]:
+    detail_rows = parse_invoice_source_rows(detail_sheet_rows) if detail_sheet_rows else []
+    details_by_identity: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for index, row in enumerate(detail_rows):
+        details_by_identity.setdefault(_invoice_identity(row, index=index), []).append(row)
+
+    authoritative_identities = {
+        _invoice_identity(row, index=index)
+        for index, row in enumerate(authoritative_rows)
+    }
+    if details_by_identity and set(details_by_identity) != authoritative_identities:
+        raise ValueError("发票基础信息与信息汇总表的发票身份集合不一致，已停止导入。")
+
+    result: list[dict[str, Any]] = []
+    for index, authoritative in enumerate(authoritative_rows):
+        row = dict(authoritative)
+        identity = _invoice_identity(row, index=index)
+        line_items = [dict(item) for item in details_by_identity.get(identity, [])]
+        for item in line_items:
+            _assert_invoice_evidence_headers_match(row, item)
+        row.update(
+            {
+                "source_sheet_name": header_sheet_name,
+                "source_sheet_role": "invoice_header",
+                "source_line_count": len(line_items),
+                "source_line_items": line_items,
+            }
+        )
+        result.append(row)
+    return result
+
+
+def _invoice_identity(row: dict[str, Any], *, index: int) -> tuple[str, ...]:
+    digital_no = _invoice_identifier(row.get("digital_invoice_no"))
+    invoice_code = _invoice_identifier(row.get("invoice_code"))
+    invoice_no = _invoice_identifier(row.get("invoice_no"))
+    if digital_no:
+        return ("digital", digital_no)
+    if invoice_code and invoice_no:
+        return ("code_no", invoice_code, invoice_no)
+    return ("row", str(index))
+
+
+def _invoice_identifier(value: Any) -> str:
+    normalized = clean(value)
+    return "" if normalized in {"-", "--", "—", "/", "无"} else normalized
+
+
+def _assert_invoice_evidence_headers_match(
+    authoritative: dict[str, Any],
+    detail: dict[str, Any],
+) -> None:
+    for field_name in (
+        "digital_invoice_no",
+        "invoice_code",
+        "invoice_no",
+        "invoice_date",
+        "seller_tax_no",
+        "buyer_tax_no",
+    ):
+        header_value = clean(authoritative.get(field_name))
+        detail_value = clean(detail.get(field_name))
+        if header_value and detail_value and header_value != detail_value:
+            raise ValueError(f"发票基础信息与信息汇总表的 {field_name} 不一致，已停止导入。")
 
 
 def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     order: list[tuple[str, ...]] = []
     for index, row in enumerate(rows):
-        digital_no = clean(row.get("digital_invoice_no"))
-        invoice_code = clean(row.get("invoice_code"))
-        invoice_no = clean(row.get("invoice_no"))
+        digital_no = _invoice_identifier(row.get("digital_invoice_no"))
+        invoice_code = _invoice_identifier(row.get("invoice_code"))
+        invoice_no = _invoice_identifier(row.get("invoice_no"))
         identity = (
             ("digital", digital_no)
             if digital_no

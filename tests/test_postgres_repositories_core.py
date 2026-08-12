@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+
 from fin_ops_platform.domain.enums import (
     BatchStatus,
     BatchType,
@@ -1139,3 +1141,36 @@ def test_imported_invoice_total_repair_requires_unchanged_source_batch_owner() -
         assert "changed after the repair plan" in str(exc)
     else:
         raise AssertionError("Invoice repair must fail when source batch ownership changed.")
+
+
+def test_invoice_header_fact_repair_requires_unchanged_amount_preconditions() -> None:
+    from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+
+    class ChangedFactsConnection:
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            return 0
+
+    with pytest.raises(RuntimeError, match="changed after the repair plan"):
+        PostgresCoreRepository(ChangedFactsConnection()).repair_invoice_header_facts(
+            ChangedFactsConnection(),
+            [
+                {
+                    "invoice_id": "invoice-1",
+                    "digital_invoice_no": "26110000000000000001",
+                    "amount": "100.00",
+                    "signed_amount": "100.00",
+                    "tax_amount": "13.00",
+                    "total_with_tax": "113.00",
+                    "tax_rate": "",
+                    "raw_payload": {"normalized_payload": {}},
+                    "before": {
+                        "amount": "10.00",
+                        "signed_amount": "10.00",
+                        "tax_amount": "1.30",
+                        "total_with_tax": "11.30",
+                        "tax_rate": "13%",
+                    },
+                }
+            ],
+            operator_id="YNSYLP007",
+        )

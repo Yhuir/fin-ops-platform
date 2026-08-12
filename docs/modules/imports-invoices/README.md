@@ -37,6 +37,7 @@
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
 - `backend/src/fin_ops_platform/services/import_job_queue.py`
 - `backend/src/fin_ops_platform/services/import_preview_audit.py`
+- `backend/src/fin_ops_platform/services/invoice_header_fact_repair_service.py`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
 - `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
@@ -47,6 +48,8 @@
 `/imports/invoices` 只渲染 `ImportWorkflowPage mode="invoice"`。共享导入工作流负责文件选择、每文件票据方向选择、预览、重复审计、确认、后台 job 反馈和 session restore。
 
 当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。旧 `/imports/preview`、`/imports/confirm` JSON 写入入口已删除，HTTP 只有 file/session API。
+
+税务平台多 sheet 工作簿若包含唯一的 `发票基础信息`，该 sheet 是每张 canonical 发票的唯一表头事实源；不得因前面的 `信息汇总表` 可以解析就提前返回。`信息汇总表` 只作为同票商品/服务行证据附着到表头行，不参与 canonical 金额、税额、价税合计或商品行字段的顶层赋值。`发票基础信息` 重名、无法识别、无有效发票或与明细强身份不一致时整文件 fail closed，不回退旧首 sheet 链；不含该 sheet 的历史单 sheet 模板继续使用共享模板识别合同。
 
 导入确认不是下游 fresh 的事实源。确认只能说明发票事实写入或确认 job 已排队；关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计和搜索必须通过 derived lifecycle、dirty scope、read model freshness 与 worker readiness 判断是否可读。
 

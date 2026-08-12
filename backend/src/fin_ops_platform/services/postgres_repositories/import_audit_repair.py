@@ -6,6 +6,24 @@ from typing import Any
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 
 
+def load_invoice_header_fact_repair_snapshot(
+    connection: Any,
+    *,
+    digital_invoice_numbers: list[str],
+) -> list[dict[str, Any]]:
+    return connection.fetch_all(
+        """
+        select coalesce(legacy_mongo_id, id::text) as invoice_id,
+               invoice_type, digital_invoice_no, invoice_month::text,
+               amount, signed_amount, tax_amount, total_with_tax, tax_rate, raw_payload
+        from app.invoices
+        where digital_invoice_no = any(%s::text[])
+        order by digital_invoice_no, id
+        """,
+        (digital_invoice_numbers,),
+    )
+
+
 def load_import_audit_repair_snapshot(
     connection: Any,
     *,

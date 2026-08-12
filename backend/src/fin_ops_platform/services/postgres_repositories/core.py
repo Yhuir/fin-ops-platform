@@ -984,6 +984,62 @@ class PostgresCoreRepository:
             if affected != 1:
                 raise RuntimeError(f"Invoice {update['invoice_id']} changed after the repair plan was built.")
 
+    def repair_invoice_header_facts(
+        self,
+        connection: Any,
+        updates: list[dict[str, Any]],
+        *,
+        operator_id: str,
+    ) -> dict[str, Any]:
+        if updates:
+            connection.execute(
+                "select set_config('fin_ops.correction_reason', '发票基础信息事实修复', true)"
+            )
+            connection.execute(
+                "select set_config('fin_ops.actor_id', %s, true)",
+                (operator_id,),
+            )
+        for update in updates:
+            before = dict(update["before"])
+            affected = connection.execute(
+                """
+                update app.invoices
+                set amount = %s,
+                    signed_amount = %s,
+                    tax_amount = %s,
+                    total_with_tax = %s,
+                    tax_rate = null,
+                    raw_payload = %s,
+                    updated_at = now()
+                where coalesce(legacy_mongo_id, id::text) = %s
+                  and digital_invoice_no = %s
+                  and amount = %s::numeric
+                  and signed_amount = %s::numeric
+                  and coalesce(tax_amount, 0) = %s::numeric
+                  and coalesce(total_with_tax, 0) = %s::numeric
+                  and coalesce(tax_rate, '') = %s
+                """,
+                (
+                    update["amount"],
+                    update["signed_amount"],
+                    update["tax_amount"],
+                    update["total_with_tax"],
+                    _jsonb(update["raw_payload"]),
+                    update["invoice_id"],
+                    update["digital_invoice_no"],
+                    before["amount"],
+                    before["signed_amount"],
+                    before["tax_amount"],
+                    before["total_with_tax"],
+                    before["tax_rate"],
+                ),
+            )
+            if affected != 1:
+                raise RuntimeError(
+                    f"Invoice {update['digital_invoice_no']} changed after the repair plan was built."
+                )
+        return {"written_invoice_count": len(updates)}
+
     def repair_submitted_etc_invoice_overlap(
         self,
         *,

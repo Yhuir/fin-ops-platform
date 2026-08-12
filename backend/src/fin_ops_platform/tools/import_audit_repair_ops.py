@@ -26,6 +26,11 @@ from fin_ops_platform.services.import_audit_repair_service import (
     public_failed_import_recovery_report,
     public_repair_report,
 )
+from fin_ops_platform.services.invoice_header_fact_repair_service import (
+    INVOICE_HEADER_REPAIR_FACTS,
+    build_invoice_header_fact_repair_plan,
+    public_invoice_header_fact_repair_report,
+)
 from fin_ops_platform.services.object_storage import (
     ObjectStorageSettings,
     S3ObjectStorageRepository,
@@ -43,16 +48,20 @@ from fin_ops_platform.services.postgres_repositories.bank_import_audit_contract_
     apply_bank_import_audit_contract_repair,
     load_bank_import_audit_contract_repair_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
     discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
+    load_invoice_header_fact_repair_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
@@ -147,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
     parser.add_argument("--expected-bank-workbench-transaction-id")
     parser.add_argument("--repair-bank-audit-contract", action="store_true")
+    parser.add_argument("--repair-invoice-header-source-sha256")
+    parser.add_argument("--expected-invoice-header-repair-count", type=int)
     parser.add_argument("--expected-bank-audit-file-object-link-count", type=int)
     parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
@@ -176,6 +187,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     discovery_requested = bool(args.discover_recover_import_job_id)
     bank_repair_requested = bool(args.repair_bank_source)
     bank_audit_repair_requested = bool(args.repair_bank_audit_contract)
+    invoice_header_repair_requested = bool(args.repair_invoice_header_source_sha256)
     if discovery_requested and args.execute:
         raise SystemExit("Failed import recovery discovery is read-only and requires --dry-run")
     if recovery_requested and not all(recovery_values):
@@ -185,6 +197,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         or discovery_requested
         or bank_repair_requested
         or bank_audit_repair_requested
+        or invoice_header_repair_requested
     ) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
@@ -194,10 +207,24 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     if bank_repair_requested and (recovery_requested or discovery_requested):
         raise SystemExit("Bank dedup repair cannot be combined with failed import recovery")
     if bank_audit_repair_requested and (
-        recovery_requested or discovery_requested or bank_repair_requested
+        recovery_requested or discovery_requested or bank_repair_requested or invoice_header_repair_requested
     ):
         raise SystemExit(
             "Bank import Audit contract repair cannot be combined with another repair mode"
+        )
+    if invoice_header_repair_requested and (
+        recovery_requested or discovery_requested or bank_repair_requested
+    ):
+        raise SystemExit("Invoice header fact repair cannot be combined with another repair mode")
+    if invoice_header_repair_requested and (
+        args.expected_invoice_header_repair_count is None or not args.operator_id
+    ):
+        raise SystemExit(
+            "Invoice header fact repair requires exact target count and --operator-id"
+        )
+    if not invoice_header_repair_requested and args.expected_invoice_header_repair_count is not None:
+        raise SystemExit(
+            "Invoice header fact repair count requires --repair-invoice-header-source-sha256"
         )
     bank_audit_expectations = (
         args.expected_bank_audit_file_object_link_count,
@@ -254,6 +281,97 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "--cleanup-related-bank-duplicates"
         )
     connection = PostgresConnection(PostgresSettings.from_env())
+    if invoice_header_repair_requested:
+        invoice_numbers = [fact["digital_invoice_no"] for fact in INVOICE_HEADER_REPAIR_FACTS]
+        plan_kwargs = {
+            "source_sha256": args.repair_invoice_header_source_sha256,
+            "expected_target_count": args.expected_invoice_header_repair_count,
+        }
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_invoice_header_fact_repair_plan(
+                load_invoice_header_fact_repair_snapshot(
+                    transaction,
+                    digital_invoice_numbers=invoice_numbers,
+                ),
+                **plan_kwargs,
+            )
+        if args.dry_run:
+            report = public_invoice_header_fact_repair_report(
+                plan,
+                mode="dry_run",
+                written=False,
+            )
+        else:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("Invoice header facts changed after dry-run; rerun dry-run.")
+            with connection.transaction() as transaction:
+                transaction.execute("set transaction isolation level serializable")
+                transaction.fetch_one(
+                    "select pg_advisory_xact_lock(hashtext('fin_ops_invoice_header_fact_repair'))"
+                )
+                locked_plan = build_invoice_header_fact_repair_plan(
+                    load_invoice_header_fact_repair_snapshot(
+                        transaction,
+                        digital_invoice_numbers=invoice_numbers,
+                    ),
+                    **plan_kwargs,
+                )
+                if locked_plan["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError(
+                        "Invoice header facts changed while acquiring the write lock."
+                    )
+                completion = PostgresCoreRepository(transaction).repair_invoice_header_facts(
+                    transaction,
+                    list(locked_plan["updates"]),
+                    operator_id=args.operator_id,
+                )
+                completion["refresh_scopes"] = {}
+                if completion["written_invoice_count"]:
+                    refresh_gateway = ReadModelRefreshGateway(
+                        queue_repository=RuntimeQueueRepository(
+                            _ActiveTransactionConnection(transaction)
+                        )
+                    )
+                    completion["refresh_scopes"] = {
+                        scope_type: refresh_gateway.enqueue_many(
+                            scope_type,
+                            locked_plan["affected_months"],
+                            reason="invoice_header_fact_repair",
+                            metadata={
+                                "force_refresh": True,
+                                "source_fingerprint": locked_plan["source_fingerprint"],
+                            },
+                        )
+                        for scope_type in ("workbench", "workbench_relation")
+                    }
+                AuditTrailService(
+                    PostgresOperationsAuditRepository(transaction)
+                ).record_action(
+                    actor_id=args.operator_id,
+                    action="invoice_header_fact_repair",
+                    entity_type="invoice_header_fact_repair",
+                    entity_id=locked_plan["source_fingerprint"],
+                    metadata={
+                        "event_type": "operation.completed",
+                        "page_key": "invoice_import",
+                        "operation_location": "import_audit_repair_ops",
+                        "reason": "authorized_invoice_header_fact_repair",
+                        "outcome": "success",
+                        **completion,
+                    },
+                )
+            report = public_invoice_header_fact_repair_report(
+                locked_plan,
+                mode="execute",
+                written=True,
+                completion=completion,
+            )
+        print(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str),
+            file=stdout,
+        )
+        return 0
     if bank_audit_repair_requested:
         plan_kwargs = {
             "expected_file_object_link_count": (

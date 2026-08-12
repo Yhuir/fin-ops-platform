@@ -89,6 +89,31 @@ def invoice_export_second_sheet_file() -> bytes:
     return buffer.getvalue()
 
 
+def invoice_header_and_detail_file(*, corrupt_header: bool = False, mismatch_detail: bool = False) -> bytes:
+    workbook = Workbook()
+    detail = workbook.active
+    detail.title = "信息汇总表"
+    header = workbook.create_sheet("发票基础信息")
+    columns = [
+        "发票代码", "发票号码", "数电发票号码", "销方名称", "销方识别号", "购买方名称", "购方识别号",
+        "开票日期", "货物或应税劳务名称", "金额", "税率", "税额", "价税合计",
+    ]
+    detail.append(columns)
+    detail.append(["", "", "26110000000000000001", "供应商甲", "TAX-A", "购买方", "TAX-B", "2026-06-01", "商品甲", "30", "13%", "3.9", "33.9"])
+    detail.append(["", "", "26110000000000000001", "供应商甲", "TAX-A", "购买方", "TAX-B", "2026-06-01", "商品乙", "70", "13%", "9.1", "79.1"])
+    header.append(["不是发票表头"] if corrupt_header else columns)
+    if not corrupt_header:
+        header.append([
+            "", "", "26110000000000000001", "供应商甲", "TAX-A", "购买方", "TAX-B",
+            "2026-06-01", "", "100", "", "13", "113",
+        ])
+    if mismatch_detail:
+        detail.cell(row=2, column=3).value = "26110000000000000002"
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 class FakeImportIdStore:
     def __init__(self) -> None:
         self._existing_session_ids = {"import_session_0001", "import_session_0002"}
@@ -147,6 +172,53 @@ class FailingSubmittedEtcIdentityRepository:
 
 
 class ImportFileServiceTests(unittest.TestCase):
+    def test_invoice_basic_information_sheet_owns_canonical_totals(self) -> None:
+        service = FileImportService(ImportNormalizationService(id_registry=FakeImportEntityRegistry()))
+
+        session = service.preview_files(
+            imported_by="tester",
+            uploads=[
+                UploadedImportFile(
+                    file_name="全量发票.xlsx",
+                    content=invoice_header_and_detail_file(),
+                )
+            ],
+        )
+
+        item = session.files[0]
+        self.assertEqual(item.status, "preview_ready")
+        self.assertEqual(item.row_count, 1)
+        normalized = item.normalized_rows[0]
+        self.assertEqual(normalized["amount"], "100.00")
+        self.assertEqual(normalized["tax_amount"], "13.00")
+        self.assertEqual(normalized["total_with_tax"], "113.00")
+        self.assertEqual(normalized["source_sheet_name"], "发票基础信息")
+        self.assertEqual(normalized["source_sheet_role"], "invoice_header")
+        self.assertEqual(normalized["source_line_count"], 2)
+        self.assertEqual(len(normalized["source_line_items"]), 2)
+
+    def test_malformed_authoritative_invoice_sheet_fails_closed(self) -> None:
+        service = FileImportService(ImportNormalizationService(id_registry=FakeImportEntityRegistry()))
+
+        session = service.preview_files(
+            imported_by="tester",
+            uploads=[UploadedImportFile(file_name="全量发票.xlsx", content=invoice_header_and_detail_file(corrupt_header=True))],
+        )
+
+        self.assertEqual(session.files[0].status, "unrecognized_template")
+        self.assertIn("发票基础信息", session.files[0].message or "")
+
+    def test_invoice_header_and_detail_identity_mismatch_fails_closed(self) -> None:
+        service = FileImportService(ImportNormalizationService(id_registry=FakeImportEntityRegistry()))
+
+        session = service.preview_files(
+            imported_by="tester",
+            uploads=[UploadedImportFile(file_name="全量发票.xlsx", content=invoice_header_and_detail_file(mismatch_detail=True))],
+        )
+
+        self.assertEqual(session.files[0].status, "unrecognized_template")
+        self.assertIn("身份集合不一致", session.files[0].message or "")
+
     def test_ccb_current_export_header_uses_metadata_account_and_unit_aliases(self) -> None:
         parsed = parse_bank_statement_rows(
             [
