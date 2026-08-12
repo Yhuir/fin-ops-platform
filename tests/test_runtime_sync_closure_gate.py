@@ -133,6 +133,21 @@ class RequiredWorkerOverrideMonitoringRepository(FakeRuntimeMonitoringRepository
         return super().ready_health_summary()
 
 
+class CandidateWorkerContractMismatchMonitoringRepository(
+    RequiredWorkerOverrideMonitoringRepository
+):
+    def ready_health_summary(
+        self,
+        *,
+        required_worker_instances: set[str] | None = None,
+    ) -> dict[str, object]:
+        summary = super().ready_health_summary(
+            required_worker_instances=required_worker_instances,
+        )
+        summary["mismatched_required_worker_count"] = 1
+        return summary
+
+
 class FakeWriteTransaction:
     def __init__(self) -> None:
         self.marker: str | None = None
@@ -668,6 +683,51 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(
             RequiredWorkerOverrideMonitoringRepository.required_worker_instances,
             {"import", "oa-sync"},
+        )
+
+    def test_preflight_allows_active_worker_contract_until_candidate_cutover(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            CandidateWorkerContractMismatchMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                object(),
+                timeout_seconds=0,
+                poll_interval_seconds=0.05,
+                required_worker_instances={"settings-maintenance"},
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(
+            check.payload["required_worker_contract"],
+            "active_release_compatible",
+        )
+        self.assertEqual(
+            check.payload["snapshot"]["mismatched_required_worker_count"],
+            1,
+        )
+
+    def test_post_cutover_keeps_candidate_worker_contract_strict(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            CandidateWorkerContractMismatchMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                object(),
+                timeout_seconds=0,
+                poll_interval_seconds=0.05,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+        self.assertEqual(
+            check.payload["blockers"]["mismatched_required_worker_count"],
+            1,
+        )
+        self.assertEqual(
+            check.payload["required_worker_contract"],
+            "strict_current_release",
         )
 
     def test_runtime_health_preserves_per_queue_diagnostics(self) -> None:

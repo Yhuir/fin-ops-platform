@@ -359,7 +359,16 @@ def _runtime_health_check(
                     "worker_metric_count": len(worker_metrics) if isinstance(worker_metrics, list) else 0,
                 },
             )
-        blockers = _runtime_blockers(summary)
+        # A preflight explicitly pins the currently active worker instances while
+        # running this candidate's gate code.  The active processes cannot yet
+        # advertise event types introduced by the candidate; their current-release
+        # contract is still enforced by /health/ready.  Keep missing/stale/queue
+        # checks strict here, and defer the candidate contract check to T+0 after
+        # the candidate workers have actually started.
+        blockers = _runtime_blockers(
+            summary,
+            allow_required_worker_contract_mismatch=required_worker_instances is not None,
+        )
         reconciliation_stable = (
             reconciled_completed_publish_states == 0
             or clean_samples_after_reconciliation > 0
@@ -385,6 +394,11 @@ def _runtime_health_check(
                     "reconciled_completed_publish_states": reconciled_completed_publish_states,
                     "clean_samples_after_reconciliation": clean_samples_after_reconciliation,
                     "terminal_publish_reconciliation_stable": reconciliation_stable,
+                    "required_worker_contract": (
+                        "active_release_compatible"
+                        if required_worker_instances is not None
+                        else "strict_current_release"
+                    ),
                     "snapshot": {
                         key: summary.get(key)
                         for key in (
@@ -826,15 +840,26 @@ def _write_operation_audit_check(
     )
 
 
-def _runtime_blockers(summary: Mapping[str, Any]) -> dict[str, Any]:
+def _runtime_blockers(
+    summary: Mapping[str, Any],
+    *,
+    allow_required_worker_contract_mismatch: bool = False,
+) -> dict[str, Any]:
     blockers: dict[str, Any] = {}
     if summary.get("rabbitmq_management_configured") is not True:
         blockers["rabbitmq_management_configured"] = summary.get("rabbitmq_management_configured")
     if summary.get("rabbitmq_metric_error"):
         blockers["rabbitmq_metric_error"] = summary.get("rabbitmq_metric_error")
-    for key in ("missing_required_worker_count", "stale_required_worker_count", "mismatched_required_worker_count"):
+    for key in ("missing_required_worker_count", "stale_required_worker_count"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
+    if (
+        not allow_required_worker_contract_mismatch
+        and int(summary.get("mismatched_required_worker_count") or 0) > 0
+    ):
+        blockers["mismatched_required_worker_count"] = summary.get(
+            "mismatched_required_worker_count"
+        )
     for key in (
         "rabbitmq_queue_depth",
         "rabbitmq_unacked_messages",

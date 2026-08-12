@@ -729,6 +729,8 @@ sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 `release-gate-activate` 先验证 candidate/active fingerprint 未漂移并自动判定 profile。三项 retired admission key 与 legacy admin key 的一次性清理已经完成；稳态发布只执行 strict env assertion，发现任一旧 key 立即失败关闭，不再重写 env。历史 OA binding cleanup/rollback SQL 与激活代码也已删除；OA topology 漂移只能阻断并由独立修复处理。`runtime`/`acl` 通过 current checkpoint 后才停止 API 和上一版本 workers、执行 migration/validated CHECK、安装 runtime assets、发布候选并恢复服务；`frontend` 只发布 exact dist 并重启已有 runtime。frontend 切换前会固定捕获 preflight 已验证的 active worker 集合，候选激活和自动回退都精确重启该集合，避免 stop 后的空 active 列表遗留 workers inactive。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
+
+runtime/ACL preflight 在候选代码下固定读取当前 active release 的 worker instance 集合；此阶段允许旧进程尚未声明候选新增的 event type，但 missing/stale worker、durable queue、RabbitMQ、当前 `/health/ready` 和 canonical page audit 仍严格阻断。候选启动后的 T+0/T+60/T+300 不使用该兼容窗口，必须严格匹配候选 worker kind/event types。这样 worker 合同演进不会在切流前形成不可能条件，同时也不能绕过切流后的候选合同验证。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，
 不再提供覆盖 `/www/wwwroot/fin-ops/dist` 或 `/opt/fin-ops/current/backend` 的发布模式。
 
