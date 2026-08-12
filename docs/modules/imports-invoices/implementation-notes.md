@@ -11,6 +11,7 @@
 - 性能：sheet 选择和明细索引均为单次有界扫描，复杂度 O(表头行+明细行)，没有逐票 DB 查询或全量 read model 刷新。
 - 测试：`tests/test_import_file_service.py` 覆盖权威表头、畸形表头 fail closed、明细身份错配；`tests/test_invoice_header_fact_repair_service.py` 覆盖 allowlist/hash/幂等/恢复；`tests/test_import_audit_repair_ops.py` 和 repository 测试覆盖 dry-run、CAS 和精确刷新。
 - 未测风险：自动化不依赖真实业务 Excel；发布前以用户文件只读解析核验 1,021 张表头/1,463 条明细，并在生产写入前确认只命中 11 张，写后验证幂等重放、页面/API/队列和性能。
+- 生产 dry-run 校正：`app.invoices.invoice_month` 是月首日 `date`；repair repository 在 SQL I/O 边界显式投影为 `YYYY-MM` 月份键，避免把 PostgreSQL 的 `2026-06-01` 文本误判为月份漂移。业务 plan 继续严格校验 `2026-06`，不放宽 allowlist，也不改写发票月份。
 
 ## 2026-08-12 - 共享 preview stale 逐行 owner 门禁
 

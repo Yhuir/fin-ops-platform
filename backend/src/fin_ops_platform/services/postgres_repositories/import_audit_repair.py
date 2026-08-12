@@ -14,7 +14,7 @@ def load_invoice_header_fact_repair_snapshot(
     return connection.fetch_all(
         """
         select coalesce(legacy_mongo_id, id::text) as invoice_id,
-               invoice_type, digital_invoice_no, invoice_month::text,
+               invoice_type, digital_invoice_no, to_char(invoice_month, 'YYYY-MM') as invoice_month,
                amount, signed_amount, tax_amount, total_with_tax, tax_rate, raw_payload
         from app.invoices
         where digital_invoice_no = any(%s::text[])

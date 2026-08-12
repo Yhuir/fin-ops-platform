@@ -1174,3 +1174,20 @@ def test_invoice_header_fact_repair_requires_unchanged_amount_preconditions() ->
             ],
             operator_id="YNSYLP007",
         )
+
+
+def test_invoice_header_fact_repair_snapshot_normalizes_postgres_date_to_month_key() -> None:
+    from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+        load_invoice_header_fact_repair_snapshot,
+    )
+
+    class SnapshotConnection:
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+            assert "to_char(invoice_month, 'YYYY-MM') as invoice_month" in sql
+            assert params == (["26110000000000000001"],)
+            return [{"invoice_month": "2026-06"}]
+
+    assert load_invoice_header_fact_repair_snapshot(
+        SnapshotConnection(),
+        digital_invoice_numbers=["26110000000000000001"],
+    ) == [{"invoice_month": "2026-06"}]
