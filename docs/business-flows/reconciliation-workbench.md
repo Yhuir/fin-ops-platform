@@ -16,7 +16,7 @@
 - 用户可以按月份、关键字、列筛选、列排序和分栏搜索缩小范围。
 - 点击行或详情入口会打开详情抽屉，查看该 OA、流水或发票的原始业务信息和关联上下文。
 - 在未配对区选择至少 2 个不同 canonical 对象后点击“确认关联”，页面先显示确认预览；同栏和跨栏选择都允许，只有预览返回 `amount_check.requires_note=true` 时才要求填写既有 `note`。确认后创建正式关系，并按完整性进入已配对或保持同一关系的未配对状态。
-- 在已配对或未配对区精确选择一条完整 active relation 后点击“撤回关联”，页面同样先展示撤回预览；preview 和 submit 都只接受与当前完整 active relation 精确相等的成员集合。确认时后端以 relation version/拓扑 fingerprint 拒绝陈旧预览，并在同一事务中先锁 current active case/members、再锁 predecessor case/members，重载后重验 canonical typed members、restored case 与唯一 owner；安全证明成立后才按最近一次确认历史的 `before_relations` 恢复上一稳定拓扑，没有 predecessor 的成员才回到 singleton 未配对状态，冲突时整笔不写。
+- 在已配对或未配对区精确选择一条完整 active relation 后点击“撤回关联”，页面同样先展示撤回预览；preview 和 submit 都只接受与当前完整 active relation 精确相等的成员集合。确认时后端以 relation version/拓扑 fingerprint 拒绝陈旧预览，并在同一事务中先计算 current 与 predecessor 的完整 case/member 锁集合、一次全局稳定排序取得锁，重载后重验 canonical typed members、restored case 与唯一 owner；安全证明成立后才按最近一次确认历史的 `before_relations` 恢复上一稳定拓扑，没有 predecessor 的成员才回到 singleton 未配对状态，冲突时整笔不写。
 - 系统自动识别 OA/发票金额不一致和附件缺失异常，并在主表 chip 与右上“异常 n | 已忽略 m”入口提示；点击该统计入口可在统一右侧抽屉查看进行中和已忽略的异常。未配对选择工具栏不再提供人工“异常处理”。
 - 对自动异常可在抽屉中忽略；撤回忽略后，该异常重新回到进行中状态。
 - 涉及买票成本的候选可打开买票确认弹窗，填写现金、票据成本、项目、费用类型和备注后提交。
