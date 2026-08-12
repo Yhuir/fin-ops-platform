@@ -1,27 +1,8 @@
-import {
-  Button,
-  Input,
-  ListBox,
-  PopoverContent,
-  PopoverDialog,
-  PopoverRoot,
-  PopoverTrigger,
-  Select,
-  TextArea,
-} from "@heroui/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Plus, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import AppDialog from "../../components/common/AppDialog";
 import AppDrawer from "../../components/common/AppDrawer";
-import {
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "../../components/common/FinanceTable";
 import { fetchBankAutoTagRules, reapplyBankAutoTagRules, saveBankAutoTagRules } from "./api";
 import type {
   BankAutoTagDirection,
@@ -320,6 +301,7 @@ export default function AutoTagRulesDrawer({
     label: string;
     values: string[];
   } | null>(null);
+  const [fieldEditor, setFieldEditor] = useState<{ localId: string; label: string } | null>(null);
   const [pendingArchiveRule, setPendingArchiveRule] = useState<DraftRule | null>(null);
 
   useEffect(() => {
@@ -524,24 +506,22 @@ export default function AutoTagRulesDrawer({
       <div className="bank-auto-tag-drawer">
         <div className="bank-auto-tag-drawer-toolbar">
           <div className="bank-auto-tag-status-tabs" role="group" aria-label="自动标签规则状态">
-            <Button
+            <button
+              type="button"
               className={`bank-auto-tag-tab${tab === "active" ? " is-active" : ""}`}
               aria-pressed={tab === "active"}
-              onPress={() => setTab("active")}
-              size="sm"
-              variant={tab === "active" ? "primary" : "tertiary"}
+              onClick={() => setTab("active")}
             >
               可用
-            </Button>
-            <Button
+            </button>
+            <button
+              type="button"
               className={`bank-auto-tag-tab${tab === "archived" ? " is-active" : ""}`}
               aria-pressed={tab === "archived"}
-              onPress={() => setTab("archived")}
-              size="sm"
-              variant={tab === "archived" ? "primary" : "tertiary"}
+              onClick={() => setTab("archived")}
             >
               停用
-            </Button>
+            </button>
           </div>
           <div className="bank-auto-tag-toolbar-actions">
             <ActionButton disabled={readonly} icon={<Plus aria-hidden="true" size={14} />} label="新增标签" onClick={addRule} />
@@ -572,63 +552,87 @@ export default function AutoTagRulesDrawer({
           {feedback ? <div className="bank-auto-tag-alert bank-auto-tag-alert--success" role="status">{feedback}</div> : null}
           {tab === "active" ? (
             <div className="bank-auto-tag-table-container">
-              <FinanceTable ariaLabel="自动标签规则表格" className="bank-auto-tag-rule-table" minWidth={1540} scrollMode="contained">
-                <FinanceTableHeader>
-                  <FinanceTableColumn id="primary" isRowHeader columnRole="identity">主标签</FinanceTableColumn>
-                  <FinanceTableColumn id="sub" columnRole="identity">子标签</FinanceTableColumn>
-                  <FinanceTableColumn id="direction" columnRole="direction">流水类型</FinanceTableColumn>
-                  <FinanceTableColumn id="fields" columnRole="description">查询项</FinanceTableColumn>
-                  <FinanceTableColumn id="contains" columnRole="description">包含</FinanceTableColumn>
-                  <FinanceTableColumn id="containsAll" columnRole="description">必须同时包含</FinanceTableColumn>
-                  <FinanceTableColumn id="exact" columnRole="description">精准命中</FinanceTableColumn>
-                  <FinanceTableColumn id="none" columnRole="description">不包含字样</FinanceTableColumn>
-                  <FinanceTableColumn id="priority" columnRole="quantity">优先级</FinanceTableColumn>
-                  <FinanceTableColumn id="action" className="bank-auto-tag-actions-column" columnRole="action">操作</FinanceTableColumn>
-                </FinanceTableHeader>
-                <FinanceTableBody>
+              <table aria-label="自动标签规则表格" className="bank-auto-tag-rule-table">
+                <colgroup>
+                  <col className="bank-auto-tag-col-primary" />
+                  <col className="bank-auto-tag-col-sub" />
+                  <col className="bank-auto-tag-col-direction" />
+                  <col className="bank-auto-tag-col-fields" />
+                  <col className="bank-auto-tag-col-condition" />
+                  <col className="bank-auto-tag-col-condition" />
+                  <col className="bank-auto-tag-col-condition" />
+                  <col className="bank-auto-tag-col-condition" />
+                  <col className="bank-auto-tag-col-priority" />
+                  <col className="bank-auto-tag-col-actions" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th scope="col">主标签</th>
+                    <th scope="col">子标签</th>
+                    <th scope="col">流水类型</th>
+                    <th scope="col">查询项</th>
+                    <th scope="col">包含</th>
+                    <th scope="col">必须同时包含</th>
+                    <th scope="col">精准命中</th>
+                    <th scope="col">不包含字样</th>
+                    <th scope="col">优先级</th>
+                    <th scope="col" className="bank-auto-tag-actions-column">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {systemRule ? (
-                    <FinanceTableRow id="system-rule" className="bank-auto-tag-system-row">
-                      <FinanceTableCell columnRole="identity">{systemRule.label}</FinanceTableCell>
-                      <FinanceTableCell columnRole="identity">系统规则</FinanceTableCell>
-                      <FinanceTableCell columnRole="direction">不限</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">-</FinanceTableCell>
-                      <FinanceTableCell columnRole="quantity">1</FinanceTableCell>
-                      <FinanceTableCell className="bank-auto-tag-actions-cell" columnRole="action">-</FinanceTableCell>
-                    </FinanceTableRow>
+                    <tr id="system-rule" className="bank-auto-tag-system-row">
+                      <th scope="row">{systemRule.label}</th>
+                      <td>系统规则</td>
+                      <td>不限</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>1</td>
+                      <td className="bank-auto-tag-actions-cell">-</td>
+                    </tr>
                   ) : null}
                   {activeRuleGroups.flatMap((group) => group.rules.map((rule, ruleIndex) => (
-                    <FinanceTableRow id={rule.localId} key={rule.localId} className={`bank-auto-tag-rule-row ${group.colorClass}`}>
-                        <FinanceTableCell columnRole="identity" className={`bank-auto-tag-primary-cell ${group.colorClass}`}>
-                          {ruleIndex === 0 ? (
-                            <Input
-                              className="bank-auto-tag-input"
-                              placeholder="主标签名称"
-                              value={group.primaryLabel === "未命名主标签" ? "" : group.primaryLabel}
-                              disabled={readonly}
-                              aria-label={`${group.primaryLabel} 主标签`}
-                              onChange={(event) => updateGroupPrimaryLabel(group, event.target.value)}
-                            />
-                          ) : <span className="bank-auto-tag-primary-repeat">{group.primaryLabel}</span>}
-                        </FinanceTableCell>
-                      <FinanceTableCell columnRole="identity">
+                    <tr
+                      id={rule.localId}
+                      key={rule.localId}
+                      className={`bank-auto-tag-rule-row ${group.colorClass}${ruleIndex === 0 ? " is-group-start" : ""}`}
+                    >
+                      {ruleIndex === 0 ? (
+                        <th
+                          scope="rowgroup"
+                          rowSpan={group.rules.length}
+                          className={`bank-auto-tag-primary-cell ${group.colorClass}`}
+                        >
+                          <textarea
+                            className="bank-auto-tag-input bank-auto-tag-label-input"
+                            placeholder="主标签名称"
+                            value={group.primaryLabel === "未命名主标签" ? "" : group.primaryLabel}
+                            disabled={readonly}
+                            aria-label={`${group.primaryLabel} 主标签`}
+                            rows={1}
+                            onChange={(event) => updateGroupPrimaryLabel(group, event.target.value)}
+                          />
+                        </th>
+                      ) : null}
+                      <td>
                         <div className="bank-auto-tag-cell-stack">
-                          <Input
-                            className="bank-auto-tag-input"
+                          <textarea
+                            className="bank-auto-tag-input bank-auto-tag-label-input"
                             placeholder="子标签名称"
                             value={rule.outputSubLabel}
                             disabled={readonly}
                             aria-label={`${ruleDisplayLabel(rule)} 子标签`}
+                            rows={1}
                             onChange={(event) => updateActiveRule(rule.localId, (current) => normalizeExternalFields({
                               ...current,
                               outputSubLabel: event.target.value,
                             }))}
                           />
                           {isExternalTurnoverRule(rule) ? (
-                            <SingleSelect
+                            <NativeSelect
                               ariaLabel={`${ruleDisplayLabel(rule)} 子子标签`}
                               disabled
                               options={[{ value: "pending_confirmation", label: "匹配后待确认" }]}
@@ -637,10 +641,10 @@ export default function AutoTagRulesDrawer({
                             />
                           ) : null}
                         </div>
-                      </FinanceTableCell>
-                      <FinanceTableCell columnRole="direction">
+                      </td>
+                      <td>
                         <div className="bank-auto-tag-cell-stack">
-                          <SingleSelect
+                          <NativeSelect
                             ariaLabel={`${ruleDisplayLabel(rule)} 流水类型`}
                             disabled={readonly}
                             options={DIRECTION_OPTIONS}
@@ -651,7 +655,7 @@ export default function AutoTagRulesDrawer({
                             }))}
                           />
                           {isExternalTurnoverRule(rule) ? (
-                            <SingleSelect
+                            <NativeSelect
                               ariaLabel={`${ruleDisplayLabel(rule)} 台账动作类型`}
                               disabled={readonly}
                               options={visibleTurnoverActionTypeOptions}
@@ -664,20 +668,18 @@ export default function AutoTagRulesDrawer({
                             />
                           ) : null}
                         </div>
-                      </FinanceTableCell>
-                      <FinanceTableCell columnRole="description">
-                        <MatchFieldPicker
-                          ariaLabel={`${ruleDisplayLabel(rule)} 查询项`}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="bank-auto-tag-condition-field-button"
+                          aria-label={`编辑${ruleDisplayLabel(rule)}查询项`}
                           disabled={readonly}
-                          fieldOptions={visibleFieldOptions}
-                          labels={fieldLabels(rule.rules.matchFields, fieldOptions)}
-                          selectedValues={rule.rules.matchFields.filter((field) => !HIDDEN_MATCH_FIELDS.has(field))}
-                          onChange={(selectedValues) => updateActiveRule(rule.localId, (current) => ({
-                            ...current,
-                            rules: { ...current.rules, matchFields: selectedValues },
-                          }))}
-                        />
-                      </FinanceTableCell>
+                          onClick={() => setFieldEditor({ localId: rule.localId, label: `${ruleDisplayLabel(rule)} 查询项` })}
+                        >
+                          <span className="bank-auto-tag-condition-preview">{fieldLabels(rule.rules.matchFields, fieldOptions)}</span>
+                        </button>
+                      </td>
                       <ConditionCell
                         ruleLabel={ruleDisplayLabel(rule)}
                         label="包含"
@@ -706,8 +708,8 @@ export default function AutoTagRulesDrawer({
                         disabled={readonly}
                         onEdit={() => setConditionEditor({ localId: rule.localId, key: "noneOf", label: "不包含字样", values: rule.rules.noneOf })}
                       />
-                      <FinanceTableCell columnRole="quantity" className="bank-auto-tag-priority-cell">
-                        <Input
+                      <td className="bank-auto-tag-priority-cell">
+                        <input
                           className="bank-auto-tag-input bank-auto-tag-priority-value"
                           type="number"
                           value={rule.priority}
@@ -720,24 +722,22 @@ export default function AutoTagRulesDrawer({
                             priority: event.target.value === "" ? "" : Number(event.target.value),
                           }))}
                         />
-                      </FinanceTableCell>
-                      <FinanceTableCell columnRole="action" className="bank-auto-tag-actions-cell">
-                        <Button
+                      </td>
+                      <td className="bank-auto-tag-actions-cell">
+                        <button
+                          type="button"
                           className="bank-auto-tag-icon-button"
                           aria-label={`停用 ${ruleDisplayLabel(rule)}`}
-                          isDisabled={readonly}
-                          isIconOnly
-                          onPress={() => setPendingArchiveRule(rule)}
-                          size="sm"
-                          variant="tertiary"
+                          disabled={readonly}
+                          onClick={() => setPendingArchiveRule(rule)}
                         >
                           <Trash2 aria-hidden="true" size={14} />
-                        </Button>
-                      </FinanceTableCell>
-                    </FinanceTableRow>
+                        </button>
+                      </td>
+                    </tr>
                   )))}
-                </FinanceTableBody>
-              </FinanceTable>
+                </tbody>
+              </table>
             </div>
           ) : (
             <div className="bank-auto-tag-archived-list">
@@ -761,18 +761,88 @@ export default function AutoTagRulesDrawer({
         </div>
       </div>
       <AppDialog
+        open={fieldEditor !== null}
+        title={fieldEditor?.label ?? ""}
+        maxWidth="sm"
+        onClose={() => setFieldEditor(null)}
+        actions={(
+          <button type="button" className="bank-auto-tag-dialog-button bank-auto-tag-dialog-button-primary" onClick={() => setFieldEditor(null)}>完成选择</button>
+        )}
+      >
+        <div className="bank-auto-tag-field-editor" role="group" aria-label={fieldEditor?.label}>
+          <div className="bank-auto-tag-field-menu-actions">
+            <button
+              type="button"
+              onClick={() => {
+                if (!fieldEditor) {
+                  return;
+                }
+                updateActiveRule(fieldEditor.localId, (current) => ({
+                  ...current,
+                  rules: { ...current.rules, matchFields: visibleFieldOptions.map((option) => option.value) },
+                }));
+              }}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!fieldEditor) {
+                  return;
+                }
+                updateActiveRule(fieldEditor.localId, (current) => ({
+                  ...current,
+                  rules: { ...current.rules, matchFields: [] },
+                }));
+              }}
+            >
+              清空
+            </button>
+          </div>
+          {visibleFieldOptions.map((option) => {
+            const checked = activeRules
+              .find((rule) => rule.localId === fieldEditor?.localId)
+              ?.rules.matchFields.includes(option.value) ?? false;
+            return (
+              <label className="bank-auto-tag-field-option" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) => {
+                    if (!fieldEditor) {
+                      return;
+                    }
+                    updateActiveRule(fieldEditor.localId, (current) => ({
+                      ...current,
+                      rules: {
+                        ...current.rules,
+                        matchFields: event.target.checked
+                          ? [...current.rules.matchFields.filter((value) => !HIDDEN_MATCH_FIELDS.has(value)), option.value]
+                          : current.rules.matchFields.filter((value) => value !== option.value),
+                      },
+                    }));
+                  }}
+                />
+                <span>{option.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      </AppDialog>
+      <AppDialog
         open={conditionEditor !== null}
         title={conditionEditor?.label ?? ""}
         maxWidth="sm"
         onClose={() => setConditionEditor(null)}
         actions={(
           <>
-            <Button className="bank-auto-tag-dialog-button" onPress={() => setConditionEditor(null)} size="sm" variant="secondary">取消</Button>
-            <Button className="bank-auto-tag-dialog-button bank-auto-tag-dialog-button-primary" onPress={commitConditionEditor} size="sm" variant="primary">确定</Button>
+            <button type="button" className="bank-auto-tag-dialog-button" onClick={() => setConditionEditor(null)}>取消</button>
+            <button type="button" className="bank-auto-tag-dialog-button bank-auto-tag-dialog-button-primary" onClick={commitConditionEditor}>确定</button>
           </>
         )}
       >
-        <TextArea
+        <textarea
           className="bank-auto-tag-condition-textarea"
           autoFocus
           rows={10}
@@ -790,20 +860,19 @@ export default function AutoTagRulesDrawer({
         onClose={() => setPendingArchiveRule(null)}
         actions={(
           <>
-            <Button className="bank-auto-tag-dialog-button" onPress={() => setPendingArchiveRule(null)} size="sm" variant="secondary">取消</Button>
-            <Button
+            <button type="button" className="bank-auto-tag-dialog-button" onClick={() => setPendingArchiveRule(null)}>取消</button>
+            <button
+              type="button"
               className="bank-auto-tag-dialog-button bank-auto-tag-dialog-button-danger"
-              onPress={() => {
+              onClick={() => {
                 if (pendingArchiveRule) {
                   archiveRule(pendingArchiveRule.localId);
                 }
                 setPendingArchiveRule(null);
               }}
-              size="sm"
-              variant="danger"
             >
               确认停用
-            </Button>
+            </button>
           </>
         )}
       />
@@ -827,21 +896,20 @@ function ActionButton({
   onClick: () => void;
 }) {
   return (
-    <Button
+    <button
+      type="button"
       className={`bank-auto-tag-action-button${className ? ` ${className}` : ""}`}
-      isDisabled={disabled}
+      disabled={disabled}
       aria-description={title}
-      onPress={onClick}
-      size="sm"
-      variant={className.includes("primary") ? "primary" : "secondary"}
+      onClick={onClick}
     >
       {icon}
       <span>{label}</span>
-    </Button>
+    </button>
   );
 }
 
-function SingleSelect({
+function NativeSelect({
   ariaLabel,
   disabled,
   options,
@@ -855,89 +923,15 @@ function SingleSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select
+    <select
       aria-label={ariaLabel}
-      className="bank-auto-tag-select"
-      isDisabled={disabled}
-      onSelectionChange={(key) => onChange(String(key))}
-      selectedKey={value}
+      className="bank-auto-tag-native-select"
+      disabled={disabled}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
     >
-      <Select.Trigger className="bank-auto-tag-select-trigger" isDisabled={disabled}>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover className="bank-auto-tag-select-listbox">
-        <ListBox>
-          {options.map((option) => (
-            <ListBox.Item
-              id={option.value}
-              key={option.value}
-              className="bank-auto-tag-select-option"
-              textValue={option.label}
-            >
-              {option.label}
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  );
-}
-
-function MatchFieldPicker({
-  ariaLabel,
-  disabled,
-  fieldOptions,
-  labels,
-  selectedValues,
-  onChange,
-}: {
-  ariaLabel: string;
-  disabled: boolean;
-  fieldOptions: BankAutoTagRulesResponse["fieldOptions"];
-  labels: string;
-  selectedValues: string[];
-  onChange: (values: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = new Set(selectedValues);
-
-  return (
-    <PopoverRoot isOpen={open} onOpenChange={(nextOpen) => !disabled && setOpen(nextOpen)}>
-      <PopoverTrigger aria-disabled={disabled} aria-label={ariaLabel} className="bank-auto-tag-select-trigger" tabIndex={disabled ? -1 : 0}>
-        {labels}
-      </PopoverTrigger>
-      <PopoverContent className="bank-auto-tag-select-listbox bank-auto-tag-field-listbox" placement="bottom start">
-        <PopoverDialog aria-label={`${ariaLabel}选项`}>
-          <div className="bank-auto-tag-field-menu-actions">
-            <Button isDisabled={disabled} onPress={() => onChange(fieldOptions.map((option) => option.value))} size="sm" variant="tertiary">
-              全选
-            </Button>
-            <Button isDisabled={disabled} onPress={() => onChange([])} size="sm" variant="tertiary">
-              清空
-            </Button>
-          </div>
-        <ListBox
-          aria-label={`${ariaLabel}选项`}
-          onSelectionChange={(keys) => onChange(keys === "all" ? fieldOptions.map((option) => option.value) : [...keys].map(String))}
-          selectedKeys={selected}
-          selectionMode="multiple"
-        >
-          {fieldOptions.map((option) => (
-            <ListBox.Item
-              id={option.value}
-              key={option.value}
-              className="bank-auto-tag-select-option"
-              textValue={option.label}
-            >
-              <span className="bank-auto-tag-option-check" aria-hidden="true">{selected.has(option.value) ? "✓" : ""}</span>
-              <span>{option.label}</span>
-            </ListBox.Item>
-          ))}
-        </ListBox>
-        </PopoverDialog>
-      </PopoverContent>
-    </PopoverRoot>
+      {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
   );
 }
 
@@ -955,14 +949,13 @@ function ConditionCell({
   onEdit: () => void;
 }) {
   return (
-    <FinanceTableCell columnRole="description">
-      <Button
+    <td>
+      <button
+        type="button"
         className="bank-auto-tag-condition-field-button"
         aria-label={`编辑${ruleLabel}${label}`}
-        isDisabled={disabled}
-        onPress={onEdit}
-        size="sm"
-        variant="tertiary"
+        disabled={disabled}
+        onClick={onEdit}
       >
         <span className="bank-auto-tag-condition-preview">
           {conditionDisplay(values).map((value) => (
@@ -971,7 +964,7 @@ function ConditionCell({
             </span>
           ))}
         </span>
-      </Button>
-    </FinanceTableCell>
+      </button>
+    </td>
   );
 }

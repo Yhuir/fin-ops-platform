@@ -7,6 +7,10 @@ const legacyWorkbenchTables = new Set([
   "components/workbench/PaneTable.tsx",
 ]);
 
+const approvedNativeTableSurfaces = new Set([
+  "features/bankDetails/AutoTagRulesDrawer.tsx",
+]);
+
 function tsxFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -15,11 +19,12 @@ function tsxFiles(directory: string): string[] {
 }
 
 describe("HeroUI finance table migration", () => {
-  it("keeps raw tables out of every non-Workbench production component", () => {
+  it("keeps raw tables out of production components except approved native table surfaces", () => {
     const sourceRoot = join(process.cwd(), "src");
     const offenders = tsxFiles(sourceRoot)
       .filter((path) => !path.includes("/test/"))
       .filter((path) => !legacyWorkbenchTables.has(relative(sourceRoot, path)))
+      .filter((path) => !approvedNativeTableSurfaces.has(relative(sourceRoot, path)))
       .filter((path) => /<table\b/.test(readFileSync(path, "utf8")))
       .map((path) => relative(sourceRoot, path));
 

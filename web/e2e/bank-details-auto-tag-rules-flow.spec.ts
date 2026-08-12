@@ -30,7 +30,7 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
   const open = async () => {
     await page.getByRole("button", { name: /自动标签规则/ }).click();
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("grid", { name: "自动标签规则表格" })).toBeVisible();
+    await expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible();
   };
   if (recordLatency) {
     await recordLatency({
@@ -40,7 +40,7 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
     }, async (mark) => {
       await page.getByRole("button", { name: /自动标签规则/ }).click();
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(drawer.getByRole("grid", { name: "自动标签规则表格" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("table", { name: "自动标签规则表格" })).toBeVisible());
     });
   } else {
     await open();
@@ -57,6 +57,9 @@ test.describe("bank details auto tag rules browser flow", () => {
     const initialTransactionRequests = api.count(TRANSACTIONS_PATH);
 
     const drawer = await openAutoTagRulesDrawer(page, recordLatency);
+    const mergedPrimaryCell = drawer.getByRole("textbox", { name: "费用 主标签" }).locator("xpath=ancestor::th");
+    await expect(mergedPrimaryCell).toHaveAttribute("scope", "rowgroup");
+    await expect(drawer.locator("textarea[aria-label='费用 主标签']")).toHaveCount(1);
     await recordLatency({
       operationId: "bank-details.fill-auto-tag-salary-sub-label",
       visibleLabel: "费用 / 工资 子标签",

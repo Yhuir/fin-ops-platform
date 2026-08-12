@@ -20983,21 +20983,54 @@ body.column-layout-dragging {
 .bank-auto-tag-table-container {
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
   border: 1px solid #dfe4ea;
-  border-radius: 8px;
+  border-radius: 4px;
   background: #ffffff;
 }
 
-.bank-auto-tag-rule-table .finance-table__content {
+.bank-auto-tag-rule-table {
+  min-width: 1540px;
   table-layout: fixed;
   width: 100%;
+  border-spacing: 0;
+  border-collapse: separate;
+  color: #1f2937;
 }
 
-.bank-auto-tag-rule-table .finance-table__column {
+.bank-auto-tag-rule-table .bank-auto-tag-col-primary,
+.bank-auto-tag-rule-table .bank-auto-tag-col-sub {
+  width: 150px;
+}
+
+.bank-auto-tag-rule-table .bank-auto-tag-col-direction {
+  width: 150px;
+}
+
+.bank-auto-tag-rule-table .bank-auto-tag-col-fields {
+  width: 190px;
+}
+
+.bank-auto-tag-rule-table .bank-auto-tag-col-condition {
+  width: 180px;
+}
+
+.bank-auto-tag-rule-table .bank-auto-tag-col-priority {
+  width: 82px;
+}
+
+.bank-auto-tag-rule-table .bank-auto-tag-col-actions {
+  width: 58px;
+}
+
+.bank-auto-tag-rule-table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
+  padding: 7px 6px;
+  border-right: 1px solid #dfe4ea;
   border-bottom: 1px solid #dfe4ea;
   background: #f2f4f7;
   color: #5f6772;
@@ -21007,47 +21040,72 @@ body.column-layout-dragging {
   text-align: left;
 }
 
-.bank-auto-tag-rule-table .finance-table__cell {
+.bank-auto-tag-rule-table tbody th,
+.bank-auto-tag-rule-table tbody td {
   vertical-align: top;
   min-width: 0;
-  padding: 7px 5px;
+  padding: 6px 5px;
+  border-right: 1px solid rgba(113, 128, 150, 0.16);
   border-bottom: 1px solid rgba(113, 128, 150, 0.16);
   font-size: 0.74rem;
-  line-height: 1.25;
-  white-space: normal;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.bank-auto-tag-system-row .finance-table__cell {
+.bank-auto-tag-rule-table thead th:last-child,
+.bank-auto-tag-rule-table tbody th:last-child,
+.bank-auto-tag-rule-table tbody td:last-child {
+  border-right: 0;
+}
+
+.bank-auto-tag-system-row > th,
+.bank-auto-tag-system-row > td {
   background: #f8fafc;
   color: #475569;
   font-weight: 700;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-blue .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-blue > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-blue {
   background: #eef5ff;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-teal .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-teal > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-teal {
   background: #edf8f6;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-green .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-green > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-green {
   background: #eff8f1;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-amber .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-amber > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-amber {
   background: #fff7e8;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-violet .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-violet > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-violet {
   background: #f4f1ff;
 }
 
-.bank-auto-tag-rule-row.bank-auto-tag-group-rose .finance-table__cell {
+.bank-auto-tag-rule-row.bank-auto-tag-group-rose > td,
+.bank-auto-tag-primary-cell.bank-auto-tag-group-rose {
   background: #fff1f4;
 }
 
+.bank-auto-tag-rule-row.is-group-start > th,
+.bank-auto-tag-rule-row.is-group-start > td {
+  border-top: 1px solid rgba(71, 85, 105, 0.28);
+}
+
 .bank-auto-tag-primary-cell {
+  vertical-align: middle !important;
   font-weight: 700;
 }
 
@@ -21069,6 +21127,44 @@ body.column-layout-dragging {
   font-size: 0.78rem;
   outline: none;
   padding: 5px 4px;
+}
+
+.bank-auto-tag-label-input {
+  field-sizing: content;
+  min-height: 30px;
+  max-height: none;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.bank-auto-tag-native-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #171717;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  outline: none;
+  padding: 4px 20px 4px 4px;
+}
+
+.bank-auto-tag-native-select:focus-visible {
+  border-bottom-color: rgba(37, 99, 235, 0.82);
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+  outline-offset: 1px;
+}
+
+.bank-auto-tag-native-select:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .bank-auto-tag-input:focus-visible {
@@ -21126,8 +21222,9 @@ body.column-layout-dragging {
 .bank-auto-tag-dialog-button:focus-visible,
 .bank-auto-tag-tab:focus-visible,
 .bank-auto-tag-icon-button:focus-visible,
-.bank-auto-tag-select-trigger:focus-visible,
-.bank-auto-tag-select-option:focus-visible {
+.bank-auto-tag-condition-field-button:focus-visible,
+.bank-auto-tag-field-menu-actions button:focus-visible,
+.bank-auto-tag-field-option input:focus-visible {
   outline: 2px solid #0f62fe;
   outline-offset: 2px;
 }
@@ -21135,8 +21232,7 @@ body.column-layout-dragging {
 .bank-auto-tag-action-button:disabled,
 .bank-auto-tag-dialog-button:disabled,
 .bank-auto-tag-tab:disabled,
-.bank-auto-tag-icon-button:disabled,
-.bank-auto-tag-select-trigger:disabled {
+.bank-auto-tag-icon-button:disabled {
   color: #94a3b8;
   cursor: not-allowed;
   opacity: 0.65;
@@ -21163,14 +21259,10 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-field-menu-actions {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   gap: 8px;
-  padding: 8px;
+  padding: 0 0 8px;
   border-bottom: 1px solid #e1e4e8;
-  background: #f8fafc;
 }
 
 .bank-auto-tag-field-menu-actions button {
@@ -21184,6 +21276,31 @@ body.column-layout-dragging {
   font: inherit;
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+.bank-auto-tag-field-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.bank-auto-tag-field-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-height: 30px;
+  padding: 5px 4px;
+  border-bottom: 1px solid #eef1f4;
+  color: #2f3742;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.bank-auto-tag-field-option input {
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
 }
 
 .bank-auto-tag-condition-field-button {
@@ -21227,95 +21344,6 @@ body.column-layout-dragging {
 
 .bank-auto-tag-condition-preview .is-empty {
   color: #64748b;
-}
-
-.bank-auto-tag-select {
-  position: relative;
-  min-width: 0;
-}
-
-.bank-auto-tag-select-trigger {
-  position: relative;
-  width: 100%;
-  min-height: 30px;
-  min-width: 0;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  background: transparent;
-  color: #171717;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.78rem;
-  outline: none;
-  padding: 5px 18px 5px 4px;
-  text-align: left;
-}
-
-.bank-auto-tag-select-trigger::after {
-  content: "";
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  border-bottom: 1.5px solid currentColor;
-  border-right: 1.5px solid currentColor;
-  transform: translateY(-65%) rotate(45deg);
-}
-
-.bank-auto-tag-select-trigger.is-disabled {
-  display: block;
-  color: #64748b;
-  cursor: not-allowed;
-}
-
-.bank-auto-tag-select-trigger.is-disabled::after {
-  content: none;
-}
-
-.bank-auto-tag-select-listbox {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 20;
-  display: grid;
-  min-width: 180px;
-  max-height: 260px;
-  overflow: auto;
-  border: 1px solid #d9dee5;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.14);
-}
-
-.bank-auto-tag-field-listbox {
-  min-width: 220px;
-}
-
-.bank-auto-tag-select-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  border: 0;
-  background: #ffffff;
-  color: #2f3742;
-  cursor: pointer;
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 6px 10px;
-  text-align: left;
-}
-
-.bank-auto-tag-select-option:hover,
-.bank-auto-tag-select-option[aria-selected="true"] {
-  background: #eef4ff;
-}
-
-.bank-auto-tag-option-check {
-  width: 12px;
-  color: #0f62fe;
-  font-weight: 700;
 }
 
 .bank-auto-tag-status-tabs,
@@ -21399,9 +21427,9 @@ body.column-layout-dragging {
 
 .bank-auto-tag-archived-label strong {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bank-auto-tag-archived-chip {
@@ -21433,6 +21461,12 @@ body.column-layout-dragging {
 @keyframes finance-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bank-auto-tag-spinner {
+    animation: none;
   }
 }
 
