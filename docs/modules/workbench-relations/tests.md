@@ -40,6 +40,7 @@
 - changed-case 持久化后只替换或删除目标 case/history；无关关系与审计保持不变，且 adapter 不得调用全局 `snapshot()` 做镜像重建。
 - persisted effective category 实际变化时，category fact 与受影响普通 relation requirement/history 必须同事务提交；无变化、无 active relation、ETC/批量账务关系均零 metadata 写。外层 UoW 只在 commit 后发布进程镜像，失败/rollback 不污染。
 - requirement repair 只自动修复 missing snapshot 或有 `manual|auto_confirmation|manual_confirmation|turnover_ledger` 有效分类来源证据的 tag drift；canonical confirmation proof 必须同时按 UUID/legacy identity 证明持久化绑定，rule-derived/未知来源只报告人工复核，dry-run fingerprint、幂等续跑、history 和 rollback 必须保留。
+- explicit requirement rule reapply 必须绑定 exact case ids、规则版本、完整 relation preimage、变更后的 metadata 与 canonical amount check；只接受无 OA 的 `bank + invoice` 收款关系、净额完全一致和可信持久化标签证据。成员/类型/规则/金额漂移均零写，execute/rollback 均只刷新 exact month，rollback 恢复 metadata 与 amount check。
 - active case 校验只执行一条 relation query，不查询 history；in-memory fallback 直接按 case 读取，不能复制全局 snapshot。
 - confirm overlap 校验只执行 active relation query，不加载 cancelled relation/history；command delta 只携带本次 history event，数据库不删除或重写旧 history，重复 operation id 保持幂等。
 - 下游只把 active relation 视为 linked；关联台的 `paired` 还必须满足页面完整性合同。普通 OA+发票 active relation 缺银行时保持 owner/case 不变但显示为 `unpaired`；只有显式 batch-accounting 关系豁免完成要求，ETC marker 只证明 batch identity。

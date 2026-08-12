@@ -708,6 +708,7 @@ class Application:
             etc_reconciliation_task_service=etc_reconciliation_task_service,
             workbench_relation_command_service=self._workbench_relation_command_service(),
             workbench_relation_reader=self._workbench_relation_command_service(),
+            workbench_canonical_rows_by_ids=self._tool_workbench_canonical_rows_by_ids,
             bank_transaction_effective_category_provider=self._bank_transaction_tag_reader(),
             bank_transaction_category_source_proofs=(
                 category_source_proofs if callable(category_source_proofs) else None
@@ -721,6 +722,7 @@ class Application:
                 else self._import_service
             ),
             persist_workbench_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(changed_case_ids=case_ids),
+            refresh_after_workbench_requirement_repair=self._refresh_after_workbench_requirement_repair,
             refresh_after_historical_etc_repair_link=self._refresh_after_historical_etc_repair_link,
             save_invoice_etc_metadata=(
                 state_store.save_invoice_etc_metadata
@@ -728,6 +730,17 @@ class Application:
                 else None
             ),
             persist_etc_state=(lambda: save_etc_state(etc_service.snapshot())) if callable(save_etc_state) else None,
+        )
+
+    def _tool_workbench_canonical_rows_by_ids(
+        self,
+        row_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is None:
+            raise RuntimeError("Workbench canonical row lookup requires PostgreSQL runtime.")
+        return PostgresWorkbenchCanonicalQueryRepository(connection).get_canonical_rows_by_ids(
+            row_ids
         )
 
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
@@ -4752,6 +4765,58 @@ class Application:
         if not normalized_months:
             return
         _ = reason
+
+    def _refresh_after_workbench_requirement_repair(
+        self,
+        changed_months: list[str],
+        *,
+        case_ids: list[str],
+        row_ids: list[str],
+        reason: str,
+    ) -> dict[str, object]:
+        normalized_months = [
+            month
+            for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
+            if MONTH_SCOPE_RE.match(month)
+        ]
+        if not normalized_months:
+            raise RuntimeError("Workbench requirement repair requires exact month scopes.")
+        normalized_reason = str(reason or "workbench_requirement_repair").strip()
+        metadata = {
+            "source": "workbench_requirement_repair",
+            "reason": normalized_reason,
+            "case_ids": sorted(
+                dict.fromkeys(str(case_id).strip() for case_id in case_ids if str(case_id).strip())
+            ),
+            "row_ids": sorted(
+                dict.fromkeys(str(row_id).strip() for row_id in row_ids if str(row_id).strip())
+            ),
+        }
+        relation_enqueued = self._enqueue_generic_read_model_refreshes(
+            "workbench_relation",
+            normalized_months,
+            reason=normalized_reason,
+            metadata=metadata,
+        )
+        workbench_enqueued = self._enqueue_generic_read_model_refreshes(
+            "workbench",
+            normalized_months,
+            reason=normalized_reason,
+            metadata=metadata,
+        )
+        dirty_months = self._mark_workbench_matching_dirty_scopes(
+            normalized_months,
+            reason=normalized_reason,
+            debounce_seconds=0,
+        )
+        if not relation_enqueued or not workbench_enqueued:
+            raise RuntimeError("Workbench requirement repair read-model refresh enqueue failed.")
+        return {
+            "months": normalized_months,
+            "workbench_relation_enqueued": relation_enqueued,
+            "workbench_enqueued": workbench_enqueued,
+            "matching_dirty_months": dirty_months,
+        }
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [

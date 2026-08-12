@@ -641,6 +641,21 @@ class PostgresWorkbenchCanonicalQueryRepository:
             lambda repository: repository._relation_preview_selection(**kwargs)
         )
 
+    def get_canonical_rows_by_ids(
+        self,
+        row_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        if not normalized_row_ids:
+            return {}
+        return self._in_snapshot(
+            lambda repository: repository._load_rows(normalized_row_ids)
+        )
+
     def validate_workbench_relation_selection_in_current_transaction(
         self,
         *,

@@ -9,8 +9,10 @@ import json
 import sys
 from typing import Any, TextIO
 
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
+    evaluate_bank_relation_completion,
 )
 from fin_ops_platform.tools import workbench_unavailable_oa_relation_repair_ops
 from fin_ops_platform.tools.runtime_application import (
@@ -20,6 +22,8 @@ from fin_ops_platform.tools.runtime_application import (
     build_tool_runtime_application,
     import_service,
     persist_workbench_pair_relations,
+    refresh_after_workbench_requirement_repair,
+    workbench_canonical_rows_by_ids,
     workbench_relation_command_service,
 )
 
@@ -29,8 +33,20 @@ REPAIR_ACTOR_ID = "system:workbench_requirement_repair"
 REPAIR_OPERATION_TYPE = "bank_transaction_paired_policy_requirement_backfill"
 ROLLBACK_ACTOR_ID = "system:workbench_requirement_repair_rollback"
 ROLLBACK_OPERATION_TYPE = "bank_transaction_paired_policy_requirement_rollback"
+REAPPLY_ACTOR_ID = "system:workbench_requirement_rule_reapply"
+REAPPLY_OPERATION_TYPE = "bank_transaction_paired_policy_requirement_rule_reapply"
+REAPPLY_ROLLBACK_ACTOR_ID = "system:workbench_requirement_rule_reapply_rollback"
+REAPPLY_ROLLBACK_OPERATION_TYPE = "bank_transaction_paired_policy_requirement_rule_reapply_rollback"
 _FORWARD_NOTE_PREFIX = "Workbench requirement repair execute fingerprint="
 _ROLLBACK_NOTE_PREFIX = "Workbench requirement repair rollback fingerprint="
+_REAPPLY_NOTE_PREFIX = "Workbench requirement rule reapply execute fingerprint="
+_REAPPLY_ROLLBACK_NOTE_PREFIX = "Workbench requirement rule reapply rollback fingerprint="
+_TRUSTED_CATEGORY_SOURCES = {
+    "manual",
+    "auto_confirmation",
+    "manual_confirmation",
+    "turnover_ledger",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--rollback-dry-run", action="store_true")
     mode.add_argument("--rollback", action="store_true")
     parser.add_argument("--expected-fingerprint")
+    parser.add_argument("--reapply-case-id", action="append", default=[])
+    parser.add_argument("--expected-rule-version", type=int)
     return parser
 
 
@@ -50,10 +68,25 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
     mode = _mode(args)
+    reapply_case_ids = list(
+        dict.fromkeys(
+            str(case_id).strip()
+            for case_id in list(args.reapply_case_id or [])
+            if str(case_id).strip()
+        )
+    )
+    if len(reapply_case_ids) != len(list(args.reapply_case_id or [])):
+        raise SystemExit("--reapply-case-id values must be non-empty and unique")
     if mode == "dry_run" and args.expected_fingerprint:
         raise SystemExit("--dry-run does not accept --expected-fingerprint")
     if mode != "dry_run" and not args.expected_fingerprint:
         raise SystemExit(f"--{mode.replace('_', '-')} requires --expected-fingerprint")
+    if mode in {"rollback_dry_run", "rollback"} and (
+        reapply_case_ids or args.expected_rule_version is not None
+    ):
+        raise SystemExit("Rollback derives its exact repair contract from audited execute history")
+    if bool(reapply_case_ids) != (args.expected_rule_version is not None):
+        raise SystemExit("Explicit rule reapply requires both --reapply-case-id and --expected-rule-version")
     app = build_tool_runtime_application(None)
     command_service = workbench_relation_command_service(app)
     relations = command_service.list_active_relations()
@@ -75,6 +108,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         workbench_unavailable_oa_relation_repair_ops.discover_unavailable_oa_relation_repairs(
             relations
         )
+        if not reapply_case_ids
+        else []
     )
     if mode == "execute":
         matching_repairs = [
@@ -94,31 +129,51 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 stdout=stdout,
             )
 
-    eligible_relations = [
-        relation
-        for relation in relations
-        if _eligible_bank_relation(relation)
-    ]
+    eligible_relations = [relation for relation in relations if _eligible_bank_relation(relation)]
+    requested_relations = (
+        _requested_active_relations(relations, reapply_case_ids)
+        if reapply_case_ids
+        else []
+    )
+    category_scope_relations = requested_relations or eligible_relations
     category_provider = bank_transaction_effective_category_provider(app)
     raw_rules_payload = bank_flow_rule_batch_tag_rules_payload(app)
     rules_payload = raw_rules_payload if isinstance(raw_rules_payload, dict) else {}
     bank_row_ids = list(
         dict.fromkeys(
             row_id
-            for relation in eligible_relations
+            for relation in category_scope_relations
             for row_id in _bank_row_ids(relation)
         )
     )
-    assessments = _build_plan(
-        eligible_relations,
-        category_provider=category_provider,
-        bank_rows=import_service(app).list_transactions(month="all"),
-        persisted_category_records=bank_transaction_category_source_proofs(
-            app,
-            bank_row_ids,
-        ),
-        rules_payload=rules_payload,
-    )
+    bank_rows = import_service(app).list_transactions(month="all")
+    persisted_category_records = bank_transaction_category_source_proofs(app, bank_row_ids)
+    if reapply_case_ids:
+        relation_row_ids = list(
+            dict.fromkeys(
+                str(row_id).strip()
+                for relation in requested_relations
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+        )
+        assessments = _build_explicit_reapply_plan(
+            requested_relations,
+            category_provider=category_provider,
+            bank_rows=bank_rows,
+            persisted_category_records=persisted_category_records,
+            rules_payload=rules_payload,
+            expected_rule_version=int(args.expected_rule_version),
+            canonical_rows=workbench_canonical_rows_by_ids(app, relation_row_ids),
+        )
+    else:
+        assessments = _build_plan(
+            eligible_relations,
+            category_provider=category_provider,
+            bank_rows=bank_rows,
+            persisted_category_records=persisted_category_records,
+            rules_payload=rules_payload,
+        )
     fresh_plan = [item for item in assessments if str(item.get("repair_reason") or "").strip()]
     manual_review = [
         item
@@ -133,6 +188,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             histories=histories,
             current_relations=relations,
             expected_fingerprint=fingerprint,
+            actor_id=REAPPLY_ACTOR_ID if reapply_case_ids else REPAIR_ACTOR_ID,
+            operation_type=REAPPLY_OPERATION_TYPE if reapply_case_ids else REPAIR_OPERATION_TYPE,
+            note_prefix=_REAPPLY_NOTE_PREFIX if reapply_case_ids else _FORWARD_NOTE_PREFIX,
         )
         if _fingerprint(full_plan) != fingerprint:
             raise RuntimeError(
@@ -149,16 +207,44 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         for item in pending_plan:
             result = command_service.update_relation_metadata_for_case_id(
                 case_id=item["case_id"],
+                amount_check=item.get("intended_amount_check"),
                 special_metadata=item["intended_special_metadata"],
                 replace_special_metadata=True,
-                actor_id=REPAIR_ACTOR_ID,
-                note=f"{_FORWARD_NOTE_PREFIX}{fingerprint}",
-                idempotency_key=f"workbench-requirement-backfill-v2:{fingerprint}:{item['case_id']}",
-                history_operation_type=REPAIR_OPERATION_TYPE,
+                actor_id=REAPPLY_ACTOR_ID if reapply_case_ids else REPAIR_ACTOR_ID,
+                note=f"{_REAPPLY_NOTE_PREFIX if reapply_case_ids else _FORWARD_NOTE_PREFIX}{fingerprint}",
+                idempotency_key=(
+                    f"workbench-requirement-rule-reapply-v1:{fingerprint}:{item['case_id']}"
+                    if reapply_case_ids
+                    else f"workbench-requirement-backfill-v2:{fingerprint}:{item['case_id']}"
+                ),
+                history_operation_type=(
+                    REAPPLY_OPERATION_TYPE if reapply_case_ids else REPAIR_OPERATION_TYPE
+                ),
             )
             persist_workbench_pair_relations(app, [item["case_id"]])
             written += 1
             affected_months.update(_affected_months(result))
+
+    refresh_result: dict[str, Any] | None = None
+    if mode == "execute" and reapply_case_ids:
+        exact_months = sorted(
+            {
+                str(item.get("month_scope") or "").strip()
+                for item in full_plan
+                if str(item.get("month_scope") or "").strip()
+            }
+        )
+        refresh_result = refresh_after_workbench_requirement_repair(
+            app,
+            exact_months,
+            case_ids=[str(item["case_id"]) for item in full_plan],
+            row_ids=[
+                str(row_id)
+                for item in full_plan
+                for row_id in list(item["before_relation"].get("row_ids") or [])
+            ],
+            reason="workbench_requirement_rule_reapply",
+        )
 
     report = _public_forward_report(
         relations=relations,
@@ -172,6 +258,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         manual_review=manual_review,
     )
     report["unavailable_oa_relation_repairs"] = unavailable_oa_repairs
+    report["explicit_rule_reapply"] = bool(reapply_case_ids)
+    if refresh_result is not None:
+        report["refresh"] = refresh_result
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
 
@@ -305,6 +394,7 @@ def _build_plan(
                 "month_scope": str(relation.get("month_scope") or "all"),
                 "row_types": [str(value) for value in list(relation.get("row_types") or [])],
                 "bank_tag_codes": tag_codes,
+                "bank_row_tag_codes": raw_tag_codes,
                 "bank_tag_sources": tag_sources,
                 "stored_bank_tag_codes": stored_tag_codes,
                 "repair_reason": (
@@ -318,6 +408,187 @@ def _build_plan(
             }
         )
     return plan
+
+
+def _requested_active_relations(
+    relations: list[dict[str, Any]],
+    requested_case_ids: list[str],
+) -> list[dict[str, Any]]:
+    active_by_case = _active_relations_by_case(relations)
+    missing = sorted(set(requested_case_ids) - set(active_by_case))
+    if missing:
+        raise RuntimeError(
+            "Explicit Workbench requirement rule reapply case is not active: "
+            + ", ".join(missing)
+        )
+    return [deepcopy(active_by_case[case_id]) for case_id in requested_case_ids]
+
+
+def _build_explicit_reapply_plan(
+    relations: list[dict[str, Any]],
+    *,
+    category_provider: Any,
+    bank_rows: list[Any],
+    persisted_category_records: dict[str, dict[str, object]],
+    rules_payload: dict[str, Any],
+    expected_rule_version: int,
+    canonical_rows: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    actual_rule_version = rules_payload.get("version")
+    if (
+        not isinstance(actual_rule_version, int)
+        or isinstance(actual_rule_version, bool)
+        or actual_rule_version != expected_rule_version
+    ):
+        raise RuntimeError(
+            "Explicit Workbench requirement rule reapply rule version changed; rerun dry-run."
+        )
+    assessments = _build_plan(
+        relations,
+        category_provider=category_provider,
+        bank_rows=bank_rows,
+        persisted_category_records=persisted_category_records,
+        rules_payload=rules_payload,
+    )
+    amount_service = WorkbenchAmountCheckService()
+    result: list[dict[str, Any]] = []
+    relations_by_case = {
+        str(relation.get("case_id") or "").strip(): relation for relation in relations
+    }
+    for assessment in assessments:
+        case_id = str(assessment.get("case_id") or "").strip()
+        relation = relations_by_case[case_id]
+        row_ids = [str(value or "").strip() for value in list(relation.get("row_ids") or [])]
+        row_types = [str(value or "").strip().lower() for value in list(relation.get("row_types") or [])]
+        if (
+            not _eligible_bank_relation(relation)
+            or str(relation.get("relation_mode") or "").strip() != "manual_confirmed"
+            or len(row_ids) != len(row_types)
+            or not row_ids
+            or len(set(row_ids)) != len(row_ids)
+            or row_types.count("bank") != 1
+            or row_types.count("invoice") < 1
+            or "oa" in row_types
+            or set(row_types) != {"bank", "invoice"}
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply relation is outside the approved shape: {case_id}."
+            )
+        metadata = relation.get("special_metadata")
+        metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
+        if (
+            str(metadata.get("paired_requirement_source") or "").strip()
+            != CANONICAL_REQUIREMENT_SOURCE
+            or not bool(metadata.get("requires_oa"))
+            or not bool(metadata.get("requires_invoice"))
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply preimage is not the expected frozen policy: {case_id}."
+            )
+        bank_row_tag_codes = list(assessment.get("bank_row_tag_codes") or [])
+        bank_tag_codes = list(assessment.get("bank_tag_codes") or [])
+        bank_tag_sources = list(assessment.get("bank_tag_sources") or [])
+        if (
+            not bank_row_tag_codes
+            or any(not str(value or "").strip() for value in bank_row_tag_codes)
+            or any(source not in _TRUSTED_CATEGORY_SOURCES for source in bank_tag_sources)
+            or list(assessment.get("stored_bank_tag_codes") or []) != bank_tag_codes
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply category proof is incomplete or changed: {case_id}."
+            )
+        intended_metadata = build_bank_relation_requirement_metadata(
+            tag_codes=bank_row_tag_codes,
+            rules_payload=rules_payload,
+        )
+        if bool(intended_metadata["requires_oa"]) or not bool(
+            intended_metadata["requires_invoice"]
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply does not resolve only the OA requirement: {case_id}."
+            )
+        missing = sorted(set(row_ids) - set(canonical_rows))
+        if missing:
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply canonical members are missing for {case_id}: {missing}."
+            )
+        rows_by_type: dict[str, list[dict[str, Any]]] = {
+            "oa": [],
+            "bank": [],
+            "invoice": [],
+        }
+        for row_id, row_type in zip(row_ids, row_types, strict=True):
+            row = canonical_rows[row_id]
+            if str(row.get("id") or "").strip() != row_id or str(
+                row.get("type") or ""
+            ).strip().lower() != row_type:
+                raise RuntimeError(
+                    f"Explicit Workbench requirement rule reapply canonical member type changed: {case_id}/{row_id}."
+                )
+            rows_by_type[row_type].append(deepcopy(row))
+        amount_check = amount_service.check(rows_by_type)
+        if (
+            amount_check.get("status") != "matched"
+            or amount_check.get("direction") != "receipt"
+            or amount_check.get("amount_delta") != "0.00"
+            or not amount_check.get("bank_total")
+            or amount_check.get("bank_total") != amount_check.get("invoice_total")
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply canonical amount check is not exact: {case_id}."
+            )
+        before_completion = evaluate_bank_relation_completion(
+            row_types=row_types,
+            special_metadata=metadata,
+            relation_mode=str(relation.get("relation_mode") or ""),
+            amount_check=(
+                relation.get("amount_check")
+                if isinstance(relation.get("amount_check"), dict)
+                else None
+            ),
+        )
+        after_completion = evaluate_bank_relation_completion(
+            row_types=row_types,
+            special_metadata=intended_metadata,
+            relation_mode=str(relation.get("relation_mode") or ""),
+            amount_check=amount_check,
+        )
+        if (
+            before_completion.get("is_complete")
+            or before_completion.get("missing_row_types") != ["oa"]
+            or not after_completion.get("is_complete")
+        ):
+            raise RuntimeError(
+                f"Explicit Workbench requirement rule reapply completion transition is not OA-only: {case_id}."
+            )
+        intended_special_metadata = {
+            key: value
+            for key, value in metadata.items()
+            if key
+            not in {
+                "paired_requirement_source",
+                "paired_requirement_tag_codes",
+                "paired_requirement_tag_code",
+                "paired_requirement_version",
+                "requires_oa",
+                "requires_invoice",
+                "paired_requires_oa",
+                "paired_requires_invoice",
+            }
+        }
+        intended_special_metadata.update(deepcopy(intended_metadata))
+        result.append(
+            {
+                **deepcopy(assessment),
+                "before_relation": deepcopy(relation),
+                "intended_special_metadata": intended_special_metadata,
+                "special_metadata": deepcopy(intended_metadata),
+                "intended_amount_check": amount_check,
+                "repair_reason": "explicit_rule_reapply",
+                "manual_review_reason": "",
+            }
+        )
+    return sorted(result, key=lambda item: str(item["case_id"]))
 
 
 def _eligible_bank_relation(relation: dict[str, Any]) -> bool:
@@ -376,12 +647,15 @@ def _reconstruct_forward_plan(
     histories: list[dict[str, Any]],
     current_relations: list[dict[str, Any]],
     expected_fingerprint: str,
+    actor_id: str,
+    operation_type: str,
+    note_prefix: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     history_records = _matched_history_records(
         histories,
-        actor_id=REPAIR_ACTOR_ID,
-        operation_type=REPAIR_OPERATION_TYPE,
-        note=f"{_FORWARD_NOTE_PREFIX}{expected_fingerprint}",
+        actor_id=actor_id,
+        operation_type=operation_type,
+        note=f"{note_prefix}{expected_fingerprint}",
     )
     applied_items: dict[str, dict[str, Any]] = {}
     applied_after: dict[str, dict[str, Any]] = {}
@@ -425,14 +699,48 @@ def _run_rollback(
     fingerprint: str,
     execute: bool,
 ) -> dict[str, Any]:
-    execute_records = _matched_history_records(
-        histories,
-        actor_id=REPAIR_ACTOR_ID,
-        operation_type=REPAIR_OPERATION_TYPE,
-        note=f"{_FORWARD_NOTE_PREFIX}{fingerprint}",
-    )
+    execute_contracts = [
+        (
+            REPAIR_ACTOR_ID,
+            REPAIR_OPERATION_TYPE,
+            _FORWARD_NOTE_PREFIX,
+            ROLLBACK_ACTOR_ID,
+            ROLLBACK_OPERATION_TYPE,
+            _ROLLBACK_NOTE_PREFIX,
+            False,
+        ),
+        (
+            REAPPLY_ACTOR_ID,
+            REAPPLY_OPERATION_TYPE,
+            _REAPPLY_NOTE_PREFIX,
+            REAPPLY_ROLLBACK_ACTOR_ID,
+            REAPPLY_ROLLBACK_OPERATION_TYPE,
+            _REAPPLY_ROLLBACK_NOTE_PREFIX,
+            True,
+        ),
+    ]
+    matching_contracts: list[tuple[tuple[Any, ...], list[dict[str, Any]]]] = []
+    for contract in execute_contracts:
+        records = _matched_history_records(
+            histories,
+            actor_id=str(contract[0]),
+            operation_type=str(contract[1]),
+            note=f"{contract[2]}{fingerprint}",
+        )
+        if records:
+            matching_contracts.append((contract, records))
+    if len(matching_contracts) > 1:
+        raise RuntimeError("Multiple execute history contracts match the supplied repair fingerprint.")
+    if matching_contracts:
+        contract, execute_records = matching_contracts[0]
+    else:
+        contract, execute_records = execute_contracts[0], []
     if not execute_records:
         raise RuntimeError("No matching execute history exists for the supplied repair fingerprint.")
+    rollback_actor_id = str(contract[3])
+    rollback_operation_type = str(contract[4])
+    rollback_note_prefix = str(contract[5])
+    explicit_reapply = bool(contract[6])
     execute_by_case: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     original_plan: list[dict[str, Any]] = []
     for history in execute_records:
@@ -448,9 +756,9 @@ def _run_rollback(
 
     rollback_records = _matched_history_records(
         histories,
-        actor_id=ROLLBACK_ACTOR_ID,
-        operation_type=ROLLBACK_OPERATION_TYPE,
-        note=f"{_ROLLBACK_NOTE_PREFIX}{fingerprint}",
+        actor_id=rollback_actor_id,
+        operation_type=rollback_operation_type,
+        note=f"{rollback_note_prefix}{fingerprint}",
     )
     rollback_by_case: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for history in rollback_records:
@@ -464,7 +772,7 @@ def _run_rollback(
         raise RuntimeError("Rollback history contains a case outside the execute fingerprint.")
 
     current_by_case = _active_relations_by_case(relations)
-    pending: list[tuple[str, dict[str, Any]]] = []
+    pending: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     for case_id in sorted(execute_by_case):
         before, after = execute_by_case[case_id]
         current = current_by_case.get(case_id)
@@ -473,13 +781,27 @@ def _run_rollback(
             if current != after:
                 raise RuntimeError(f"Workbench requirement rollback drift detected for pending case {case_id}.")
             metadata = before.get("special_metadata")
-            pending.append((case_id, deepcopy(metadata) if isinstance(metadata, dict) else {}))
+            amount_check = before.get("amount_check")
+            pending.append(
+                (
+                    case_id,
+                    deepcopy(metadata) if isinstance(metadata, dict) else {},
+                    deepcopy(amount_check) if isinstance(amount_check, dict) else {},
+                )
+            )
             continue
         rollback_before, rollback_after = rollback_transition
         expected_metadata = before.get("special_metadata")
         if rollback_before != after or (
             rollback_after.get("special_metadata")
             != (expected_metadata if isinstance(expected_metadata, dict) else {})
+        ) or (
+            rollback_after.get("amount_check")
+            != (
+                before.get("amount_check")
+                if isinstance(before.get("amount_check"), dict)
+                else {}
+            )
         ):
             raise RuntimeError(f"Workbench requirement rollback history drift detected for case {case_id}.")
         if current != rollback_after:
@@ -488,19 +810,40 @@ def _run_rollback(
     written = 0
     affected_months: set[str] = set()
     if execute:
-        for case_id, preimage in pending:
+        for case_id, metadata_preimage, amount_check_preimage in pending:
             result = command_service.update_relation_metadata_for_case_id(
                 case_id=case_id,
-                special_metadata=preimage,
+                amount_check=amount_check_preimage,
+                special_metadata=metadata_preimage,
                 replace_special_metadata=True,
-                actor_id=ROLLBACK_ACTOR_ID,
-                note=f"{_ROLLBACK_NOTE_PREFIX}{fingerprint}",
+                actor_id=rollback_actor_id,
+                note=f"{rollback_note_prefix}{fingerprint}",
                 idempotency_key=f"workbench-requirement-rollback-v1:{fingerprint}:{case_id}",
-                history_operation_type=ROLLBACK_OPERATION_TYPE,
+                history_operation_type=rollback_operation_type,
             )
             persist_workbench_pair_relations(app, [case_id])
             written += 1
             affected_months.update(_affected_months(result))
+
+    refresh_result: dict[str, Any] | None = None
+    if execute and explicit_reapply:
+        refresh_result = refresh_after_workbench_requirement_repair(
+            app,
+            sorted(
+                {
+                    str(before.get("month_scope") or "").strip()
+                    for before, _after in execute_by_case.values()
+                    if str(before.get("month_scope") or "").strip()
+                }
+            ),
+            case_ids=sorted(execute_by_case),
+            row_ids=[
+                str(row_id)
+                for before, _after in execute_by_case.values()
+                for row_id in list(before.get("row_ids") or [])
+            ],
+            reason="workbench_requirement_rule_reapply_rollback",
+        )
 
     return {
         "status": "applied" if execute else "dry_run",
@@ -512,7 +855,9 @@ def _run_rollback(
         "written_relation_count": written,
         "source_fingerprint": fingerprint,
         "affected_months": sorted(affected_months),
-        "sample_case_ids": [case_id for case_id, _metadata in pending[:10]],
+        "sample_case_ids": [case_id for case_id, _metadata, _amount in pending[:10]],
+        "explicit_rule_reapply": explicit_reapply,
+        **({"refresh": refresh_result} if refresh_result is not None else {}),
     }
 
 
@@ -561,6 +906,9 @@ def _plan_item_from_transition(
         "case_id": str(before.get("case_id") or "").strip(),
         "before_relation": deepcopy(before),
         "intended_special_metadata": after_metadata,
+        "intended_amount_check": deepcopy(
+            after.get("amount_check") if isinstance(after.get("amount_check"), dict) else {}
+        ),
         "special_metadata": after_metadata,
         "month_scope": str(before.get("month_scope") or "all"),
         "row_types": [str(value) for value in list(before.get("row_types") or [])],
@@ -639,14 +987,24 @@ def _existing_or_built_requirement(
 
 
 def _fingerprint(plan: list[dict[str, Any]]) -> str:
-    payload = [
-        {
+    payload: list[dict[str, Any]] = []
+    for item in sorted(plan, key=lambda value: str(value.get("case_id") or "")):
+        fingerprint_item: dict[str, Any] = {
             "case_id": str(item.get("case_id") or ""),
             "before_relation": item.get("before_relation"),
             "intended_special_metadata": item.get("intended_special_metadata"),
         }
-        for item in sorted(plan, key=lambda value: str(value.get("case_id") or ""))
-    ]
+        before_relation = item.get("before_relation")
+        before_amount_check = (
+            before_relation.get("amount_check")
+            if isinstance(before_relation, dict)
+            and isinstance(before_relation.get("amount_check"), dict)
+            else {}
+        )
+        intended_amount_check = item.get("intended_amount_check")
+        if isinstance(intended_amount_check, dict) and intended_amount_check != before_amount_check:
+            fingerprint_item["intended_amount_check"] = intended_amount_check
+        payload.append(fingerprint_item)
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -708,7 +1066,7 @@ def _public_forward_report(
         "written_relation_count": written,
         "rule_version": rules_payload.get("version"),
         "source_fingerprint": fingerprint,
-        "fingerprint_contract": "exact_before_relation+intended_special_metadata",
+        "fingerprint_contract": "exact_before_relation+intended_special_metadata+changed_intended_amount_check",
         "requirement_counts": dict(sorted(requirement_counts.items())),
         "row_type_counts": dict(sorted(row_type_counts.items())),
         "top_tag_codes": tag_counts.most_common(20),

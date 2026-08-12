@@ -6,6 +6,12 @@
 
 历史 drift 复用既有可回滚 repair：missing snapshot 与有持久化分类来源证据的 drift 可执行；规则推导/未知来源只列入人工复核。旧未接线 category callback 和绕过 closure 的 Turnover 直接 writer 路径已移除。
 
+## 2026-08-12 - 两条收入正式关系显式重应用规则
+
+规则保存继续保持非追溯语义。对已经人工确认、但冻结在旧规则版本且因此只缺 OA 的关系，扩展既有 `workbench-requirement-repair` 运维入口：operator 必须列出 exact case ids 和 expected rule version；工具批量直读 canonical typed members、持久化标签证据与当前规则，验证 `bank + invoice` 收款净额完全一致后，才通过 `WorkbenchRelationCommandService` 一次更新 frozen requirement 与 canonical amount check。fingerprint 绑定完整 before relation、目标 metadata 和发生变化的 amount check；history/幂等续跑/rollback 均复用正式关系边界，rollback 恢复两份 preimage。写后只刷新受影响月份的 Workbench/共享 relation projection 和 matching dirty scope，不使用 `all`。
+
+没有新增在线 API、页面状态、规则自动追溯或第二条 relation writer；不满足 exact shape、可信标签来源、成员完整、规则版本和金额一致性时全部在写前失败。
+
 ## 2026-07-30 - 人工 ETC summary 写入合同
 
 人工 confirm 不再信任 preview DTO 作为写入事实：relation UoW 使用同一事务的 canonical query 重新解析 selected row ids/types，任何漂移整批冲突退出。合法折叠 ETC summary 必须解析为唯一 external batch 并写入 relation special metadata；多个 batch、缺 summary 或类型不一致不写 relation/history/idempotency。

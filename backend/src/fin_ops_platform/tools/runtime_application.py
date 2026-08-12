@@ -68,6 +68,19 @@ def workbench_relation_reader(app: Any) -> Any | None:
     return getattr(tool_runtime_ports(app), "workbench_relation_reader", None)
 
 
+def workbench_canonical_rows_by_ids(
+    app: Any,
+    row_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    provider = getattr(tool_runtime_ports(app), "workbench_canonical_rows_by_ids", None)
+    if not callable(provider):
+        raise RuntimeError("Workbench canonical row lookup boundary is unavailable.")
+    result = provider(list(row_ids or []))
+    if not isinstance(result, dict):
+        raise RuntimeError("Workbench canonical row lookup boundary returned an invalid result.")
+    return result
+
+
 def bank_transaction_effective_category_provider(app: Any) -> Any:
     provider = getattr(
         tool_runtime_ports(app),
@@ -114,3 +127,29 @@ def object_identity_repository(app: Any) -> Any | None:
 
 def persist_workbench_pair_relations(app: Any, case_ids: list[str]) -> Any:
     return tool_runtime_ports(app).persist_workbench_pair_relations(case_ids)
+
+
+def refresh_after_workbench_requirement_repair(
+    app: Any,
+    months: list[str],
+    *,
+    case_ids: list[str],
+    row_ids: list[str],
+    reason: str,
+) -> dict[str, Any]:
+    refresh = getattr(
+        tool_runtime_ports(app),
+        "refresh_after_workbench_requirement_repair",
+        None,
+    )
+    if not callable(refresh):
+        raise RuntimeError("Workbench requirement repair refresh boundary is unavailable.")
+    result = refresh(
+        list(months or []),
+        case_ids=list(case_ids or []),
+        row_ids=list(row_ids or []),
+        reason=reason,
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Workbench requirement repair refresh boundary returned an invalid result.")
+    return result

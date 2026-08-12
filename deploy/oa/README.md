@@ -492,6 +492,13 @@ sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --rollback \
   --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
+  --dry-run --reapply-case-id <exact-case-id> [--reapply-case-id <exact-case-id> ...] \
+  --expected-rule-version <version>
+sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
+  --execute --expected-fingerprint <dry-run-source-fingerprint> \
+  --reapply-case-id <exact-case-id> [--reapply-case-id <exact-case-id> ...] \
+  --expected-rule-version <version>
 sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
   --case-id <case-id> --external-etc-batch-id <batch-id> --dry-run
 sudo /usr/local/sbin/finops-deploy-control workbench-etc-summary-repair <release-name> \
@@ -649,6 +656,10 @@ fingerprint、operator 和 reason。它只补 canonical ETC member/link、归一
 中断后幂等续跑。`rollback-dry-run` / `rollback` 只选择同 fingerprint 的 execute history，在首写前检查
 after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢复完整 `special_metadata` preimage；
 不 cancel/recreate relation。ETC 与批量账务不在修复范围；命令不开放 SQL、任意脚本或常驻回扫。
+显式 `--reapply-case-id + --expected-rule-version` 不改变规则默认非追溯语义；它只处理 operator 明确列出的
+active `bank + invoice` 收款关系，并要求 persisted tag/source、typed canonical members、OA-only 缺项及
+收款/销项净额全部精确成立。execute 同时审计更新 frozen requirement 与 canonical amount check；rollback
+恢复两者，写后只 enqueue exact month scopes，不触发 `all` fan-out。
 `workbench-etc-summary-repair` 只修复一个明确 case 与 external ETC batch 的 durable relation marker。
 dry-run 要求 active relation 精确包含由 batch ID 确定性生成的 invoice summary row，fingerprint 绑定
 case、batch、scope、mode 和有序 row ids/types；冲突 marker、缺 summary 或类型不一致全部 fail closed。

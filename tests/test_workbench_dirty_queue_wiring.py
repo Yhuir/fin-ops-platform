@@ -279,6 +279,53 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         )
         self.assertNotIn("all", [call["scope_key"] for call in workbench_calls])
 
+    def test_requirement_rule_reapply_refreshes_only_exact_workbench_scopes(self) -> None:
+        app = build_application()
+        queue = RecordingReadModelQueue()
+        dirty_calls: list[dict[str, object]] = []
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._mark_workbench_matching_dirty_scopes = lambda months, **kwargs: (
+            dirty_calls.append({"months": list(months), **kwargs}) or list(months)
+        )
+
+        result = app._refresh_after_workbench_requirement_repair(
+            ["2026-07", "invalid", "2026-05", "2026-07"],
+            case_ids=["case-2", "case-1", "case-2"],
+            row_ids=["bank-1", "invoice-1", "bank-1"],
+            reason="workbench_requirement_rule_reapply",
+        )
+
+        self.assertEqual(result["months"], ["2026-05", "2026-07"])
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
+            [
+                ("workbench_relation", "2026-05"),
+                ("workbench_relation", "2026-07"),
+                ("workbench", "2026-05"),
+                ("workbench", "2026-07"),
+            ],
+        )
+        self.assertEqual(
+            queue.calls[0]["metadata"],
+            {
+                "source": "workbench_requirement_repair",
+                "reason": "workbench_requirement_rule_reapply",
+                "case_ids": ["case-1", "case-2"],
+                "row_ids": ["bank-1", "invoice-1"],
+            },
+        )
+        self.assertEqual(
+            dirty_calls,
+            [
+                {
+                    "months": ["2026-05", "2026-07"],
+                    "reason": "workbench_requirement_rule_reapply",
+                    "debounce_seconds": 0,
+                }
+            ],
+        )
+        self.assertNotIn("all", [call["scope_key"] for call in queue.calls])
+
     def test_ordinary_write_events_are_not_accepted_by_maintenance_boundary(self) -> None:
         app = build_application()
 
