@@ -84,7 +84,7 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 
 ## Bank-flow live candidate
 
-流水规则未提交候选不是 read model 或后台任务。页面 API 在同一只读 snapshot 中读取月份窗口内全部 canonical 银行流水、人工/确认分类事实、当前自动分类规则、paired policy 和 active relation；有效分类由与银行明细相同的 `BankTransactionEffectiveCategoryProvider` 批量计算，再交给共享 `BankBatchService` 内核实时推导。禁止仅按已持久化分类做 SQL 预筛。`app.bank_flow_rule_batches/events` 只保存正式状态和历史；旧 canonical draft event/owner/producer/worker/replay 不得恢复。
+流水规则未提交候选不是 read model 或后台任务。页面 API 在同一只读 snapshot 中读取月份窗口内全部 canonical 银行流水、人工/确认分类事实、当前自动分类规则、paired policy 和 active relation；有效分类由与银行明细相同的 `BankTransactionEffectiveCategoryProvider` 批量计算，再交给共享 `BankBatchService` 内核实时推导。禁止仅按已持久化分类做 SQL 预筛。`app.bank_flow_rule_batches/events` 只保存正式状态和历史；旧 canonical draft event/owner/producer/worker/replay 不得恢复。标签 requirement 保存产生的 settings-maintenance job 是正式关系 metadata 的增量业务任务，不是 bank-flow 页面 projection；它只经 `ReadModelRefreshGateway` 刷新实际变化关系所在的精确 `workbench` / `workbench_relation` 月份。
 
 OA sync、import processing 与 Workbench matching 仍属于 canonical integration/domain jobs；它们不是页面 read model。
 

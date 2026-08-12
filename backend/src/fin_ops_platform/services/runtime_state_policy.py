@@ -31,6 +31,7 @@ BACKGROUND_JOB_KNOWN_TYPES = BACKGROUND_JOB_REBUILDABLE_TYPES | {
     "etc_invoice_import",
     "file_import",
     "settings_data_reset",
+    "bank_relation_requirement_recalculation",
 }
 BACKGROUND_JOB_RETRYABLE_TYPES = {
     "file_import",

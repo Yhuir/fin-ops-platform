@@ -7,7 +7,7 @@
 | BRB-E2E-001 | 标签规则抽屉跟随银行明细标签 | `web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/src/test/BankFlowRuleBatchPage.test.tsx` | 已覆盖新 route、标题、xlsx-like grid、全部 active tag 的 OA/发票 checkbox、保存 `rules` 且不发送 `selected_tag_codes`；未提交 rail 明确排除需要任一单据的标签，submitted/history 使用实际历史 summary；保存返回空 targets 后当前页 normal GET 收敛，银行明细自动标签保存后抽屉同步更新。 |
 | BRB-E2E-002 | 无需 OA/发票直接进入已配对并折叠 | `web/e2e/bank-flow-rule-batches-flow.spec.ts`、`tests/test_no_oa_bank_batch_tag_selection_api.py`、`web/src/test/RelationGroupGrid.test.tsx` | 已覆盖 `relation_mode=bank_flow_rule_batch`、4 条流水折叠、展开明细和流水规则文案。 |
 | BRB-E2E-003 | 无 active relation 时 unpaired，确认后 paired | `web/e2e/bank-flow-rule-batches-flow.spec.ts`、`tests/test_workbench_relation_grouping.py` | 后端 active relation 分组回归已覆盖；Chromium shared Workbench confirm-preview fixture 的旧 DTO 当前被前端拒绝，主控修复共享 fixture 后必须重跑。 |
-| BRB-E2E-004 | 规则保存不追溯改写 existing relation | `tests/test_no_oa_bank_batch_tag_selection_api.py` | 覆盖 bank-flow、turnover、manual relation metadata 和 mode 保持不变。 |
+| BRB-E2E-004 | 规则保存增量重算 existing active relation | `tests/test_bank_relation_requirement_recalculation.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_bank_flow_rule_batch_application_service.py` | 覆盖 semantic diff、完整 tag OR、设置/job/outbox 原子性、零写失败、精确月份刷新、幂等重放；生产 Browser 分区归位由发布门禁验证。 |
 | BRB-E2E-006 | 权限、空集和失败状态 fail closed | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/src/test/BankFlowRuleBatchPage.test.tsx` | 已覆盖 read-export 无保存/提交/撤回、首屏失败恢复、真实空态和首次 canonical GET 后不后台轮询。 |
 | BRB-E2E-007 | 银行标签变更后规则 grid 同步 | `web/e2e/bank-flow-rule-batches-flow.spec.ts` | 已覆盖银行明细自动标签规则保存后，流水规则抽屉左侧标签同步更新，旧标签不再出现。 |
 
@@ -19,5 +19,5 @@
 - 规则 API 为 `bank-flow-rule-batches`。
 - relation mode 为 `bank_flow_rule_batch`。
 - `selected_tag_codes` 不参与写入。
-- paired/unpaired 由 active formal relation 判定，checkbox requirement 不参与分区。
+- paired/unpaired 由 active formal relation 及其当前持久化 requirement 判定，checkbox 语义变化经后台任务写入该 requirement。
 - 大于 3 条银行流水折叠展示。

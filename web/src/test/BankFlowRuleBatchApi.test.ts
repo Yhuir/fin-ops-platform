@@ -69,6 +69,8 @@ describe("bank flow rule batch API", () => {
         version: 4,
         active_tags: [],
         rules: [],
+        requirement_changed_tag_codes: ["fee"],
+        recalculation_job: { job_id: "job-recalculate-1" },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -108,6 +110,8 @@ describe("bank flow rule batch API", () => {
       }),
     );
     expect(saved.version).toBe(4);
+    expect(saved.requirementChangedTagCodes).toEqual(["fee"]);
+    expect(saved.recalculationJobId).toBe("job-recalculate-1");
     expect(saved).not.toHaveProperty("refreshEnqueued");
   });
 

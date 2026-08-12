@@ -92,7 +92,10 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         instance_name="settings-maintenance",
         worker_kind="settings-maintenance",
         handler_flags=("--enable-settings-maintenance",),
-        event_types=("settings.data_reset.requested",),
+        event_types=(
+            "settings.data_reset.requested",
+            "settings.bank_relation_requirements.recalculate.requested",
+        ),
         required=True,
         rabbitmq_eligible=False,
         env_example="fin-ops.worker.settings-maintenance.env.example",

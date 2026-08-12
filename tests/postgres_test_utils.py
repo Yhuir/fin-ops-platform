@@ -156,6 +156,7 @@ EXPECTED_MIGRATION_FILES = [
     "0142_operation_history_logical_operations.sql",
     "0143_import_lifecycle_hot_paths.sql",
     "0144_import_file_session_owner.sql",
+    "0145_bank_relation_requirement_recalculation.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

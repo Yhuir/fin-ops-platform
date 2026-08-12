@@ -21,7 +21,7 @@
 
 Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Worker lifecycle 触发 read model refresh 时必须通过统一 refresh gateway 入队，由 registry/policy 先完成 scope normalize、validate 和 dedupe，避免 worker 直接投递过期或非法 scope contract。
 
-`settings-maintenance` 是 required、PostgreSQL-only 的非 read-model worker。它独占 `settings.data_reset.requested`，执行 destructive reset、显式 runtime recovery 和重置后的 read-model/matching enqueue；API 进程只创建 job/outbox，不运行后台 executor。重置完成后 worker 通过受控 Gunicorn PID file 请求 graceful reload，使 API 进程内 command/cache state 不继续保留 reset 前快照。
+`settings-maintenance` 是 required、PostgreSQL-only 的非 read-model worker。它独占 `settings.data_reset.requested` 和 `settings.bank_relation_requirements.recalculate.requested`：前者执行 destructive reset、显式 runtime recovery 和重置后的 read-model/matching enqueue；后者按变化标签增量重算 active Workbench relation requirements，并只刷新实际变化关系的精确月份。API 进程只原子创建 settings/job/outbox，不运行后台 executor。重置完成后 worker 通过受控 Gunicorn PID file 请求 graceful reload，使 API 进程内 command/cache state 不继续保留 reset 前快照。
 
 当前 registry 精确包含 6 个 required instance：`oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance`。其中只有 `workbench` 与 `workbench-relation` 带 `read_model_key`，并与 `READ_MODEL_MANIFEST` 双向一致。Search、no-OA projection 与 `workbench-secondary` 已从代码、CLI、env、dispatcher 和部署 manifest 退役。
 

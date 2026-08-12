@@ -36,5 +36,11 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments",), "/oa-pending-payments"),
     "settings_refresh": AppStatusBackgroundJobDefinition("settings_refresh", "刷新设置", ("settings",), "/settings", legacy=True),
     "settings_data_reset": AppStatusBackgroundJobDefinition("settings_data_reset", "设置数据重置", ("settings",), "/settings", legacy=True),
+    "bank_relation_requirement_recalculation": AppStatusBackgroundJobDefinition(
+        "bank_relation_requirement_recalculation",
+        "重算流水关联要求",
+        ("settings", "workbench"),
+        "/bank-flow-rule-batches",
+    ),
     "historical_etc_reconcile": AppStatusBackgroundJobDefinition("historical_etc_reconcile", "历史ETC核对", ("etc_tickets",), "/etc-tickets", legacy=True),
 }

@@ -107,6 +107,9 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
+from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
+    PostgresBankRelationRequirementRecalculationRequestRepository,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
     BankTransactionCategoryMutationWriter,
@@ -7144,6 +7147,21 @@ class Application:
             "workbench_relation_repository",
             pair_relation_snapshot_port,
         )
+        queue_repository = getattr(
+            getattr(self, "_runtime_repositories", None),
+            "queue_repository",
+            None,
+        )
+        connection = getattr(self._state_store, "_connection", None)
+        recalculation_requests = (
+            PostgresBankRelationRequirementRecalculationRequestRepository(
+                connection,
+                queue_repository,
+                self._state_store,
+            )
+            if connection is not None and queue_repository is not None
+            else None
+        )
         return BankFlowRuleBatchApplicationService(
             import_service=self._import_service,
             effective_category_provider=self._bank_transaction_tag_reader(),
@@ -7160,6 +7178,8 @@ class Application:
                 save_repository=False,
             ),
             relation_source_repository=relation_source_repository,
+            background_jobs=self._background_job_service,
+            requirement_recalculation_requests=recalculation_requests,
         )
 
     def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:

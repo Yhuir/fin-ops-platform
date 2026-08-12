@@ -39,14 +39,14 @@
 核心规则：
 
 - 标签管理抽屉左侧 `收支类型 / 流水主标签 / 流水子标签` 来自银行明细当前 active 标签事实，只读展示，不能在本模块新增、编辑或删除。
-- 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签的业务闭环/审计提示需要对应单据，不作为 paired/unpaired 判定条件。
+- 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签的业务闭环需要对应单据，并作为活跃正式关系进入 paired/unpaired 的要求。
 - 新增或未配置的银行标签默认勾选 `OA` 和 `发票`，避免新标签自动进入无需 OA/发票闭环。
 - 未提交主/子标签和批次的生成资格固定为 active tag 且 `requires_oa=false`、`requires_invoice=false`；任一勾选、规则缺失或标签归档都不得进入未提交区。
 - 已提交/历史 bucket 保留批次提交时冻结的标签和 requirement snapshot，不受当前勾选、标签 active 状态或改名影响。
 - 未提交候选还必须排除任一 canonical active relation 已占用的银行流水；页面查询和提交入口均不得用可能滞后的 Workbench relation read model 代替 canonical relation source bundle。
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
-- 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的冻结 requirement 必须为双 false；active relation 决定 ownership。规则保存不追溯改写既有 relation metadata。
-- 规则资格变化只返回信息性的受影响未提交月份；资格未变化的语义更新不重算。保存 API 不写 dirty/outbox，也不返回 `refresh_enqueued` 或 write targets；页面清空旧选择后执行一次正常 GET。
+- 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的 requirement 必须为双 false；active relation 决定 ownership。关系仍持久化规则证明，但当前活跃关系会在相关标签的 OA/发票要求发生语义变化后，由 durable 后台任务增量重算。
+- 规则保存只比较 `requires_oa/requires_invoice` 的真实语义差异；仅扫描持久化 tag proof 命中变化标签的 active relation，并用关系内完整标签集合做 OR 重算。设置 CAS、可见 background job 与 outbox event 在同一事务提交；页面清空旧选择、执行一次正常 GET，并提示后台重算。已提交/已撤回批次历史 payload 不改写。
 - 从本页面提交且银行流水超过 3 条时，关联台只折叠银行栏；1 到 3 条直接完整展示，不生成通用 preview 或详情加载入口。
 - 本页 linked 提示只显示“已有未撤回关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
 

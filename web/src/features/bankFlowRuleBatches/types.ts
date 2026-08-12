@@ -184,6 +184,8 @@ export type BankFlowRuleBatchTagSelection = {
   requirementsByTagCode: Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
   eligibilityChanged: boolean;
   eligibilityChangedTagCodes: string[];
+  requirementChangedTagCodes: string[];
+  recalculationJobId: string;
   affectedMonths: string[];
   affectedScopeKeys: string[];
 };

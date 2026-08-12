@@ -31,7 +31,7 @@
 - 自动识别只产生候选和差额提示。`deterministic` 表示系统发现同组零差额候选，不表示业务已闭环。
 - 页面汇总行只承载组级聚合、余额和展开入口；流水选择、补充信息编辑、确认闭环和撤销归并等写操作必须以真实流水行为入口。
 - 所有外部往来闭环都必须由用户在外部往来款管理页手动选择同一往来组内真实流水确认；可选择多笔流水，但必须同时包含收入和支出，且收支合计差额为 `0.00`。确认前不进入关联台已配对区。
-- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；若所选流水已存在仅含 OA + 银行的 active relation，确认闭环应把这些既有关联合并进同一个 `turnover_manual_closure` active case，但合并后的全部银行成员必须属于本次所选流水，否则冲突并整笔回滚。确认成功后，外部往来台账必须在对应流水展示“收支闭环”；关联台必须保留同一个 canonical `case:*` relation/evidence。active relation 只表示同组 ownership，不等于完成：relation 创建时必须按所选流水的有效规则标签冻结 `requires_oa`、`requires_invoice`、规则来源和版本；关联台按这份冻结快照判断分区。只含银行流水且规则要求 OA 时，同一个 active case 必须完整留在未配对区等待 OA；所需 OA/发票全部满足后才进入已配对。缺失、空或无法识别的规则快照一律 fail closed，规则保存不得追溯改写既有 relation。
+- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；若所选流水已存在仅含 OA + 银行的 active relation，确认闭环应把这些既有关联合并进同一个 `turnover_manual_closure` active case，但合并后的全部银行成员必须属于本次所选流水，否则冲突并整笔回滚。确认成功后，外部往来台账必须在对应流水展示“收支闭环”；关联台必须保留同一个 canonical `case:*` relation/evidence。active relation 只表示同组 ownership，不等于完成：relation 创建时必须持久化所选流水的有效规则标签、`requires_oa`、`requires_invoice`、规则来源和版本；关联台按该 canonical metadata 判断分区。只含银行流水且当前持久化要求 OA 时，同一个 active case 必须完整留在未配对区等待 OA；所需 OA/发票全部满足后才进入已配对。缺失、空或无法识别的规则证明一律 fail closed。规则要求发生语义变化时，只重算持久化标签证明命中的 active relation，保留关系 identity 与成员并追加审计历史。
 - “收支闭环”必须同时满足：同一个 active canonical case 中至少有两条完整银行成员、成员属于同一往来业务语义、现金收入与支出差额为 `0.00`，并且业务本金减结清发生额为 `0.00`。active relation 的 mode/source 只说明来源，不能单独证明闭环。active case 余额非零时显示“已配对未结清”，并按业务类型与余额正负显示待还款或待收款；不同 case 的正负余额不得互相抵消。没有进入 active relation 的流水永远不能显示“收支闭环”，即使同组金额恰好相等。
 - `closed_amount` 只保留 API 兼容，固定为 `0.00`；页面的实际未结义务由 `pending_repayment_amount` 和 `pending_collection_amount` 表达。借入类余额 `B=principal-settlement`：`B>0` 为待还款、`B<0` 为待收款；借出/业务应收类相反。金额缺失、非法、重复成员、跨业务语义或 active case 重叠时必须 fail closed，不得猜测闭环。
 - 已确认的外部往来闭环不能直接追加流水；用户发现漏选流水时，必须先撤回原闭环关系，再重新选择完整流水确认。
@@ -44,8 +44,8 @@
 
 - 新未提交批次的唯一资格是标签当前 active，且该标签规则同时满足 `requires_oa=false`、`requires_invoice=false`。任一项为 `true`、规则缺失或标签已归档时，该流水都不进入本页面未提交区，应由关联台、待找发票等需要单据的流程处理。
 - 页面未提交 bucket 的主标签、子标签和批次都只展示上述合格标签，不得把银行明细的全部 active 标签与当前页 rows 合并后铺满。标签管理抽屉仍展示全部 active 标签，供用户维护 OA/发票规则。
-- 已提交和已撤回历史按提交时冻结的批次、标签和 requirement snapshot 展示，不受当前标签是否 active、当前 OA/发票勾选状态或标签改名影响；规则保存不得追溯改写既有 relation。
-- 规则保存发生资格变化时返回受影响标签出现过的月份；同一标签从“需要 OA”改为“需要发票”等资格未变化的语义更新只保存规则。页面不产生 `bank_flow_rule_batch` refresh。
+- 已提交和已撤回历史按提交时冻结的批次、标签和 requirement snapshot 展示，不受当前标签是否 active、当前 OA/发票勾选状态或标签改名影响。该历史合同不阻止 active relation requirement 受审计增量更新。
+- 规则保存只比较 OA/发票要求的真实语义差异；变化时在同一事务创建后台任务/outbox。worker 只扫描持久化 tag proof 命中变化标签的 active relation，用完整标签集合 OR 重算，跳过结果未变的关系，并只刷新实际变化关系的精确月份。
 - 设置版本和审计以 CAS 原子提交；请求返回后页面清空旧选择并执行一次正常 GET。列表、summary、分页和详情直接读取已经同步到 PostgreSQL 的 canonical facts，不等待后台 read model。
 - 银行流水导入、导入状态变化、手工分类和自动标签规则写入各自 canonical facts；下一次页面 GET 必须在同一 repeatable-read snapshot 看到一致的批次、银行/分类规则和 active relation，不读取外部系统或旧投影。
 - 性能验收目标：规则保存 API p95 ≤ 300ms、p99 ≤ 1s；页面列表/summary 使用固定查询数、集合 SQL 和服务端分页，禁止逐标签、逐流水 I/O、浏览器全量过滤或用缓存掩盖慢查询。

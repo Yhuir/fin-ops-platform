@@ -97,6 +97,8 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   requirementsByTagCode: {},
   eligibilityChanged: false,
   eligibilityChangedTagCodes: [],
+  requirementChangedTagCodes: [],
+  recalculationJobId: "",
   affectedMonths: [],
   affectedScopeKeys: [],
 };
@@ -636,7 +638,13 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => mutationErrorMessage(caught, "保存流水规则失败"),
     });
     if (result.status === "success") {
-      setFeedback({ severity: "success", message: "流水规则已保存" });
+      const saved = result.value;
+      setFeedback({
+        severity: "success",
+        message: saved?.recalculationJobId
+          ? "流水规则已保存，受影响关联正在后台重算"
+          : "流水规则已保存",
+      });
     }
   };
 

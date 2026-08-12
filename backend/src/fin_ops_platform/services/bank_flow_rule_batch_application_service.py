@@ -4,6 +4,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.bank_relation_requirement_recalculation import (
+    BANK_RELATION_REQUIREMENT_RECALCULATION_JOB_TYPE,
+    changed_requirement_tag_codes,
+)
 from fin_ops_platform.services.bank_batch_application_service import (
     MONTH_SCOPE_RE,
     BankBatchApplicationService,
@@ -35,6 +39,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     """Application boundary for 流水规则批量处理."""
 
     def __init__(self, **kwargs: Any) -> None:
+        self._background_jobs = kwargs.pop("background_jobs", None)
+        self._requirement_recalculation_requests = kwargs.pop(
+            "requirement_recalculation_requests",
+            None,
+        )
         super().__init__(**kwargs)
         self._query_repository = self._bank_batch_query_repository
 
@@ -1092,10 +1101,8 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 affected_scope_keys=[],
             )
 
-        before_eligible = self._eligible_bank_flow_rule_batch_tag_codes(previous_public)
-        after_eligible = self._eligible_bank_flow_rule_batch_tag_codes(result)
-        changed_tag_codes = sorted(before_eligible.symmetric_difference(after_eligible))
-        affected_scope_keys = self._affected_scope_keys_for_tag_rule_change(changed_tag_codes)
+        changed_tag_codes = changed_requirement_tag_codes(previous_public, result)
+        affected_scope_keys: list[str] = []
         prepared = {
             **prepared,
             "audit_event": {
@@ -1104,51 +1111,17 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "affected_months": affected_scope_keys,
             },
         }
-        self._commit_tag_rule_update(prepared=prepared)
+        recalculation_job = self._commit_tag_rule_update(
+            prepared=prepared,
+            changed_tag_codes=changed_tag_codes,
+            actor_id=actor_id,
+        )
         return self._tag_rule_update_response(
             result,
             changed_tag_codes=changed_tag_codes,
             affected_scope_keys=affected_scope_keys,
+            recalculation_job=recalculation_job,
         )
-
-    def _affected_scope_keys_for_tag_rule_change(self, changed_tag_codes: list[str]) -> list[str]:
-        if not changed_tag_codes:
-            return []
-        resolver = getattr(
-            self._query_repository,
-            "affected_scope_keys_for_tag_codes",
-            None,
-        )
-        if callable(resolver):
-            scope_keys = self._dedupe_ordered(resolver(changed_tag_codes))
-        elif self._state_store_backend() in {"local_pickle", "memory"}:
-            scope_keys = self._local_affected_scope_keys_for_tag_codes(changed_tag_codes)
-        else:
-            raise RuntimeError(
-                "bank_flow_rule_batch read repository requires affected_scope_keys_for_tag_codes."
-            )
-        if any(not MONTH_SCOPE_RE.match(scope_key) for scope_key in scope_keys):
-            raise RuntimeError("bank_flow_rule_batch tag-rule refresh requires month scopes.")
-        return scope_keys
-
-    def _local_affected_scope_keys_for_tag_codes(self, tag_codes: list[str]) -> list[str]:
-        """Resolve exact local-store scopes without introducing a production scan fallback."""
-        changed_codes = set(tag_codes)
-        bank_rows = self.bank_transaction_rows(month="all", include_categories=False)
-        categories = self.effective_categories_for_rows(bank_rows)
-        affected = {
-            self._month_from_bank_row(row)
-            for row in bank_rows
-            if str(
-                (categories.get(str(row.get("id") or "").strip()) or {}).get(
-                    "effective_category_code"
-                )
-                or (categories.get(str(row.get("id") or "").strip()) or {}).get("category_code")
-                or ""
-            ).strip()
-            in changed_codes
-        }
-        return sorted(scope_key for scope_key in affected if MONTH_SCOPE_RE.match(scope_key))
 
     def _state_store_backend(self) -> str:
         if self._state_store is None:
@@ -1162,42 +1135,70 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         self,
         *,
         prepared: dict[str, Any],
-    ) -> None:
+        changed_tag_codes: list[str] | None = None,
+        actor_id: str = "",
+    ) -> dict[str, object] | None:
+        normalized_changed_tag_codes = self._dedupe_ordered(changed_tag_codes or [])
         state_store = self._state_store
         if state_store is None:
             self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
                 next_snapshot=dict(prepared.get("next_snapshot") or {}),
                 audit_event=dict(prepared.get("audit_event") or {}),
             )
-            return
+            return None
         if self._state_store_backend() == "postgres":
-            connection = getattr(state_store, "_connection", None)
-            save_settings = getattr(
-                state_store,
-                "save_app_settings_for_bank_flow_rule_version_in_transaction",
-                None,
-            )
-            if connection is None or not callable(save_settings):
+            requests = getattr(self, "_requirement_recalculation_requests", None)
+            background_jobs = getattr(self, "_background_jobs", None)
+            if requests is None or (
+                normalized_changed_tag_codes and background_jobs is None
+            ):
                 raise BankFlowRuleBatchPersistenceError(
-                    "bank_flow_rule_batch tag-rule transaction boundary is unavailable."
+                    "bank_flow_rule_batch durable requirement recalculation boundary is unavailable."
                 )
             audit_event = dict(prepared.get("audit_event") or {})
-            with connection.transaction() as transaction:
-                saved_snapshot = save_settings(
-                    dict(prepared.get("next_snapshot") or {}),
-                    expected_version=int(audit_event.get("old_version") or 0),
-                    transaction=transaction,
+            new_version = int(audit_event.get("new_version") or 1)
+            job = (
+                background_jobs.build_job(
+                    job_type=BANK_RELATION_REQUIREMENT_RECALCULATION_JOB_TYPE,
+                    label="重算流水关联要求",
+                    owner_user_id=actor_id,
+                    visibility="system",
+                    phase="queued",
+                    current=0,
+                    total=1,
+                    message="规则已保存，关联要求重算任务已排队。",
+                    result_summary={
+                        "rule_version": new_version,
+                        "changed_tag_codes": normalized_changed_tag_codes,
+                        "changed_case_ids": [],
+                        "affected_months": [],
+                    },
+                    idempotency_key=f"bank-relation-requirements:version:{new_version}",
+                    source={
+                        "rule_version": new_version,
+                        "changed_tag_codes": normalized_changed_tag_codes,
+                    },
+                    affected_scopes=["settings", "workbench", "workbench_relation"],
                 )
-                if not isinstance(saved_snapshot, dict):
-                    raise AppSettingsValidationError(
-                        "bank_flow_rule_batch_tag_rules_version_conflict",
-                        "Bank flow rule batch tag rules version conflict.",
-                    )
+                if normalized_changed_tag_codes
+                else None
+            )
+            saved_snapshot = requests.commit(
+                next_snapshot=dict(prepared.get("next_snapshot") or {}),
+                expected_version=int(audit_event.get("old_version") or 0),
+                job_payload=job.to_payload() if job is not None else None,
+                changed_tag_codes=normalized_changed_tag_codes,
+            )
+            if not isinstance(saved_snapshot, dict):
+                raise AppSettingsValidationError(
+                    "bank_flow_rule_batch_tag_rules_version_conflict",
+                    "Bank flow rule batch tag rules version conflict.",
+                )
             self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
                 next_snapshot=dict(saved_snapshot),
                 audit_event=audit_event,
             )
-            return
+            return job.to_payload() if job is not None else None
 
         next_snapshot = dict(prepared.get("next_snapshot") or {})
         save_app_settings = getattr(state_store, "save_app_settings", None)
@@ -1210,6 +1211,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             next_snapshot=next_snapshot,
             audit_event=dict(prepared.get("audit_event") or {}),
         )
+        return None
 
     @staticmethod
     def _tag_rule_update_response(
@@ -1217,10 +1219,15 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         *,
         changed_tag_codes: list[str],
         affected_scope_keys: list[str],
+        recalculation_job: dict[str, object] | None = None,
     ) -> dict[str, Any]:
-        return {
+        response = {
             **payload,
             "eligibility_changed": bool(changed_tag_codes),
             "eligibility_changed_tag_codes": list(changed_tag_codes),
+            "requirement_changed_tag_codes": list(changed_tag_codes),
             "affected_months": list(affected_scope_keys),
         }
+        if isinstance(recalculation_job, dict):
+            response["recalculation_job"] = recalculation_job
+        return response

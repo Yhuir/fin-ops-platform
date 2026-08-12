@@ -7,6 +7,9 @@ import pytest
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
+from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
+    PostgresBankRelationRequirementRecalculationRequestRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.state_store_protocol import (
     SettingsAccessControlCommitOutcomeUnknown,
@@ -82,6 +85,105 @@ class RecordingConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetched_one.append((" ".join(sql.split()), params))
         return None
+
+
+def test_requirement_recalculation_request_commits_settings_job_and_event_in_one_transaction() -> None:
+    connection = RecordingConnection()
+    settings_calls: list[dict[str, object]] = []
+    queue_calls: list[dict[str, object]] = []
+    state_store = type(
+        "StateStore",
+        (),
+        {
+            "save_app_settings_for_bank_flow_rule_version_in_transaction": (
+                lambda _self, payload, *, expected_version, transaction: (
+                    settings_calls.append(
+                        {
+                            "payload": payload,
+                            "expected_version": expected_version,
+                            "transaction": transaction,
+                        }
+                    )
+                    or payload
+                )
+            )
+        },
+    )()
+    queue = type(
+        "Queue",
+        (),
+        {
+            "enqueue_in_transaction": (
+                lambda _self, **kwargs: queue_calls.append(dict(kwargs))
+            )
+        },
+    )()
+    repository = PostgresBankRelationRequirementRecalculationRequestRepository(
+        connection,
+        queue,
+        state_store,
+    )
+    next_snapshot = {"bank_flow_rule_batch_tag_rules": {"version": 12}}
+
+    saved = repository.commit(
+        next_snapshot=next_snapshot,
+        expected_version=11,
+        job_payload={
+            "job_id": "job-12",
+            "type": "bank_relation_requirement_recalculation",
+            "owner_user_id": "finance-user",
+            "source": {},
+            "result_summary": {},
+        },
+        changed_tag_codes=["sales_income"],
+    )
+
+    assert saved == next_snapshot
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+    assert settings_calls[0]["transaction"].parent is connection
+    assert any("insert into job.background_jobs" in sql.lower() for sql, _ in connection.executed)
+    assert queue_calls[0]["transaction"].parent is connection
+    assert queue_calls[0]["payload"]["changed_tag_codes"] == ["sales_income"]
+
+
+def test_requirement_recalculation_request_does_not_enqueue_when_settings_cas_fails() -> None:
+    connection = RecordingConnection()
+    queue_calls: list[dict[str, object]] = []
+    state_store = type(
+        "StateStore",
+        (),
+        {
+            "save_app_settings_for_bank_flow_rule_version_in_transaction": (
+                lambda _self, _payload, *, expected_version, transaction: None
+            )
+        },
+    )()
+    queue = type(
+        "Queue",
+        (),
+        {
+            "enqueue_in_transaction": (
+                lambda _self, **kwargs: queue_calls.append(dict(kwargs))
+            )
+        },
+    )()
+    repository = PostgresBankRelationRequirementRecalculationRequestRepository(
+        connection,
+        queue,
+        state_store,
+    )
+
+    saved = repository.commit(
+        next_snapshot={"bank_flow_rule_batch_tag_rules": {"version": 12}},
+        expected_version=11,
+        job_payload={"job_id": "job-12", "owner_user_id": "finance-user"},
+        changed_tag_codes=["sales_income"],
+    )
+
+    assert saved is None
+    assert queue_calls == []
+    assert not any("insert into job.background_jobs" in sql.lower() for sql, _ in connection.executed)
 
 
 class RawSettingsCursor:
@@ -814,25 +916,6 @@ def test_bank_flow_rule_batch_query_reads_canonical_tables_without_page_projecti
     assert not any("limit %s offset %s" in sql for sql in read_sql)
     assert not any("read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
-
-
-def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> None:
-    connection = RecordingConnection()
-    connection.fetch_all = lambda sql, params=(): (  # type: ignore[method-assign]
-        connection.fetched_all.append((" ".join(sql.split()), params))
-        or [{"scope_key": "2026-05"}, {"scope_key": "2026-07"}]
-    )
-    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
-
-    scopes = repository.affected_scope_keys_for_tag_codes(["fee", "fee", "salary"])
-
-    assert scopes == ["2026-05", "2026-07"]
-    assert len(connection.fetched_all) == 1
-    sql, params = connection.fetched_all[0]
-    assert "from app.bank_transactions bank" in sql
-    assert "from app.bank_flow_rule_batches batch" not in sql
-    assert "in ('draft', 'unsubmitted')" not in sql
-    assert params == ()
 
 
 def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:

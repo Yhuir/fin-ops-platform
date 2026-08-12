@@ -414,21 +414,6 @@ def test_detail_reads_bank_rows_events_and_only_active_canonical_relations() -> 
     assert "read_model." not in detail_sql
 
 
-def test_affected_scope_lookup_is_one_set_based_canonical_query() -> None:
-    connection = _Connection()
-    repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
-
-    scopes = repository.affected_scope_keys_for_tag_codes(["fee", "fee", "salary"])
-
-    assert scopes == ["2026-05", "2026-07"]
-    assert len(connection.fetched_all) == 1
-    sql, params = connection.fetched_all[0]
-    assert "from app.bank_transactions bank" in sql
-    assert "from app.bank_flow_rule_batches batch" not in sql
-    assert "read_model." not in sql
-    assert params == ()
-
-
 @pytest.mark.parametrize(
     ("filters", "error_code"),
     [

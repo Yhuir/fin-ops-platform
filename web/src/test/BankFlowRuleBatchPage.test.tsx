@@ -431,7 +431,13 @@ function installFetchMock(
     }
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body ?? "{}"));
-      return jsonResponse({ ...tagSelection, version: 4, rules: body.rules ?? [] });
+      return jsonResponse({
+        ...tagSelection,
+        version: 4,
+        rules: body.rules ?? [],
+        requirement_changed_tag_codes: ["fee"],
+        recalculation_job: { job_id: "job-recalculate-1" },
+      });
     }
     if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
       if (listFailuresRemaining > 0) {
@@ -940,7 +946,7 @@ describe("BankFlowRuleBatchPage", () => {
       );
     });
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-    expect(await screen.findByText("流水规则已保存")).toBeInTheDocument();
+    expect(await screen.findByText("流水规则已保存，受影响关联正在后台重算")).toBeInTheDocument();
   });
 
   test("does not save stale tag rules before the opening request completes", async () => {

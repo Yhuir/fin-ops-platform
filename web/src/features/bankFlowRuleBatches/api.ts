@@ -156,6 +156,10 @@ type ApiBankFlowRuleBatchTagSelection = {
   eligibilityChanged?: boolean | null;
   eligibility_changed_tag_codes?: unknown[] | null;
   eligibilityChangedTagCodes?: unknown[] | null;
+  requirement_changed_tag_codes?: unknown[] | null;
+  requirementChangedTagCodes?: unknown[] | null;
+  recalculation_job?: { job_id?: string | null } | null;
+  recalculationJob?: { jobId?: string | null } | null;
   affected_months?: unknown[] | null;
   affectedMonths?: unknown[] | null;
   affected_scope_keys?: unknown[] | null;
@@ -454,6 +458,12 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
     eligibilityChanged: Boolean(payload.eligibility_changed ?? payload.eligibilityChanged),
     eligibilityChangedTagCodes: unknownStringList(
       payload.eligibility_changed_tag_codes ?? payload.eligibilityChangedTagCodes,
+    ),
+    requirementChangedTagCodes: unknownStringList(
+      payload.requirement_changed_tag_codes ?? payload.requirementChangedTagCodes,
+    ),
+    recalculationJobId: text(
+      payload.recalculation_job?.job_id ?? payload.recalculationJob?.jobId,
     ),
     affectedMonths: unknownStringList(payload.affected_months ?? payload.affectedMonths),
     affectedScopeKeys: unknownStringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),

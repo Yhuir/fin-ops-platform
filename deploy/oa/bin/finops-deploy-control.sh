@@ -72,9 +72,7 @@ commands:
   workbench-requirement-repair <release-name> --execute --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
-  workbench-requirement-repair <release-name> --dry-run --reapply-case-id ID [...] --expected-rule-version VERSION
-  workbench-requirement-repair <release-name> --execute --expected-fingerprint <sha256> --reapply-case-id ID [...] --expected-rule-version VERSION
-                                      repair historical frozen OA/invoice requirements through relation commands
+                                      backfill missing historical OA/invoice requirement proof through relation commands
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --dry-run
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --execute --expected-fingerprint <sha256>
   workbench-etc-summary-repair <release-name> --case-id ID --external-etc-batch-id ID --rollback-dry-run --expected-fingerprint <sha256>
@@ -1725,46 +1723,13 @@ workbench_requirement_repair() {
   [[ -n "$release" ]] || die "workbench-requirement-repair requires release name"
   shift
   local mode="${1:-}"
-  validate_workbench_requirement_reapply_args() {
-    local saw_case="false"
-    local saw_version="false"
-    while [[ "$#" -gt 0 ]]; do
-      case "${1:-}" in
-        --reapply-case-id)
-          [[ "$#" -ge 2 && "${2:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || \
-            die "workbench-requirement-repair requires a safe --reapply-case-id"
-          saw_case="true"
-          shift 2
-          ;;
-        --expected-rule-version)
-          [[ "$#" -ge 2 && "${2:-}" =~ ^[1-9][0-9]*$ ]] || \
-            die "workbench-requirement-repair requires a positive --expected-rule-version"
-          [[ "$saw_version" == "false" ]] || \
-            die "workbench-requirement-repair accepts one --expected-rule-version"
-          saw_version="true"
-          shift 2
-          ;;
-        *)
-          die "workbench-requirement-repair only permits explicit case IDs and rule version after a fixed mode"
-          ;;
-      esac
-    done
-    [[ "$saw_case" == "true" && "$saw_version" == "true" ]] || \
-      die "workbench-requirement-repair explicit reapply requires case IDs and rule version"
-  }
   case "$mode" in
     --dry-run)
-      if [[ "$#" -gt 1 ]]; then
-        validate_workbench_requirement_reapply_args "${@:2}"
-      fi
+      [[ "$#" -eq 1 ]] || die "workbench-requirement-repair only permits the four fixed modes"
       ;;
     --execute)
-      [[ "$#" -eq 3 && "${2:-}" == "--expected-fingerprint" && -n "${3:-}" ]] || \
-        [[ "$#" -gt 3 && "${2:-}" == "--expected-fingerprint" && "${3:-}" =~ ^[a-f0-9]{64}$ ]] || \
+      [[ "$#" -eq 3 && "${2:-}" == "--expected-fingerprint" && "${3:-}" =~ ^[a-f0-9]{64}$ ]] || \
         die "workbench-requirement-repair only permits the four fixed modes"
-      if [[ "$#" -gt 3 ]]; then
-        validate_workbench_requirement_reapply_args "${@:4}"
-      fi
       ;;
     --rollback-dry-run|--rollback)
       [[ "$#" -eq 3 && "${2:-}" == "--expected-fingerprint" && "${3:-}" =~ ^[a-f0-9]{64}$ ]] || \

@@ -39,7 +39,7 @@
 | 导出查询 | `GET /api/bank-details/transactions/export` | `mode=all|account` 与同一筛选合同；复用 canonical query，读取上限为 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`，超限返回业务错误。 |
 | canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、金额、余额、银行文本和时间语义。 |
 | 分类与确认事实 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、settings 标签规则 | active confirmation 只用于候选确认；`source=manual, manual_assignment=true` 是持久人工覆盖并优先于当前自动规则，清除后才重新暴露当前自动结果；不读取 `read_model.bank_detail_rows`。 |
-| 分类写闭环 | 当前 effective category + 同一 settings snapshot + active relation | 分类事实、relation requirement metadata 与 relation history 在同一 PostgreSQL 事务提交；无标签变化或无 active relation 时短路。规则保存本身不追溯改写关系。 |
+| 分类写闭环 | 当前 effective category + 同一 settings snapshot + active relation | 分类事实、relation requirement metadata 与 relation history 在同一 PostgreSQL 事务提交；无标签变化或无 active relation 时短路。单独保存 OA/发票 requirement 时由 bank-flow settings-maintenance job 按变化 tag proof 增量更新关系，不进入本页面分类写事务。 |
 | 正式关系事实 | `app.workbench_pair_relations` | 只读取 `status=active`；按当前可见/导出目标 legacy + canonical row IDs 做 bounded overlap；排除 `turnover_manual_closure`，不读取 `read_model.workbench_relation*`。 |
 | 账户映射 | canonical app settings | 账户 identity/display mapping 与 active tag definitions 由 PostgreSQL snapshot 读取。 |
 | 写请求 | route session + JSON body | 候选确认只接受当前候选；人工覆盖只接受当前 active 自动标签或系统 `internal_transfer`，可替换 unmatched/auto/confirmation 状态；保持权限、重复/冲突、审计和幂等合同，route 不做业务组合或 SQL。 |

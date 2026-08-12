@@ -12,6 +12,9 @@ from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import BackgroundJobService
+from fin_ops_platform.services.bank_relation_requirement_recalculation import (
+    BankRelationRequirementRecalculationJobHandler,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
@@ -46,6 +49,9 @@ from fin_ops_platform.services.postgres_repositories.workbench_idempotency impor
     PostgresWorkbenchIdempotencyRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.postgres_bank_relation_requirement_updater import (
+    PostgresBankRelationRequirementUpdater,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
@@ -398,6 +404,36 @@ class SettingsDataResetRuntimeFactory:
             audit_recorder=AuditTrailService(
                 PostgresOperationsAuditRepository(self._connection)
             ).record_action,
+        )
+
+    def build_requirement_recalculation_handler(
+        self,
+    ) -> BankRelationRequirementRecalculationJobHandler:
+        state_store = self._state_store()
+        return BankRelationRequirementRecalculationJobHandler(
+            state_store=state_store,
+            relation_repository=PostgresWorkbenchRelationRepository(self._connection),
+            relation_updater=PostgresBankRelationRequirementUpdater(self._connection),
+            queue_repository=self._queue_repository,
+            background_jobs=BackgroundJobService(state_store),
+            matching_dirty_marker=self._mark_matching_dirty,
+        )
+
+    def _mark_matching_dirty(self, months: list[str]) -> list[str]:
+        state_store = self._state_store()
+        repository = getattr(state_store, "read_model_repository", None)
+        if repository is None:
+            raise RuntimeError("workbench matching dirty-scope repository is unavailable")
+        return list(
+            repository.mark_workbench_matching_dirty_scopes(
+                tenant_id="default",
+                scope_months=months,
+                reason="bank_relation_requirement_recalculation",
+                source_versions=_workbench_matching_source_versions(
+                    _app_settings_service(state_store)
+                ),
+                debounce_seconds=0,
+            )
         )
 
     def _execute_reset(self, action: str, **kwargs: Any) -> Any:

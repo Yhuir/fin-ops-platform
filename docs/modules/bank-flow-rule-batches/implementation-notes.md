@@ -1,5 +1,14 @@
 # 流水规则批量处理实施记录
 
+## 2026-08-12 - OA/发票要求按变化标签增量传播到 active relation
+
+- 业务口径：批次 submitted/withdrawn 历史 payload 继续冻结；active Workbench relation 的 `requires_oa/requires_invoice` 不再永久冻结。规则保存只比较这两个布尔值的语义差异，并只处理持久化 tag proof 命中变化标签的 active relation。
+- 原子边界：PostgreSQL 设置 CAS、visible background job 和 `settings.bank_relation_requirements.recalculate.requested` outbox 在同一事务提交。API 只返回 job receipt；`settings-maintenance` required worker 承担后台执行，禁止页面请求内扫描关系。
+- 重算语义：每条关系使用其完整 `paired_requirement_tag_codes` 和当前规则做 OR；先预验证本 job 全部关系的 case、精确月份、tag proof 和 current rule，任一缺失则零关系写入。结果未变短路；结果变化通过正式 relation command 保留 identity/members/amount，更新 metadata 并追加 `bank_relation_requirement_recalculated` history。
+- 收敛与性能：只刷新实际写入关系所在的精确 `workbench` / `workbench_relation` 月份并标记同月 matching dirty，不允许 `all`。迁移 `0145` 创建 tag-proof GIN 索引，并投递一次幂等全标签 convergence job，用于把发布前存量 active relations 收敛到当前规则。
+- 旧链删除：删除人工 `--reapply-case-id` / `--expected-rule-version` helper 参数、专用 plan/execute 分支、运维说明与对应测试；历史缺失/损坏 proof repair 仍保留，但不再承担正常规则传播。
+- 验证：覆盖 semantic diff、完整 tag OR、fail-closed 零写、no-op、幂等重放、原子 settings/job/outbox、精确月份 refresh、worker registry、前端 job feedback、旧 helper 负向门禁和既有页面回归。
+
 ## 2026-08-10 HeroUI 批次筛选收敛
 
 - 未提交/已提交/历史改用共享 HeroUI `ToggleButtonGroup`，月份改用共享“全部 + 年/月”控件；删除旧嵌套 segment、原生 month input 和对应 CSS，canonical 列表/提交/撤回 I/O 不变。

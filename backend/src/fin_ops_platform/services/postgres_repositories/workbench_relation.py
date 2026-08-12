@@ -112,6 +112,33 @@ class PostgresWorkbenchRelationRepository:
         payload = row_payload(rows[0], "raw_payload")
         return dict(payload) if isinstance(payload, dict) else None
 
+    def load_active_bank_requirement_relations_for_tag_codes(
+        self,
+        tag_codes: list[str],
+    ) -> list[dict[str, Any]]:
+        normalized_tag_codes = text_list(tag_codes)
+        if not normalized_tag_codes:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select raw_payload
+            from app.workbench_pair_relations
+            where status = 'active'
+              and special_metadata->>'paired_requirement_source' = 'bank_transaction_paired_policy'
+              and (
+                    special_metadata->'paired_requirement_tag_codes' ?| %s::text[]
+                    or special_metadata->>'paired_requirement_tag_code' = any(%s::text[])
+              )
+            order by case_id
+            """,
+            (normalized_tag_codes, normalized_tag_codes),
+        )
+        return [
+            dict(payload)
+            for row in rows
+            if isinstance((payload := row_payload(row, "raw_payload")), dict)
+        ]
+
     def load_active_workbench_pair_relations_for_row_ids(
         self,
         row_ids: list[str],

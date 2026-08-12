@@ -106,7 +106,7 @@ same group flow rows selected
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
 - 已确认后不能追加流水；漏选时必须先撤回原闭环关系，再重新选择完整流水确认。
 - 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。
-- 写入 Workbench active relation 时，必须从本次 selected-row 快照的 `effective_category_code`（缺失时回退 `category_code`）和一次 canonical rules payload，经统一 helper 冻结 tag code、`requires_oa`、`requires_invoice`、`paired_requirement_source` 与版本。关联台只读取 relation metadata 判断 required row type 是否满足；未知/空规则和 metadata 缺失的旧关系 fail closed，不得在关联台查询当前设置兜底，也不得由规则保存追溯改写。
+- 写入 Workbench active relation 时，必须从本次 selected-row 快照的 `effective_category_code`（缺失时回退 `category_code`）和一次 canonical rules payload，经统一 helper 持久化 tag code、`requires_oa`、`requires_invoice`、`paired_requirement_source` 与版本。关联台只读取 relation metadata 判断 required row type 是否满足；未知/空规则和 metadata 缺失的旧关系 fail closed，不得在关联台查询当前设置兜底。后续规则语义变化只允许由 durable settings-maintenance job 按持久化 tag proof 增量更新。
 
 ### 撤回
 

@@ -19,7 +19,8 @@
 - 只展示 active tag 且 `requires_oa=false`、`requires_invoice=false` 的未提交批次。
 - 读取已提交/已撤回批次及 `app.bank_flow_rule_batch_events` 历史。
 - 通过 relation command 创建或按单批次撤回 `relation_mode=bank_flow_rule_batch` 的正式关系。
-- 提交时冻结标签、requirement metadata、资格版本和行级分类 snapshot。
+- 提交时持久化标签、requirement metadata、资格版本和行级分类 proof；批次历史快照不可改写，active relation requirement 可由规则语义变化任务受审计更新。
+- 对规则保存做 requirement 语义差异计算，并原子创建后台任务与 durable outbox；worker 只重算命中变化标签的 active relation。
 
 ### 不负责
 
@@ -41,7 +42,7 @@
 | 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 对请求范围内全部 non-deleted 银行流水复用银行明细 owner 的 `bank_category_classification_cte(...)`，在同一 canonical snapshot 内集合式得出 effective category；不按人工分类预筛，也不在 Python 对同一批流水再次执行自动分类。confirmation、manual 与 auto 的优先级和银行明细共用一个 SQL compiler。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
-| 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。 |
+| 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。OA/发票要求发生变化时，`app.app_settings`、`job.background_jobs` 与 `settings.bank_relation_requirements.recalculate.requested` outbox 在同一事务提交；任一步失败整体回滚。 |
 | 批量提交 | `submit-selection` / `submit` | `submit-selection` 必须携带 `scope_month=YYYY-MM`。流水、当前有效分类、标签规则、OA/发票 requirement 和 active relation 占用均从同一个 canonical source 读取，禁止回退到 import/category/settings 启动时快照；最终 `SERIALIZABLE` 写事务同时比较 selected-row proof 与 rule proof。selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
 | 撤回 | `POST /api/bank-flow-rule-batches/{batch_id}/withdraw` | 只撤回用户明确选中的已提交批次；保持一次 relation command 与一次 changed-batch delta 保存，不直接改表，不同步 rebuild。active relation 已缺失视为 cancel 幂等完成，批次和事件仍原子持久化。 |
 | 权限/session | session / permissions | 读、规则写、提交和撤回分别 fail closed。 |
@@ -53,11 +54,11 @@
 | 列表 | 只返回 `summary`、`batches`、`pagination`。不返回 `read_model_status`、`read_model_version`、stale reason、source version、refresh enqueue 或 operation-barrier target。 |
 | Summary | 对同一 live builder 的完整 summary filter 范围聚合，不能从当前页推算；包含各状态 batch count、row count、金额和冻结历史标签。 |
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
-| 规则保存 | 返回规则版本、资格变化和信息性的 `affected_months` / `affected_scope_keys`；不返回页面 refresh target。 |
+| 规则保存 | 返回规则版本、`requirement_changed_tag_codes` 和可见 `recalculation_job`；关系月份由 worker 从实际命中的 active relation 得出，不由保存热路径扫描或猜测。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
 | 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
 | 失败反馈 | Mutation 失败只由全局操作弹窗显示一次；后端 5xx 的 `requestId` 必须附在错误消息中用于精确查日志，页面不得再叠加第二个 feedback。 |
-| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、冻结 `requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。银行行数 `>3` 只在银行栏使用 bank-flow summary；1 到 3 行直接完整展示。 |
+| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、`requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。当前 active relation 的要求可由增量任务通过正式 relation command 更新；银行行数 `>3` 只在银行栏使用 bank-flow summary，1 到 3 行直接完整展示。 |
 
 ## 一致性与查询预算
 
@@ -96,7 +97,7 @@ Canonical facts：
 本地 StateStore 的 relation 与 bank-flow batch snapshot 同样必须通过单个 `state.pkl`
 原子替换提交，失败时保留旧快照。
 
-提交/撤回不得改回 month-scope replace、全量 runtime refresh、Workbench snapshot 写入、no-OA persistence 或 read-model fan-out。已提交/历史的冻结 payload 与事件是审计事实；当前规则变化不追溯修改。
+提交/撤回不得改回 month-scope replace、全量 runtime refresh、Workbench snapshot 写入、no-OA persistence 或 read-model fan-out。已提交/历史的冻结 payload 与事件仍是审计事实。规则语义变化只允许通过 `BankRelationRequirementRecalculationJobHandler` 更新受影响 active relation，并追加 history；禁止页面、route、SQL repair 或旧 case-id 白名单路径直接改写。
 
 ## 文件范围
 
@@ -106,6 +107,7 @@ Canonical facts：
 | Frontend feature | `web/src/features/bankFlowRuleBatches/api.ts`、`types.ts`、`policy.ts`、`viewModel.ts`、`components.tsx`；共享时间展示复用 `web/src/features/dateTime.ts`。 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py` |
 | Backend service | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py` |
+| Requirement recalculation | `backend/src/fin_ops_platform/services/bank_relation_requirement_recalculation.py`、`services/postgres_repositories/bank_relation_requirement_recalculation.py` |
 | Canonical query repository | `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py` |
 | Shared category SQL compiler | `backend/src/fin_ops_platform/services/bank_details_canonical_query.py` 的 `bank_category_classification_cte(...)` |
 | Live candidate builder | `backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_query.py` |
@@ -116,7 +118,7 @@ Canonical facts：
 ## 依赖方向
 
 - 允许：页面 -> 专属 API -> route -> application service -> canonical query repository。
-- 允许：application service -> relation command / mutation persistence / settings audit owner。
+- 允许：application service -> atomic settings/job request repository；settings-maintenance handler -> active relation repository / relation command / read-model refresh gateway。
 - 禁止：页面或 route -> SQL。
 - 禁止：query repository -> worker、queue、cache、外部系统或 Workbench projection。
 - 禁止：bank-flow -> no-OA service/read model/table fallback。
@@ -138,7 +140,7 @@ Canonical facts：
 - 业务核心：paired policy、冻结历史、内部转账金额、占用、CAS/幂等。
 - Service/repository：同 snapshot、固定查询数、canonical-only SQL、active relation、delta writer。
 - API：权限、非法参数、空集、筛选、分页、summary、详情和旧字段缺失。
-- Read-model cleanup：页面不读 projection、不 enqueue、不 polling。
+- Read model/worker：页面不读 projection、不 polling；规则 worker 只 enqueue 实际变化关系的精确 `workbench` / `workbench_relation` 月份并标记同月份 matching dirty，禁止 `all`。
 - Frontend：loading/empty/error、交互、一次写后 GET。
 - E2E：提交 -> canonical relation/batch -> 当前页 GET -> 关联台。
 - 生产可逆门禁：只接受 `fixture_ownership=test_owned` 的固定流水，执行 submit -> withdraw -> resubmit，并以 withdraw recovery 保证最终 inactive；同时验证五个受影响页面和四个隔离页面。

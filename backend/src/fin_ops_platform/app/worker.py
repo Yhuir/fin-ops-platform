@@ -64,6 +64,9 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     check_import_job_processors,
 )
 from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
+from fin_ops_platform.services.bank_relation_requirement_recalculation import (
+    BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT,
+)
 from fin_ops_platform.services.runtime_worker_registry import (
     RuntimeWorkerRegistration,
     get_registration_by_instance_name,
@@ -281,6 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.enable_settings_maintenance:
         if args.check:
             handlers[SETTINGS_DATA_RESET_REQUESTED_EVENT] = lambda _event: {"status": "check"}
+            handlers[BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT] = lambda _event: {
+                "status": "check"
+            }
         else:
             settings_maintenance_factory = SettingsDataResetRuntimeFactory(
                 data_dir=default_data_dir(),
@@ -290,8 +296,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             handlers[SETTINGS_DATA_RESET_REQUESTED_EVENT] = (
                 settings_maintenance_factory.build_handler().handle_runtime_event
             )
+            handlers[BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT] = (
+                settings_maintenance_factory.build_requirement_recalculation_handler().handle_runtime_event
+            )
         if SETTINGS_DATA_RESET_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(SETTINGS_DATA_RESET_REQUESTED_EVENT)
+        if BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT not in config.event_types:
+            config.event_types.append(BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT)
 
     if args.check:
         print(

@@ -157,6 +157,7 @@ EXPECTED_MIGRATIONS = [
     "0142_operation_history_logical_operations.sql",
     "0143_import_lifecycle_hot_paths.sql",
     "0144_import_file_session_owner.sql",
+    "0145_bank_relation_requirement_recalculation.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -315,7 +316,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 145)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 146)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1498,6 +1499,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             idempotency_reliability_sql,
             "approved_idempotency_and_worker_attempt_history;",
         )
+        bank_requirement_recalculation_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0145_bank_relation_requirement_recalculation.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(bank_requirement_recalculation_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            bank_requirement_recalculation_sql,
+            "approved_bank_relation_requirement_recalculation;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1525,6 +1537,27 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         ]
         for pattern in forbidden_patterns:
             self.assertIsNone(re.search(pattern, checked_sql), pattern)
+
+    def test_bank_relation_requirement_recalculation_is_bounded_and_idempotent(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0145_bank_relation_requirement_recalculation.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+
+        self.assertIn("using gin ((special_metadata -> 'paired_requirement_tag_codes'))", sql)
+        self.assertIn("where status = 'active'", sql)
+        self.assertIn("insert into job.background_jobs", sql)
+        self.assertIn("insert into job.outbox_events", sql)
+        self.assertIn(
+            "settings.bank_relation_requirements.recalculate.requested",
+            sql,
+        )
+        self.assertIn("on conflict (job_id) do nothing", sql)
+        self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
+        self.assertNotIn("delete from", sql)
+        self.assertNotIn("update app.workbench_pair_relations", sql)
 
     def test_oa_attachment_invoice_cache_sources_is_indexed_lookup_table(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

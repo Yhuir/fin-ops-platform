@@ -13,9 +13,10 @@
 规则含义：
 
 - 只有 active 且 `requires_oa=false`、`requires_invoice=false` 的标签进入本页未提交资格集合。
-- `requires_oa` / `requires_invoice`、标签文本和行级分类在 relation 创建时冻结；已提交/历史不回查当前设置改写。
+- 已提交/已撤回批次的标签文本、行级分类和 requirement snapshot 保持创建时历史，不随规则改写。
+- active relation 持久化 tag codes/source/version 作为可审计证明；相关标签的 `requires_oa` / `requires_invoice` 发生真实语义变化时，后台任务仅重算命中这些 tag codes 的 active relation，并使用关系完整 tag set 做 OR 聚合。
 - 完全相同的保存是 no-op；语义变化使用版本 CAS 并写审计。
-- 资格集合变化只返回信息性的受影响月份；不产生本页面 dirty/outbox。保存成功后前端清空旧选择并执行一次正常 GET。
+- 规则与 background job/outbox 在同一事务写入。保存成功后前端清空旧选择、执行一次正常 GET 并提示后台重算；worker 只为实际发生 requirement 变化的关系刷新精确月份。
 
 ## 批量状态
 
@@ -42,12 +43,12 @@
 
 | 状态 | 判定 | 语义 |
 | --- | --- | --- |
-| `unpaired` | 无 active relation，或 active relation 的冻结 requirement 未满足 | 无 owner 时为 singleton；有 owner 时保持同 case 并显示待补类型。 |
-| `paired` | active formal relation 且冻结 requirement 已满足 | relation 完整成员进入已配对区。 |
+| `unpaired` | 无 active relation，或 active relation 当前持久化 requirement 未满足 | 无 owner 时为 singleton；有 owner 时保持同 case 并显示待补类型。 |
+| `paired` | active formal relation 且当前持久化 requirement 已满足 | relation 完整成员进入已配对区。 |
 | `collapsed` | relation 内银行流水数 `>3` | 默认显示 bank-flow summary，原始行位于 `collapsed_rows.bank`。 |
 | `expanded` | 银行流水数 `<=3` 或用户展开 | 展示原始银行流水。 |
 
-禁止根据当前规则追溯重分 existing relation，也禁止前端本地推断 paired/unpaired。
+禁止在页面读路径临时回查规则或本地推断 paired/unpaired。规则变化必须先由受审计 worker 更新 canonical relation metadata/history，再由精确月份 read model 刷新发布新分区。
 
 ## UI 状态
 

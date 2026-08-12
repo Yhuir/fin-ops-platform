@@ -70,23 +70,24 @@
 - 确认形成 active relation 后，冻结要求满足时同一个 case 的完整成员进入 paired；未满足时保持同 case unpaired 并显示缺失类型。
 - 原始银行 rows 未丢失，折叠摘要和展开详情一致。
 
-## BRB-E2E-004 规则保存不追溯改写 existing relation
+## BRB-E2E-004 规则保存增量重算 existing active relation
 
 前置：
 
 - 已存在 bank-flow、turnover 或 manual active relation。
-- 当前规则与 relation 提交时的审计提示不同。
+- 当前规则与 relation 持久化 requirement 不同。
 
 步骤：
 
 1. 保存新的 OA/发票规则。
-2. 读取 existing relation 和关联台分区。
+2. 获取返回的 recalculation job，等待 durable worker 完成。
+3. 读取 existing relation/history 和关联台分区。
 
 验收：
 
-- existing relation metadata、relation mode 和 history 不变。
-- active relation 继续 paired，不因当前规则变化回到 unpaired。
-- 资格变化时只返回信息性受影响月份，不写 bank-flow/Workbench/turnover dirty/outbox；下一次页面 GET 直接读取 canonical facts。资格未变化时同样零 projection work。
+- 只命中持久化 tag proof 包含变化标签的 active relation；case id、成员、relation mode 和金额事实不变。
+- 用关系完整 tag set 的当前规则 OR 重算 requirements，并追加 `bank_relation_requirement_recalculated` history；结果未变的关系零写。
+- 设置、job、outbox 原子提交；worker 只刷新实际变化关系的精确 Workbench 月份。重复执行同一 job 零新增写，语义 no-op 不创建 job。
 
 ## BRB-E2E-006 权限、空集和失败状态 fail closed
 

@@ -569,26 +569,6 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             )
         return [self._batch_payload(row) for row in rows]
 
-    def affected_scope_keys_for_tag_codes(self, tag_codes: list[str]) -> list[str]:
-        normalized_codes = list(dict.fromkeys(text(code) for code in tag_codes if text(code)))
-        if not normalized_codes:
-            return []
-        rows = self._connection.fetch_all(
-            """
-            with categorized_scopes as (
-                select coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date) as scope_month
-                from app.bank_transactions bank
-                where bank.status <> 'deleted'
-            )
-            select to_char(scope_month, 'YYYY-MM') as scope_key
-            from categorized_scopes
-            where scope_month is not null
-            group by scope_month
-            order by scope_month
-            """
-        )
-        return [scope_key for row in rows if (scope_key := text(row.get("scope_key")))]
-
     @contextmanager
     def _snapshot(self) -> Iterator[Any]:
         with self._connection.transaction() as transaction:

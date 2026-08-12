@@ -8,7 +8,7 @@ def build_bank_relation_requirement_metadata(
     tag_codes: Iterable[str],
     rules_payload: dict[str, Any] | None,
 ) -> dict[str, object]:
-    """Build the frozen Workbench completion requirement for bank members."""
+    """Build current Workbench completion requirements from persisted bank tag proofs."""
 
     payload = rules_payload if isinstance(rules_payload, dict) else {}
     raw_requirements = payload.get("requirements_by_tag_code")

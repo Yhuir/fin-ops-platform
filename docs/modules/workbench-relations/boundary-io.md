@@ -29,7 +29,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
 | persisted bank category changed | Bank Details / Turnover category closure | effective category 实际变化后，在分类事务内按 changed bank member 锁定 active 普通 relation，复用当前 canonical classifier 与同一 settings policy snapshot 重冻结 requirement metadata 并追加 history。ETC/批量账务关系排除；无变化或无 active relation 时零 relation 写。 |
 | historical category source proof | requirement repair tool runtime port | 只读 PostgreSQL canonical category fact，同时返回 UUID/legacy transaction identity alias；仅用于证明 persisted confirmation 并修复旧 requirement snapshot，不作为在线分类或页面事实源。 |
-| explicit requirement rule reapply input | requirement repair tool | 精确 active case ids、精确规则版本、dry-run fingerprint；只允许重验已冻结的 `bank + invoice` 普通正式关系，不改变规则保存默认不追溯语义。 |
+| requirement recalculation event | settings-maintenance worker | 规则保存事务产生的 job id、owner、目标版本和真实变化 tag codes；只读取 tag proof 命中的 active relation，并以完整 tag set 和当前规则重算。 |
 | canonical relation members | requirement repair tool runtime port | 按 relation 原始 typed member ids 一次批量读取 canonical OA/流水/发票行；用于重算金额和证明成员未漂移，缺行/错类型立即失败。 |
 | repair refresh output | durable runtime queue | 仅 enqueue 受影响月份的 `workbench_relation` 与 `workbench` scope，并把相同月份标记 matching dirty；禁止 `all` fan-out。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
@@ -39,7 +39,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
-| frozen completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case 但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过冻结要求或实际成员类型。持久化分类事实变化必须原子重冻结其既有关系；单独保存规则不得追溯改写未发生分类变化的关系。下游 linked ownership 仍只由 active status 决定。 |
+| persisted completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过 requirements 或实际成员类型。持久化分类事实变化继续原子更新既有关系；规则语义变化由 durable incremental job 更新命中关系并追加 history。下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw/operation-history | before/after、actor、event、timestamp、reason、rule/provenance；人工确认附带服务端 request id 与选择项 before/after 业务投影，供操作历史详情读取，不改变 relation 事实 |
 | command result | caller | relation/version/affected rows/months/idempotent replay；普通关系操作的 `freshness_targets` / `operation_barrier_targets` 为空，月份/scope 只作读侧重校验提示 |
 | ETC relation enrichment | Workbench projection/Audit | 人工确认折叠 ETC summary 时，relation UoW 在同一事务重读 canonical selected rows，并把唯一 `external_etc_batch_id` 写入 `special_metadata`；自动补全继续由 `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额。一个 external batch 只能有一个 active relation owner，Audit 只认可 batch identity 与确定性 `etc-summary-<batch>` row id 同时匹配。 |
@@ -70,6 +70,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - OA 附件 binding 写入 `special_metadata.oa_attachment_bindings`；纯 OA+附件关系不可撤回，混合关系撤回或扩展时必须恢复 exact binding。canonical invoice row id 不要求 `oa-att-inv-*` 前缀，旧前缀识别只作为历史兼容，不得替代显式 binding metadata。
 - 历史普通关系的人工撤回 fingerprint 继续阻止同一成员集合被自动重建；仅成员类型严格为 OA+invoice 且全部连边均为显式 `attachment_source` 的不可拆分归属关系不受旧撤回 fingerprint 污染。
 - matching 事实 repository 先把 `CNY`、`RMB`、`人民币`、`人民币元`、`元` 统一为 `CNY`，未知币种保持原值并继续隔离；随后按 currency、direction 与强 evidence 建索引，只生成跨 pane 的候选边。同类型事实比较既不生成边，也不得消耗搜索状态预算。公司对方户名、税号、业务号、项目号和发票号仍只在 365 天窗口内比较跨类型事实；日常报销额外把 OA 申请人与银行对方户名归一为 `employee_reimbursement_payee` 强证据，该专用证据允许至少 2 个有效字符、使用 OA 完成/审批日期（缺失才回退申请日期）与银行交易日期，并严格限制在 30 个自然日内。通用 `counterparty` 至少 4 字的保护不放宽，员工证据不依赖银行标签。active case 缺一个 pane 时，先按缺失类型、币种、方向和任一既有 pane 合计查找唯一同额单笔，再校验强证据与日期窗口；唯一命中直接补全，重复同额或跨 case 争用 fail closed。只有单笔路径未命中时才进入原有组合搜索，组合扩展继续按 case 使用独立有界预算；全局建图或单个高密度 case 资源受限不得丢弃已证明安全的单笔计划，也不得阻断同批其它独立 case。禁止恢复对全部 canonical facts 的 O(n²) 两两扫描或整批共享 active-extension 状态预算。
+- requirement recalculation 必须先完整预验证本 job 命中的全部 active relation；任一关系缺 case、精确月份、持久化 tag proof 或当前 tag rule 时整批零写并失败。写入保留 case id、成员和金额事实，只替换 requirement metadata，追加 `bank_relation_requirement_recalculated` history。重放同一 job 必须零新增写；只刷新实际写入关系的精确 `workbench` / `workbench_relation` 月份并标记相同 matching dirty scopes，禁止 `all` fan-out。
 - 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
 - manual confirm 与 deterministic matching 必须在 relation UoW 写入前，通过 bank-tag read facade 的一次批量 fresh I/O 冻结 requirement metadata；non-fresh 或任一 bank row 缺失时整批不写。读投影不得回查 settings、不得按 row 逐条读取标签。
 
@@ -87,7 +88,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 | 层 | 文件 |
 | --- | --- |
 | Domain/command | `workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_modes.py` |
-| UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py` |
+| UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py`、`bank_relation_requirement_recalculation.py` |
 | Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
 | Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`workbench_etc_batch_link.py`、`postgres_repositories/workbench_formal_relation.py` |
 | Tests | `tests/test_workbench_relation_*.py`、`test_workbench_formal_relation_repository.py`、`test_workbench_matching_orchestrator.py` |
@@ -100,6 +101,6 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 禁止历史 `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、promotion service 或 pending claim 排除重新成为运行时 relation owner；migration `0136` 后它们只读审计。
 - 旧 generic `MatchingEngineService` 仅可服务其独立 legacy reconciliation/内部转账备注上下文；它的 result 不得决定 Workbench membership、zone、linked status 或正式关系写入。该隔离由 boundary guards 和 grouping tests 保护。
 - migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。失效 canonical OA 成员修复复用固定 `workbench-requirement-repair` 控制入口；dry-run 为每个 case 输出独立 fingerprint，execute 以该 fingerprint 唯一定位并重验单 case，再通过 `WorkbenchRelationCommandService.remove_rows_from_active_relations(...)` 删除成员并复用正式持久化边界。禁止直接 SQL 改 relation/read model；若仍有至少两个无附件父级冲突的成员则保留关系，否则取消关系。
-- 同一固定控制入口的 explicit rule reapply 只接受人工列出的 active case ids 与 expected rule version。它必须证明 persisted tag codes/source 未变、旧关系仅缺 OA、当前规则只把 `requires_oa` 从 true 改为 false、发票要求仍为 true、canonical typed members 完整且收款/销项净额精确一致；写入时由正式 command 一次更新 frozen metadata 与 canonical `amount_check` 并追加 before/after history。rollback 必须恢复两者完整 preimage。普通规则保存仍禁止追溯改写历史关系。
+- 旧的人工 `--reapply-case-id` / `--expected-rule-version` 运维白名单路径已删除，不得恢复。规则要求迁移只能由设置事务产生的 durable job 驱动，并按变化 tag proof 集合式定位；历史 repair 工具继续只处理缺失/损坏 proof，不承担正常规则传播。
 - 银行导入 duplicate 恢复只能对 dry-run 冻结的唯一 `bank + invoice` active case 调用 `prepare_withdraw_relation` / `withdraw_relation`；必须逐项校验 case、version、preview id、expected versions、成员和发票事实，且 `after_relations=[]`。relation 表/history 不得直接 SQL 删除或改写，撤回审计历史必须保留。
 - 已删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService` 及其 CLI；禁止恢复这两条 operator-only 平行写链。历史数据补全由同一 matching worker + formal relation UoW 收敛。
