@@ -5,6 +5,8 @@ import hashlib
 import json
 from typing import Any
 
+from fin_ops_platform.domain.enums import InvoiceType
+
 
 INVOICE_HEADER_REPAIR_SOURCE_SHA256 = (
     "c1080bb92a64553956ea76a363022cc4034e9673cbfaa1f55528a208411abb00"
@@ -132,7 +134,7 @@ def build_invoice_header_fact_repair_plan(
     restore_rows: list[dict[str, Any]] = []
     for fact in INVOICE_HEADER_REPAIR_FACTS:
         current = rows_by_number[fact["digital_invoice_no"]]
-        if _text(current.get("invoice_type")) != "input_invoice":
+        if _text(current.get("invoice_type")) != InvoiceType.INPUT.value:
             raise ValueError("Invoice header repair only accepts input invoices.")
         if _text(current.get("invoice_month")) != "2026-06":
             raise ValueError("Invoice header repair target month changed.")

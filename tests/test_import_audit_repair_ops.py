@@ -147,7 +147,7 @@ def _invoice_header_repair_snapshot() -> list[dict[str, object]]:
     return [
         {
             "invoice_id": f"invoice-{index}",
-            "invoice_type": "input_invoice",
+            "invoice_type": "input",
             "digital_invoice_no": fact["digital_invoice_no"],
             "invoice_month": "2026-06",
             "amount": "1.00",

@@ -16,7 +16,7 @@ def _snapshot() -> list[dict[str, object]]:
     return [
         {
             "invoice_id": f"invoice-{index}",
-            "invoice_type": "input_invoice",
+            "invoice_type": "input",
             "digital_invoice_no": fact["digital_invoice_no"],
             "invoice_month": "2026-06",
             "amount": "1.00",
@@ -71,6 +71,18 @@ def test_invoice_header_fact_repair_rejects_wrong_hash_missing_and_duplicate_tar
     with pytest.raises(ValueError, match="exactly once"):
         build_invoice_header_fact_repair_plan(
             duplicate,
+            source_sha256=INVOICE_HEADER_REPAIR_SOURCE_SHA256,
+            expected_target_count=11,
+        )
+
+
+def test_invoice_header_fact_repair_rejects_non_input_invoice() -> None:
+    snapshot = _snapshot()
+    snapshot[0]["invoice_type"] = "output"
+
+    with pytest.raises(ValueError, match="only accepts input invoices"):
+        build_invoice_header_fact_repair_plan(
+            snapshot,
             source_sha256=INVOICE_HEADER_REPAIR_SOURCE_SHA256,
             expected_target_count=11,
         )
