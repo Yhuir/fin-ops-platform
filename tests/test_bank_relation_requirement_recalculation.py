@@ -28,10 +28,14 @@ def _relation(
     requires_oa: bool = True,
     requires_invoice: bool = True,
     rule_version: int = 11,
+    canonical_months: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "case_id": case_id,
         "month_scope": month,
+        "_canonical_bank_months": list(
+            canonical_months if canonical_months is not None else ([month] if month else [])
+        ),
         "special_metadata": {
             "paired_requirement_source": "bank_transaction_paired_policy",
             "paired_requirement_tag_codes": list(tags or ["sales_income"]),
@@ -80,14 +84,7 @@ def _handler(
                 lambda _codes: list(relations)
             )
         ),
-        relation_updater=lambda **kwargs: (
-            writes.append(dict(kwargs))
-            or {"affected_months": [next(
-                str(row["month_scope"])
-                for row in relations
-                if row["case_id"] == kwargs["case_id"]
-            )]}
-        ),
+        relation_updater=lambda **kwargs: (writes.append(dict(kwargs)) or {}),
         queue_repository=SimpleNamespace(
             enqueue_read_model_refresh=lambda **kwargs: refreshes.append(dict(kwargs))
         ),
@@ -218,6 +215,7 @@ def test_handler_supersedes_failed_rollout_only_after_replacement_succeeds() -> 
 def test_handler_keeps_failed_rollout_visible_when_replacement_fails_closed() -> None:
     invalid = _relation("case-invalid")
     invalid["month_scope"] = "all"
+    invalid["_canonical_bank_months"] = []
     handler, event, jobs, job_id, writes, _refreshes, _dirty_calls, old_job_id = _handler(
         [invalid],
         supersedes_failed_job=True,
@@ -229,6 +227,44 @@ def test_handler_keeps_failed_rollout_visible_when_replacement_fails_closed() ->
     assert writes == []
     assert jobs.get_job(old_job_id, "finance-user").status == "failed"
     assert jobs.get_job(job_id, "finance-user").status == "failed"
+
+
+def test_handler_derives_exact_scope_from_canonical_bank_month_for_legacy_relation() -> None:
+    relation = _relation(
+        "case-legacy-scope",
+        month="",
+        canonical_months=["2026-05"],
+    )
+    handler, event, _jobs, _job_id, writes, refreshes, dirty_calls, _ = _handler(
+        [relation]
+    )
+
+    summary = handler.handle_runtime_event(event)
+
+    assert len(writes) == 1
+    assert summary["affected_months"] == ["2026-05"]
+    assert {(row["scope_type"], row["scope_key"]) for row in refreshes} == {
+        ("workbench", "2026-05"),
+        ("workbench_relation", "2026-05"),
+    }
+    assert dirty_calls == [["2026-05"]]
+
+
+def test_handler_refreshes_every_canonical_bank_month_for_cross_month_relation() -> None:
+    relation = _relation(
+        "case-cross-month",
+        month="",
+        canonical_months=["2026-07", "2026-08"],
+    )
+    handler, event, _jobs, _job_id, writes, _refreshes, dirty_calls, _ = _handler(
+        [relation]
+    )
+
+    summary = handler.handle_runtime_event(event)
+
+    assert len(writes) == 1
+    assert summary["affected_months"] == ["2026-07", "2026-08"]
+    assert dirty_calls == [["2026-07", "2026-08"]]
 
 
 def test_handler_updates_rule_version_even_when_booleans_are_unchanged() -> None:

@@ -147,6 +147,39 @@ def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in all_sql)
 
 
+def test_requirement_relation_load_attaches_canonical_bank_months_in_one_query() -> None:
+    class RequirementLoadConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+            self.fetch_all_calls.append((sql, params))
+            return [
+                {
+                    "raw_payload": {
+                        "case_id": "CASE-LEGACY",
+                        "row_ids": ["bank-1", "invoice-1"],
+                        "row_types": ["bank", "invoice"],
+                        "status": "active",
+                    },
+                    "canonical_bank_months": ["2026-05", "2026-07", "2026-05"],
+                }
+            ]
+
+    connection = RequirementLoadConnection()
+    relations = PostgresWorkbenchRelationRepository(
+        connection
+    ).load_active_bank_requirement_relations_for_tag_codes(["sales_income"])
+
+    assert relations == [
+        {
+            "case_id": "CASE-LEGACY",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "_canonical_bank_months": ["2026-05", "2026-07"],
+        }
+    ]
+    assert len(connection.fetch_all_calls) == 1
+
+
 def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existing_rows() -> None:
     class CanonicalLockConnection(RecordingConnection):
         def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:

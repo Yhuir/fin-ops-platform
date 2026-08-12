@@ -1234,6 +1234,9 @@ def test_requirement_recalculation_query_excludes_non_formal_candidate_case_ids(
     sql, params = connection.fetched_all[0]
     assert "case_id !~ '^(candidate|decision|temp):'" in sql
     assert "paired_requirement_source" in sql
+    assert "canonical_bank_months" in sql
+    assert "from app.bank_transactions bank" in sql
+    assert "bank.txn_month is not null" in sql
     assert params == (["sales_income"], ["sales_income"])
 
 

@@ -114,15 +114,17 @@ class BankRelationRequirementRecalculationJobHandler:
         total = max(len(relations), 1)
         scanned = 0
         skipped = 0
-        plans: list[tuple[dict[str, Any], str, str, dict[str, Any], dict[str, object]]] = []
+        plans: list[
+            tuple[dict[str, Any], str, list[str], dict[str, Any], dict[str, object]]
+        ] = []
 
         try:
             for relation in relations:
-                case_id, month_scope, metadata, intended = self._plan_relation(
+                case_id, month_scopes, metadata, intended = self._plan_relation(
                     relation,
                     current_rules=current_rules,
                 )
-                plans.append((relation, case_id, month_scope, metadata, intended))
+                plans.append((relation, case_id, month_scopes, metadata, intended))
         except RuntimeError as exc:
             self._background_jobs.fail_job(
                 job_id,
@@ -137,12 +139,12 @@ class BankRelationRequirementRecalculationJobHandler:
                 "written_relation_count": 0,
             }
 
-        for _relation, case_id, month_scope, metadata, intended in plans:
+        for _relation, case_id, month_scopes, metadata, intended in plans:
             scanned += 1
             if _same_effective_requirements(metadata, intended):
                 if metadata.get("paired_requirement_recalculation_job_id") == job_id:
                     changed_case_ids.add(case_id)
-                    affected_months.add(month_scope)
+                    affected_months.update(month_scopes)
                 skipped += 1
                 continue
             result = self._relation_updater(
@@ -164,7 +166,7 @@ class BankRelationRequirementRecalculationJobHandler:
                 history_operation_type="bank_relation_requirement_recalculated",
             )
             changed_case_ids.add(case_id)
-            affected_months.add(month_scope)
+            affected_months.update(month_scopes)
             affected_months.update(
                 month
                 for month in _text_list(result.get("affected_months"))
@@ -236,7 +238,7 @@ class BankRelationRequirementRecalculationJobHandler:
         relation: dict[str, Any],
         *,
         current_rules: dict[str, Any],
-    ) -> tuple[str, str, dict[str, Any], dict[str, object]]:
+    ) -> tuple[str, list[str], dict[str, Any], dict[str, object]]:
         case_id = str(relation.get("case_id") or "").strip()
         if not case_id:
             raise RuntimeError("active relation has no case id")
@@ -257,16 +259,25 @@ class BankRelationRequirementRecalculationJobHandler:
                 f"active relation {case_id} references missing tag rules: "
                 + ",".join(missing_rules)
             )
-        month_scope = str(relation.get("month_scope") or "").strip()
-        if not _is_month_scope(month_scope):
+        canonical_months = _text_list(relation.get("_canonical_bank_months"))
+        invalid_canonical_months = [
+            month for month in canonical_months if not _is_month_scope(month)
+        ]
+        if invalid_canonical_months:
             raise RuntimeError(
-                f"active relation {case_id} does not have an exact month scope"
+                f"active relation {case_id} has invalid canonical bank month scopes: "
+                + ",".join(invalid_canonical_months)
+            )
+        month_scopes = set(canonical_months)
+        if not month_scopes:
+            raise RuntimeError(
+                f"active relation {case_id} does not have a canonical bank month scope"
             )
         intended = build_bank_relation_requirement_metadata(
             tag_codes=stored_tag_codes,
             rules_payload=current_rules,
         )
-        return case_id, month_scope, metadata, intended
+        return case_id, sorted(month_scopes), metadata, intended
 
     def _current_rules_payload(self) -> dict[str, Any]:
         settings = self._state_store.load_app_settings()

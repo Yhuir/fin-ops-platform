@@ -4811,3 +4811,9 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 修复边界：在 PostgreSQL relation repository 的集合查询入口排除 `candidate:`、`decision:`、`temp:`；不在 handler 添加跳过 fallback，确保真正正式关系仍接受完整预验证。预配对候选继续由 matching/read model 基于当前规则重建，不写 requirement history。
 - 恢复策略：migration 0146 只在 0145 rollout job 已经 `failed` 时创建确定性的 v2 job/event；全新环境中 0145 仍为 queued，因此不会产生重复 rollout。v2 成功完成关系写入和精确 scope enqueue 后才通过 BackgroundJobService 将 v1 标记 superseded；v2 失败则保留两条 attention 证据。
 - 性能与污染控制：仍按变化 tag code + GIN proof 索引查询；不扫描全关系、不使用 `all` refresh、不创建第二条关系写链，也不改页面/API DTO。
+
+## 2026-08-12 - 存量正式关系精确月份恢复
+
+- 生产 v2 收敛任务排除候选后，暴露 `CASE-AUTO-0001` 等旧正式关系没有 payload `month_scope`；原 handler 只信该历史字段，因此在任何关系写入前正确地整批失败。问题不是规则、页面缓存或队列，而是旧 payload 与当前 exact-scope 合同之间的存量差异。
+- repository 现在在变化 tag proof 的同一次有界查询中，以 relation `row_ids` 批量关联 canonical `app.bank_transactions`，返回全部非删除银行成员的 `txn_month`。handler 只接受这些 canonical 月份；一条跨月关系刷新所有精确月份，零月份或非法月份仍整批零写，绝不降级为 `all`，也不把历史 payload scope 当事实源。
+- migration 0147 仅在 v2 已失败时创建确定性的 v3 job/event；全新部署不会产生额外任务。v3 成功后才 supersede v2，并复用同一 relation updater、history、精确 read model gateway 与 matching dirty 边界。

@@ -121,24 +121,43 @@ class PostgresWorkbenchRelationRepository:
             return []
         rows = self._connection.fetch_all(
             """
-            select raw_payload
-            from app.workbench_pair_relations
-            where status = 'active'
-              and case_id !~ '^(candidate|decision|temp):'
-              and special_metadata->>'paired_requirement_source' = 'bank_transaction_paired_policy'
+            select
+                relation.raw_payload,
+                coalesce(
+                    array(
+                        select distinct to_char(bank.txn_month, 'YYYY-MM')
+                        from app.bank_transactions bank
+                        where coalesce(bank.legacy_mongo_id, bank.id::text)
+                              = any(relation.row_ids)
+                          and bank.status <> 'deleted'
+                          and bank.txn_month is not null
+                        order by 1
+                    ),
+                    array[]::text[]
+                ) as canonical_bank_months
+            from app.workbench_pair_relations relation
+            where relation.status = 'active'
+              and relation.case_id !~ '^(candidate|decision|temp):'
+              and relation.special_metadata->>'paired_requirement_source' = 'bank_transaction_paired_policy'
               and (
-                    special_metadata->'paired_requirement_tag_codes' ?| %s::text[]
-                    or special_metadata->>'paired_requirement_tag_code' = any(%s::text[])
+                    relation.special_metadata->'paired_requirement_tag_codes' ?| %s::text[]
+                    or relation.special_metadata->>'paired_requirement_tag_code' = any(%s::text[])
               )
-            order by case_id
+            order by relation.case_id
             """,
             (normalized_tag_codes, normalized_tag_codes),
         )
-        return [
-            dict(payload)
-            for row in rows
-            if isinstance((payload := row_payload(row, "raw_payload")), dict)
-        ]
+        relations: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row_payload(row, "raw_payload")
+            if not isinstance(payload, dict):
+                continue
+            relation = dict(payload)
+            relation["_canonical_bank_months"] = list(
+                dict.fromkeys(text_list(row.get("canonical_bank_months")))
+            )
+            relations.append(relation)
+        return relations
 
     def load_active_workbench_pair_relations_for_row_ids(
         self,
