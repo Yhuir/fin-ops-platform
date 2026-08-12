@@ -325,6 +325,22 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         self.assertEqual(refreshes[0]["months"], ["2026-05"])
         self.assertEqual(refreshes[0]["case_ids"], ["case-income-no-oa"])
 
+        replay = _run(
+            command,
+            execute_args,
+            rules=rules,
+            canonical_rows=canonical_rows,
+            refreshes=refreshes,
+        )
+
+        self.assertEqual(replay["written_relation_count"], 0)
+        self.assertEqual(replay["original_plan_relation_count"], 1)
+        self.assertEqual(replay["target_relation_count"], 0)
+        self.assertEqual(replay["source_fingerprint"], fingerprint)
+        self.assertEqual(len(command.history), 1)
+        self.assertEqual(refreshes[1]["months"], ["2026-05"])
+        self.assertEqual(refreshes[1]["case_ids"], ["case-income-no-oa"])
+
     def test_explicit_rule_reapply_rollback_restores_metadata_and_amount_preimage(self) -> None:
         original = self._reapply_relation()
         command = _CommandService([original])

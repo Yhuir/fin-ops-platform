@@ -135,7 +135,33 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         if reapply_case_ids
         else []
     )
-    category_scope_relations = requested_relations or eligible_relations
+    applied_reapply_case_ids: set[str] = set()
+    if reapply_case_ids and mode == "execute":
+        history_records = _matched_history_records(
+            histories,
+            actor_id=REAPPLY_ACTOR_ID,
+            operation_type=REAPPLY_OPERATION_TYPE,
+            note=f"{_REAPPLY_NOTE_PREFIX}{args.expected_fingerprint}",
+        )
+        for history in history_records:
+            before, _after = _single_history_transition(history)
+            case_id = str(before.get("case_id") or "").strip()
+            if case_id:
+                applied_reapply_case_ids.add(case_id)
+        unexpected_applied_case_ids = applied_reapply_case_ids.difference(reapply_case_ids)
+        if unexpected_applied_case_ids:
+            raise RuntimeError(
+                "Explicit rule reapply history contains cases outside the requested contract: "
+                + ", ".join(sorted(unexpected_applied_case_ids))
+            )
+    pending_requested_relations = [
+        relation
+        for relation in requested_relations
+        if str(relation.get("case_id") or "").strip() not in applied_reapply_case_ids
+    ]
+    category_scope_relations = (
+        pending_requested_relations if reapply_case_ids else eligible_relations
+    )
     category_provider = bank_transaction_effective_category_provider(app)
     raw_rules_payload = bank_flow_rule_batch_tag_rules_payload(app)
     rules_payload = raw_rules_payload if isinstance(raw_rules_payload, dict) else {}
@@ -146,19 +172,23 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             for row_id in _bank_row_ids(relation)
         )
     )
-    bank_rows = import_service(app).list_transactions(month="all")
+    bank_rows = (
+        import_service(app).list_transactions(month="all")
+        if category_scope_relations
+        else []
+    )
     persisted_category_records = bank_transaction_category_source_proofs(app, bank_row_ids)
     if reapply_case_ids:
         relation_row_ids = list(
             dict.fromkeys(
                 str(row_id).strip()
-                for relation in requested_relations
+                for relation in pending_requested_relations
                 for row_id in list(relation.get("row_ids") or [])
                 if str(row_id).strip()
             )
         )
         assessments = _build_explicit_reapply_plan(
-            requested_relations,
+            pending_requested_relations,
             category_provider=category_provider,
             bank_rows=bank_rows,
             persisted_category_records=persisted_category_records,
@@ -195,6 +225,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         if _fingerprint(full_plan) != fingerprint:
             raise RuntimeError(
                 "Workbench relation requirement sources changed after dry-run; rerun dry-run before execute."
+            )
+        if reapply_case_ids and {
+            str(item.get("case_id") or "").strip() for item in full_plan
+        } != set(reapply_case_ids):
+            raise RuntimeError(
+                "Explicit rule reapply execute cases do not match the requested dry-run contract."
             )
     else:
         full_plan = fresh_plan
