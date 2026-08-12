@@ -158,6 +158,7 @@ EXPECTED_MIGRATIONS = [
     "0143_import_lifecycle_hot_paths.sql",
     "0144_import_file_session_owner.sql",
     "0145_bank_relation_requirement_recalculation.sql",
+    "0146_bank_relation_requirement_rollout_retry.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -316,7 +317,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 146)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 147)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1510,6 +1511,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             bank_requirement_recalculation_sql,
             "approved_bank_relation_requirement_recalculation;",
         )
+        bank_requirement_rollout_retry_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0146_bank_relation_requirement_rollout_retry.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(bank_requirement_rollout_retry_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            bank_requirement_rollout_retry_sql,
+            "approved_bank_relation_requirement_rollout_retry;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1554,6 +1566,24 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "settings.bank_relation_requirements.recalculate.requested",
             sql,
         )
+        self.assertIn("on conflict (job_id) do nothing", sql)
+        self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
+        self.assertNotIn("delete from", sql)
+        self.assertNotIn("update app.workbench_pair_relations", sql)
+
+    def test_bank_relation_requirement_rollout_retry_only_replaces_failed_job(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0146_bank_relation_requirement_rollout_retry.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+
+        self.assertIn("old_job.status = 'failed'", sql)
+        self.assertIn("rollout-v2-", sql)
+        self.assertIn("supersedes_job_id", sql)
+        self.assertIn("insert into job.background_jobs", sql)
+        self.assertIn("insert into job.outbox_events", sql)
         self.assertIn("on conflict (job_id) do nothing", sql)
         self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
         self.assertNotIn("delete from", sql)

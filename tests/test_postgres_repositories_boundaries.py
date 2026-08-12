@@ -1224,6 +1224,19 @@ def test_workbench_active_relation_case_load_is_one_history_free_query() -> None
     assert params == ("case-1",)
 
 
+def test_requirement_recalculation_query_excludes_non_formal_candidate_case_ids() -> None:
+    connection = WorkbenchReadConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.load_active_bank_requirement_relations_for_tag_codes(["sales_income"])
+
+    assert len(connection.fetched_all) == 1
+    sql, params = connection.fetched_all[0]
+    assert "case_id !~ '^(candidate|decision|temp):'" in sql
+    assert "paired_requirement_source" in sql
+    assert params == (["sales_income"], ["sales_income"])
+
+
 def test_workbench_active_relation_overlap_load_is_one_history_free_query() -> None:
     connection = WorkbenchReadConnection()
     repository = PostgresWorkbenchRelationRepository(connection)

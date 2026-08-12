@@ -60,14 +60,48 @@ class BankRelationRequirementRecalculationJobHandler:
         job_id = str(payload.get("job_id") or "").strip()
         owner_user_id = str(payload.get("owner_user_id") or "").strip()
         changed_tag_codes = _text_list(payload.get("changed_tag_codes"))
+        supersedes_job_id = str(payload.get("supersedes_job_id") or "").strip()
         if not job_id or not owner_user_id or not changed_tag_codes:
             raise ValueError("bank relation requirement recalculation event is incomplete")
+        if supersedes_job_id == job_id:
+            raise ValueError("bank relation requirement recalculation cannot supersede itself")
 
         job = self._background_jobs.get_job(job_id, owner_user_id)
         if job.status in TERMINAL_BACKGROUND_JOB_STATUSES:
             return dict(job.result_summary)
         if job.status == "queued":
             job = self._background_jobs.start_job(job_id)
+
+        if supersedes_job_id:
+            try:
+                superseded_job = self._background_jobs.get_job(
+                    supersedes_job_id,
+                    owner_user_id,
+                )
+            except (KeyError, PermissionError) as exc:
+                self._background_jobs.fail_job(
+                    job_id,
+                    "关联要求重算失败，未修改任何关系。",
+                    f"replacement target is unavailable: {supersedes_job_id}",
+                )
+                return {
+                    "status": "failed",
+                    "changed_tag_codes": changed_tag_codes,
+                    "error": str(exc),
+                    "written_relation_count": 0,
+                }
+            if superseded_job.status not in {"failed", "superseded"}:
+                self._background_jobs.fail_job(
+                    job_id,
+                    "关联要求重算失败，未修改任何关系。",
+                    f"replacement target is not failed: {supersedes_job_id}",
+                )
+                return {
+                    "status": "failed",
+                    "changed_tag_codes": changed_tag_codes,
+                    "error": "replacement target is not failed",
+                    "written_relation_count": 0,
+                }
 
         previous_summary = dict(job.result_summary or {})
         affected_months = set(_text_list(previous_summary.get("affected_months")))
@@ -183,6 +217,13 @@ class BankRelationRequirementRecalculationJobHandler:
             "affected_months": sorted(affected_months),
             "matching_dirty_months": list(dirty_months),
         }
+        if supersedes_job_id:
+            self._background_jobs.supersede_job(
+                supersedes_job_id,
+                owner_user_id,
+                superseded_by_job_id=job_id,
+            )
+            summary["superseded_job_id"] = supersedes_job_id
         self._background_jobs.succeed_job(
             job_id,
             "关联要求重算完成。",
@@ -271,6 +312,8 @@ def _same_effective_requirements(
 ) -> bool:
     return (
         str(current.get("paired_requirement_source") or "") == REQUIREMENT_SOURCE
+        and int(current.get("paired_requirement_version") or 0)
+        == int(intended.get("paired_requirement_version") or 0)
         and bool(current.get("requires_oa")) == bool(intended.get("requires_oa"))
         and bool(current.get("requires_invoice"))
         == bool(intended.get("requires_invoice"))

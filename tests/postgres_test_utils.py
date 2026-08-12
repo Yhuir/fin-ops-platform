@@ -157,6 +157,7 @@ EXPECTED_MIGRATION_FILES = [
     "0143_import_lifecycle_hot_paths.sql",
     "0144_import_file_session_owner.sql",
     "0145_bank_relation_requirement_recalculation.sql",
+    "0146_bank_relation_requirement_rollout_retry.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

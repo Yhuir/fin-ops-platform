@@ -124,6 +124,7 @@ class PostgresWorkbenchRelationRepository:
             select raw_payload
             from app.workbench_pair_relations
             where status = 'active'
+              and case_id !~ '^(candidate|decision|temp):'
               and special_metadata->>'paired_requirement_source' = 'bank_transaction_paired_policy'
               and (
                     special_metadata->'paired_requirement_tag_codes' ?| %s::text[]

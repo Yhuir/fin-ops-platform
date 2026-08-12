@@ -4804,3 +4804,10 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 生产审计定位 `CASE-AUTO-0112`、`CASE-AUTO-0118`、`CASE-AUTO-0119`、`CASE-AUTO-0120` 的 active relation 引用了已经不在 canonical OA 表中的成员，污染 Workbench 及七个下游页面审计。
 - 定向工具只接受单一 case，先输出包含 relation version、成员、缺失 OA 与预期动作的 SHA-256 fingerprint；execute 必须匹配 fingerprint，并通过 `remove_rows_from_active_relations`、正式 delta persist 和 history actor/reason 完成写入。
 - 删除 OA 后仍有 bank + invoice 且无 attachment parent 冲突时保留关系，否则取消关系；禁止直接 SQL 修改 relation/read model，不增加在线 API、worker、fallback 或常驻扫描。
+
+## 2026-08-12 - 规则收敛候选边界修复
+
+- 真实原因：首次上线收敛 job 的 repository 查询只按 `status=active + requirement source + tag proof` 过滤，误把遗留的 `candidate:*` 预配对候选行纳入正式关系集合。候选没有正式关系的 exact `month_scope`，因此 handler 的全量预验证正确地 fail closed，生产关系保持零写，但两笔存量 182400 元关系也没有完成规则迁移。
+- 修复边界：在 PostgreSQL relation repository 的集合查询入口排除 `candidate:`、`decision:`、`temp:`；不在 handler 添加跳过 fallback，确保真正正式关系仍接受完整预验证。预配对候选继续由 matching/read model 基于当前规则重建，不写 requirement history。
+- 恢复策略：migration 0146 只在 0145 rollout job 已经 `failed` 时创建确定性的 v2 job/event；全新环境中 0145 仍为 queued，因此不会产生重复 rollout。v2 成功完成关系写入和精确 scope enqueue 后才通过 BackgroundJobService 将 v1 标记 superseded；v2 失败则保留两条 attention 证据。
+- 性能与污染控制：仍按变化 tag code + GIN proof 索引查询；不扫描全关系、不使用 `all` refresh、不创建第二条关系写链，也不改页面/API DTO。
