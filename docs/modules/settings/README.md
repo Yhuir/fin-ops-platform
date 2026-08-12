@@ -63,7 +63,7 @@ canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的
 | --- | --- | --- |
 | 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
 | 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
-| 项目范围变化 | project settings/version | 成本统计等 direct 页面下次 GET 读取；关联台按 `workbench` freshness 合同刷新 |
+| 项目范围变化 | project settings/version | 成本统计、关联台等 direct 页面下次 GET 直接读取；不发布 page Workbench refresh |
 | 访问控制 no-op / 真实变化 | `app.app_settings` ACL family + 独立 version；真实变化同事务写 `audit.events` | no-op 零 I/O；真实变化严格投影 OA 三专用角色后提交，下一次 session/API 使用新 snapshot；失败按补偿状态返回 502/503 |
 | OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
 | OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |

@@ -19,10 +19,6 @@ type MockFetchHandler = (request: {
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
   workbenchEmptyPayload?: boolean;
-  workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-  workbenchReadModelVersions?: string[];
-  workbenchRefreshStatus?: Record<string, unknown>;
-  workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
@@ -59,10 +55,6 @@ type MockApiOptions = {
     invoice?: string[];
   };
   emptyBodyPaths?: string[];
-  workbenchOaStatus?: {
-    code: "idle" | "loading" | "ready" | "error";
-    message: string;
-  };
   workbenchOaSyncStatuses?: Array<Record<string, unknown>>;
   dataResetPasswordShouldFail?: boolean;
   dataResetJobPollsBeforeComplete?: number;
@@ -1453,8 +1445,8 @@ function buildImportPreviewPayload(
   };
 }
 
-function buildWorkbenchPayload(month: string, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
-  return toGroupedWorkbenchPayload(buildWorkbenchRowPayload(month), oaStatus);
+function buildWorkbenchPayload(month: string) {
+  return toGroupedWorkbenchPayload(buildWorkbenchRowPayload(month));
 }
 
 type RawWorkbenchPayload = ReturnType<typeof buildWorkbenchRowPayload>;
@@ -2070,13 +2062,15 @@ function toGroupedWorkbenchPayload(payload: {
   };
   paired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
   unpaired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
-}, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
+}) {
   const pairedGroups = buildGroups(payload.paired, "paired");
   const unpairedGroups = buildGroups(payload.unpaired, "unpaired");
+  const pairedRowCounts = countMockWorkbenchRows(pairedGroups);
+  const unpairedRowCounts = countMockWorkbenchRows(unpairedGroups);
 
   return {
     month: payload.month,
-    oa_status: oaStatus ?? { code: "ready", message: "OA 已同步" },
+    scope_key: payload.month,
     summary: {
       oa_count: payload.summary.oa_count,
       bank_count: payload.summary.bank_count,
@@ -2099,6 +2093,23 @@ function toGroupedWorkbenchPayload(payload: {
       etc_summary_batch_count: 3,
       oa_attachment_total: 5,
     },
+    statistics: {
+      oa_count: payload.summary.oa_count,
+      bank_transaction_count: payload.summary.bank_count,
+      input_invoice_count: payload.summary.invoice_count,
+      output_invoice_count: 0,
+      paired_group_count: pairedGroups.length,
+      unpaired_object_count: unpairedGroups.length,
+      expense_transaction_count: 0,
+      income_transaction_count: 0,
+      paired_oa_count: pairedRowCounts.oa,
+      paired_bank_transaction_count: pairedRowCounts.bank,
+      paired_invoice_count: pairedRowCounts.invoice,
+      incomplete_group_count: 0,
+      missing_oa_group_count: 0,
+      missing_bank_group_count: 0,
+      missing_invoice_group_count: 0,
+    },
     paired: { groups: pairedGroups },
     unpaired: { groups: unpairedGroups },
   };
@@ -2112,6 +2123,7 @@ function buildGroups(
     string,
     {
       group_id: string;
+      detail_key: string;
       group_type: "relation" | "unpaired";
       match_confidence: "high" | "medium" | "low";
       reason: string;
@@ -2128,6 +2140,7 @@ function buildGroups(
     if (!groups.has(groupId)) {
       groups.set(groupId, {
         group_id: groupId,
+        detail_key: section === "paired" && caseId ? caseId : String(row.id),
         group_type: section === "paired" ? "relation" : "unpaired",
         match_confidence: section === "paired" ? "high" : "low",
         reason: section === "paired" ? "active_formal_relation" : "unpaired_fact",
@@ -2169,6 +2182,19 @@ function parseWorkbenchGroupJsonParam(value: string | null): MockWorkbenchJsonPa
   } catch {
     return {};
   }
+}
+
+function parseMockWorkbenchCursor(value: string | null, prefix: string) {
+  if (!value?.startsWith(prefix)) {
+    return 0;
+  }
+  const offset = Number(value.slice(prefix.length));
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+}
+
+function nextMockWorkbenchCursor(prefix: string, offset: number, pageSize: number, total: number) {
+  const nextOffset = offset + pageSize;
+  return nextOffset < total ? `${prefix}${nextOffset}` : null;
 }
 
 function countMockWorkbenchRows(groups: MockWorkbenchGroup[]) {
@@ -4573,7 +4599,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
-  let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -4695,8 +4720,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
-  let workbenchReadModelVersionIndex = 0;
-  let workbenchReadModelVersion = options.workbenchReadModelVersions?.[0] ?? "mock-workbench-generation-1";
   let appHealthDashboardIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -4768,14 +4791,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
-      const versions = options.workbenchReadModelVersions?.length
-        ? options.workbenchReadModelVersions
-        : ["mock-workbench-generation-1"];
-      workbenchReadModelVersion = versions[Math.min(workbenchReadModelVersionIndex, versions.length - 1)];
-      workbenchReadModelVersionIndex += 1;
       const mappedPayload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
-        options.workbenchOaStatus,
       );
       const payload = options.transformWorkbenchPayload
         ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
@@ -4799,9 +4816,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           total: groups.length,
           row_counts: countMockWorkbenchRows(groups),
           has_more: groups.length > 200,
+          next_cursor: groups.length > 200 ? "mock-workbench-group:200" : null,
           groups: groups.slice(0, 200),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
         };
       };
       return {
@@ -4809,10 +4825,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ...payload,
           paired: pageForZone("paired"),
           unpaired: pageForZone("unpaired"),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
-          active_generation_id: workbenchReadModelVersion,
-          generated_at: "2026-05-22T09:30:00+08:00",
         },
       };
     },
@@ -4822,23 +4834,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "workbench groups failed" } };
       }
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
-      const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
-      const mappedPayload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const cursorPrefix = "mock-workbench-group:";
+      const offset = parseMockWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
+      const mappedPayload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options));
       const payload = options.transformWorkbenchPayload
         ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
         : mappedPayload;
-      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
-      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
-        return {
-          status: 409,
-          body: {
-            error: "workbench_read_model_version_conflict",
-            expected_read_model_version: expectedReadModelVersion,
-            read_model_version: workbenchReadModelVersion,
-          },
-        };
-      }
       const search = String(url.searchParams.get("search") ?? "").trim();
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
@@ -4857,20 +4859,73 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         )),
         sort,
       );
-      const offset = (page - 1) * pageSize;
       const rowCounts = countMockWorkbenchRows(groups);
       return {
         body: {
-          month: payload.month,
-          zone,
-          page,
-          page_size: pageSize,
+          groups: groups.slice(offset, offset + pageSize),
           total: groups.length,
           row_counts: rowCounts,
+          page_size: pageSize,
           has_more: offset + pageSize < groups.length,
-          groups: groups.slice(offset, offset + pageSize),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
+          next_cursor: nextMockWorkbenchCursor(cursorPrefix, offset, pageSize, groups.length),
+        },
+      };
+    },
+    "/api/workbench/groups/detail": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "";
+      if (options.workbenchErrorMonths?.includes(month)) {
+        return { status: 500, body: { message: "workbench group detail failed" } };
+      }
+      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
+      const groupId = url.searchParams.get("group_id") ?? "";
+      const mappedPayload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options));
+      const payload = options.transformWorkbenchPayload
+        ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
+        : mappedPayload;
+      const group = payload[zone].groups.find((candidate) => candidate.group_id === groupId);
+      if (!group) {
+        return { status: 404, body: { message: "workbench group detail not found" } };
+      }
+      const collapsedRowCounts = group.collapsed_row_counts ?? {
+        oa: group.oa_rows.length,
+        bank: group.bank_rows.length,
+        invoice: group.invoice_rows.length,
+      };
+      const expandPaneRows = <T extends { id: string }>(rows: T[], expectedCount: number) => {
+        if (rows.length === 0 || rows.length >= expectedCount) {
+          return rows;
+        }
+        return Array.from({ length: expectedCount }, (_, index) => (
+          index < rows.length
+            ? rows[index]
+            : { ...rows[index % rows.length], id: `${rows[index % rows.length].id}-detail-${index + 1}` }
+        ));
+      };
+      const paneRows = {
+        oa: expandPaneRows(
+          group.collapsed_rows?.oa ?? group.oa_rows,
+          collapsedRowCounts.oa,
+        ),
+        bank: expandPaneRows(
+          group.collapsed_rows?.bank ?? group.bank_rows,
+          collapsedRowCounts.bank,
+        ),
+        invoice: expandPaneRows(
+          group.collapsed_rows?.invoice ?? group.invoice_rows,
+          collapsedRowCounts.invoice,
+        ),
+      };
+      return {
+        body: {
+          group: {
+            ...group,
+            oa_rows: paneRows.oa,
+            bank_rows: paneRows.bank,
+            invoice_rows: paneRows.invoice,
+            row_counts: collapsedRowCounts,
+            collapsed_rows: paneRows,
+            collapsed_row_counts: collapsedRowCounts,
+          },
         },
       };
     },
@@ -4882,13 +4937,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : "oa";
       const facet = url.searchParams.get("facet") === "time_year" ? "time_year" : "column";
       const column = String(url.searchParams.get("column") ?? "").trim();
-      const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "100") || 100);
-      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
-      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
-        return { status: 409, body: { error: "workbench_read_model_version_conflict" } };
-      }
-      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const cursorPrefix = "mock-workbench-option:";
+      const offset = parseMockWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
+      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options));
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
       const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
       if (facet === "column") {
@@ -4925,36 +4977,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const optionsList = Array.from(values.values())
         .filter((option) => !optionSearch || normalizeMockWorkbenchText(option.label).includes(optionSearch))
         .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
-      const offset = (page - 1) * pageSize;
       return {
         body: {
-          page,
+          options: optionsList.slice(offset, offset + pageSize),
           page_size: pageSize,
           has_more: offset + pageSize < optionsList.length,
-          options: optionsList.slice(offset, offset + pageSize),
-          read_model_status: options.workbenchReadModelStatus ?? "fresh",
-          read_model_version: workbenchReadModelVersion,
+          next_cursor: nextMockWorkbenchCursor(cursorPrefix, offset, pageSize, optionsList.length),
         },
-      };
-    },
-    "/api/workbench/refresh-status": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "all";
-      const statusSequence = options.workbenchRefreshStatusSequence ?? [];
-      if (statusSequence.length > 0) {
-        const status = statusSequence[Math.min(workbenchRefreshStatusIndex, statusSequence.length - 1)];
-        workbenchRefreshStatusIndex += 1;
-        return { body: cloneJson(status) };
-      }
-      return {
-        body: options.workbenchRefreshStatus
-          ? cloneJson(options.workbenchRefreshStatus)
-          : {
-              scope_key: month,
-              read_model_status: "fresh",
-              generated_at: "2026-05-22T09:30:00+08:00",
-              dirty_scopes: [],
-              retryable: false,
-            },
       };
     },
     "/api/oa-sync/status": () => {
@@ -5176,7 +5205,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             ],
             read_models: [
               {
-                key: "workbench",
+                key: "workbench_relation",
                 refresh_duration_ms: { p50: 110, p95: 450, p99: 700 },
                 stale_count: 1,
                 unavailable_count: 0,
@@ -5305,7 +5334,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
-          ...(pageKey === "cost-statistics"
+          ...(["cost-statistics", "reconciliation-workbench"].includes(pageKey)
             ? { registered_read_model_keys: [] }
             : {}),
         },
@@ -7042,19 +7071,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           moveWorkbenchGroup(payload, "unpaired", "paired", rowId);
         }
       }
-      const operationProjection = {
-        after: {
-          paired_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
-            buildRelationPreviewGroups(
-              findWorkbenchRowsByIds(workbenchStateStore, resolvedMonth, rowIds),
-              typeof jsonBody?.case_id === "string" ? jsonBody.case_id : "CASE-MOCK-CONFIRM",
-              "paired",
-              "together",
-            ),
-          ),
-          unpaired_groups: [],
-        },
-      };
       const body = {
         success: true,
         action: "confirm_link",
@@ -7063,7 +7079,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
         affected_months: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        operation_projection: operationProjection,
         message: `已确认 ${rowIds.length} 条记录关联。`,
       };
       return {
@@ -7102,14 +7117,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           withdrawWorkbenchGroup(payload, rowId);
         }
       }
-      const operationProjection = {
-        after: {
-          paired_groups: [],
-          unpaired_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
-            buildWithdrawAfterPreviewGroups(findWorkbenchRowsByIds(workbenchStateStore, resolvedMonth, rowIds)),
-          ),
-        },
-      };
       const body = {
         success: true,
         action: "withdraw_link",
@@ -7118,7 +7125,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         restored_relations: [],
         changed_scopes: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        operation_projection: operationProjection,
         message: "已撤回 1 组关联。",
       };
       return {
@@ -7188,7 +7194,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               pair_relation: null,
               updated_rows: rowIds.map((id) => ({ id })),
               affected_row_ids: rowIds,
-              workbench_refresh_required: true,
               message: "已提交统一异常处理。",
             },
       };
@@ -7962,48 +7967,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_months: ["2026-04"],
         },
       });
-    }
-
-    const isWorkbenchActionRequest = (init?.method ?? "GET").toUpperCase() === "POST"
-      && (
-        url.pathname.startsWith("/api/workbench/actions/")
-        || url.pathname.startsWith("/api/workbench/exception/")
-      );
-    if (isWorkbenchActionRequest) {
-      const expectedVersion = String(jsonBody?.expected_read_model_version ?? "").trim();
-      if (!expectedVersion) {
-        return jsonResponse({
-          status: 400,
-          body: {
-            error: "expected_read_model_version_required",
-            message: "expected_read_model_version is required.",
-          },
-        });
-      }
-      if (expectedVersion !== workbenchReadModelVersion) {
-        return jsonResponse({
-          status: 409,
-          body: {
-            error: "workbench_read_model_version_conflict",
-            read_model_status: options.workbenchReadModelStatus ?? "fresh",
-            read_model_version: workbenchReadModelVersion,
-            retryable: true,
-          },
-        });
-      }
-      if ((options.workbenchReadModelStatus ?? "fresh") !== "fresh") {
-        return jsonResponse({
-          status: ["failed", "unavailable"].includes(options.workbenchReadModelStatus ?? "") ? 503 : 409,
-          body: {
-            error: (options.workbenchReadModelStatus === "failed" || options.workbenchReadModelStatus === "unavailable")
-              ? "workbench_read_model_unavailable"
-              : "workbench_read_model_not_fresh",
-            read_model_status: options.workbenchReadModelStatus,
-            read_model_version: workbenchReadModelVersion,
-            retryable: true,
-          },
-        });
-      }
     }
 
     const handler = handlers[url.pathname];

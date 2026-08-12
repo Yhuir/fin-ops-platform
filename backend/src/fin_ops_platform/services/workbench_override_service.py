@@ -8,6 +8,12 @@ from fin_ops_platform.services.workbench_exception_projection import (
     EXCEPTION_PROJECTION_VERSION,
     WorkbenchExceptionProjectionService,
 )
+from fin_ops_platform.services.workbench_row_identity import (
+    canonical_workbench_row_type,
+    parse_workbench_row_identity_key,
+    row_type_for_workbench_row_id,
+    workbench_row_identity_key,
+)
 
 
 def is_legacy_workbench_exception_override(payload: object) -> bool:
@@ -31,7 +37,7 @@ class WorkbenchOverrideService:
         row_overrides: dict[str, dict[str, Any]] | None = None,
         case_counter: int = 0,
     ) -> None:
-        self._row_overrides = deepcopy(row_overrides or {})
+        self._row_overrides = self._normalize_row_overrides(row_overrides or {})
         self._case_counter_value = max(case_counter, 0)
         self._case_counter = count(self._case_counter_value + 1)
         self._projection_service = WorkbenchExceptionProjectionService()
@@ -60,21 +66,29 @@ class WorkbenchOverrideService:
             "row_overrides": deepcopy(self._row_overrides),
         }
 
-    def case_id_for_row(self, row_id: str) -> str | None:
-        override = self._row_overrides.get(str(row_id))
-        if not isinstance(override, dict):
+    def case_id_for_row(self, row_id: str, *, row_type: str | None = None) -> str | None:
+        normalized_id = str(row_id or "").strip()
+        if not normalized_id:
             return None
-        case_id = override.get("case_id")
-        if case_id in (None, ""):
-            return None
-        return str(case_id)
+        if row_type is not None:
+            override = self._override_for_identity(row_type, normalized_id)
+            case_id = override.get("case_id") if isinstance(override, dict) else None
+            return str(case_id) if case_id not in (None, "") else None
+
+        case_ids = {
+            str(case_id)
+            for key, override in self._row_overrides.items()
+            if self._row_id_for_override(key, override) == normalized_id
+            if (case_id := override.get("case_id")) not in (None, "")
+        }
+        return next(iter(case_ids)) if len(case_ids) == 1 else None
 
     def row_ids_for_case(self, case_id: str) -> list[str]:
         if not case_id:
             return []
         return [
-            str(row_id)
-            for row_id, override in self._row_overrides.items()
+            self._row_id_for_override(key, override)
+            for key, override in self._row_overrides.items()
             if isinstance(override, dict) and override.get("case_id") == case_id
         ]
 
@@ -95,7 +109,10 @@ class WorkbenchOverrideService:
         payload = deepcopy(row)
         if payload.get("type") == "oa":
             payload["available_actions"] = ["detail"]
-        override = self._row_overrides.get(str(payload.get("id")))
+        override = self._override_for_identity(
+            payload.get("type") or payload.get("row_type"),
+            payload.get("id") or payload.get("row_id"),
+        )
         if not isinstance(override, dict):
             return payload
 
@@ -165,7 +182,7 @@ class WorkbenchOverrideService:
             rows,
             candidate_evidence=candidate_evidence,
         )
-        self._apply_projection_overrides(projection)
+        self._apply_projection_overrides(projection, rows=rows)
         return [self.apply_to_row(row) for row in rows]
 
     def apply_relation_projection(
@@ -182,7 +199,7 @@ class WorkbenchOverrideService:
             case_payload=case_payload,
             candidate_evidence=candidate_evidence,
         )
-        self._apply_projection_overrides(projection)
+        self._apply_projection_overrides(projection, rows=rows)
         return [self.apply_to_row(row) for row in rows]
 
     def clear_projection_for_case(self, case_id: str) -> list[str]:
@@ -190,11 +207,11 @@ class WorkbenchOverrideService:
         if not resolved_case_id:
             return []
         cleared_row_ids: list[str] = []
-        for row_id, override in list(self._row_overrides.items()):
+        for key, override in list(self._row_overrides.items()):
             if not self._is_projection_override_for_case(override, resolved_case_id):
                 continue
-            del self._row_overrides[row_id]
-            cleared_row_ids.append(row_id)
+            del self._row_overrides[key]
+            cleared_row_ids.append(self._row_id_for_override(key, override))
         return cleared_row_ids
 
     def clear_projection_for_relation(self, case_id: str) -> list[str]:
@@ -202,24 +219,24 @@ class WorkbenchOverrideService:
         if not resolved_case_id:
             return []
         cleared_row_ids: list[str] = []
-        for row_id, override in list(self._row_overrides.items()):
+        for key, override in list(self._row_overrides.items()):
             if not self._is_projection_override_for_case(override, resolved_case_id):
                 continue
             if str(override.get("projection_kind") or "") != "pair_relation":
                 continue
-            del self._row_overrides[row_id]
-            cleared_row_ids.append(row_id)
+            del self._row_overrides[key]
+            cleared_row_ids.append(self._row_id_for_override(key, override))
         return cleared_row_ids
 
     def confirm_link(self, *, rows: list[dict[str, Any]], case_id: str | None = None) -> tuple[str, list[dict[str, Any]]]:
         resolved_case_id = case_id or self._first_case_id(rows) or self._next_case_id()
         for row in rows:
-            self._row_overrides[str(row["id"])] = {
+            self._set_override(row, {
                 "case_id": resolved_case_id,
                 "relation": self.linked_relation(),
                 "available_actions": ["detail"],
                 "handled_exception": False,
-            }
+            })
         return resolved_case_id, [self.apply_to_row(row) for row in rows]
 
     def cancel_link(self, *, rows: list[dict[str, Any]], comment: str | None = None) -> list[dict[str, Any]]:
@@ -228,14 +245,14 @@ class WorkbenchOverrideService:
             pending = self.pending_relation(str(row["type"]))
             if comment:
                 pending = {**pending, "label": "取消关联，待重新处理"}
-            self._row_overrides[str(row["id"])] = {
+            self._set_override(row, {
                 "case_id": None,
                 "relation": pending,
                 "available_actions": self.available_actions(str(row["type"]), "unpaired"),
                 "detail_note": comment or "已取消关联",
                 "auto_close_suppressed": True,
                 "handled_exception": False,
-            }
+            })
             updated_rows.append(self.apply_to_row(row))
         return updated_rows
 
@@ -247,7 +264,7 @@ class WorkbenchOverrideService:
         comment: str | None = None,
         exception_case_id: str | None = None,
     ) -> dict[str, Any]:
-        self._row_overrides[str(row["id"])] = {
+        self._set_override(row, {
             "case_id": exception_case_id,
             "exception_case_id": exception_case_id,
             "relation": {
@@ -258,7 +275,7 @@ class WorkbenchOverrideService:
             "available_actions": self.available_actions(str(row["type"]), "unpaired"),
             "detail_note": comment or exception_code,
             "handled_exception": True,
-        }
+        })
         return self.apply_to_row(row)
 
     def update_bank_exception(
@@ -270,7 +287,7 @@ class WorkbenchOverrideService:
         comment: str | None = None,
         exception_case_id: str | None = None,
     ) -> dict[str, Any]:
-        self._row_overrides[str(row["id"])] = {
+        self._set_override(row, {
             "case_id": exception_case_id,
             "exception_case_id": exception_case_id,
             "relation": {
@@ -281,7 +298,7 @@ class WorkbenchOverrideService:
             "available_actions": self.available_actions("bank", "unpaired"),
             "detail_note": comment or relation_label,
             "handled_exception": True,
-        }
+        })
         return self.apply_to_row(row)
 
     def apply_oa_bank_exception(
@@ -299,7 +316,7 @@ class WorkbenchOverrideService:
             row_type = str(row.get("type"))
             if row_type not in {"oa", "bank"}:
                 raise ValueError("oa_bank_exception only supports oa and bank rows.")
-            self._row_overrides[str(row["id"])] = {
+            self._set_override(row, {
                 "case_id": exception_case_id,
                 "exception_case_id": exception_case_id,
                 "relation": {
@@ -310,7 +327,7 @@ class WorkbenchOverrideService:
                 "available_actions": self.available_actions(row_type, "unpaired"),
                 "detail_note": detail_note,
                 "handled_exception": True,
-            }
+            })
             updated_rows.append(self.apply_to_row(row))
         return updated_rows
 
@@ -321,7 +338,7 @@ class WorkbenchOverrideService:
         comment: str | None = None,
         exception_case_id: str | None = None,
     ) -> dict[str, Any]:
-        self._row_overrides[str(row["id"])] = {
+        self._set_override(row, {
             "case_id": exception_case_id,
             "exception_case_id": exception_case_id,
             "relation": self.pending_relation(str(row["type"])),
@@ -329,11 +346,11 @@ class WorkbenchOverrideService:
             "detail_note": comment or "已忽略",
             "ignored": True,
             "handled_exception": False,
-        }
+        })
         return self.apply_to_row(row)
 
     def unignore_row(self, *, row: dict[str, Any]) -> dict[str, Any]:
-        self._row_overrides[str(row["id"])] = {
+        self._set_override(row, {
             "case_id": None,
             "exception_case_id": None,
             "relation": self.pending_relation(str(row["type"])),
@@ -342,7 +359,7 @@ class WorkbenchOverrideService:
             "auto_close_suppressed": True,
             "ignored": False,
             "handled_exception": False,
-        }
+        })
         return self.apply_to_row(row)
 
     def cancel_exception(self, *, rows: list[dict[str, Any]], comment: str | None = None) -> list[dict[str, Any]]:
@@ -350,7 +367,7 @@ class WorkbenchOverrideService:
         detail_note = comment or "已取消异常处理"
         for row in rows:
             row_type = str(row["type"])
-            self._row_overrides[str(row["id"])] = {
+            self._set_override(row, {
                 "case_id": None,
                 "exception_case_id": None,
                 "relation": self.pending_relation(row_type),
@@ -359,7 +376,7 @@ class WorkbenchOverrideService:
                 "auto_close_suppressed": True,
                 "handled_exception": False,
                 "ignored": False,
-            }
+            })
             updated_rows.append(self.apply_to_row(row))
         return updated_rows
 
@@ -397,13 +414,20 @@ class WorkbenchOverrideService:
         self._case_counter_value = next(self._case_counter)
         return f"CASE-AUTO-{self._case_counter_value:04d}"
 
-    def _apply_projection_overrides(self, projection: dict[str, Any]) -> None:
+    def _apply_projection_overrides(
+        self,
+        projection: dict[str, Any],
+        *,
+        rows: list[dict[str, Any]],
+    ) -> None:
         row_overrides = projection.get("row_overrides")
         if not isinstance(row_overrides, dict):
             return
         group_metadata = projection.get("group_metadata")
         processed_summary = projection.get("processed_exception_summary")
-        for row_id, override in row_overrides.items():
+        for row in rows:
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            override = row_overrides.get(row_id)
             if not isinstance(override, dict):
                 continue
             normalized_override = deepcopy(override)
@@ -411,7 +435,7 @@ class WorkbenchOverrideService:
                 normalized_override["group_metadata"] = deepcopy(group_metadata)
             if isinstance(processed_summary, dict):
                 normalized_override["processed_exception_summary"] = deepcopy(processed_summary)
-            self._row_overrides[str(row_id)] = normalized_override
+            self._set_override(row, normalized_override)
 
     @staticmethod
     def _is_projection_override_for_case(override: Any, case_id: str) -> bool:
@@ -468,10 +492,71 @@ class WorkbenchOverrideService:
                 merged.append(text)
         return merged
 
+    def _set_override(
+        self,
+        row: dict[str, Any],
+        override: dict[str, Any],
+    ) -> None:
+        row_type, row_id = self._identity_for_row(row)
+        normalized_override = deepcopy(override)
+        normalized_override["row_id"] = row_id
+        normalized_override["row_type"] = row_type
+        if not normalized_override.get("scope_month"):
+            for field_name in (
+                "scope_month",
+                "month",
+                "reconciliation_month",
+                "accounting_month",
+                "invoice_month",
+                "txn_month",
+            ):
+                raw_month = str(row.get(field_name) or "").strip()
+                if len(raw_month) >= 7 and raw_month[4:5] == "-":
+                    normalized_override["scope_month"] = raw_month[:7]
+                    break
+        # A legacy raw-id entry is unsafe once a typed mutation exists because
+        # it would otherwise be applied to every pane sharing the same id.
+        self._row_overrides.pop(row_id, None)
+        self._row_overrides[workbench_row_identity_key(row_type, row_id)] = normalized_override
+
+    def _override_for_identity(
+        self,
+        row_type: object,
+        row_id: object,
+    ) -> dict[str, Any] | None:
+        canonical_type = canonical_workbench_row_type(row_type, unknown="")
+        normalized_id = str(row_id or "").strip()
+        if not canonical_type or not normalized_id:
+            return None
+        override = self._row_overrides.get(
+            workbench_row_identity_key(canonical_type, normalized_id)
+        )
+        return override if isinstance(override, dict) else None
+
+    @staticmethod
+    def _identity_for_row(row: dict[str, Any]) -> tuple[str, str]:
+        row_type = canonical_workbench_row_type(
+            row.get("type") or row.get("row_type"),
+            unknown="",
+        )
+        row_id = str(row.get("id") or row.get("row_id") or "").strip()
+        if not row_type or not row_id:
+            raise ValueError("Workbench override requires a canonical typed row.")
+        return row_type, row_id
+
+    @staticmethod
+    def _row_id_for_override(key: object, override: object) -> str:
+        if isinstance(override, dict):
+            row_id = str(override.get("row_id") or "").strip()
+            if row_id:
+                return row_id
+        parsed = parse_workbench_row_identity_key(key)
+        return parsed[1] if parsed is not None else str(key)
+
     @staticmethod
     def _normalize_row_overrides(row_overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
         normalized: dict[str, dict[str, Any]] = {}
-        for row_id, raw_override in row_overrides.items():
+        for raw_key, raw_override in row_overrides.items():
             if not isinstance(raw_override, dict):
                 continue
             override = deepcopy(raw_override)
@@ -480,5 +565,30 @@ class WorkbenchOverrideService:
                 tone = relation.get("tone") if isinstance(relation, dict) else None
                 ignored = bool(override.get("ignored"))
                 override["handled_exception"] = bool(tone == "danger" and not ignored)
-            normalized[str(row_id)] = override
+            parsed_identity = parse_workbench_row_identity_key(raw_key)
+            payload_row_id = str(override.get("row_id") or "").strip()
+            payload_row_type = canonical_workbench_row_type(
+                override.get("row_type") or override.get("type"),
+                unknown="",
+            )
+            if parsed_identity is not None:
+                row_type, row_id = parsed_identity
+                if payload_row_id and payload_row_id != row_id:
+                    raise ValueError("Workbench override key and payload row ids do not match.")
+                if payload_row_type and payload_row_type != row_type:
+                    raise ValueError("Workbench override key and payload row types do not match.")
+            elif payload_row_type:
+                row_type = payload_row_type
+                row_id = payload_row_id or str(raw_key).strip()
+            else:
+                row_id = payload_row_id or str(raw_key).strip()
+                row_type = row_type_for_workbench_row_id(row_id, unknown="")
+                if not row_type:
+                    # Preserve ambiguous historical state for round-tripping,
+                    # but never apply it across panes without a typed identity.
+                    normalized[str(raw_key)] = override
+                    continue
+            override["row_id"] = row_id
+            override["row_type"] = row_type
+            normalized[workbench_row_identity_key(row_type, row_id)] = override
         return normalized

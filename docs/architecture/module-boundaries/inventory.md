@@ -22,7 +22,7 @@
 
 | Module key | 名称 | 类型 | Route/入口 | 边界文档 | 文件范围来源 |
 | --- | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | 关联台 | 页面模块 | `/` | `../../modules/reconciliation-workbench/README.md` + `../../modules/reconciliation-workbench/boundary-io.md` | 模块 README 代码入口 + boundary-io + workbench read model contract |
+| `reconciliation-workbench` | 关联台 | 页面模块 | `/` | `../../modules/reconciliation-workbench/README.md` + `../../modules/reconciliation-workbench/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical API contract |
 | `workbench-relations` | 关联台关系事实源 | 资源模块 | N/A | `../../modules/workbench-relations/README.md` + `../../modules/workbench-relations/boundary-io.md` | 模块 README 代码入口 + boundary-io + relation read model contract |
 | `canonical-facts` | PostgreSQL 业务唯一真相 | 资源治理模块 | N/A | `../../modules/canonical-facts/README.md` + `../../modules/canonical-facts/boundary-io.md` | `canonical-facts.md` + 拥有事实的业务模块 boundary-io |
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `../../modules/tax-offset/README.md` + `../../modules/tax-offset/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
@@ -58,7 +58,7 @@
 
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。
-- Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，精确覆盖 `workbench`、`workbench_relation` 两个 runtime read model，详见 `read-model-contracts.md`。
+- Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，只覆盖 `workbench_relation` 这一个 runtime read model，详见 `read-model-contracts.md`。Workbench page 是 direct canonical consumer，不得重新登记为 read model。
 - Worker 当前以 `backend/src/fin_ops_platform/services/runtime_worker_registry.py` 为可执行合同，read model worker/event 与 manifest 可以互相核对。
 - HTTP runtime 由 Gunicorn + `WsgiHttpAdapter` 提供有界并发、请求体、request ID、access log 和 graceful shutdown；`application_factory.py` 负责构造依赖，`server.py` 保留路由/HTTP 映射，后台任务只允许由 worker/显式 maintenance 入口启动。
 - 前端页面已按 `web/src/pages/` 与 `web/src/features/<feature>/` 组织；修改页面时必须同步核对后端 API、该页面的 direct canonical 或已登记 read-model 读取合同，以及模块测试文档。

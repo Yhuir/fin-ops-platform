@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -97,8 +98,8 @@ class FakeConnection:
         if "pg_total_relation_size" in normalized:
             return [
                 {
-                    "schema_name": "read_model",
-                    "table_name": "workbench_groups",
+                    "schema_name": "app",
+                    "table_name": "workbench_pair_relations",
                     "total_bytes": 1024,
                     "estimated_rows": 20,
                     "seq_scan": 1,
@@ -108,9 +109,9 @@ class FakeConnection:
         if "from pg_stat_user_indexes" in normalized:
             return [
                 {
-                    "schema_name": "read_model",
-                    "table_name": "workbench_groups",
-                    "index_name": "workbench_groups_idx",
+                    "schema_name": "app",
+                    "table_name": "workbench_pair_relations",
+                    "index_name": "workbench_pair_relations_pkey",
                     "index_bytes": 512,
                     "idx_scan": 0,
                 }
@@ -130,7 +131,7 @@ class FakeConnection:
                 raise self.pg_stat_query_error
             return [
                 {
-                    "query": "select * from read_model.workbench_groups where scope_key = $1",
+                    "query": "select relation_id from app.workbench_pair_relations where tenant_id = $1",
                     "calls": 3,
                     "total_exec_time": 30.0,
                     "mean_exec_time": 10.0,
@@ -166,13 +167,16 @@ class SyncSloBaselineTests(unittest.TestCase):
             payload["evidence_bands"]["target_scale"]["required_rows"],
             {"bank_transactions": 1_000_000, "invoices": 500_000, "oa": 1_000_000, "relations": 500_000},
         )
-        self.assertEqual(payload["slo_targets"]["retained_read_model_keys"], ["workbench", "workbench_relation"])
+        self.assertEqual(payload["slo_targets"]["retained_read_model_keys"], ["workbench_relation"])
         self.assertNotIn("heavy_workbench_local_convergence_p95_ms", payload["slo_targets"])
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
         self.assertIn("search", payload["runtime_snapshot"]["data"]["read_model_attention"])
         self.assertNotIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])
         self.assertEqual(payload["postgres_connections"]["data"]["max_connections"], 100)
-        self.assertEqual(payload["postgres_table_sizes"]["data"][0]["table_name"], "workbench_groups")
+        self.assertEqual(payload["postgres_table_sizes"]["data"][0]["schema_name"], "app")
+        self.assertEqual(payload["postgres_table_sizes"]["data"][0]["table_name"], "workbench_pair_relations")
+        self.assertIn("app.workbench_pair_relations", payload["pg_stat_statements"]["data"]["rows"][0]["query"])
+        self.assertNotIn("read_model.workbench_groups", json.dumps(payload, sort_keys=True))
         self.assertTrue(payload["pg_stat_statements"]["data"]["installed"])
         self.assertEqual(payload["explain_probes"]["status"], "available")
         self.assertEqual(payload["explain_probes"]["data"][0]["node_type"], "Aggregate")

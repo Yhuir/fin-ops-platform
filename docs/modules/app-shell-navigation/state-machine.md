@@ -87,7 +87,8 @@
 
 - focus、blur、visibilitychange 和 BFCache pageshow 不改变 page runtime identity，也不触发业务页面 I/O。
 - route 进入/重进、页面查询变化、浏览器手动刷新或页面明确重试由页面 owner 自行执行 normal GET。
-- App Health、后台任务和 Workbench refresh-status 使用各自专属状态通道，不属于 shell 业务刷新。
+- App Health 和后台任务使用各自专属状态通道，不属于 shell 业务刷新；Workbench page
+  refresh-status 已退役，关联台只在页面 owner 明确触发时执行 normal direct GET。
 
 ## Read Model / Worker 状态
 

@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
 - 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples、runtime worker manifest 和生产等价发布门禁。
-- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example`、自定义 `ThreadingHTTPServer` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
+- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example`、自定义 `ThreadingHTTPServer` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。关联台 page worker、`workbench.read_model.refresh` dispatcher allowlist、generation prune helper/service/timer 也已退出当前 release。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
 
 ## 职责边界
 
@@ -39,7 +39,7 @@
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | `dependency-audit` 使用独立锁定的审计工具检查生产 requirements；`all` 必须先通过该门禁，再按 backend/web/docs/ops 分类执行。`check-release` 在候选 release 的隔离临时 venv 中执行同一审计，发现已知漏洞即停止发布，不把审计工具安装进 runtime venv。 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
-| Workbench generation retention | `finops-prune-workbench-generations.timer` + versioned helper env | helper 从 root-owned common env 读取 `FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE`（默认 1）与 `FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS`（默认 60 秒）并传递 CLI 参数；一次运行最多 500 个 `superseded|failed` 候选，删除 SQL 只走 read-model repository 的 scope-isolated 小事务与终态 guard，shell 仅执行只读 PostgreSQL、磁盘和 health 诊断；末尾 ready health 失败时 helper 必须非零退出，禁止 systemd/监控误报成功。release 不自动合并已有 common env |
+| Workbench direct cutover | candidate registry + live systemd/env + durable queue | PRE 后、stop 前先把 exact live page-worker env 保存到 release tree 外的 root-only gate evidence（backup/metadata `0600`，绑定 owner/mode/SHA-256，不输出 secret）。runtime 激活在 API/worker 停止窗口内停 RabbitMQ dispatcher，确认 retired page event 不处于 pending/processing/publishing 且连续采样无新增，再 stop/disable page worker、删除其 live env/unit、同步 dispatcher allowlist、退役 generation prune helper/service/timer；随后只启动候选 registry 的五个 required workers。候选 T+0 前启动贯穿 T+0/T+60/T+300 的动态零增量观测：event/scope total 与 watermark、旧 projection `pg_stat_statements` calls/rows、旧表累计 scan/tuple stats 必须均不增长；统计扩展或权限不可用时 fail closed。Redis page cache 不引入全局 MONITOR；由候选 commit 绑定的 retired owner 文件缺席、direct read source 无 Redis helper 调用 marker 的机械 guard 提供 source/runtime owner proof。`workbench_relation` 与 `workbench-matching` 必须保留。 |
 | HTTP runtime | systemd + Gunicorn + Nginx | systemd 只启动 Gunicorn WSGI；当前单 worker/有界 gthread 保持进程内 command state 一致。Gunicorn 约束 threads/backlog/recycling/graceful timeout，Nginx 约束 client body/upstream timeout；pidfile 只写入 systemd `RuntimeDirectory`。 |
 | Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。scenario 只接受固定 root-owned `0600` 标准文件，或 `finops-deploy` 持有且不可 group/world write 的 `/tmp/finops-write-e2e-*.json`；可选 preview sample count 只接受 `1..20`，默认 1，且只重复只读 preview。mutation response 显式 `outbox_event_ids: []` 是普通写零 fan-out receipt，runner 不得把它误当 receipt 缺失而强制查询 disabled-by-default durable idempotency；字段缺失时才允许走 durable receipt 查询。每个 checkpoint 必须清除上一 checkpoint 的 receipt。同一受影响页面可声明最多三个明确 scope probe，用于逐一模拟用户访问该页的 active/all 等正式 scope；`bank_oa_invoice` 的 Cost probes 必须至少包含一个 `project_scope=active` 的 Workbench-dependent semantic probe，可追加 `project_scope=all` 以收敛 System Audit，但二者都不得使用 time/bank_tag 冒充 relation proof。不得以多 scope probe 投递 sibling scope 或放宽业务 fan-out。isolation 页面仍必须恰好一个 probe。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate。consumer `target_ms` 同时约束单次 fresh HTTP 和该 consumer 首次访问到 fresh/业务可见的总耗时；`operation_commit_to_visible_ms` 仅保留为观察值，不得把访问前的 zero-fan-out 审计时间算入访问 SLO。任一强制门超限都必须 fail closed |
 | Bank-flow reversible shape | operator | `bank_flow_rule_batch` 只接受 `test_owned` 流水，固定执行 submit -> withdraw -> resubmit 并配置 withdraw recovery；四个 checkpoint 必须复用同一组 bounded row ids。该业务 command 使用 batch/version 生成的内部幂等键，runner 禁止在 API body 塞入不生效的外部 idempotency key；无 response receipt 时仅用本 checkpoint 时间窗/profile 与精确 consumer identity 证据，响应歧义必须 fail closed |
@@ -49,7 +49,7 @@
 | Request traceback lookup | API `requestId` | 同一严格 ID 和两小时时间窗；从异常摘要开始最多返回 64 行，并在 traceback 终止异常行停止；不包含 locals，不开放任意 journal 参数 |
 | Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id`；银行恢复必须显式绑定全部 source session/file、目标/保护 cohort 数、精确重复删除数、预期新增数和 operator。历史 fingerprint/reference 漂移只允许以秒级时间、方向、金额、余额、币种全等且双方唯一的 statement-position 证据匹配；账户表示不一致时，仅允许一个账户明确为 4 位尾号且与另一完整账户尾号一致，两个不同完整账户不得匹配；多义或缺字段 fail closed |
 | Workbench unavailable OA relation repair | `finops-deploy-control workbench-requirement-repair <release> --dry-run/--execute --expected-fingerprint` | 复用固定 Workbench relation repair 控制入口；dry-run 为每个失效 OA relation 输出包含 case 的独立 fingerprint，execute 只接受其中一个 fingerprint 并重验该单 case，只调用正式 relation command/persist adapter |
-| OA 附件发票恢复 | `finops-deploy-control workbench-rehydrate <release> --promote-oa-attachment-invoices` | 复用生产已批准的 exact-release 固定维护脚本；dry-run 返回候选 SHA-256 fingerprint，apply 必须同时携带该 fingerprint 和显式确认参数；不得开放任意 SQL/shell |
+| Workbench late rollback preparation | previous immutable release + retained physical generation tables + exact env backup | direct release 的自动回滚必须先保持 maintenance、停止 candidate API/workers/dispatcher，再用 previous release 自带的 rehydrate 工具离线重建全部 scope，验证 fresh generation、source proof、零 processing page event；然后按 owner/mode/SHA-256 原子恢复 exact page-worker env，使用本次已验证的固定 ensure helper 按 previous manifest 启动，禁止降级旧 helper、example fallback 或迁移 exact env，最后才激活 previous backend/frontend/worker。candidate T+300/final evidence PASS 或 rollback checkpoint PASS 后才删除 env backup；失败时保持 maintenance 并保留 backup。禁止先暴露 stale generation。该能力不是当前 direct runtime 的公开维护入口。 |
 
 ## 输出 I/O
 
@@ -59,12 +59,13 @@
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
 | Release evidence | `/opt/fin-ops/runtime-smoke/release-gates/<release>/evidence.json` | root-owned `0600` 原子写入并绑定 release、Git commit、previous release 和自动 profile。`frontend` PASS 证明 pre/T+0 exact dist、ready、005、shell/asset 与 worker inventory；`runtime`/`acl` 另要求 queue/read-model/audit T+300 稳定 |
+| Workbench page-worker rollback evidence | `/opt/fin-ops/runtime-smoke/release-gates/<candidate>/workbench-page-worker-runtime/` | release tree 外 root-only `0700` 目录；exact env backup 与 secret-free owner/mode/SHA-256 metadata 均为 `0600`。成功闭环删除 backup、保留 metadata；rollback/restore 失败保留 backup且 production maintenance |
+| Workbench retired-runtime window evidence | `/opt/fin-ops/runtime-smoke/release-gates/<candidate>/retired-workbench-page-runtime-window.json` | root-only `0600`；记录累计计数、watermark、stats reset、candidate commit 与 Redis page-cache source owner proof，不记录 SQL 文本、Redis key/command、DSN 或 token。证据 PASS 且最终 gate contract PASS 前不得删除 rollback env backup |
 | Schema compatibility plan/evidence | release gate 内 `schema-compatibility-plan.json`；`/opt/fin-ops/runtime-smoke/schema-compatibility/<release>.json` | plan 为只读且绑定 production applied schema；evidence 只由显式 root 命令验真并原子安装为 `0600`，不得写 release tree、不得包含 DSN/token/业务 payload。自动回滚复用同一 plan/evidence，不重新猜测兼容性 |
 | Settings ACL preflight evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-preflight.json` + `.sha256` | 可选专项验收产物；root-owned `0600`，只含非敏感 hashes/counts/fingerprints，不含 token、DSN、密码或 raw role/menu IDs；标准激活不消费 |
 | Settings ACL post-deploy evidence | `/opt/fin-ops/evidence/<release>/settings-access-control-post-deploy.json` + `.sha256` | 可选专项验收产物；验证 006 full→read→denied、OA router/role、audit/latency 和 finally restore/read-back，不是标准发布完成条件 |
 | Bounded request traceback | operator | 仅用于把已知生产 500 定位到 release 文件和行号；不得输出业务 payload、token 或任意日志窗口 |
 | Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
-| OA 附件发票恢复报告 | operator | 只返回候选 fingerprint、计数、规范发票 ID、OA ID、跳过原因和应用结果；人工导入来源证据保留，强身份冲突 fail closed，不返回附件正文或凭据 |
 
 ## 持久化与投影
 
@@ -78,7 +79,7 @@
 | --- | --- |
 | Scripts | `scripts/deploy-oa.sh`、`scripts/deploy_oa.py`、`scripts/verify.sh` |
 | CI | `.github/workflows/nightly-ci.yml` |
-| Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh`、`finops-prune-workbench-generations.sh` |
+| Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh` |
 | Examples | `deploy/oa/nginx.fin-ops.conf.example`、`deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example` |
 | Worker manifest | `backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`、`runtime_worker_registry.py` |
 | ACL evidence | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |

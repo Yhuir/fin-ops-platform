@@ -704,6 +704,19 @@ class PostgresStateStore:
             case_ids=list(case_ids or []),
         )
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._workbench_relation_repository.load_active_workbench_pair_relations_for_typed_rows(
+            list(row_ids or []),
+            list(row_types or []),
+            case_ids=list(case_ids or []),
+        )
+
     def save_workbench_pair_relations(self, snapshot: dict[str, Any], *, changed_case_ids: set[str] | None = None) -> None:
         self._workbench_relation_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
 
@@ -1043,16 +1056,6 @@ class PostgresStateStore:
     @property
     def bank_transaction_category_repository(self) -> PostgresBankTransactionCategoryRepository:
         return self._bank_transaction_category_repository
-
-    @property
-    def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._sql_read_model_repository
-
-    @property
-    def workbench_sql_projection_builder(self) -> Any:
-        from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
-
-        return WorkbenchSqlProjectionBuilder(connection=self._connection, read_model_repository=self._read_model_repository)
 
     @property
     def workbench_relation_repository(self) -> PostgresWorkbenchRelationRepository:

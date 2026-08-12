@@ -1,6 +1,6 @@
 # 生产性能合同
 
-日期：2026-08-06
+日期：2026-08-13
 
 ## 目标与边界
 
@@ -17,13 +17,13 @@ Redis cache 或搜索 projection 掩盖慢查询。PostgreSQL 继续拥有 canon
 | 合同 | 阈值 | 证据 |
 | --- | --- | --- |
 | 页面首屏与核心读 API | 每个 probe p95 `<= 1000ms`，p99 `<= 2000ms`，错误 `0` | authenticated `http_slo_probe` |
-| 写提交到消费者可见 | browser-inclusive p99 `<= 3000ms`，失败 `0` | isolated prod-equivalent Playwright same-clock `t0..t4`（至少 100 个样本） |
+| 写提交到消费者可见 | browser-inclusive p99 `<= 3000ms`，失败 `0` | isolated prod-equivalent Playwright same-clock T1 receipt → T2 canonical read → T3 DOM（至少 100 个样本） |
 | PostgreSQL 连接获取 | p95 `<= 50ms`，无 backpressure rejection | `/health`、`/metrics` 与 HTTP probe 同窗样本 |
 | 有界并发 | `N_normal=max(4,C_normal)`；`N_peak=max(8,C_peak)` | 命名 14 天容量证据或已批准 capacity contract；每 tier 固定 iterations、错误和 peak requests |
 | 响应体 | 记录压缩传输 bytes p50/p95/p99；增长超过前一 release 25% 必须解释 | HTTP probe `response_bytes` |
 | 导入持久化 | batch rows 按 bounded multi-value chunk 写入，禁止逐行数据库 round-trip | repository test、import integration/audit |
 
-精确金额、total、summary、statistics、facets、active generation/version 和排序稳定性是正确性合同，
+精确金额、total、summary、statistics、facets 和排序稳定性是正确性合同，
 不得为了满足延迟阈值静默降级。确实不需要精确 total 的新页面可以独立采用 `hasMore`，但不能改变
 既有财务页面 API。
 
@@ -57,16 +57,11 @@ visible client/session 的命名 access evidence，以 rolling 60-second unique 
 两种证据都不可用时，结论固定为 `NOT_MEASURED`、`release_blocked=true`；`4/8` 只能作为压测下限，
 不得冒充生产并发事实。
 
-两个 tier 都必须覆盖 authenticated `/api/workbench/refresh-status?month=all`，证明 p95 `<=1000ms`、
-error `0`，并在同一窗口检查 HTTP active/peak requests、PostgreSQL pool/acquire/SQL、DB CPU/IO、
-durable queue 和 required worker 无饱和。派生 target 超过当前 probe 的有界 worker 上限 `8` 时不得静默截断，
+两个 tier 都必须覆盖 authenticated Workbench combined initial、paired/unpaired groups 和 filter-options，证明每个 blocking probe p95 `<=1000ms`、p99 `<=2000ms`、error `0`，并在同一窗口检查 HTTP active/peak requests、PostgreSQL pool/acquire/SQL、DB CPU/IO/temp spill 及 required worker 无饱和，同时证明 Workbench page event/cache/projection I/O 为零。派生 target 超过当前 probe 的有界 worker 上限 `8` 时不得静默截断，
 必须阻断并由批准的容量执行方案承接。
 
-commit-to-visible 证据由现有 Playwright/Node 单一 `performance.now()` 时钟记录整数微秒：`t0` 紧邻
-bank-flow submit POST 之前，`t1` 为 canonical 2xx receipt 解析完成，`t2` 为 exact scope 首次被
-refresh-status 观察为 stale/refreshing，`t3` 为新 active generation `g1` fresh，`t4` 为同一 `g1`
-combined payload 含 transaction/business identity 且唯一 DOM label 可见。每个样本必须满足相邻四段之和
-严格等于 `t4-t0`。隔离 prod-equivalent run 至少 100 个 test-owned、可逆样本才计算 p99；生产 run
+commit-to-visible 证据由现有 Playwright/Node 单一 `performance.now()` 时钟记录整数微秒：T1 在 mutation 2xx receipt 解析完成后开始，T2 为写成功后的正常 canonical GET 已包含精确 relation/decision identity，T3 为唯一 DOM identity 可见。报告只包含 `canonical_read_us`、`browser_render_us` 与 `receipt_to_dom_us`，且前两段之和
+严格等于 T1→T3 总耗时；窗口内没有 page refresh-status、generation 或 worker wait。隔离 prod-equivalent run 至少 100 个 test-owned、可逆样本才计算 p99；生产 run
 恰好一个已批准样本，仅作为 smoke 合并进既有报告，不能覆盖隔离样本或重新声称 p99。
 
 ## 执行入口
@@ -94,7 +89,7 @@ scripts/with-production-admin-token.sh \
 
 ## 发布判定
 
-- T0、T+60、T+300 均验证 exact release、6 required workers、2 retained read models、queue/dirty scope
+- T0、T+60、T+300 均验证 exact release、5 required workers、1 retained read model、queue/dirty scope
   收敛、System Audit 和核心 API SLO。
 - 单次最快样本、public shell、未认证 401/403、HTML fallback、零样本或旧 release 指标都不能作为通过。
 - rollback 锚点保留上一 release；若正确性、错误率、p95/p99、连接获取或 queue 任一项退化，停止扩量并

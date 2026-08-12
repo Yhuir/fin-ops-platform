@@ -36,11 +36,11 @@ HTTP 请求先经过 `WsgiHttpAdapter` 的 body/request-ID/access-log 边界，�
 3. API 直接返回页面 DTO；不读取 projection/Redis，不比较 read-model version，不访问 dirty/outbox/readiness，也不 enqueue 或返回 `read_model_status`。
 4. 缺少 canonical repository 或 snapshot 合同时 fail fast，不能回退历史 projection、进程内 snapshot 或 app Mongo。
 
-成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款和外部往来款均使用该合同。
+关联台、成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款和外部往来款均使用该合同。关联台额外保留 OA sync safety gate，但不因此读取 page projection。
 
 ### 已登记 read model read
 
-只有 `workbench`、`workbench_relation` 使用 read-model runtime：
+只有 `workbench_relation` 使用 read-model runtime：
 
 1. Query owner 带 expected schema/source contract 调用自身 freshness service 或 `ReadModelQueryGateway`。
 2. fresh 必须同时满足 expected contract、actual projection metadata、dirty/outbox/readiness 状态；缺少 expected contract 或 actual schema/source proof 时不能标 fresh。
@@ -77,8 +77,8 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 2. Application/domain service 校验业务规则，调用 repository 做原子写入。
 3. 普通写只提交 owner canonical facts、可比较 source version、审计/idempotency 与必要领域任务；返回精确 affected scopes 作为信息，不产生页面 dirty/outbox。
 4. API 返回写入结果、受影响月份/对象和版本；普通写的 `freshness_targets`、`operation_barrier_targets` 为空，不等待任何未访问页面重建。
-5. 当前页可以在成功后重新执行自己的普通 GET；其它 direct-canonical 页面和 hidden 页面不执行 I/O。持续可见的关联台是唯一例外：它只通过公开 refresh-status 自行观察 canonical proof，不接收 writer notification。
-6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，direct canonical 页面只执行 normal GET；只有已登记 read-model consumer 的 query owner 比较 expected/actual source versions，并在当前精确 scope missing/stale 时经 `ReadModelRefreshGateway` 入 durable queue。关联台可见时在进入/focus 立即检查，随后按“status 完成 + 1000ms”单飞调度；hidden 暂停，fresh generation 变化只触发一次既有 300ms combined reload。
+5. 当前页可以在成功后重新执行自己的普通 GET；其它 direct-canonical 页面和 hidden 页面不执行 I/O。关联台不接收 writer notification，不轮询 page refresh-status。
+6. route 进入/重进、页面查询变化、浏览器手动刷新或用户明确重试时，direct canonical 页面只执行 normal GET；只有已登记 read-model consumer 的 query owner 比较 expected/actual source versions，并在当前精确 scope missing/stale 时经 `ReadModelRefreshGateway` 入 durable queue。
 
 authoritative integration snapshot 默认同样只提交 canonical facts/source version；当前 OA sync 不主动入队页面 refresh。只有 data reset、repair/backfill/reapply 和人工 maintenance 可按已登记合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务管理员 settings reset 与历史 ETC repair，不是普通写后的默认分发器。
 
@@ -101,7 +101,7 @@ OA integration 只消费归一后的真实变化：它在一个 OA transaction �
 1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
 2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
 3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。direct canonical 页面直接读取新事实；已登记 read-model consumer 才由 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
-4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。direct-canonical 页面在 focus、hidden→visible 与 BFCache 恢复时不触发业务 I/O；关联台作为唯一 active-generation 页面，在重新可见/focus 时立即恢复轻量 refresh-status，仍不读取 writer signal 或重复完整 payload。
+4. 其它已打开、未挂载或 document hidden 的页面不响应业务刷新事件、不缓冲重放、不执行 load。包括关联台在内的 direct-canonical 页面在 focus、hidden→visible 与 BFCache 恢复时不触发 Workbench business GET；全局 App Health、background jobs 和 OA sync safety 仍按各自 owner 运行。
 5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 
 `/api/operation-barrier/status` 只保留给显式返回非空 targets 的 maintenance/integration 操作；普通 mutation 不再依赖它。权限/session、DB 可写性、canonical version/idempotency/owner 状态仍由 command service 和 UoW 决定。
@@ -125,7 +125,7 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 1. route / facade 通过 `WorkbenchRelationCommandService` 预览 canonical active relation 撤回；只有存在 active relation 时才返回 `withdraw_relation`。
 2. 若没有 active relation，preview/submit 必须返回 relation not found 或 invalid operation，不能回退到任何 legacy candidate/decision 表、store 或 snapshot。
 3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
-4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
+4. Workbench direct group spine、groups page 和 canonical relation audit 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。历史 page-generation 物理表只为上一 immutable release 的短期离线回滚暂留，当前运行时必须保持零访问；物理删除另立 forward migration。
 
 ### 成本统计 direct canonical read boundary
 

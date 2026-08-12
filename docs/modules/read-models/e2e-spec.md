@@ -10,9 +10,9 @@
 
 | Spec ID | 用户可观察合同 | 必须证明 |
 | --- | --- | --- |
-| `READMODEL-E2E-001` | 页面读取 fresh read model 时显示业务数据、summary、分页、导出入口和状态提示一致。 | API payload 必须带 `read_model_status=fresh` 或等价 fresh 证明；Redis 只能缓存 fresh gate 后 payload。 |
+| `READMODEL-E2E-001` | 登记 read-model 页面读取 fresh projection 时显示业务数据、summary、分页、导出入口和状态提示一致。 | API payload 必须带 `read_model_status=fresh` 或登记的等价 fresh 证明；Redis 只能缓存 fresh gate 后 payload。Workbench page 不在此类，它的 RR/RO direct canonical GET 即是当前事实。 |
 | `READMODEL-E2E-002` | 页面遇到 missing/stale/refreshing read model 时显示同步中/诊断状态，不能显示普通空态或旧 rows。 | API 需要返回 refreshing/stale/missing reason，并通过规范 scope 入队。 |
-| `READMODEL-E2E-003` | 普通写操作成功即结束命令阻塞；当前页必须重跑 normal GET，由自己的 fresh gate 证明/收敛，不能只凭 POST 200 把旧 projection 显示为已同步。 | 普通写零 barrier target；页面 GET fresh 或其访问产生的 exact target 完成后才展示最终结果。 |
+| `READMODEL-E2E-003` | 普通写操作成功即结束命令阻塞；当前页必须重跑 normal GET，由自己的 read contract 证明/收敛，不能只凭 POST 200 把旧内存状态显示为已同步。 | 普通写零 page barrier target；read-model consumer 由 GET fresh gate 收敛；Workbench direct page 恰好一次 canonical GET 即显示 committed 结果，无 worker polling/projection fallback。 |
 | `READMODEL-E2E-004` | 导入、关联、撤回、规则保存等普通事实写必须产生零页面 dirty/outbox；data reset、reapply、repair 等显式 batch 只产生 owner 声明的精确 job。 | write-operation 零 fan-out 证据 + 各消费页访问后的 exact dirty/readiness/fresh 证据一致。 |
 | `READMODEL-E2E-005` | 生产/staging direct read model apply gate 能把 critical scopes enqueue 到 worker 并收敛到 done/fresh。 | `read_model_slo_smoke --critical-only --apply` 通过；dry-run 只能证明 scope discovery。 |
 | `READMODEL-E2E-006` | 真实业务写入口必须能被 write-operation audit 关联到 required scopes 和 SLO。 | `write_operation_slo_audit` 有非空 matching samples 且通过 operation profile；无样本是 missing，不是 covered。 |
@@ -32,6 +32,7 @@
 - worker 完成后 readiness fresh：页面可重读并显示最终结果。
 - write-operation audit 无样本：保持 missing，不得用 direct refresh 证据替代真实写链路证据。
 - 页面新增、改名或新增 read model：必须同步更新页面 read model/fact-display 矩阵，否则不能声明页面 fresh 与事实源显示覆盖。
+- Workbench direct page 不得返回 page `read_model_status`、读写 page Redis/projection、请求 refresh-status 或投递 `workbench.read_model.refresh`；生产/staging 以 direct API 语义、SQL/连接池性能和旧链零 I/O 证据验收。
 - 新增或修改 durable write operation：必须同步更新 write-operation impact 矩阵，否则不能声明写后跨页 read model 强可见覆盖。
 
 ## 外部风险

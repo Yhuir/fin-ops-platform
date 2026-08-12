@@ -10,6 +10,7 @@ const passThroughPath = "/api/workbench/actions/confirm-cash-pass-through";
 const ticketPurchasePath = "/api/workbench/actions/confirm-cash-ticket-purchase";
 const cancelCashSpecialPath = "/api/workbench/actions/cancel-cash-special";
 const workbenchRowIds = ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"];
+const workbenchRowTypes = ["oa", "bank", "invoice"];
 
 async function openPairedBankRowMenu(page: Page) {
   const pairedGroup = page.getByTestId(pairedGroupTestId);
@@ -32,6 +33,16 @@ function waitForWorkbenchPost(page: Page, pathname: string) {
 function expectWorkbenchRowIds(body: Record<string, unknown>) {
   expect(body.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
   expect(body.row_ids).toHaveLength(workbenchRowIds.length);
+  expect(body.row_types).toEqual(expect.arrayContaining(workbenchRowTypes));
+  expect(body.row_types).toHaveLength(workbenchRowTypes.length);
+  expect((body.row_ids as string[]).map((rowId, index) => ({
+    rowId,
+    rowType: (body.row_types as string[])[index],
+  }))).toEqual(expect.arrayContaining([
+    { rowId: "oa-o-202603-001", rowType: "oa" },
+    { rowId: "bk-o-202603-001", rowType: "bank" },
+    { rowId: "iv-o-202603-001", rowType: "invoice" },
+  ]));
 }
 
 test.describe("workbench cash special browser flow", () => {
@@ -61,7 +72,7 @@ test.describe("workbench cash special browser flow", () => {
     });
     expectWorkbenchRowIds(passThroughBody);
     expect(api.count(operationBarrierPath)).toBe(0);
-    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforePassThrough);
+    expect(api.count(workbenchLoadPath)).toBe(workbenchLoadsBeforePassThrough + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const workbenchLoadsBeforeTicket = api.count(workbenchLoadPath);
@@ -100,7 +111,7 @@ test.describe("workbench cash special browser flow", () => {
     });
     expectWorkbenchRowIds(ticketBody);
     expect(api.count(operationBarrierPath)).toBe(0);
-    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforeTicket);
+    expect(api.count(workbenchLoadPath)).toBe(workbenchLoadsBeforeTicket + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const workbenchLoadsBeforeCancel = api.count(workbenchLoadPath);
@@ -119,7 +130,7 @@ test.describe("workbench cash special browser flow", () => {
     });
     expectWorkbenchRowIds(cancelBody);
     expect(api.count(operationBarrierPath)).toBe(0);
-    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforeCancel);
+    expect(api.count(workbenchLoadPath)).toBe(workbenchLoadsBeforeCancel + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

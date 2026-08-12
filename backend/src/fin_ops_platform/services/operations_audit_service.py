@@ -245,52 +245,56 @@ class OperationsAuditService:
 
     @classmethod
     def _workbench_items(cls, histories: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        projection: dict[str, Any] = {}
+        receipts: list[dict[str, Any]] = []
         for history in histories:
             raw = history.get("raw_payload") if isinstance(history.get("raw_payload"), dict) else {}
             normalized = raw.get("normalized_payload") if isinstance(raw.get("normalized_payload"), dict) else {}
-            candidate = normalized.get("operation_projection")
-            if isinstance(candidate, dict):
-                projection = candidate
-        before = cls._projection_rows(projection.get("before"))
-        after = cls._projection_rows(projection.get("after"))
-        items: list[dict[str, Any]] = []
-        for row_id in dict.fromkeys([*before, *after]):
-            before_row = before.get(row_id)
-            after_row = after.get(row_id)
-            row = (after_row or before_row or {}).get("row")
-            if not isinstance(row, dict):
+            row_ids = list(normalized.get("affected_row_ids") or history.get("row_ids") or [])
+            row_types = list(normalized.get("affected_row_types") or history.get("row_types") or [])
+            if len(row_ids) != len(row_types):
+                relation_payloads = [
+                    relation
+                    for key in ("after_relations", "before_relations", "after_payload", "before_payload")
+                    for relation in cls._relation_history_payloads(normalized.get(key) or history.get(key))
+                ]
+                typed_members = [
+                    (str(row_id), str(row_type))
+                    for relation in relation_payloads
+                    for row_id, row_type in zip(
+                        list(relation.get("row_ids") or []),
+                        list(relation.get("row_types") or []),
+                        strict=False,
+                    )
+                    if str(row_id).strip() and str(row_type).strip()
+                ]
+                affected_ids = {str(row_id) for row_id in row_ids}
+                typed_members = [member for member in typed_members if not affected_ids or member[0] in affected_ids]
+                typed_members = list(dict.fromkeys(typed_members))
+                if typed_members:
+                    row_ids = [row_id for row_id, _row_type in typed_members]
+                    row_types = [row_type for _row_id, row_type in typed_members]
+            if len(row_ids) != len(row_types):
                 continue
-            items.append(
+            receipts.extend(
                 {
-                    "item_key": f"item-{len(items) + 1}",
-                    **cls._display_row(row),
-                    "before_status": (before_row or {}).get("status") or "未关联",
-                    "after_status": (after_row or {}).get("status") or "未关联",
+                    "item_key": f"item-{len(receipts) + 1}",
+                    "type": str(row_type),
+                    "title": str(row_id),
+                    "secondary": "",
+                    "amount": None,
+                    "date": None,
                 }
+                for row_id, row_type in zip(row_ids, row_types, strict=True)
             )
-        return items
+        return receipts
 
     @staticmethod
-    def _projection_rows(value: Any) -> dict[str, dict[str, Any]]:
-        section = value if isinstance(value, dict) else {}
-        groups = [
-            *list(section.get("paired_groups") or []),
-            *list(section.get("unpaired_groups") or []),
-        ]
-        rows: dict[str, dict[str, Any]] = {}
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            status = "已配对" if group.get("zone") == "paired" else "未配对"
-            for collection in ("oa_rows", "bank_rows", "invoice_rows"):
-                for row in list(group.get(collection) or []):
-                    if not isinstance(row, dict):
-                        continue
-                    row_id = str(row.get("id") or row.get("row_id") or "").strip()
-                    if row_id:
-                        rows[row_id] = {"row": row, "status": status}
-        return rows
+    def _relation_history_payloads(value: object) -> list[dict[str, Any]]:
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        return []
 
     @staticmethod
     def _display_row(row: dict[str, Any]) -> dict[str, Any]:

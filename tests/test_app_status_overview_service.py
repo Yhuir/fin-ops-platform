@@ -103,6 +103,16 @@ def healthy_dependencies() -> dict[str, dict[str, str]]:
 
 
 class AppStatusOverviewServiceTests(unittest.TestCase):
+    def test_snapshot_adapter_ignores_retired_workbench_page_read_model(self) -> None:
+        statuses = AppStatusOverviewService._read_model_statuses_from_snapshot(
+            {
+                "workbench_read_model": {"status": "ready", "last_error": None},
+                "workbench_relation_read_model": {"status": "ready", "last_failure_reason": None},
+            }
+        )
+
+        self.assertEqual(statuses, {"workbench_relation": {"status": "ready", "last_error": None}})
+
     def test_domain_registry_covers_frontend_routes(self) -> None:
         self.assertEqual(set(domain_routes(APP_STATUS_DOMAIN_REGISTRY)), FRONTEND_ROUTES)
 
@@ -220,7 +230,6 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             active_jobs=[],
             attention_jobs=[],
             read_model_statuses={
-                "workbench": {"status": "fresh"},
                 "workbench_relation": {
                     "status": "refreshing",
                     "scopes": [
@@ -243,12 +252,11 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
             worker_statuses={
                 "runtime-worker": {"status": "ready", "required": True},
                 "workbench-relation": {"status": "working", "required": True},
-                "workbench": {"status": "stale", "required": True, "warning_code": "heartbeat_stale"},
                 "legacy-worker": {"status": "missing", "required": False, "warning_code": "required_worker_missing"},
             },
             outbox_statuses={
                 "workbench_relation.read_model.refresh": {"status": "pending", "count": 2},
-                "workbench.read_model.refresh": {"status": "processing", "count": 1},
+                "oa.sync": {"status": "processing", "count": 1},
                 "import.process.requested": {"status": "failed", "count": 3},
             },
             app_health_snapshot={
@@ -262,8 +270,8 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(
             payload["runtime_summary"]["read_models"],
             {
-                "total": 2,
-                "fresh": 1,
+                "total": 1,
+                "fresh": 0,
                 "refreshing": 1,
                 "stale": 0,
                 "missing": 0,
@@ -273,13 +281,13 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
                 "scope_issue_count": 1,
             },
         )
-        self.assertEqual(payload["runtime_summary"]["workers"]["total"], 4)
-        self.assertEqual(payload["runtime_summary"]["workers"]["required"], 3)
+        self.assertEqual(payload["runtime_summary"]["workers"]["total"], 3)
+        self.assertEqual(payload["runtime_summary"]["workers"]["required"], 2)
         self.assertEqual(payload["runtime_summary"]["workers"]["ready"], 1)
         self.assertEqual(payload["runtime_summary"]["workers"]["working"], 1)
-        self.assertEqual(payload["runtime_summary"]["workers"]["stale"], 1)
+        self.assertEqual(payload["runtime_summary"]["workers"]["stale"], 0)
         self.assertEqual(payload["runtime_summary"]["workers"]["missing"], 1)
-        self.assertEqual(payload["runtime_summary"]["workers"]["issue_count"], 2)
+        self.assertEqual(payload["runtime_summary"]["workers"]["issue_count"], 1)
         self.assertEqual(
             payload["runtime_summary"]["queue"],
             {

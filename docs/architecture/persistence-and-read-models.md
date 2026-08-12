@@ -5,8 +5,8 @@
 生产主读写状态存放在 PostgreSQL：
 
 - `app.*` 保存业务 canonical facts、active relations、设置和领域任务状态。
-- `job.*` 保存后台任务、outbox 和两个保留 read model 的 dirty scope。
-- `read_model.*` 只承载已登记的关联台 active-generation 与共享 read model；其它历史页面 projection 表不属于当前运行时合同。
+- `job.*` 保存后台任务、outbox 和唯一保留 read model 的 dirty scope。
+- `read_model.*` 的活跃运行时只承载已登记的共享 `workbench_relation` read model；历史 Workbench page generation/projection 表仅为短期离线回滚证据，不属于当前读取、刷新或定时清理合同。
 - 原始上传文件和附件进入 MinIO/S3，PostgreSQL `app.file_objects` 只保存 verified object pointer。
 - OA Mongo 是外部只读来源，只能由独立 sync worker 或明确登记的 migration/audit 工具读取；页面 API 读取 PostgreSQL OA projection。
 
@@ -19,9 +19,10 @@ Mongo direct adapter。迁移和回滚工具不能进入 production bootstrap。
 
 ## 页面直接读取
 
-除关联台外，以下页面/API 每次请求都在一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中直接读取 canonical
+以下页面/API 每次请求都在一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 中直接读取 canonical
 facts 和 active canonical relations：
 
+- 关联台
 - 银行明细与账户余额
 - OA 待付款核对
 - 流水规则批量处理
@@ -55,16 +56,14 @@ facts 和 active canonical relations：
 
 | Key | 目的 | 事实源 |
 | --- | --- | --- |
-| `workbench` | 关联台页面 active-generation rows/groups/group rows | PostgreSQL canonical facts 与 `app.workbench_pair_relations` |
 | `workbench_relation` | 给仍登记的独立消费者分发 eligible relation context | `app.workbench_pair_relations` |
 
 Manifest、scope policy、App Status registry 和带 `read_model_key` 的 worker registration 必须精确等于该集合。
-两个 read model 都使用月份 shard；关联台查询层可组合 fresh active month generations 为 `all` 视图，
-共享 relation 模型的 `all` 只做 fan-out command。Search runtime 已删除；legacy no-OA API 直接读取
+共享 relation 模型使用月份 shard，其 `all` 只做 fan-out command。关联台页面不登记 scope、generation、dirty/outbox 或 readiness。Search runtime 已删除；legacy no-OA API 直接读取
 canonical batch/relation facts，不进入 read-model manifest、worker、queue 或 App Status。
-当前 required worker 也必须精确为 6 个：`oa-sync`、`workbench-matching`、`workbench`、
-`workbench-relation`、`import`、`settings-maintenance`。其中只有 `workbench` 与 `workbench_relation`
-绑定上述两个 read model；其余 4 个是 canonical/integration/domain job owner。
+当前 required worker 也必须精确为 5 个：`oa-sync`、`workbench-matching`、
+`workbench-relation`、`import`、`settings-maintenance`。其中只有 `workbench-relation`
+绑定上述 read model；其余 4 个是 canonical/integration/domain job owner。
 
 它们的 refresh 状态事实源是 `job.outbox_events` 和 `job.read_model_dirty_scopes`。非事务 refresh 必须经
 `ReadModelRefreshGateway` normalize、validate 和 dedupe；业务 service 不得直接写 queue SQL。Redis 只能
@@ -77,7 +76,7 @@ readiness、cache 或 replay。
 
 ## 旧链删除与回滚
 
-- 除关联台外，已退役页面的 service、repository、projector、refresh producer、worker handler、
+- 已退役页面（包括关联台 page read model）的 service、repository、projector、refresh producer、worker handler、
   registry/env、前端 polling/status DTO 和页面专属运维工具必须保持删除。
 - migration `0127_direct_canonical_page_runtime_retirement.sql` 只标记运行时退休，不物理 drop 历史表；
   这是本次发布的数据库回滚保护，不代表历史表仍可读。

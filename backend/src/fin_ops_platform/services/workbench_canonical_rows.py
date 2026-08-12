@@ -6,6 +6,7 @@ from concurrent.futures import Future
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from threading import Lock
 from typing import Any
 
@@ -42,6 +43,9 @@ from fin_ops_platform.services.workbench_relation_alignment_service import Workb
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
+)
+from fin_ops_platform.services.workbench_row_identity import (
+    workbench_row_identity_key,
 )
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -85,6 +89,543 @@ class WorkbenchCanonicalRowsBuilder:
                 oa_adapter=PostgresOAProjectionAdapter(oa_repository),
                 seed_demo_rows=False,
             )
+
+    def load_page_rows(
+        self,
+        typed_row_ids: dict[str, set[str]],
+        *,
+        etc_summary_external_ids: dict[str, str] | None = None,
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        """Batch-hydrate only the typed canonical ids selected for one page."""
+
+        invoice_ids = set(typed_row_ids.get("invoice", set()))
+        etc_summary_ids = {
+            row_id for row_id in invoice_ids if row_id.startswith("etc-summary-")
+        }
+        ordinary_invoice_ids = invoice_ids - etc_summary_ids
+        rows = [
+            *self._oa_projection_rows_by_ids(set(typed_row_ids.get("oa", set()))),
+            *self._bank_rows_by_ids(set(typed_row_ids.get("bank", set()))),
+            *self._invoice_rows_by_ids(ordinary_invoice_ids),
+            *self._etc_invoice_summary_rows_by_ids(
+                etc_summary_ids,
+                external_ids_by_row_id=etc_summary_external_ids,
+            ),
+        ]
+        result: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            row_id = str(row.get("id") or "").strip()
+            row_type = str(row.get("type") or "").strip()
+            if not row_id or row_type not in {"oa", "bank", "invoice"}:
+                continue
+            key = (row_type, row_id)
+            if key in result:
+                raise ValueError(
+                    f"Duplicate canonical Workbench typed row: {row_type}:{row_id}."
+                )
+            result[key] = row
+        return result
+
+    def build_page_groups(
+        self,
+        *,
+        scope_key: str,
+        rows_by_typed_id: dict[tuple[str, str], dict[str, Any]],
+        relations: list[dict[str, Any]],
+        page_overrides: dict[tuple[str, str], dict[str, Any]] | None = None,
+        amount_mismatch_decisions: dict[str, str] | None = None,
+        page_etc_summaries: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Apply canonical Workbench domain policies to one selected page batch."""
+
+        normalized_relations = deepcopy(relations)
+        formal_members = {
+            (self._normalized_page_row_type(row_type), str(row_id).strip())
+            for relation in normalized_relations
+            for row_id, row_type in zip(
+                list(relation.get("row_ids") or []),
+                list(relation.get("row_types") or []),
+                strict=True,
+            )
+        }
+        prepared_rows = {
+            identity: dict(row) for identity, row in rows_by_typed_id.items()
+        }
+        self._apply_typed_page_overrides(
+            prepared_rows,
+            formal_members=formal_members,
+            preloaded_overrides=page_overrides,
+        )
+
+        id_type_counts: dict[str, int] = defaultdict(int)
+        for _row_type, row_id in prepared_rows:
+            id_type_counts[row_id] += 1
+        internal_ids: dict[tuple[str, str], str] = {}
+        used_ids = {row_id for _row_type, row_id in prepared_rows}
+        for identity in prepared_rows:
+            row_type, row_id = identity
+            if id_type_counts[row_id] == 1:
+                internal_ids[identity] = row_id
+                continue
+            digest = sha256(f"{row_type}\0{row_id}".encode("utf-8")).hexdigest()
+            internal_id = f"__workbench_typed__:{row_type}:{digest}"
+            if internal_id in used_ids:
+                raise ValueError("Canonical Workbench typed page key collision.")
+            used_ids.add(internal_id)
+            internal_ids[identity] = internal_id
+
+        rows_by_id: dict[str, dict[str, Any]] = {}
+        for identity, row in prepared_rows.items():
+            internal_id = internal_ids[identity]
+            prepared = dict(row)
+            prepared["id"] = internal_id
+            rows_by_id[internal_id] = prepared
+        for relation in normalized_relations:
+            row_ids = list(relation.get("row_ids") or [])
+            row_types = list(relation.get("row_types") or [])
+            relation["row_ids"] = [
+                internal_ids[
+                    (self._normalized_page_row_type(row_type), str(row_id).strip())
+                ]
+                for row_id, row_type in zip(row_ids, row_types, strict=True)
+            ]
+
+        grouped = self._group_payload(
+            scope_key,
+            rows_by_id,
+            normalized_relations,
+            overrides_applied=True,
+            amount_mismatch_decisions=amount_mismatch_decisions,
+            page_etc_summaries=page_etc_summaries,
+        )
+        display_ids = {
+            internal_id: identity[1]
+            for identity, internal_id in internal_ids.items()
+            if internal_id != identity[1]
+        }
+        return self._restore_typed_page_ids(grouped, display_ids)
+
+    @staticmethod
+    def _normalized_page_row_type(value: object) -> str:
+        normalized = str(value or "").strip().lower()
+        return {
+            "oa_application": "oa",
+            "bank_transaction": "bank",
+            "invoice_record": "invoice",
+            "formal_invoice": "invoice",
+            "input": "invoice",
+            "input_invoice": "invoice",
+            "output": "invoice",
+            "output_invoice": "invoice",
+            "etc_summary": "invoice",
+        }.get(normalized, normalized)
+
+    def _etc_invoice_summary_rows_by_ids(
+        self,
+        row_ids: set[str],
+        *,
+        external_ids_by_row_id: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        external_ids_by_row_id = dict(external_ids_by_row_id or {})
+        external_batch_ids = {
+            external_batch_id
+            for row_id in row_ids
+            if row_id.startswith("etc-summary-")
+            if (external_batch_id := str(external_ids_by_row_id.get(row_id) or "").strip())
+        }
+        unresolved = {
+            row_id for row_id in row_ids
+            if row_id.startswith("etc-summary-") and row_id not in external_ids_by_row_id
+        }
+        if unresolved:
+            raise ValueError("ETC summary hydration requires an explicit external batch identity.")
+        if not external_batch_ids:
+            return []
+        rows = self._etc_invoice_summary_rows_for_page(external_batch_ids)
+        hydrated: list[dict[str, Any]] = []
+        for row_id, external_batch_id in sorted(external_ids_by_row_id.items()):
+            row = rows.get(external_batch_id)
+            if row_id not in row_ids or not isinstance(row, dict):
+                continue
+            hydrated.append({**row, "id": row_id})
+        return hydrated
+
+    def _etc_invoice_summary_rows_for_page(
+        self,
+        external_batch_ids: set[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Hydrate a bounded page's ETC summaries in one set-based query."""
+
+        rows = self._connection.fetch_all(
+            """
+            with requested_batches(external_batch_id) as (
+                select distinct btrim(requested.external_batch_id)
+                from unnest(%s::text[]) requested(external_batch_id)
+                where nullif(btrim(requested.external_batch_id), '') is not null
+            ),
+            link_rows as (
+                select
+                    1 as source_rank,
+                    batch_identity.external_batch_id,
+                    business_batches.invoice_count as business_invoice_count,
+                    business_batches.total_amount as business_total_amount,
+                    coalesce(
+                        business_batches.raw_payload->'normalized_payload',
+                        '{}'::jsonb
+                    ) as business_batch_payload,
+                    null::jsonb as submission_batch_payload,
+                    null::jsonb as batch_payload,
+                    coalesce(invoices.legacy_mongo_id, invoices.id::text) as row_id,
+                    invoices.invoice_type,
+                    invoices.invoice_no,
+                    invoices.invoice_code,
+                    invoices.digital_invoice_no,
+                    invoices.invoice_date,
+                    invoices.counterparty_name,
+                    invoices.seller_name,
+                    invoices.seller_tax_no,
+                    invoices.buyer_name,
+                    invoices.buyer_tax_no,
+                    invoices.amount,
+                    invoices.tax_rate,
+                    invoices.tax_amount,
+                    invoices.total_with_tax,
+                    invoices.status,
+                    invoices.workbench_visibility,
+                    invoices.raw_payload
+                from app.etc_batch_invoice_links links
+                join app.invoices invoices on invoices.id = links.invoice_id
+                left join app.etc_business_batches business_batches
+                  on business_batches.business_batch_id = links.business_batch_id
+                cross join lateral (
+                    select coalesce(
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'external_etc_batch_id',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'externalEtcBatchId',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submission_batch_id',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submissionBatchId',
+                            ''
+                        ),
+                        links.business_batch_id
+                    ) as external_batch_id
+                ) batch_identity
+                join requested_batches requested
+                  on requested.external_batch_id = batch_identity.external_batch_id
+                where links.link_status = 'active'
+                  and invoices.status <> 'deleted'
+            ),
+            submitted_business_batches as (
+                select
+                    business_batches.business_batch_id,
+                    business_batches.invoice_count as business_invoice_count,
+                    business_batches.total_amount as business_total_amount,
+                    coalesce(
+                        business_batches.raw_payload->'normalized_payload',
+                        '{}'::jsonb
+                    ) as business_batch_payload,
+                    batch_identity.external_batch_id,
+                    coalesce(
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submission_batch_id',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submissionBatchId',
+                            ''
+                        )
+                    ) as submission_batch_id
+                from app.etc_business_batches business_batches
+                cross join lateral (
+                    select coalesce(
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'external_etc_batch_id',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'externalEtcBatchId',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submission_batch_id',
+                            ''
+                        ),
+                        nullif(
+                            business_batches.raw_payload->'normalized_payload'
+                                ->>'submissionBatchId',
+                            ''
+                        ),
+                        business_batches.business_batch_id
+                    ) as external_batch_id
+                ) batch_identity
+                join requested_batches requested
+                  on requested.external_batch_id = batch_identity.external_batch_id
+                where business_batches.status in (
+                    'oa_submitted',
+                    'manually_marked_submitted',
+                    'closed'
+                )
+            ),
+            submission_batches as (
+                select
+                    submissions.submission_batch_id,
+                    submissions.raw_payload->'normalized_payload'
+                        as submission_batch_payload,
+                    batch_identity.external_batch_id
+                from app.etc_submission_batches submissions
+                cross join lateral (
+                    select coalesce(
+                        nullif(
+                            submissions.raw_payload->'normalized_payload'
+                                ->>'etc_batch_id',
+                            ''
+                        ),
+                        submissions.submission_batch_id
+                    ) as external_batch_id
+                ) batch_identity
+                join requested_batches requested
+                  on requested.external_batch_id = batch_identity.external_batch_id
+                where submissions.status in (
+                    'submitted_confirmed',
+                    'submitted',
+                    'closed'
+                )
+            ),
+            business_rows as (
+                select
+                    2 as source_rank,
+                    business_batches.external_batch_id,
+                    business_batches.business_invoice_count,
+                    business_batches.business_total_amount,
+                    business_batches.business_batch_payload,
+                    submissions.raw_payload->'normalized_payload'
+                        as submission_batch_payload,
+                    null::jsonb as batch_payload,
+                    coalesce(
+                        etc_invoices.legacy_mongo_id,
+                        etc_invoices.etc_invoice_id,
+                        etc_invoices.id::text
+                    ) as row_id,
+                    '进项发票'::text as invoice_type,
+                    etc_invoices.invoice_no,
+                    etc_invoices.invoice_code,
+                    etc_invoices.invoice_no as digital_invoice_no,
+                    etc_invoices.invoice_date,
+                    etc_invoices.seller_name as counterparty_name,
+                    etc_invoices.seller_name,
+                    null::text as seller_tax_no,
+                    etc_invoices.buyer_name,
+                    null::text as buyer_tax_no,
+                    etc_invoices.amount,
+                    null::text as tax_rate,
+                    etc_invoices.tax_amount,
+                    etc_invoices.total_with_tax,
+                    etc_invoices.status,
+                    'hidden_after_etc_submission'::text as workbench_visibility,
+                    etc_invoices.raw_payload
+                from submitted_business_batches business_batches
+                left join app.etc_submission_batches submissions
+                  on submissions.submission_batch_id = business_batches.submission_batch_id
+                join app.etc_invoices etc_invoices
+                  on etc_invoices.business_batch_id = business_batches.business_batch_id
+                where etc_invoices.status <> 'deleted'
+            ),
+            submitted_rows as (
+                select
+                    3 as source_rank,
+                    submissions.external_batch_id,
+                    null::integer as business_invoice_count,
+                    null::numeric as business_total_amount,
+                    null::jsonb as business_batch_payload,
+                    null::jsonb as submission_batch_payload,
+                    submissions.submission_batch_payload as batch_payload,
+                    coalesce(invoices.legacy_mongo_id, invoices.id::text) as row_id,
+                    invoices.invoice_type,
+                    invoices.invoice_no,
+                    invoices.invoice_code,
+                    invoices.digital_invoice_no,
+                    invoices.invoice_date,
+                    invoices.counterparty_name,
+                    invoices.seller_name,
+                    invoices.seller_tax_no,
+                    invoices.buyer_name,
+                    invoices.buyer_tax_no,
+                    invoices.amount,
+                    invoices.tax_rate,
+                    invoices.tax_amount,
+                    invoices.total_with_tax,
+                    invoices.status,
+                    invoices.workbench_visibility,
+                    invoices.raw_payload
+                from app.invoices invoices
+                join submission_batches submissions
+                  on submissions.submission_batch_id = coalesce(
+                      invoices.raw_payload->'normalized_payload'
+                          ->>'etc_submission_batch_id',
+                      ''
+                  )
+                  or submissions.external_batch_id = coalesce(
+                      invoices.raw_payload->'normalized_payload'
+                          ->>'etc_submission_batch_id',
+                      ''
+                  )
+                where invoices.status <> 'deleted'
+                  and (
+                      invoices.workbench_visibility = 'hidden_after_etc_submission'
+                      or invoices.raw_payload->'normalized_payload'
+                          ->>'workbench_visibility' = 'hidden_after_etc_submission'
+                      or invoices.raw_payload->'normalized_payload'
+                          ->>'etc_submission_status' = 'submitted'
+                  )
+            ),
+            source_rows as (
+                select * from link_rows
+                union all
+                select * from business_rows
+                union all
+                select * from submitted_rows
+            ),
+            ranked_rows as (
+                select
+                    source_rows.*,
+                    min(source_rank) over (partition by external_batch_id)
+                        as preferred_source_rank
+                from source_rows
+            )
+            select *
+            from ranked_rows
+            where source_rank = preferred_source_rank
+            order by external_batch_id, invoice_date, row_id
+            """,
+            (sorted(external_batch_ids),),
+        )
+        invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        invoice_keys_by_external_batch_id: dict[str, set[str]] = defaultdict(set)
+        batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            external_batch_id = str(row.get("external_batch_id") or "").strip()
+            if not external_batch_id:
+                continue
+            invoice_key = self._etc_invoice_summary_invoice_identity(row)
+            if invoice_key not in invoice_keys_by_external_batch_id[external_batch_id]:
+                invoice_keys_by_external_batch_id[external_batch_id].add(invoice_key)
+                invoices_by_external_batch_id[external_batch_id].append(row)
+            batch_payload = (
+                row_payload(row, "batch_payload")
+                if row.get("source_rank") == 3
+                else self._etc_business_summary_batch_payload(row)
+            )
+            if isinstance(batch_payload, dict) and batch_payload:
+                existing = batch_payload_by_external_batch_id.get(external_batch_id, {})
+                batch_payload_by_external_batch_id[external_batch_id] = {
+                    **existing,
+                    **batch_payload,
+                }
+        return {
+            external_batch_id: self._build_etc_invoice_summary_row(
+                external_batch_id,
+                invoices,
+                batch_payload=batch_payload_by_external_batch_id.get(external_batch_id),
+            )
+            for external_batch_id, invoices in invoices_by_external_batch_id.items()
+            if invoices
+        }
+
+    def _apply_typed_page_overrides(
+        self,
+        rows_by_typed_id: dict[tuple[str, str], dict[str, Any]],
+        *,
+        formal_members: set[tuple[str, str]],
+        preloaded_overrides: dict[tuple[str, str], dict[str, Any]] | None = None,
+    ) -> None:
+        identities = sorted(set(rows_by_typed_id) - formal_members)
+        if not identities:
+            return
+        if preloaded_overrides is None:
+            rows = self._connection.fetch_all(
+                """
+                select override.row_type, override.row_id,
+                       override.override_payload, override.raw_payload
+                from app.workbench_row_overrides override
+                join unnest(%s::text[], %s::text[])
+                    as selected(row_type, row_id)
+                  on selected.row_type = override.row_type
+                 and selected.row_id = override.row_id
+                where override.status = 'active'
+                order by override.row_type, override.row_id
+                """,
+                (
+                    [row_type for row_type, _row_id in identities],
+                    [row_id for _row_type, row_id in identities],
+                ),
+            )
+            resolved_overrides = {
+                (
+                    self._normalized_page_row_type(source.get("row_type")),
+                    str(source.get("row_id") or "").strip(),
+                ): row_payload(source, "override_payload", "raw_payload")
+                for source in rows
+            }
+        else:
+            resolved_overrides = dict(preloaded_overrides)
+        for identity in identities:
+            row = rows_by_typed_id.get(identity)
+            payload = resolved_overrides.get(identity)
+            if (
+                row is None
+                or not isinstance(payload, dict)
+                or is_legacy_workbench_exception_override(payload)
+            ):
+                continue
+            rows_by_typed_id[identity] = WorkbenchOverrideService.from_snapshot(
+                {
+                    "row_overrides": {
+                        workbench_row_identity_key(*identity): {
+                            **payload,
+                            "row_id": identity[1],
+                            "row_type": identity[0],
+                        }
+                    }
+                }
+            ).apply_to_row(row)
+
+    @classmethod
+    def _restore_typed_page_ids(
+        cls,
+        value: Any,
+        display_ids: dict[str, str],
+    ) -> Any:
+        if not display_ids:
+            return value
+        if isinstance(value, str):
+            return display_ids.get(value, value)
+        if isinstance(value, list):
+            return [cls._restore_typed_page_ids(item, display_ids) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._restore_typed_page_ids(item, display_ids) for item in value)
+        if isinstance(value, dict):
+            return {
+                key: cls._restore_typed_page_ids(item, display_ids)
+                for key, item in value.items()
+            }
+        return value
 
     def _bank_account_mapping_dict(self) -> dict[str, str]:
         if self._bank_account_mapping_cache is not None:
@@ -147,9 +688,8 @@ class WorkbenchCanonicalRowsBuilder:
     def _oa_projection_rows_by_ids(self, row_ids: set[str]) -> list[dict[str, Any]]:
         if not row_ids:
             return []
-        oa_row_ids = {row_id for row_id in row_ids if row_id.startswith("oa-") and not row_id.startswith("oa-att-")}
         wanted = set(row_ids)
-        self._oa_query_service.sync_oa_row_ids(sorted(oa_row_ids))
+        self._oa_query_service.sync_oa_row_ids(sorted(wanted))
         result: list[dict[str, Any]] = []
         for row in self._oa_query_service.list_record_snapshots():
             row_id = str(row.get("id") or "").strip()
@@ -166,7 +706,9 @@ class WorkbenchCanonicalRowsBuilder:
         return result
 
     def _oa_projection_rows_by_sql_ids(self, row_ids: set[str]) -> list[dict[str, Any]]:
-        normalized_row_ids = sorted({row_id for row_id in row_ids if row_id.startswith("oa-") and not row_id.startswith("oa-att-")})
+        normalized_row_ids = sorted(
+            {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
+        )
         if not normalized_row_ids:
             return []
         rows = self._connection.fetch_all(
@@ -268,7 +810,7 @@ class WorkbenchCanonicalRowsBuilder:
         return {
             "id": row_id,
             "type": "bank",
-            "source_kind": "bank",
+            "source_kind": "bank_transaction",
             "status": "unpaired",
             "case_id": None,
             "trade_time": _date_text(row.get("trade_time") or row.get("txn_date")),
@@ -538,6 +1080,10 @@ class WorkbenchCanonicalRowsBuilder:
         month: str,
         rows_by_id: dict[str, dict[str, Any]],
         relations: list[dict[str, Any]],
+        *,
+        overrides_applied: bool = False,
+        amount_mismatch_decisions: dict[str, str] | None = None,
+        page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
         formal_relation_row_ids = {
@@ -546,11 +1092,37 @@ class WorkbenchCanonicalRowsBuilder:
             for row_id in list(relation.get("row_ids") or [])
             if (normalized_row_id := str(row_id).strip())
         }
-        self._apply_workbench_overrides(
-            working_rows_by_id,
-            formal_relation_row_ids=formal_relation_row_ids,
-        )
-        etc_summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_for_relations(relations)
+        if not overrides_applied:
+            self._apply_workbench_overrides(
+                working_rows_by_id,
+                formal_relation_row_ids=formal_relation_row_ids,
+            )
+        etc_summary_rows_by_external_batch_id = {
+            str(row.get("etc_batch_id") or "").strip(): deepcopy(row)
+            for row in working_rows_by_id.values()
+            if str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
+            and str(row.get("etc_batch_id") or "").strip()
+        }
+        if page_etc_summaries is not None:
+            etc_summary_rows_by_external_batch_id.update(
+                {
+                    str(external_batch_id): deepcopy(row)
+                    for external_batch_id, row in page_etc_summaries.items()
+                    if str(external_batch_id).strip() and isinstance(row, dict)
+                }
+            )
+        missing_relation_batch_ids = {
+            external_batch_id
+            for relation in relations
+            if (external_batch_id := self._relation_external_etc_batch_id(relation))
+            and external_batch_id not in etc_summary_rows_by_external_batch_id
+        }
+        if missing_relation_batch_ids and page_etc_summaries is None:
+            etc_summary_rows_by_external_batch_id.update(
+                self._etc_invoice_summary_rows(
+                    external_batch_ids=missing_relation_batch_ids,
+                )
+            )
         for relation in relations:
             relation_row_ids = [row_id for row_id in list(relation.get("row_ids") or []) if row_id in working_rows_by_id]
             if not relation_row_ids:
@@ -638,9 +1210,11 @@ class WorkbenchCanonicalRowsBuilder:
             rows_by_id=working_rows_by_id,
             active_relations=relations,
             amount_mismatch_decisions=(
-                PostgresWorkbenchRepository(self._connection).load_workbench_amount_mismatch_decisions(
-                    scope_key=month,
-                )
+                amount_mismatch_decisions
+                if amount_mismatch_decisions is not None
+                else PostgresWorkbenchRepository(
+                    self._connection
+                ).load_workbench_amount_mismatch_decisions(scope_key=month)
             ),
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
@@ -704,10 +1278,7 @@ class WorkbenchCanonicalRowsBuilder:
         override_service = WorkbenchOverrideService.from_snapshot(
             {"row_overrides": row_overrides}
         )
-        for row_id in row_overrides:
-            row = rows_by_id.get(row_id)
-            if row is None:
-                continue
+        for row_id, row in list(rows_by_id.items()):
             rows_by_id[row_id] = override_service.apply_to_row(row)
 
     def _row_overrides_for_rows(self, row_ids: set[str]) -> dict[str, dict[str, Any]]:
@@ -715,7 +1286,7 @@ class WorkbenchCanonicalRowsBuilder:
             return {}
         rows = self._connection.fetch_all(
             """
-            select row_id, override_payload, raw_payload
+            select row_id, row_type, override_payload, raw_payload
             from app.workbench_row_overrides
             where row_id = any(%s)
               and status = 'active'
@@ -726,13 +1297,19 @@ class WorkbenchCanonicalRowsBuilder:
         result: dict[str, dict[str, Any]] = {}
         for row in rows:
             row_id = str(row.get("row_id") or "").strip()
+            row_type = self._normalized_page_row_type(row.get("row_type"))
             payload = row_payload(row, "override_payload", "raw_payload")
             if (
                 row_id
+                and row_type in {"oa", "bank", "invoice"}
                 and isinstance(payload, dict)
                 and not is_legacy_workbench_exception_override(payload)
             ):
-                result[row_id] = payload
+                result[workbench_row_identity_key(row_type, row_id)] = {
+                    **payload,
+                    "row_id": row_id,
+                    "row_type": row_type,
+                }
         return result
 
     @staticmethod

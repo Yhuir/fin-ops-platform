@@ -5,9 +5,9 @@ import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import {
   createOperationLatencyRecorder,
-  createWorkbenchVisibilitySegmentRecorder,
-  type WorkbenchVisibilityRunMode,
-  type WorkbenchVisibilitySampleBinding,
+  createWorkbenchDirectCommitVisibilityRecorder,
+  type WorkbenchDirectCommitVisibilityRunMode,
+  type WorkbenchDirectCommitVisibilitySampleBinding,
 } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
@@ -119,20 +119,11 @@ const ordinaryBankFlowRuleCheckboxCases = [
   },
 ];
 
-type WorkbenchVisibilityFixture = WorkbenchVisibilitySampleBinding & {
+type WorkbenchDirectCommitVisibilityFixture = WorkbenchDirectCommitVisibilitySampleBinding & {
   fixture_ownership: "test_owned";
   submit: { path: string; body: Record<string, unknown> };
   recovery: { path: string; body: Record<string, unknown> };
 };
-
-function cleanStrings(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => {
-    if (typeof item === "string") return item.trim();
-    if (!item || typeof item !== "object") return "";
-    return payloadString(item as Record<string, unknown>, ["scope_key", "scopeKey"]);
-  }).filter(Boolean);
-}
 
 function payloadString(payload: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
@@ -140,10 +131,6 @@ function payloadString(payload: Record<string, unknown>, keys: string[]) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
-}
-
-function workbenchGeneration(payload: Record<string, unknown>) {
-  return payloadString(payload, ["active_generation_id", "read_model_version", "activeGenerationId", "readModelVersion"]);
 }
 
 function browserJsonRequest(
@@ -187,23 +174,27 @@ async function runWithRecovery<T>(operation: () => Promise<T>, recovery: () => P
   return result as T;
 }
 
-async function recoverWorkbenchVisibilityFixture(
+async function recoverWorkbenchDirectCommitVisibilityFixture(
   page: Page,
-  mode: WorkbenchVisibilityRunMode,
-  sample: WorkbenchVisibilityFixture,
+  mode: WorkbenchDirectCommitVisibilityRunMode,
+  sample: WorkbenchDirectCommitVisibilityFixture,
 ) {
   const detailPath = `/api/bank-flow-rule-batches/${encodeURIComponent(sample.batch_id)}`;
-  const loadDetail = async () => {
-    const result = mode === "isolated"
-      ? await browserJsonRequest(page, "GET", detailPath)
-      : await (async () => {
-          const response = await page.context().request.get(detailPath);
-          return {
-            ok: response.ok(),
-            status: response.status(),
-            payload: await response.json() as Record<string, unknown>,
-          };
-        })();
+  const request = async (method: "GET" | "POST", path: string, body?: Record<string, unknown>) => {
+    if (mode === "isolated") {
+      return browserJsonRequest(page, method, path, body);
+    }
+    const response = method === "GET"
+      ? await page.context().request.get(path)
+      : await page.context().request.post(path, { data: body });
+    return {
+      ok: response.ok(),
+      status: response.status(),
+      payload: await response.json() as Record<string, unknown>,
+    };
+  };
+  const loadStatus = async () => {
+    const result = await request("GET", detailPath);
     if (!result.ok || !result.payload || typeof result.payload.batch !== "object" || result.payload.batch === null) {
       throw new Error(`cannot determine exact fixture batch state (${result.status})`);
     }
@@ -216,54 +207,56 @@ async function recoverWorkbenchVisibilityFixture(
     return status;
   };
 
-  const initialStatus = await loadDetail();
-  if (["withdrawn", "unsubmitted", "inactive"].includes(initialStatus)) return;
+  const initialStatus = await loadStatus();
+  if (["withdrawn", "unsubmitted", "inactive", "draft"].includes(initialStatus)) return;
   if (!["active", "submitted"].includes(initialStatus)) {
     throw new Error(`unexpected fixture batch status: ${initialStatus}`);
   }
-  const recoveryResult = mode === "isolated"
-    ? await browserJsonRequest(page, "POST", sample.recovery.path, sample.recovery.body)
-    : await (async () => {
-        const response = await page.context().request.post(sample.recovery.path, { data: sample.recovery.body });
-        return { ok: response.ok(), status: response.status() };
-      })();
+  const recoveryResult = await request("POST", sample.recovery.path, sample.recovery.body);
   if (!recoveryResult.ok) throw new Error(`withdraw recovery failed with ${recoveryResult.status}`);
-  if (await loadDetail() !== "withdrawn") {
+  if ((await loadStatus()) !== "withdrawn") {
     throw new Error("withdraw recovery did not restore the test-owned fixture to inactive");
   }
 }
 
-async function loadWorkbenchVisibilityFixtures(mode: WorkbenchVisibilityRunMode, requestedSampleCount: number) {
-  const manifestPath = String(process.env.FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST ?? "").trim();
-  if (!manifestPath) throw new Error("FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST is required");
+async function loadWorkbenchDirectCommitVisibilityFixtures(
+  mode: WorkbenchDirectCommitVisibilityRunMode,
+  requestedSampleCount: number,
+) {
+  const manifestPath = String(
+    process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_FIXTURE_MANIFEST ?? "",
+  ).trim();
+  if (!manifestPath) {
+    throw new Error("FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_FIXTURE_MANIFEST is required");
+  }
   const metadata = await lstat(manifestPath);
   const operatorUid = typeof process.getuid === "function" ? process.getuid() : metadata.uid;
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error("Workbench visibility fixture manifest must be a regular non-symlink file");
+    throw new Error("Workbench direct commit visibility fixture manifest must be a regular non-symlink file");
   }
   if ((metadata.uid !== 0 && metadata.uid !== operatorUid) || (metadata.mode & 0o077) !== 0) {
-    throw new Error("Workbench visibility fixture manifest must be root/operator-owned with no group/world permissions");
+    throw new Error("Workbench direct commit visibility fixture manifest must be root/operator-owned with no group/world permissions");
   }
   const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
     fixture_ownership?: string;
     environment?: string;
     isolated_repeat_count?: number;
-    samples?: WorkbenchVisibilityFixture[];
+    samples?: WorkbenchDirectCommitVisibilityFixture[];
   };
   const templates = Array.isArray(manifest.samples) ? manifest.samples : [];
   const isolatedRepeatCount = Number(manifest.isolated_repeat_count ?? templates.length);
   if (manifest.fixture_ownership !== "test_owned" || templates.some((sample) => sample.fixture_ownership !== "test_owned")) {
-    throw new Error("Workbench visibility fixtures must be test_owned");
+    throw new Error("Workbench direct commit visibility fixtures must be test_owned");
   }
   if (mode === "production_smoke" && (templates.length !== 1 || isolatedRepeatCount !== 1)) {
     throw new Error("production_smoke requires exactly one fixture sample");
   }
   if (mode === "isolated" && (
-    manifest.environment !== "isolated_prod_equivalent_browser_poller"
+    manifest.environment !== "isolated_prod_equivalent_direct_canonical_get"
     || templates.length < 1
     || isolatedRepeatCount !== requestedSampleCount
   )) {
-    throw new Error("isolated fixture manifest must explicitly bind the prod-equivalent browser/poller sample count");
+    throw new Error("isolated fixture manifest must explicitly bind the direct combined-read sample count");
   }
   const selected = mode === "production_smoke"
     ? templates
@@ -612,7 +605,6 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(resolvedSubmitResponse.status()).toBe(200);
     const submitPayload = await resolvedSubmitResponse.json() as Record<string, unknown>;
     expect(submitPayload).not.toHaveProperty("operation_barrier_targets");
-    expect(submitPayload).not.toHaveProperty("freshness_targets");
     expect(submitPayload).not.toHaveProperty("workbench_refresh_required");
     expect(api.count("POST /api/bank-flow-rule-batches/submit-selection")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
@@ -626,8 +618,6 @@ test.describe("bank flow rule batches browser flow", () => {
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
-    expect(costPayload).not.toHaveProperty("read_model_status");
-    expect(costPayload).not.toHaveProperty("refresh_enqueued");
     await page.getByRole("radio", { name: "按项目" }).click();
     const bankFlowRuleCostProject = page.getByRole("button", { name: /流水规则手续费成本项目/ });
     await expect(bankFlowRuleCostProject).toBeVisible();
@@ -640,48 +630,22 @@ test.describe("bank flow rule batches browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const workbenchReadsBeforeVisit = api.count("GET /api/workbench");
-    const refreshStatusReadsBeforeVisit = api.count("GET /api/workbench/refresh-status");
-    const workbenchGenerationResponses: string[] = [];
-    page.on("response", (response) => {
-      if (
-        response.request().method() !== "GET"
-        || !responsePathMatches(response.url(), "/api/workbench")
-        || response.status() !== 200
-      ) {
-        return;
-      }
-      void response.json().then((payload: Record<string, unknown>) => {
-        workbenchGenerationResponses.push(String(payload.active_generation_id ?? ""));
-      });
-    });
-    const convergedGenerationResponse = page.waitForResponse(async (response) => {
-      if (
-        response.request().method() !== "GET"
-        || !responsePathMatches(response.url(), "/api/workbench")
-        || response.status() !== 200
-      ) {
-        return false;
-      }
-      const payload = await response.json() as Record<string, unknown>;
-      return payload.active_generation_id === "workbench-generation-e2e-002";
-    });
+    const directInitialResponse = page.waitForResponse((response) => (
+      response.request().method() === "GET"
+      && responsePathMatches(response.url(), "/api/workbench")
+      && response.status() === 200
+    ));
     await page.goto("/");
-    expect((await convergedGenerationResponse).status()).toBe(200);
-    await expect.poll(
-      () => api.count("GET /api/workbench/refresh-status"),
-    ).toBeGreaterThanOrEqual(refreshStatusReadsBeforeVisit + 4);
-    await expect.poll(
-      () => workbenchGenerationResponses.filter(
-        (generationId) => generationId === "workbench-generation-e2e-002",
-      ).length,
-    ).toBe(1);
-    expect(workbenchGenerationResponses).toContain("workbench-generation-e2e-001");
+    expect((await directInitialResponse).status()).toBe(200);
+    // React StrictMode may remount once in the dev E2E server; both reads are
+    // The Workbench opens from one ordinary combined initial read.
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchReadsBeforeVisit);
-    const convergedGroup = page.getByTestId(
+    expect(api.count("GET /api/workbench")).toBeLessThanOrEqual(workbenchReadsBeforeVisit + 2);
+    const canonicalGroup = page.getByTestId(
       "candidate-group-paired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
     );
-    await expect(convergedGroup).toBeVisible();
-    await expect(convergedGroup).toContainText("流水规则手续费批次");
+    await expect(canonicalGroup).toBeVisible();
+    await expect(canonicalGroup).toContainText("流水规则手续费批次");
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -818,16 +782,7 @@ test.describe("bank flow rule batches browser flow", () => {
   });
 });
 
-test.describe("workbench visibility SLO", () => {
-  test("parses production dirty-scope DTOs", () => {
-    expect(cleanStrings([
-      "2026-04",
-      { scope_key: "2026-05", status: "processing" },
-      { scopeKey: "all", status: "pending" },
-      { status: "fresh" },
-    ])).toEqual(["2026-04", "2026-05", "all"]);
-  });
-
+test.describe("workbench direct commit visibility SLO", () => {
   test("recovers an exact test-owned batch after an ambiguous submit", async ({ page }) => {
     const sample = {
       sample_id: "ambiguous-submit",
@@ -841,8 +796,8 @@ test.describe("workbench visibility SLO", () => {
         path: "/api/bank-flow-rule-batches/ambiguous-submit-batch/withdraw",
         body: { expected_version: 1, reason: "ambiguous submit recovery" },
       },
-    } satisfies WorkbenchVisibilityFixture;
-    let status = "unsubmitted";
+    } satisfies WorkbenchDirectCommitVisibilityFixture;
+    let status = "draft";
     let submitAttempted = false;
     let recoveryCalls = 0;
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
@@ -868,14 +823,14 @@ test.describe("workbench visibility SLO", () => {
       status = "submitted";
       throw new Error("submit response lost after commit");
     }, async () => {
-      if (submitAttempted) await recoverWorkbenchVisibilityFixture(page, "isolated", sample);
+      if (submitAttempted) await recoverWorkbenchDirectCommitVisibilityFixture(page, "isolated", sample);
     })).rejects.toThrow("submit response lost after commit");
 
     expect(recoveryCalls).toBe(1);
     expect(status).toBe("withdrawn");
   });
 
-  test("preserves the operation and recovery failures", async () => {
+  test("preserves both operation and exact-fixture recovery failures", async () => {
     const operationError = new Error("submit response lost");
     const recoveryError = new Error("recovery state unavailable");
 
@@ -888,30 +843,42 @@ test.describe("workbench visibility SLO", () => {
     expect((failure as AggregateError).errors).toEqual([operationError, recoveryError]);
   });
 
-  test("commit-to-visible same-clock", async ({ page }) => {
-    const workbenchVisibilitySloEnabled = process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1";
-    if (!workbenchVisibilitySloEnabled) return;
-    const mode = String(process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_MODE ?? "isolated") as WorkbenchVisibilityRunMode;
-    if (mode !== "isolated" && mode !== "production_smoke") throw new Error("invalid Workbench visibility SLO mode");
+  test("measures direct mutation receipt to canonical GET to DOM visibility on one clock", async ({ page }) => {
+    const directCommitVisibilityEnabled = process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY === "1";
+    if (!directCommitVisibilityEnabled) return;
+    const mode = String(
+      process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_MODE ?? "isolated",
+    ) as WorkbenchDirectCommitVisibilityRunMode;
+    if (mode !== "isolated" && mode !== "production_smoke") {
+      throw new Error("invalid Workbench direct commit visibility SLO mode");
+    }
     const requestedSampleCount = Number.parseInt(
-      String(process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_SAMPLES ?? (mode === "production_smoke" ? "1" : "100")),
+      String(
+        process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_SAMPLES
+        ?? (mode === "production_smoke" ? "1" : "100"),
+      ),
       10,
     );
-    if (!Number.isSafeInteger(requestedSampleCount) || requestedSampleCount < 1) throw new Error("invalid Workbench visibility sample count");
-    if (mode === "isolated" && requestedSampleCount < 100) throw new Error("isolated SLO requires at least 100 samples");
+    if (!Number.isSafeInteger(requestedSampleCount) || requestedSampleCount < 1) {
+      throw new Error("invalid Workbench direct commit visibility sample count");
+    }
+    if (mode === "isolated" && requestedSampleCount < 100) {
+      throw new Error("isolated direct commit visibility SLO requires at least 100 samples");
+    }
     test.setTimeout(Math.max(60_000, requestedSampleCount * 10_000));
-    const samples = await loadWorkbenchVisibilityFixtures(mode, requestedSampleCount);
-    const recorder = createWorkbenchVisibilitySegmentRecorder(mode, requestedSampleCount);
+    const samples = await loadWorkbenchDirectCommitVisibilityFixtures(mode, requestedSampleCount);
+    const recorder = createWorkbenchDirectCommitVisibilityRecorder(mode, requestedSampleCount);
     if (mode === "isolated") {
       await installDeterministicApiMocks(page, {
         bankFlowRuleWorkbenchConvergence: true,
-        bankFlowRuleWorkbenchConvergenceReads: 2,
         sessionMode: "full_access",
         workbenchBankFlowRuleBatchScenario: true,
       });
     }
     const adminToken = String(process.env.FIN_OPS_E2E_ADMIN_TOKEN ?? "").trim();
-    if (mode === "production_smoke" && !adminToken) throw new Error("production_smoke requires FIN_OPS_E2E_ADMIN_TOKEN");
+    if (mode === "production_smoke" && !adminToken) {
+      throw new Error("production_smoke requires FIN_OPS_E2E_ADMIN_TOKEN");
+    }
     if (adminToken) {
       await page.context().setExtraHTTPHeaders({
         "Admin-Token": adminToken,
@@ -920,108 +887,57 @@ test.describe("workbench visibility SLO", () => {
     }
 
     for (const sample of samples) {
-      const baselineResponse = page.waitForResponse((response) => (
-        response.request().method() === "GET"
-        && responsePathMatches(response.url(), "/api/workbench")
-        && response.status() === 200
-      ));
-      await page.goto("/");
-      const baselinePayload = await (await baselineResponse).json() as Record<string, unknown>;
-      const g0 = workbenchGeneration(baselinePayload);
-      if (!g0 || payloadString(baselinePayload, ["read_model_status", "readModelStatus"]) !== "fresh") {
-        throw new Error("Workbench baseline must be fresh with an active generation");
-      }
-      let segment: ReturnType<typeof recorder.start>;
-      let t2Marked = false;
-      let t3Marked = false;
-      let t4Marked = false;
-      let g1 = "";
-      let candidatePayload: Record<string, unknown> | null = null;
-      let resolveT2!: () => void;
-      let resolveT3!: () => void;
-      let resolveT4!: () => void;
-      const convergenceRejectors: Array<(reason: unknown) => void> = [];
-      const t2 = new Promise<void>((resolve, reject) => { resolveT2 = resolve; convergenceRejectors.push(reject); });
-      const t3 = new Promise<void>((resolve, reject) => { resolveT3 = resolve; convergenceRejectors.push(reject); });
-      const t4 = new Promise<void>((resolve, reject) => { resolveT4 = resolve; convergenceRejectors.push(reject); });
-      const rejectConvergence = (reason: unknown) => {
-        for (const reject of convergenceRejectors) reject(reason);
-      };
-      const maybeMarkT4 = async () => {
-        if (!candidatePayload || !t3Marked || t4Marked || workbenchGeneration(candidatePayload) !== g1) return;
-        const serialized = JSON.stringify(candidatePayload);
-        if (!sample.transaction_ids.every((id) => serialized.includes(id)) || !serialized.includes(sample.business_identity)) {
-          throw new Error("g1 combined payload does not contain the submitted business identity");
-        }
-        const identity = page.getByText(sample.business_identity, { exact: true });
-        if (await identity.count() !== 1) throw new Error("business_identity must have one unique DOM locator");
-        await expect(identity).toBeVisible();
-        segment.markT4();
-        t4Marked = true;
-        resolveT4();
-      };
-      const onResponse = (response: { request(): { method(): string }; url(): string; status(): number; json(): Promise<unknown> }) => {
-        if (response.request().method() !== "GET" || response.status() !== 200) return;
-        void (async () => {
-          const path = new URL(response.url()).pathname;
-          if (path !== "/api/workbench/refresh-status" && path !== "/api/workbench") return;
-          const payload = await response.json() as Record<string, unknown>;
-          if (path === "/api/workbench/refresh-status") {
-            const status = payloadString(payload, ["read_model_status", "status", "readModelStatus"]);
-            const refreshScopes = cleanStrings(payload.refresh_scope_keys ?? payload.refreshScopeKeys);
-            const dirtyScopes = cleanStrings(payload.dirty_scopes ?? payload.dirtyScopes);
-            if ([...refreshScopes, ...dirtyScopes].includes("all")) throw new Error("refresh-status returned broad all scope");
-            if (!t2Marked && ((status === "stale" && refreshScopes.includes(sample.exact_scope))
-              || (status === "refreshing" && dirtyScopes.includes(sample.exact_scope)))) {
-              segment.markT2();
-              t2Marked = true;
-              resolveT2();
-            }
-            const activeGenerationId = workbenchGeneration(payload);
-            if (t2Marked && !t3Marked && status === "fresh" && activeGenerationId && activeGenerationId !== g0) {
-              g1 = activeGenerationId;
-              segment.markT3(g1);
-              t3Marked = true;
-              resolveT3();
-              await maybeMarkT4();
-            }
-            return;
-          }
-          const activeGenerationId = workbenchGeneration(payload);
-          if (activeGenerationId && activeGenerationId !== g0) {
-            candidatePayload = payload;
-            await maybeMarkT4();
-          }
-        })().catch(rejectConvergence);
-      };
-      page.on("response", onResponse);
+      await page.goto("/bank-flow-rule-batches");
+      await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
       let submitAttempted = false;
       await runWithRecovery(async () => {
-        try {
-          segment = recorder.start(sample, g0);
-          submitAttempted = true;
-          const submitResult = mode === "isolated"
-            ? await browserJsonRequest(page, "POST", sample.submit.path, sample.submit.body)
-            : await (async () => {
-                const response = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
-                return {
-                  ok: response.ok(),
-                  status: response.status(),
-                  payload: await response.json() as Record<string, unknown>,
-                };
-              })();
-          if (!submitResult.ok) throw new Error(`bank-flow submit failed with ${submitResult.status}`);
-          if (!JSON.stringify(submitResult.payload).includes(sample.batch_id)) {
-            throw new Error("submit receipt does not bind the fixture batch_id");
-          }
-          segment.markT1();
-          await Promise.all([t2, t3, t4]);
-          segment.complete();
-        } finally {
-          page.off("response", onResponse);
+        submitAttempted = true;
+        const submitResult = mode === "isolated"
+          ? await browserJsonRequest(page, "POST", sample.submit.path, sample.submit.body)
+          : await (async () => {
+              const response = await page.context().request.post(sample.submit.path, { data: sample.submit.body });
+              return {
+                ok: response.ok(),
+                status: response.status(),
+                payload: await response.json() as Record<string, unknown>,
+              };
+            })();
+        if (!submitResult.ok) throw new Error(`bank-flow submit failed with ${submitResult.status}`);
+        if (!JSON.stringify(submitResult.payload).includes(sample.batch_id)) {
+          throw new Error("submit receipt does not bind the exact fixture batch_id");
         }
+        const segment = recorder.startAtMutationReceipt(sample);
+
+        const combinedResponse = page.waitForResponse(async (response) => {
+          const url = new URL(response.url());
+          if (
+            response.request().method() !== "GET"
+            || url.pathname !== "/api/workbench"
+            || url.searchParams.get("month") !== "all"
+            || response.status() !== 200
+          ) {
+            return false;
+          }
+          const payload = await response.json() as Record<string, unknown>;
+          const serialized = JSON.stringify(payload);
+          return sample.transaction_ids.every((rowId) => serialized.includes(rowId))
+            && serialized.includes(sample.business_identity);
+        });
+        await page.getByRole("link", { name: "关联台" }).click();
+        await combinedResponse;
+        segment.markCanonicalReadVisible();
+
+        const identity = page.getByText(sample.business_identity, { exact: true });
+        if (await identity.count() !== 1) {
+          throw new Error("business_identity must have one unique DOM locator");
+        }
+        await expect(identity).toBeVisible();
+        segment.markDomVisible();
+        segment.complete();
       }, async () => {
-        if (submitAttempted) await recoverWorkbenchVisibilityFixture(page, mode, sample);
+        if (submitAttempted) {
+          await recoverWorkbenchDirectCommitVisibilityFixture(page, mode, sample);
+        }
       });
     }
     await recorder.writeReport();

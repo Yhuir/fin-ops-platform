@@ -6,6 +6,7 @@ import json
 import unittest
 from unittest.mock import patch
 
+from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 from fin_ops_platform.tools import runtime_queue_ops
 
 
@@ -348,8 +349,6 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "enqueue-read-model-refresh",
                     "--scope",
                     "workbench_relation=all",
-                    "--scope",
-                    "workbench=all",
                     "--dry-run",
                 ],
                 stdout=stdout,
@@ -362,10 +361,13 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             payload["targets"],
             [
                 {"scope_key": "all", "scope_type": "workbench_relation"},
-                {"scope_key": "all", "scope_type": "workbench"},
             ],
         )
         self.assertEqual(repository.enqueue_read_model_refresh_calls, [])
+
+    def test_read_model_refresh_rejects_retired_workbench_page_scope(self) -> None:
+        with self.assertRaisesRegex(ReadModelScopeError, "Retired read model refresh scope_type"):
+            runtime_queue_ops._normalize_read_model_refresh_targets(["workbench=all"])
 
     def test_read_model_refresh_execute_uses_gateway_and_durable_queue_repository(self) -> None:
         connection = FakeConnection()
@@ -726,8 +728,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "event_id": "00000000-0000-0000-0000-000000000001",
                     "tenant_id": "default",
-                    "event_type": "workbench.read_model.refresh",
-                    "scope_type": "workbench",
+                    "event_type": "workbench_relation.read_model.refresh",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-03",
                     "status": "dead_lettered",
                     "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),

@@ -1223,9 +1223,13 @@ class ApplicationStateStore:
                 else {}
             )
             kept_row_overrides = {
-                row_id: override
-                for row_id, override in row_overrides.items()
-                if str(row_id) not in normalized_row_ids
+                override_key: override
+                for override_key, override in row_overrides.items()
+                if str(
+                    self._get_container_value(override, "row_id")
+                    or override_key
+                )
+                not in normalized_row_ids
             }
             relation_snapshot = (
                 source_snapshot.get("workbench_pair_relations")
@@ -1336,11 +1340,17 @@ class ApplicationStateStore:
                 else {}
             )
             kept_row_overrides = {
-                row_id: override
-                for row_id, override in row_overrides.items()
+                override_key: override
+                for override_key, override in row_overrides.items()
                 if not self._local_workbench_item_matches_domain(
-                    row_id=str(row_id),
-                    row_type=self._get_container_value(override, "type"),
+                    row_id=str(
+                        self._get_container_value(override, "row_id")
+                        or override_key
+                    ),
+                    row_type=(
+                        self._get_container_value(override, "row_type")
+                        or self._get_container_value(override, "type")
+                    ),
                     row_types=workbench_row_types,
                     row_id_prefixes=workbench_row_id_prefixes,
                 )

@@ -477,13 +477,12 @@ class SettingsDataResetRuntimeFactory:
         invalidated_scopes: list[str] = []
         enqueued_jobs: list[str] = []
         gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        for scope_type in ("workbench", "workbench_relation"):
-            try:
-                gateway.enqueue_one(scope_type, "all", reason=reason, metadata={"action": action})
-                invalidated_scopes.append(f"{scope_type}:all")
-                enqueued_jobs.append(f"{scope_type}.read_model.refresh")
-            except Exception as exc:
-                errors.append({"domain": f"{scope_type}_read_model", "error": str(exc)})
+        try:
+            gateway.enqueue_one("workbench_relation", "all", reason=reason, metadata={"action": action})
+            invalidated_scopes.append("workbench_relation:all")
+            enqueued_jobs.append("workbench_relation.read_model.refresh")
+        except Exception as exc:
+            errors.append({"domain": "workbench_relation_read_model", "error": str(exc)})
         try:
             dirty_months = (
                 WorkbenchReconciliationDirtyQueue(

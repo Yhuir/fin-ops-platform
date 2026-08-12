@@ -129,7 +129,12 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
         self.assertIn('[ "$worker" = "workbench-matching" ]', helper)
         self.assertIn("--poll-interval-seconds 5([^0-9.]|$)", helper)
-        self.assertTrue((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
+        self.assertIn('required_existing_worker_envs="${FINOPS_REQUIRE_EXISTING_WORKER_ENVS:-}"', helper)
+        self.assertIn("worker_env_must_already_exist", helper)
+        self.assertIn('[[ " $required_existing_worker_envs " == *" $worker "* ]]', helper)
+        self.assertIn("required existing worker env is missing or not a regular file", helper)
+        self.assertIn('if ! worker_env_must_already_exist "$worker"; then', helper)
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
 
     def test_bank_flow_draft_worker_runtime_is_absent(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
@@ -174,8 +179,40 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn('systemctl stop "$service"', deploy_control)
         self.assertIn("assert_retired_page_runtime_quiesced", deploy_control)
         self.assertIn("from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST", deploy_control)
-        self.assertIn("where status = %s", deploy_control)
-        self.assertIn('"processing", "%.read_model.refresh", active_event_types', deploy_control)
+        self.assertIn('where event_type = %s', deploy_control)
+        self.assertIn('"workbench.read_model.refresh"', deploy_control)
+        self.assertIn('where scope_type = %s', deploy_control)
+        self.assertIn('"event_pending_count", "event_processing_count", "event_publishing_count"', deploy_control)
+        self.assertIn('"event_failed_count"', deploy_control)
+        self.assertIn('"event_dead_lettered_count"', deploy_control)
+        self.assertIn("terminalize_retired_page_runtime_history", deploy_control)
+        self.assertIn("workbench_page_read_model_runtime_retired", deploy_control)
+        self.assertIn("retirement_resolution", deploy_control)
+        self.assertIn("FINOPS_RETIRED_PAGE_RUNTIME_TERMINAL_BATCH_SIZE", deploy_control)
+        self.assertIn("FINOPS_RETIRED_PAGE_RUNTIME_TERMINAL_MAX_ROWS", deploy_control)
+        self.assertIn("for update skip locked", deploy_control)
+        self.assertIn("terminal history exceeds the bounded resolution cap", deploy_control)
+        self.assertIn('"original_publish_status"', deploy_control)
+        self.assertIn('"original_publish_attempts"', deploy_control)
+        self.assertIn('"original_publish_last_error"', deploy_control)
+        self.assertNotIn("publish_status = case when publish_status", deploy_control)
+        self.assertIn("must be an integer from 2 through 60", deploy_control)
+        self.assertIn("status = %s", deploy_control)
+        self.assertIn('"superseded", "{}", ["retirement_resolution"]', deploy_control)
+        self.assertIn('where event_type = %s', deploy_control)
+        self.assertIn('where scope_type = %s', deploy_control)
+        self.assertIn('stable_fields = (', deploy_control)
+        self.assertIn('"event_latest_created_at"', deploy_control)
+        self.assertIn('"scope_latest_created_at"', deploy_control)
+        self.assertIn('"terminal_history": {', deploy_control)
+        self.assertIn('"disposition": "terminalized_in_place_for_retired_page_runtime"', deploy_control)
+        self.assertIn('"final": final', deploy_control)
+        self.assertIn('retired-workbench-page-runtime.json', deploy_control)
+        self.assertIn('"retired_workbench_page_runtime": retired_page_runtime', deploy_control)
+        self.assertLess(
+            activate_case.index("systemctl stop fin-ops-rabbitmq-dispatcher.service"),
+            activate_case.index("stop_runtime_worker_services_for_activation"),
+        )
         self.assertLess(
             activate_case.index("stop_runtime_worker_services_for_activation"),
             activate_case.index('run_schema_migrations "$src"'),
@@ -185,13 +222,64 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             activate_case.index('retire_unregistered_worker_services "$src"'),
         )
         self.assertLess(
-            activate_case.index('retire_unregistered_worker_services "$src"'),
-            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index("systemctl stop fin-ops-rabbitmq-dispatcher.service"),
+            activate_case.index('sync_rabbitmq_dispatcher_event_types "$src"'),
         )
         self.assertLess(
-            activate_case.index('assert_retired_page_runtime_quiesced "$src"'),
+            activate_case.index('retire_unregistered_worker_services "$src"'),
+            activate_case.index('assert_retired_page_runtime_quiesced'),
+        )
+        self.assertLess(
+            activate_case.index("retire_workbench_generation_retention"),
+            activate_case.index('assert_retired_page_runtime_quiesced'),
+        )
+        self.assertLess(
+            activate_case.index('assert_retired_page_runtime_quiesced'),
             activate_case.index('ensure_runtime_workers "$src"'),
         )
+
+    def test_release_gate_proves_retired_workbench_page_runtime_zero_delta_across_candidate_window(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        release_gate = deploy_control.split("release_gate_activate() {", 1)[1].split(
+            '\ncmd="${1:-}"', 1
+        )[0]
+        observer = deploy_control.split("start_retired_workbench_page_runtime_window() {", 1)[1].split(
+            "\nfinish_retired_workbench_page_runtime_window() {", 1
+        )[0]
+
+        self.assertIn("retired-workbench-page-runtime-window-v1", observer)
+        self.assertIn('"event_total_count"', observer)
+        self.assertIn('"event_latest_created_at"', observer)
+        self.assertIn('"scope_total_count"', observer)
+        self.assertIn('"scope_latest_created_at"', observer)
+        self.assertIn("pg_stat_statements_info", observer)
+        self.assertIn("projection_statements", observer)
+        self.assertIn("projection_table_stats", observer)
+        self.assertIn("pg_stat_user_tables", observer)
+        self.assertIn('"workbench_generation_stats"', observer)
+        self.assertIn('"workbench_group_rows"', observer)
+        self.assertIn('"workbench_snapshots"', observer)
+        self.assertIn('"workbench_summary"', observer)
+        self.assertIn('"mode": "source_owner_absent"', observer)
+        self.assertIn('"retired_source_paths_absent"', observer)
+        self.assertIn('"active_call_markers_absent"', observer)
+        self.assertIn('"page_runtime_registration_absent"', observer)
+        self.assertIn('"page_read_model_registration_absent"', observer)
+        self.assertNotIn("client.monitor()", observer)
+        self.assertNotIn("MONITOR", observer)
+        self.assertLess(
+            release_gate.index("start_retired_workbench_page_runtime_window"),
+            release_gate.index('release_gate_checkpoint "$release" t0'),
+        )
+        self.assertGreater(
+            release_gate.index("finish_retired_workbench_page_runtime_window"),
+            release_gate.index('release_gate_checkpoint "$release" t300'),
+        )
+        self.assertLess(
+            release_gate.index("finish_retired_workbench_page_runtime_window"),
+            release_gate.index("discard_workbench_page_worker_env_rollback_backup"),
+        )
+        self.assertIn('"retired_workbench_page_runtime_zero_delta": True', release_gate)
 
     def test_deploy_control_stops_api_and_workers_before_acl_migration(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
@@ -232,21 +320,29 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("backfill_etc_batch_invoice_links", deploy_control)
         self.assertIn("--expected-auto-backfill-count", deploy_control)
 
-    def test_workbench_page_worker_matching_and_relation_remain(self) -> None:
+    def test_workbench_page_worker_is_retired_while_matching_and_relation_remain(self) -> None:
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 
-        self.assertIn("workbench", required)
+        self.assertEqual(
+            list(required),
+            ["oa-sync", "workbench-matching", "workbench-relation", "import", "settings-maintenance"],
+        )
+        self.assertNotIn("workbench", required)
         self.assertNotIn("workbench-secondary", required)
         self.assertNotIn("workbench-aggregate", required)
         self.assertIn("workbench-matching", required)
         self.assertIn("workbench-relation", required)
-        self.assertTrue((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
+        self.assertFalse((WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").exists())
+
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        self.assertIn('"registered_read_models": ["workbench_relation"]', deploy_control)
+        self.assertIn('"registered_read_model_count": 1', deploy_control)
 
     def test_rabbitmq_dispatcher_env_excludes_retired_page_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()
 
         self.assertIn("workbench_relation.read_model.refresh", env_example)
-        self.assertIn("workbench.read_model.refresh", env_example)
+        self.assertNotIn("workbench.read_model.refresh", env_example)
         self.assertNotIn("search.read_model.refresh", env_example)
         self.assertNotIn("no_oa_bank_batch.read_model.refresh", env_example)
         for retired_event in (
@@ -280,46 +376,130 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertNotIn("search.read_model.refresh", dispatcher_env)
         self.assertNotIn("pending_invoice.read_model.refresh", dispatcher_env)
 
-    def test_workbench_generation_prune_runtime_is_installed(self) -> None:
+    def test_workbench_generation_prune_runtime_is_removed_idempotently(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
 
-        self.assertTrue((REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh").exists())
-        self.assertTrue(
+        self.assertFalse((REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh").exists())
+        self.assertFalse(
             (REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example").exists()
         )
-        self.assertTrue(
+        self.assertFalse(
             (REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example").exists()
         )
-        self.assertIn("install_workbench_generation_retention", deploy_control)
-        self.assertIn("finops-prune-workbench-generations", deploy_control)
+        self.assertIn("retire_workbench_generation_retention", deploy_control)
+        self.assertIn('systemctl disable --now "$timer_unit"', deploy_control)
+        self.assertIn('rm -f --', deploy_control)
+        self.assertNotIn("reconcile_workbench_generation_retention", deploy_control)
+        self.assertNotIn("install_workbench_generation_retention", deploy_control)
+        self.assertIn("restore_previous_workbench_generation_retention_for_rollback", deploy_control)
+        self.assertIn("audited previous-page-runtime mode requires a page read-model release", deploy_control)
+        self.assertIn("release_has_workbench_page_read_model", deploy_control)
 
-    def test_workbench_generation_prune_helper_uses_bounded_batch_and_statement_timeout_defaults(self) -> None:
-        helper = WORKBENCH_GENERATION_PRUNE_HELPER.read_text(encoding="utf-8")
+    def test_candidate_retires_live_page_worker_and_syncs_dispatcher_allowlist(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("retire_workbench_page_runtime_assets", deploy_control)
+        self.assertIn("systemctl disable --now fin-ops-worker@workbench.service", deploy_control)
+        self.assertIn('rm -f -- "$WORKBENCH_PAGE_WORKER_ENV" "$WORKBENCH_PAGE_WORKER_UNIT"', deploy_control)
+        self.assertIn("sync_rabbitmq_dispatcher_event_types", deploy_control)
+        self.assertIn('assert_root_owned_runtime_env "$RABBITMQ_DISPATCHER_ENV"', deploy_control)
+        self.assertIn('rabbitmq_dispatch_event_types "$src"', deploy_control)
+        self.assertIn('chown --reference="$RABBITMQ_DISPATCHER_ENV"', deploy_control)
+        self.assertIn('chmod --reference="$RABBITMQ_DISPATCHER_ENV"', deploy_control)
+
+    def test_rollback_rehydrates_previous_page_runtime_before_activation(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        rollback = deploy_control.split("rollback_release_gate() {", 1)[1].split("\n}", 1)[0]
+        prepare = deploy_control.split("prepare_previous_workbench_page_runtime() {", 1)[1].split(
+            "\nworkbench_audit_identity() {", 1
+        )[0]
+
+        self.assertIn('"$src/scripts/rehydrate-workbench-read-models.py" --json', prepare)
+        self.assertIn('seed_previous_workbench_rehydrate_scopes "$src"', prepare)
+        self.assertIn('rollback-workbench-seed.json', prepare)
+        self.assertIn("rollback rehydrate seed did not cover every month shard and all", prepare)
+        self.assertIn('status.get("read_model_status") != "fresh"', prepare)
+        self.assertIn('status.get("active_generation_id")', prepare)
+        self.assertIn('status.get("building_generation_id")', prepare)
+        self.assertIn('status.get("consistency_failures")', prepare)
+        self.assertIn('status.get("all_scope_parent_failures")', prepare)
+        self.assertIn('status.get("dirty_scopes")', prepare)
+        self.assertIn("page refresh outbox is not quiesced after offline rehydrate", prepare)
+        self.assertIn("retirement_history", prepare)
+        self.assertIn("before_active_generations", prepare)
+        self.assertIn("after_active_generations", prepare)
+        self.assertIn("did not create a new Workbench generation", prepare)
+        self.assertIn("new Workbench generation is not active", prepare)
+        self.assertLess(
+            rollback.index("enter_runtime_maintenance"),
+            rollback.index('prepare_previous_workbench_page_runtime "$previous_release" "$evidence_dir"'),
+        )
+        self.assertLess(
+            rollback.index('prepare_previous_workbench_page_runtime "$previous_release" "$evidence_dir"'),
+            rollback.index('activate_release "$previous_release"'),
+        )
+        self.assertIn("audited-previous-page-runtime", rollback)
+        self.assertIn("rollback_page_runtime_mode=direct-only", rollback)
+        self.assertIn('rollback_page_runtime_mode=audited-previous-page-runtime', rollback)
+        self.assertIn('"$rollback_page_runtime_mode"', rollback)
+        self.assertIn('"$rollback_page_runtime_evidence"', rollback)
+        self.assertIn("assert_previous_workbench_rollback_evidence", deploy_control)
+        self.assertIn('payload.get("previous_release") != release', deploy_control)
+        self.assertIn("enter_runtime_maintenance", rollback)
+        self.assertIn("production remains in maintenance", rollback)
+
+    def test_workbench_page_worker_env_has_exact_cutover_and_rollback_lifecycle(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        activate = deploy_control.split("activate_release() {", 1)[1].split(
+            "\nrepair_active_api_runtime() {", 1
+        )[0]
+        rollback = deploy_control.split("rollback_release_gate() {", 1)[1].split(
+            "\nrelease_gate_activate() {", 1
+        )[0]
+        release_gate = deploy_control.split("release_gate_activate() {", 1)[1].split(
+            '\ncmd="${1:-}"', 1
+        )[0]
+
+        self.assertIn("capture_workbench_page_worker_env_for_cutover", deploy_control)
+        self.assertIn("workbench-page-worker-env-rollback-v1", deploy_control)
+        self.assertIn('install -d -m 0700 "$backup_dir"', deploy_control)
+        self.assertIn('install -m 0600 "$WORKBENCH_PAGE_WORKER_ENV" "$backup_temp"', deploy_control)
+        self.assertIn("hashlib.sha256(path.read_bytes()).hexdigest()", deploy_control)
+        self.assertIn("restore_previous_workbench_page_worker_env", activate)
+        self.assertLess(
+            activate.index("restore_previous_workbench_page_worker_env"),
+            activate.index('ensure_runtime_workers "$src" "$required_existing_worker_envs"'),
+        )
+        self.assertIn('required_existing_worker_envs="workbench"', activate)
+        self.assertIn('runtime_worker_helper_src="$(release_src "$rollback_candidate_release")"', activate)
+        self.assertLess(
+            activate.index('install_runtime_worker_helper "$runtime_worker_helper_src"'),
+            activate.index("restore_previous_workbench_page_worker_env"),
+        )
+        self.assertIn('FINOPS_REQUIRE_EXISTING_WORKER_ENVS="$required_existing_worker_envs"', deploy_control)
+        self.assertLess(
+            release_gate.index("capture_workbench_page_worker_env_for_cutover"),
+            release_gate.index('activate_release "$release"'),
+        )
+        self.assertGreater(
+            release_gate.index("discard_workbench_page_worker_env_rollback_backup"),
+            release_gate.index("release gate evidence contract failed"),
+        )
+        self.assertGreater(
+            release_gate.index("discard_workbench_page_worker_env_rollback_backup"),
+            release_gate.index('release_gate_checkpoint "$release" t300'),
+        )
+        self.assertIn("backup_cleanup", release_gate)
+        self.assertGreater(
+            rollback.index("discard_workbench_page_worker_env_rollback_backup"),
+            rollback.index('if [[ "$rolled_back" == true ]]'),
+        )
+        self.assertIn("enter_runtime_maintenance", rollback)
+        self.assertNotIn('cat "$backup_path"', deploy_control)
+
+    def test_retired_workbench_generation_prune_env_is_absent(self) -> None:
         common_env = COMMON_ENV.read_text(encoding="utf-8")
-        service = WORKBENCH_GENERATION_PRUNE_SERVICE.read_text(encoding="utf-8")
-        timer = WORKBENCH_GENERATION_PRUNE_TIMER.read_text(encoding="utf-8")
-
-        self.assertIn('KEEP_RECENT="${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}"', helper)
-        self.assertIn('KEEP_DAYS="${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}"', helper)
-        self.assertIn('LIMIT="${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}"', helper)
-        self.assertIn('DELETE_BATCH_SIZE="${FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE:-1}"', helper)
-        self.assertIn('STATEMENT_TIMEOUT_SECONDS="${FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS:-60}"', helper)
-        self.assertIn('--delete-batch-size "$DELETE_BATCH_SIZE"', helper)
-        self.assertIn('--statement-timeout-seconds "$STATEMENT_TIMEOUT_SECONDS"', helper)
-        self.assertIn('delete_batch_size=$DELETE_BATCH_SIZE statement_timeout_seconds=$STATEMENT_TIMEOUT_SECONDS', helper)
-        self.assertIn('if curl -fsS --max-time 20 "$HEALTH_URL" >/dev/null; then', helper)
-        self.assertIn('echo "health=failed url=$HEALTH_URL"\n  exit 3', helper)
-        self.assertIn("--execute", helper)
-        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-0", helper)
-        self.assertLess(helper.index('source "$SECRETS_ENV"'), helper.index('DELETE_BATCH_SIZE="${FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE:-1}"'))
-        self.assertIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT=1", common_env)
-        self.assertIn("FINOPS_WORKBENCH_PRUNE_KEEP_DAYS=0", common_env)
-        self.assertIn("FINOPS_WORKBENCH_PRUNE_LIMIT=500", common_env)
-        self.assertIn("FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE=1", common_env)
-        self.assertIn("FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS=60", common_env)
-        self.assertIn("ExecStart=/usr/local/sbin/finops-prune-workbench-generations", service)
-        self.assertIn("OnCalendar=*-*-* 03:35:00", timer)
-        self.assertIn("RandomizedDelaySec=15m", timer)
+        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_", common_env)
 
     def test_runtime_queue_history_prune_helper_uses_controlled_retention_defaults(self) -> None:
         helper = RUNTIME_QUEUE_PRUNE_HELPER.read_text(encoding="utf-8")

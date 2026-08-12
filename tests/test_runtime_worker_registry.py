@@ -32,22 +32,21 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 
 
 class RuntimeWorkerRegistryTests(unittest.TestCase):
-    def test_current_runtime_inventory_is_exactly_six_workers_and_two_read_models(self) -> None:
+    def test_current_runtime_inventory_is_exactly_five_workers_and_one_read_model(self) -> None:
         self.assertEqual(
             required_worker_instance_names(),
             (
                 "oa-sync",
                 "workbench-matching",
-                "workbench",
                 "workbench-relation",
                 "import",
                 "settings-maintenance",
             ),
         )
-        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench", "workbench_relation"))
+        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench_relation",))
         self.assertEqual(tuple(APP_STATUS_READ_MODEL_REGISTRY), tuple(READ_MODEL_MANIFEST))
 
-    def test_direct_canonical_page_workers_are_retired_but_workbench_remains(self) -> None:
+    def test_direct_canonical_page_workers_include_retired_workbench_page_runtime(self) -> None:
         registrations = registration_by_instance_name()
 
         for instance_name in (
@@ -61,10 +60,11 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "cost-tax",
             "tax-offset",
             "bank-flow-rule-batch",
+            "workbench",
         ):
             self.assertNotIn(instance_name, registrations)
 
-        self.assertEqual(registrations["workbench"].event_types, ("workbench.read_model.refresh",))
+        self.assertNotIn("workbench.read_model.refresh", rabbitmq_dispatch_event_types())
         self.assertNotIn("workbench-secondary", registrations)
 
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
@@ -119,13 +119,11 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_page_and_relation_distribution_workers_are_retained(self) -> None:
+    def test_only_workbench_relation_distribution_worker_is_retained(self) -> None:
         registrations = registration_by_instance_name()
-        workbench = registrations["workbench"]
         workbench_relation = registrations["workbench-relation"]
 
-        self.assertEqual(workbench.event_types, ("workbench.read_model.refresh",))
-        self.assertEqual(workbench.worker_kind, "workbench-read-model")
+        self.assertNotIn("workbench", registrations)
         self.assertEqual(workbench_relation.event_types, ("workbench_relation.read_model.refresh",))
         self.assertEqual(workbench_relation.worker_kind, "workbench-relation-read-model")
         self.assertEqual(
@@ -144,7 +142,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             (
                 "oa-sync",
                 "workbench-matching",
-                "workbench",
                 "workbench-relation",
                 "import",
                 "settings-maintenance",
@@ -226,6 +223,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             "--enable-bank-flow-rule-batch-canonical-draft-refresh",
             "--enable-search-read-model-refresh",
             "--enable-no-oa-bank-batch-read-model-refresh",
+            "--enable-workbench-read-model-refresh",
         ):
             with self.subTest(retired_flag=retired_flag), self.assertRaises(SystemExit):
                 worker_app.build_parser().parse_args([retired_flag])

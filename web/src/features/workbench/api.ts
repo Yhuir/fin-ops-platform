@@ -25,7 +25,6 @@ import type {
   WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
   WorkbenchSummary,
-  WorkbenchOaStatus,
   WorkbenchColumnLayouts,
   WorkbenchAmountCheck,
   WorkbenchOaInvoiceAnomaly,
@@ -40,9 +39,6 @@ import type {
   WorkbenchFilterOptionsRequest,
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
-  WorkbenchReadModelStatus,
-  WorkbenchRefreshScopeStatus,
-  WorkbenchRefreshStatus,
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
@@ -75,6 +71,22 @@ export type WorkbenchBootstrapProgress = {
 export const WORKBENCH_GROUP_PAGE_SIZE = 50;
 
 const workbenchInitialPageRequests = new Map<string, Promise<ApiWorkbenchInitialPayload>>();
+
+type WorkbenchDirectReadOptions = {
+  forceFresh?: boolean;
+};
+
+function directReadRequestInit(signal?: AbortSignal, options: WorkbenchDirectReadOptions = {}): RequestInit {
+  if (!options.forceFresh) {
+    return { method: "GET", signal };
+  }
+  return {
+    method: "GET",
+    signal,
+    cache: "no-store",
+    headers: { "Cache-Control": "no-cache" },
+  };
+}
 
 type ApiRelation = {
   code: string;
@@ -192,10 +204,6 @@ type ApiWorkbenchOaInvoiceAnomaly = {
 
 type ApiWorkbenchPayload = {
   month: string;
-  oa_status?: {
-    code?: string;
-    message?: string;
-  };
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: {
     oa_count: number;
@@ -218,10 +226,6 @@ type ApiWorkbenchPayload = {
 type ApiWorkbenchSummaryPayload = {
   month: string;
   scope_key?: string;
-  generated_at?: string | null;
-  read_model_status?: WorkbenchReadModelStatus;
-  read_model_version?: string | null;
-  oa_status?: ApiWorkbenchPayload["oa_status"];
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
   statistics?: {
@@ -244,25 +248,22 @@ type ApiWorkbenchSummaryPayload = {
 };
 
 type ApiWorkbenchGroupsPayload = {
-  month: string;
+  month?: string;
   scope_key?: string;
-  zone: WorkbenchZoneId;
-  page: number;
+  zone?: WorkbenchZoneId;
+  page?: number;
   page_size: number;
   total: number;
   row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
-  read_model_status?: WorkbenchReadModelStatus;
-  read_model_version?: string | null;
+  next_cursor?: string | null;
   groups: ApiWorkbenchGroup[];
 };
 
 type ApiWorkbenchFilterOptionsPayload = {
-  page: number;
   page_size: number;
   has_more: boolean;
-  read_model_status?: WorkbenchReadModelStatus;
-  read_model_version?: string | null;
+  next_cursor?: string | null;
   options?: Array<{
     value?: string | null;
     label?: string | null;
@@ -271,7 +272,6 @@ type ApiWorkbenchFilterOptionsPayload = {
 };
 
 type ApiWorkbenchInitialPayload = ApiWorkbenchSummaryPayload & {
-  active_generation_id?: string | null;
   paired: ApiWorkbenchGroupsPayload;
   unpaired: ApiWorkbenchGroupsPayload;
 };
@@ -302,50 +302,6 @@ type ApiWorkbenchOaSyncStatus = {
   failed_event_count?: number | null;
   failedEventCount?: number | null;
   version?: number | null;
-};
-
-type ApiWorkbenchRefreshScopeStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  status?: string | null;
-  updated_at?: string | null;
-  updatedAt?: string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  source_version?: number | string | null;
-  sourceVersion?: number | string | null;
-};
-
-type ApiWorkbenchRefreshStatus = {
-  scope_key?: string | null;
-  scopeKey?: string | null;
-  read_model_status?: WorkbenchReadModelStatus | null;
-  readModelStatus?: WorkbenchReadModelStatus | null;
-  status?: string | null;
-  generated_at?: string | null;
-  generatedAt?: string | null;
-  active_generation_id?: string | null;
-  activeGenerationId?: string | null;
-  consistency_status?: string | null;
-  consistencyStatus?: string | null;
-  read_model_version?: string | number | null;
-  readModelVersion?: string | number | null;
-  source_version?: string | number | null;
-  sourceVersion?: string | number | null;
-  version?: string | number | null;
-  dirty_scopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  dirtyScopes?: ApiWorkbenchRefreshScopeStatus[] | null;
-  running_scopes?: unknown[] | null;
-  runningScopes?: unknown[] | null;
-  processed_count?: number | string | null;
-  processedCount?: number | string | null;
-  total_count?: number | string | null;
-  totalCount?: number | string | null;
-  worker_lag_seconds?: number | string | null;
-  workerLagSeconds?: number | string | null;
-  last_error?: string | null;
-  lastError?: string | null;
-  retryable?: boolean | null;
 };
 
 type ApiIgnoredWorkbenchPayload = {
@@ -456,6 +412,7 @@ type ApiWorkbenchSettingsOption =
 
 type ApiWorkbenchGroup = {
   group_id: string;
+  detail_key?: string | null;
   group_type: string;
   zone?: string | null;
   status?: string | null;
@@ -545,8 +502,6 @@ type ApiWorkbenchActionResult = {
   success: boolean;
   action: string;
   month: string;
-  read_model_status?: string;
-  read_model_version?: string | number | null;
   affected_row_ids: string[];
   case_id?: string;
   exception_case_id?: string;
@@ -558,30 +513,10 @@ type ApiWorkbenchActionResult = {
   affected_scope_keys?: unknown[];
   changedScopes?: unknown[];
   changed_scopes?: unknown[];
-  operationProjection?: ApiWorkbenchOperationProjection;
-  operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
 };
-
-type ApiWorkbenchOperationProjection = {
-  after?: {
-    pairedGroups?: ApiWorkbenchGroup[];
-    paired_groups?: ApiWorkbenchGroup[];
-    unpairedGroups?: ApiWorkbenchGroup[];
-    unpaired_groups?: ApiWorkbenchGroup[];
-  };
-};
-
-export type WorkbenchOperationProjection = {
-  after: {
-    pairedGroups: WorkbenchRelationGroup[];
-    unpairedGroups: WorkbenchRelationGroup[];
-  };
-};
-
-export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "affectedScopeKeys"> & {
+export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "affectedScopeKeys"> & {
   affectedScopeKeys: string[];
-  operationProjection?: WorkbenchOperationProjection;
 };
 
 type ApiWorkbenchExceptionScenario = {
@@ -671,31 +606,13 @@ type ApiWorkbenchExceptionApplyResult = {
   affectedRowIds?: unknown[];
   affected_scope_keys?: unknown[];
   affectedScopeKeys?: unknown[];
-  freshness_targets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  freshnessTargets?: Array<{
-    readModelKey?: unknown;
-    read_model_key?: unknown;
-    scopeType?: unknown;
-    scope_type?: unknown;
-    scopeKey?: unknown;
-    scope_key?: unknown;
-  }>;
-  workbench_refresh_required?: boolean;
-  workbenchRefreshRequired?: boolean;
   message?: string;
 };
 
 type ConfirmLinkPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   caseId?: string;
   note?: string;
   idempotencyKey: string;
@@ -704,7 +621,7 @@ type ConfirmLinkPayload = {
 type WithdrawLinkPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   note?: string;
   operationType?: "withdraw_relation";
   previewId?: string;
@@ -712,10 +629,16 @@ type WithdrawLinkPayload = {
   idempotencyKey: string;
 };
 
+type RelationPreviewPayload = {
+  month: string;
+  rowIds: string[];
+  rowTypes: WorkbenchRecordType[];
+};
+
 type MarkExceptionPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
+  rowType: WorkbenchRecordType;
   exceptionCode: string;
   comment?: string;
 };
@@ -723,7 +646,7 @@ type MarkExceptionPayload = {
 type CancelLinkPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
+  rowType: WorkbenchRecordType;
   comment?: string;
   idempotencyKey: string;
 };
@@ -731,7 +654,7 @@ type CancelLinkPayload = {
 type UpdateBankExceptionPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
+  rowType: WorkbenchRecordType;
   relationCode: string;
   relationLabel: string;
   comment?: string;
@@ -740,14 +663,14 @@ type UpdateBankExceptionPayload = {
 type ConfirmPersonalAdvanceRepaymentPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   note?: string;
 };
 
 type IgnoreRowPayload = {
   month: string;
   rowId: string;
-  expectedReadModelVersion: string;
+  rowType: WorkbenchRecordType;
   comment?: string;
 };
 
@@ -756,13 +679,12 @@ type OaInvoiceAnomalyDecisionPayload = {
   zone: WorkbenchZoneId;
   groupId: string;
   fingerprint: string;
-  expectedReadModelVersion: string;
 };
 
 type ConfirmCashPassThroughPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   cashAmount?: string;
   note?: string;
 };
@@ -770,7 +692,7 @@ type ConfirmCashPassThroughPayload = {
 type ConfirmCashTicketPurchasePayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   cashAmount: string;
   ticketCostAmount: string;
   projectId?: string;
@@ -783,7 +705,7 @@ type ConfirmCashTicketPurchasePayload = {
 type CancelCashSpecialPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   note?: string;
 };
 
@@ -1503,6 +1425,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
   const rawGroupType = String(group.group_type || "").trim();
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
+    detailKey: typeof group.detail_key === "string" && group.detail_key.trim()
+      ? group.detail_key.trim()
+      : undefined,
     groupType: mapGroupType(group.group_type, zoneHint),
     rawGroupType: rawGroupType || undefined,
     matchConfidence: group.match_confidence,
@@ -1769,7 +1694,6 @@ function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): Wo
 function mapWorkbenchExceptionApplyResult(
   payload: ApiWorkbenchExceptionApplyResult,
 ): WorkbenchExceptionApplyResult {
-  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
   return {
     success: payload.success === true,
     case: payload.case ?? null,
@@ -1778,42 +1702,8 @@ function mapWorkbenchExceptionApplyResult(
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
     affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
       .filter((scopeKey) => scopeKey !== "all"),
-    freshnessTargets,
-    workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
-}
-
-function cleanFreshnessTargets(value: unknown): WorkbenchExceptionApplyResult["freshnessTargets"] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: WorkbenchExceptionApplyResult["freshnessTargets"] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const record = item as Record<string, unknown>;
-    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
-    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
-    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
-    if (!readModelKey || !scopeKey || scopeKey === "all") {
-      continue;
-    }
-    const target = {
-      readModelKey,
-      scopeKey,
-      ...(scopeType ? { scopeType } : {}),
-    };
-    if (!normalized.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      normalized.push(target);
-    }
-  }
-  return normalized;
 }
 
 function mapZoneCounts(
@@ -1860,14 +1750,21 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
   };
 }
 
-function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
-  return String(value ?? "refreshing").trim() as WorkbenchReadModelStatus || "refreshing";
-}
-
-function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
+function mapWorkbenchZonePage(
+  payload: ApiWorkbenchGroupsPayload,
+  zone: WorkbenchZoneId,
+  cursor: string | null = null,
+  page = 1,
+): WorkbenchZonePageInfo {
+  const nextCursor = typeof payload.next_cursor === "string" && payload.next_cursor.trim()
+    ? payload.next_cursor.trim()
+    : null;
+  if (payload.has_more === true && !nextCursor) {
+    throw new Error("invalid_workbench_cursor_contract");
+  }
   return {
-    zone: payload.zone,
-    page: toCount(payload.page) || 1,
+    zone,
+    page,
     pageSize: toCount(payload.page_size) || 50,
     total: toCount(payload.total),
     rowCounts: {
@@ -1878,8 +1775,8 @@ function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZone
         || toCount(payload.row_counts?.oa) + toCount(payload.row_counts?.bank) + toCount(payload.row_counts?.invoice),
     },
     hasMore: payload.has_more === true,
-    readModelStatus: mapReadModelStatus(payload.read_model_status),
-    readModelVersion: payload.read_model_version ?? null,
+    cursor,
+    nextCursor,
   };
 }
 
@@ -1896,15 +1793,6 @@ function mapInvoiceInventory(inventory?: ApiWorkbenchInvoiceInventory): Workbenc
     extraEtcTotal: mapInventoryCount(inventory?.extra_etc_total),
     etcSummaryBatchCount: mapInventoryCount(inventory?.etc_summary_batch_count),
     oaAttachmentTotal: mapInventoryCount(inventory?.oa_attachment_total),
-  };
-}
-
-function mapOaStatus(oaStatus?: ApiWorkbenchPayload["oa_status"]): WorkbenchOaStatus {
-  const code = String(oaStatus?.code ?? "ready").trim();
-  const message = String(oaStatus?.message ?? "OA 已同步").trim();
-  return {
-    code: code === "idle" || code === "loading" || code === "ready" || code === "error" ? code : "ready",
-    message: message || "OA 已同步",
   };
 }
 
@@ -2150,7 +2038,7 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   duplicate_pending_invoice_tag_mapping: "同一个银行明细标签不能同时归入多个待找发票筛选。",
   bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。",
   bank_transaction_tags_version_conflict: "银行明细标签已被其他页面更新，请刷新后重新保存。",
-  workbench_read_model_version_conflict: "关联台数据已变化，请刷新后重新预览。",
+  workbench_canonical_selection_conflict: "所选记录已变化，请刷新后重新选择。",
   workbench_relation_preview_stale: "关联预览已失效，请重新预览。",
   workbench_relation_preview_conflict: "关联预览已失效，请重新预览。",
   workbench_row_not_found: "所选关联台记录已不可用，请刷新后重新选择。",
@@ -2395,66 +2283,17 @@ function cleanOaSyncScopeList(value: unknown[] | undefined) {
     : [];
 }
 
-function nullableNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function cleanRefreshScopeList(value: unknown[] | null | undefined): WorkbenchRefreshScopeStatus[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .filter((item): item is ApiWorkbenchRefreshScopeStatus => Boolean(item) && typeof item === "object")
-    .map((scope) => ({
-      scopeKey: String(scope.scopeKey ?? scope.scope_key ?? "").trim(),
-      status: String(scope.status ?? "").trim(),
-      updatedAt: scope.updatedAt ?? scope.updated_at ?? null,
-      lastError: scope.lastError ?? scope.last_error ?? null,
-      sourceVersion: nullableNumber(scope.sourceVersion ?? scope.source_version),
-    }))
-    .filter((scope) => scope.scopeKey || scope.status);
-}
-
-function mapWorkbenchRefreshStatus(payload: ApiWorkbenchRefreshStatus): WorkbenchRefreshStatus {
-  const rawStatus = String(payload.readModelStatus ?? payload.read_model_status ?? payload.status ?? "refreshing").trim() || "refreshing";
-  return {
-    scopeKey: String(payload.scopeKey ?? payload.scope_key ?? "all").trim() || "all",
-    readModelStatus: rawStatus as WorkbenchReadModelStatus,
-    consistencyStatus: payload.consistencyStatus ?? payload.consistency_status ?? null,
-    generatedAt: payload.generatedAt ?? payload.generated_at ?? null,
-    activeGenerationId: payload.activeGenerationId ?? payload.active_generation_id ?? null,
-    readModelVersion:
-      payload.readModelVersion ??
-      payload.read_model_version ??
-      payload.activeGenerationId ??
-      payload.active_generation_id ??
-      payload.sourceVersion ??
-      payload.source_version ??
-      payload.version ??
-      null,
-    dirtyScopes: cleanRefreshScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
-    runningScopes: cleanOaSyncScopeList((payload.runningScopes ?? payload.running_scopes) as unknown[] | undefined),
-    processedCount: nullableNumber(payload.processedCount ?? payload.processed_count),
-    totalCount: nullableNumber(payload.totalCount ?? payload.total_count),
-    workerLagSeconds: nullableNumber(payload.workerLagSeconds ?? payload.worker_lag_seconds),
-    lastError: payload.lastError ?? payload.last_error ?? null,
-    retryable: payload.retryable === true,
-  };
-}
-
 export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<WorkbenchOaSyncStatus> {
   const payload = await requestJson<ApiWorkbenchOaSyncStatus>("/api/oa-sync/status", { method: "GET", signal });
-  const status = String(payload.status ?? "synced").trim() || "synced";
+  const status = String(payload.status ?? "unknown").trim() || "unknown";
+  const defaultMessage = status === "synced"
+    ? "OA 已同步"
+    : status === "error" || status === "unknown"
+      ? "OA 同步状态异常"
+      : "OA 正在同步";
   return {
     status,
-    message: String(payload.message ?? (status === "refreshing" ? "OA 正在同步" : "OA 已同步")).trim(),
+    message: String(payload.message ?? defaultMessage).trim() || defaultMessage,
     dirtyScopes: cleanOaSyncScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
     changedScopes: cleanOaSyncScopeList(payload.changedScopes ?? payload.changed_scopes),
     lastSeenChangeAt: payload.lastSeenChangeAt ?? payload.last_seen_change_at ?? null,
@@ -2473,29 +2312,21 @@ export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<
   };
 }
 
-export async function fetchWorkbenchRefreshStatus(month: string, signal?: AbortSignal): Promise<WorkbenchRefreshStatus> {
-  const params = new URLSearchParams({ month });
-  const payload = await requestJson<ApiWorkbenchRefreshStatus>(`/api/workbench/refresh-status?${params.toString()}`, {
-    method: "GET",
-    signal,
-  });
-  return mapWorkbenchRefreshStatus(payload);
-}
-
 function workbenchGroupsUrl(
   month: string,
   zone: WorkbenchZoneId,
-  page: number,
+  cursor: string | null,
   pageSize: number,
   query: WorkbenchGroupsPageQuery = {},
-  expectedReadModelVersion?: string,
 ) {
   const params = new URLSearchParams({
     month,
     zone,
-    page: String(page),
     page_size: String(pageSize),
   });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
   const search = String(query.search ?? "").trim();
   const status = String(query.status ?? "").trim();
   const sourceKind = String(query.sourceKind ?? "").trim();
@@ -2527,9 +2358,6 @@ function workbenchGroupsUrl(
   }
   if (exceptionBucket) {
     params.set("exception_bucket", exceptionBucket);
-  }
-  if (expectedReadModelVersion?.trim()) {
-    params.set("expected_read_model_version", expectedReadModelVersion.trim());
   }
   return `/api/workbench/groups?${params.toString()}`;
 }
@@ -2602,20 +2430,21 @@ function stableJsonValue(value: unknown): unknown {
 export async function fetchWorkbenchGroupsPage(
   month: string,
   zone: WorkbenchZoneId,
-  page: number,
+  cursor: string | null = null,
   pageSize = WORKBENCH_GROUP_PAGE_SIZE,
   signal?: AbortSignal,
   query: WorkbenchGroupsPageQuery = {},
-  expectedReadModelVersion?: string,
+  page = 1,
+  readOptions: WorkbenchDirectReadOptions = {},
 ): Promise<WorkbenchGroupsPageResult> {
   const payload = await requestJson<ApiWorkbenchGroupsPayload>(
-    workbenchGroupsUrl(month, zone, page, pageSize, query, expectedReadModelVersion),
-    { method: "GET", signal },
+    workbenchGroupsUrl(month, zone, cursor, pageSize, query),
+    directReadRequestInit(signal, readOptions),
   );
   return {
-    zone: payload.zone,
-    groups: payload.groups.map((group) => mapGroup(group, payload.zone)),
-    page: mapWorkbenchZonePage(payload),
+    zone,
+    groups: payload.groups.map((group) => mapGroup(group, zone)),
+    page: mapWorkbenchZonePage(payload, zone, cursor, page),
   };
 }
 
@@ -2624,7 +2453,6 @@ export async function fetchWorkbenchFilterOptions(
   zone: WorkbenchZoneId,
   request: WorkbenchFilterOptionsRequest,
   query: WorkbenchGroupsPageQuery = {},
-  expectedReadModelVersion?: string,
   signal?: AbortSignal,
 ): Promise<WorkbenchFilterOptionsPage> {
   const params = new URLSearchParams({
@@ -2632,9 +2460,9 @@ export async function fetchWorkbenchFilterOptions(
     zone,
     pane: request.pane,
     facet: request.facet,
-    page: String(request.page ?? 1),
     page_size: "100",
   });
+  if (request.cursor) params.set("cursor", request.cursor);
   if (request.column) params.set("column", request.column);
   if (request.optionSearch?.trim()) params.set("option_search", request.optionSearch.trim());
   if (query.search?.trim()) params.set("search", query.search.trim());
@@ -2645,13 +2473,16 @@ export async function fetchWorkbenchFilterOptions(
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   if (columnFilters) params.set("column_filters", columnFilters);
   if (timeFilters) params.set("time_filters", timeFilters);
-  if (expectedReadModelVersion?.trim()) {
-    params.set("expected_read_model_version", expectedReadModelVersion.trim());
-  }
   const payload = await requestJson<ApiWorkbenchFilterOptionsPayload>(
     `/api/workbench/filter-options?${params.toString()}`,
     { method: "GET", signal },
   );
+  const nextCursor = typeof payload.next_cursor === "string" && payload.next_cursor.trim()
+    ? payload.next_cursor.trim()
+    : null;
+  if (payload.has_more === true && !nextCursor) {
+    throw new Error("invalid_workbench_filter_cursor_contract");
+  }
   return {
     options: (payload.options ?? [])
       .map((option) => ({
@@ -2660,60 +2491,57 @@ export async function fetchWorkbenchFilterOptions(
         missing: option.missing === true,
       }))
       .filter((option) => option.value && option.label),
-    page: Math.max(1, Number(payload.page) || 1),
     pageSize: Math.max(1, Number(payload.page_size) || 100),
     hasMore: payload.has_more === true,
-    readModelStatus: payload.read_model_status ?? "refreshing",
-    readModelVersion: payload.read_model_version ?? null,
+    nextCursor,
   };
 }
 
 export async function fetchWorkbenchExceptionGroups(
   month: string,
   bucket: "active" | "processed",
-  expectedReadModelVersion: string,
   signal?: AbortSignal,
-): Promise<{ groups: WorkbenchRelationGroup[] }> {
+): Promise<{
+  groups: WorkbenchRelationGroup[];
+  pages: Record<WorkbenchZoneId, WorkbenchZonePageInfo>;
+}> {
   const loadZone = async (zone: WorkbenchZoneId) => {
-    const groups: WorkbenchRelationGroup[] = [];
-    let page = 1;
-    while (true) {
-      const result = await fetchWorkbenchGroupsPage(
-        month,
-        zone,
-        page,
-        200,
-        signal,
-        { detailLevel: "full", exceptionBucket: bucket },
-        expectedReadModelVersion,
-      );
-      groups.push(...result.groups);
-      if (!result.page.hasMore) {
-        return groups;
-      }
-      page += 1;
-    }
+    return fetchWorkbenchGroupsPage(
+      month,
+      zone,
+      null,
+      WORKBENCH_GROUP_PAGE_SIZE,
+      signal,
+      { detailLevel: "summary", exceptionBucket: bucket },
+      1,
+      { forceFresh: true },
+    );
   };
   const [paired, unpaired] = await Promise.all([
     loadZone("paired"),
     loadZone("unpaired"),
   ]);
-  return { groups: [...paired, ...unpaired] };
+  return {
+    groups: [...paired.groups, ...unpaired.groups],
+    pages: { paired: paired.page, unpaired: unpaired.page },
+  };
 }
 
 export async function fetchWorkbenchGroupDetail(
   month: string,
   zone: WorkbenchZoneId,
   groupId: string,
-  expectedReadModelVersion: string,
+  detailKey?: string,
   signal?: AbortSignal,
 ): Promise<WorkbenchRelationGroup> {
   const params = new URLSearchParams({
     month,
     zone,
     group_id: groupId,
-    expected_read_model_version: expectedReadModelVersion,
   });
+  if (detailKey?.trim()) {
+    params.set("detail_key", detailKey.trim());
+  }
   const payload = await requestJson<{
     group: ApiWorkbenchGroup;
   }>(`/api/workbench/groups/detail?${params.toString()}`, {
@@ -2755,6 +2583,7 @@ export async function fetchWorkbenchInitialPage(
   signal?: AbortSignal,
   onProgress?: (progress: WorkbenchBootstrapProgress) => void,
   zoneQueries: Partial<Record<WorkbenchZoneId, WorkbenchGroupsPageQuery>> = {},
+  readOptions: WorkbenchDirectReadOptions = {},
 ): Promise<WorkbenchInitialPageResult> {
   const requestUrl = workbenchInitialUrl(month, zoneQueries);
   onProgress?.({
@@ -2765,8 +2594,11 @@ export async function fetchWorkbenchInitialPage(
     indeterminate: false,
   });
   let payloadRequest: Promise<ApiWorkbenchInitialPayload>;
-  if (signal) {
-    payloadRequest = requestJson<ApiWorkbenchInitialPayload>(requestUrl, { method: "GET", signal });
+  if (signal || readOptions.forceFresh) {
+    payloadRequest = requestJson<ApiWorkbenchInitialPayload>(
+      requestUrl,
+      directReadRequestInit(signal, readOptions),
+    );
   } else {
     payloadRequest = workbenchInitialPageRequests.get(requestUrl)
       ?? requestJson<ApiWorkbenchInitialPayload>(requestUrl, { method: "GET" }).finally(() => {
@@ -2775,19 +2607,13 @@ export async function fetchWorkbenchInitialPage(
     workbenchInitialPageRequests.set(requestUrl, payloadRequest);
   }
   const payload = await payloadRequest;
-  const readModelVersion = payload.read_model_version ?? payload.active_generation_id ?? null;
-  const readModelStatus = mapReadModelStatus(payload.read_model_status);
   const pairedPayload: ApiWorkbenchGroupsPayload = {
     ...payload.paired,
     zone: "paired",
-    read_model_status: payload.paired.read_model_status ?? readModelStatus,
-    read_model_version: payload.paired.read_model_version ?? readModelVersion,
   };
   const unpairedPayload: ApiWorkbenchGroupsPayload = {
     ...payload.unpaired,
     zone: "unpaired",
-    read_model_status: payload.unpaired.read_model_status ?? readModelStatus,
-    read_model_version: payload.unpaired.read_model_version ?? readModelVersion,
   };
   onProgress?.({
     label: "关联台数据已加载完成",
@@ -2800,7 +2626,6 @@ export async function fetchWorkbenchInitialPage(
   return {
     data: {
       month: payload.month,
-      oaStatus: mapOaStatus(payload.oa_status),
       summary: mapSummaryCounts(payload.summary),
       invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
       paired: {
@@ -2811,8 +2636,8 @@ export async function fetchWorkbenchInitialPage(
       },
     },
     pages: {
-      paired: mapWorkbenchZonePage(pairedPayload),
-      unpaired: mapWorkbenchZonePage(unpairedPayload),
+      paired: mapWorkbenchZonePage(pairedPayload, "paired"),
+      unpaired: mapWorkbenchZonePage(unpairedPayload, "unpaired"),
     },
     statistics: payload.statistics ? {
       oaCount: toOptionalCount(payload.statistics.oa_count),
@@ -3243,10 +3068,7 @@ export async function syncWorkbenchSettingsProjects(actorId: string): Promise<Wo
 function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchActionResult {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
-  const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
   const {
-    operationProjection: _rawOperationProjection,
-    operation_projection: _rawOperationProjectionSnake,
     affectedScopeKeys: _rawAffectedScopeKeys,
     affected_scope_keys: _rawAffectedScopeKeysSnake,
     ...rest
@@ -3254,7 +3076,6 @@ function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchA
   return {
     ...rest,
     affectedScopeKeys,
-    ...(operationProjection ? { operationProjection } : {}),
   };
 }
 
@@ -3262,35 +3083,6 @@ function mapAffectedScopeEnvelope(payload: ApiAffectedScopeEnvelope) {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
   return { affectedScopeKeys };
-}
-
-function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProjection | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const after = (value as ApiWorkbenchOperationProjection).after;
-  if (!after || typeof after !== "object") {
-    return undefined;
-  }
-  const pairedGroups = Array.isArray(after.pairedGroups)
-    ? after.pairedGroups
-    : Array.isArray(after.paired_groups)
-      ? after.paired_groups
-      : undefined;
-  const unpairedGroups = Array.isArray(after.unpairedGroups)
-    ? after.unpairedGroups
-    : Array.isArray(after.unpaired_groups)
-      ? after.unpaired_groups
-      : undefined;
-  if (!pairedGroups && !unpairedGroups) {
-    return undefined;
-  }
-  return {
-    after: {
-      pairedGroups: (pairedGroups ?? []).map((group) => mapGroup(group, "paired")),
-      unpairedGroups: (unpairedGroups ?? []).map((group) => mapGroup(group, "unpaired")),
-    },
-  };
 }
 
 function cleanScopeList(value: unknown) {
@@ -3328,7 +3120,7 @@ export async function deleteWorkbenchSettingsProject(projectId: string): Promise
 
 export async function fetchWorkbenchRowDetail(
   rowId: string,
-  options: AbortSignal | { month?: string; signal?: AbortSignal; expectedReadModelVersion?: string } = {},
+  options: AbortSignal | { month?: string; rowType?: WorkbenchRecordType; signal?: AbortSignal } = {},
 ): Promise<WorkbenchRecord> {
   const signal = options instanceof AbortSignal ? options : options.signal;
   const month = options instanceof AbortSignal ? "" : options.month?.trim() ?? "";
@@ -3336,8 +3128,8 @@ export async function fetchWorkbenchRowDetail(
   if (month) {
     params.set("month", month);
   }
-  if (!(options instanceof AbortSignal) && options.expectedReadModelVersion?.trim()) {
-    params.set("expected_read_model_version", options.expectedReadModelVersion.trim());
+  if (!(options instanceof AbortSignal) && options.rowType) {
+    params.set("row_type", options.rowType);
   }
   const query = params.toString();
   const payload = await requestJson<{ row: ApiWorkbenchRow }>(
@@ -3354,14 +3146,14 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
   const requestBody: {
     month: string;
     row_ids: string[];
-    expected_read_model_version: string;
+    row_types: WorkbenchRecordType[];
     case_id?: string;
     note?: string;
     idempotency_key: string;
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
-    expected_read_model_version: payload.expectedReadModelVersion,
+    row_types: payload.rowTypes,
     case_id: payload.caseId,
     idempotency_key: payload.idempotencyKey,
   };
@@ -3377,7 +3169,8 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
 }
 
 export async function previewWorkbenchConfirmLink(
-  payload: Omit<ConfirmLinkPayload, "idempotencyKey">,
+  payload: RelationPreviewPayload,
+  signal?: AbortSignal,
 ): Promise<WorkbenchRelationPreview> {
   const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/confirm-link/preview", {
     method: "POST",
@@ -3385,15 +3178,16 @@ export async function previewWorkbenchConfirmLink(
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
-      case_id: payload.caseId,
+      row_types: payload.rowTypes,
     }),
+    signal,
   });
   return mapRelationPreview(result);
 }
 
 export async function previewWorkbenchWithdrawLink(
-  payload: Omit<WithdrawLinkPayload, "idempotencyKey">,
+  payload: RelationPreviewPayload,
+  signal?: AbortSignal,
 ): Promise<WorkbenchRelationPreview> {
   const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/withdraw-link/preview", {
     method: "POST",
@@ -3401,8 +3195,9 @@ export async function previewWorkbenchWithdrawLink(
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
     }),
+    signal,
   });
   return mapRelationPreview(result);
 }
@@ -3416,7 +3211,7 @@ export async function previewWorkbenchException(
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
     }),
   });
   return mapWorkbenchExceptionPreview(result);
@@ -3433,7 +3228,7 @@ export async function applyWorkbenchException(
       body: JSON.stringify({
         month: payload.month,
         row_ids: payload.rowIds,
-        expected_read_model_version: payload.expectedReadModelVersion,
+        row_types: payload.rowTypes,
         scenario_code: payload.scenarioCode,
         action_code: payload.actionCode,
         payload: payload.payload,
@@ -3448,7 +3243,7 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   const requestBody: {
     month: string;
     row_ids: string[];
-    expected_read_model_version: string;
+    row_types: WorkbenchRecordType[];
     note?: string;
     operation_type?: "withdraw_relation";
     preview_id?: string;
@@ -3457,7 +3252,7 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
-    expected_read_model_version: payload.expectedReadModelVersion,
+    row_types: payload.rowTypes,
     idempotency_key: payload.idempotencyKey,
   };
   if (payload.note?.trim()) {
@@ -3487,7 +3282,7 @@ export async function markWorkbenchException(payload: MarkExceptionPayload): Pro
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_type: payload.rowType,
       exception_code: payload.exceptionCode,
       comment: payload.comment,
     }),
@@ -3502,7 +3297,7 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<W
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_type: payload.rowType,
       comment: payload.comment,
       idempotency_key: payload.idempotencyKey,
     }),
@@ -3517,7 +3312,7 @@ export async function updateWorkbenchBankException(payload: UpdateBankExceptionP
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_type: payload.rowType,
       relation_code: payload.relationCode,
       relation_label: payload.relationLabel,
       comment: payload.comment,
@@ -3533,7 +3328,7 @@ export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmP
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
       note: payload.note,
     }),
   });
@@ -3547,7 +3342,7 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<Wor
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_type: payload.rowType,
       comment: payload.comment,
     }),
   });
@@ -3568,7 +3363,6 @@ export async function setWorkbenchOaInvoiceAnomalyIgnored(
         zone: payload.zone,
         group_id: payload.groupId,
         fingerprint: payload.fingerprint,
-        expected_read_model_version: payload.expectedReadModelVersion,
       }),
     },
   );
@@ -3582,7 +3376,7 @@ export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassTh
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
       cash_amount: payload.cashAmount,
       note: payload.note,
     }),
@@ -3597,7 +3391,7 @@ export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTic
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
       cash_amount: payload.cashAmount,
       ticket_cost_amount: payload.ticketCostAmount,
       project_id: payload.projectId,
@@ -3617,7 +3411,7 @@ export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPaylo
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
-      expected_read_model_version: payload.expectedReadModelVersion,
+      row_types: payload.rowTypes,
       note: payload.note,
     }),
   });

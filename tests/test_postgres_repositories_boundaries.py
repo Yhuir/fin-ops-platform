@@ -1093,6 +1093,50 @@ def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     assert stale_file_update[1] == ("task-1", ["file-1"])
 
 
+def test_etc_state_persists_business_batch_member_invoice_summary() -> None:
+    connection = RecordingConnection()
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    repository.save_etc_state(
+        {
+            "invoices": {
+                "ETC001": {"invoice_number": "ETC001", "total_amount": "13.07"},
+                "ETC002": {"invoice_number": "ETC002", "total_amount": "14.07"},
+            },
+            "batches": {
+                "etc_20260520_001": {
+                    "status": "submitted_confirmed",
+                    "issue_start_date": "2026-05-20",
+                    "invoice_ids": ["ETC001", "ETC002"],
+                    "oa_total_amount": "1673.30",
+                    "total_amount": "1673.30",
+                    "etc_invoice_amount": "27.14",
+                    "etc_invoice_count": 37,
+                }
+            },
+            "business_batches": {
+                "etc_business_batch_0004": {
+                    "status": "manually_marked_submitted",
+                    "submission_batch_id": "etc_20260520_001",
+                    "invoice_ids": ["ETC001", "ETC002"],
+                    "created_at": "2026-05-20T09:00:00+08:00",
+                }
+            },
+        }
+    )
+
+    business_batch_writes = [
+        params
+        for sql, params in connection.executed
+        if "insert into app.etc_business_batches" in sql
+    ]
+    assert len(business_batch_writes) == 1
+    params = business_batch_writes[0]
+    assert params[4] == "2026-05-01"
+    assert params[5] == 2
+    assert params[6] == "27.14"
+
+
 def test_ops_tax_etc_oa_draft_save_locks_and_compares_the_target_version() -> None:
     class VersionedConnection(RecordingConnection):
         def __init__(self, version: int) -> None:

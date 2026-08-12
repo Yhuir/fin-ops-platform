@@ -147,9 +147,13 @@ class RuntimeStatePolicyTests(unittest.TestCase):
 
     def test_production_worker_refresh_paths_do_not_use_application_or_snapshot_fallback(self) -> None:
         repository_root = Path(__file__).resolve().parents[1]
+        retired_page_refresh = (
+            repository_root
+            / "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py"
+        )
+        self.assertFalse(retired_page_refresh.exists())
         production_worker_files = [
             repository_root / "backend/src/fin_ops_platform/app/worker.py",
-            repository_root / "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py",
         ]
         forbidden_tokens = (

@@ -1,6 +1,6 @@
 # 测试闭环依赖地图
 
-> 2026-08-01 当前合同：read-model registry 只保留 active-generation `workbench` 与共享 `workbench_relation`；独立 Search API/index/runtime 和 no-OA projection/worker 已退休。本文后续出现的 Search/no-OA 或其它页面 freshness/worker/projection 文件名属于历史覆盖地图，不得作为当前运行时依赖；当前事实源见 `docs/architecture/module-boundaries/read-model-contracts.md` 和各页面 `boundary-io.md`。
+> 2026-08-13 当前合同：read-model registry 只保留共享 `workbench_relation`；关联台页面与其它 direct 页面一样请求内读取 canonical facts。独立 Workbench page generation、Search API/index/runtime 和 no-OA projection/worker 已退休。本文后续出现的这些 freshness/worker/projection 文件名属于历史覆盖地图，不得作为当前运行时依赖；当前事实源见 `docs/architecture/module-boundaries/read-model-contracts.md` 和各页面 `boundary-io.md`。
 
 本文是测试闭环的全局依赖地图。它先描述页面、API、read model、worker、domain event 和状态平面之间的关系，再指导各模块在 `docs/modules/<module>/tests.md` 中补齐影响面和测试缺口。
 
@@ -25,7 +25,7 @@
 
 | Module | Route | Page component | API client | 后端入口 | Read model / worker / status | 主要测试入口 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | `/` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench*`、`routes_workbench.py` | `workbench`、`workbench_relation`、`workbench-matching`、App Status `workbench` | `tests/test_workbench_*`、`web/src/test/Workbench*.test.tsx` |
+| `reconciliation-workbench` | `/` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench*`、`routes_workbench.py`、`PostgresWorkbenchPageQueryRepository` | direct canonical snapshot；`workbench-matching` 与共享 `workbench_relation` 为独立下游，不是页面读取依赖 | `tests/test_workbench_*`、`web/src/test/Workbench*.test.tsx` |
 | `tax-offset` | `/tax-offset` | `web/src/pages/TaxOffsetPage.tsx` | `web/src/features/tax/api.ts` | `routes_tax.py`、`server.py` `/api/tax-offset*` | `tax_offset`、`invoice_lifecycle`、`cost-tax`、`invoice-lifecycle` | `tests/test_tax_offset_*`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` |
 | `cost-statistics` | `/cost-statistics` | `web/src/pages/CostStatisticsPage.tsx` | `web/src/features/cost-statistics/api.ts` | `routes_cost_statistics.py`、`server.py` `/api/cost-statistics*` | `cost_statistics`、`cost-statistics` | `tests/test_cost_statistics_*`、`web/src/test/CostStatistics*.test.ts`、`web/e2e/cost-statistics-flow.spec.ts` |
 | `bank-details` | `/bank-details` | `web/src/pages/BankDetailsPage.tsx` | `web/src/features/bankDetails/api.ts` | `routes_bank_details.py`、`BankDetailsCanonicalQueryService`、`server.py` `/api/bank-details*` | 页面直读 canonical PostgreSQL；共享旧 `bank_detail` / `bank_account_balance` worker 不属于页面请求链 | `tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_*`、`web/src/test/BankDetails*.test.tsx` |
@@ -346,9 +346,9 @@
 | Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService` | task ready/importing/imported/closed/deleted、source files、version、deleted tombstone、重启 hydrate |
 | Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存 |
-| Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、delete/reset 不恢复旧二栏 relation |
+| Workbench direct query | `PostgresWorkbenchPageQueryRepository`、`WorkbenchPairRelationService` | normal GET 从 canonical submitted business batch 构造 `etc_invoice_summary`、active relation 排除 open summary、delete/reset 不恢复旧二栏 relation；零 page projection/cache/queue |
 | Ops tools | cleanup/migration tools | orphan task 清理显式 allowlist、历史迁移 dry-run/execute 不绕过 service 边界 |
-| App Status | import worker、Workbench read model、App Health | import job、Workbench dirty/readiness、ETC route/API smoke、Nginx HTML/502 风险 |
+| App Status | import worker、`workbench_relation`、App Health | import job、shared relation/matching runtime、ETC route/API smoke、Nginx HTML/502 风险；不登记 Workbench page read model |
 
 `etc-tickets` 写入 fan-out：
 
@@ -368,7 +368,7 @@
 - `tests/test_etc_backend.py` 保护 business batch API、manual OA status、delete/reset、source file、导入确认、旧 route 兼容和 Workbench summary contract。
 - `tests/test_etc_reconciliation_service.py` 保护 task 状态机、source file、deleted tombstone、重启 hydrate 和 active import recovery。
 - `tests/test_import_service.py`、`tests/test_postgres_core_repository.py`、`tests/test_platform_runtime_boundary_guards.py` 保护 ETC 导入不创建 canonical invoice、已存在 canonical invoice 关联、弱 fingerprint、不重新引入自动检测 worker。
-- `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_pair_relation_service.py` 保护 `etc_invoice_summary` 投影、active relation 排除和 delete/reset 关系恢复规则。
+- `tests/test_workbench_query_postgres_integration.py`、`tests/test_workbench_page_query_repository.py`、`tests/test_workbench_pair_relation_service.py` 保护 direct `etc_invoice_summary` hydration、active relation 排除、零 page runtime 和 delete/reset 关系恢复规则。
 - `web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx` 保护页面交互、API mapper、错误反馈和 Workbench summary 展示。
 - `web/e2e/etc-tickets-flow.spec.ts` 用真实 Chromium 保护 ETC 票据管理未提交业务批次首屏、发票明细表、创建 OA 草稿、人工确认已提交和进入已提交 bucket 的可见闭环。
 
@@ -689,7 +689,7 @@
 
 ## 前端业务刷新边界
 
-前端 finance domain event、业务 tag BroadcastChannel/window event 已删除。跨页面一致性只以后端 canonical facts、source versions、freshness gate、durable queue 和 worker 为准；另一个已打开页面保持当前 snapshot，直到用户 route 重进、改变该页查询、手动刷新浏览器或明确重试。App Health、后台任务进度和 Workbench refresh-status channel 是运维/显式任务状态，不承担业务页面 reload。
+前端 finance domain event、业务 tag BroadcastChannel/window event 已删除。跨页面一致性只以后端 canonical facts，以及仍登记消费者自己的 freshness/queue/worker 为准；另一个已打开页面保持当前 snapshot，直到用户 route 重进、改变该页查询、手动刷新浏览器或明确重试。App Health 与后台任务进度只承担运维/显式任务状态；Workbench 不再有 refresh-status channel。
 
 相关测试入口：`web/src/test/PageRouteHost.test.tsx`、`tests/test_platform_runtime_boundary_guards.py`。
 
@@ -697,7 +697,6 @@
 
 | Read model key | Scope type | Worker | Refresh event | 主要页面/API | 关键风险 |
 | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench` | `workbench` | `workbench.read_model.refresh` | 关联台、搜索、成本间接依赖 | active generation 原子发布，不能读 building/failed 中间态 |
 | `workbench_relation` | `workbench_relation` | `workbench-relation` | `workbench_relation.read_model.refresh` | 批量账务、关联台、下游关系 | 非 fresh 时不能把空关系当全部未提交 |
 | `bank_detail` | `bank_detail` | `bank-detail` | `bank_detail.read_model.refresh` | 银行明细、免 OA 上游 | 标签规则版本、stale 后台刷新 |
 | `bank_account_balance` | `bank_account_balance` | `bank-account-balance` | `bank_account_balance.read_model.refresh` | 银行明细余额 | critical required；不能用 stale 覆盖 fresh total |

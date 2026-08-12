@@ -18,7 +18,7 @@
 - XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
 - 多 sheet 税务导出若存在唯一 `发票基础信息`，只从该 sheet 生成 canonical invoice facts；`信息汇总表` 仅提供同票明细证据。表头 sheet 重名、无有效行、模板不合法或明细强身份不能唯一归属时 fail closed，禁止回退到首个可解析 sheet。历史单 sheet 文件仍走共享模板识别。
 - 将导入结果转化为发票源事实与精确 affected scopes。
-- Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
+- Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只终结未确认 preview，不改发票 canonical facts。
 

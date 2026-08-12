@@ -6,6 +6,8 @@
 
 > 2026-07-22 Phase 27 当前合同：普通 import、relation、规则、Drawer 保存和 OA sync 写入零页面 dirty/outbox、零跨页 operation barrier；当前页重跑 normal GET，其它页在访问或重新激活时通过 fresh gate 精确收敛。下文历史 spec 文件名仍可能含 `fanout`，早期增量记录也可能描述旧 barrier；它们只作测试演进溯源，不得覆盖当前代码、模块边界和 Phase 27 verification 合同。
 
+> 2026-08-13 关联台合同：页面自身也改为 direct canonical normal GET，已删除 `workbench` page read model、active generation、refresh-status、page Redis cache 和 worker；read-model registry 只保留共享 `workbench_relation`。关联台写入仍使用 canonical preview/CAS/idempotency，成功后只重读一次页面。
+
 ## 验证层级
 
 - 本地目标验证：修改某个模块时，优先运行 `docs/modules/<module>/tests.md` 中列出的模块命令。

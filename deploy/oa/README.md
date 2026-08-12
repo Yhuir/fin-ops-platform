@@ -178,7 +178,8 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-relation.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 ## 生产 Browser Route-Shell Smoke Bundle
@@ -275,8 +276,6 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 
@@ -288,8 +287,8 @@ systemd 模板位于：
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
 `job.workbench_matching_dirty_scopes`，批量读取 canonical OA、流水、发票和 active relation，
 仅把满足确定性安全规则的结果通过 Workbench relation UoW 写成正式 active relation；不生成或读取
-候选/decision 状态。`workbench-read-model` worker 只负责把 active relation 与逐条未配对事实投影到
-页面读模型，不能替代自动配对。
+候选/decision 状态。关联台页面直读 canonical facts 与 active relations，不运行 `workbench-read-model` worker；
+`workbench_relation` 仍是下游页面使用的独立共享 read model。
 生产实例配置示例：
 
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
@@ -298,15 +297,8 @@ systemd 模板位于：
 
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
-发布激活会安装两个版本化 retention timers 和一个 OA sync enqueue timer：
+发布激活会安装一个版本化 retention timer 和一个 OA sync enqueue timer。Workbench generation prune helper/service/timer 已随 page read-model runtime 退役；激活候选时会 stop/disable 并删除 live unit/helper，回滚时只由 previous immutable release 按它自身 registry 恢复。
 
-- `finops-prune-workbench-generations.timer`：清理 `superseded|failed` Workbench generations，
-  `active|building` 不进入候选。每轮最多选择 500 个候选，按 scope 分组后默认逐 generation 独立事务删除；
-  当前策略为 `keep_recent=1`、`keep_days=0`、`limit=500`、delete batch `1`、statement timeout
-  `60` 秒。helper 从 root-owned `/etc/fin-ops/fin-ops.common.env` 读取对应
-  `FINOPS_WORKBENCH_PRUNE_*` 参数；缺失时使用上述内置默认。发布只安装 helper/unit/timer，不自动合并已有
-  common env，调参必须由 operator 显式更新该文件。删除 SQL 只由版本化 Python repository 执行；helper
-  另做只读 PostgreSQL、磁盘和 health 诊断。删除前 repository 锁定并复核 default tenant、scope 与终态。
 - `finops-prune-runtime-queue-history.timer`：清理 `job.outbox_events` /
   `job.read_model_dirty_scopes` 的完成态历史。默认 `keep_days=30`、
   `keep_recent_per_type=512`、`limit=20000`，只删除 `status='done'`，并为每个 exact
@@ -411,9 +403,9 @@ active 只代表进程存在，不代表 API 已经加载正确 release identity
 - 门禁内部受控激活阶段会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
   release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
 - `/health` 是轻量 liveness，暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、
-  `PYTHONPATH` 和 `RELEASE.json`，不会跑 workbench read model self-test；release 运行时若实际导入路径
+  `PYTHONPATH` 和 `RELEASE.json`，不会跑 Workbench direct query self-test；release 运行时若实际导入路径
   不在当前 release 的 `backend/src` 下，健康状态必须是 `not_ready`
-- `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 workbench API self-test，
+- `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 Workbench direct API self-test，
   不作为发布脚本的快速就绪检查
 - 门禁内部通过 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`
   确保常驻 worker 矩阵已安装、开机自启并重启到当前 release；外层发布脚本不再重复调用该 helper
@@ -430,11 +422,10 @@ active 只代表进程存在，不代表 API 已经加载正确 release identity
   worker 由激活阶段的 ensure helper 安装，并从 T+0 起按候选 registry 严格校验，避免候选 registry 在
   激活前把尚未部署的新 worker 误报为旧 runtime 故障
 - `runtime`/`acl` 候选激活后 T+0 运行只读 `stability`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
-  queue/dirty/dead-letter 收敛、真实页面 read-model freshness、隔离事务写入能力、domain/page canonical
-  audit 及 API/health 性能。自动发布门禁不 enqueue synthetic read-model refresh；workbench 的 active generation
-  是全局原子发布边界，局部 smoke scope 不能污染 `month=all` 等真实页面 scope
+  queue/dirty/dead-letter 收敛、真实页面 canonical proof、隔离事务写入能力、domain/page canonical
+  audit 及 API/health 性能。自动发布门禁不 enqueue synthetic read-model refresh，并证明 Workbench page event、Redis cache、projection I/O 为零
 - `runtime`/`acl` 在 T+60s、T+300s 继续运行只读 `stability`：重跑性能、domain audit 和 runtime 收敛检查，
-  不 enqueue read-model smoke，也不执行 confirm/withdraw；单个无错误、fresh、p99
+  不 enqueue read-model smoke，也不执行 confirm/withdraw；单个无错误、合同完整、p99
   合格但 p95 超标的三样本窗口只允许重采样一次，第二个窗口仍超标即失败。最终证据以 T+300 证明异步拓扑持续稳定
 - `frontend` 只执行 pre/T+0 的 exact dist、active release、worker inventory、ready、005 session 和公开 shell/首个 hashed asset；不执行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 等待
 - 页面 shell 探针固定使用公开站点 origin；API 探针固定使用当前 release 的内部服务 origin，
@@ -485,11 +476,6 @@ sudo /usr/local/sbin/finops-deploy-control status
 sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-name> \
   --json \
   --limit 20
-sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
-  --promote-oa-attachment-invoices --dry-run --json
-sudo /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \
-  --promote-oa-attachment-invoices --apply-repair --confirm-apply-oa-attachment-invoices \
-  --expected-fingerprint <dry-run-candidate-fingerprint> --json
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --dry-run
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
@@ -738,6 +724,14 @@ sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 `release-gate-activate` 先验证 candidate/active fingerprint 未漂移并自动判定 profile。三项 retired admission key 与 legacy admin key 的一次性清理已经完成；稳态发布只执行 strict env assertion，发现任一旧 key 立即失败关闭，不再重写 env。历史 OA binding cleanup/rollback SQL 与激活代码也已删除；OA topology 漂移只能阻断并由独立修复处理。`runtime`/`acl` 通过 current checkpoint 后才停止 API 和上一版本 workers、执行 migration/validated CHECK、安装 runtime assets、发布候选并恢复服务；`frontend` 只发布 exact dist 并重启已有 runtime。frontend 切换前会固定捕获 preflight 已验证的 active worker 集合，候选激活和自动回退都精确重启该集合，避免 stop 后的空 active 列表遗留 workers inactive。`0127_direct_canonical_page_runtime_retirement.sql` 只是 no-op 标记，不会改写 pending backlog、readiness 或回滚 projection 证据。不要手工创建业务表、
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
+
+首次退役 Workbench page worker 时，PRE 通过后且停止服务前，gate 会把 exact live worker env 复制到
+`/opt/fin-ops/runtime-smoke/release-gates/<candidate>/workbench-page-worker-runtime/`。目录为 root-only `0700`，
+env backup 与 owner/mode/SHA-256 metadata 为 root-only `0600`，内容不会打印到 terminal 或普通 evidence。
+自动回滚会在 previous ensure/start 前按 metadata 原子恢复该 env；继续使用本次已验证的固定 ensure helper、
+但读取 previous release manifest，禁止降级旧 helper、用 example fallback 或 poll-interval migration 改写 exact env。
+backup 仅在 candidate T+300 与最终 evidence contract 均 PASS，或 previous rollback checkpoint 验证成功后删除；
+失败时 production 保持 maintenance，backup 留给人工恢复，禁止在未完成回滚时清理。
 
 runtime/ACL preflight 在候选代码下固定读取当前 active release 的 worker instance 集合；此阶段允许旧进程尚未声明候选新增的 event type，但 missing/stale worker、durable queue、RabbitMQ、当前 `/health/ready` 和 canonical page audit 仍严格阻断。候选启动后的 T+0/T+60/T+300 不使用该兼容窗口，必须严格匹配候选 worker kind/event types。这样 worker 合同演进不会在切流前形成不可能条件，同时也不能绕过切流后的候选合同验证。
 覆盖式 `legacy-current` 部署入口已经移除；`scripts/deploy-oa.sh` 只生成 versioned release payload，

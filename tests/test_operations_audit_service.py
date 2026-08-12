@@ -165,38 +165,12 @@ class OperationsAuditServiceTests(unittest.TestCase):
                 "payload": {},
             },
         ]
-        repository.relation_history = [
-            {
-                "raw_payload": {
-                    "normalized_payload": {
-                        "operation_projection": {
-                            "before": {
-                                "paired_groups": [],
-                                "unpaired_groups": [
-                                    {
-                                        "zone": "unpaired",
-                                        "oa_rows": [{"id": "oa-internal", "type": "oa", "applicant": "樊祖芳", "project_name": "大理卷烟厂", "amount": "2200"}],
-                                        "bank_rows": [],
-                                        "invoice_rows": [],
-                                    }
-                                ],
-                            },
-                            "after": {
-                                "paired_groups": [
-                                    {
-                                        "zone": "paired",
-                                        "oa_rows": [{"id": "oa-internal", "type": "oa", "applicant": "樊祖芳", "project_name": "大理卷烟厂", "amount": "2200"}],
-                                        "bank_rows": [],
-                                        "invoice_rows": [],
-                                    }
-                                ],
-                                "unpaired_groups": [],
-                            },
-                        }
-                    }
-                }
-            }
-        ]
+        repository.relation_history = [{
+            "raw_payload": {"normalized_payload": {
+                "affected_row_ids": ["oa-internal"],
+                "affected_row_types": ["oa"],
+            }}
+        }]
 
         operation = OperationsAuditService(repository).get_operation_history("request:request-1")
 
@@ -209,17 +183,58 @@ class OperationsAuditServiceTests(unittest.TestCase):
             [
                 {
                     "item_key": "item-1",
-                    "type": "OA",
-                    "title": "樊祖芳",
-                    "secondary": "大理卷烟厂",
-                    "amount": "2200",
+                    "type": "oa",
+                    "title": "oa-internal",
+                    "secondary": "",
+                    "amount": None,
                     "date": None,
-                    "before_status": "未配对",
-                    "after_status": "已配对",
                 }
             ],
         )
-        self.assertNotIn("oa-internal", str(operation))
+        self.assertNotIn("operation_projection", str(operation))
+
+    def test_derives_typed_items_from_real_relation_history_shape(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 8, 9, 10, 6, tzinfo=UTC)
+        repository.events_by_key["request:request-typed"] = [
+            {
+                "event_type": "operation.completed",
+                "request_id": "request-typed",
+                "action": "POST /api/workbench/actions/withdraw-link",
+                "page_key": "reconciliation-workbench",
+                "occurred_at": occurred_at,
+                "outcome": "success",
+                "payload": {},
+            }
+        ]
+        relation = {
+            "case_id": "CASE-1",
+            "row_ids": ["same-id", "same-id"],
+            "row_types": ["bank", "invoice"],
+        }
+        repository.relation_history = [
+            {
+                "before_payload": [relation],
+                "after_payload": [],
+                "raw_payload": {
+                    "normalized_payload": {
+                        "affected_row_ids": ["same-id", "same-id"],
+                        "before_relations": [relation],
+                        "after_relations": [],
+                    }
+                },
+            }
+        ]
+
+        operation = OperationsAuditService(repository).get_operation_history(
+            "request:request-typed"
+        )
+
+        assert operation is not None
+        self.assertEqual(
+            [(item["type"], item["title"]) for item in operation["items"]],
+            [("bank", "same-id"), ("invoice", "same-id")],
+        )
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from fin_ops_platform.services.workbench_exception_projection import (
     WorkbenchExceptionProjectionService,
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_row_identity import workbench_row_identity_key
 
 
 def oa_row(row_id: str = "oa-001") -> dict[str, object]:
@@ -30,6 +31,22 @@ def bank_row(row_id: str = "bk-001") -> dict[str, object]:
         "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
         "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"],
         "summary_fields": {"和发票关联情况": "待匹配"},
+        "detail_fields": {"备注": ""},
+    }
+
+
+def invoice_row(row_id: str = "iv-001") -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "month": "2026-05",
+        "total_with_tax": "120.00",
+        "invoice_bank_relation": {
+            "code": "pending_collection",
+            "label": "待匹配流水",
+            "tone": "warn",
+        },
+        "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
         "detail_fields": {"备注": ""},
     }
 
@@ -112,6 +129,58 @@ class WorkbenchExceptionProjectionServiceTests(unittest.TestCase):
 
 
 class WorkbenchOverrideProjectionTests(unittest.TestCase):
+    def test_ambiguous_legacy_raw_id_override_fails_closed_across_panes(self) -> None:
+        service = WorkbenchOverrideService.from_snapshot(
+            {
+                "row_overrides": {
+                    "same-id": {
+                        "case_id": "WEX-LEGACY-UNTYPED",
+                        "ignored": True,
+                    }
+                }
+            }
+        )
+
+        self.assertNotIn("ignored", service.apply_to_row(bank_row("same-id")))
+        self.assertNotIn("ignored", service.apply_to_row(invoice_row("same-id")))
+
+    def test_same_text_id_overrides_remain_independent_across_panes(self) -> None:
+        service = WorkbenchOverrideService()
+        bank = bank_row("same-id")
+        invoice = invoice_row("same-id")
+
+        service.update_bank_exception(
+            row=bank,
+            relation_code="bank_fee",
+            relation_label="银行手续费",
+            exception_case_id="WEX-BANK",
+        )
+        service.ignore_row(
+            row=invoice,
+            exception_case_id="WEX-INVOICE",
+        )
+
+        snapshot = service.snapshot()["row_overrides"]
+        self.assertEqual(
+            set(snapshot),
+            {
+                workbench_row_identity_key("bank", "same-id"),
+                workbench_row_identity_key("invoice", "same-id"),
+            },
+        )
+        self.assertEqual(service.apply_to_row(bank)["exception_case_id"], "WEX-BANK")
+        self.assertNotIn("ignored", service.apply_to_row(bank))
+        self.assertEqual(service.apply_to_row(invoice)["exception_case_id"], "WEX-INVOICE")
+        self.assertTrue(service.apply_to_row(invoice)["ignored"])
+
+        service.unignore_row(row=invoice)
+
+        self.assertEqual(
+            service.apply_to_row(bank)["invoice_relation"]["code"],
+            "bank_fee",
+        )
+        self.assertFalse(service.apply_to_row(invoice)["ignored"])
+
     def test_oa_rows_only_expose_detail_in_both_zones(self) -> None:
         service = WorkbenchOverrideService()
 

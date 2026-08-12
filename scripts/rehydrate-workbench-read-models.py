@@ -15,12 +15,7 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from fin_ops_platform.services import postgres_connection as postgres_connection_module  # noqa: E402
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings  # noqa: E402
-from fin_ops_platform.services.postgres_repositories import read_models as read_models_module  # noqa: E402
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository  # noqa: E402
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder  # noqa: E402
 from fin_ops_platform.tools.oa_attachment_invoice_promotion import (  # noqa: E402
     APPLY_CONFIRMATION_FLAG,
     audit_oa_attachment_invoice_promotion,
@@ -30,12 +25,16 @@ from fin_ops_platform.tools.oa_attachment_invoice_promotion import (  # noqa: E4
 def main() -> int:
     script_started_at = perf_counter()
     parser = argparse.ArgumentParser(
-        description="Rehydrate Workbench SQL read models from PostgreSQL facts and publish all only after consistency checks pass."
+        description="Maintain OA attachment identity bridges and canonical attachment invoice promotion."
     )
-    parser.add_argument("--scope", action="append", default=[], help="Month scope YYYY-MM. Repeatable. Defaults to all fact-backed months.")
-    parser.add_argument("--dry-run", action="store_true", help="List scopes and current status without rebuilding.")
+    parser.add_argument(
+        "--scope",
+        action="append",
+        default=[],
+        help="Month scope YYYY-MM for structured attachment diagnostics. Repeatable; 'all' is also supported.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Preview an OA attachment repair or promotion action.")
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
-    parser.add_argument("--profile-internal", action="store_true", help="Include fine-grained builder and repository step timings.")
     parser.add_argument(
         "--repair-attachment-identity-bridge",
         action="store_true",
@@ -69,13 +68,13 @@ def main() -> int:
     parser.add_argument(
         "--explain-structured-attachments",
         action="store_true",
-        help="Run read-only EXPLAIN ANALYZE diagnostics for the Workbench structured OA attachment query.",
+        help="Run read-only EXPLAIN ANALYZE diagnostics for canonical structured OA attachment lookup.",
     )
     parser.add_argument(
         "--statement-timeout-seconds",
         type=int,
         default=300,
-        help="PostgreSQL statement timeout for rebuild queries. Defaults to 300 seconds.",
+        help="PostgreSQL statement timeout for maintenance queries. Defaults to 300 seconds.",
     )
     args = parser.parse_args()
     if args.statement_timeout_seconds <= 0:
@@ -87,9 +86,10 @@ def main() -> int:
         args.rollback_attachment_identity_bridge,
         args.promote_oa_attachment_invoices,
     )
+    maintenance_actions = (*repair_actions, args.explain_structured_attachments)
+    if sum(bool(value) for value in maintenance_actions) != 1:
+        raise ValueError("Choose exactly one OA attachment maintenance action.")
     repair_mode = any(repair_actions)
-    if sum(bool(value) for value in repair_actions) > 1:
-        raise ValueError("Choose only one OA attachment repair action.")
     if args.apply_repair and not repair_mode:
         raise ValueError("--apply-repair is only valid with an OA attachment repair action.")
     if (
@@ -104,8 +104,6 @@ def main() -> int:
         and not bool(getattr(args, "confirm_apply_oa_attachment_invoices", False))
     ):
         raise ValueError(f"OA attachment invoice promotion apply requires {APPLY_CONFIRMATION_FLAG}.")
-    if repair_mode and args.explain_structured_attachments:
-        raise ValueError("OA attachment repair cannot be combined with --explain-structured-attachments.")
     if repair_mode and not (args.dry_run or args.apply_repair):
         raise ValueError("OA attachment repair requires --dry-run or --apply-repair.")
     if args.explain_structured_attachments and not args.scope:
@@ -113,67 +111,15 @@ def main() -> int:
 
     connection = PostgresConnection(PostgresSettings.from_env())
     connection.set_statement_timeout_ms(args.statement_timeout_seconds * 1000)
-    if repair_mode:
-        repair_started_at = perf_counter()
-        report: dict[str, Any] = {
-            "action": (
-                "rollback_attachment_identity_bridge"
-                if args.rollback_attachment_identity_bridge
-                else (
-                    "promote_oa_attachment_invoices"
-                    if args.promote_oa_attachment_invoices
-                    else "repair_attachment_identity_bridge"
-                )
-            ),
-            "dry_run": bool(args.dry_run),
-            "apply_repair": bool(args.apply_repair),
-            "timings": [],
-        }
-        if args.promote_oa_attachment_invoices:
-            report["oa_attachment_invoice_promotion"] = audit_oa_attachment_invoice_promotion(
-                connection=connection,
-                example_limit=100,
-                apply=bool(args.apply_repair),
-                oa_row_ids=list(args.oa_row_id or []),
-                expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
-            )
-        elif args.rollback_attachment_identity_bridge:
-            report["attachment_identity_bridge"] = _rollback_attachment_identity_bridge(
-                connection,
-                apply_changes=bool(args.apply_repair),
-            )
-        else:
-            report["attachment_identity_bridge"] = _repair_attachment_identity_bridge(
-                connection,
-                apply_changes=bool(args.apply_repair),
-                expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
-            )
-        report["timings"].append({"step": report["action"], "duration_ms": _duration_ms(repair_started_at)})
-        report["duration_ms"] = _duration_ms(script_started_at)
-        return _print_report(report, json_output=args.json)
-
-    repository = PostgresReadModelRepository(connection)
-    queue_repository = RuntimeQueueRepository(connection)
-    builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
-    internal_timings: list[dict[str, Any]] = []
-    if args.profile_internal:
-        _install_internal_profiling(builder, repository, internal_timings)
-    scopes = _scope_keys(builder, args.scope)
-    report: dict[str, Any] = {
-        "action": "rehydrate_workbench_read_models",
-        "dry_run": bool(args.dry_run),
-        "profile_internal": bool(args.profile_internal),
-        "explain_structured_attachments": bool(args.explain_structured_attachments),
-        "scope_keys": scopes,
-        "rebuilt": [],
-        "completed_dirty_scopes": [],
-        "all": None,
-        "status": None,
-        "timings": [],
-        "internal_timings": internal_timings,
-    }
     if args.explain_structured_attachments:
         diagnostic_started_at = perf_counter()
+        scopes = _scope_keys(args.scope)
+        report: dict[str, Any] = {
+            "action": "explain_structured_attachments",
+            "read_only": True,
+            "scope_keys": scopes,
+            "timings": [],
+        }
         report["structured_attachment_diagnostics"] = [
             _structured_attachment_query_diagnostic(connection, scope_key) for scope_key in scopes
         ]
@@ -182,76 +128,48 @@ def main() -> int:
         )
         report["duration_ms"] = _duration_ms(script_started_at)
         return _print_report(report, json_output=args.json)
-    if args.dry_run:
-        status_started_at = perf_counter()
-        report["status"] = repository.get_workbench_refresh_status(scope_key="all")
-        report["timings"].append({"step": "dry_run_status", "duration_ms": _duration_ms(status_started_at)})
-        report["duration_ms"] = _duration_ms(script_started_at)
-        return _print_report(report, json_output=args.json)
 
-    for scope_key in scopes:
-        rebuild_started_at = perf_counter()
-        result = builder.rebuild_workbench_read_model_scope(scope_key)
-        rebuild_duration_ms = _duration_ms(rebuild_started_at)
-        status_started_at = perf_counter()
-        status = repository.get_workbench_refresh_status(scope_key=scope_key)
-        status_duration_ms = _duration_ms(status_started_at)
-        if str(status.get("read_model_status") or "").strip() == "failed":
-            raise RuntimeError(str(status.get("last_error") or f"Workbench scope {scope_key} failed consistency validation."))
-        complete_started_at = perf_counter()
-        completed_dirty_scope = False
-        if queue_repository.complete_read_model_refresh(
-            tenant_id="default",
-            scope_type="workbench",
-            scope_key=scope_key,
-        ):
-            completed_dirty_scope = True
-            report["completed_dirty_scopes"].append(scope_key)
-        complete_duration_ms = _duration_ms(complete_started_at)
-        scope_timings = {
-            "rebuild_ms": rebuild_duration_ms,
-            "status_ms": status_duration_ms,
-            "complete_dirty_scope_ms": complete_duration_ms,
-            "completed_dirty_scope": completed_dirty_scope,
-        }
-        report["timings"].append({"step": "scope", "scope_key": scope_key, **scope_timings})
-        report["rebuilt"].append({"scope_key": scope_key, "result": result, "status": status, "timings": scope_timings})
-
-    all_status_started_at = perf_counter()
-    all_status = repository.get_workbench_refresh_status(scope_key="all")
-    all_status_duration_ms = _duration_ms(all_status_started_at)
-    if str(all_status.get("read_model_status") or "").strip() == "failed":
-        raise RuntimeError(str(all_status.get("last_error") or "Workbench all-scope generation failed consistency validation."))
-    complete_all_started_at = perf_counter()
-    completed_all_dirty_scope = False
-    if queue_repository.complete_read_model_refresh(
-        tenant_id="default",
-        scope_type="workbench",
-        scope_key="all",
-    ):
-        completed_all_dirty_scope = True
-        report["completed_dirty_scopes"].append("all")
-    complete_all_duration_ms = _duration_ms(complete_all_started_at)
-    report["all"] = {"scope_key": "all", "fan_out": True, "status": all_status}
-    report["timings"].append(
-        {
-            "step": "all",
-            "status_ms": all_status_duration_ms,
-            "complete_dirty_scope_ms": complete_all_duration_ms,
-            "completed_dirty_scope": completed_all_dirty_scope,
-        }
-    )
-    final_status_started_at = perf_counter()
-    report["status"] = repository.get_workbench_refresh_status(scope_key="all")
-    report["timings"].append({"step": "final_status", "duration_ms": _duration_ms(final_status_started_at)})
+    repair_started_at = perf_counter()
+    report = {
+        "action": (
+            "rollback_attachment_identity_bridge"
+            if args.rollback_attachment_identity_bridge
+            else (
+                "promote_oa_attachment_invoices"
+                if args.promote_oa_attachment_invoices
+                else "repair_attachment_identity_bridge"
+            )
+        ),
+        "dry_run": bool(args.dry_run),
+        "apply_repair": bool(args.apply_repair),
+        "timings": [],
+    }
+    if args.promote_oa_attachment_invoices:
+        report["oa_attachment_invoice_promotion"] = audit_oa_attachment_invoice_promotion(
+            connection=connection,
+            example_limit=100,
+            apply=bool(args.apply_repair),
+            oa_row_ids=list(args.oa_row_id or []),
+            expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
+        )
+    elif args.rollback_attachment_identity_bridge:
+        report["attachment_identity_bridge"] = _rollback_attachment_identity_bridge(
+            connection,
+            apply_changes=bool(args.apply_repair),
+        )
+    else:
+        report["attachment_identity_bridge"] = _repair_attachment_identity_bridge(
+            connection,
+            apply_changes=bool(args.apply_repair),
+            expected_fingerprint=str(args.expected_fingerprint or "").strip() or None,
+        )
+    report["timings"].append({"step": report["action"], "duration_ms": _duration_ms(repair_started_at)})
     report["duration_ms"] = _duration_ms(script_started_at)
     return _print_report(report, json_output=args.json)
 
 
-def _scope_keys(builder: WorkbenchSqlProjectionBuilder, requested: list[str]) -> list[str]:
-    if requested:
-        return sorted(dict.fromkeys(str(scope).strip() for scope in requested if str(scope).strip()))
-    return list(builder.list_workbench_scope_shards("all"))
+def _scope_keys(requested: list[str]) -> list[str]:
+    return sorted(dict.fromkeys(str(scope).strip() for scope in requested if str(scope).strip()))
 
 
 def _print_report(report: dict[str, Any], *, json_output: bool) -> int:
@@ -733,136 +651,6 @@ def _attachment_identity_bridge_matches_cte() -> str:
                 cache.parsed_at desc nulls last
         )
         """
-
-
-def _install_internal_profiling(builder: Any, repository: Any, timings: list[dict[str, Any]]) -> None:
-    for attr in (
-        "_current_dirty_scope_source_version",
-        "_workbench_rows_for_month",
-        "_oa_projection_rows",
-        "_attachment_invoice_rows_from_structured_oa_tables",
-        "_bank_rows",
-        "_invoice_rows",
-        "_unpaired_etc_invoice_summary_rows",
-        "_active_pair_relations_for_month",
-        "_supplement_missing_relation_rows",
-        "_group_payload",
-        "_current_bank_auto_tag_rules_version",
-    ):
-        _wrap_timed_method(builder, attr, f"builder.{attr}", timings)
-    for attr in (
-        "save_workbench_read_models",
-        "_refresh_workbench_all_scope_from_month_shards",
-        "_workbench_generation_consistency_failures",
-        "_start_workbench_generation",
-        "_iter_workbench_rows",
-        "_iter_workbench_groups",
-        "_workbench_summary_from_payload",
-        "_workbench_invoice_inventory",
-        "_upsert_workbench_generation_stats",
-        "_activate_workbench_generation",
-        "get_workbench_refresh_status",
-    ):
-        _wrap_timed_method(repository, attr, f"repository.{attr}", timings)
-    _wrap_timed_execute_many(timings)
-    _wrap_timed_transaction_sql(timings)
-
-
-def _wrap_timed_method(obj: Any, attr: str, label: str, timings: list[dict[str, Any]]) -> None:
-    original = getattr(obj, attr, None)
-    if not callable(original):
-        return
-
-    def timed(*args: Any, **kwargs: Any) -> Any:
-        started_at = perf_counter()
-        try:
-            return original(*args, **kwargs)
-        finally:
-            item: dict[str, Any] = {"step": label, "duration_ms": _duration_ms(started_at)}
-            changed_scope_keys = kwargs.get("changed_scope_keys")
-            if changed_scope_keys is not None:
-                item["changed_scope_keys"] = sorted(str(scope_key) for scope_key in changed_scope_keys)
-            if args and attr in {"_workbench_rows_for_month", "_oa_projection_rows", "_bank_rows", "_invoice_rows"}:
-                item["scope_key"] = str(args[0])
-            timings.append(item)
-
-    setattr(obj, attr, timed)
-
-
-def _wrap_timed_execute_many(timings: list[dict[str, Any]]) -> None:
-    original = getattr(read_models_module, "_execute_many", None)
-    if not callable(original):
-        return
-
-    def timed(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) -> Any:
-        started_at = perf_counter()
-        try:
-            return original(connection, sql, params_seq)
-        finally:
-            timings.append(
-                {
-                    "step": "read_models._execute_many",
-                    "duration_ms": _duration_ms(started_at),
-                    "target": _sql_target(sql),
-                    "row_count": len(params_seq or []),
-                }
-            )
-
-    setattr(read_models_module, "_execute_many", timed)
-
-
-def _wrap_timed_transaction_sql(timings: list[dict[str, Any]]) -> None:
-    transaction_cls = getattr(postgres_connection_module, "PostgresTransaction", None)
-    if transaction_cls is None:
-        return
-    for attr in ("fetch_one", "fetch_all", "execute"):
-        original = getattr(transaction_cls, attr, None)
-        if not callable(original):
-            continue
-
-        def timed(self: Any, sql: str, params: tuple[Any, ...] = (), *, _original: Any = original, _attr: str = attr) -> Any:
-            started_at = perf_counter()
-            try:
-                return _original(self, sql, params)
-            finally:
-                timings.append(
-                    {
-                        "step": f"postgres_transaction.{_attr}",
-                        "duration_ms": _duration_ms(started_at),
-                        "target": _sql_target(sql),
-                    }
-                )
-
-        setattr(transaction_cls, attr, timed)
-
-
-def _sql_target(sql: str) -> str:
-    normalized = " ".join(str(sql or "").lower().split())
-    for target in (
-        "read_model.workbench_group_rows",
-        "read_model.workbench_groups",
-        "read_model.workbench_rows",
-        "read_model.workbench_summary",
-        "read_model.workbench_snapshots",
-        "read_model.workbench_generations",
-        "job.read_model_dirty_scopes",
-        "job.outbox_events",
-        "app.invoices",
-        "app.oa_attachment_invoice_cache_sources",
-        "app.oa_attachment_invoice_cache",
-        "app.oa_attachments",
-    ):
-        if target in normalized:
-            return target
-    if normalized.startswith("select"):
-        return "select"
-    if normalized.startswith("insert"):
-        return "insert"
-    if normalized.startswith("update"):
-        return "update"
-    if normalized.startswith("delete"):
-        return "delete"
-    return "sql"
 
 
 if __name__ == "__main__":

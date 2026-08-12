@@ -104,6 +104,7 @@ class WorkbenchRelationConfirmPreparation:
     owner_token: object
     row_ids: tuple[str, ...]
     row_types: tuple[str, ...]
+    tenant_id: str
     month_scope: str
     freshness: dict[str, Any]
     pair_service: WorkbenchPairRelationService
@@ -196,6 +197,34 @@ class CallbackWorkbenchRelationRepository:
             ],
         )
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        service = WorkbenchPairRelationService.from_snapshot(self.load_workbench_pair_relations())
+        requested = set(zip(row_types, row_ids, strict=True))
+        normalized_case_ids = {
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        }
+        relations: dict[str, dict[str, Any]] = {}
+        for relation in service.list_active_relations():
+            case_id = str(relation.get("case_id") or "").strip()
+            members = set(
+                zip(
+                    [str(value).strip() for value in list(relation.get("row_types") or [])],
+                    [str(value).strip() for value in list(relation.get("row_ids") or [])],
+                    strict=True,
+                )
+            )
+            if case_id in normalized_case_ids or requested.intersection(members):
+                relations[case_id] = relation
+        return {"pair_relations": deepcopy(relations)}
+
     def save_workbench_pair_relation_delta(
         self,
         snapshot: dict[str, Any],
@@ -243,12 +272,14 @@ class WorkbenchRelationCommandService:
         relation_facade: Any | None = None,
         idempotency_store: Any | None = None,
         require_fresh_relations: bool = False,
+        tenant_id: str | None = None,
     ) -> None:
         self._relation_repository = relation_repository
         self._etc_batch_link_repository = etc_batch_link_repository
         self._relation_facade = relation_facade
         self._idempotency_store = idempotency_store or _InMemoryIdempotencyStore()
         self._require_fresh_relations = bool(require_fresh_relations)
+        self._tenant_id = str(tenant_id or "").strip()
         self._confirm_preparation_owner = object()
         self._withdraw_preparation_owner = object()
 
@@ -259,6 +290,7 @@ class WorkbenchRelationCommandService:
         row_types: list[str],
         month_scope: str = "all",
         scope_keys_hint: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> WorkbenchRelationConfirmPreparation:
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         normalized_row_types = [str(row_type).strip() for row_type in list(row_types or [])]
@@ -270,17 +302,25 @@ class WorkbenchRelationCommandService:
         self._assert_canonical_relation_members_available(
             normalized_row_ids,
             row_types=normalized_row_types,
+            tenant_id=tenant_id,
         )
         self._acquire_relation_member_locks(
             normalized_row_ids,
             row_types=normalized_row_types,
         )
-        pair_service = self._active_pair_service_for_row_ids(normalized_row_ids)
-        active_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
+        pair_service = self._active_pair_service_for_typed_rows(
+            normalized_row_ids,
+            normalized_row_types,
+        )
+        active_relations = pair_service.active_relations_for_typed_rows(
+            normalized_row_ids,
+            normalized_row_types,
+        )
         return WorkbenchRelationConfirmPreparation(
             owner_token=self._confirm_preparation_owner,
             row_ids=tuple(normalized_row_ids),
             row_types=tuple(normalized_row_types),
+            tenant_id=self._canonical_tenant_id(tenant_id),
             month_scope=str(month_scope or "all").strip() or "all",
             freshness=deepcopy(freshness),
             pair_service=pair_service,
@@ -313,7 +353,7 @@ class WorkbenchRelationCommandService:
         history_operation_type: str = "confirm_relation",
         preparation: WorkbenchRelationConfirmPreparation | None = None,
         request_id: str | None = None,
-        operation_projection: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         mode = self._validated_relation_mode(relation_mode)
         fingerprint = self._request_fingerprint(
@@ -338,6 +378,7 @@ class WorkbenchRelationCommandService:
                 "before_relations": before_relations,
                 "replace_existing": replace_existing,
                 "history_operation_type": history_operation_type,
+                "tenant_id": self._canonical_tenant_id(tenant_id),
             },
         )
         replay = self._idempotency_replay(idempotency_key, fingerprint)
@@ -352,14 +393,16 @@ class WorkbenchRelationCommandService:
             self._assert_canonical_relation_members_available(
                 list(row_ids or []),
                 row_types=list(row_types or []),
+                tenant_id=tenant_id,
             )
             self._acquire_relation_member_locks(
                 list(row_ids or []),
                 row_types=list(row_types or []),
                 case_ids=[case_id],
             )
-            pair_service = self._active_pair_service_for_row_ids(
+            pair_service = self._active_pair_service_for_typed_rows(
                 list(row_ids or []),
+                list(row_types or []),
                 case_ids=[case_id],
             )
         else:
@@ -370,6 +413,7 @@ class WorkbenchRelationCommandService:
                 row_ids=requested_row_ids,
                 row_types=requested_row_types,
                 month_scope=month_scope,
+                tenant_id=tenant_id,
             )
             freshness = deepcopy(preparation.freshness)
             pair_service = preparation.pair_service
@@ -386,13 +430,17 @@ class WorkbenchRelationCommandService:
             self._assert_canonical_relation_members_available(
                 additional_row_ids,
                 row_types=additional_row_types,
+                tenant_id=tenant_id,
             )
             self._acquire_relation_member_locks(
                 additional_row_ids,
                 row_types=additional_row_types,
                 case_ids=[case_id],
             )
-        active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
+        active_relations = pair_service.active_relations_for_typed_rows(
+            list(row_ids or []),
+            list(row_types or []),
+        )
         if not replace_existing:
             conflicts = [
                 relation
@@ -465,11 +513,10 @@ class WorkbenchRelationCommandService:
                 amount_check=amount_check,
                 created_at=occurred_at,
             )
-        if request_id or operation_projection:
+        if request_id:
             history = {
                 **history,
                 "request_id": str(request_id or "").strip(),
-                "operation_projection": deepcopy(operation_projection or {}),
             }
         changed_case_ids = self._changed_case_ids(
             [
@@ -545,6 +592,7 @@ class WorkbenchRelationCommandService:
         actor_id: str,
         etc_batch_links: list[dict[str, Any]] | None = None,
         paired_requirements_by_case_id: dict[str, dict[str, object]] | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         normalized_plans = [plan for plan in list(plans or []) if plan is not None]
         normalized_links = self._normalize_etc_batch_links(etc_batch_links or [])
@@ -588,7 +636,11 @@ class WorkbenchRelationCommandService:
                 "paired_requirement_plan_mismatch",
                 "Paired requirements must belong to the formal relation plan batch.",
             )
-        self._assert_canonical_relation_members_available(row_ids, row_types=row_types)
+        self._assert_canonical_relation_members_available(
+            row_ids,
+            row_types=row_types,
+            tenant_id=tenant_id,
+        )
         self._acquire_relation_member_locks(row_ids, row_types=row_types, case_ids=case_ids)
         self._validate_etc_batch_links(normalized_links)
         pair_service = self._pair_service_for_row_ids(row_ids, case_ids=case_ids)
@@ -1372,6 +1424,25 @@ class WorkbenchRelationCommandService:
             normalized_row_ids
         ).active_relations_for_row_ids(normalized_row_ids)
 
+    def active_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        pair_service = self._active_pair_service_for_typed_rows(
+            list(row_ids or []),
+            list(row_types or []),
+        )
+        return list(
+            pair_service.active_relations_for_typed_rows(
+                list(row_ids or []),
+                list(row_types or []),
+            )
+            or []
+        )
+
     def list_active_relations(self) -> list[dict[str, Any]]:
         return self._pair_service().list_active_relations()
 
@@ -1402,6 +1473,7 @@ class WorkbenchRelationCommandService:
         self,
         *,
         row_ids: list[str],
+        row_types: list[str] | None = None,
         month_scope: str = "all",
         row_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -1409,6 +1481,7 @@ class WorkbenchRelationCommandService:
         return self._preview_withdraw_relation_from_pair_service(
             pair_service,
             row_ids=list(row_ids or []),
+            row_types=None if row_types is None else list(row_types),
             month_scope=month_scope,
             row_id_aliases=row_id_aliases,
         )
@@ -1418,13 +1491,20 @@ class WorkbenchRelationCommandService:
         pair_service: WorkbenchPairRelationService,
         *,
         row_ids: list[str],
+        row_types: list[str] | None = None,
         month_scope: str = "all",
         freshness: dict[str, Any] | None = None,
         row_id_aliases: dict[str, str] | None = None,
         active_relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(active_relation, dict):
-            active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
+            if row_types is not None:
+                active_relations = pair_service.active_relations_for_typed_rows(
+                    list(row_ids or []),
+                    list(row_types or []),
+                )
+            else:
+                active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
             if not active_relations:
                 raise WorkbenchRelationCommandError(
                     "workbench_relation_not_found",
@@ -1446,6 +1526,7 @@ class WorkbenchRelationCommandService:
             active_relation = active_relations[0]
         self._assert_exact_withdraw_selection(
             row_ids,
+            row_types=row_types,
             active_relation=active_relation,
             row_id_aliases=row_id_aliases,
         )
@@ -1478,10 +1559,6 @@ class WorkbenchRelationCommandService:
                 "before_relations": [deepcopy(active_relation)],
                 "after_relations": after_relations,
                 "submit_expected_versions": expected_versions,
-                "read_model_status": FRESH_WORKBENCH_RELATION_STATUS,
-                "read_model_scope_keys": self._affected_months(resolved_month_scope),
-                "read_model_stale_reasons": [],
-                "refresh_enqueued": False,
             }
         resolved_freshness = freshness or self._assert_relation_read_model_fresh(
             row_ids=active_row_ids,
@@ -1526,10 +1603,6 @@ class WorkbenchRelationCommandService:
             "before_relations": [deepcopy(active_relation)],
             "after_relations": after_relations,
             "submit_expected_versions": expected_versions,
-            "read_model_status": str(resolved_freshness.get("status") or resolved_freshness.get("read_model_status") or FRESH_WORKBENCH_RELATION_STATUS),
-            "read_model_scope_keys": list(resolved_freshness.get("read_model_scope_keys") or self._affected_months(resolved_month_scope)),
-            "read_model_stale_reasons": list(resolved_freshness.get("stale_reasons") or resolved_freshness.get("read_model_stale_reasons") or []),
-            "refresh_enqueued": bool(resolved_freshness.get("refresh_enqueued")),
         }
 
     def withdraw_relation(
@@ -1538,6 +1611,7 @@ class WorkbenchRelationCommandService:
         case_id: str,
         actor_id: str,
         row_ids: list[str] | None = None,
+        row_types: list[str] | None = None,
         reason: str | None = None,
         occurred_at: str | None = None,
         idempotency_key: str | None = None,
@@ -1561,11 +1635,15 @@ class WorkbenchRelationCommandService:
             for row_id in list(row_ids or [])
             if str(row_id).strip()
         ]
+        selected_row_types = [str(row_type).strip() for row_type in list(row_types or [])]
+        if row_types is not None and len(selected_row_ids) != len(selected_row_types):
+            raise ValueError("row_types must align with row_ids.")
         fingerprint = self._request_fingerprint(
             "withdraw_relation",
             {
                 "case_id": resolved_case_id,
                 "row_ids": selected_row_ids,
+                "row_types": selected_row_types,
                 "actor_id": actor_id,
                 "reason": reason,
                 "history_operation_type": history_operation_type,
@@ -1597,7 +1675,13 @@ class WorkbenchRelationCommandService:
                 before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
             else:
                 pair_service = self._pair_service_for_row_ids(selected_row_ids)
-                active_relations = pair_service.active_relations_for_row_ids(selected_row_ids)
+                if row_types is not None:
+                    active_relations = pair_service.active_relations_for_typed_rows(
+                        selected_row_ids,
+                        selected_row_types,
+                    )
+                else:
+                    active_relations = pair_service.active_relations_for_row_ids(selected_row_ids)
                 if len(active_relations) > 1:
                     raise WorkbenchRelationCommandError(
                         "workbench_relation_multiple_groups_selected",
@@ -1626,6 +1710,7 @@ class WorkbenchRelationCommandService:
         if row_ids is not None:
             self._assert_exact_withdraw_selection(
                 selected_row_ids,
+                row_types=selected_row_types if row_types is not None else None,
                 active_relation=before_relation,
                 row_id_aliases=row_id_aliases,
             )
@@ -1841,6 +1926,7 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         row_types: list[str],
         month_scope: str,
+        tenant_id: str | None,
     ) -> None:
         normalized_month_scope = str(month_scope or "all").strip() or "all"
         prepared_members = set(zip(preparation.row_ids, preparation.row_types, strict=False))
@@ -1866,6 +1952,7 @@ class WorkbenchRelationCommandService:
             )
         if (
             preparation.owner_token is not self._confirm_preparation_owner
+            or preparation.tenant_id != self._canonical_tenant_id(tenant_id)
             or preparation.month_scope != normalized_month_scope
             or not prepared_members.issubset(requested_members)
             or not requested_members.issubset(allowed_members)
@@ -1934,25 +2021,42 @@ class WorkbenchRelationCommandService:
         cls,
         row_ids: list[str],
         *,
+        row_types: list[str] | None = None,
         active_relation: dict[str, Any],
         row_id_aliases: dict[str, str] | None,
     ) -> None:
-        requested = {
+        requested_ids = [
             cls._canonical_withdraw_row_id(
                 str(row_id),
                 row_id_aliases=row_id_aliases,
             )
             for row_id in list(row_ids or [])
             if str(row_id).strip()
-        }
-        current = {
+        ]
+        current_ids = [
             cls._canonical_withdraw_row_id(
                 str(row_id),
                 row_id_aliases=row_id_aliases,
             )
             for row_id in list(active_relation.get("row_ids") or [])
             if str(row_id).strip()
-        }
+        ]
+        if row_types is not None:
+            normalized_types = [str(row_type).strip() for row_type in row_types]
+            current_types = [
+                str(row_type).strip()
+                for row_type in list(active_relation.get("row_types") or [])
+            ]
+            if len(requested_ids) != len(normalized_types) or len(current_ids) != len(current_types):
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_exact_selection_required",
+                    "Withdraw relation requires aligned typed members.",
+                )
+            requested: set[Any] = set(zip(normalized_types, requested_ids, strict=True))
+            current: set[Any] = set(zip(current_types, current_ids, strict=True))
+        else:
+            requested = set(requested_ids)
+            current = set(current_ids)
         if requested != current:
             raise WorkbenchRelationCommandError(
                 "workbench_relation_exact_selection_required",
@@ -2165,13 +2269,21 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         *,
         row_types: list[str],
+        tenant_id: str | None = None,
     ) -> None:
         lock = getattr(self._relation_repository, "lock_canonical_relation_members", None)
         if not callable(lock):
             return
         missing_member_keys = sorted(
             str(item).strip()
-            for item in list(lock(list(row_ids or []), row_types=list(row_types or [])) or [])
+            for item in list(
+                lock(
+                    list(row_ids or []),
+                    row_types=list(row_types or []),
+                    tenant_id=self._canonical_tenant_id(tenant_id),
+                )
+                or []
+            )
             if str(item).strip()
         )
         if missing_member_keys:
@@ -2180,6 +2292,9 @@ class WorkbenchRelationCommandService:
                 "One or more Workbench relation members no longer exist in canonical facts.",
                 payload={"missing_member_keys": missing_member_keys},
             )
+
+    def _canonical_tenant_id(self, tenant_id: str | None) -> str:
+        return str(tenant_id or self._tenant_id or "").strip()
 
     def _pair_service_for_row_ids(
         self,
@@ -2225,6 +2340,33 @@ class WorkbenchRelationCommandService:
             )
         return WorkbenchPairRelationService.from_snapshot(
             loader(list(row_ids or []), case_ids=list(case_ids or []))
+        )
+
+    def _active_pair_service_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> WorkbenchPairRelationService:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        loader = getattr(
+            self._relation_repository,
+            "load_active_workbench_pair_relations_for_typed_rows",
+            None,
+        )
+        if not callable(loader):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_repository_unavailable",
+                "Workbench relation repository does not expose typed active relation overlap reads.",
+            )
+        return WorkbenchPairRelationService.from_snapshot(
+            loader(
+                list(row_ids or []),
+                list(row_types or []),
+                case_ids=list(case_ids or []),
+            )
         )
 
     def _save_changed_cases(

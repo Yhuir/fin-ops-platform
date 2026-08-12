@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
+import { workbenchRowIdentityKey } from "../features/workbench/selectionModel";
 import type { WorkbenchRecord } from "../features/workbench/types";
 
 export type WorkbenchRowState = "idle" | "selected" | "related";
@@ -11,25 +12,41 @@ export default function useWorkbenchSelection() {
   const [selectedOpenRows, setSelectedOpenRows] = useState<WorkbenchRecord[]>([]);
 
   const selectedCaseId = useMemo(() => selectedRow?.caseId ?? null, [selectedRow]);
-  const selectedPairedRowIds = useMemo(() => selectedPairedRows.map((row) => row.id), [selectedPairedRows]);
-  const selectedOpenRowIds = useMemo(() => selectedOpenRows.map((row) => row.id), [selectedOpenRows]);
-  const selectedPairedRowIdSet = useMemo(() => new Set(selectedPairedRowIds), [selectedPairedRowIds]);
-  const selectedOpenRowIdSet = useMemo(() => new Set(selectedOpenRowIds), [selectedOpenRowIds]);
+  const selectedPairedRowIdentityKeys = useMemo(
+    () => selectedPairedRows.map(workbenchRowIdentityKey),
+    [selectedPairedRows],
+  );
+  const selectedOpenRowIdentityKeys = useMemo(
+    () => selectedOpenRows.map(workbenchRowIdentityKey),
+    [selectedOpenRows],
+  );
+  const selectedPairedRowIdentityKeySet = useMemo(
+    () => new Set(selectedPairedRowIdentityKeys),
+    [selectedPairedRowIdentityKeys],
+  );
+  const selectedOpenRowIdentityKeySet = useMemo(
+    () => new Set(selectedOpenRowIdentityKeys),
+    [selectedOpenRowIdentityKeys],
+  );
 
   const togglePairedRowSelection = useCallback((row: WorkbenchRecord) => {
-    setSelectedPairedRows((current) =>
-      current.some((item) => item.id === row.id)
-        ? current.filter((item) => item.id !== row.id)
-        : [...current, row],
-    );
+    const identityKey = workbenchRowIdentityKey(row);
+    setSelectedPairedRows((current) => {
+      const isSelected = current.some((item) => workbenchRowIdentityKey(item) === identityKey);
+      return isSelected
+        ? current.filter((item) => workbenchRowIdentityKey(item) !== identityKey)
+        : [...current, row];
+    });
   }, []);
 
   const toggleOpenRowSelection = useCallback((row: WorkbenchRecord) => {
-    setSelectedOpenRows((current) =>
-      current.some((item) => item.id === row.id)
-        ? current.filter((item) => item.id !== row.id)
-        : [...current, row],
-    );
+    const identityKey = workbenchRowIdentityKey(row);
+    setSelectedOpenRows((current) => {
+      const isSelected = current.some((item) => workbenchRowIdentityKey(item) === identityKey);
+      return isSelected
+        ? current.filter((item) => workbenchRowIdentityKey(item) !== identityKey)
+        : [...current, row];
+    });
   }, []);
 
   const openDetail = useCallback((row: WorkbenchRecord) => {
@@ -62,20 +79,26 @@ export default function useWorkbenchSelection() {
   }, []);
 
   const getRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired"): WorkbenchRowState => {
+    const identityKey = workbenchRowIdentityKey(row);
     if (zoneId === "unpaired") {
-      return selectedOpenRowIdSet.has(row.id) ? "selected" : "idle";
+      return selectedOpenRowIdentityKeySet.has(identityKey) ? "selected" : "idle";
     }
 
-    if (selectedPairedRowIdSet.has(row.id)) {
+    if (selectedPairedRowIdentityKeySet.has(identityKey)) {
       return "selected";
     }
 
-    if (selectedPairedRowIds.length === 0 && selectedCaseId && row.caseId && row.caseId === selectedCaseId) {
+    if (selectedPairedRowIdentityKeys.length === 0 && selectedCaseId && row.caseId && row.caseId === selectedCaseId) {
       return "related";
     }
 
     return "idle";
-  }, [selectedCaseId, selectedOpenRowIdSet, selectedPairedRowIdSet, selectedPairedRowIds.length]);
+  }, [
+    selectedCaseId,
+    selectedOpenRowIdentityKeySet,
+    selectedPairedRowIdentityKeySet,
+    selectedPairedRowIdentityKeys.length,
+  ]);
 
   return {
     detailRow,
@@ -86,10 +109,8 @@ export default function useWorkbenchSelection() {
     clearSelection,
     clearPairedSelection,
     clearOpenSelection,
-    selectedPairedRowIds,
     selectedPairedRows,
     togglePairedRowSelection,
-    selectedOpenRowIds,
     selectedOpenRows,
     toggleOpenRowSelection,
   };

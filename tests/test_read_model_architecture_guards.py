@@ -37,35 +37,10 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation groups to downstream freshness facade."),
     (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository._workbench_summary_from_payload",
-        "dict read_model_status=fresh",
-    ): (1, "workbench summary payload is emitted only from the active generation selected by the SQL repository."),
-    (
-        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
-        "PostgresReadModelRepository.get_workbench_relation_preview_selection",
-        "dict read_model_status=fresh",
-    ): (1, "workbench preview selection is pinned to the active generation and validated by the facade freshness gate."),
-    (
         "backend/src/fin_ops_platform/services/read_model_query_gateway.py",
         "build_fresh_cache_envelope",
         "dict read_model_status=fresh",
     ): (1, "shared helper is the only generic fresh cache envelope writer."),
-    (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "WorkbenchQueryFacade.group_detail",
-        "dict read_model_status=fresh",
-    ): (1, "facade returns group detail only after SQL active generation source/status gate passes."),
-    (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "WorkbenchQueryFacade.relation_preview_selection",
-        "dict read_model_status=fresh",
-    ): (1, "facade mirrors the repository result only after the exact preview selection freshness and generation proof passes."),
-    (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "WorkbenchQueryFacade._cached_groups_payload",
-        "read_model_status=fresh",
-    ): (1, "workbench groups page cache is separately gated by active generation cache version before use."),
 }
 
 SAFE_EXPECTED_SOURCE_VERSION_METHOD_CALLS: set[tuple[str, str]] = set()
@@ -298,10 +273,10 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         offenders: list[str] = []
         reset_worker_path = SOURCE_ROOT / "services" / "runtime_worker_handlers.py"
         reset_worker_source = reset_worker_path.read_text(encoding="utf-8")
-        if 'for scope_type in ("workbench", "workbench_relation")' not in reset_worker_source:
-            offenders.append("settings maintenance worker must own the explicit global read-model refresh set")
-        if 'gateway.enqueue_one(scope_type, "all"' not in reset_worker_source:
-            offenders.append("settings maintenance worker must enqueue global scopes through ReadModelRefreshGateway")
+        if 'gateway.enqueue_one("workbench_relation", "all"' not in reset_worker_source:
+            offenders.append("settings maintenance worker must enqueue the retained global relation scope")
+        if 'gateway.enqueue_one("workbench", "all"' in reset_worker_source:
+            offenders.append("settings maintenance worker still enqueues the retired Workbench page scope")
         for path in SOURCE_ROOT.rglob("*.py"):
             source = path.read_text(encoding="utf-8")
             count = source.count("include_all=True")

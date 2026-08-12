@@ -12,7 +12,7 @@
 | protected targets | `SettingsDataResetService.protected_targets()` | 防止误删 OA 源表、app settings、metadata、import metadata |
 | 后台 job | `BackgroundJobService` + `/data-reset/jobs*` | 页面离开后可恢复进度；并发提交必须互斥；失败要可诊断 |
 | 派生生命周期 | `_execute_derived_data_lifecycle_event("settings_reset_completed")` | 重置后旧 read model/cache 不能伪装 fresh |
-| OA rebuild | `reset_oa_and_rebuild` 路径、OA adapter、workbench worker | reset 只可靠登记后台重建并返回 pending，不同步构建页面；下游重建要受保留月份和配置表单限制，不能破坏纯银行+发票关系 |
+| OA rebuild | `reset_oa_and_rebuild` 路径、OA adapter、OA/matching/shared-relation workers | reset 只可靠登记 canonical OA 后台重建并返回 pending，不同步构建页面；关联台下一次 direct GET 读取已提交事实，下游共享分布重建受保留月份和配置表单限制，不能破坏纯银行+发票关系 |
 | App Health/App Status | `tests/test_app_health_api.py`、App Status overview | running/failed/partial reset job 必须进入全局状态平面 |
 | 设置页 UI | `SettingsPage`、`SettingsDataResetDialogs`、Workbench 内设置入口 | 影响确认、密码弹窗、progress reentry、错误反馈、权限隐藏 |
 | 备份/恢复 | deploy-control + operations docs | 复用 verified custom `pg_dump` 并登记短时 receipt；真实 restore 演练仍需 staging |

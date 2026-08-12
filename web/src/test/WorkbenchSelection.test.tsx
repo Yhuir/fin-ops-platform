@@ -137,6 +137,110 @@ function withUnpairedActiveRelations(memberIdSets: string[][]) {
   };
 }
 
+function withAmountMismatchGroups(
+  payload: Record<string, unknown>,
+  state: "active" | "ignored",
+  count = 1,
+) {
+  const paired = payload.paired as { groups: TestWorkbenchApiGroup[] };
+  const sourceGroup = paired.groups[0];
+  if (!sourceGroup) {
+    throw new Error("Missing paired Workbench fixture group for amount mismatch test.");
+  }
+  const groups = Array.from({ length: count }, (_, index) => ({
+    ...sourceGroup,
+    group_id: `case:ANOMALY-${index + 1}`,
+    oa_invoice_anomaly: {
+      code: "oa_invoice_anomaly",
+      fingerprint: "a".repeat(64),
+      state,
+      items: [{
+        code: "oa_invoice_amount_mismatch",
+        label: "金额不一致",
+        display_label: state === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+        fingerprint: "b".repeat(64),
+        comparison_unit_id: `case:ANOMALY-${index + 1}`,
+        oa_total: "100.00",
+        invoice_total: "99.00",
+        amount_delta: "1.00",
+        invoice_row_ids: sourceGroup.invoice_rows.map((row) => row.id),
+      }],
+    },
+  }));
+  const summary = payload.summary as Record<string, unknown>;
+  return {
+    ...payload,
+    summary: {
+      ...summary,
+      exception_count: state === "active" ? count : 0,
+      ignored_exception_count: state === "ignored" ? count : 0,
+    },
+    paired: {
+      ...paired,
+      groups,
+    },
+  };
+}
+
+function withTypedIdentityCollision(payload: Record<string, unknown>) {
+  const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
+  const replaceId = (row: Record<string, unknown>) => (
+    ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"].includes(String(row.id))
+      ? { ...row, id: "shared-cross-pane-id" }
+      : row
+  );
+  return {
+    ...payload,
+    unpaired: {
+      ...unpaired,
+      groups: unpaired.groups.map((group) => ({
+        ...group,
+        oa_rows: group.oa_rows.map(replaceId),
+        bank_rows: group.bank_rows.map(replaceId),
+        invoice_rows: group.invoice_rows.map(replaceId),
+      })),
+    },
+  };
+}
+
+function withCollapsedPairedGroup(payload: Record<string, unknown>, amount: string) {
+  const paired = payload.paired as { groups: Array<Record<string, unknown>> };
+  const sourceGroup = paired.groups.find((group) => group.group_id === "case:CASE-202603-001");
+  if (!sourceGroup) {
+    throw new Error("Missing paired Workbench fixture group for group-detail race test.");
+  }
+  const sourceRow = (sourceGroup.bank_rows as Array<Record<string, unknown>>)[0];
+  if (!sourceRow) {
+    throw new Error("Missing paired bank row for group-detail race test.");
+  }
+  const sourceRows = [0, 1].map((index) => ({
+    ...sourceRow,
+    id: `detail-bank-${index + 1}`,
+    debit_amount: amount,
+    remark: `明细快照 ${amount}`,
+  }));
+  const compactGroup = {
+    ...sourceGroup,
+    bank_rows: sourceRows.slice(0, 1),
+    row_counts: { oa: 1, bank: 2, invoice: 1 },
+    collapsed_rows: {
+      oa: sourceGroup.oa_rows,
+      bank: sourceRows.slice(0, 1),
+      invoice: sourceGroup.invoice_rows,
+    },
+    collapsed_row_counts: { oa: 1, bank: 2, invoice: 1 },
+  };
+  return {
+    ...payload,
+    paired: {
+      ...paired,
+      groups: paired.groups.map((group) => (
+        group.group_id === "case:CASE-202603-001" ? compactGroup : group
+      )),
+    },
+  };
+}
+
 function setDocumentVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -146,268 +250,6 @@ function setDocumentVisibility(state: DocumentVisibilityState) {
 }
 
 describe("Workbench row selection and detail drawer", () => {
-  test("polls refresh status only when visible with completion plus one second single-flight cadence", async () => {
-    vi.useFakeTimers();
-    setDocumentVisibility("visible");
-    const fetchMock = installMockApiFetch();
-    const defaultFetch = fetchMock.getMockImplementation();
-    const refreshRequests: Array<ReturnType<typeof deferredResponse> & { signal: AbortSignal | null }> = [];
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
-        const request = deferredResponse();
-        refreshRequests.push({ ...request, signal: init?.signal ?? null });
-        return request.promise;
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-
-    const rendered = renderWorkbenchPage();
-    expect(refreshRequests).toHaveLength(1);
-
-    fireEvent.focus(window);
-    setDocumentVisibility("visible");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
-    expect(refreshRequests).toHaveLength(1);
-    expect(refreshRequests[0].signal?.aborted).toBe(false);
-
-    await act(async () => {
-      refreshRequests[0].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "refreshing",
-        read_model_version: "generation-v1",
-      }));
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(999);
-    });
-    expect(refreshRequests).toHaveLength(1);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(refreshRequests).toHaveLength(2);
-
-    fireEvent.focus(window);
-    setDocumentVisibility("visible");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-    expect(refreshRequests).toHaveLength(2);
-
-    setDocumentVisibility("hidden");
-    await act(async () => {
-      refreshRequests[1].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "stale",
-        read_model_version: "generation-v1",
-      }));
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(refreshRequests).toHaveLength(2);
-
-    setDocumentVisibility("visible");
-    fireEvent.focus(window);
-    expect(refreshRequests).toHaveLength(3);
-
-    rendered.unmount();
-    expect(refreshRequests[2].signal?.aborted).toBe(true);
-    fireEvent.focus(window);
-    setDocumentVisibility("visible");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
-    });
-    expect(refreshRequests).toHaveLength(3);
-  });
-
-  test("keeps failed and thrown refresh checks on cadence and reloads one changed fresh generation once", async () => {
-    vi.useFakeTimers();
-    setDocumentVisibility("visible");
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    const refreshRequests: Array<ReturnType<typeof deferredResponse>> = [];
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
-        const request = deferredResponse();
-        refreshRequests.push(request);
-        return request.promise;
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderWorkbenchPage();
-    expect(refreshRequests).toHaveLength(1);
-    const initialRequestCount = fetchMock.mock.calls.filter(([input]) => (
-      isWorkbenchInitialRequest(input as RequestInfo | URL)
-    )).length;
-
-    await act(async () => {
-      refreshRequests[0].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "failed",
-        read_model_version: "generation-v1",
-        last_error: "投影刷新失败",
-      }));
-      await Promise.resolve();
-    });
-    expect(screen.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-    expect(refreshRequests).toHaveLength(2);
-    await act(async () => {
-      refreshRequests[1].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "unavailable",
-        read_model_version: "generation-v1",
-      }));
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(999);
-    });
-    expect(refreshRequests).toHaveLength(2);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(refreshRequests).toHaveLength(3);
-
-    await act(async () => {
-      refreshRequests[2].reject(new Error("network down"));
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-    expect(refreshRequests).toHaveLength(4);
-
-    await act(async () => {
-      refreshRequests[3].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "fresh",
-        read_model_version: "generation-v2",
-      }));
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(300);
-    });
-    expect(fetchMock.mock.calls.filter(([input]) => (
-      isWorkbenchInitialRequest(input as RequestInfo | URL)
-    ))).toHaveLength(initialRequestCount + 1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(700);
-    });
-    expect(refreshRequests).toHaveLength(5);
-    await act(async () => {
-      refreshRequests[4].resolve(jsonResponse({
-        scope_key: "all",
-        read_model_status: "fresh",
-        read_model_version: "generation-v2",
-      }));
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(300);
-    });
-    expect(fetchMock.mock.calls.filter(([input]) => (
-      isWorkbenchInitialRequest(input as RequestInfo | URL)
-    ))).toHaveLength(initialRequestCount + 1);
-  });
-
-  test("fails closed when a fresh workbench refresh check loses the network", async () => {
-    setDocumentVisibility("visible");
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    const refreshRequests: Array<ReturnType<typeof deferredResponse>> = [];
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
-        const request = deferredResponse();
-        refreshRequests.push(request);
-        return request.promise;
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderWorkbenchPage();
-    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
-    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
-    expect(screen.getByRole("button", { name: "确认关联" })).toBeEnabled();
-
-    await act(async () => {
-      refreshRequests[0].reject(new Error("network down"));
-      await Promise.resolve();
-    });
-    expect(screen.getByText("关联台读模型不可用")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(screen.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
-  });
-
-  test.each([
-    ["initial generation first", false],
-    ["refresh generation first", true],
-  ])("reloads when %s exposes a generation race", async (_label, statusFirst) => {
-    vi.useFakeTimers();
-    setDocumentVisibility("visible");
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    const initialRequest = deferredResponse();
-    const refreshRequest = deferredResponse();
-    let initialFetchArgs: [RequestInfo | URL, RequestInit | undefined] | null = null;
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (isWorkbenchInitialRequest(input) && initialFetchArgs === null) {
-        initialFetchArgs = [input, init];
-        return initialRequest.promise;
-      }
-      if (fetchPath(input).startsWith("/api/workbench/refresh-status")) {
-        return refreshRequest.promise;
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-
-    renderWorkbenchPage();
-    expect(initialFetchArgs).not.toBeNull();
-    const initialResponse = await defaultFetch!(...initialFetchArgs!);
-    const statusResponse = jsonResponse({
-      scope_key: "all",
-      read_model_status: "fresh",
-      read_model_version: "generation-v2",
-    });
-
-    await act(async () => {
-      if (statusFirst) {
-        refreshRequest.resolve(statusResponse);
-        await Promise.resolve();
-        initialRequest.resolve(initialResponse);
-      } else {
-        initialRequest.resolve(initialResponse);
-        await Promise.resolve();
-        refreshRequest.resolve(statusResponse);
-      }
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(300);
-      await Promise.resolve();
-    });
-
-    expect(fetchMock.mock.calls.filter(([input]) => (
-      isWorkbenchInitialRequest(input as RequestInfo | URL)
-    ))).toHaveLength(2);
-  });
-
   test("shows the unified page Audit control to admins", async () => {
     installMockApiFetch();
     renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
@@ -415,6 +257,39 @@ describe("Workbench row selection and detail drawer", () => {
     expect(await screen.findByRole("heading", { name: "关联台" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Audit 关联台" })).toBeInTheDocument();
   });
+
+  test("invalidates a visible Audit proof after a newer canonical page is installed", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
+
+    await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ });
+    await user.click(screen.getByRole("button", { name: "Audit 关联台" }));
+    expect(await screen.findByText(/已登记 App 内部合同一致/)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByText(/已登记 App 内部合同一致/)).not.toBeInTheDocument();
+    }, { timeout: 4_500 });
+  }, 6_000);
 
   test("clicking an open row toggles multi-selection without opening the detail drawer", async () => {
     const user = userEvent.setup();
@@ -433,44 +308,6 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(row);
 
     expect(row).toHaveAttribute("data-row-state", "idle");
-  });
-
-  test("stops a relation write and reloads when the active generation changes after preview", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input) === "/api/workbench/actions/confirm-link") {
-        return Promise.resolve(jsonResponse({
-          error: "workbench_read_model_version_conflict",
-          message: "关联台数据版本已更新，请重新确认。",
-          read_model_status: "fresh",
-          read_model_version: "generation-v2",
-        }, 409));
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-    renderWorkbenchPage();
-
-    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
-    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
-
-    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
-
-    await waitFor(() => {
-      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
-      expect(initialRequests).toHaveLength(2);
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-      expect(screen.getAllByText("已选 0")).toHaveLength(2);
-    });
-    expect(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
   });
 
   test("bank pane time filter supports month selection and clears through the all-time control", async () => {
@@ -526,52 +363,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(oaRow).toHaveAttribute("data-row-state", "related");
     expect(bankRow).toHaveAttribute("data-row-state", "related");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
-      expect.any(Object),
-    );
-  });
-
-  test("detail reloads the active generation once and retries after a version conflict", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    let detailRequestCount = 0;
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/workbench/rows/")) {
-        detailRequestCount += 1;
-        if (detailRequestCount === 1) {
-          return Promise.resolve(jsonResponse({
-            error: "workbench_read_model_version_conflict",
-            message: "关联台数据版本已更新。",
-            read_model_status: "fresh",
-            read_model_version: "generation-v2",
-          }, 409));
-        }
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-    renderWorkbenchPage();
-
-    const bankRow = await screen.findByRole("row", {
-      name: /2026-03-25 14:22.*华东设备供应商/,
-    });
-    await user.click(within(bankRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
-
-    const dialog = await screen.findByRole("dialog", { name: "银行流水详情" });
-    expect(await within(dialog).findByText("账号")).toBeInTheDocument();
-    expect(within(dialog).getByText("招商银行")).toBeInTheDocument();
-    expect(within(dialog).queryByText("详情加载失败，请稍后重试。")).not.toBeInTheDocument();
-    expect(detailRequestCount).toBe(2);
-    expect(
-      fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)),
-    ).toHaveLength(2);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=generation-v2",
+      "/api/workbench/rows/bk-p-202603-001?month=all&row_type=bank",
       expect.any(Object),
     );
   });
@@ -632,7 +424,7 @@ describe("Workbench row selection and detail drawer", () => {
     const dialog = screen.getByRole("dialog", { name: "银行流水详情" });
     expect(within(dialog).getByText("正在加载详情...")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
+      "/api/workbench/rows/bk-p-202603-001?month=all&row_type=bank",
       expect.any(Object),
     );
     expect(detailSignal?.aborted).toBe(false);
@@ -663,7 +455,7 @@ describe("Workbench row selection and detail drawer", () => {
     const dialog = await screen.findByRole("dialog", { name: "OA详情" });
     expect(within(dialog).getByText("OA详情")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/rows/oa-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
+      "/api/workbench/rows/oa-p-202603-001?month=all&row_type=oa",
       expect.any(Object),
     );
   });
@@ -784,7 +576,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "bank", "invoice"],
         }),
       }),
     );
@@ -801,7 +593,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
         month: "all",
         row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-        expected_read_model_version: "mock-workbench-generation-1",
+        row_types: ["oa", "bank", "invoice"],
         idempotency_key: expect.any(String),
       });
     });
@@ -1278,7 +1070,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
         month: "all",
         row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
-        expected_read_model_version: "mock-workbench-generation-1",
+        row_types: ["bank", "invoice"],
         idempotency_key: expect.any(String),
       });
     });
@@ -1325,7 +1117,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202604-001", "bk-o-202604-001"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "bank"],
         }),
       }),
     );
@@ -1363,7 +1155,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "bank"],
         }),
       }),
     );
@@ -1402,19 +1194,22 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "bank", "invoice"],
         }),
       }),
     );
   });
 
-  test("workbench action applies backend projection and never calls the operation barrier", async () => {
+  test("confirm action performs exactly one direct combined reread after the mutation", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
+    const initialReadsBeforeWrite = fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    )).length;
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
@@ -1445,54 +1240,444 @@ describe("Workbench row selection and detail drawer", () => {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    ))).toHaveLength(initialReadsBeforeWrite + 1);
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input as RequestInfo | URL) === "/api/workbench/actions/confirm-link"
+    ))).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"))).toBe(false);
   });
 
-  test("workbench action ignores legacy global freshness targets and does not call the barrier", async () => {
+  test("post-commit reread is a fresh request even when the identical OA background read is still in flight", async () => {
     const user = userEvent.setup();
+    let releaseBackgroundRead!: () => void;
+    const backgroundReadGate = new Promise<void>((resolve) => {
+      releaseBackgroundRead = resolve;
+    });
+    let backgroundReadStarted = false;
+    let initialReadCount = 0;
     const fetchMock = installMockApiFetch({
-      actionDelayMs: 20,
-      workbenchBackgroundLoadDelayMs: 180,
-      transformWorkbenchConfirmActionResponse: (body) => ({
-        ...body,
-        affected_months: ["all"],
-        affected_scope_keys: ["all"],
-        freshness_targets: [
-          { read_model_key: "workbench_relation", scope_key: "all" },
-        ],
-      }),
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+        if (initialReadCount === 2) {
+          backgroundReadStarted = true;
+          const staleResponse = defaultFetch!(input, init);
+          return backgroundReadGate.then(() => staleResponse);
+        }
+      }
+      return defaultFetch!(input, init);
     });
     renderWorkbenchPage();
 
-    const openBankRow = await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    });
-    const openInvoiceRow = await screen.findByRole("row", {
-      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
-    });
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await waitFor(() => expect(backgroundReadStarted).toBe(true), { timeout: 4_500 });
+    expect(initialReadCount).toBe(2);
 
-    await user.click(openBankRow);
-    await user.click(openInvoiceRow);
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    await user.click(await within(unpairedZone).findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    }));
+    await user.click(within(unpairedZone).getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
     const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
-    expectRelationPreviewBlocking(preview, "确认关联");
-    expect(within(preview).getByText("正在确认关联...")).toBeInTheDocument();
+    await waitFor(() => expect(initialReadCount).toBe(3));
+    const postCommitRequest = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))[2];
+    expect(postCommitRequest[1]).toMatchObject({ cache: "no-store" });
+    expect(new Headers(postCommitRequest[1]?.headers).get("Cache-Control")).toBe("no-cache");
+
+    releaseBackgroundRead();
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    }, { timeout: 2_000 });
-
-    const barrierCalls = fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
-    const globalRelationBarrierCalls = barrierCalls.filter(([, init]) => {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return (body.targets ?? []).some((target: { read_model_key?: string; scope_key?: string }) => (
-        target.read_model_key === "workbench_relation" && target.scope_key === "all"
-      ));
     });
-    expect(globalRelationBarrierCalls).toHaveLength(0);
-    expect(screen.queryByText(/操作同步等待超时/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
+  }, 8_000);
+
+  test("each OA completion bypasses an older in-flight direct snapshot", async () => {
+    let releaseFirstOaRead!: () => void;
+    const firstOaReadGate = new Promise<void>((resolve) => {
+      releaseFirstOaRead = resolve;
+    });
+    let initialReadCount = 0;
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:03+08:00",
+          version: 3,
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+        if (initialReadCount === 2) {
+          const staleResponse = defaultFetch!(input, init);
+          return firstOaReadGate.then(() => staleResponse);
+        }
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await screen.findByTestId("zone-unpaired");
+    await waitFor(() => expect(initialReadCount).toBe(2), { timeout: 4_500 });
+    await waitFor(() => expect(initialReadCount).toBe(3), { timeout: 7_500 });
+    const oaRefreshRequests = fetchMock.mock.calls
+      .filter(([input]) => isWorkbenchInitialRequest(input))
+      .slice(1, 3);
+    expect(oaRefreshRequests).toHaveLength(2);
+    oaRefreshRequests.forEach(([, init]) => {
+      expect(init).toMatchObject({ method: "GET", cache: "no-store" });
+      expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
+    });
+
+    releaseFirstOaRead();
+    await act(async () => Promise.resolve());
+    expect(initialReadCount).toBe(3);
+  }, 10_000);
+
+  test("a late group-detail response cannot replace a newer canonical group", async () => {
+    const user = userEvent.setup();
+    const staleDetail = deferredResponse();
+    let staleDetailSignal: AbortSignal | null = null;
+    let canonicalAmount = "111.00";
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withCollapsedPairedGroup(
+        payload as Record<string, unknown>,
+        canonicalAmount,
+      ),
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      if (url.pathname === "/api/workbench/groups/detail" && !staleDetailSignal) {
+        staleDetailSignal = init?.signal ?? null;
+        const stalePayload = defaultFetch!(input, init);
+        return stalePayload.then(async (response) => {
+          const body = await response.json() as { group: Record<string, unknown> };
+          return staleDetail.promise.then(() => jsonResponse(body));
+        });
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    await user.click(await within(pairedZone).findByRole("button", { name: "展开折叠明细，2 条" }));
+    await waitFor(() => expect(staleDetailSignal).not.toBeNull());
+    canonicalAmount = "222.00";
+    await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true), { timeout: 4_500 });
+    expect(within(pairedZone).getAllByText("222.00")).toHaveLength(1);
+
+    staleDetail.resolve(jsonResponse({}));
+    await act(async () => Promise.resolve());
+    expect(within(pairedZone).queryByText("111.00")).not.toBeInTheDocument();
+    expect(within(pairedZone).getAllByText("222.00")).toHaveLength(1);
+    expect(screen.queryByText("加载完整明细失败，请稍后重试。")).not.toBeInTheDocument();
+
+    await user.click(within(pairedZone).getByRole("button", { name: "展开折叠明细，2 条" }));
+    await waitFor(() => expect(within(pairedZone).getAllByText("222.00")).toHaveLength(2));
+  }, 10_000);
+
+  test("OA completion waits behind an in-flight post-commit reread and follows it once", async () => {
+    const user = userEvent.setup();
+    let releasePostCommitRead!: () => void;
+    const postCommitReadGate = new Promise<void>((resolve) => {
+      releasePostCommitRead = resolve;
+    });
+    let initialReadCount = 0;
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+        if (initialReadCount === 2) {
+          const postCommitResponse = defaultFetch!(input, init);
+          return postCommitReadGate.then(() => postCommitResponse);
+        }
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    }));
+    await user.click(within(unpairedZone).getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "确认关联" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+    await waitFor(() => expect(initialReadCount).toBe(2));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/oa-sync/status"))).toHaveLength(2);
+    }, { timeout: 4_500 });
+    expect(initialReadCount).toBe(2);
+
+    releasePostCommitRead();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
+    });
+    await waitFor(() => expect(initialReadCount).toBe(3));
+    expect(initialReadCount).toBe(3);
+  }, 8_000);
+
+  test("amount mismatch decisions reread exactly one bounded fresh current bucket and replace its cursor state", async () => {
+    const user = userEvent.setup();
+    let anomalyState: "active" | "ignored" = "active";
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        anomalyState,
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/ignore") {
+        anomalyState = "ignored";
+        return Promise.resolve(jsonResponse({
+          success: true,
+          action: "ignore_oa_invoice_anomaly",
+          month: "all",
+          affected_row_ids: [],
+          affected_scope_keys: ["2026-03"],
+          message: "已忽略金额异常。",
+        }));
+      }
+      if (fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/restore") {
+        anomalyState = "active";
+        return Promise.resolve(jsonResponse({
+          success: true,
+          action: "restore_oa_invoice_anomaly",
+          month: "all",
+          affected_row_ids: [],
+          affected_scope_keys: ["2026-03"],
+          message: "已撤回忽略金额异常。",
+        }));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /异常 1 \| 已忽略 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    const initialCombinedReads = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
+    const initialBucketReads = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "active";
+    });
+    expect(initialBucketReads).toHaveLength(2);
+
+    await user.click(within(drawer).getByRole("button", { name: "忽略" }));
+    expect(await within(drawer).findByText("当前没有进行中的异常。")).toBeInTheDocument();
+
+    const currentBucketReads = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "active";
+    });
+    expect(currentBucketReads).toHaveLength(initialBucketReads.length + 2);
+    currentBucketReads.slice(-2).forEach(([, init]) => {
+      expect(init).toMatchObject({ method: "GET", cache: "no-store" });
+      expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/ignore"
+    ))).toHaveLength(1);
+
+    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
+    expect(await within(drawer).findByRole("button", { name: "撤回忽略" })).toBeInTheDocument();
+    const processedReadsBeforeRestore = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "processed";
+    }).length;
+    expect(processedReadsBeforeRestore).toBe(2);
+
+    await user.click(within(drawer).getByRole("button", { name: "撤回忽略" }));
+    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
+    const processedReadsAfterRestore = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "processed";
+    });
+    expect(processedReadsAfterRestore).toHaveLength(processedReadsBeforeRestore + 2);
+    processedReadsAfterRestore.slice(-2).forEach(([, init]) => {
+      expect(init).toMatchObject({ method: "GET", cache: "no-store" });
+      expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/restore"
+    ))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(initialCombinedReads);
+  });
+
+  test("switching exception buckets aborts load-more and clears its pending generation", async () => {
+    const user = userEvent.setup();
+    let loadMoreStarted = false;
+    let loadMoreAborted = false;
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "active",
+        51,
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      if (
+        url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("exception_bucket") === "active"
+        && url.searchParams.has("cursor")
+      ) {
+        loadMoreStarted = true;
+        return new Promise<Response>((_, reject) => {
+          const rejectAsAborted = () => {
+            loadMoreAborted = true;
+            reject(new DOMException("aborted", "AbortError"));
+          };
+          if (init?.signal?.aborted) {
+            rejectAsAborted();
+            return;
+          }
+          init?.signal?.addEventListener("abort", rejectAsAborted, { once: true });
+        });
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /异常 51 \| 已忽略 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    expect(await within(drawer).findByText("50 / 51 项")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
+    await waitFor(() => expect(loadMoreStarted).toBe(true));
+
+    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
+    await waitFor(() => expect(loadMoreAborted).toBe(true));
+    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("radio", { name: "进行中的异常" }));
+    const loadMoreButton = await within(drawer).findByRole("button", { name: "加载更多异常" });
+    expect(loadMoreButton).toBeEnabled();
+    expect(loadMoreButton).not.toHaveAttribute("aria-busy", "true");
+  });
+
+  test("switching exception buckets aborts an expanded detail and keeps the processed bucket canonical", async () => {
+    const user = userEvent.setup();
+    const staleDetail = deferredResponse();
+    let staleDetailSignal: AbortSignal | null = null;
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "active",
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      if (url.pathname === "/api/workbench/groups/detail" && !staleDetailSignal) {
+        staleDetailSignal = init?.signal ?? null;
+        const stalePayload = defaultFetch!(input, init);
+        return stalePayload.then(async (response) => {
+          const body = await response.json() as { group: Record<string, unknown> };
+          return staleDetail.promise.then(() => jsonResponse(body));
+        });
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /异常 1 \| 已忽略 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await waitFor(() => expect(staleDetailSignal).not.toBeNull());
+    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
+    await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true));
+    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
+
+    staleDetail.resolve(jsonResponse({}));
+    await act(async () => Promise.resolve());
+    expect(within(drawer).getByText("当前没有已忽略的异常。")).toBeInTheDocument();
+    expect(within(drawer).queryByText("明细快照")).not.toBeInTheDocument();
   });
 
   test("confirm link does not expose row movement while the submit is still in progress", async () => {
@@ -1522,155 +1707,6 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("refreshing response cannot overwrite the committed confirm projection", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ actionDelayMs: 20 });
-    const defaultFetch = fetchMock.getMockImplementation();
-    let initialSnapshot: Record<string, unknown> | null = null;
-    let confirmCommitted = false;
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = fetchPath(input);
-      if (confirmCommitted && isWorkbenchInitialRequest(input) && initialSnapshot) {
-        const refreshingSnapshot = JSON.parse(JSON.stringify(initialSnapshot)) as {
-          paired: Record<string, unknown>;
-          unpaired: Record<string, unknown>;
-          read_model_status: string;
-        };
-        refreshingSnapshot.read_model_status = "refreshing";
-        refreshingSnapshot.paired.read_model_status = "refreshing";
-        refreshingSnapshot.unpaired.read_model_status = "refreshing";
-        return jsonResponse(refreshingSnapshot);
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      const response = await defaultFetch(input, init);
-      if (isWorkbenchInitialRequest(input) && !initialSnapshot) {
-        initialSnapshot = await response.json() as Record<string, unknown>;
-        return jsonResponse(initialSnapshot);
-      }
-      if (path === "/api/workbench/actions/confirm-link") {
-        confirmCommitted = true;
-      }
-      return response;
-    });
-    renderWorkbenchPage();
-
-    await user.click(await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    }));
-    await user.click(screen.getByRole("row", {
-      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
-    }));
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
-
-    await waitFor(() => {
-      const initialRequests = fetchMock.mock.calls.filter(([input]) => (
-        isWorkbenchInitialRequest(input as RequestInfo | URL)
-      ));
-      expect(initialRequests).toHaveLength(2);
-    });
-    const pairedZone = screen.getByTestId("zone-paired");
-    const unpairedZone = screen.getByTestId("zone-unpaired");
-    expect(within(pairedZone).getByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    })).toBeInTheDocument();
-    expect(within(unpairedZone).queryByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    })).not.toBeInTheDocument();
-    expect(screen.getByText(
-      "关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。",
-    )).toBeInTheDocument();
-  });
-
-  test("two-pane confirm uses the authoritative unpaired projection without waiting for all-scope refresh", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      actionDelayMs: 20,
-      transformWorkbenchConfirmActionResponse: (body) => {
-        const projection = body.operation_projection as {
-          after: { paired_groups: unknown[] };
-        };
-        return {
-          ...body,
-          operation_projection: {
-            after: {
-              paired_groups: [],
-              unpaired_groups: projection.after.paired_groups,
-            },
-          },
-        };
-      },
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    let confirmCommitted = false;
-    let refreshStatusCalls = 0;
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      const path = fetchPath(input);
-      if (path === "/api/workbench/actions/confirm-link") {
-        const response = await defaultFetch(input, init);
-        confirmCommitted = true;
-        return response;
-      }
-      if (confirmCommitted && path.startsWith("/api/workbench/refresh-status")) {
-        refreshStatusCalls += 1;
-        return jsonResponse({ scope_key: "all", read_model_status: "refreshing" });
-      }
-      if (confirmCommitted && isWorkbenchInitialRequest(input)) {
-        const response = await defaultFetch(input, init) as Response;
-        const payload = await response.json() as Record<string, unknown>;
-        return jsonResponse({
-          ...payload,
-          read_model_status: "refreshing",
-          paired: { ...(payload.paired as Record<string, unknown>), read_model_status: "refreshing" },
-          unpaired: { ...(payload.unpaired as Record<string, unknown>), read_model_status: "refreshing" },
-        });
-      }
-      return defaultFetch(input, init);
-    });
-    renderWorkbenchPage();
-
-    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
-    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    }, { timeout: 2_000 });
-    expect(refreshStatusCalls).toBe(0);
-    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
-  });
-
-  test("disables relation writes while the workbench generation is refreshing", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch({
-      actionDelayMs: 20,
-      workbenchReadModelStatus: "refreshing",
-    });
-    renderWorkbenchPage();
-
-    await screen.findByTestId("zone-unpaired");
-    const openBankRow = await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    });
-    const openInvoiceRow = await screen.findByRole("row", {
-      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
-    });
-
-    await user.click(openBankRow);
-    await user.click(openInvoiceRow);
-    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(screen.getByText("关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-  });
-
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
     installMockApiFetch({
       workbenchPrimaryDelayMs: 20,
@@ -1686,120 +1722,46 @@ describe("Workbench row selection and detail drawer", () => {
     ).toBeInTheDocument();
   });
 
-  test("withdraw link finishes only after the fresh refetch restores every row as an unpaired singleton", async () => {
+  test("withdraw link installs one direct combined reread and clears the relation selection", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
-    const defaultFetch = fetchMock.getMockImplementation();
-    let withdrawCommitted = false;
-    let refreshStatusCallsAfterWrite = 0;
-    let initialPageCallsAfterWrite = 0;
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      const path = fetchPath(input);
-      if (path === "/api/workbench/actions/withdraw-link") {
-        const response = await defaultFetch(input, init);
-        withdrawCommitted = true;
-        return response;
-      }
-      if (withdrawCommitted && path.startsWith("/api/workbench/refresh-status")) {
-        refreshStatusCallsAfterWrite += 1;
-        return jsonResponse({
-          scope_key: "all",
-          read_model_status: refreshStatusCallsAfterWrite >= 3 ? "fresh" : "refreshing",
-          dirty_scopes: [],
-          retryable: false,
-        });
-      }
-      if (withdrawCommitted && isWorkbenchInitialRequest(input)) {
-        initialPageCallsAfterWrite += 1;
-        const response = await defaultFetch(input, init) as Response;
-        const payload = await response.json() as Record<string, unknown>;
-        const readModelStatus = refreshStatusCallsAfterWrite >= 3 ? "fresh" : "refreshing";
-        return jsonResponse({
-          ...payload,
-          read_model_status: readModelStatus,
-          paired: {
-            ...(payload.paired as Record<string, unknown>),
-            read_model_status: readModelStatus,
-          },
-          unpaired: {
-            ...(payload.unpaired as Record<string, unknown>),
-            read_model_status: readModelStatus,
-          },
-        });
-      }
-      return defaultFetch(input, init);
-    });
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
     const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const initialReadsBeforeWrite = fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    )).length;
 
-    const pairedBankRow = await screen.findByRole("row", {
+    await user.click(await within(pairedZone).findByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
-    });
-    const pairedInvoiceRow = await screen.findByRole("row", {
+    }));
+    await user.click(within(pairedZone).getByRole("row", {
       name: /91310000MA1K8A001X.*华东设备供应商/,
-    });
-
-    await user.click(pairedBankRow);
-    await user.click(pairedInvoiceRow);
+    }));
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
-    const preview = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    expect(within(preview).getByRole("heading", { name: "撤回关联" })).toBeInTheDocument();
-    expect(within(preview).getByRole("heading", { name: "操作前" })).toBeInTheDocument();
-    expect(within(preview).getByRole("heading", { name: "操作后" })).toBeInTheDocument();
-    const before = within(preview).getByTestId("relation-preview-before");
-    const after = within(preview).getByTestId("relation-preview-after");
-    expectRelationPreviewSummary(before);
-    expectRelationPreviewSummary(after);
-    expectRelationPreviewTriPane(before);
-    expectRelationPreviewTriPane(after);
-    expect(within(before).getAllByTestId(/^candidate-group-/)).toHaveLength(1);
-    const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
-    expect(afterGroups).toHaveLength(3);
-    const oaOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
-    expect(oaOnlyGroup).toBeDefined();
-    expect(within(oaOnlyGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(oaOnlyGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
-    const bankOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ }));
-    expect(bankOnlyGroup).toBeDefined();
-    expect(within(bankOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    const invoiceOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ }));
-    expect(invoiceOnlyGroup).toBeDefined();
-    expect(within(invoiceOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    const preview = await screen.findByRole("dialog", { name: "撤回关联" });
+    expectRelationPreviewSummary(within(preview).getByTestId("relation-preview-before"));
+    expectRelationPreviewSummary(within(preview).getByTestId("relation-preview-after"));
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
-    expectRelationPreviewBlocking(preview, "确认撤回");
-    expect(within(preview).getByText("正在撤回关联...")).toBeInTheDocument();
-    expect(pairedZone).toHaveTextContent(/2026-03-25\s*14:22/);
-    expect(pairedZone).toHaveTextContent("华东设备供应商");
-    expect(unpairedZone).not.toHaveTextContent(/2026-03-25\s*14:22/);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    }, { timeout: 5000 });
-    expect(
-      within(pairedZone).queryByRole("row", {
-        name: /2026-03-25 14:22.*华东设备供应商/,
-      }),
-    ).not.toBeInTheDocument();
-    const restoredOaGroup = await within(unpairedZone).findByTestId("candidate-group-unpaired-row:oa-p-202603-001");
-    const bankOnlyUnpairedGroup = within(unpairedZone).getByTestId("candidate-group-unpaired-row:bk-p-202603-001");
-    const invoiceOnlyUnpairedGroup = within(unpairedZone).getByTestId("candidate-group-unpaired-row:iv-p-202603-001");
-    expect(within(restoredOaGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(restoredOaGroup).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(invoiceOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    // The operation poller must reach the third (fresh) response. The visible-page
-    // status poller may overlap it once under full-suite load, so endpoint call
-    // count is intentionally not an exact operation-poller count.
-    expect(refreshStatusCallsAfterWrite).toBeGreaterThanOrEqual(3);
-    expect(refreshStatusCallsAfterWrite).toBeLessThanOrEqual(4);
-    expect(initialPageCallsAfterWrite).toBe(2);
+      expect(screen.queryByRole("dialog", { name: "撤回关联" })).not.toBeInTheDocument();
+    }, { timeout: 5_000 });
+    expect(within(pairedZone).queryByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      isWorkbenchInitialRequest(input as RequestInfo | URL)
+    ))).toHaveLength(initialReadsBeforeWrite + 1);
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input as RequestInfo | URL) === "/api/workbench/actions/withdraw-link"
+    ))).toHaveLength(1);
+    expect(screen.getAllByText("已选 0")).toHaveLength(2);
   });
 
   test("unpaired zone keeps withdraw visible but disables both relation actions for zero or one singleton", async () => {
@@ -1855,6 +1817,23 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByRole("button", { name: "清空搜索" })).toBeInTheDocument();
   });
 
+  test("zero-result zone reads replace the global count instead of falling back to it", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    expect(within(unpairedZone).getByText(/未配对 \d+ 项/)).toBeInTheDocument();
+
+    await user.type(
+      within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" }),
+      "肯定不存在的关联台记录",
+    );
+
+    expect(await within(unpairedZone).findByText("未配对 0 项")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("当前区域暂无记录。")).toBeInTheDocument();
+  });
+
   test("unpaired confirm accepts two different canonical members from the same pane", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -1880,10 +1859,70 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "oa-o-202603-002"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "oa"],
         }),
       }),
     );
+  });
+
+  test("unpaired selection keeps identical source ids distinct across typed panes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withTypedIdentityCollision,
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    expect(confirmButton).toBeEnabled();
+    await user.click(confirmButton);
+
+    await screen.findByRole("dialog", { name: "确认关联" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["shared-cross-pane-id", "shared-cross-pane-id"],
+          row_types: ["oa", "bank"],
+        }),
+      }),
+    );
+  });
+
+  test("row ignore keeps the invoice type when another pane has the same source id", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withTypedIdentityCollision,
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const invoiceRow = await within(unpairedZone).findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+    await user.click(within(invoiceRow).getByRole("button", { name: "更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "忽略" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/ignore-row",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_id: "shared-cross-pane-id",
+            row_type: "invoice",
+            comment: "由关联台忽略发票：shared-cross-pane-id",
+          }),
+        }),
+      );
+    });
   });
 
   test("unpaired relation actions distinguish one exact formal relation from additions and multiple relations", async () => {
@@ -1960,7 +1999,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "iv-o-202603-001"],
-          expected_read_model_version: "mock-workbench-generation-1",
+          row_types: ["oa", "invoice"],
         }),
       }),
     );
@@ -2015,46 +2054,6 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("workbench stale refresh does not globally disable selected group actions", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch({
-      appHealth: {
-        status: "ok",
-        generated_at: "2026-05-06T00:00:00+08:00",
-        session: { status: "authenticated" },
-        oa_sync: {
-          status: "synced",
-          message: "OA 已同步",
-          dirty_scopes: [],
-        },
-        workbench_matching: {
-          status: "stale",
-          dirty_scopes: ["2026-04"],
-          stale_scopes: ["2026-04"],
-          rebuilding_scopes: ["2026-04"],
-        },
-        background_jobs: {
-          active: 0,
-          queued: 0,
-          running: 0,
-          attention: 0,
-        },
-        dependencies: {},
-      },
-    });
-    renderAppAt("/");
-
-    const unpairedZone = await screen.findByTestId("zone-unpaired");
-    expect(await screen.findByRole("button", { name: /关联台待刷新/ })).toBeInTheDocument();
-    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
-
-    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
-    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
-    expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
-  });
-
   test("OA dirty sync still disables selected group actions", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
@@ -2106,7 +2105,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
   });
 
-  test("restores selected Workbench actions from the local OA status without waiting for stale App Health", async () => {
+  test("real OA completion fields trigger one canonical reread and invalidate the old selection", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       appHealth: {
@@ -2137,17 +2136,13 @@ describe("Workbench row selection and detail drawer", () => {
           status: "idle",
           message: "OA 有待处理变更",
           dirty_scopes: ["2026-03"],
-          changed_scopes: [],
           last_synced_at: "2026-05-06T09:59:00+08:00",
-          version: 1,
         },
         {
           status: "synced",
           message: "OA 已同步",
           dirty_scopes: [],
-          changed_scopes: ["all"],
           last_synced_at: "2026-05-06T10:00:00+08:00",
-          version: 2,
         },
       ],
     });
@@ -2166,15 +2161,136 @@ describe("Workbench row selection and detail drawer", () => {
     })).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(confirmButton).toBeEnabled();
+      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
       expect(within(unpairedZone).queryByRole("status", {
         name: "OA 正在同步，完成后将自动恢复关联操作。",
       })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
 
-    expect(oaRow).toHaveAttribute("data-row-state", "selected");
-    expect(bankRow).toHaveAttribute("data-row-state", "selected");
+    expect(confirmButton).toBeDisabled();
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    expect(confirmButton).toBeEnabled();
   });
+
+  test("OA status transport failures fail closed until the visible retry succeeds", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const defaultFetch = fetchMock.getMockImplementation();
+    let oaStatusReachable = false;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/oa-sync/status") && !oaStatusReachable) {
+        return Promise.reject(new TypeError("network unavailable"));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    expect(await screen.findByText("OA 同步状态读取失败，请重试。")).toBeInTheDocument();
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    expect(confirmButton).toBeDisabled();
+    expect(within(unpairedZone).getByRole("status", {
+      name: "OA 同步状态读取失败，请重试；恢复后将自动开放关联操作。",
+    })).toBeInTheDocument();
+
+    oaStatusReachable = true;
+    await user.click(screen.getByRole("button", { name: "重试 OA 状态" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("OA 同步状态读取失败，请重试。")).not.toBeInTheDocument();
+      expect(confirmButton).toBeEnabled();
+    });
+  });
+
+  test("background direct-read failures fail closed and recover only after a successful visible reread", async () => {
+    const user = userEvent.setup();
+    let initialReadCount = 0;
+    let failBackgroundRead = true;
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+        if (initialReadCount === 2 && failBackgroundRead) {
+          return Promise.resolve(jsonResponse({ message: "关联台后台读取失败" }, 503));
+        }
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    expect(confirmButton).toBeEnabled();
+
+    expect(await screen.findByText("关联台服务暂时不可用，请稍后重试。", undefined, { timeout: 4_500 })).toBeInTheDocument();
+    expect(confirmButton).toBeDisabled();
+    expect(within(unpairedZone).getByRole("status", {
+      name: "关联台读取失败，请重新读取成功后再执行关联操作。",
+    })).toBeInTheDocument();
+
+    failBackgroundRead = false;
+    await user.click(screen.getByRole("button", { name: "重新读取" }));
+    await waitFor(() => {
+      expect(screen.queryByText("关联台服务暂时不可用，请稍后重试。")).not.toBeInTheDocument();
+      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+    });
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    expect(confirmButton).toBeEnabled();
+  }, 8_000);
+
+  test("a canonical OA reread closes an open preview and invalidates its selection", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
+    expect(await screen.findByRole("dialog", { name: "确认关联" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
+      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+    }, { timeout: 5_000 });
+  }, 8_000);
 
   test("workbench settings can manage allowed app accounts", async () => {
     const user = userEvent.setup();
@@ -2741,8 +2857,13 @@ describe("Workbench row selection and detail drawer", () => {
   });
 
   test("OA connection errors keep the global status icon independent while warning in the page", async () => {
+    const user = userEvent.setup();
     installMockApiFetch({
-      workbenchOaStatus: { code: "error", message: "OA连接失败，请检查会话或网络" },
+      workbenchOaSyncStatuses: [{
+        status: "error",
+        message: "OA连接失败，请检查会话或网络",
+        dirty_scopes: ["all"],
+      }],
     });
     renderAppAt("/");
 
@@ -2752,6 +2873,13 @@ describe("Workbench row selection and detail drawer", () => {
     expect(statusIndicator.textContent).toBe("");
     expect(document.querySelector(".global-status-text")).toBeNull();
     expect(await screen.findByText("OA连接失败，请检查会话或网络，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("status", {
+      name: "OA 同步状态尚未就绪，恢复后将自动开放关联操作。",
+    })).toBeInTheDocument();
   });
 
   test("OA sync polling keeps the global status icon independent from local refresh messages", async () => {
@@ -2828,6 +2956,123 @@ describe("Workbench row selection and detail drawer", () => {
       expect(screen.queryByRole("status", { name: "OA 正在同步，关联台稍后更新" })).not.toBeInTheDocument();
     }, { timeout: 8_000 });
   });
+
+  test("OA completion background reread uses the latest zone query without an unfiltered intermediate page", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.type(
+      within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" }),
+      "智能工厂",
+    );
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(fetchPath(input), "http://localhost");
+        return url.pathname === "/api/workbench/groups" && url.searchParams.get("search") === "智能工厂";
+      })).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length).toBeGreaterThan(1);
+    }, { timeout: 4_500 });
+    const backgroundInitialReads = fetchMock.mock.calls
+      .filter(([input]) => isWorkbenchInitialRequest(input))
+      .slice(1);
+    expect(backgroundInitialReads.length).toBeGreaterThan(0);
+    backgroundInitialReads.forEach(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      expect(JSON.parse(url.searchParams.get("unpaired_query") ?? "{}")).toMatchObject({
+        search: "智能工厂",
+      });
+    });
+  }, 8_000);
+
+  test("a combined OA reread supersedes an older zone response for the same query", async () => {
+    const user = userEvent.setup();
+    const staleZoneResponse = deferredResponse();
+    let staleResponseBody: Promise<Record<string, unknown>> | null = null;
+    let staleSignal: AbortSignal | null = null;
+    let initialReadCount = 0;
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+      }
+      if (
+        url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("zone") === "unpaired"
+        && url.searchParams.get("search") === "智能工厂"
+        && staleResponseBody === null
+      ) {
+        staleSignal = init?.signal ?? null;
+        staleResponseBody = Promise.resolve(defaultFetch!(input, init)).then((response) => response.json());
+        return staleZoneResponse.promise;
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await user.type(
+      within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" }),
+      "智能工厂",
+    );
+    await waitFor(() => expect(staleResponseBody).not.toBeNull());
+    await waitFor(() => expect(initialReadCount).toBeGreaterThan(1), { timeout: 4_500 });
+    await waitFor(() => expect(staleSignal?.aborted).toBe(true));
+
+    const staleBody = await staleResponseBody!;
+    staleZoneResponse.resolve(jsonResponse({
+      ...staleBody,
+      groups: [],
+      total: 0,
+      row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
+      has_more: false,
+      next_cursor: null,
+    }));
+    await act(async () => Promise.resolve());
+
+    expect(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("heading", { name: "未配对 0 项" })).not.toBeInTheDocument();
+  }, 8_000);
 
   test("read-only export users can search and view details but cannot see write actions", async () => {
     const user = userEvent.setup();
@@ -3022,7 +3267,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(JSON.parse(String(call?.[1]?.body ?? "{}"))).toEqual({
         month: "all",
         row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
-        expected_read_model_version: "mock-workbench-generation-1",
+        row_types: ["oa", "bank", "invoice"],
         idempotency_key: expect.any(String),
         operation_type: "withdraw_relation",
       });
@@ -3042,166 +3287,12 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("OA invoice anomaly ignore waits for a new generation before loading ignored exceptions", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      workbenchReadModelVersions: ["generation-v1", "generation-v1", "generation-v1", "generation-v2"],
-    });
-    const defaultFetch = fetchMock.getMockImplementation();
-    let amountMismatchState: "active" | "ignored" = "active";
-
-    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const requestUrl = new URL(fetchPath(input), "http://localhost");
-      if (requestUrl.pathname === "/api/workbench/exceptions/amount-mismatch/ignore") {
-        amountMismatchState = "ignored";
-        return jsonResponse({
-          success: true,
-          action: "amount_mismatch_ignored",
-          month: "all",
-          affected_row_ids: [],
-          affected_scope_keys: ["2026-03"],
-          read_model_status: "refreshing",
-          read_model_version: "generation-v1",
-          message: "已忽略金额异常。",
-        });
-      }
-      const exceptionBucket = requestUrl.searchParams.get("exception_bucket");
-      if (requestUrl.pathname === "/api/workbench/groups" && exceptionBucket) {
-        if (!defaultFetch) {
-          throw new Error("Mock API fetch is not installed.");
-        }
-        const sourceUrl = new URL(requestUrl);
-        sourceUrl.searchParams.delete("exception_bucket");
-        const sourceResponse = await defaultFetch(`${sourceUrl.pathname}${sourceUrl.search}`, init) as Response;
-        const sourcePayload = await sourceResponse.json() as Record<string, unknown>;
-        const sourceGroups = Array.isArray(sourcePayload.groups) ? sourcePayload.groups : [];
-        const expectedVersion = requestUrl.searchParams.get("expected_read_model_version");
-        const shouldInclude = requestUrl.searchParams.get("zone") === "paired" && (
-          (exceptionBucket === "active" && amountMismatchState === "active" && expectedVersion === "generation-v1")
-          || (exceptionBucket === "processed" && amountMismatchState === "ignored" && expectedVersion === "generation-v2")
-        );
-        const groups = shouldInclude && sourceGroups[0]
-          ? [{
-              ...(sourceGroups[0] as Record<string, unknown>),
-              oa_invoice_anomaly: {
-                code: "oa_invoice_anomaly",
-                fingerprint: "a".repeat(64),
-                state: amountMismatchState,
-                items: [{
-                  code: "oa_invoice_amount_mismatch",
-                  label: "金额不一致",
-                  display_label: amountMismatchState === "ignored" ? "已忽略：金额不一致" : "金额不一致",
-                  fingerprint: "b".repeat(64),
-                  comparison_unit_id: "case:CASE-1",
-                  oa_total: "100.00",
-                  invoice_total: "99.90",
-                  amount_delta: "0.10",
-                  invoice_row_ids: [],
-                  attachment_file_count: 0,
-                }],
-              },
-            }]
-          : [];
-        return jsonResponse({
-          ...sourcePayload,
-          groups,
-          total: groups.length,
-          has_more: false,
-          read_model_version: expectedVersion,
-        });
-      }
-      if (!defaultFetch) {
-        throw new Error("Mock API fetch is not installed.");
-      }
-      return defaultFetch(input, init);
-    });
-    renderWorkbenchPage();
-
-    const unpairedZone = await screen.findByTestId("zone-unpaired");
-    await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ });
-    await user.click(within(unpairedZone).getByRole("button", { name: /异常 \d+ \| 已忽略 \d+/ }));
-    const exceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click((await within(exceptionDrawer).findAllByRole("button", { name: "忽略" }))[0]);
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)).length)
-        .toBeGreaterThanOrEqual(4);
-    });
-    const refreshedExceptionDrawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(refreshedExceptionDrawer).getByRole("radio", { name: "已忽略的异常" }));
-    expect((await within(refreshedExceptionDrawer).findAllByRole("button", { name: "撤回忽略" })).length)
-      .toBeGreaterThan(0);
-    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL)))
-      .toHaveLength(4);
-    expect(fetchMock.mock.calls.some(([input]) => {
-      const url = new URL(fetchPath(input as RequestInfo | URL), "http://localhost");
-      return url.pathname === "/api/workbench/groups"
-        && url.searchParams.get("exception_bucket") === "processed"
-        && url.searchParams.get("expected_read_model_version") === "generation-v2";
-    })).toBe(true);
-  });
-
   test("renders an error state when the workbench request fails", async () => {
     installMockApiFetch({ workbenchErrorMonths: ["all"] });
     renderWorkbenchPage();
 
     expect(await screen.findByText("关联台服务暂时不可用，请稍后重试。")).toBeInTheDocument();
     expect(screen.queryByText("workbench failed")).not.toBeInTheDocument();
-  });
-
-  test("does not render the global empty state for a stale empty workbench payload", async () => {
-    installMockApiFetch({
-      workbenchEmptyPayload: true,
-      workbenchReadModelStatus: "stale",
-      workbenchRefreshStatus: {
-        scope_key: "all",
-        read_model_status: "stale",
-        dirty_scopes: [
-          {
-            scope_key: "2026-03",
-            status: "failed",
-            last_error: null,
-          },
-        ],
-        last_error: null,
-        retryable: true,
-      },
-    });
-    renderWorkbenchPage();
-
-    await screen.findByTestId("zone-unpaired");
-    expect(await screen.findByText("关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。")).toBeInTheDocument();
-    expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("zone-unpaired")).getByText("未配对 0 项")).toBeInTheDocument();
-  });
-
-  test("requeued workbench refresh failure does not show the stale failure banner", async () => {
-    installMockApiFetch({
-      workbenchRefreshStatus: {
-        scope_key: "all",
-        read_model_status: "refreshing",
-        dirty_scopes: [
-          {
-            scope_key: "2026-03",
-            status: "failed",
-            last_error: "workbench_all_scope_parent_inconsistent: active_relation_open_membership count=4",
-          },
-          {
-            scope_key: "2026-03",
-            status: "processing",
-          },
-        ],
-        last_error: null,
-        retryable: false,
-      },
-    });
-    renderWorkbenchPage();
-
-    expect(await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.queryByText(/关联台刷新失败/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/workbench_all_scope_parent_inconsistent/)).not.toBeInTheDocument();
-    });
   });
 
   test("keeps both zones visible and exposes no expand or layout mode controls", async () => {

@@ -62,6 +62,7 @@ class _WorkbenchConfirmLinkCommand:
     action_name: str
     month: str
     row_ids: list[str]
+    row_types: list[str]
     case_id: str
     scope_keys: list[str]
     payload: dict[str, object]
@@ -94,6 +95,7 @@ class _WorkbenchWithdrawLinkCommand:
     action_name: str
     month: str
     row_ids: list[str]
+    row_types: list[str]
     case_id: str
     scope_keys: list[str]
     payload: dict[str, object]
@@ -103,6 +105,20 @@ class _WorkbenchWithdrawLinkCommand:
     tenant_id: str = "default"
     actor_id: str = "system"
     timing_emit: Callable[[str, float, str | None], None] | None = None
+
+
+@dataclass(frozen=True)
+class _WorkbenchExceptionApplyCommand:
+    action_name: str
+    month: str
+    row_ids: list[str]
+    row_types: list[str]
+    scope_keys: list[str]
+    payload: dict[str, object]
+    idempotency_key: str
+    expected_versions: dict[str, object] | None = None
+    tenant_id: str = "default"
+    actor_id: str = "system"
 
 
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
@@ -117,9 +133,27 @@ class WorkbenchWriteRelationReadSnapshotPort:
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         return self._pair_relation_service.active_relations_for_row_ids(row_ids)
 
+    def active_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, object]]:
+        reader = getattr(self._pair_relation_service, "active_relations_for_typed_rows", None)
+        if not callable(reader):
+            raise RuntimeError("Typed Workbench relation lookup is required.")
+        return list(reader(row_ids, row_types) or [])
+
     def active_relation_by_row_id(self, row_id: str) -> dict[str, object] | None:
         relation = self._pair_relation_service.get_active_relation_by_row_id(row_id)
         return relation if isinstance(relation, dict) else None
+
+    def active_relation_by_typed_row(
+        self,
+        row_id: str,
+        row_type: str,
+    ) -> dict[str, object] | None:
+        relations = self.active_relations_for_typed_rows([row_id], [row_type])
+        return relations[0] if len(relations) == 1 else None
 
     def preview_withdraw_for_row_ids(self, row_ids: list[str]) -> dict[str, object]:
         return self._pair_relation_service.preview_withdraw_for_row_ids(row_ids)
@@ -158,6 +192,54 @@ class WorkbenchWriteRelationSpecialMetadataMutationPort:
     ) -> tuple[dict[str, object], dict[str, object]]:
         updated_relation, history = self._pair_relation_service.clear_special_metadata_for_row_ids(
             row_ids,
+            updated_by=updated_by,
+            note=note,
+        )
+        return dict(updated_relation), dict(history)
+
+    def update_special_metadata_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        special_metadata: dict[str, object],
+        updated_by: str,
+        note: str | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        mutation = getattr(
+            self._pair_relation_service,
+            "update_special_metadata_for_typed_rows",
+            None,
+        )
+        if not callable(mutation):
+            raise RuntimeError("Typed Workbench special-metadata mutation is required.")
+        updated_relation, history = mutation(
+            row_ids,
+            row_types,
+            special_metadata=special_metadata,
+            updated_by=updated_by,
+            note=note,
+        )
+        return dict(updated_relation), dict(history)
+
+    def clear_special_metadata_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        updated_by: str,
+        note: str | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        mutation = getattr(
+            self._pair_relation_service,
+            "clear_special_metadata_for_typed_rows",
+            None,
+        )
+        if not callable(mutation):
+            raise RuntimeError("Typed Workbench special-metadata mutation is required.")
+        updated_relation, history = mutation(
+            row_ids,
+            row_types,
             updated_by=updated_by,
             note=note,
         )
@@ -249,7 +331,7 @@ class WorkbenchWriteFacade:
     def preview_confirm_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            row_ids, requested_row_types = self._typed_selection_from_payload(payload)
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -259,23 +341,20 @@ class WorkbenchWriteFacade:
                 },
             )
 
-        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
+        before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
+            row_ids,
+            requested_row_types,
+        )
         is_active_selection, withdraw_preview, blocked_message = self._active_relation_withdraw_preview(
             before_relations=before_relations,
             selected_row_ids=row_ids,
+            selected_row_types=requested_row_types,
             month=month,
-        )
-        selection_row_ids = self._normalize_row_ids(
-            [
-                *row_ids,
-                *self._relation_row_ids(before_relations),
-                *self._withdraw_preview_row_ids(withdraw_preview),
-            ]
         )
         selection_result = self._relation_preview_selection(
             month,
-            row_ids=selection_row_ids,
-            expected_read_model_version=payload.get("expected_read_model_version"),
+            row_ids=row_ids,
+            row_types=requested_row_types,
         )
         if selection_result.status_code != HTTPStatus.OK:
             return WorkbenchWriteResult(
@@ -288,15 +367,12 @@ class WorkbenchWriteFacade:
             for row in list(selection.get("selected_rows") or [])
             if isinstance(row, dict)
         ]
-        context_rows = [
-            dict(row)
-            for row in list(selection.get("context_rows") or [])
-            if isinstance(row, dict)
-        ]
         try:
-            requested_row_types = self._canonical_confirm_link_row_types(
+            self._assert_canonical_typed_selection(
                 row_ids,
+                requested_row_types,
                 selected_rows,
+                minimum_rows=2,
             )
         except (KeyError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -306,21 +382,8 @@ class WorkbenchWriteFacade:
                     "message": str(exc),
                 },
             )
-        has_selected_bank_context = "bank" in requested_row_types
-        rows = [
-            *selected_rows,
-            *(context_rows if has_selected_bank_context else []),
-        ]
-        row_ids = self._normalize_row_ids(
-            [
-                str(row.get("id") or row.get("row_id") or "")
-                for row in rows
-            ]
-        )
-        row_types = [
-            str(row.get("type") or row.get("source_kind") or "unknown")
-            for row in rows
-        ]
+        rows = selected_rows
+        row_types = requested_row_types
         rows_by_type = self._rows_by_type(rows)
         amount_check = self._amount_check_for_rows_by_type(rows_by_type)
         if is_active_selection:
@@ -389,6 +452,7 @@ class WorkbenchWriteFacade:
         *,
         before_relations: list[dict[str, object]],
         selected_row_ids: list[str],
+        selected_row_types: list[str],
         month: str,
     ) -> tuple[bool, dict[str, object] | None, str | None]:
         if not before_relations:
@@ -396,13 +460,13 @@ class WorkbenchWriteFacade:
         if len(before_relations) > 1:
             return False, None, None
         active_relation = dict(before_relations[0])
-        active_row_ids = {
-            str(row_id).strip()
-            for row_id in list(active_relation.get("row_ids") or [])
-            if str(row_id).strip()
-        }
-        selected_ids = {str(row_id).strip() for row_id in list(selected_row_ids or []) if str(row_id).strip()}
-        if not selected_ids or selected_ids != active_row_ids:
+        active_row_ids = [str(row_id).strip() for row_id in list(active_relation.get("row_ids") or [])]
+        active_row_types = [str(row_type).strip() for row_type in list(active_relation.get("row_types") or [])]
+        if len(active_row_ids) != len(active_row_types):
+            return True, None, "所选关系成员类型已损坏，请联系管理员。"
+        selected_identities = list(zip(selected_row_types, selected_row_ids, strict=True))
+        active_identities = list(zip(active_row_types, active_row_ids, strict=True))
+        if not selected_identities or set(selected_identities) != set(active_identities):
             return False, None, None
 
         relation_command = self._relation_command_service_for()
@@ -410,7 +474,8 @@ class WorkbenchWriteFacade:
             try:
                 preview = self._preview_withdraw_relation_via_command_service(
                     relation_command,
-                    row_ids=sorted(active_row_ids),
+                    row_ids=selected_row_ids,
+                    row_types=selected_row_types,
                     month=month,
                 )
             except WorkbenchRelationCommandError as exc:
@@ -422,7 +487,7 @@ class WorkbenchWriteFacade:
             return True, preview, None
 
         try:
-            preview = self._relation_read_snapshot_port.preview_withdraw_for_row_ids(sorted(active_row_ids))
+            preview = self._relation_read_snapshot_port.preview_withdraw_for_row_ids(selected_row_ids)
         except Exception:
             return True, None, "所选记录已确认关联，但撤回预览暂时不可用。"
         active_relation = dict(preview.get("active_relation") or active_relation)
@@ -482,7 +547,7 @@ class WorkbenchWriteFacade:
         action_name = "confirm_link"
         try:
             month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            row_ids, row_types = self._typed_selection_from_payload(payload)
             case_id = str(payload["case_id"]) if payload.get("case_id") is not None else None
             note = str(payload.get("note") or payload.get("comment") or "").strip()
         except (KeyError, TypeError, ValueError) as exc:
@@ -493,16 +558,19 @@ class WorkbenchWriteFacade:
 
         resolve_rows_started_at = monotonic()
         try:
-            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
+            selected_rows = self._resolve_rows_for_amount_check(
+                row_ids,
+                row_types=row_types,
+                month=month,
+            )
+            self._assert_canonical_typed_selection(
+                row_ids,
+                row_types,
+                selected_rows,
+                minimum_rows=2,
+            )
             rows_by_type = self._rows_by_type(selected_rows)
-            self._canonical_confirm_link_row_types(row_ids, selected_rows)
             amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-            row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
-            if set(row_ids) != {str(row.get("id") or "") for row in selected_rows}:
-                selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
-                rows_by_type = self._rows_by_type(selected_rows)
-                amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-            row_types = self._canonical_row_types(row_ids, selected_rows)
         except KeyError as exc:
             row_id = str(exc.args[0] if exc.args else "").strip()
             return WorkbenchWriteResult(
@@ -543,16 +611,9 @@ class WorkbenchWriteFacade:
             selected_rows=selected_rows,
             amount_check=amount_check,
         )
-        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
-        operation_projection = self._confirm_link_operation_projection(
-            case_id=resolved_case_id,
-            row_ids=row_ids,
-            row_types=row_types,
-            selected_rows=selected_rows,
-            before_relations=before_relations,
-            month=month,
-            amount_check=amount_check,
-            paired_policy_metadata=paired_policy_metadata,
+        before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
+            row_ids,
+            row_types,
         )
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
@@ -587,7 +648,6 @@ class WorkbenchWriteFacade:
                 selected_rows=selected_rows,
                 history_before_relations=history_before_relations,
                 changed_scope_keys=changed_scope_keys,
-                operation_projection=operation_projection,
                 paired_policy_metadata=paired_policy_metadata,
             )
 
@@ -611,7 +671,7 @@ class WorkbenchWriteFacade:
                     selected_rows=selected_rows,
                     paired_policy_metadata=paired_policy_metadata,
                     request_id=request_id,
-                    operation_projection=operation_projection,
+                    tenant_id=tenant_id,
                 )
             except WorkbenchRelationCommandError as exc:
                 return self._relation_command_error_result(exc)
@@ -648,7 +708,6 @@ class WorkbenchWriteFacade:
                             command_result.get("affected_months") or changed_scope_keys
                         ),
                         "amount_check": amount_check,
-                        "operation_projection": operation_projection,
                         "message": f"已确认 {len(row_ids)} 条记录关联。",
                     }
                 ),
@@ -672,7 +731,6 @@ class WorkbenchWriteFacade:
         selected_rows: list[dict[str, object]],
         history_before_relations: list[dict[str, object]],
         changed_scope_keys: list[str],
-        operation_projection: dict[str, object],
         paired_policy_metadata: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
@@ -693,6 +751,7 @@ class WorkbenchWriteFacade:
             action_name=action_name,
             month=month,
             row_ids=list(row_ids),
+            row_types=list(row_types),
             case_id=resolved_case_id,
             scope_keys=list(changed_scope_keys),
             payload=dict(payload),
@@ -719,27 +778,36 @@ class WorkbenchWriteFacade:
                 raise _WorkbenchWritePersistenceError(
                     "confirm-link UoW requires transaction-bound canonical selection validation."
                 )
-            canonical_rows = validate_selection(scope_key=month, row_ids=row_ids)
-            if set(canonical_rows) != set(row_ids):
-                raise WorkbenchWriteConflict(
-                    action=action_name,
-                    reason="canonical_selection_changed",
-                    expected={"row_ids": row_ids},
-                    actual={"row_ids": sorted(canonical_rows)},
+            canonical_selection = validate_selection(
+                scope_key=month,
+                row_ids=row_ids,
+                row_types=row_types,
+            )
+            canonical_identities = [
+                (
+                    str(item.get("pane") or ""),
+                    str(item.get("row_id") or ""),
                 )
-            canonical_row_types = [str(canonical_rows[row_id].get("pane") or "") for row_id in row_ids]
-            if canonical_row_types != row_types:
+                for item in canonical_selection
+                if isinstance(item, dict)
+            ]
+            expected_identities = list(zip(row_types, row_ids, strict=True))
+            if canonical_identities != expected_identities:
                 raise WorkbenchWriteConflict(
                     action=action_name,
                     reason="canonical_selection_changed",
                     expected={"row_ids": row_ids, "row_types": row_types},
-                    actual={"row_ids": row_ids, "row_types": canonical_row_types},
+                    actual={
+                        "row_ids": [row_id for _row_type, row_id in canonical_identities],
+                        "row_types": [row_type for row_type, _row_id in canonical_identities],
+                    },
                 )
             external_etc_batch_ids = list(
                 dict.fromkeys(
-                    str(canonical_rows[row_id].get("external_etc_batch_id") or "").strip()
-                    for row_id in row_ids
-                    if str(canonical_rows[row_id].get("external_etc_batch_id") or "").strip()
+                    str(item.get("external_etc_batch_id") or "").strip()
+                    for item in canonical_selection
+                    if isinstance(item, dict)
+                    and str(item.get("external_etc_batch_id") or "").strip()
                 )
             )
             if len(external_etc_batch_ids) > 1:
@@ -771,7 +839,7 @@ class WorkbenchWriteFacade:
                 selected_rows=selected_rows,
                 paired_policy_metadata=transaction_metadata,
                 request_id=request_id,
-                operation_projection=operation_projection,
+                tenant_id=tenant_id,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -789,7 +857,6 @@ class WorkbenchWriteFacade:
                 "affected_months": list(changed_scope_keys),
                 "affected_scope_keys": list(changed_scope_keys),
                 "amount_check": amount_check,
-                "operation_projection": operation_projection,
                 "message": f"已确认 {len(row_ids)} 条记录关联。",
             }
 
@@ -820,8 +887,6 @@ class WorkbenchWriteFacade:
                 },
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
-        if not isinstance(result.get("operation_projection"), dict) or not result.get("operation_projection"):
-            result = {**result, "operation_projection": operation_projection}
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             self._confirm_link_response_payload(result),
@@ -844,7 +909,7 @@ class WorkbenchWriteFacade:
         selected_rows: list[dict[str, object]],
         paired_policy_metadata: dict[str, object],
         request_id: str | None,
-        operation_projection: dict[str, object],
+        tenant_id: str | None,
     ) -> dict[str, object]:
         confirm_relation = getattr(relation_command, "confirm_relation", None)
         if not callable(confirm_relation):
@@ -864,7 +929,7 @@ class WorkbenchWriteFacade:
             replace_existing=True,
             history_operation_type="confirm_link",
             request_id=request_id,
-            operation_projection=dict(operation_projection),
+            tenant_id=tenant_id,
         )
 
     @staticmethod
@@ -880,50 +945,8 @@ class WorkbenchWriteFacade:
             "affected_scope_keys": affected_scope_keys,
             **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
-            "operation_projection": dict(result.get("operation_projection") or {}),
             "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or ""),
-        }
-
-    def _confirm_link_operation_projection(
-        self,
-        *,
-        case_id: str,
-        row_ids: list[str],
-        row_types: list[str],
-        selected_rows: list[dict[str, object]],
-        before_relations: list[dict[str, object]],
-        month: str,
-        amount_check: dict[str, object],
-        paired_policy_metadata: dict[str, object],
-    ) -> dict[str, object]:
-        after_relation = {
-            "case_id": case_id,
-            "row_ids": list(row_ids),
-            "row_types": list(row_types),
-            "status": "active",
-            "relation_mode": "manual_confirmed",
-            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            "amount_check": dict(amount_check or {}),
-            "special_metadata": dict(paired_policy_metadata or {}),
-        }
-        before_groups = self._relation_groups(
-            before_relations,
-            selected_rows=selected_rows,
-            ungrouped_selected_rows="separate",
-        )
-        after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
-        paired_groups = [group for group in after_groups if group.get("zone") == "paired"]
-        unpaired_groups = [group for group in after_groups if group.get("zone") != "paired"]
-        return {
-            "before": {
-                "paired_groups": [group for group in before_groups if group.get("zone") == "paired"],
-                "unpaired_groups": [group for group in before_groups if group.get("zone") != "paired"],
-            },
-            "after": {
-                "paired_groups": paired_groups,
-                "unpaired_groups": unpaired_groups,
-            }
         }
 
     def _bank_transaction_paired_policy_metadata(
@@ -1186,6 +1209,9 @@ class WorkbenchWriteFacade:
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
+            row_type = str(payload["row_type"]).strip().lower()
+            if row_type not in {"oa", "bank", "invoice"}:
+                raise ValueError("row_type must be oa, bank, or invoice.")
             _comment = str(payload["comment"]) if payload.get("comment") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -1204,7 +1230,10 @@ class WorkbenchWriteFacade:
             return replayed
 
         resolve_rows_started_at = monotonic()
-        active_relation = self._relation_read_snapshot_port.active_relation_by_row_id(row_id)
+        active_relation = self._relation_read_snapshot_port.active_relation_by_typed_row(
+            row_id,
+            row_type,
+        )
         if not isinstance(active_relation, dict):
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -1501,7 +1530,11 @@ class WorkbenchWriteFacade:
         if not isinstance(expected_versions, dict) or not expected_versions:
             return None
         row_id = str(row.get("id") or "")
-        active_relation = self._relation_read_snapshot_port.active_relation_by_row_id(row_id)
+        row_type = str(row.get("type") or "").strip()
+        active_relation = self._relation_read_snapshot_port.active_relation_by_typed_row(
+            row_id,
+            row_type,
+        )
         current_row_status = "confirmed" if isinstance(active_relation, dict) else "unpaired"
         try:
             assert_workbench_stale_preconditions(
@@ -1543,7 +1576,7 @@ class WorkbenchWriteFacade:
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._withdraw_row_ids(payload)
+            row_ids, row_types = self._typed_selection_from_payload(payload)
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -1557,6 +1590,7 @@ class WorkbenchWriteFacade:
             preview_relation = self._preview_withdraw_relation_via_command_service(
                 relation_command,
                 row_ids=row_ids,
+                row_types=row_types,
                 month=month,
             )
         except WorkbenchRelationCommandError as exc:
@@ -1570,8 +1604,8 @@ class WorkbenchWriteFacade:
             )
         selection_result = self._relation_preview_selection(
             month,
-            row_ids=self._withdraw_preview_row_ids(preview_relation),
-            expected_read_model_version=payload.get("expected_read_model_version"),
+            row_ids=row_ids,
+            row_types=row_types,
         )
         if selection_result.status_code != HTTPStatus.OK:
             return WorkbenchWriteResult(
@@ -1604,7 +1638,7 @@ class WorkbenchWriteFacade:
         action_name = "withdraw_link"
         try:
             month = str(payload["month"])
-            row_ids = self._withdraw_row_ids(payload)
+            row_ids, row_types = self._typed_selection_from_payload(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -1626,6 +1660,7 @@ class WorkbenchWriteFacade:
             payload=payload,
             month=month,
             row_ids=row_ids,
+            row_types=row_types,
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
@@ -1653,6 +1688,7 @@ class WorkbenchWriteFacade:
                     tenant_id=tenant_id,
                     month=month,
                     row_ids=row_ids,
+                    row_types=row_types,
                     note=note,
                     row_id_aliases=row_id_aliases,
                 )
@@ -1670,6 +1706,7 @@ class WorkbenchWriteFacade:
             preview = self._preview_withdraw_relation_via_command_service(
                 relation_command,
                 row_ids=row_ids,
+                row_types=row_types,
                 month=month,
                 row_id_aliases=row_id_aliases,
             )
@@ -1677,7 +1714,6 @@ class WorkbenchWriteFacade:
             case_id = str(active_relation.get("case_id") or "").strip()
             if not case_id:
                 raise ValueError("active relation case_id is required.")
-            operation_projection: dict[str, object] = {}
             previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
             result = self._withdraw_relation_via_command_service(
                 relation_command,
@@ -1687,6 +1723,7 @@ class WorkbenchWriteFacade:
                 reason=note,
                 row_id_aliases=row_id_aliases,
                 row_ids=row_ids,
+                row_types=row_types,
             )
         except WorkbenchRelationCommandError as exc:
             return self._relation_command_error_result(exc)
@@ -1752,7 +1789,6 @@ class WorkbenchWriteFacade:
                 "affected_scope_keys": changed_scope_keys,
                 "affected_row_ids": affected_row_ids,
                 "restored_relations": restored_relations,
-                "operation_projection": operation_projection,
                 "message": "已撤回 1 组关联。",
             },
         )
@@ -1763,6 +1799,7 @@ class WorkbenchWriteFacade:
         payload: dict[str, object],
         month: str,
         row_ids: list[str],
+        row_types: list[str],
         actor_id: str | None,
         tenant_id: str | None,
     ) -> WorkbenchWriteResult | None:
@@ -1772,6 +1809,7 @@ class WorkbenchWriteFacade:
             action_name="withdraw_link",
             month=month,
             row_ids=list(row_ids),
+            row_types=list(row_types),
             case_id="",
             scope_keys=[],
             payload=dict(payload),
@@ -1806,6 +1844,7 @@ class WorkbenchWriteFacade:
         tenant_id: str | None,
         month: str,
         row_ids: list[str],
+        row_types: list[str],
         note: str,
         row_id_aliases: dict[str, str] | None = None,
     ) -> WorkbenchWriteResult:
@@ -1823,6 +1862,7 @@ class WorkbenchWriteFacade:
             action_name=action_name,
             month=month,
             row_ids=list(row_ids),
+            row_types=list(row_types),
             case_id="",
             scope_keys=[],
             payload=dict(payload),
@@ -1842,6 +1882,37 @@ class WorkbenchWriteFacade:
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
+            canonical_query = getattr(ctx, "canonical_query", None)
+            validate_selection = getattr(
+                canonical_query,
+                "validate_workbench_relation_selection_in_current_transaction",
+                None,
+            )
+            if not callable(validate_selection):
+                raise _WorkbenchWritePersistenceError(
+                    "withdraw-link UoW requires transaction-bound canonical selection validation."
+                )
+            canonical_selection = validate_selection(
+                scope_key=month,
+                row_ids=row_ids,
+                row_types=row_types,
+            )
+            canonical_identities = [
+                (str(item.get("pane") or ""), str(item.get("row_id") or ""))
+                for item in canonical_selection
+                if isinstance(item, dict)
+            ]
+            expected_identities = list(zip(row_types, row_ids, strict=True))
+            if canonical_identities != expected_identities:
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="canonical_selection_changed",
+                    expected={"row_ids": row_ids, "row_types": row_types},
+                    actual={
+                        "row_ids": [row_id for _row_type, row_id in canonical_identities],
+                        "row_types": [row_type for row_type, _row_id in canonical_identities],
+                    },
+                )
             pair_relation_started_at = monotonic()
             result = self._withdraw_relation_via_command_service(
                 relation_command,
@@ -1852,6 +1923,7 @@ class WorkbenchWriteFacade:
                 idempotency_key=None,
                 row_id_aliases=row_id_aliases,
                 row_ids=row_ids,
+                row_types=row_types,
             )
             before_relation = dict(result.get("before_relation") or result.get("relation") or {})
             case_id = str(result.get("case_id") or before_relation.get("case_id") or "").strip()
@@ -1911,7 +1983,6 @@ class WorkbenchWriteFacade:
                 "affected_scope_keys": changed_scope_keys,
                 "affected_row_ids": affected_row_ids,
                 "restored_relations": restored_relations,
-                "operation_projection": {},
                 "message": "已撤回 1 组关联。",
             }
 
@@ -1947,7 +2018,6 @@ class WorkbenchWriteFacade:
             **WorkbenchWriteFacade._affected_scope_envelope(affected_scope_keys),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
-            "operation_projection": dict(result.get("operation_projection") or {}),
             "outbox_event_ids": list(result.get("outbox_event_ids") or []),
             "message": str(result.get("message") or "已撤回 1 组关联。"),
         }
@@ -1957,6 +2027,7 @@ class WorkbenchWriteFacade:
         relation_command: Any,
         *,
         row_ids: list[str],
+        row_types: list[str],
         month: str,
         row_id_aliases: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -1966,6 +2037,7 @@ class WorkbenchWriteFacade:
         preview = dict(
             preview_withdraw_relation(
                 row_ids=list(row_ids),
+                row_types=list(row_types),
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
                 row_id_aliases=row_id_aliases
                 if row_id_aliases is not None
@@ -1987,6 +2059,7 @@ class WorkbenchWriteFacade:
         idempotency_key: str | None | object = _IDEMPOTENCY_FROM_PAYLOAD,
         row_id_aliases: dict[str, str] | None = None,
         row_ids: list[str] | None = None,
+        row_types: list[str] | None = None,
     ) -> dict[str, object]:
         withdraw_relation = getattr(relation_command, "withdraw_relation", None)
         if not callable(withdraw_relation):
@@ -2001,6 +2074,7 @@ class WorkbenchWriteFacade:
                 case_id=case_id,
                 actor_id=_normalize_actor_id(actor_id),
                 row_ids=None if row_ids is None else list(row_ids),
+                row_types=None if row_types is None else list(row_types),
                 reason=reason,
                 idempotency_key=resolved_idempotency_key,
                 history_operation_type="withdraw_link",
@@ -2300,9 +2374,9 @@ class WorkbenchWriteFacade:
     ) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
+            row_ids, row_types = self._cash_special_typed_rows(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
-            relation = self._active_relation_for_cash_special(row_ids)
+            relation = self._active_relation_for_cash_special(row_ids, row_types)
             conflict = self._cash_special_stale_conflict(
                 action_name="confirm_cash_pass_through",
                 payload=payload,
@@ -2322,8 +2396,9 @@ class WorkbenchWriteFacade:
                 "created_by": "system",
                 "updated_by": "system",
             }
-            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_typed_rows(
                 row_ids,
+                row_types,
                 special_metadata=special_metadata,
                 updated_by="system",
                 note=note,
@@ -2362,9 +2437,9 @@ class WorkbenchWriteFacade:
     ) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
+            row_ids, row_types = self._cash_special_typed_rows(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
-            relation = self._active_relation_for_cash_special(row_ids)
+            relation = self._active_relation_for_cash_special(row_ids, row_types)
             conflict = self._cash_special_stale_conflict(
                 action_name="confirm_cash_ticket_purchase",
                 payload=payload,
@@ -2391,8 +2466,9 @@ class WorkbenchWriteFacade:
                 "created_by": "system",
                 "updated_by": "system",
             }
-            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.update_special_metadata_for_typed_rows(
                 row_ids,
+                row_types,
                 special_metadata=special_metadata,
                 updated_by="system",
                 note=note,
@@ -2431,9 +2507,9 @@ class WorkbenchWriteFacade:
     ) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._cash_special_row_ids(payload)
+            row_ids, row_types = self._cash_special_typed_rows(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
-            relation = self._active_relation_for_cash_special(row_ids)
+            relation = self._active_relation_for_cash_special(row_ids, row_types)
             conflict = self._cash_special_stale_conflict(
                 action_name="cancel_cash_special",
                 payload=payload,
@@ -2442,8 +2518,9 @@ class WorkbenchWriteFacade:
             if conflict is not None:
                 conflict_payload = conflict.to_response_payload()
                 return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
-            updated_relation, _history = self._relation_special_metadata_mutation_port.clear_special_metadata_for_row_ids(
+            updated_relation, _history = self._relation_special_metadata_mutation_port.clear_special_metadata_for_typed_rows(
                 row_ids,
+                row_types,
                 updated_by="system",
                 note=note,
             )
@@ -2477,6 +2554,9 @@ class WorkbenchWriteFacade:
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
+            row_type = str(payload["row_type"]).strip().lower()
+            if row_type != "bank":
+                raise ValueError("row_type must be bank.")
             relation_code = str(payload["relation_code"])
             relation_label = str(payload["relation_label"])
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
@@ -2487,7 +2567,11 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            rows = self._resolve_live_rows_direct([row_id], month_hint=month)
+            rows = self._resolve_live_rows_direct(
+                [row_id],
+                row_types=[row_type],
+                month_hint=month,
+            )
         except KeyError as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2502,6 +2586,7 @@ class WorkbenchWriteFacade:
         return self._legacy_exception_result(
             month=month,
             row_ids=[row_id],
+            row_types=["bank"],
             action_name="update_bank_exception",
             invalid_error_code="invalid_update_bank_exception_request",
             legacy_payload={
@@ -2515,7 +2600,7 @@ class WorkbenchWriteFacade:
     def oa_bank_exception(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            row_ids, row_types = self._typed_selection_from_payload(payload)
             exception_code = str(payload["exception_code"])
             exception_label = str(payload["exception_label"])
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
@@ -2526,7 +2611,11 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
+            rows = self._resolve_live_rows_direct(
+                row_ids,
+                row_types=row_types,
+                month_hint=month,
+            )
         except KeyError as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2542,6 +2631,7 @@ class WorkbenchWriteFacade:
             return self._oa_bank_exception_with_invoice(
                 month=month,
                 row_ids=row_ids,
+                row_types=row_types,
                 exception_code=exception_code,
                 exception_label=exception_label,
                 comment=comment,
@@ -2550,6 +2640,7 @@ class WorkbenchWriteFacade:
         return self._legacy_exception_result(
             month=month,
             row_ids=row_ids,
+            row_types=[str(row.get("type") or "") for row in rows],
             action_name="oa_bank_exception",
             invalid_error_code="invalid_oa_bank_exception_request",
             legacy_payload={
@@ -2569,7 +2660,7 @@ class WorkbenchWriteFacade:
         action_name = "confirm_personal_advance_repayment"
         try:
             month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            row_ids, row_types = self._typed_selection_from_payload(payload)
             note = str(payload.get("note") or payload.get("comment") or "").strip()
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -2578,7 +2669,11 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
+            rows = self._resolve_live_rows_direct(
+                row_ids,
+                row_types=row_types,
+                month_hint=month,
+            )
         except KeyError as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2598,7 +2693,10 @@ class WorkbenchWriteFacade:
             )
 
         changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-        before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
+        before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
+            row_ids,
+            row_types,
+        )
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
             self._synthetic_existing_case_relations(
@@ -2633,7 +2731,7 @@ class WorkbenchWriteFacade:
             command_result = confirm_relation(
                 case_id=case_id,
                 row_ids=row_ids,
-                row_types=[str(row.get("type") or "") for row in rows],
+                row_types=row_types,
                 relation_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
                 actor_id="system",
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
@@ -2700,6 +2798,7 @@ class WorkbenchWriteFacade:
         payload: dict[str, object],
         *,
         actor: str,
+        tenant_id: str = "default",
         request_id: str | None = None,
         action_name: str = "exception_apply",
         invalid_error_code: str = "invalid_workbench_exception_apply_request",
@@ -2708,8 +2807,21 @@ class WorkbenchWriteFacade:
             result = self._apply_exception_payload(
                 payload,
                 actor=actor,
+                tenant_id=tenant_id,
                 request_id=request_id,
                 action_name=action_name,
+            )
+        except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchWriteConflict as exc:
+            conflict_payload = exc.to_response_payload()
+            return WorkbenchWriteResult(
+                HTTPStatus(exc.status_code),
+                dict(conflict_payload["payload"]),
             )
         except WorkbenchRelationCommandError as exc:
             return self._relation_command_error_result(exc)
@@ -2736,6 +2848,9 @@ class WorkbenchWriteFacade:
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
+            row_type = str(payload["row_type"]).strip().lower()
+            if row_type not in {"oa", "bank", "invoice"}:
+                raise ValueError("row_type must be oa, bank, or invoice.")
             exception_code = str(payload["exception_code"])
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
@@ -2747,6 +2862,7 @@ class WorkbenchWriteFacade:
         return self._legacy_exception_result(
             month=month,
             row_ids=[row_id],
+            row_types=[row_type],
             action_name="mark_exception",
             invalid_error_code="invalid_mark_exception_request",
             legacy_payload={
@@ -2760,7 +2876,7 @@ class WorkbenchWriteFacade:
     def cancel_exception(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
-            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            row_ids, row_types = self._typed_selection_from_payload(payload)
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -2775,7 +2891,11 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
+            rows = self._resolve_live_rows_direct(
+                row_ids,
+                row_types=row_types,
+                month_hint=month,
+            )
         except KeyError as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2824,16 +2944,25 @@ class WorkbenchWriteFacade:
         *,
         month: str,
         row_ids: list[str],
+        row_types: list[str],
         exception_code: str,
         exception_label: str,
         comment: str | None,
     ) -> WorkbenchWriteResult:
         try:
-            preview = self._exception_service.preview({"month": month, "row_ids": row_ids})
+            rows = self._resolve_live_rows_direct(
+                row_ids,
+                row_types=row_types,
+                month_hint=month,
+            )
+            preview = self._exception_service.preview(
+                {"month": month, "row_ids": row_ids, "row_types": row_types}
+            )
             result = self._apply_exception_payload(
                 {
                     "month": month,
                     "row_ids": row_ids,
+                    "row_types": row_types,
                     "scenario_code": str(preview["scenario"]["scenario_code"]),
                     "action_code": "manual_review",
                     "payload": {
@@ -2880,6 +3009,7 @@ class WorkbenchWriteFacade:
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
+            row_type = str(payload["row_type"]).strip().lower()
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
@@ -2888,7 +3018,11 @@ class WorkbenchWriteFacade:
             )
 
         try:
-            row = self._resolve_live_rows_direct([row_id], month_hint=month)[0]
+            row = self._resolve_live_rows_direct(
+                [row_id],
+                row_types=[row_type],
+                month_hint=month,
+            )[0]
         except (IndexError, KeyError):
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2949,6 +3083,9 @@ class WorkbenchWriteFacade:
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
+            row_type = str(payload["row_type"]).strip().lower()
+            if row_type not in {"oa", "bank", "invoice"}:
+                raise ValueError("row_type must be oa, bank, or invoice.")
         except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
@@ -2956,10 +3093,10 @@ class WorkbenchWriteFacade:
             )
 
         ignored_rows = {
-            str(row["id"]): row
+            (str(row.get("type") or "").strip().lower(), str(row["id"])): row
             for row in self._list_ignored_rows(month)
         }
-        row = ignored_rows.get(row_id)
+        row = ignored_rows.get((row_type, row_id))
         if row is None:
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
@@ -2999,11 +3136,32 @@ class WorkbenchWriteFacade:
             },
         )
 
-    def _withdraw_row_ids(self, payload: dict[str, object]) -> list[str]:
+    @staticmethod
+    def _typed_selection_from_payload(
+        payload: dict[str, object],
+    ) -> tuple[list[str], list[str]]:
         raw_row_ids = payload.get("row_ids")
-        if raw_row_ids is None and payload.get("row_id") is not None:
-            raw_row_ids = [payload.get("row_id")]
-        return self._normalize_row_ids(list(raw_row_ids or []))
+        raw_row_types = payload.get("row_types")
+        if not isinstance(raw_row_ids, list) or not isinstance(raw_row_types, list):
+            raise ValueError("row_ids and row_types are required arrays.")
+        row_ids = [str(value or "").strip() for value in raw_row_ids]
+        row_types = [str(value or "").strip().lower() for value in raw_row_types]
+        if not row_ids or len(row_ids) != len(row_types):
+            raise ValueError("row_ids and row_types must be non-empty aligned arrays.")
+        if any(not row_id for row_id in row_ids):
+            raise ValueError("row_ids must contain non-empty identifiers.")
+        aliases = {
+            "oa_application": "oa",
+            "bank_transaction": "bank",
+            "invoice_record": "invoice",
+        }
+        row_types = [aliases.get(row_type, row_type) for row_type in row_types]
+        if any(row_type not in {"oa", "bank", "invoice"} for row_type in row_types):
+            raise ValueError("row_types contains an unsupported canonical row type.")
+        identities = list(zip(row_types, row_ids, strict=True))
+        if len(set(identities)) != len(identities):
+            raise ValueError("Workbench selection contains a duplicate typed row.")
+        return row_ids, row_types
 
     def _amount_check_for_withdraw_preview(
         self,
@@ -3020,18 +3178,40 @@ class WorkbenchWriteFacade:
         return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
 
     def _cash_special_row_ids(self, payload: dict[str, object]) -> list[str]:
-        raw_row_ids = payload.get("row_ids")
-        if raw_row_ids is None and payload.get("row_id") is not None:
-            raw_row_ids = [payload.get("row_id")]
-        return self._normalize_row_ids(list(raw_row_ids or []))
+        row_ids, _row_types = self._typed_selection_from_payload(payload)
+        return row_ids
 
-    def _active_relation_for_cash_special(self, row_ids: list[str]) -> dict[str, object]:
+    def _cash_special_typed_rows(
+        self,
+        payload: dict[str, object],
+    ) -> tuple[list[str], list[str]]:
+        return self._typed_selection_from_payload(payload)
+
+    def _active_relation_for_cash_special(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> dict[str, object]:
         if not row_ids:
             raise ValueError("row_ids is required.")
-        relation = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
-        if not relation:
+        relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
+            row_ids,
+            row_types,
+        )
+        if len(relations) != 1:
             raise KeyError("workbench_pair_relation_not_found")
-        return relation[0]
+        relation = relations[0]
+        requested = set(zip(row_types, row_ids, strict=True))
+        members = set(
+            zip(
+                [str(value).strip().lower() for value in list(relation.get("row_types") or [])],
+                [str(value).strip() for value in list(relation.get("row_ids") or [])],
+                strict=True,
+            )
+        )
+        if requested != members or len(row_ids) != len(members):
+            raise ValueError("cash special update requires the complete typed relation selection.")
+        return relation
 
     @staticmethod
     def _validate_cash_pass_through_relation(relation: dict[str, object]) -> None:
@@ -3142,6 +3322,31 @@ class WorkbenchWriteFacade:
             raise ValueError("confirm link requires at least two distinct canonical rows.")
         return cls._canonical_row_types(row_ids, rows)
 
+    @staticmethod
+    def _assert_canonical_typed_selection(
+        row_ids: list[str],
+        row_types: list[str],
+        rows: list[dict[str, object]],
+        *,
+        minimum_rows: int = 1,
+    ) -> None:
+        if len(row_ids) < minimum_rows:
+            raise ValueError(
+                f"confirm link requires at least {minimum_rows} distinct canonical rows."
+            )
+        if len(row_ids) != len(row_types) or len(rows) != len(row_ids):
+            raise ValueError("canonical Workbench selection changed.")
+        expected = list(zip(row_types, row_ids, strict=True))
+        actual = [
+            (
+                str(row.get("type") or "").strip(),
+                str(row.get("id") or row.get("row_id") or "").strip(),
+            )
+            for row in rows
+        ]
+        if actual != expected:
+            raise ValueError("row_types do not match canonical Workbench rows.")
+
     def _personal_advance_repayment_amount_summary(self, rows: list[dict[str, object]]) -> dict[str, str]:
         oa_total = Decimal("0.00")
         bank_debit_total = Decimal("0.00")
@@ -3228,26 +3433,71 @@ class WorkbenchWriteFacade:
         *,
         month: str,
         row_ids: list[str],
+        row_types: list[str],
         action_name: str,
         invalid_error_code: str,
         legacy_payload: dict[str, object],
         response_message: str,
     ) -> WorkbenchWriteResult:
         try:
-            normalized_row_ids = self._normalize_row_ids(row_ids)
+            normalized_row_ids, normalized_row_types = self._typed_selection_from_payload(
+                {"row_ids": row_ids, "row_types": row_types}
+            )
+            rows = self._resolve_live_rows_direct(
+                normalized_row_ids,
+                row_types=normalized_row_types,
+                month_hint=month,
+            )
+            self._assert_canonical_typed_selection(
+                normalized_row_ids,
+                normalized_row_types,
+                rows,
+            )
             scenario_code = self._legacy_replay_scenario_code(
                 month=month,
                 row_ids=normalized_row_ids,
+                row_types=normalized_row_types,
                 legacy_payload=legacy_payload,
             )
             preview = None
             if not scenario_code:
-                preview = self._exception_service.preview({"month": month, "row_ids": normalized_row_ids})
+                preview = self._exception_service.preview(
+                    {
+                        "month": month,
+                        "row_ids": normalized_row_ids,
+                        "row_types": normalized_row_types,
+                    }
+                )
+                if not bool(preview.get("can_apply")):
+                    warnings = [
+                        warning
+                        for warning in list(preview.get("warnings") or [])
+                        if isinstance(warning, dict)
+                    ]
+                    active_conflict = next(
+                        (
+                            warning
+                            for warning in warnings
+                            if warning.get("code")
+                            in {
+                                "active_exception_case_conflict",
+                                "active_pair_relation_conflict",
+                            }
+                        ),
+                        None,
+                    )
+                    if active_conflict is not None:
+                        raise WorkbenchExceptionApplicationConflict(
+                            str(active_conflict.get("code") or "exception_apply_conflict"),
+                            str(active_conflict.get("message") or "Selected rows cannot be applied."),
+                            payload=dict(active_conflict.get("payload") or {}),
+                        )
                 scenario_code = str(preview["scenario"]["scenario_code"])
             result = self._apply_exception_payload(
                 {
                     "month": month,
                     "row_ids": normalized_row_ids,
+                    "row_types": normalized_row_types,
                     "scenario_code": scenario_code,
                     "action_code": "manual_review",
                     "payload": legacy_payload,
@@ -3303,6 +3553,7 @@ class WorkbenchWriteFacade:
         *,
         month: str,
         row_ids: list[str],
+        row_types: list[str],
         legacy_payload: dict[str, object],
     ) -> str:
         identity_key = next(
@@ -3315,12 +3566,20 @@ class WorkbenchWriteFacade:
         )
         if not identity_key:
             return ""
-        existing_cases = self._exception_case_service.preview_existing_case_conflicts(row_ids)
+        existing_cases = self._exception_case_service.preview_existing_case_conflicts(
+            row_ids,
+            row_types,
+        )
         if len(existing_cases) != 1:
             return ""
         existing_case = existing_cases[0]
         existing_row_ids = [str(row_id) for row_id in list(existing_case.get("row_ids") or [])]
-        if set(existing_row_ids) != set(row_ids) or len(existing_row_ids) != len(row_ids):
+        existing_row_types = [str(row_type) for row_type in list(existing_case.get("row_types") or [])]
+        if len(existing_row_ids) != len(existing_row_types):
+            return ""
+        existing_identities = set(zip(existing_row_types, existing_row_ids, strict=True))
+        requested_identities = set(zip(row_types, row_ids, strict=True))
+        if existing_identities != requested_identities or len(existing_row_ids) != len(row_ids):
             return ""
         scope_months = {str(scope) for scope in list(existing_case.get("scope_months") or [])}
         if month not in scope_months:
@@ -3337,28 +3596,358 @@ class WorkbenchWriteFacade:
         payload: dict[str, object],
         *,
         actor: str,
+        tenant_id: str = "default",
         request_id: str | None = None,
         action_name: str = "exception_apply",
+    ) -> dict[str, object]:
+        month = str(payload.get("month") or "")
+        requested_row_ids, requested_row_types = self._typed_selection_from_payload(payload)
+        if self._confirm_link_uow is not None:
+            return self._apply_exception_payload_with_uow(
+                payload=payload,
+                actor=actor,
+                tenant_id=tenant_id,
+                action_name=action_name,
+                month=month,
+                requested_row_ids=requested_row_ids,
+                requested_row_types=requested_row_types,
+            )
+        rows = self._resolve_rows_for_amount_check(
+            requested_row_ids,
+            row_types=requested_row_types,
+            month=month,
+        )
+        self._assert_canonical_typed_selection(
+            requested_row_ids,
+            requested_row_types,
+            rows,
+            minimum_rows=1,
+        )
+        return self._apply_exception_payload_without_uow(
+            payload=payload,
+            actor=actor,
+            request_id=request_id,
+            action_name=action_name,
+            month=month,
+            requested_row_ids=requested_row_ids,
+            requested_row_types=requested_row_types,
+            rows=rows,
+        )
+
+    def _apply_exception_payload_with_uow(
+        self,
+        *,
+        payload: dict[str, object],
+        actor: str,
+        tenant_id: str,
+        action_name: str,
+        month: str,
+        requested_row_ids: list[str],
+        requested_row_types: list[str],
+    ) -> dict[str, object]:
+        idempotency_key_provider = getattr(
+            self._exception_service,
+            "apply_idempotency_key",
+            None,
+        )
+        if not callable(idempotency_key_provider):
+            raise _WorkbenchWritePersistenceError(
+                "Workbench exception apply requires a deterministic idempotency boundary."
+            )
+        command = _WorkbenchExceptionApplyCommand(
+            action_name=action_name,
+            month=month,
+            row_ids=list(requested_row_ids),
+            row_types=list(requested_row_types),
+            scope_keys=[month],
+            payload=dict(payload),
+            idempotency_key=(
+                f"{action_name}:{str(idempotency_key_provider(payload)).strip()}"
+            ),
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor),
+        )
+
+        replay_committed = getattr(self._confirm_link_uow, "replay_committed", None)
+        if callable(replay_committed):
+            replay = replay_committed(command)
+            if isinstance(replay, dict):
+                return self._committed_exception_apply_payload(
+                    replay,
+                    idempotent=True,
+                )
+
+        rows = self._resolve_rows_for_amount_check(
+            requested_row_ids,
+            row_types=requested_row_types,
+            month=month,
+        )
+        self._assert_canonical_typed_selection(
+            requested_row_ids,
+            requested_row_types,
+            rows,
+            minimum_rows=1,
+        )
+
+        previous_exception_snapshot = self._exception_case_service.snapshot()
+        previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
+        previous_override_snapshot = self._override_service.snapshot()
+
+        handler_executed = False
+
+        def handler(ctx: object) -> dict[str, object]:
+            nonlocal handler_executed
+            handler_executed = True
+            transaction = getattr(ctx, "transaction", None)
+            if transaction is None:
+                raise _WorkbenchWritePersistenceError(
+                    "Workbench UoW context is missing transaction."
+                )
+            canonical_query = getattr(ctx, "canonical_query", None)
+            validate_selection = getattr(
+                canonical_query,
+                "validate_workbench_relation_selection_in_current_transaction",
+                None,
+            )
+            if not callable(validate_selection):
+                raise _WorkbenchWritePersistenceError(
+                    "exception-apply UoW requires transaction-bound canonical selection validation."
+                )
+            canonical_selection = validate_selection(
+                scope_key=month,
+                row_ids=requested_row_ids,
+                row_types=requested_row_types,
+            )
+            canonical_identities = [
+                (
+                    str(item.get("pane") or ""),
+                    str(item.get("row_id") or ""),
+                )
+                for item in canonical_selection
+                if isinstance(item, dict)
+            ]
+            requested_identities = list(
+                zip(requested_row_types, requested_row_ids, strict=True)
+            )
+            if canonical_identities != requested_identities:
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="canonical_selection_changed",
+                    expected={
+                        "row_ids": requested_row_ids,
+                        "row_types": requested_row_types,
+                    },
+                    actual={
+                        "row_ids": [row_id for _row_type, row_id in canonical_identities],
+                        "row_types": [row_type for row_type, _row_id in canonical_identities],
+                    },
+                )
+
+            relation_command = self._relation_command_service_for(
+                repository=getattr(ctx, "pair_relations", None)
+            )
+            bind_write_dependencies = getattr(
+                self._exception_service,
+                "with_write_dependencies",
+                None,
+            )
+            if relation_command is None or not callable(bind_write_dependencies):
+                raise _WorkbenchWritePersistenceError(
+                    "exception-apply UoW requires transaction-bound relation and case services."
+                )
+            transaction_exception_service = bind_write_dependencies(
+                case_service=self._exception_case_service,
+                relation_command_service=relation_command,
+                row_provider=lambda _month, _row_ids, _row_types: [
+                    dict(row) for row in rows
+                ],
+            )
+            result = transaction_exception_service.apply(payload, actor=actor)
+            result, row_ids, relation, case_payload = self._prepare_exception_apply_result(
+                result=result,
+                requested_row_ids=requested_row_ids,
+                requested_row_types=requested_row_types,
+                rows=rows,
+                month=month,
+            )
+
+            save_cases = getattr(
+                getattr(ctx, "exception_cases", None),
+                "save_workbench_exception_cases",
+                None,
+            )
+            save_overrides = getattr(
+                getattr(ctx, "row_overrides", None),
+                "save_workbench_overrides",
+                None,
+            )
+            if not callable(save_cases) or not callable(save_overrides):
+                raise _WorkbenchWritePersistenceError(
+                    "exception-apply UoW requires transaction-bound case and override persistence."
+                )
+            if not isinstance(case_payload, dict):
+                raise _WorkbenchWritePersistenceError(
+                    "Workbench exception apply did not produce a case."
+                )
+            case_id = str(case_payload.get("id") or "").strip()
+            if not case_id:
+                raise _WorkbenchWritePersistenceError(
+                    "Workbench exception apply produced an invalid case identity."
+                )
+            snapshot_case_ids = getattr(
+                self._exception_case_service,
+                "snapshot_case_ids",
+                None,
+            )
+            if not callable(snapshot_case_ids):
+                raise _WorkbenchWritePersistenceError(
+                    "exception-apply UoW requires changed-case snapshot persistence."
+                )
+            save_cases(snapshot_case_ids([case_id]))
+
+            override_snapshot = self._override_service.snapshot()
+            all_overrides = override_snapshot.get("row_overrides")
+            changed_row_id_set = set(row_ids)
+            changed_identities = set(
+                zip(requested_row_types, requested_row_ids, strict=True)
+            )
+            changed_overrides = {
+                identity_key: dict(override)
+                for identity_key, override in dict(all_overrides or {}).items()
+                if isinstance(override, dict)
+                and (
+                    str(override.get("row_type") or ""),
+                    str(override.get("row_id") or ""),
+                )
+                in changed_identities
+            }
+            save_overrides(
+                {
+                    "case_counter": override_snapshot.get("case_counter", 0),
+                    "projection_version": override_snapshot.get("projection_version"),
+                    "row_overrides": changed_overrides,
+                },
+                changed_row_ids=changed_row_id_set,
+            )
+            return self._finalize_exception_apply_transaction_result(result)
+
+        try:
+            result = self._confirm_link_uow.run(command, handler)
+        except Exception as exc:
+            self._restore_exception_write_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_pair_snapshot=previous_pair_snapshot,
+                previous_override_snapshot=previous_override_snapshot,
+            )
+            if isinstance(
+                exc,
+                (
+                    WorkbenchIdempotencyKeyConflict,
+                    WorkbenchIdempotencyInProgress,
+                    WorkbenchIdempotencyFailed,
+                    WorkbenchWriteConflict,
+                    WorkbenchRelationCommandError,
+                    WorkbenchExceptionApplicationConflict,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    _WorkbenchWritePersistenceError,
+                ),
+            ):
+                raise
+            raise _WorkbenchWritePersistenceError(
+                "工作台状态暂时无法保存，请稍后重试。"
+            ) from exc
+        return self._committed_exception_apply_payload(
+            result,
+            idempotent=bool(result.get("idempotent")) or not handler_executed,
+        )
+
+    def _apply_exception_payload_without_uow(
+        self,
+        *,
+        payload: dict[str, object],
+        actor: str,
+        request_id: str | None,
+        action_name: str,
+        month: str,
+        requested_row_ids: list[str],
+        requested_row_types: list[str],
+        rows: list[dict[str, object]],
     ) -> dict[str, object]:
         previous_exception_snapshot = self._exception_case_service.snapshot()
         previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
         previous_override_snapshot = self._override_service.snapshot()
         try:
             result = self._exception_service.apply(payload, actor=actor)
-        except WorkbenchRelationCommandError:
+            result, row_ids, relation, _case_payload = self._prepare_exception_apply_result(
+                result=result,
+                requested_row_ids=requested_row_ids,
+                requested_row_types=requested_row_types,
+                rows=rows,
+                month=month,
+            )
+        except Exception:
             self._restore_exception_write_snapshots(
                 previous_exception_snapshot=previous_exception_snapshot,
                 previous_pair_snapshot=previous_pair_snapshot,
                 previous_override_snapshot=previous_override_snapshot,
             )
             raise
+        try:
+            self._save_exception_cases_snapshot()
+            if isinstance(relation, dict):
+                self._persist_pair_relations(
+                    changed_case_ids=[str(relation.get("case_id") or "")],
+                )
+            self._save_overrides_snapshot(changed_row_ids=row_ids)
+        except Exception as exc:
+            self._restore_exception_write_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_pair_snapshot=previous_pair_snapshot,
+                previous_override_snapshot=previous_override_snapshot,
+            )
+            raise _WorkbenchWritePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
+
+        if isinstance(relation, dict):
+            self._schedule_pair_relation_persist(
+                changed_case_ids=[str(relation.get("case_id") or "")],
+                request_id=request_id,
+                action_name=action_name,
+            )
+        return result
+
+    def _prepare_exception_apply_result(
+        self,
+        *,
+        result: dict[str, object],
+        requested_row_ids: list[str],
+        requested_row_types: list[str],
+        rows: list[dict[str, object]],
+        month: str,
+    ) -> tuple[dict[str, object], list[str], object, object]:
         row_ids = [
             str(row_id)
             for row_id in list(result.get("affected_row_ids") or [])
             if str(row_id).strip()
         ]
-        month = str(payload.get("month") or "")
-        rows = self._resolve_live_rows_direct(row_ids, month_hint=month) if row_ids else []
+        row_types = [
+            str(row_type)
+            for row_type in list(result.get("affected_row_types") or [])
+            if str(row_type).strip()
+        ]
+        result_identities = (
+            list(zip(row_types, row_ids, strict=True))
+            if len(row_types) == len(row_ids)
+            else []
+        )
+        requested_identities = list(
+            zip(requested_row_types, requested_row_ids, strict=True)
+        )
+        if result_identities != requested_identities:
+            raise _WorkbenchWritePersistenceError(
+                "工作台异常处理结果与已校验选择不一致，请刷新后重试。"
+            )
         relation = result.get("pair_relation")
         case_payload = result.get("case")
         if isinstance(case_payload, dict):
@@ -3376,21 +3965,6 @@ class WorkbenchWriteFacade:
                     candidate_evidence=list(result.get("candidate_evidence") or []),
                 )
             result["updated_rows"] = updated_rows
-        try:
-            self._save_exception_cases_snapshot()
-            if isinstance(relation, dict):
-                self._persist_pair_relations(
-                    changed_case_ids=[str(relation.get("case_id") or "")],
-                )
-            self._save_overrides_snapshot(changed_row_ids=row_ids)
-        except Exception as exc:
-            self._restore_exception_write_snapshots(
-                previous_exception_snapshot=previous_exception_snapshot,
-                previous_pair_snapshot=previous_pair_snapshot,
-                previous_override_snapshot=previous_override_snapshot,
-            )
-            raise _WorkbenchWritePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
-
         changed_scope_keys = self._normalize_operation_scope_keys(list(
             self._scope_keys_for_row_ids(
                 month=month,
@@ -3400,13 +3974,25 @@ class WorkbenchWriteFacade:
         ))
         result["affected_scope_keys"] = list(changed_scope_keys)
         result.update(self._affected_scope_envelope(changed_scope_keys))
-        if isinstance(relation, dict):
-            self._schedule_pair_relation_persist(
-                changed_case_ids=[str(relation.get("case_id") or "")],
-                request_id=request_id,
-                action_name=action_name,
-            )
-        return result
+        return result, row_ids, relation, case_payload
+
+    @staticmethod
+    def _finalize_exception_apply_transaction_result(
+        result: dict[str, object],
+    ) -> dict[str, object]:
+        return dict(result)
+
+    @staticmethod
+    def _committed_exception_apply_payload(
+        result: dict[str, object],
+        *,
+        idempotent: bool,
+    ) -> dict[str, object]:
+        payload = dict(result)
+        payload.pop("source_versions", None)
+        payload.pop("outbox_event_ids", None)
+        payload["idempotent"] = bool(idempotent)
+        return payload
 
     def _persist_exception_and_override_change(
         self,

@@ -20,7 +20,7 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 
 
-ACTIVE_READ_MODEL_SCOPE_TYPES = ("workbench", "workbench_relation")
+ACTIVE_READ_MODEL_SCOPE_TYPES = ("workbench_relation",)
 
 
 def main() -> int:

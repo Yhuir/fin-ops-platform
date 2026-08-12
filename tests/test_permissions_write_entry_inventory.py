@@ -613,13 +613,12 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, evaluator_source + acl_save_source)
 
-        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench", "workbench_relation"))
+        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench_relation",))
         self.assertEqual(
             tuple(registration.instance_name for registration in RUNTIME_WORKER_REGISTRY),
             (
                 "oa-sync",
                 "workbench-matching",
-                "workbench",
                 "workbench-relation",
                 "import",
                 "settings-maintenance",

@@ -2,7 +2,13 @@
 
 本文是测试闭环 master goal 的控制状态。每轮只处理一个模块或共享边界；结束时必须更新本文件，再根据状态选择下一轮。
 
-## 2026-08-01 - Phase 39 Worker / read model 拓扑收敛
+## 2026-08-13 - 关联台 direct canonical API
+
+- 当前 required runtime 精确为 `oa-sync`、`workbench-matching`、`workbench-relation`、`import`、`settings-maintenance` 五个实例；read-model registry/manifest 只登记共享 `workbench_relation`。
+- 关联台通过 direct canonical query repository 读取 canonical facts、active formal relations 和 anomaly decisions；不读取 page generation、Redis page cache 或 refresh queue，也不再提供 refresh-status/active-generation DTO。
+- 下方 Phase 39 及更早阶段保留为历史证据；其中 `workbench` page read model、六 worker、generation/freshness/polling 均不是当前合同。
+
+## 2026-08-01 - Phase 39 Worker / read model 拓扑收敛（历史）
 
 - 当前 required runtime 精确为 `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance` 六个实例；read-model registry/manifest 精确为 `workbench`、`workbench_relation` 两项。
 - Search API/index/projection/三个 worker 与 no-OA projection/worker 已删除；`GET /api/no-oa-bank-batches` 在请求内刷新并读取 canonical PostgreSQL facts，不返回 freshness/read-model/queue 伪状态。

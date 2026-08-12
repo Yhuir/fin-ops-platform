@@ -22,27 +22,27 @@ describe("workbench api runtime base path", () => {
         JSON.stringify({
           month: "all",
           zone: "unpaired",
-          page: 1,
           page_size: 50,
           total: 0,
           has_more: false,
+          next_cursor: null,
+          row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
           groups: [],
-          read_model_status: "fresh",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
     const { fetchWorkbenchGroupsPage } = await import("../features/workbench/api");
 
-    await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50, undefined, { detailLevel: "summary" });
+    await fetchWorkbenchGroupsPage("all", "unpaired", "opaque-next", 50, undefined, { detailLevel: "summary" });
 
     const [input, init] = fetchSpy.mock.calls[0];
-    expect(String(input)).toBe("/fin-ops-api/api/workbench/groups?month=all&zone=unpaired&page=1&page_size=50&detail_level=summary");
+    expect(String(input)).toBe("/fin-ops-api/api/workbench/groups?month=all&zone=unpaired&page_size=50&cursor=opaque-next&detail_level=summary");
     expect(init?.credentials).toBe("include");
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer prod-token");
   });
 
-  test("routes refresh status through runtime api path", async () => {
+  test("routes direct filter options through runtime api path", async () => {
     vi.doMock("../app/runtime", () => ({
       APP_BASE_PATH: "/fin-ops/",
       API_BASE_PATH: "/fin-ops-api/",
@@ -52,20 +52,28 @@ describe("workbench api runtime base path", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          scope_key: "all",
-          read_model_status: "fresh",
-          dirty_scopes: [],
+          options: [{ value: "供应商A", label: "供应商A" }],
+          page_size: 50,
+          has_more: false,
+          next_cursor: null,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    const { fetchWorkbenchRefreshStatus } = await import("../features/workbench/api");
+    const { fetchWorkbenchFilterOptions } = await import("../features/workbench/api");
 
-    const status = await fetchWorkbenchRefreshStatus("all");
+    const result = await fetchWorkbenchFilterOptions("all", "unpaired", {
+      pane: "invoice",
+      facet: "column",
+      column: "sellerName",
+      cursor: null,
+    });
 
-    expect(status.readModelStatus).toBe("fresh");
+    expect(result.options).toEqual([{ value: "供应商A", label: "供应商A", missing: false }]);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0][0])).toBe("/fin-ops-api/api/workbench/refresh-status?month=all");
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      "/fin-ops-api/api/workbench/filter-options?month=all&zone=unpaired&pane=invoice&facet=column&page_size=100&column=sellerName",
+    );
     expect(fetchSpy.mock.calls[0][1]).toMatchObject({ method: "GET" });
   });
 

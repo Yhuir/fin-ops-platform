@@ -8,11 +8,10 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_direct_workbench_selection_repository,
 )
 
 
@@ -28,12 +27,45 @@ def _json_response(response) -> dict[str, object]:
 
 
 class WorkbenchStaleWriteContractTests(unittest.TestCase):
-    READ_MODEL_VERSION = "stale-write-test-generation-1"
+    def test_write_gate_requires_explicit_synced_status_even_without_dirty_scopes(self) -> None:
+        class GateHarness:
+            _workbench_write_freshness_guard = Application._workbench_write_freshness_guard
+
+            def __init__(self, status: str, *, dirty_scopes: list[str] | None = None) -> None:
+                self.status = status
+                self.dirty_scopes = list(dirty_scopes or [])
+
+            def _oa_sync_status_payload(self) -> dict[str, object]:
+                return {"status": self.status, "dirty_scopes": self.dirty_scopes}
+
+            @staticmethod
+            def _is_oa_sync_rebuild_scheduled() -> bool:
+                return False
+
+            @staticmethod
+            def _json_response(
+                status_code: object,
+                payload: dict[str, object],
+            ) -> tuple[object, dict[str, object]]:
+                return status_code, payload
+
+        for blocked_status in ("error", "refreshing", "unknown", ""):
+            with self.subTest(status=blocked_status):
+                response = GateHarness(blocked_status)._workbench_write_freshness_guard({})
+                self.assertIsNotNone(response)
+                status_code, payload = response
+                self.assertEqual(status_code, HTTPStatus.CONFLICT)
+                self.assertEqual(payload["error"], "workbench_stale")
+        self.assertIsNone(GateHarness("ready")._workbench_write_freshness_guard({}))
+        self.assertIsNone(GateHarness("synced")._workbench_write_freshness_guard({}))
+        response = GateHarness("ready", dirty_scopes=["2026-03"])._workbench_write_freshness_guard({})
+        self.assertIsNotNone(response)
 
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
-        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
+        app._oa_sync_status_payload = lambda: {"status": "ready", "dirty_scopes": []}
+        install_direct_workbench_selection_repository(app)
         return app
 
     def _default_open_row_ids(self, app: Application) -> list[str]:
@@ -58,9 +90,9 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
+                    "row_types": ["oa", "bank", "invoice"],
                     "case_id": "CASE-WITHDRAW-COMPAT",
                     "note": "withdraw compatibility covers documented mismatch path",
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             withdraw_response = self._post(
@@ -69,8 +101,8 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
+                    "row_types": ["oa", "bank", "invoice"],
                     "expected_versions": {"relation:CASE-WITHDRAW-COMPAT": 1},
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 
@@ -94,9 +126,9 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
+                    "row_types": ["oa", "bank", "invoice"],
                     "case_id": "CASE-WITHDRAW-PREVIEW-VERSION",
                     "note": "withdraw preview covers documented mismatch path",
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             preview_response = self._post(
@@ -105,7 +137,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
+                    "row_types": ["oa", "bank", "invoice"],
                 },
             )
 
@@ -144,36 +176,6 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertEqual(payload["conflict"]["expected"], {"relation:CASE-OLD": 2})
         self.assertEqual(payload["conflict"]["actual"], {"relation:CASE-NEW": 5})
 
-    def test_relation_preview_selection_maps_generation_drift_to_stable_conflict(self) -> None:
-        class Repository:
-            @staticmethod
-            def get_workbench_relation_preview_selection(**_kwargs: object) -> dict[str, object]:
-                raise WorkbenchReadModelVersionConflictError(
-                    expected="generation-old",
-                    current="generation-new",
-                )
-
-        facade = WorkbenchQueryFacade(
-            repository=Repository(),
-            redis_helper=None,
-            enqueue_refresh=lambda *_args, **_kwargs: None,
-            scope_key_for_month=lambda month: str(month or "all"),
-            stale_reasons=lambda *_args, **_kwargs: [],
-            emit_status_metric=lambda **_kwargs: None,
-            missing_read_model_error=lambda _error: False,
-        )
-
-        result = facade.relation_preview_selection(
-            "2026-05",
-            row_ids=["oa-1", "bank-1"],
-            expected_read_model_version="generation-old",
-        )
-
-        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
-        self.assertEqual(result.payload["error"], "workbench_read_model_version_conflict")
-        self.assertEqual(result.payload["message"], "工作台数据已变化，请刷新后重试。")
-        self.assertEqual(result.payload["read_model_version"], "generation-new")
-
     def test_relation_preview_selection_rejects_unbounded_client_input_before_repository(self) -> None:
         class Repository:
             @staticmethod
@@ -181,19 +183,15 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                 raise AssertionError("oversized selection must not reach the repository")
 
         facade = WorkbenchQueryFacade(
-            repository=Repository(),
-            redis_helper=None,
-            enqueue_refresh=lambda *_args, **_kwargs: None,
+            repository=None,
+            selection_repository=Repository(),
             scope_key_for_month=lambda month: str(month or "all"),
-            stale_reasons=lambda *_args, **_kwargs: [],
-            emit_status_metric=lambda **_kwargs: None,
-            missing_read_model_error=lambda _error: False,
         )
 
         result = facade.relation_preview_selection(
             "all",
             row_ids=[f"row-{index}" for index in range(21)],
-            expected_read_model_version="generation-set-1",
+            row_types=["bank"] * 21,
         )
 
         self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)

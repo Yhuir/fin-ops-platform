@@ -108,9 +108,9 @@ export function createOperationLatencyRecorder(
   };
 }
 
-export type WorkbenchVisibilityRunMode = "isolated" | "production_smoke";
+export type WorkbenchDirectCommitVisibilityRunMode = "isolated" | "production_smoke";
 
-export type WorkbenchVisibilitySampleBinding = {
+export type WorkbenchDirectCommitVisibilitySampleBinding = {
   sample_id: string;
   batch_id: string;
   transaction_ids: string[];
@@ -118,52 +118,34 @@ export type WorkbenchVisibilitySampleBinding = {
   exact_scope: string;
 };
 
-type WorkbenchVisibilityMarks = {
-  t0: number;
-  t1: number | null;
-  t2: number | null;
-  t3: number | null;
-  t4: number | null;
+type WorkbenchDirectCommitVisibilitySample = WorkbenchDirectCommitVisibilitySampleBinding & {
+  canonical_read_us: number;
+  browser_render_us: number;
+  receipt_to_dom_us: number;
 };
 
-type WorkbenchVisibilitySample = WorkbenchVisibilitySampleBinding & {
-  g0: string;
-  g1: string;
-  marks: Required<WorkbenchVisibilityMarks>;
-  segmentsMicroseconds: {
-    canonicalCommit: number;
-    statusProofEnqueue: number;
-    workerPublish: number;
-    browserReloadRender: number;
-  };
-  segmentSumMicroseconds: number;
-  totalMicroseconds: number;
-};
-
-type WorkbenchVisibilityRun = {
-  evidence_environment: "isolated_prod_equivalent_browser_poller" | "production_smoke";
+type WorkbenchDirectCommitVisibilityRun = {
+  evidence_environment: "isolated_prod_equivalent_direct_canonical_get" | "production_smoke";
   production_p99_claim: boolean;
   sample_count: number;
-  samples: WorkbenchVisibilitySample[];
-  distributionsMicroseconds: Record<string, { p50: number; p95: number; p99: number }>;
-  total_p99_microseconds: number;
-  slo_microseconds: number;
+  samples: WorkbenchDirectCommitVisibilitySample[];
+  distributions_us: Record<string, { p50: number; p95: number; p99: number }>;
+  receipt_to_dom_p99_us: number;
+  slo_us: number;
   pass: boolean;
 };
 
-export type WorkbenchVisibilitySegmentRecorder = {
-  start: (binding: WorkbenchVisibilitySampleBinding, g0: string) => {
-    markT1: () => void;
-    markT2: () => void;
-    markT3: (g1: string) => void;
-    markT4: () => void;
-    complete: () => WorkbenchVisibilitySample;
+export type WorkbenchDirectCommitVisibilityRecorder = {
+  startAtMutationReceipt: (binding: WorkbenchDirectCommitVisibilitySampleBinding) => {
+    markCanonicalReadVisible: () => void;
+    markDomVisible: () => void;
+    complete: () => WorkbenchDirectCommitVisibilitySample;
   };
   writeReport: () => Promise<void>;
 };
 
-const workbenchVisibilityReportPath = fileURLToPath(new URL(
-  "../../../.planning/phases/40-performance-contract-hot-path-closure/40-workbench-visibility-p99.json",
+const workbenchDirectCommitVisibilityReportPath = fileURLToPath(new URL(
+  "../../../.planning/phases/40-performance-contract-hot-path-closure/40-workbench-direct-commit-visibility-p99.json",
   import.meta.url,
 ));
 
@@ -181,86 +163,77 @@ function percentile(values: number[], fraction: number) {
   return sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(fraction * sorted.length) - 1))];
 }
 
-function summarizeVisibilityRun(
-  samples: WorkbenchVisibilitySample[],
-  evidenceEnvironment: WorkbenchVisibilityRun["evidence_environment"],
-): WorkbenchVisibilityRun {
+function summarizeDirectCommitVisibilityRun(
+  samples: WorkbenchDirectCommitVisibilitySample[],
+  evidenceEnvironment: WorkbenchDirectCommitVisibilityRun["evidence_environment"],
+): WorkbenchDirectCommitVisibilityRun {
   const fields = {
-    canonicalCommit: samples.map((sample) => sample.segmentsMicroseconds.canonicalCommit),
-    statusProofEnqueue: samples.map((sample) => sample.segmentsMicroseconds.statusProofEnqueue),
-    workerPublish: samples.map((sample) => sample.segmentsMicroseconds.workerPublish),
-    browserReloadRender: samples.map((sample) => sample.segmentsMicroseconds.browserReloadRender),
-    total: samples.map((sample) => sample.totalMicroseconds),
+    canonical_read_us: samples.map((sample) => sample.canonical_read_us),
+    browser_render_us: samples.map((sample) => sample.browser_render_us),
+    receipt_to_dom_us: samples.map((sample) => sample.receipt_to_dom_us),
   };
-  const distributionsMicroseconds = Object.fromEntries(Object.entries(fields).map(([name, values]) => [name, {
+  const distributionsUs = Object.fromEntries(Object.entries(fields).map(([name, values]) => [name, {
     p50: percentile(values, 0.50),
     p95: percentile(values, 0.95),
     p99: percentile(values, 0.99),
   }]));
-  const totalP99 = distributionsMicroseconds.total.p99;
+  const receiptToDomP99 = distributionsUs.receipt_to_dom_us.p99;
   return {
     evidence_environment: evidenceEnvironment,
     production_p99_claim: false,
     sample_count: samples.length,
     samples,
-    distributionsMicroseconds,
-    total_p99_microseconds: totalP99,
-    slo_microseconds: 3_000_000,
-    pass: totalP99 <= 3_000_000,
+    distributions_us: distributionsUs,
+    receipt_to_dom_p99_us: receiptToDomP99,
+    slo_us: 3_000_000,
+    pass: receiptToDomP99 <= 3_000_000,
   };
 }
 
-export function createWorkbenchVisibilitySegmentRecorder(
-  mode: WorkbenchVisibilityRunMode,
+export function createWorkbenchDirectCommitVisibilityRecorder(
+  mode: WorkbenchDirectCommitVisibilityRunMode,
   requestedSampleCount: number,
-): WorkbenchVisibilitySegmentRecorder {
-  const samples: WorkbenchVisibilitySample[] = [];
+): WorkbenchDirectCommitVisibilityRecorder {
+  const samples: WorkbenchDirectCommitVisibilitySample[] = [];
   return {
-    start(binding, g0) {
-      if (!g0 || binding.exact_scope === "all") throw new Error("baseline generation and exact scope are required");
-      const marks: WorkbenchVisibilityMarks = { t0: monotonicMicroseconds(), t1: null, t2: null, t3: null, t4: null };
-      let g1 = "";
-      const mark = (name: "t1" | "t2" | "t3" | "t4") => {
-        if (marks[name] !== null) throw new Error(`${name} was already recorded`);
-        marks[name] = monotonicMicroseconds();
-      };
+    startAtMutationReceipt(binding) {
+      if (!binding.exact_scope || binding.exact_scope === "all") {
+        throw new Error("an exact non-all scope is required");
+      }
+      const mutationReceiptAt = monotonicMicroseconds();
+      let canonicalReadAt: number | null = null;
+      let domVisibleAt: number | null = null;
       return {
-        markT1: () => mark("t1"),
-        markT2: () => mark("t2"),
-        markT3: (activeGenerationId) => {
-          if (!activeGenerationId || activeGenerationId === g0) throw new Error("t3 requires a new active generation");
-          g1 = activeGenerationId;
-          mark("t3");
+        markCanonicalReadVisible: () => {
+          if (canonicalReadAt !== null) throw new Error("canonical read was already recorded");
+          canonicalReadAt = monotonicMicroseconds();
         },
-        markT4: () => mark("t4"),
+        markDomVisible: () => {
+          if (domVisibleAt !== null) throw new Error("DOM visibility was already recorded");
+          domVisibleAt = monotonicMicroseconds();
+        },
         complete: () => {
-          if (Object.values(marks).some((value) => value === null) || !g1) throw new Error("t0..t4 and g0..g1 must be complete");
-          const completeMarks = marks as Required<WorkbenchVisibilityMarks>;
-          if (!(completeMarks.t0 <= completeMarks.t1 && completeMarks.t1 <= completeMarks.t2
-            && completeMarks.t2 <= completeMarks.t3 && completeMarks.t3 <= completeMarks.t4)) {
-            throw new Error("Workbench visibility marks are not monotonic");
+          if (canonicalReadAt === null || domVisibleAt === null) {
+            throw new Error("canonical read and DOM visibility must both be recorded");
           }
-          const segmentsMicroseconds = {
-            canonicalCommit: completeMarks.t1 - completeMarks.t0,
-            statusProofEnqueue: completeMarks.t2 - completeMarks.t1,
-            workerPublish: completeMarks.t3 - completeMarks.t2,
-            browserReloadRender: completeMarks.t4 - completeMarks.t3,
-          };
-          const segmentSumMicroseconds = Object.values(segmentsMicroseconds).reduce((sum, value) => sum + value, 0);
-          const totalMicroseconds = completeMarks.t4 - completeMarks.t0;
-          if (segmentSumMicroseconds !== totalMicroseconds) throw new Error("segment sum does not equal total");
-          const sample: WorkbenchVisibilitySample = {
+          if (!(mutationReceiptAt <= canonicalReadAt && canonicalReadAt <= domVisibleAt)) {
+            throw new Error("Workbench direct commit visibility marks are not monotonic");
+          }
+          const canonicalReadUs = canonicalReadAt - mutationReceiptAt;
+          const browserRenderUs = domVisibleAt - canonicalReadAt;
+          const receiptToDomUs = domVisibleAt - mutationReceiptAt;
+          if (canonicalReadUs + browserRenderUs !== receiptToDomUs) {
+            throw new Error("direct commit visibility segments do not equal receipt-to-DOM total");
+          }
+          const sample: WorkbenchDirectCommitVisibilitySample = {
             sample_id: redact(binding.sample_id),
             batch_id: redact(binding.batch_id),
             transaction_ids: binding.transaction_ids.map(redact),
             business_identity: redact(binding.business_identity),
             exact_scope: redact(binding.exact_scope),
-            g0,
-            g1,
-            marks: completeMarks,
-            segmentsMicroseconds,
-            segmentSumMicroseconds,
-            totalMicroseconds,
+            canonical_read_us: canonicalReadUs,
+            browser_render_us: browserRenderUs,
+            receipt_to_dom_us: receiptToDomUs,
           };
           samples.push(sample);
           return sample;
@@ -269,36 +242,41 @@ export function createWorkbenchVisibilitySegmentRecorder(
     },
     async writeReport() {
       if (mode === "isolated" && (requestedSampleCount < 100 || samples.length < requestedSampleCount)) {
-        throw new Error("isolated Workbench visibility evidence requires at least 100 complete samples");
+        throw new Error("isolated Workbench direct commit visibility evidence requires at least 100 complete samples");
       }
       if (mode === "production_smoke" && (requestedSampleCount !== 1 || samples.length !== 1)) {
-        throw new Error("production Workbench visibility smoke requires exactly one sample");
+        throw new Error("production Workbench direct commit visibility smoke requires exactly one sample");
       }
       let existing: Record<string, unknown> = {};
       try {
-        existing = JSON.parse(await readFile(workbenchVisibilityReportPath, "utf-8")) as Record<string, unknown>;
+        existing = JSON.parse(await readFile(workbenchDirectCommitVisibilityReportPath, "utf-8")) as Record<string, unknown>;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
       const report: Record<string, unknown> = {
-        version: 1,
+        version: 2,
         generated_at: new Date().toISOString(),
         isolated: mode === "isolated"
-          ? summarizeVisibilityRun(samples, "isolated_prod_equivalent_browser_poller")
+          ? summarizeDirectCommitVisibilityRun(samples, "isolated_prod_equivalent_direct_canonical_get")
           : existing.isolated,
         production_smoke: mode === "production_smoke"
-          ? summarizeVisibilityRun(samples, "production_smoke")
+          ? summarizeDirectCommitVisibilityRun(samples, "production_smoke")
           : existing.production_smoke,
       };
-      const isolated = report.isolated as WorkbenchVisibilityRun | undefined;
-      if (mode === "production_smoke" && (!isolated || isolated.sample_count < 100 || !isolated.pass)) {
+      const isolated = report.isolated as WorkbenchDirectCommitVisibilityRun | undefined;
+      if (mode === "production_smoke" && (
+        !isolated
+        || isolated.evidence_environment !== "isolated_prod_equivalent_direct_canonical_get"
+        || isolated.sample_count < 100
+        || !isolated.pass
+      )) {
         throw new Error("production smoke cannot replace missing or failed isolated p99 evidence");
       }
-      const temporaryPath = `${workbenchVisibilityReportPath}.${process.pid}.tmp`;
+      const temporaryPath = `${workbenchDirectCommitVisibilityReportPath}.${process.pid}.tmp`;
       await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-      await rename(temporaryPath, workbenchVisibilityReportPath);
-      if (mode === "isolated" && !(report.isolated as WorkbenchVisibilityRun).pass) {
-        throw new Error("Workbench browser-inclusive total p99 exceeds 3000ms");
+      await rename(temporaryPath, workbenchDirectCommitVisibilityReportPath);
+      if (mode === "isolated" && !(report.isolated as WorkbenchDirectCommitVisibilityRun).pass) {
+        throw new Error("Workbench browser-inclusive direct total p99 exceeds 3000ms");
       }
     },
   };

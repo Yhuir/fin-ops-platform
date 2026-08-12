@@ -131,13 +131,18 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
     HttpProbe("operation_history", "/api/operations/history?limit=50", auth_scope="admin"),
-    HttpProbe("workbench_initial_all", "/api/workbench?month=all", expected_statuses=(200, 202)),
-    HttpProbe("workbench_refresh_status_all", "/api/workbench/refresh-status?month=all"),
-    HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),
+    HttpProbe("workbench_initial_all", "/api/workbench?month=all"),
+    HttpProbe(
+        "workbench_groups_all_paired",
+        "/api/workbench/groups?month=all&zone=paired&page_size=50&detail_level=summary",
+    ),
+    HttpProbe(
+        "workbench_groups_all_unpaired",
+        "/api/workbench/groups?month=all&zone=unpaired&page_size=50&detail_level=summary",
+    ),
     HttpProbe(
         "workbench_filter_options_all_paired",
-        "/api/workbench/filter-options?month=all&zone=paired&pane=oa&facet=column&column=applicant&page=1&page_size=100",
-        expected_statuses=(200, 202),
+        "/api/workbench/filter-options?month=all&zone=paired&pane=oa&facet=column&column=applicant&page_size=100",
     ),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe(

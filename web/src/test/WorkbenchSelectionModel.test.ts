@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildWorkbenchSelectionContext,
   workbenchComparableAmountCents,
+  workbenchRowIdentityKey,
 } from "../features/workbench/selectionModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
@@ -59,8 +60,8 @@ describe("buildWorkbenchSelectionContext", () => {
     });
 
     expect(context.explicitRows.map((record) => record.id)).toEqual(["unpaired-1-bank"]);
-    expect(context.includedRowIds).toEqual(["unpaired-1-bank"]);
-    expect([...context.relatedRowIdSet]).toEqual([]);
+    expect(context.includedRowIdentityKeys).toEqual([workbenchRowIdentityKey(selectedBankRow)]);
+    expect([...context.relatedRowIdentityKeySet]).toEqual([]);
     expect(context.summary).toMatchObject({
       explicitTotal: 1,
       total: 1,
@@ -92,8 +93,11 @@ describe("buildWorkbenchSelectionContext", () => {
     });
 
     expect(context.explicitRows.map((record) => record.id)).toEqual(["bank-partial"]);
-    expect(context.includedRowIds).toEqual(["bank-partial", "oa-partial"]);
-    expect([...context.relatedRowIdSet]).toEqual(["oa-partial"]);
+    expect(context.includedRowIdentityKeys).toEqual([
+      "bank\u001fbank-partial",
+      "oa\u001foa-partial",
+    ]);
+    expect([...context.relatedRowIdentityKeySet]).toEqual(["oa\u001foa-partial"]);
     expect(context.summary).toMatchObject({
       explicitTotal: 1,
       total: 2,
@@ -101,5 +105,37 @@ describe("buildWorkbenchSelectionContext", () => {
       bank: 1,
       invoice: 0,
     });
+  });
+
+  test("keeps records with the same source id distinct across panes", () => {
+    const sharedBankRow = row("shared-source-id", "bank");
+    const sharedOaRow = row("shared-source-id", "oa");
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:typed-collision",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      rows: {
+        oa: [sharedOaRow],
+        bank: [sharedBankRow],
+        invoice: [],
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [sharedBankRow],
+      sourceGroups: [sourceGroup],
+      zoneId: "paired",
+    });
+
+    expect(context.explicitRows).toEqual([sharedBankRow]);
+    expect(context.includedRows).toEqual([sharedBankRow, sharedOaRow]);
+    expect(context.includedRowIdentityKeys).toEqual([
+      "bank\u001fshared-source-id",
+      "oa\u001fshared-source-id",
+    ]);
+    expect([...context.relatedRowIdentityKeySet]).toEqual(["oa\u001fshared-source-id"]);
+    expect(context.summary).toMatchObject({ explicitTotal: 1, total: 2, oa: 1, bank: 1 });
   });
 });

@@ -30,9 +30,6 @@ READ_MODEL_REFRESH_SLOW_EVENT_LIMIT = 20
 READ_MODEL_REFRESH_CURRENT_WINDOWS = ("recent_15m", "recent_1h", "recent_6h")
 RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
-_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL = "true"
-
-
 def readiness_blockers(
     *,
     storage_backend: str,
@@ -79,8 +76,18 @@ def readiness_blockers(
 
 
 def _current_effective_outbox_event_predicate_sql(alias: str) -> str:
-    _ = alias
-    return "true"
+    prefix = f"{alias}."
+    active_read_model_event_types = tuple(READ_MODEL_MANIFEST_BY_EVENT_TYPE)
+    if not active_read_model_event_types:
+        return f"{prefix}event_type not like '%%.read_model.refresh'"
+    literals = ", ".join(
+        "'" + event_type.replace("'", "''") + "'"
+        for event_type in active_read_model_event_types
+    )
+    return (
+        f"({prefix}event_type not like '%%.read_model.refresh' "
+        f"or {prefix}event_type in ({literals}))"
+    )
 
 
 def _active_dirty_scope_coverage_sql(alias: str) -> str:
@@ -197,8 +204,18 @@ def _current_effective_dirty_scope_predicate_sql(alias: str | None = None) -> st
         scope_type_sql=scope_type_expr,
         scope_key_sql=scope_key_expr,
     )
+    active_scope_types = tuple(
+        sorted({entry.scope_type for entry in READ_MODEL_MANIFEST.values()})
+    )
+    if not active_scope_types:
+        return "false"
+    literals = ", ".join(
+        "'" + scope_type.replace("'", "''") + "'"
+        for scope_type in active_scope_types
+    )
     return f"""
-not (
+{scope_type_expr} in ({literals})
+and not (
   not {command_only_parent}
   and exists (
     select 1
@@ -1205,6 +1222,8 @@ class RuntimeMonitoringRepository:
         for row in refresh_metric_rows:
             window_name = str(row.get("window_name") or "all_time")
             event_type = str(row.get("event_type") or "")
+            if event_type != "__all__" and event_type not in READ_MODEL_EVENT_TYPES:
+                continue
             if window_name != "all_time":
                 if event_type == "__all__":
                     read_model_refresh_current_windows[window_name] = _refresh_metric_summary(row, window=window_name)
@@ -2372,9 +2391,8 @@ def _read_model_refresh_slow_event_payloads(rows: list[dict[str, Any]]) -> list[
         event_type = str(row.get("event_type") or "")
         event_metadata = READ_MODEL_EVENT_TYPES.get(event_type)
         if event_metadata is None:
-            read_model_key = event_type
-        else:
-            read_model_key, _scope_type = event_metadata
+            continue
+        read_model_key, _scope_type = event_metadata
         payloads.append(
             {
                 "event_id": str(row.get("event_id") or ""),
@@ -2643,25 +2661,6 @@ def _string_list(value: object) -> list[str]:
 
 
 def _app_status_readiness_backfill_fact(connection: Any, read_model_key: str, *, tenant_id: str) -> dict[str, Any] | None:
-    if read_model_key == "workbench":
-        return connection.fetch_one(
-            """
-            select
-                'all' as scope_key,
-                case status when 'active' then 'fresh' when 'failed' then 'failed' else 'missing' end as status,
-                row_count,
-                schema_version,
-                source_versions,
-                activated_at::text as generated_at,
-                last_error
-            from read_model.workbench_generations
-            where tenant_id = %s
-              and scope_key = 'all'
-            order by case status when 'active' then 0 when 'failed' then 1 else 2 end, updated_at desc
-            limit 1
-            """,
-            (tenant_id,),
-        )
     scope_spec = APP_STATUS_READINESS_BACKFILL_SCOPE_TABLES.get(read_model_key)
     if scope_spec:
         tenant_where = "tenant_id = %s" if scope_spec["tenant_scoped"] else "true"

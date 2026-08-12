@@ -13,9 +13,9 @@
 | HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | file/session API 是唯一 HTTP 写入合同；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
 | Normalization core | `ImportNormalizationService` | input/output invoice identity、digital invoice number fallback、重复/疑似重复、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、source links、tags |
-| Import processing | `ImportProcessingService` | file confirm job 后必须执行发票生命周期、tax/cost/workbench scope 计算和 state persistence |
+| Import processing | `ImportProcessingService` | file confirm job 后必须执行发票生命周期、共享 relation/matching exact-scope 计算和 state persistence；不得生成 Workbench page scope |
 | Derived lifecycle | `DerivedDataLifecycleService` | `invoice_import_confirmed` 必须先刷新 `invoice_lifecycle`，再影响待找发票、税金、进项/销项/OA 待付款、成本、搜索 |
-| Read model / worker | `runtime_worker_handlers.py`、runtime queue、App Status registries、`write_operation_slo_audit` | import job 成功不等于下游已展示；worker/readiness 失败必须在 App Status 暴露；真实发票确认后应能审计 Workbench、Workbench relation 以及下游 direct-canonical 页面状态，且已退休 Search/no-OA event 为零 |
+| Read model / worker | `runtime_worker_handlers.py`、runtime queue、App Status registries、`write_operation_slo_audit` | import job 成功不等于登记的下游 consumer 已收敛；worker/readiness 失败必须在 App Status 暴露；真实发票确认后应能审计 `workbench_relation`/matching 与下游 direct-canonical 页面状态，且 Workbench page、Search/no-OA event 为零 |
 
 ## 场景覆盖清单
 
@@ -37,9 +37,9 @@
 - ETC 来源或 tag 指向 ETC 时，input invoice import 只允许合并已存在 canonical invoice，不能因为 ETC metadata/ZIP 来源创建新的统一发票池事实。
 - 正式进项发票晚于历史 submitted/manual-submitted ETC 批次导入时，必须按强身份把 ETC metadata 反向链接到同一 canonical invoice，并幂等写入 `app.etc_batch_invoice_links`；严格匹配失败时不得自动隐藏或合并。
 - confirm 必须跳过重复行、更新 source status、持久化 source links，并对 later preview batch 的重复保持幂等。
-- `invoice_import_confirmed` 必须刷新 Workbench、Workbench relation/matching、invoice lifecycle 和 search；tax offset、cost statistics 在 canonical commit 后由页面 GET 直接读取。
-- `invoice_import_confirmed` 的进项使用/销项收款 read model 必须按文件方向收窄：input-only 只刷新 `input_invoice_usage`，output-only 只刷新 `output_invoice_collection`，混合导入按各自文件月份分别刷新。
-- read-model 下游页面必须通过各自 freshness/source versions 判断结果；tax offset、cost statistics 必须通过各自 normal GET 读取已提交 canonical facts。不能把导入确认返回当作所有页面已经可读。
+- `invoice_import_confirmed` 必须推进 canonical invoice/source-link versions，并保持 Workbench relation/matching 的独立 owner 合同；不得 enqueue Workbench page、Search 或其它已退休页面 projection。
+- input-only、output-only 与混合导入必须只改变对应方向的 canonical 发票事实；进项使用、销项收款和其它 direct 页面在下一次 normal GET 中按自身查询读取。
+- 不能把导入确认返回当作所有页面已经完成重读；Browser/E2E 必须明确打开受影响页面并验证 canonical 结果，而不是等待已退休 freshness。
 
 ## 七类测试适用性
 
@@ -50,7 +50,7 @@
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、read-model 下游状态字段，以及税金抵扣 canonical snapshot token/无旧状态字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、仍存在的 read-model 下游 App Status/readiness，并用 `invoice_import_confirmed` write-operation profile保护共享下游；税金抵扣页面读取不再属于本类。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、预览审计、慢预览动作锁定、重复明细、未导入项明细、错误提示、session restore、route unmount、API mapper、全局 status popover，以及真实浏览器中的上传/选择/确认交互、损坏文件混合、preview stale/confirm failure、下游页面重新读取、成功后无可见错误残留和 read-only 导入门禁。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale protection -> Workbench active-generation 与 direct-canonical 下游重新 GET；前端导入流程不主动请求 Workbench 页面，由关联台访问时的 freshness gate 负责精确收敛。真实 worker drain 仍需 staging/后续 smoke。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale preview protection -> Workbench 与其它 direct-canonical 下游 normal GET；前端导入流程不主动请求 Workbench 页面，用户进入关联台时直接读取已提交事实。真实 import/matching worker drain 仍需 staging/后续 smoke。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，以及下游模块测试矩阵、`web/e2e/imports-invoices-flow.spec.ts` | 每次改 shared import、invoice fact、lifecycle、read model 或 App Status 时，都必须回归发票导入和下游页面旧行为。 |
 
 ## 历史 bug 回归库
@@ -62,7 +62,7 @@
 | 弱 fingerprint 被误用导致不同发票合并 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_upsert_etc_invoice_does_not_reuse_weak_fingerprint_when_invoice_number_changed` |
 | 既有 canonical invoice 读取时保留过期弱 fingerprint | `tests/test_import_service.py::ImportNormalizationServiceTests::test_existing_canonical_invoice_drops_weak_fingerprint_on_load` |
 | 历史 ETC-linked canonical invoice 与 input invoice import 重复 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_merges_existing_etc_canonical_invoice_without_duplicate` |
-| 历史 submitted ETC 批次先存在，正式进项发票后导入导致关联台重复散票 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later`、`tests/test_etc_batch_invoice_link_service.py`、`tests/test_postgres_repositories_core.py::test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata`、`tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlProjectionRelationPayloadTests::test_invoice_rows_excludes_visible_formal_invoices_already_bound_to_submitted_etc_batches`、`tests/test_repair_submitted_etc_invoice_overlaps_tool.py` |
+| 历史 submitted ETC 批次先存在，正式进项发票后导入导致关联台重复散票 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later`、`tests/test_etc_batch_invoice_link_service.py`、`tests/test_postgres_repositories_core.py::test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata`、`tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity`、`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_page_etc_hydration_is_one_statement_and_matches_legacy_dto`、`tests/test_repair_submitted_etc_invoice_overlaps_tool.py` |
 | 预览后源事实变化仍允许确认 | `tests/test_import_file_service.py::ImportFileServiceTests::test_confirm_session_rejects_stale_preview_when_existing_records_change`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | 大重复组被全部当作可确认行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row` |
 | 发票导入路由重挂载丢失预览或选择 | `web/src/test/ImportCenterPage.test.tsx` 中 invoice import session restore / navigating away tests |
@@ -72,7 +72,7 @@
 | 发票导入确认或下游 fresh 成功后页面仍残留导入失败/read model 失败提示 | `web/e2e/imports-invoices-flow.spec.ts` 的 success visible-error guard，断言导入页和六个下游成功节点没有导入失败、后台导入失败或 read model 失败等可见错误残留 |
 | 发票导入 `preview_stale` 仍显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 preview stale Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
 | 发票导入 confirm 失败后显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
-| 发票导入后 read model 队列长期同步中 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_file_import_confirm_job_returns_import_write_targets`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models` |
+| 发票导入后 relation/matching 队列长期同步中 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_file_import_confirm_job_returns_import_write_targets`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_read_model_scope_contract.py`、`tests/test_read_model_slo_smoke.py`；关联台页面没有 import invalidation/refresh 队列，normal GET 直接读取已提交 canonical facts。 |
 | 发票导入 preview/confirm 因逐行 DB 查重和 preview 重型持久化变慢 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_preview_import_preloads_invoice_identity_in_bulk`、`tests/test_import_service.py::ImportNormalizationServiceTests::test_confirm_import_refreshes_invoice_identity_in_bulk`、`tests/test_postgres_repositories_core.py::test_find_invoices_by_identity_keys_uses_single_bulk_lookup`、`tests/test_import_file_api.py::ImportFileApiTests::test_preview_files_uses_lightweight_import_preview_persistence` |
 | 发票文件确认 background job 在 App Status 中落到泛化导入域 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session` 断言 `affected_domains=["imports_invoices"]`、route `/imports/invoices`；`tests/test_app_status_overview_service.py` 覆盖泛化 import fallback |
 | 发票 `信息汇总表` 表头别名不被识别，或汇总页脚被当作错误发票行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_accepts_invoice_summary_header_aliases`、`tests/test_import_file_service.py::ImportFileServiceTests::test_preview_detects_invoice_summary_without_template_override` |
@@ -95,7 +95,7 @@
 - Browser negative smoke：两份发票 XLSX 上传 -> 预览 -> confirm 返回 `preview_stale` 或 500 -> 错误可见 -> 无“已确认导入” -> 零 operation barrier、零 Workbench 页面请求。
 - 240 行同文件重复发票 -> preview audit 只保留一个 confirmable representative -> duplicate group 展示 240 行，skipped count 为 239。
 - 预览后手工导入或另一个导入批次改变发票事实 -> 当前 confirm 返回 `preview_stale` -> 前端要求重新预览。
-- 发票导入确认 -> 关联台 read model invalidation -> matching/candidate 重新生成，不使用旧 cache。
+- 发票导入确认 -> canonical 发票可见 -> matching 按独立合同处理；关联台下一次 direct GET 重新计算，不使用旧 cache 或 page invalidation。
 - input invoice import 与历史 ETC-linked canonical invoice 或 submitted ETC metadata 相遇 -> 严格匹配时只更新同一 canonical invoice、保留 ETC tag 并从关联台普通 open 发票视图隐藏；ETC ZIP 本身不得创建新的 canonical invoice。
 
 ## 现有验证命令
@@ -119,7 +119,8 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_runtime_worker_registry \
   tests.test_app_status_overview_service \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_import_file_confirm_returns_preview_stale_when_existing_records_change \
-  tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_invoice_import_confirm_invalidates_workbench_read_model \
+  tests.test_workbench_query_postgres_integration.WorkbenchQueryPostgresIntegrationTests.test_direct_initial_and_groups_use_canonical_facts_without_read_model \
+  tests.test_read_model_scope_contract \
   -v
 
 pytest -q \

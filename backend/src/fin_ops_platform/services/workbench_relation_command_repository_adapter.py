@@ -82,6 +82,46 @@ class WorkbenchRelationCommandRepositoryAdapter:
         }
         return {"pair_relations": deepcopy(relations)}
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        loader = getattr(
+            self._repository,
+            "load_active_workbench_pair_relations_for_typed_rows",
+            None,
+        )
+        if callable(loader):
+            snapshot = loader(
+                list(row_ids or []),
+                list(row_types or []),
+                case_ids=list(case_ids or []),
+            )
+            return deepcopy(snapshot) if isinstance(snapshot, dict) else {"pair_relations": {}}
+        requested = set(zip(row_types, row_ids, strict=True))
+        normalized_case_ids = {
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        }
+        relations: dict[str, dict[str, Any]] = {}
+        for relation in self._pair_relation_service.list_active_relations():
+            relation_ids = [str(value).strip() for value in list(relation.get("row_ids") or [])]
+            relation_types = [str(value).strip() for value in list(relation.get("row_types") or [])]
+            if len(relation_ids) != len(relation_types):
+                raise ValueError("workbench_relation_member_arrays_misaligned")
+            case_id = str(relation.get("case_id") or "").strip()
+            if case_id in normalized_case_ids or requested.intersection(
+                zip(relation_types, relation_ids, strict=True)
+            ):
+                relations[case_id] = relation
+        return {"pair_relations": deepcopy(relations)}
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],
@@ -149,11 +189,19 @@ class WorkbenchRelationCommandRepositoryAdapter:
         row_ids: list[str],
         *,
         row_types: list[str],
+        tenant_id: str | None = None,
     ) -> list[str]:
         lock = getattr(self._repository, "lock_canonical_relation_members", None)
         if not callable(lock):
             return []
-        return list(lock(list(row_ids or []), row_types=list(row_types or [])) or [])
+        return list(
+            lock(
+                list(row_ids or []),
+                row_types=list(row_types or []),
+                tenant_id=tenant_id,
+            )
+            or []
+        )
 
     def _apply_snapshot(
         self,

@@ -41,7 +41,7 @@
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
 - `Admin-Token` 只作为身份来源；OA roles/permissions 不授予 APP 访问。固定 `YNSYLP005` 与 Settings canonical ACL 是唯一 APP authority，后端 direct API guard 与前端 `SessionGate` 分别强制执行同一结果。
 - `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、三个专用 role 和 exact 三绑定后，只替换三 role members；历史 non-dedicated binding cleanup 已退休，deployment 稳态只读验证 exact topology。
-- OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；各 direct 页面下一次 GET 读取已提交 facts，`workbench`/`workbench_relation` 由各自 owner 按明确合同维护。
+- OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；关联台及其它 direct 页面下一次 GET 读取已提交 facts。共享 `workbench_relation` 由其 owner 按独立消费者合同维护，不得恢复 page `workbench` runtime。
 - OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
 - ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。

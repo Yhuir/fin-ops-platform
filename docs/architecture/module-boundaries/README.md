@@ -48,13 +48,15 @@
 
 ## Read Model 目标态
 
-所有普通页面 read model 的目标态是 Partitioned + Scoped + Incremental Projection：
+所有仍登记的 read model 的目标态是 Partitioned + Scoped + Incremental Projection：
 
 - Partitioned：按业务可失效维度分区，常见分区是月份、方向、来源、账号、页面 scope 或父聚合 scope。刷新不得默认重建全量数据，除非 manifest 明确允许 all 作为 fan-out 或父聚合语义。
 - Scoped：所有刷新、dirty scope、freshness gate 和查询状态必须有可验证 scope。页面不能读取旧 read model 却伪装 fresh。
 - Incremental Projection：普通写操作只提交 canonical facts/version/audit；被访问页面比较 source proof 后只让当前精确 scope 变 dirty，并由 worker 增量重算或重放投影。显式维护/repair 才可主动入队；禁止为单个普通写触发跨页面或无界全量重建。
 
-特殊页面按 manifest 例外处理。例如 `workbench` 保留 active generation 原子发布模型；成本统计允许 parent rollup 查询聚合；这些例外必须写入 `read-model-contracts.md`，不能靠口头约定。
+canonical direct-read 页面不进入 manifest，也不套用 projection freshness 合同。关联台已是
+direct canonical consumer；当前 manifest 只保留共享 `workbench_relation`。任何例外必须写入
+`read-model-contracts.md`，不能靠口头约定。
 
 ## GSD 使用规则
 

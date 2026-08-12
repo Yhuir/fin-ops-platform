@@ -840,8 +840,8 @@ def _test_owned_workbench_preimage_checkpoint(
         or scenario.checkpoints[0].relation_state_after != "active"
         or recovery_checkpoint is None
         or recovery_checkpoint.relation_state_after != "inactive"
-        or len(recovery_checkpoint.steps) != 3
-        or recovery_checkpoint.steps[1].path != WITHDRAW_PREVIEW_PATH
+        or len(recovery_checkpoint.steps) != 2
+        or recovery_checkpoint.steps[0].path != WITHDRAW_PREVIEW_PATH
     ):
         return None
     return recovery_checkpoint
@@ -858,7 +858,7 @@ def _probe_test_owned_workbench_preimage(
 ) -> dict[str, Any]:
     variables: dict[str, Any] = {}
     step_results: list[WriteStepResult] = []
-    for step in checkpoint.steps[:2]:
+    for step in checkpoint.steps[:1]:
         try:
             resolved_step = _resolved_step(step, variables)
         except ValueError as exc:
@@ -2736,12 +2736,12 @@ def _validate_canonical_relation_steps(
         if direction == "confirm"
         else (WITHDRAW_PREVIEW_PATH, WITHDRAW_MUTATION_PATH)
     )
-    if len(checkpoint.steps) != 3:
+    if len(checkpoint.steps) != 2:
         raise ValueError(
             f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must contain exactly "
-            "read-version, preview, and mutation steps."
+            "preview and mutation steps."
         )
-    read_version, preview, mutation = checkpoint.steps
+    preview, mutation = checkpoint.steps
     if (
         preview.mutation
         or preview.method != "POST"
@@ -2764,30 +2764,6 @@ def _validate_canonical_relation_steps(
         raise ValueError(
             f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} preview and mutation month/row_ids must match."
         )
-    read_version_captures = [
-        name for name, pointer in read_version.captures if pointer == "/read_model_version"
-    ]
-    if (
-        len(read_version_captures) != 1
-        or read_version.mutation
-        or read_version.method != "GET"
-        or read_version.path != f"/api/workbench?month={preview_month}"
-        or read_version.json_body is not None
-        or read_version.expected_statuses != (200,)
-    ):
-        raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must read and capture the exact "
-            "Workbench read_model_version for its month before preview."
-        )
-    expected_read_model_version = f"${{{read_version_captures[0]}}}"
-    if (
-        (preview.json_body or {}).get("expected_read_model_version") != expected_read_model_version
-        or (mutation.json_body or {}).get("expected_read_model_version") != expected_read_model_version
-    ):
-        raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} preview and mutation must consume "
-            "the captured Workbench read_model_version."
-        )
     if direction == "confirm":
         if (preview.json_body or {}).get("case_id") != (mutation.json_body or {}).get("case_id"):
             raise ValueError(
@@ -2797,12 +2773,10 @@ def _validate_canonical_relation_steps(
             "month",
             "row_ids",
             "case_id",
-            "expected_read_model_version",
         } or set(mutation.json_body or {}) - {
             "month",
             "row_ids",
             "case_id",
-            "expected_read_model_version",
             "note",
             "comment",
             "idempotency_key",
@@ -2821,12 +2795,11 @@ def _validate_canonical_relation_steps(
         or mutation_body.get("preview_id") != f"${{{preview_id_names[0]}}}"
         or mutation_body.get("expected_versions") != f"${{{version_names[0]}}}"
         or mutation_body.get("operation_type") != "withdraw_relation"
-        or set(preview.json_body or {}) - {"month", "row_ids", "expected_read_model_version"}
+        or set(preview.json_body or {}) - {"month", "row_ids"}
         or set(mutation_body)
         - {
             "month",
             "row_ids",
-            "expected_read_model_version",
             "operation_type",
             "preview_id",
             "expected_versions",

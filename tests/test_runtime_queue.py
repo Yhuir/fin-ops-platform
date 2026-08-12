@@ -100,7 +100,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             set(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES),
             {
                 "oa.sync",
-                "workbench.read_model.refresh",
                 "workbench_relation.read_model.refresh",
                 "import.process.requested",
             },
@@ -124,7 +123,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "RABBITMQ_MANAGEMENT_PASSWORD": "secret",
                 "RABBITMQ_MANAGEMENT_TIMEOUT_SECONDS": "3",
                 "RABBITMQ_SHADOW_PUBLISH": "true",
-                "RABBITMQ_DISPATCH_EVENT_TYPES": "workbench.read_model.refresh,workbench_relation.read_model.refresh",
+                "RABBITMQ_DISPATCH_EVENT_TYPES": "workbench_relation.read_model.refresh,oa.sync",
             }
         )
 
@@ -146,8 +145,22 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertTrue(settings.rabbitmq_shadow_publish)
         self.assertEqual(
             settings.rabbitmq_dispatch_event_types,
-            ("workbench.read_model.refresh", "workbench_relation.read_model.refresh"),
+            ("workbench_relation.read_model.refresh", "oa.sync"),
         )
+
+    def test_settings_reject_dispatch_events_outside_active_runtime_registry(self) -> None:
+        for unsupported_event_type in (
+            "workbench.read_model.refresh",
+            "unregistered.runtime.event",
+        ):
+            with self.subTest(unsupported_event_type=unsupported_event_type):
+                with self.assertRaises(RuntimeQueueDataError) as context:
+                    RuntimeQueueSettings.from_env(
+                        {"RABBITMQ_DISPATCH_EVENT_TYPES": unsupported_event_type}
+                    )
+
+                self.assertIn("outside the active runtime registry", str(context.exception))
+                self.assertIn(unsupported_event_type, str(context.exception))
 
     def test_event_envelope_contains_only_routing_identity_and_version(self) -> None:
         event = RuntimeQueueEvent(

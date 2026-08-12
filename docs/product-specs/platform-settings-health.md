@@ -38,7 +38,7 @@ App Health 用于展示运行状态和后台任务：
 
 颜色语义：
 
-- 绿色：所有页面数据域 ready/loaded/synced，且每个 domain 的 read model 都有 `read_model.app_status_readiness` 或等价 active generation readiness 记录证明为 `fresh`，且无 queued/running/attention 后台任务，且关键依赖正常。
+- 绿色：所有页面数据域 ready/loaded/synced；登记的 read model 由 `read_model.app_status_readiness` 证明为 `fresh`，direct canonical 页面由 normal GET/Audit 与依赖状态证明可读；同时无 queued/running/attention 后台任务且关键依赖正常。
 - 黄色：任一页面数据域 loading/refreshing/stale，任一后台任务 queued/running/failed/partial_success 未确认，或存在非阻断运行告警。
 - 红色：会话失效、权限不可用、App Health/API 不可达、关键依赖失败，或关键 read model failed/unavailable。
 

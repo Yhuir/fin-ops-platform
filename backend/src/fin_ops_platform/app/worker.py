@@ -73,14 +73,12 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_claim_event_types,
     worker_registrations,
 )
-from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
     WorkbenchRelationReadModelRefreshService,
 )
 from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 
 APP_SETTINGS_KEY = "app_settings"
 OA_IMPORT_FORM_TYPES = {"payment_request", "expense_claim"}
@@ -108,7 +106,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
-    parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
     parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
@@ -237,15 +234,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
-    if args.enable_workbench_read_model_refresh:
-        projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
-        refresh_service = WorkbenchReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers["workbench.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
-        if "workbench.read_model.refresh" not in config.event_types:
-            config.event_types.append("workbench.read_model.refresh")
     if args.enable_workbench_relation_read_model_refresh:
         projection_builder = (
             workbench_relation_projection_builder

@@ -15,6 +15,10 @@ from tests.app_test_support import build_local_state_application as build_applic
 
 DIRECT_CANONICAL_PROBES = frozenset(
     {
+        "workbench_initial_all",
+        "workbench_groups_all_paired",
+        "workbench_groups_all_unpaired",
+        "workbench_filter_options_all_paired",
         "workbench_settings",
         "bank_details_accounts",
         "bank_details_transactions",
@@ -85,14 +89,37 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
     def test_default_api_probes_expose_sanitized_local_envelopes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._workbench_canonical_query_repository = SimpleNamespace(  # noqa: SLF001
+            app._workbench_page_query_repository = SimpleNamespace(  # noqa: SLF001
                 get_workbench_initial_page=lambda **_kwargs: {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {},
+                    "invoice_inventory": {},
                     "paired": {"groups": []},
                     "unpaired": {"groups": []},
                 },
                 get_workbench_groups_page=lambda **_kwargs: {
+                    "month": "all",
+                    "scope_key": "all",
+                    "zone": "paired",
                     "groups": [],
-                    "pagination": {"page": 1, "page_size": 50, "total": 0},
+                    "total": 0,
+                    "row_counts": {"oa": 0, "bank": 0, "invoice": 0, "rows": 0},
+                    "page_size": 50,
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+                get_workbench_filter_options=lambda **_kwargs: {
+                    "month": "all",
+                    "scope_key": "all",
+                    "zone": "paired",
+                    "pane": "oa",
+                    "facet": "column",
+                    "column": "applicant",
+                    "options": [],
+                    "page_size": 100,
+                    "has_more": False,
+                    "next_cursor": None,
                 },
             )
             bank_details_service = app._bank_details_application_service()  # noqa: SLF001
@@ -130,8 +157,48 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
 
             required_keys_by_probe = {
                 "session_me": ("user", "allowed", "can_access_app"),
-                "workbench_initial_all": ("paired", "unpaired", "scope_key"),
-                "workbench_groups_all_paired": ("groups", "pagination", "scope_key", "zone"),
+                "workbench_initial_all": (
+                    "month",
+                    "scope_key",
+                    "summary",
+                    "invoice_inventory",
+                    "paired",
+                    "unpaired",
+                ),
+                "workbench_groups_all_paired": (
+                    "month",
+                    "scope_key",
+                    "zone",
+                    "groups",
+                    "total",
+                    "row_counts",
+                    "page_size",
+                    "has_more",
+                    "next_cursor",
+                ),
+                "workbench_groups_all_unpaired": (
+                    "month",
+                    "scope_key",
+                    "zone",
+                    "groups",
+                    "total",
+                    "row_counts",
+                    "page_size",
+                    "has_more",
+                    "next_cursor",
+                ),
+                "workbench_filter_options_all_paired": (
+                    "month",
+                    "scope_key",
+                    "zone",
+                    "pane",
+                    "facet",
+                    "column",
+                    "options",
+                    "page_size",
+                    "has_more",
+                    "next_cursor",
+                ),
                 "workbench_settings": ("projects", "workbench_column_layouts"),
                 "bank_details_accounts": ("accounts",),
                 "bank_details_transactions": ("rows", "pagination"),

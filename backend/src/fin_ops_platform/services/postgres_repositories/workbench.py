@@ -20,6 +20,12 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_no_oa_bank_batches,
     normalize_turnover_relations,
 )
+from fin_ops_platform.services.workbench_row_identity import (
+    canonical_workbench_row_type,
+    parse_workbench_row_identity_key,
+    row_type_for_workbench_row_id,
+    workbench_row_identity_key,
+)
 
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
 BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
@@ -460,9 +466,34 @@ class PostgresWorkbenchRepository:
         row_overrides = workbench_overrides_snapshot.get("row_overrides") if isinstance(workbench_overrides_snapshot, dict) else None
         payload_map = overrides if isinstance(overrides, dict) else row_overrides if isinstance(row_overrides, dict) else {}
         changed_ids = {str(item) for item in changed_row_ids} if changed_row_ids is not None else None
-        for row_id, payload in iter_mapping(payload_map):
+        for identity_key, payload in iter_mapping(payload_map):
+            parsed_identity = parse_workbench_row_identity_key(identity_key)
+            payload_row_id = text(payload.get("row_id"))
+            payload_row_type = canonical_workbench_row_type(
+                payload.get("row_type") or payload.get("type"),
+                unknown="",
+            )
+            if parsed_identity is not None:
+                parsed_row_type, parsed_row_id = parsed_identity
+                if payload_row_id and payload_row_id != parsed_row_id:
+                    raise ValueError("Workbench override key and payload row ids do not match.")
+                if payload_row_type and payload_row_type != parsed_row_type:
+                    raise ValueError("Workbench override key and payload row types do not match.")
+                row_id = parsed_row_id
+                row_type = parsed_row_type
+            else:
+                row_id = payload_row_id or identity_key
+                row_type = payload_row_type or row_type_for_workbench_row_id(
+                    row_id,
+                    unknown="unknown",
+                )
             if changed_ids is not None and row_id not in changed_ids:
                 continue
+            legacy_identity = (
+                workbench_row_identity_key(row_type, row_id)
+                if row_type != "unknown"
+                else row_id
+            )
             self._connection.execute(
                 """
                 insert into app.workbench_row_overrides(
@@ -482,9 +513,9 @@ class PostgresWorkbenchRepository:
                     updated_at = now()
                 """,
                 (
+                    legacy_identity,
                     row_id,
-                    row_id,
-                    text(payload.get("row_type") or payload.get("type") or "unknown"),
+                    row_type,
                     month_start(payload.get("scope_month") or payload.get("month")),
                     text(payload.get("status") or "active"),
                     int_value(payload.get("projection_version"), 1),
@@ -499,14 +530,28 @@ class PostgresWorkbenchRepository:
     def load_workbench_overrides(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
             """
-            select row_id as key, raw_payload
+            select row_id, row_type, override_payload, raw_payload
             from app.workbench_row_overrides
-            order by row_id
+            order by row_type, row_id
             """
         )
         if not rows:
             return {}
-        row_overrides = {str(row.get("key")): row_payload(row, "raw_payload") for row in rows}
+        row_overrides: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            row_id = str(row.get("row_id") or "").strip()
+            row_type = canonical_workbench_row_type(row.get("row_type"), unknown="")
+            payload = row_payload(row, "override_payload", "raw_payload")
+            if not row_id or not isinstance(payload, dict):
+                continue
+            normalized_payload = dict(payload)
+            if row_type:
+                normalized_payload["row_id"] = row_id
+                normalized_payload["row_type"] = row_type
+                key = workbench_row_identity_key(row_type, row_id)
+            else:
+                key = row_id
+            row_overrides[key] = normalized_payload
         case_counter = 0
         for payload in row_overrides.values():
             if not isinstance(payload, dict):

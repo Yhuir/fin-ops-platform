@@ -99,7 +99,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
         "reconciliation-workbench",
         "关联台",
         "workbench",
-        ("workbench",),
+        (),
         external_source_boundary="bank, OA, invoice, and ETC source evidence before App registration",
         external_evidence_keys=("bank", "oa", "invoice", "etc"),
     ),

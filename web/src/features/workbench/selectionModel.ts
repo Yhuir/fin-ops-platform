@@ -15,10 +15,16 @@ export type WorkbenchSelectionSummary = {
 export type WorkbenchSelectionContext = {
   explicitRows: WorkbenchRecord[];
   includedRows: WorkbenchRecord[];
-  includedRowIds: string[];
-  relatedRowIdSet: Set<string>;
+  includedRowIdentityKeys: string[];
+  relatedRowIdentityKeySet: Set<string>;
   summary: WorkbenchSelectionSummary;
 };
+
+export function workbenchRowIdentityKey(
+  row: Pick<WorkbenchRecord, "id" | "recordType">,
+) {
+  return `${row.recordType}\u001f${row.id}`;
+}
 
 export function buildWorkbenchSelectionContext({
   explicitRows,
@@ -29,37 +35,42 @@ export function buildWorkbenchSelectionContext({
   sourceGroups: WorkbenchRelationGroup[];
   zoneId: "paired" | "unpaired";
 }): WorkbenchSelectionContext {
-  const sourceRowsById = new Map(flattenWorkbenchGroups(sourceGroups).map((row) => [row.id, row]));
-  const explicitRowIds = explicitRows.map((row) => row.id);
-  const explicitRowIdSet = new Set(explicitRowIds);
-  const includedRowsById = new Map<string, WorkbenchRecord>();
+  const sourceRowsByIdentity = new Map(
+    flattenWorkbenchGroups(sourceGroups).map((row) => [workbenchRowIdentityKey(row), row]),
+  );
+  const explicitRowIdentityKeys = explicitRows.map(workbenchRowIdentityKey);
+  const explicitRowIdentityKeySet = new Set(explicitRowIdentityKeys);
+  const includedRowsByIdentity = new Map<string, WorkbenchRecord>();
 
   explicitRows.forEach((row) => {
-    includedRowsById.set(row.id, sourceRowsById.get(row.id) ?? row);
+    const identityKey = workbenchRowIdentityKey(row);
+    includedRowsByIdentity.set(identityKey, sourceRowsByIdentity.get(identityKey) ?? row);
   });
 
   sourceGroups.forEach((group) => {
     const groupRows = flattenWorkbenchGroup(group);
-    if (!groupRows.some((row) => explicitRowIdSet.has(row.id))) {
+    if (!groupRows.some((row) => explicitRowIdentityKeySet.has(workbenchRowIdentityKey(row)))) {
       return;
     }
 
-    groupRows.forEach((row) => includedRowsById.set(row.id, row));
+    groupRows.forEach((row) => includedRowsByIdentity.set(workbenchRowIdentityKey(row), row));
   });
 
-  const includedRows = Array.from(includedRowsById.values());
-  const relatedRowIdSet = new Set(
-    includedRows.map((row) => row.id).filter((rowId) => !explicitRowIdSet.has(rowId)),
+  const includedRows = Array.from(includedRowsByIdentity.values());
+  const relatedRowIdentityKeySet = new Set(
+    includedRows
+      .map(workbenchRowIdentityKey)
+      .filter((identityKey) => !explicitRowIdentityKeySet.has(identityKey)),
   );
 
   return {
-    explicitRows: explicitRowIds
-      .map((rowId) => includedRowsById.get(rowId))
+    explicitRows: explicitRowIdentityKeys
+      .map((identityKey) => includedRowsByIdentity.get(identityKey))
       .filter((row): row is WorkbenchRecord => Boolean(row)),
     includedRows,
-    includedRowIds: includedRows.map((row) => row.id),
-    relatedRowIdSet,
-    summary: summarizeWorkbenchRows(includedRows, explicitRowIdSet.size),
+    includedRowIdentityKeys: includedRows.map(workbenchRowIdentityKey),
+    relatedRowIdentityKeySet,
+    summary: summarizeWorkbenchRows(includedRows, explicitRowIdentityKeySet.size),
   };
 }
 

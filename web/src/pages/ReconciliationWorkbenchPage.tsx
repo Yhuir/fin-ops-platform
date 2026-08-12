@@ -29,7 +29,6 @@ import {
   fetchWorkbenchFilterOptions,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
-  fetchWorkbenchRefreshStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   ignoreWorkbenchRow,
@@ -41,7 +40,6 @@ import {
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
   type WorkbenchActionResult,
-  type WorkbenchOperationProjection,
 } from "../features/workbench/api";
 import { fetchBankFlowRuleBatchDetail, withdrawBankFlowRuleBatch } from "../features/bankFlowRuleBatches/api";
 import {
@@ -56,7 +54,10 @@ import {
   type WorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
-import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
+import {
+  buildWorkbenchSelectionContext,
+  workbenchRowIdentityKey,
+} from "../features/workbench/selectionModel";
 import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 import type {
   WorkbenchRelationGroup,
@@ -66,14 +67,13 @@ import type {
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
-  WorkbenchRefreshStatus,
+  WorkbenchRecordType,
   WorkbenchRelationPreview,
   WorkbenchSettings,
   WorkbenchStatistics,
   WorkbenchZoneCounts,
   WorkbenchZonePageInfo,
 } from "../features/workbench/types";
-import { useMonth } from "../contexts/MonthContext";
 import useWorkbenchSelection from "../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "../components/workbench/RowActions";
 
@@ -86,13 +86,15 @@ type ActionDialogState = {
 type RelationPreviewDialogState = {
   preview: WorkbenchRelationPreview;
   rowIds: string[];
+  rowTypes: WorkbenchRecordType[];
+  canonicalEpoch: number;
   caseId?: string;
   idempotencyKey: string;
 };
 
 type RelationPreviewRequestKind = "confirm" | "withdraw";
 
-type WorkbenchActionProgressPhase = "submitting" | "syncing" | "loading";
+type WorkbenchActionProgressPhase = "submitting" | "rereading" | "loading";
 
 type WorkbenchActionProgress = {
   phase: WorkbenchActionProgressPhase;
@@ -107,7 +109,7 @@ type WorkbenchExceptionDialogState = {
 };
 
 type CashTicketPurchaseDialogState = {
-  rowIds: string[];
+  rows: Array<Pick<WorkbenchRecord, "id" | "recordType">>;
   cashAmount: string;
 };
 
@@ -127,8 +129,8 @@ function createInitialZonePageInfo(zone: "paired" | "unpaired"): WorkbenchZonePa
     total: 0,
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
-    readModelStatus: "refreshing",
-    readModelVersion: null,
+    cursor: null,
+    nextCursor: null,
   };
 }
 
@@ -140,7 +142,7 @@ function createInitialZonePages(): Record<"paired" | "unpaired", WorkbenchZonePa
 }
 
 function resolveZoneItemCount(pageInfo: WorkbenchZonePageInfo, zoneCounts?: WorkbenchZoneCounts) {
-  if (pageInfo.rowCounts.rows > 0) {
+  if (pageInfo.page > 0) {
     return pageInfo.rowCounts.rows;
   }
   return zoneCounts?.rows ?? 0;
@@ -165,6 +167,18 @@ function actionErrorMessage(error: unknown) {
     return error.message;
   }
   return "操作失败，请稍后重试。";
+}
+
+function workbenchReadErrorMessage(error: unknown, fallback: string) {
+  return error instanceof WorkbenchApiError && error.message ? error.message : fallback;
+}
+
+function createWorkbenchAbortError() {
+  return new DOMException("Workbench request superseded.", "AbortError");
+}
+
+function isWorkbenchAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function isRelationPreviewRetryableSubmitError(message: string) {
@@ -201,10 +215,6 @@ function normalizedAmountForInput(value: string) {
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
-const WORKBENCH_REFRESH_POLL_DELAY_MS = 1_000;
-const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
-const WORKBENCH_OPERATION_FRESH_POLL_MS = 150;
-const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -217,12 +227,6 @@ function createWorkbenchZoneServerPageQueryKeys(
     paired: createWorkbenchServerPageQueryKey(queries.paired),
     unpaired: createWorkbenchServerPageQueryKey(queries.unpaired),
   };
-}
-
-function createWorkbenchZoneServerPageQueriesKey(
-  queries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
-) {
-  return JSON.stringify(createWorkbenchZoneServerPageQueryKeys(queries));
 }
 
 function isBankFlowRuleBatchSummaryRow(row: WorkbenchRecord) {
@@ -255,100 +259,11 @@ function readNumberMetadata(metadata: Record<string, unknown> | undefined, key: 
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function cleanWorkbenchScopeList(value: unknown) {
-  return Array.isArray(value)
-    ? value.map((scope) => String(scope).trim()).filter(Boolean)
-    : [];
-}
-
 function actionResultMessage(result: string | WorkbenchActionResult) {
   return typeof result === "string" ? result : result.message;
 }
 
-function workbenchInitialPageIsFresh(
-  result: WorkbenchInitialPageResult | null,
-  previousReadModelVersion = "",
-) {
-  if (result?.pages.paired.readModelStatus !== "fresh" || result.pages.unpaired.readModelStatus !== "fresh") {
-    return false;
-  }
-  const nextVersion = workbenchActiveReadModelVersion(result.pages);
-  return !previousReadModelVersion || Boolean(nextVersion && nextVersion !== previousReadModelVersion);
-}
-
-function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
-  const statuses = [pages.paired.readModelStatus, pages.unpaired.readModelStatus]
-    .map((status) => String(status || "refreshing").trim() || "refreshing");
-  if (statuses.some((status) => status === "failed")) {
-    return "failed";
-  }
-  if (statuses.some((status) => status === "unavailable")) {
-    return "unavailable";
-  }
-  if (statuses.some((status) => status === "refreshing")) {
-    return "refreshing";
-  }
-  if (statuses.some((status) => status === "stale")) {
-    return "stale";
-  }
-  return statuses.every((status) => status === "fresh") ? "fresh" : statuses.find((status) => status !== "fresh") ?? "refreshing";
-}
-
-function workbenchReadModelStatusMessage(status: string | null, lastError?: string | null) {
-  if (status === "failed") {
-    return `关联台刷新失败${lastError ? `：${lastError}` : ""}`;
-  }
-  if (status === "unavailable") {
-    return "关联台读模型不可用";
-  }
-  if (status === "refreshing") {
-    return "关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。";
-  }
-  if (status === "stale") {
-    return "关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。";
-  }
-  return null;
-}
-
-function workbenchActiveReadModelVersion(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
-  const pairedVersion = String(pages.paired.readModelVersion ?? "").trim();
-  const unpairedVersion = String(pages.unpaired.readModelVersion ?? "").trim();
-  return pairedVersion && pairedVersion === unpairedVersion ? pairedVersion : "";
-}
-
-function isWorkbenchReadModelRejected(error: unknown) {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const code = String((error as { code?: unknown }).code ?? "").trim();
-  return (
-    code === "workbench_read_model_version_conflict"
-    || code === "workbench_read_model_not_fresh"
-    || code === "workbench_stale"
-    || code === "workbench_row_not_found"
-  );
-}
-
-function delayWorkbenchOperationPoll() {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, WORKBENCH_OPERATION_FRESH_POLL_MS);
-  });
-}
-
-function workbenchRefreshStatusVersionKey(status: WorkbenchRefreshStatus) {
-  const version = status.readModelVersion;
-  return version === null || version === undefined ? "" : String(version);
-}
-
-function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
-  if (!status) {
-    return null;
-  }
-  return workbenchReadModelStatusMessage(status.readModelStatus, status.lastError);
-}
-
 export default function ReconciliationWorkbenchPage() {
-  const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
   const { runOperation } = useGlobalOperationOverlay();
@@ -365,7 +280,6 @@ export default function ReconciliationWorkbenchPage() {
     clearOpenSelection,
     selectedPairedRows: explicitSelectedPairedRows,
     togglePairedRowSelection,
-    selectedOpenRowIds,
     selectedOpenRows: explicitSelectedOpenRows,
     toggleOpenRowSelection,
   } =
@@ -381,24 +295,20 @@ export default function ReconciliationWorkbenchPage() {
   });
   const [zonePages, setZonePages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(() => createInitialZonePages());
   const [oaSyncStatus, setOaSyncStatus] = useState<WorkbenchOaSyncStatus | null>(null);
-  const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
-  const activeWorkbenchReadModelVersion = workbenchActiveReadModelVersion(zonePages);
-  const oaSyncWriteBlocked = oaSyncStatus
-    ? oaSyncStatus.status === "refreshing" || oaSyncStatus.dirtyScopes.length > 0
-    : healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
-  const workbenchWriteGate = resolveWorkbenchWriteGate({
-    canMutateData,
-    mutationsBlocked: healthStatus.blocksMutations,
-    oaSyncWriteBlocked,
-    readModelStatus: workbenchPageReadModelStatus,
-    readModelVersion: activeWorkbenchReadModelVersion || null,
-  });
-  const canWriteWorkbench = workbenchWriteGate.allowed;
+  const [oaSyncStatusError, setOaSyncStatusError] = useState<string | null>(null);
   const [loadingMoreByZone, setLoadingMoreByZone] = useState<Record<"paired" | "unpaired", boolean>>({
     paired: false,
     unpaired: false,
   });
   const [loadMoreErrorByZone, setLoadMoreErrorByZone] = useState<Record<"paired" | "unpaired", string | null>>({
+    paired: null,
+    unpaired: null,
+  });
+  const [zoneQueryLoadingByZone, setZoneQueryLoadingByZone] = useState<Record<"paired" | "unpaired", boolean>>({
+    paired: false,
+    unpaired: false,
+  });
+  const [zoneQueryErrorByZone, setZoneQueryErrorByZone] = useState<Record<"paired" | "unpaired", string | null>>({
     paired: null,
     unpaired: null,
   });
@@ -411,31 +321,79 @@ export default function ReconciliationWorkbenchPage() {
     percent: null,
     indeterminate: true,
   });
-  const [workbenchRefreshStatus, setWorkbenchRefreshStatus] = useState<WorkbenchRefreshStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backgroundLoadError, setBackgroundLoadError] = useState<string | null>(null);
+  const directReadAvailable = workbenchData !== null
+    && loadError === null
+    && backgroundLoadError === null
+    && zoneQueryErrorByZone.paired === null
+    && zoneQueryErrorByZone.unpaired === null;
+  const workbenchWriteGate = resolveWorkbenchWriteGate({
+    canMutateData,
+    mutationsBlocked: healthStatus.blocksMutations,
+    directReadAvailable,
+    oaSyncReachable: oaSyncStatus !== null && oaSyncStatusError === null,
+    oaSyncStatus: oaSyncStatus?.status ?? null,
+    oaDirtyScopes: oaSyncStatus?.dirtyScopes ?? [],
+  });
+  const canWriteWorkbench = workbenchWriteGate.allowed;
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const detailRequestAbortControllerRef = useRef<AbortController | null>(null);
   const loadRequestSeqRef = useRef(0);
+  const groupDetailRequestGenerationRef = useRef(0);
+  const groupDetailRequestsRef = useRef(new Map<string, {
+    canonicalEpoch: number;
+    controller: AbortController;
+    detailKey: string | undefined;
+    generation: number;
+    promise: Promise<void>;
+  }>());
+  const postCommitRereadInFlightRef = useRef(false);
+  const oaSyncRefreshPendingRef = useRef(false);
+  const zoneQueryRequestSeqRef = useRef<Record<"paired" | "unpaired", number>>({ paired: 0, unpaired: 0 });
+  const zoneQueryAbortControllerRef = useRef<Record<"paired" | "unpaired", AbortController | null>>({ paired: null, unpaired: null });
+  const zoneQueryInFlightKeyRef = useRef<Record<"paired" | "unpaired", string | null>>({ paired: null, unpaired: null });
   const loadMoreRequestSeqRef = useRef<Record<"paired" | "unpaired", number>>({ paired: 0, unpaired: 0 });
   const loadMoreInFlightRef = useRef<Record<"paired" | "unpaired", boolean>>({ paired: false, unpaired: false });
-  const activeWorkbenchReadModelVersionRef = useRef("");
+  const loadMoreAbortControllerRef = useRef<Record<"paired" | "unpaired", AbortController | null>>({ paired: null, unpaired: null });
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
   const relationPreviewRequestKindRef = useRef<RelationPreviewRequestKind | null>(null);
+  const relationPreviewAbortControllerRef = useRef<AbortController | null>(null);
   const relationPreviewContextKeyRef = useRef("");
+  const canonicalEpochRef = useRef(0);
+  const [canonicalEpoch, setCanonicalEpoch] = useState(0);
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [exceptionDrawerOpen, setExceptionDrawerOpen] = useState(false);
   const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"active" | "processed">("active");
+  const exceptionDrawerOpenRef = useRef(exceptionDrawerOpen);
+  const exceptionDrawerBucketRef = useRef(exceptionDrawerBucket);
+  exceptionDrawerOpenRef.current = exceptionDrawerOpen;
+  exceptionDrawerBucketRef.current = exceptionDrawerBucket;
   const [exceptionDrawerGroups, setExceptionDrawerGroups] = useState<WorkbenchRelationGroup[]>([]);
+  const [exceptionDrawerPages, setExceptionDrawerPages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(
+    () => createInitialZonePages(),
+  );
   const [ignoredExceptionCount, setIgnoredExceptionCount] = useState(0);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
+  const [exceptionDrawerLoadingMore, setExceptionDrawerLoadingMore] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
   const exceptionDrawerRequestRef = useRef<AbortController | null>(null);
+  const exceptionDrawerRequestGenerationRef = useRef(0);
+  const exceptionGroupDetailRequestGenerationRef = useRef(0);
+  const exceptionGroupDetailRequestsRef = useRef(new Map<string, {
+    bucket: "active" | "processed";
+    canonicalEpoch: number;
+    controller: AbortController;
+    detailKey: string | undefined;
+    generation: number;
+    promise: Promise<WorkbenchRelationGroup>;
+  }>());
+  const [exceptionDrawerContentGeneration, setExceptionDrawerContentGeneration] = useState(0);
   const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
@@ -464,9 +422,9 @@ export default function ReconciliationWorkbenchPage() {
   const setOpenDisplayState = openDisplaySession.setValue;
   const columnLayoutSaveRequestIdRef = useRef(0);
   const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const workbenchRefreshReloadTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
-  const lastWorkbenchRefreshVersionRef = useRef<string>("");
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
+  const oaSyncStatusAbortControllerRef = useRef<AbortController | null>(null);
+  const oaSyncStatusRequestSeqRef = useRef(0);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
   const pairedServerPageQuery = useMemo(
@@ -488,12 +446,28 @@ export default function ReconciliationWorkbenchPage() {
     () => createWorkbenchZoneServerPageQueryKeys(zoneServerPageQueries),
     [zoneServerPageQueries],
   );
-  const zoneServerPageQueryKey = useMemo(
-    () => createWorkbenchZoneServerPageQueriesKey(zoneServerPageQueries),
-    [zoneServerPageQueries],
+  const latestZoneServerPageQueries = useMemo<Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>>(
+    () => ({
+      paired: buildWorkbenchServerPageQuery(pairedDisplayState),
+      unpaired: buildWorkbenchServerPageQuery(openDisplayState),
+    }),
+    [openDisplayState, pairedDisplayState],
   );
-  const lastZoneServerPageQueryKeyRef = useRef(zoneServerPageQueryKey);
+  const latestZoneServerPageQueriesRef = useRef(latestZoneServerPageQueries);
+  latestZoneServerPageQueriesRef.current = latestZoneServerPageQueries;
   const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
+
+  const invalidateGroupDetailRequests = useCallback(() => {
+    groupDetailRequestGenerationRef.current += 1;
+    groupDetailRequestsRef.current.forEach(({ controller }) => controller.abort());
+    groupDetailRequestsRef.current.clear();
+  }, []);
+
+  const invalidateExceptionGroupDetailRequests = useCallback(() => {
+    exceptionGroupDetailRequestGenerationRef.current += 1;
+    exceptionGroupDetailRequestsRef.current.forEach(({ controller }) => controller.abort());
+    exceptionGroupDetailRequestsRef.current.clear();
+  }, []);
 
   const loadFilterOptions = useCallback((
     zone: "paired" | "unpaired",
@@ -504,9 +478,8 @@ export default function ReconciliationWorkbenchPage() {
     zone,
     request,
     zoneServerPageQueries[zone],
-    activeWorkbenchReadModelVersion,
     signal,
-  ), [activeWorkbenchReadModelVersion, zoneServerPageQueries]);
+  ), [zoneServerPageQueries]);
 
   const updateZoneDisplayState = useCallback((
     zoneId: "paired" | "unpaired",
@@ -514,6 +487,8 @@ export default function ReconciliationWorkbenchPage() {
   ) => {
     loadMoreRequestSeqRef.current[zoneId] += 1;
     loadMoreInFlightRef.current[zoneId] = false;
+    loadMoreAbortControllerRef.current[zoneId]?.abort();
+    loadMoreAbortControllerRef.current[zoneId] = null;
     setLoadingMoreByZone((current) => current[zoneId] ? { ...current, [zoneId]: false } : current);
     setLoadMoreErrorByZone((current) => current[zoneId] ? { ...current, [zoneId]: null } : current);
     if (zoneId === "paired") {
@@ -641,10 +616,23 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const refreshWorkbenchDataInBackground = useCallback((month: string) => {
-    void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false });
+    if (postCommitRereadInFlightRef.current) {
+      oaSyncRefreshPendingRef.current = true;
+      return;
+    }
+    void loadWorkbenchData(month, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: latestZoneServerPageQueriesRef.current,
+      forceFresh: true,
+    });
   }, []);
 
   const scheduleOaSyncWorkbenchRefresh = useCallback(() => {
+    if (postCommitRereadInFlightRef.current) {
+      oaSyncRefreshPendingRef.current = true;
+      return;
+    }
     if (oaSyncRefreshTimeoutRef.current !== null) {
       window.clearTimeout(oaSyncRefreshTimeoutRef.current);
     }
@@ -654,39 +642,62 @@ export default function ReconciliationWorkbenchPage() {
     }, OA_SYNC_REFRESH_DEBOUNCE_MS);
   }, [refreshWorkbenchDataInBackground]);
 
-  const oaSyncScopesAffectWorkbench = useCallback((scopes: string[]) => {
-    return scopes.includes("all") || scopes.includes(WORKBENCH_VIEW_MONTH) || scopes.includes(currentMonth);
-  }, [currentMonth]);
-
   const applyOaSyncStatus = useCallback((status: WorkbenchOaSyncStatus) => {
     const previousStatus = previousOaSyncStatusRef.current;
     const message = status.message || (status.status === "refreshing" ? "OA 正在同步" : "OA 已同步");
 
     setOaSyncStatus(status);
 
-    if (status.status === "refreshing") {
-      setOaSyncShellStatus({ level: "pending", reason: message });
-    } else if (status.status === "error") {
+    const oaSyncReady = status.status === "synced" && status.dirtyScopes.length === 0;
+    if (status.status === "error" || status.status === "unknown") {
       setOaSyncShellStatus({ level: "error", reason: message || "OA 同步失败" });
-    } else {
+    } else if (oaSyncReady) {
       setOaSyncShellStatus({ level: "ok", reason: message });
+    } else {
+      setOaSyncShellStatus({ level: "pending", reason: message });
     }
 
-    if (previousStatus && status.status !== "refreshing") {
+    if (previousStatus && oaSyncReady) {
+      const previousReady = previousStatus.status === "synced" && previousStatus.dirtyScopes.length === 0;
+      const becameReady = !previousReady;
       const versionChanged = status.version !== null && status.version !== previousStatus.version;
-      const lastSyncedAtChanged = status.lastSyncedAt !== previousStatus.lastSyncedAt;
-      const affectedScopes = status.changedScopes.length > 0
-        ? status.changedScopes
-        : status.dirtyScopes.length > 0
-          ? status.dirtyScopes
-          : previousStatus.dirtyScopes;
-      if ((status.changedScopes.length > 0 || versionChanged || lastSyncedAtChanged) && oaSyncScopesAffectWorkbench(affectedScopes)) {
+      const lastSyncedAtChanged = Boolean(
+        status.lastSyncedAt && status.lastSyncedAt !== previousStatus.lastSyncedAt,
+      );
+      if (becameReady || status.changedScopes.length > 0 || versionChanged || lastSyncedAtChanged) {
         scheduleOaSyncWorkbenchRefresh();
       }
     }
 
     previousOaSyncStatusRef.current = status;
-  }, [oaSyncScopesAffectWorkbench, scheduleOaSyncWorkbenchRefresh]);
+  }, [scheduleOaSyncWorkbenchRefresh]);
+
+  const pollOaSyncStatus = useCallback(async () => {
+    oaSyncStatusAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    const requestSeq = oaSyncStatusRequestSeqRef.current + 1;
+    oaSyncStatusRequestSeqRef.current = requestSeq;
+    oaSyncStatusAbortControllerRef.current = controller;
+    try {
+      const status = await fetchWorkbenchOaSyncStatus(controller.signal);
+      if (controller.signal.aborted || oaSyncStatusRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      setOaSyncStatusError(null);
+      applyOaSyncStatus(status);
+    } catch {
+      if (controller.signal.aborted || oaSyncStatusRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      const message = "OA 同步状态读取失败，请重试。";
+      setOaSyncStatusError(message);
+      setOaSyncShellStatus({ level: "error", reason: message });
+    } finally {
+      if (oaSyncStatusAbortControllerRef.current === controller) {
+        oaSyncStatusAbortControllerRef.current = null;
+      }
+    }
+  }, [applyOaSyncStatus]);
 
   const withdrawBankFlowRuleBatchSummaryRow = useCallback(async (row: WorkbenchRecord) => {
     const sourceBatchId = readStringMetadata(row.specialMetadata, "source_batch_id");
@@ -729,58 +740,56 @@ export default function ReconciliationWorkbenchPage() {
   function applyWorkbenchInitialPageResult(
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
-    preserveDetailRequest = false,
   ) {
-    const nextStatus = workbenchZonePagesReadModelStatus(workbenchPayload.pages);
-    const previousVersion = activeWorkbenchReadModelVersionRef.current;
-    if (previousVersion && nextStatus !== "fresh") {
-      setStatistics(null);
-      setZonePages((current) => ({
-        paired: {
-          ...current.paired,
-          readModelStatus: workbenchPayload.pages.paired.readModelStatus,
-        },
-        unpaired: {
-          ...current.unpaired,
-          readModelStatus: workbenchPayload.pages.unpaired.readModelStatus,
-        },
-      }));
-      return;
-    }
-    loadMoreRequestSeqRef.current.paired += 1;
-    loadMoreRequestSeqRef.current.unpaired += 1;
+    invalidateGroupDetailRequests();
+    invalidateExceptionGroupDetailRequests();
+    (["paired", "unpaired"] as const).forEach((zone) => {
+      zoneQueryRequestSeqRef.current[zone] += 1;
+      zoneQueryAbortControllerRef.current[zone]?.abort();
+      zoneQueryAbortControllerRef.current[zone] = null;
+      zoneQueryInFlightKeyRef.current[zone] = null;
+      loadMoreRequestSeqRef.current[zone] += 1;
+      loadMoreAbortControllerRef.current[zone]?.abort();
+      loadMoreAbortControllerRef.current[zone] = null;
+      loadMoreInFlightRef.current[zone] = false;
+    });
+    setZoneQueryLoadingByZone({ paired: false, unpaired: false });
+    setZoneQueryErrorByZone({ paired: null, unpaired: null });
     loadMoreInFlightRef.current = { paired: false, unpaired: false };
     setLoadingMoreByZone({ paired: false, unpaired: false });
     setLoadMoreErrorByZone({ paired: null, unpaired: null });
-    const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
-    if (previousVersion && nextVersion && previousVersion !== nextVersion) {
-      clearSelection();
-      if (!preserveDetailRequest) {
-        detailRequestAbortControllerRef.current?.abort();
-        detailRequestAbortControllerRef.current = null;
-        detailRequestSeqRef.current += 1;
-        closeDetail();
-        setDetailError(null);
-        setIsDetailLoading(false);
-      }
-      setSelectionSourceGroups({ paired: [], unpaired: [] });
-      setActionDialog(null);
-      setRelationPreviewDialog(null);
-      setWorkbenchExceptionDialog(null);
-      setCashTicketPurchaseDialog(null);
-    }
-    activeWorkbenchReadModelVersionRef.current = nextVersion;
-    if (nextStatus === "fresh" && nextVersion) {
-      const observedRefreshVersion = lastWorkbenchRefreshVersionRef.current;
-      if (!observedRefreshVersion) {
-        lastWorkbenchRefreshVersionRef.current = nextVersion;
-      } else if (!previousVersion && observedRefreshVersion !== nextVersion) {
-        scheduleWorkbenchReadModelReload();
-      }
-    }
+
+    canonicalEpochRef.current += 1;
+    const nextCanonicalEpoch = canonicalEpochRef.current;
+    setCanonicalEpoch(nextCanonicalEpoch);
+    relationPreviewContextKeyRef.current = `canonical:${nextCanonicalEpoch}`;
+    clearSelection();
+    setSelectionSourceGroups({ paired: [], unpaired: [] });
+    detailRequestSeqRef.current += 1;
+    detailRequestAbortControllerRef.current?.abort();
+    detailRequestAbortControllerRef.current = null;
+    setIsDetailLoading(false);
+    setDetailError(null);
+    relationPreviewAbortControllerRef.current?.abort();
+    relationPreviewAbortControllerRef.current = null;
+    relationPreviewRequestKindRef.current = null;
+    setRelationPreviewRequestKind(null);
+    setRelationPreviewDialog(null);
+    setWorkbenchExceptionDialog(null);
+    setCashTicketPurchaseDialog(null);
+    exceptionDrawerRequestRef.current?.abort();
+    exceptionDrawerRequestRef.current = null;
+    exceptionDrawerRequestGenerationRef.current += 1;
+    exceptionDrawerOpenRef.current = false;
+    setExceptionDrawerOpen(false);
+    setExceptionDrawerLoading(false);
+    setExceptionDrawerLoadingMore(false);
+    setExceptionDrawerGroups([]);
+    setExceptionDrawerPages(createInitialZonePages());
+
     setWorkbenchData(workbenchPayload.data);
     setIgnoredExceptionCount(workbenchPayload.data.summary.ignoredExceptionCount);
-    setStatistics(nextStatus === "fresh" ? workbenchPayload.statistics ?? null : null);
+    setStatistics(workbenchPayload.statistics ?? null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
   }
@@ -793,20 +802,17 @@ export default function ReconciliationWorkbenchPage() {
       includeAuxiliary?: boolean;
       zoneQueries?: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>;
       propagateError?: boolean;
-      deferStateApply?: boolean;
-      preserveDetailRequest?: boolean;
+      forceFresh?: boolean;
     },
   ): Promise<WorkbenchInitialPageResult | null> {
     const requestSeq = loadRequestSeqRef.current + 1;
     loadRequestSeqRef.current = requestSeq;
     const background = options?.background ?? false;
     const includeAuxiliary = options?.includeAuxiliary ?? false;
-    const deferStateApply = options?.deferStateApply ?? false;
     const resolvedZoneQueries = options?.zoneQueries ?? zoneServerPageQueries;
 
     if (background) {
       setIsRefreshing(true);
-      setBackgroundLoadError(null);
     } else {
       setIsLoading(true);
       setLoadError(null);
@@ -827,17 +833,12 @@ export default function ReconciliationWorkbenchPage() {
           setLoadProgress(progress);
         },
         resolvedZoneQueries,
+        { forceFresh: options?.forceFresh ?? false },
       );
       if (signal?.aborted || loadRequestSeqRef.current !== requestSeq) {
         return null;
       }
-      if (!deferStateApply) {
-        applyWorkbenchInitialPageResult(
-          workbenchPayload,
-          resolvedZoneQueries,
-          options?.preserveDetailRequest ?? false,
-        );
-      }
+      applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
       setBackgroundLoadError(null);
       if (!background) {
         setIsLoading(false);
@@ -853,13 +854,13 @@ export default function ReconciliationWorkbenchPage() {
       if (signal?.aborted || loadRequestSeqRef.current !== requestSeq) {
         return null;
       }
-      const normalizedError = error instanceof Error && error.message
-        ? error
-        : new Error("工作台数据加载失败，请稍后重试。");
+      const normalizedError = new Error(workbenchReadErrorMessage(
+        error,
+        "关联台读取失败，请稍后重试。",
+      ));
       if (!background) {
         setWorkbenchData(null);
         setStatistics(null);
-        activeWorkbenchReadModelVersionRef.current = "";
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setExceptionDrawerGroups([]);
@@ -878,94 +879,29 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
-  const waitForWorkbenchFreshAfterOperation = useCallback(async (options?: {
-    deferStateApply?: boolean;
-    afterReadModelVersion?: string;
-  }) => {
-    const startedAt = Date.now();
-    let lastReadModelStatus = "";
-    const deferStateApply = options?.deferStateApply ?? false;
-    const afterReadModelVersion = options?.afterReadModelVersion ?? "";
-
-    const initialResult = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      includeAuxiliary: false,
-      zoneQueries: zoneServerPageQueries,
-      propagateError: true,
-      deferStateApply,
-    });
-    const initialPairedStatus = initialResult?.pages.paired.readModelStatus ?? "unknown";
-    const initialOpenStatus = initialResult?.pages.unpaired.readModelStatus ?? "unknown";
-    lastReadModelStatus = initialPairedStatus === initialOpenStatus
-      ? initialPairedStatus
-      : `${initialPairedStatus}/${initialOpenStatus}`;
-    if (workbenchInitialPageIsFresh(initialResult, afterReadModelVersion)) {
-      return initialResult;
+  async function rereadWorkbenchAfterCommit() {
+    if (oaSyncRefreshTimeoutRef.current !== null) {
+      window.clearTimeout(oaSyncRefreshTimeoutRef.current);
+      oaSyncRefreshTimeoutRef.current = null;
+      oaSyncRefreshPendingRef.current = true;
     }
-
-    while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
-      const refreshStatus = await fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH);
-      lastReadModelStatus = refreshStatus.readModelStatus;
-      if (refreshStatus.readModelStatus === "failed" || refreshStatus.readModelStatus === "unavailable") {
-        throw new Error(
-          refreshStatus.lastError
-          || `关联台最新数据加载失败，当前状态：${refreshStatus.readModelStatus}。`,
-        );
-      }
-      if (refreshStatus.readModelStatus !== "fresh") {
-        await delayWorkbenchOperationPoll();
-        continue;
-      }
-
-      const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+    postCommitRereadInFlightRef.current = true;
+    try {
+      return await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
         background: true,
         includeAuxiliary: false,
-        zoneQueries: zoneServerPageQueries,
+        zoneQueries: latestZoneServerPageQueriesRef.current,
         propagateError: true,
-        deferStateApply,
+        forceFresh: true,
       });
-      const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
-      const openStatus = result?.pages.unpaired.readModelStatus ?? "unknown";
-      lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
-      if (workbenchInitialPageIsFresh(result, afterReadModelVersion)) {
-        return result;
+    } finally {
+      postCommitRereadInFlightRef.current = false;
+      if (oaSyncRefreshPendingRef.current) {
+        oaSyncRefreshPendingRef.current = false;
+        scheduleOaSyncWorkbenchRefresh();
       }
-      await delayWorkbenchOperationPoll();
     }
-
-    throw new Error(`关联台最新数据同步超过 ${Math.round(WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS / 1000)} 秒，当前状态：${lastReadModelStatus || "unknown"}。`);
-  }, [zoneServerPageQueries]);
-
-  const scheduleWorkbenchReadModelReload = useCallback(() => {
-    if (workbenchRefreshReloadTimeoutRef.current !== null) {
-      window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
-    }
-    workbenchRefreshReloadTimeoutRef.current = window.setTimeout(() => {
-      workbenchRefreshReloadTimeoutRef.current = null;
-      void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-        background: true,
-        includeAuxiliary: false,
-        zoneQueries: zoneServerPageQueries,
-      });
-    }, WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS);
-  }, [zoneServerPageQueries]);
-
-  const applyWorkbenchRefreshStatus = useCallback((status: WorkbenchRefreshStatus) => {
-    setWorkbenchRefreshStatus(status);
-    const nextVersionKey = workbenchRefreshStatusVersionKey(status);
-    const previousVersionKey = lastWorkbenchRefreshVersionRef.current;
-    if (nextVersionKey) {
-      lastWorkbenchRefreshVersionRef.current = nextVersionKey;
-    }
-    if (
-      status.readModelStatus === "fresh"
-      && nextVersionKey
-      && previousVersionKey
-      && previousVersionKey !== nextVersionKey
-    ) {
-      scheduleWorkbenchReadModelReload();
-    }
-  }, [scheduleWorkbenchReadModelReload]);
+  }
 
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "unpaired") => {
     const pageInfo = zonePages[zone];
@@ -975,45 +911,32 @@ export default function ReconciliationWorkbenchPage() {
     if (
       !workbenchData
       || !pageInfo.hasMore
-      || pageInfo.readModelStatus !== "fresh"
+      || !pageInfo.nextCursor
       || displayStatePending
       || loadedZoneServerPageQueryKeys?.[zone] !== zoneServerPageQueryKeys[zone]
       || loadMoreInFlightRef.current[zone]
     ) {
       return;
     }
-    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
-    if (!expectedReadModelVersion) {
-      setLastActionMessage("最新数据尚未就绪，请刷新后重试。");
-      return;
-    }
     const requestSeq = loadMoreRequestSeqRef.current[zone] + 1;
     loadMoreRequestSeqRef.current[zone] = requestSeq;
     loadMoreInFlightRef.current[zone] = true;
+    loadMoreAbortControllerRef.current[zone]?.abort();
+    const controller = new AbortController();
+    loadMoreAbortControllerRef.current[zone] = controller;
     setLoadingMoreByZone((current) => ({ ...current, [zone]: true }));
     setLoadMoreErrorByZone((current) => current[zone] ? { ...current, [zone]: null } : current);
     try {
       const result = await fetchWorkbenchGroupsPage(
         WORKBENCH_VIEW_MONTH,
         zone,
-        pageInfo.page + 1,
+        pageInfo.nextCursor,
         pageInfo.pageSize,
-        undefined,
+        controller.signal,
         { ...zoneServerPageQueries[zone], detailLevel: "summary" },
-        expectedReadModelVersion,
+        pageInfo.page + 1,
       );
-      if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
-        return;
-      }
-      if (
-        activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
-        || result.page.readModelVersion !== expectedReadModelVersion
-      ) {
-        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-          background: true,
-          includeAuxiliary: false,
-          zoneQueries: zoneServerPageQueries,
-        });
+      if (controller.signal.aborted || loadMoreRequestSeqRef.current[zone] !== requestSeq) {
         return;
       }
       setWorkbenchData((current) => {
@@ -1032,24 +955,18 @@ export default function ReconciliationWorkbenchPage() {
         [zone]: result.page,
       }));
     } catch (error) {
-      if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
+      if (controller.signal.aborted || loadMoreRequestSeqRef.current[zone] !== requestSeq) {
         return;
       }
-      if (isWorkbenchReadModelRejected(error)) {
-        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-          background: true,
-          includeAuxiliary: false,
-          zoneQueries: zoneServerPageQueries,
-        });
-        setLastActionMessage("关联台数据已更新，页面已重新加载。");
-      } else {
-        setLoadMoreErrorByZone((current) => ({
-          ...current,
-          [zone]: "自动加载下一页失败，请重试。",
-        }));
-      }
+      setLoadMoreErrorByZone((current) => ({
+        ...current,
+        [zone]: error instanceof Error ? error.message : "自动加载下一页失败，请重试。",
+      }));
     } finally {
       if (loadMoreRequestSeqRef.current[zone] === requestSeq) {
+        if (loadMoreAbortControllerRef.current[zone] === controller) {
+          loadMoreAbortControllerRef.current[zone] = null;
+        }
         loadMoreInFlightRef.current[zone] = false;
         setLoadingMoreByZone((current) => current[zone] ? { ...current, [zone]: false } : current);
       }
@@ -1071,50 +988,138 @@ export default function ReconciliationWorkbenchPage() {
     if (!normalizedGroupId) {
       throw new Error("invalid_workbench_group_detail_request");
     }
-    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
-    if (!expectedReadModelVersion) {
-      setLastActionMessage("最新数据尚未就绪，请刷新后重试。");
-      throw new Error("workbench_group_detail_version_unavailable");
+    const detailKey = workbenchData?.[zone].groups.find((candidate) => candidate.id === normalizedGroupId)?.detailKey;
+    const requestKey = `${zone}\u001f${normalizedGroupId}`;
+    const requestCanonicalEpoch = canonicalEpochRef.current;
+    const requestGeneration = groupDetailRequestGenerationRef.current;
+    const existingRequest = groupDetailRequestsRef.current.get(requestKey);
+    if (
+      existingRequest
+      && existingRequest.canonicalEpoch === requestCanonicalEpoch
+      && existingRequest.detailKey === detailKey
+      && existingRequest.generation === requestGeneration
+    ) {
+      return existingRequest.promise;
     }
-    let group: WorkbenchRelationGroup;
+
+    existingRequest?.controller.abort();
+    const controller = new AbortController();
+    const requestPromise = (async () => {
+      try {
+        const group = await fetchWorkbenchGroupDetail(
+          WORKBENCH_VIEW_MONTH,
+          zone,
+          normalizedGroupId,
+          detailKey,
+          controller.signal,
+        );
+        if (
+          controller.signal.aborted
+          || canonicalEpochRef.current !== requestCanonicalEpoch
+          || groupDetailRequestGenerationRef.current !== requestGeneration
+        ) {
+          throw createWorkbenchAbortError();
+        }
+        setWorkbenchData((current) => {
+          const currentGroup = current?.[zone].groups.find((candidate) => candidate.id === normalizedGroupId);
+          if (!current || !currentGroup || currentGroup.detailKey !== detailKey) {
+            return current;
+          }
+          return {
+            ...current,
+            [zone]: {
+              groups: current[zone].groups.map((candidate) => (
+                candidate.id === group.id ? group : candidate
+              )),
+            },
+          };
+        });
+      } catch (error) {
+        if (
+          controller.signal.aborted
+          || canonicalEpochRef.current !== requestCanonicalEpoch
+          || groupDetailRequestGenerationRef.current !== requestGeneration
+          || isWorkbenchAbortError(error)
+        ) {
+          throw createWorkbenchAbortError();
+        }
+        setLastActionMessage("加载完整明细失败，请稍后重试。");
+        throw new Error("workbench_group_detail_load_failed");
+      } finally {
+        if (groupDetailRequestsRef.current.get(requestKey)?.controller === controller) {
+          groupDetailRequestsRef.current.delete(requestKey);
+        }
+      }
+    })();
+    groupDetailRequestsRef.current.set(requestKey, {
+      canonicalEpoch: requestCanonicalEpoch,
+      controller,
+      detailKey,
+      generation: requestGeneration,
+      promise: requestPromise,
+    });
+    return requestPromise;
+  }, [workbenchData]);
+
+  const loadZoneFirstPage = useCallback(async (
+    zone: "paired" | "unpaired",
+    query: WorkbenchGroupsPageQuery,
+    queryKey: string,
+  ) => {
+    invalidateGroupDetailRequests();
+    zoneQueryAbortControllerRef.current[zone]?.abort();
+    const controller = new AbortController();
+    zoneQueryAbortControllerRef.current[zone] = controller;
+    zoneQueryInFlightKeyRef.current[zone] = queryKey;
+    const requestSeq = zoneQueryRequestSeqRef.current[zone] + 1;
+    zoneQueryRequestSeqRef.current[zone] = requestSeq;
+    loadMoreAbortControllerRef.current[zone]?.abort();
+    loadMoreAbortControllerRef.current[zone] = null;
+    loadMoreRequestSeqRef.current[zone] += 1;
+    loadMoreInFlightRef.current[zone] = false;
+    setLoadingMoreByZone((current) => ({ ...current, [zone]: false }));
+    setLoadMoreErrorByZone((current) => ({ ...current, [zone]: null }));
+    setZoneQueryLoadingByZone((current) => ({ ...current, [zone]: true }));
+    setZoneQueryErrorByZone((current) => ({ ...current, [zone]: null }));
     try {
-      group = await fetchWorkbenchGroupDetail(
+      const result = await fetchWorkbenchGroupsPage(
         WORKBENCH_VIEW_MONTH,
         zone,
-        normalizedGroupId,
-        expectedReadModelVersion,
+        null,
+        WORKBENCH_GROUP_PAGE_SIZE,
+        controller.signal,
+        { ...query, detailLevel: "summary" },
       );
-    } catch (error) {
-      if (isWorkbenchReadModelRejected(error)) {
-        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-          background: true,
-          includeAuxiliary: false,
-          zoneQueries: zoneServerPageQueries,
-        });
-        setLastActionMessage("关联台数据已更新，页面已重新加载。");
-        throw new Error("workbench_group_detail_version_changed");
+      if (controller.signal.aborted || zoneQueryRequestSeqRef.current[zone] !== requestSeq) {
+        return;
       }
-      setLastActionMessage("加载完整明细失败，请稍后重试。");
-      throw new Error("workbench_group_detail_load_failed");
-    }
-    if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
-      setLastActionMessage("关联台数据已更新，请重新展开明细。");
-      throw new Error("workbench_group_detail_version_changed");
-    }
-    setWorkbenchData((current) => {
-      if (!current) {
-        return current;
-      }
-      return {
+      setWorkbenchData((current) => current ? {
         ...current,
-        [zone]: {
-          groups: current[zone].groups.map((candidate) => (
-            candidate.id === group.id ? group : candidate
-          )),
-        },
-      };
-    });
-  }, [zonePages]);
+        [zone]: { groups: result.groups },
+      } : current);
+      setZonePages((current) => ({ ...current, [zone]: result.page }));
+      setLoadedZoneServerPageQueryKeys((current) => ({
+        paired: current?.paired ?? zoneServerPageQueryKeys.paired,
+        unpaired: current?.unpaired ?? zoneServerPageQueryKeys.unpaired,
+        [zone]: queryKey,
+      }));
+    } catch (error) {
+      if (!controller.signal.aborted && zoneQueryRequestSeqRef.current[zone] === requestSeq) {
+        setZoneQueryErrorByZone((current) => ({
+          ...current,
+          [zone]: error instanceof WorkbenchApiError ? error.message : "筛选结果加载失败，请重试。",
+        }));
+      }
+    } finally {
+      const isCurrentRequest = zoneQueryAbortControllerRef.current[zone] === controller
+        && zoneQueryRequestSeqRef.current[zone] === requestSeq;
+      if (isCurrentRequest) {
+        zoneQueryAbortControllerRef.current[zone] = null;
+        zoneQueryInFlightKeyRef.current[zone] = null;
+        setZoneQueryLoadingByZone((current) => ({ ...current, [zone]: false }));
+      }
+    }
+  }, [invalidateGroupDetailRequests, zoneServerPageQueryKeys.paired, zoneServerPageQueryKeys.unpaired]);
 
   useEffect(() => {
     if (!active) {
@@ -1123,17 +1128,37 @@ export default function ReconciliationWorkbenchPage() {
     if (!workbenchData || isLoading) {
       return;
     }
-    if (lastZoneServerPageQueryKeyRef.current === zoneServerPageQueryKey) {
-      return;
-    }
-    lastZoneServerPageQueryKeyRef.current = zoneServerPageQueryKey;
-    const controller = new AbortController();
-    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, {
-      background: true,
-      zoneQueries: zoneServerPageQueries,
+    (["paired", "unpaired"] as const).forEach((zone) => {
+      const queryKey = zoneServerPageQueryKeys[zone];
+      if (
+        loadedZoneServerPageQueryKeys?.[zone] !== queryKey
+        && zoneQueryInFlightKeyRef.current[zone] !== queryKey
+      ) {
+        void loadZoneFirstPage(zone, zoneServerPageQueries[zone], queryKey);
+      }
     });
-    return () => controller.abort();
-  }, [active, isLoading, workbenchData, zoneServerPageQueries, zoneServerPageQueryKey]);
+  }, [
+    active,
+    isLoading,
+    loadZoneFirstPage,
+    loadedZoneServerPageQueryKeys,
+    workbenchData,
+    zoneServerPageQueries,
+    zoneServerPageQueryKeys,
+  ]);
+
+  useEffect(() => () => {
+    zoneQueryAbortControllerRef.current.paired?.abort();
+    zoneQueryAbortControllerRef.current.unpaired?.abort();
+    loadMoreAbortControllerRef.current.paired?.abort();
+    loadMoreAbortControllerRef.current.unpaired?.abort();
+    relationPreviewAbortControllerRef.current?.abort();
+    detailRequestAbortControllerRef.current?.abort();
+    exceptionDrawerRequestRef.current?.abort();
+    oaSyncStatusAbortControllerRef.current?.abort();
+    invalidateGroupDetailRequests();
+    invalidateExceptionGroupDetailRequests();
+  }, [invalidateExceptionGroupDetailRequests, invalidateGroupDetailRequests]);
 
   useEffect(() => {
     if (!workbenchData) {
@@ -1161,138 +1186,23 @@ export default function ReconciliationWorkbenchPage() {
     if (!active) {
       return undefined;
     }
-    let isActive = true;
-    let pollTimeoutId: number | null = null;
-    let pollController: AbortController | null = null;
-
-    const clearPollTimer = () => {
-      if (pollTimeoutId !== null) {
-        window.clearTimeout(pollTimeoutId);
-        pollTimeoutId = null;
-      }
-    };
-
-    const scheduleNextPoll = () => {
-      if (!isActive || document.visibilityState === "hidden") {
-        return;
-      }
-      clearPollTimer();
-      pollTimeoutId = window.setTimeout(() => {
-        pollTimeoutId = null;
-        pollRefreshStatus();
-      }, WORKBENCH_REFRESH_POLL_DELAY_MS);
-    };
-
-    const pollRefreshStatus = () => {
-      if (!isActive || document.visibilityState === "hidden" || pollController) {
-        return;
-      }
-      clearPollTimer();
-      const controller = new AbortController();
-      pollController = controller;
-      void fetchWorkbenchRefreshStatus(WORKBENCH_VIEW_MONTH, controller.signal)
-        .then((status) => {
-          if (!isActive || controller.signal.aborted) {
-            return;
-          }
-          applyWorkbenchRefreshStatus(status);
-        })
-        .catch(() => {
-          if (!isActive || controller.signal.aborted) {
-            return;
-          }
-          setWorkbenchRefreshStatus((current) => ({
-            scopeKey: current?.scopeKey ?? WORKBENCH_VIEW_MONTH,
-            readModelStatus: "unavailable",
-            consistencyStatus: current?.consistencyStatus ?? null,
-            generatedAt: current?.generatedAt ?? null,
-            activeGenerationId: current?.activeGenerationId ?? null,
-            readModelVersion: current?.readModelVersion ?? (activeWorkbenchReadModelVersionRef.current || null),
-            dirtyScopes: current?.dirtyScopes ?? [],
-            runningScopes: current?.runningScopes ?? [],
-            processedCount: current?.processedCount ?? null,
-            totalCount: current?.totalCount ?? null,
-            workerLagSeconds: current?.workerLagSeconds ?? null,
-            lastError: "关联台刷新状态检查失败，请稍后重试。",
-            retryable: true,
-          }));
-          setZonePages((current) => ({
-            paired: { ...current.paired, readModelStatus: "unavailable" },
-            unpaired: { ...current.unpaired, readModelStatus: "unavailable" },
-          }));
-        })
-        .finally(() => {
-          if (pollController === controller) {
-            pollController = null;
-          }
-          scheduleNextPoll();
-        });
-    };
-
-    const pollImmediately = () => {
-      if (document.visibilityState === "hidden") {
-        clearPollTimer();
-        return;
-      }
-      clearPollTimer();
-      pollRefreshStatus();
-    };
-
-    const handleVisibilityChange = () => {
-      pollImmediately();
-    };
-
-    pollImmediately();
-    window.addEventListener("focus", pollImmediately);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void pollOaSyncStatus();
+    const intervalId = window.setInterval(() => {
+      void pollOaSyncStatus();
+    }, OA_SYNC_POLL_INTERVAL_MS);
 
     return () => {
-      isActive = false;
-      clearPollTimer();
-      pollController?.abort();
-      if (workbenchRefreshReloadTimeoutRef.current !== null) {
-        window.clearTimeout(workbenchRefreshReloadTimeoutRef.current);
-        workbenchRefreshReloadTimeoutRef.current = null;
-      }
-      window.removeEventListener("focus", pollImmediately);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [active, applyWorkbenchRefreshStatus]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-    let isActive = true;
-    let pollController: AbortController | null = null;
-
-    const pollOaSyncStatus = () => {
-      pollController?.abort();
-      const controller = new AbortController();
-      pollController = controller;
-      void fetchWorkbenchOaSyncStatus(controller.signal)
-        .then((status) => {
-          if (!isActive || controller.signal.aborted) {
-            return;
-          }
-          applyOaSyncStatus(status);
-        })
-        .catch(() => undefined);
-    };
-
-    pollOaSyncStatus();
-    const intervalId = window.setInterval(pollOaSyncStatus, OA_SYNC_POLL_INTERVAL_MS);
-
-    return () => {
-      isActive = false;
       window.clearInterval(intervalId);
-      pollController?.abort();
+      oaSyncStatusRequestSeqRef.current += 1;
+      oaSyncStatusAbortControllerRef.current?.abort();
+      oaSyncStatusAbortControllerRef.current = null;
       if (oaSyncRefreshTimeoutRef.current !== null) {
         window.clearTimeout(oaSyncRefreshTimeoutRef.current);
         oaSyncRefreshTimeoutRef.current = null;
       }
+      oaSyncRefreshPendingRef.current = false;
     };
-  }, [active, applyOaSyncStatus]);
+  }, [active, pollOaSyncStatus]);
 
   useEffect(() => {
     document.body.classList.add("workbench-page-mode");
@@ -1306,52 +1216,48 @@ export default function ReconciliationWorkbenchPage() {
       setWorkbenchStatus({ level: "error", reason: loadError });
       return;
     }
+    if (backgroundLoadError) {
+      setWorkbenchStatus({ level: "error", reason: backgroundLoadError });
+      return;
+    }
+    if (oaSyncStatusError) {
+      setWorkbenchStatus({ level: "error", reason: oaSyncStatusError });
+      return;
+    }
     if (lastActionMessage) {
       setWorkbenchStatus({ level: "pending", reason: lastActionMessage });
-      return;
-    }
-    if (workbenchData?.oaStatus?.code === "error" && workbenchData.oaStatus.message) {
-      setWorkbenchStatus({ level: "error", reason: workbenchData.oaStatus.message });
-      return;
-    }
-    if (workbenchRefreshStatus?.readModelStatus === "failed" || workbenchRefreshStatus?.readModelStatus === "unavailable") {
-      setWorkbenchStatus({
-        level: "error",
-        reason: workbenchRefreshStatusMessage(workbenchRefreshStatus) ?? "关联台刷新失败",
-      });
       return;
     }
     if (oaSyncShellStatus) {
       setWorkbenchStatus(oaSyncShellStatus);
       return;
     }
-    if (isLoading || isRefreshing) {
+    const zoneQueryError = zoneQueryErrorByZone.paired ?? zoneQueryErrorByZone.unpaired;
+    if (zoneQueryError) {
+      setWorkbenchStatus({ level: "error", reason: zoneQueryError });
+      return;
+    }
+    if (isLoading || isRefreshing || zoneQueryLoadingByZone.paired || zoneQueryLoadingByZone.unpaired) {
       const reason = loadProgress.percent === null
         ? `${loadProgress.label}...`
         : `${loadProgress.label} ${loadProgress.percent}%`;
       setWorkbenchStatus({ level: "pending", reason });
       return;
     }
-    if (workbenchData?.oaStatus?.message) {
-      setWorkbenchStatus({
-        level: workbenchData.oaStatus.code === "error" ? "error" : workbenchData.oaStatus.code === "ready" ? "ok" : "pending",
-        reason: workbenchData.oaStatus.message,
-      });
-      return;
-    }
     setWorkbenchStatus(null);
   }, [
     isLoading,
     isRefreshing,
+    backgroundLoadError,
     lastActionMessage,
     loadError,
     loadProgress.label,
     loadProgress.percent,
     oaSyncShellStatus,
+    oaSyncStatusError,
     setWorkbenchStatus,
-    workbenchRefreshStatus,
-    workbenchData?.oaStatus?.code,
-    workbenchData?.oaStatus?.message,
+    zoneQueryErrorByZone,
+    zoneQueryLoadingByZone,
   ]);
 
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
@@ -1436,49 +1342,58 @@ export default function ReconciliationWorkbenchPage() {
 
   const selectedOpenRows = openSelectionContext.includedRows;
   const selectedOpenActionableRows = selectedOpenRows.filter((row) => !row.displayOnly);
-  const selectedOpenActionableRowIds = selectedOpenActionableRows.map((row) => row.id);
+  const selectedOpenActionableIdentityKeys = selectedOpenActionableRows.map(workbenchRowIdentityKey);
   const selectedPairedRows = pairedSelectionContext.includedRows;
   const openSelectionSummary = openSelectionContext.summary;
   const pairedSelectionSummary = pairedSelectionContext.summary;
-  const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
-  const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
+  const contextualOpenRowIdentityKeys = openSelectionContext.relatedRowIdentityKeySet;
+  const contextualPairedRowIdentityKeys = pairedSelectionContext.relatedRowIdentityKeySet;
   relationPreviewContextKeyRef.current = [
     WORKBENCH_VIEW_MONTH,
-    activeWorkbenchReadModelVersion,
-    openSelectionContext.includedRowIds.join(","),
-    pairedSelectionContext.includedRowIds.join(","),
+    canonicalEpoch,
+    openSelectionContext.includedRowIdentityKeys.join(","),
+    pairedSelectionContext.includedRowIdentityKeys.join(","),
   ].join("|");
   const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
     const explicitState = getRowState(row, zoneId);
     if (explicitState !== "idle") {
       return explicitState;
     }
-    return (zoneId === "unpaired" ? contextualOpenRowIds : contextualPairedRowIds).has(row.id) ? "related" : "idle";
-  }, [contextualOpenRowIds, contextualPairedRowIds, getRowState]);
+    const identityKey = workbenchRowIdentityKey(row);
+    return (
+      zoneId === "unpaired" ? contextualOpenRowIdentityKeys : contextualPairedRowIdentityKeys
+    ).has(identityKey) ? "related" : "idle";
+  }, [contextualOpenRowIdentityKeys, contextualPairedRowIdentityKeys, getRowState]);
 
   const selectedOpenGroupsForUnifiedAction = useMemo(() => {
-    const selectedRowIdSet = new Set(openSelectionContext.includedRowIds);
-    return openSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
-  }, [openSelectionContext.includedRowIds, openSelectionSourceGroups]);
+    const selectedRowIdentityKeySet = new Set(openSelectionContext.includedRowIdentityKeys);
+    return openSelectionSourceGroups.filter((group) => (
+      flattenGroups([group]).some((row) => selectedRowIdentityKeySet.has(workbenchRowIdentityKey(row)))
+    ));
+  }, [openSelectionContext.includedRowIdentityKeys, openSelectionSourceGroups]);
   const selectedOpenWithdrawableRelationGroups = selectedOpenGroupsForUnifiedAction.filter(
     (group) => group.rawGroupType === "relation" && group.canWithdraw,
   );
   const selectedOpenWithdrawableRelationRows = flattenGroups(selectedOpenWithdrawableRelationGroups)
     .filter((row) => !row.displayOnly);
-  const selectedOpenWithdrawableRelationRowIdSet = new Set(
-    selectedOpenWithdrawableRelationRows.map((row) => row.id),
+  const selectedOpenWithdrawableRelationRowIdentityKeySet = new Set(
+    selectedOpenWithdrawableRelationRows.map(workbenchRowIdentityKey),
   );
-  const isExactOpenRelationSelection = selectedOpenActionableRowIds.length >= 2
+  const isExactOpenRelationSelection = selectedOpenActionableRows.length >= 2
     && selectedOpenGroupsForUnifiedAction.length === 1
     && selectedOpenWithdrawableRelationGroups.length === 1
-    && selectedOpenActionableRowIds.length === selectedOpenWithdrawableRelationRowIdSet.size
-    && selectedOpenActionableRowIds.every((rowId) => selectedOpenWithdrawableRelationRowIdSet.has(rowId));
-  const canConfirmOpenSelection = selectedOpenActionableRowIds.length >= 2 && !isExactOpenRelationSelection;
+    && selectedOpenActionableIdentityKeys.length === selectedOpenWithdrawableRelationRowIdentityKeySet.size
+    && selectedOpenActionableIdentityKeys.every((identityKey) => (
+      selectedOpenWithdrawableRelationRowIdentityKeySet.has(identityKey)
+    ));
+  const canConfirmOpenSelection = selectedOpenActionableRows.length >= 2 && !isExactOpenRelationSelection;
   const canWithdrawOpenSelection = isExactOpenRelationSelection;
   const selectedPairedGroupsForUnifiedAction = useMemo(() => {
-    const selectedRowIdSet = new Set(pairedSelectionContext.includedRowIds);
-    return pairedSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
-  }, [pairedSelectionContext.includedRowIds, pairedSelectionSourceGroups]);
+    const selectedRowIdentityKeySet = new Set(pairedSelectionContext.includedRowIdentityKeys);
+    return pairedSelectionSourceGroups.filter((group) => (
+      flattenGroups([group]).some((row) => selectedRowIdentityKeySet.has(workbenchRowIdentityKey(row)))
+    ));
+  }, [pairedSelectionContext.includedRowIdentityKeys, pairedSelectionSourceGroups]);
   const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
   const isOpenWithdrawSelectionDisabled = !canWithdrawOpenSelection;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
@@ -1494,20 +1409,19 @@ export default function ReconciliationWorkbenchPage() {
         ? "确认关联至少需要选择 2 个不同记录。"
         : null;
 
-  const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
+  const collectCaseRows = useCallback((row: WorkbenchRecord) => {
+    const rowIdentityKey = workbenchRowIdentityKey(row);
     const containingGroup = sourceAllGroups.find((group) =>
-      [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((candidate) => candidate.id === row.id),
+      flattenGroups([group]).some((candidate) => workbenchRowIdentityKey(candidate) === rowIdentityKey),
     );
     if (containingGroup) {
-      return [...containingGroup.rows.oa, ...containingGroup.rows.bank, ...containingGroup.rows.invoice].map(
-        (candidate) => candidate.id,
-      );
+      return flattenGroups([containingGroup]);
     }
     if (!row.caseId) {
-      return [row.id];
+      return [row];
     }
-    const relatedIds = sourceAllRows.filter((candidate) => candidate.caseId === row.caseId).map((candidate) => candidate.id);
-    return relatedIds.length > 0 ? relatedIds : [row.id];
+    const relatedRows = sourceAllRows.filter((candidate) => candidate.caseId === row.caseId);
+    return relatedRows.length > 0 ? relatedRows : [row];
   }, [sourceAllGroups, sourceAllRows]);
 
   const handleOpenDetail = useCallback((row: WorkbenchRecord) => {
@@ -1517,63 +1431,16 @@ export default function ReconciliationWorkbenchPage() {
     setDetailError(null);
     setIsDetailLoading(true);
     openDetail(row);
-    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
-    if (!expectedReadModelVersion) {
-      setDetailError("最新数据尚未就绪，请刷新后重试。");
-      setIsDetailLoading(false);
-      return;
-    }
     const controller = new AbortController();
     detailRequestAbortControllerRef.current = controller;
-
-    const loadDetail = async () => {
-      try {
-        const detailedRow = await fetchWorkbenchRowDetail(row.id, {
-          month: WORKBENCH_VIEW_MONTH,
-          expectedReadModelVersion,
-          signal: controller.signal,
-        });
-        return { detailedRow, readModelVersion: expectedReadModelVersion };
-      } catch (error) {
-        if (
-          !(error instanceof WorkbenchApiError)
-          || error.code !== "workbench_read_model_version_conflict"
-        ) {
-          throw error;
-        }
-        const refreshed = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, {
-          background: true,
-          includeAuxiliary: false,
-          zoneQueries: zoneServerPageQueries,
-          propagateError: true,
-          preserveDetailRequest: true,
-        });
-        if (controller.signal.aborted || detailRequestSeqRef.current !== requestSeq || !refreshed) {
-          return null;
-        }
-        const refreshedVersion = workbenchActiveReadModelVersion(refreshed.pages);
-        if (!refreshedVersion) {
-          throw error;
-        }
-        const detailedRow = await fetchWorkbenchRowDetail(row.id, {
-          month: WORKBENCH_VIEW_MONTH,
-          expectedReadModelVersion: refreshedVersion,
-          signal: controller.signal,
-        });
-        return { detailedRow, readModelVersion: refreshedVersion };
-      }
-    };
-
-    void loadDetail()
-      .then((result) => {
-        if (!result) {
-          return;
-        }
-        if (
-          detailRequestSeqRef.current === requestSeq
-          && activeWorkbenchReadModelVersionRef.current === result.readModelVersion
-        ) {
-          replaceDetailRow(result.detailedRow);
+    void fetchWorkbenchRowDetail(row.id, {
+      month: WORKBENCH_VIEW_MONTH,
+      rowType: row.recordType,
+      signal: controller.signal,
+    })
+      .then((detailedRow) => {
+        if (detailRequestSeqRef.current === requestSeq) {
+          replaceDetailRow(detailedRow);
         }
       })
       .catch((error: unknown) => {
@@ -1589,7 +1456,7 @@ export default function ReconciliationWorkbenchPage() {
           setIsDetailLoading(false);
         }
       });
-  }, [openDetail, replaceDetailRow, zoneServerPageQueries]);
+  }, [openDetail, replaceDetailRow]);
 
   const handleCloseDetail = useCallback(() => {
     detailRequestAbortControllerRef.current?.abort();
@@ -1605,39 +1472,174 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const loadExceptionDrawer = useCallback(async (bucket: "active" | "processed") => {
-    const version = activeWorkbenchReadModelVersionRef.current;
-    if (!version) {
-      setExceptionDrawerError("关联台数据尚未就绪，请稍后重试。");
-      return;
-    }
+    invalidateExceptionGroupDetailRequests();
     exceptionDrawerRequestRef.current?.abort();
     const controller = new AbortController();
+    const requestGeneration = exceptionDrawerRequestGenerationRef.current + 1;
+    exceptionDrawerRequestGenerationRef.current = requestGeneration;
     exceptionDrawerRequestRef.current = controller;
     setExceptionDrawerLoading(true);
+    setExceptionDrawerLoadingMore(false);
     setExceptionDrawerError(null);
     try {
       const result = await fetchWorkbenchExceptionGroups(
         WORKBENCH_VIEW_MONTH,
         bucket,
-        version,
         controller.signal,
       );
-      if (!controller.signal.aborted) {
-        setExceptionDrawerGroups(result.groups);
-        if (bucket === "processed") {
-          setIgnoredExceptionCount(result.groups.length);
-        }
+      if (controller.signal.aborted || exceptionDrawerRequestGenerationRef.current !== requestGeneration) {
+        return false;
       }
+      setExceptionDrawerGroups(result.groups);
+      setExceptionDrawerPages(result.pages);
+      setExceptionDrawerContentGeneration((current) => current + 1);
+      const bucketTotal = result.pages.paired.total + result.pages.unpaired.total;
+      if (bucket === "processed") {
+        setIgnoredExceptionCount(bucketTotal);
+      } else {
+        setWorkbenchData((current) => current ? {
+          ...current,
+          summary: { ...current.summary, exceptionCount: bucketTotal },
+        } : current);
+      }
+      return true;
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && exceptionDrawerRequestGenerationRef.current === requestGeneration) {
         setExceptionDrawerError(error instanceof Error ? error.message : "异常数据加载失败，请稍后重试。");
       }
+      return false;
     } finally {
-      if (exceptionDrawerRequestRef.current === controller) {
+      if (
+        exceptionDrawerRequestRef.current === controller
+        && exceptionDrawerRequestGenerationRef.current === requestGeneration
+      ) {
         exceptionDrawerRequestRef.current = null;
         setExceptionDrawerLoading(false);
+        setExceptionDrawerLoadingMore(false);
       }
     }
+  }, [invalidateExceptionGroupDetailRequests]);
+
+  const loadMoreExceptionDrawer = useCallback(async () => {
+    const zones = (["paired", "unpaired"] as const).filter((zone) => (
+      exceptionDrawerPages[zone].hasMore && exceptionDrawerPages[zone].nextCursor
+    ));
+    if (zones.length === 0 || exceptionDrawerLoadingMore) {
+      return;
+    }
+    exceptionDrawerRequestRef.current?.abort();
+    const controller = new AbortController();
+    const requestGeneration = exceptionDrawerRequestGenerationRef.current + 1;
+    exceptionDrawerRequestGenerationRef.current = requestGeneration;
+    exceptionDrawerRequestRef.current = controller;
+    setExceptionDrawerLoadingMore(true);
+    setExceptionDrawerError(null);
+    try {
+      const results = await Promise.all(zones.map((zone) => fetchWorkbenchGroupsPage(
+        WORKBENCH_VIEW_MONTH,
+        zone,
+        exceptionDrawerPages[zone].nextCursor,
+        WORKBENCH_GROUP_PAGE_SIZE,
+        controller.signal,
+        { detailLevel: "summary", exceptionBucket: exceptionDrawerBucket },
+        exceptionDrawerPages[zone].page + 1,
+      )));
+      if (controller.signal.aborted || exceptionDrawerRequestGenerationRef.current !== requestGeneration) {
+        return;
+      }
+      setExceptionDrawerGroups((current) => mergeWorkbenchGroupsById(
+        current,
+        results.flatMap((result) => result.groups),
+      ));
+      setExceptionDrawerPages((current) => {
+        const next = { ...current };
+        results.forEach((result) => {
+          next[result.zone] = result.page;
+        });
+        return next;
+      });
+    } catch (error) {
+      if (!controller.signal.aborted && exceptionDrawerRequestGenerationRef.current === requestGeneration) {
+        setExceptionDrawerError(error instanceof WorkbenchApiError ? error.message : "更多异常加载失败，请重试。");
+      }
+    } finally {
+      if (
+        exceptionDrawerRequestRef.current === controller
+        && exceptionDrawerRequestGenerationRef.current === requestGeneration
+      ) {
+        exceptionDrawerRequestRef.current = null;
+        setExceptionDrawerLoadingMore(false);
+      }
+    }
+  }, [exceptionDrawerBucket, exceptionDrawerLoadingMore, exceptionDrawerPages]);
+
+  const ensureExceptionGroupDetail = useCallback(async (group: WorkbenchRelationGroup) => {
+    const requestBucket = exceptionDrawerBucketRef.current;
+    const requestCanonicalEpoch = canonicalEpochRef.current;
+    const requestGeneration = exceptionGroupDetailRequestGenerationRef.current;
+    const requestKey = `${requestBucket}\u001f${group.groupType}\u001f${group.id}`;
+    const existingRequest = exceptionGroupDetailRequestsRef.current.get(requestKey);
+    if (
+      existingRequest
+      && existingRequest.bucket === requestBucket
+      && existingRequest.canonicalEpoch === requestCanonicalEpoch
+      && existingRequest.detailKey === group.detailKey
+      && existingRequest.generation === requestGeneration
+    ) {
+      return existingRequest.promise;
+    }
+
+    existingRequest?.controller.abort();
+    const controller = new AbortController();
+    const requestPromise = (async () => {
+      try {
+        const detailGroup = await fetchWorkbenchGroupDetail(
+          WORKBENCH_VIEW_MONTH,
+          group.groupType,
+          group.id,
+          group.detailKey,
+          controller.signal,
+        );
+        if (
+          controller.signal.aborted
+          || canonicalEpochRef.current !== requestCanonicalEpoch
+          || exceptionGroupDetailRequestGenerationRef.current !== requestGeneration
+          || !exceptionDrawerOpenRef.current
+          || exceptionDrawerBucketRef.current !== requestBucket
+        ) {
+          throw createWorkbenchAbortError();
+        }
+        setExceptionDrawerGroups((current) => current.map((candidate) => (
+          candidate.id === detailGroup.id && candidate.detailKey === group.detailKey
+            ? detailGroup
+            : candidate
+        )));
+        return detailGroup;
+      } catch (error) {
+        if (
+          controller.signal.aborted
+          || canonicalEpochRef.current !== requestCanonicalEpoch
+          || exceptionGroupDetailRequestGenerationRef.current !== requestGeneration
+          || isWorkbenchAbortError(error)
+        ) {
+          throw createWorkbenchAbortError();
+        }
+        throw error;
+      } finally {
+        if (exceptionGroupDetailRequestsRef.current.get(requestKey)?.controller === controller) {
+          exceptionGroupDetailRequestsRef.current.delete(requestKey);
+        }
+      }
+    })();
+    exceptionGroupDetailRequestsRef.current.set(requestKey, {
+      bucket: requestBucket,
+      canonicalEpoch: requestCanonicalEpoch,
+      controller,
+      detailKey: group.detailKey,
+      generation: requestGeneration,
+      promise: requestPromise,
+    });
+    return requestPromise;
   }, []);
 
   const handleOpenExceptionDrawer = useCallback(() => {
@@ -1646,23 +1648,39 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const handleExceptionDrawerBucketChange = useCallback((bucket: "active" | "processed") => {
+    if (bucket === exceptionDrawerBucket) {
+      return;
+    }
+    exceptionDrawerRequestRef.current?.abort();
+    exceptionDrawerRequestRef.current = null;
+    exceptionDrawerRequestGenerationRef.current += 1;
+    invalidateExceptionGroupDetailRequests();
+    setExceptionDrawerGroups([]);
+    setExceptionDrawerPages(createInitialZonePages());
+    setExceptionDrawerLoading(false);
+    setExceptionDrawerLoadingMore(false);
+    setExceptionDrawerError(null);
+    setExceptionDrawerContentGeneration((current) => current + 1);
     setExceptionDrawerBucket(bucket);
-  }, []);
+  }, [exceptionDrawerBucket, invalidateExceptionGroupDetailRequests]);
 
   const handleCloseExceptionDrawer = useCallback(() => {
     exceptionDrawerRequestRef.current?.abort();
     exceptionDrawerRequestRef.current = null;
+    exceptionDrawerRequestGenerationRef.current += 1;
+    invalidateExceptionGroupDetailRequests();
+    setExceptionDrawerLoading(false);
+    setExceptionDrawerLoadingMore(false);
     setExceptionDrawerOpen(false);
-  }, []);
+  }, [invalidateExceptionGroupDetailRequests]);
 
   useEffect(() => {
-    if (!activeWorkbenchReadModelVersion || !exceptionDrawerOpen) {
+    if (!exceptionDrawerOpen) {
       return;
     }
     void loadExceptionDrawer(exceptionDrawerBucket);
     return () => exceptionDrawerRequestRef.current?.abort();
   }, [
-    activeWorkbenchReadModelVersion,
     exceptionDrawerBucket,
     exceptionDrawerOpen,
     loadExceptionDrawer,
@@ -1700,89 +1718,31 @@ export default function ReconciliationWorkbenchPage() {
     setWorkbenchExceptionDialog(null);
   };
 
-  const applyWorkbenchOperationProjection = useCallback((result: WorkbenchActionResult) => {
-    const projection = result.operationProjection;
-    if (!hasOperationProjection(projection)) {
-      return false;
-    }
-    const affectedRowIds = operationProjectionAffectedRowIds(result);
-    setWorkbenchData((current) => {
-      if (!current) {
-        return current;
-      }
-      return {
-        ...current,
-        paired: {
-          groups: applyOperationProjectionToGroups(
-            current.paired.groups,
-            projection?.after.pairedGroups ?? [],
-            affectedRowIds,
-          ),
-        },
-        unpaired: {
-          groups: applyOperationProjectionToGroups(
-            current.unpaired.groups,
-            projection?.after.unpairedGroups ?? [],
-            affectedRowIds,
-          ),
-        },
-      };
-    });
-    setSelectionSourceGroups((current) => ({
-      paired: applyOperationProjectionToGroups(
-        current.paired,
-        projection?.after.pairedGroups ?? [],
-        affectedRowIds,
-      ),
-      unpaired: applyOperationProjectionToGroups(
-        current.unpaired,
-        projection?.after.unpairedGroups ?? [],
-        affectedRowIds,
-      ),
-    }));
-    return true;
-  }, []);
-
-  const executeWorkbenchActionWithFreshness = useCallback(async ({
+  const executeWorkbenchActionAndReread = useCallback(async ({
     loadingMessage,
     action,
     onProgress,
-    waitForFreshWorkbenchLoad = false,
-    deferFreshWorkbenchApply = false,
-    onFreshWorkbenchPayload,
   }: {
     loadingMessage: string;
     action: () => Promise<string | WorkbenchActionResult>;
     onProgress?: WorkbenchActionProgressHandler;
-    waitForFreshWorkbenchLoad?: boolean;
-    deferFreshWorkbenchApply?: boolean;
-    onFreshWorkbenchPayload?: (payload: WorkbenchInitialPageResult) => void;
   }) => {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
-    const submittedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     const result = await action();
-    const actionResult = typeof result === "string" ? null : result;
-    const committed = Boolean(actionResult);
-    const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
-      ? applyWorkbenchOperationProjection(actionResult)
-      : false;
-    if (waitForFreshWorkbenchLoad || !projectionApplied) {
-      onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
-      const freshWorkbenchPayload = await waitForWorkbenchFreshAfterOperation({
-        deferStateApply: deferFreshWorkbenchApply,
-        afterReadModelVersion: actionResult?.read_model_status === "refreshing"
-          ? submittedReadModelVersion
-          : undefined,
-      });
-      if (deferFreshWorkbenchApply && freshWorkbenchPayload) {
-        onFreshWorkbenchPayload?.(freshWorkbenchPayload);
-      }
-    } else {
-      onProgress?.({ phase: "loading", message: "正在更新关联台页面...", committed });
-      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+    onProgress?.({ phase: "rereading", message: "关系已写入，正在重新读取关联台...", committed: true });
+    clearSelection();
+    setSelectionSourceGroups({ paired: [], unpaired: [] });
+    loadMoreAbortControllerRef.current.paired?.abort();
+    loadMoreAbortControllerRef.current.unpaired?.abort();
+    zoneQueryAbortControllerRef.current.paired?.abort();
+    zoneQueryAbortControllerRef.current.unpaired?.abort();
+    setZonePages(createInitialZonePages());
+    const reread = await rereadWorkbenchAfterCommit();
+    if (!reread) {
+      throw new Error("关系已写入，但页面重新读取失败；请勿重复提交，稍后刷新页面确认。");
     }
     return actionResultMessage(result);
-  }, [applyWorkbenchOperationProjection, refreshWorkbenchDataInBackground, waitForWorkbenchFreshAfterOperation]);
+  }, [clearSelection]);
 
   const runBlockingAction = useCallback(async ({
     loadingMessage,
@@ -1795,7 +1755,7 @@ export default function ReconciliationWorkbenchPage() {
     const outcome = await runOperation({
       loadingMessage,
       action: async ({ setMessage }) => {
-        return executeWorkbenchActionWithFreshness({
+        return executeWorkbenchActionAndReread({
           loadingMessage,
           action,
           onProgress: (progress) => setMessage(progress.message),
@@ -1806,49 +1766,26 @@ export default function ReconciliationWorkbenchPage() {
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
       return true;
-    } else if (isWorkbenchReadModelRejected(outcome.error)) {
-      await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-        background: true,
-        includeAuxiliary: false,
-        zoneQueries: zoneServerPageQueries,
-      });
-      setLastActionMessage("关联台数据已更新，页面已重新加载。");
     }
     return false;
-  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, loadWorkbenchData, runOperation, zoneServerPageQueries]);
-
-  const refreshAfterReadModelRejection = useCallback((error: unknown) => {
-    if (!isWorkbenchReadModelRejected(error)) {
-      return;
-    }
-    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      includeAuxiliary: false,
-      zoneQueries: zoneServerPageQueries,
-    });
-    setLastActionMessage("关联台数据已更新，页面正在重新加载。");
-  }, [loadWorkbenchData, zoneServerPageQueries]);
+  }, [executeWorkbenchActionAndReread, handleCloseDetail, runOperation]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
-    refreshAfterReadModelRejection(error);
     openActionResultDialog(actionErrorMessage(error), "操作失败");
-  }, [openActionResultDialog, refreshAfterReadModelRejection]);
+  }, [openActionResultDialog]);
 
   const handleWorkbenchExceptionApplied = useCallback(async (
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    if (result.workbenchRefreshRequired || result.affectedScopeKeys.length > 0) {
-      onProgress({
-        phase: "loading",
-        message: "正在加载关联台最新数据...",
-        committed: true,
-      });
-      await waitForWorkbenchFreshAfterOperation();
-    }
     clearOpenSelection();
+    onProgress({ phase: "rereading", message: "异常处理已写入，正在重新读取关联台...", committed: true });
+    const reread = await rereadWorkbenchAfterCommit();
+    if (!reread) {
+      throw new Error("异常处理已写入，但页面重新读取失败；请勿重复提交，稍后刷新页面确认。");
+    }
     setLastActionMessage(result.message ?? "已提交统一异常处理。");
-  }, [clearOpenSelection, waitForWorkbenchFreshAfterOperation]);
+  }, [clearOpenSelection]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
@@ -1861,10 +1798,8 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "confirm-match") {
-      const rowIds = collectCaseRowIds(row);
-      const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
       try {
-        await openConfirmPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+        await openConfirmPreview(collectCaseRows(row));
       } catch (error) {
         openRelationPreviewErrorDialog(error);
       }
@@ -1883,25 +1818,24 @@ export default function ReconciliationWorkbenchPage() {
           const result = await ignoreWorkbenchRow({
             month: WORKBENCH_VIEW_MONTH,
             rowId: row.id,
-            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+            rowType: row.recordType,
             comment: `由关联台忽略发票：${row.id}`,
           });
           return result;
         },
       });
-      await loadWorkbenchAuxiliaryData(WORKBENCH_VIEW_MONTH);
       return;
     }
 
     if (action === "confirm-cash-pass-through") {
-      const rowIds = collectCaseRowIds(row);
+      const rows = collectCaseRows(row);
       await runBlockingAction({
         loadingMessage: "正在确认过账...",
         action: async () => {
           const result = await confirmWorkbenchCashPassThrough({
             month: WORKBENCH_VIEW_MONTH,
-            rowIds,
-            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+            rowIds: rows.map((candidate) => candidate.id),
+            rowTypes: rows.map((candidate) => candidate.recordType),
             note: "由关联台确认现金往来过账",
           });
           return result;
@@ -1912,21 +1846,21 @@ export default function ReconciliationWorkbenchPage() {
 
     if (action === "confirm-cash-ticket-purchase") {
       setCashTicketPurchaseDialog({
-        rowIds: collectCaseRowIds(row),
+        rows: collectCaseRows(row).map(({ id, recordType }) => ({ id, recordType })),
         cashAmount: normalizedAmountForInput(row.amount),
       });
       return;
     }
 
     if (action === "cancel-cash-special") {
-      const rowIds = collectCaseRowIds(row);
+      const rows = collectCaseRows(row);
       await runBlockingAction({
         loadingMessage: "正在取消现金处理...",
         action: async () => {
           const result = await cancelWorkbenchCashSpecial({
             month: WORKBENCH_VIEW_MONTH,
-            rowIds,
-            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+            rowIds: rows.map((candidate) => candidate.id),
+            rowTypes: rows.map((candidate) => candidate.recordType),
             note: "由关联台取消现金往来特殊处理",
           });
           return result;
@@ -1943,10 +1877,8 @@ export default function ReconciliationWorkbenchPage() {
         });
         return;
       }
-      const rowIds = collectCaseRowIds(row);
-      const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
       try {
-        await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+        await openWithdrawPreview(collectCaseRows(row));
       } catch (error) {
         openRelationPreviewErrorDialog(error);
       }
@@ -1959,14 +1891,12 @@ export default function ReconciliationWorkbenchPage() {
     }
   }, [
     clearOpenSelection,
-    collectCaseRowIds,
+    collectCaseRows,
     ensureCanWriteWorkbench,
     openActionResultDialog,
     openWorkbenchExceptionDialog,
-    refreshWorkbenchDataInBackground,
     runBlockingAction,
     withdrawBankFlowRuleBatchSummaryRow,
-    sourceAllRows,
     openRelationPreviewErrorDialog,
   ]);
 
@@ -1992,15 +1922,15 @@ export default function ReconciliationWorkbenchPage() {
     if (!cashTicketPurchaseDialog || !ensureCanWriteWorkbench()) {
       return;
     }
-    const { rowIds } = cashTicketPurchaseDialog;
+    const { rows } = cashTicketPurchaseDialog;
     setCashTicketPurchaseDialog(null);
     await runBlockingAction({
       loadingMessage: "正在确认买票成本...",
       action: async () => {
         const result = await confirmWorkbenchCashTicketPurchase({
           month: WORKBENCH_VIEW_MONTH,
-          rowIds,
-          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+          rowIds: rows.map((row) => row.id),
+          rowTypes: rows.map((row) => row.recordType),
           cashAmount,
           ticketCostAmount,
           projectName,
@@ -2031,8 +1961,11 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     const rowIds = rows.map((row) => row.id);
-    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    const rowTypes = rows.map((row) => row.recordType);
     const requestContextKey = relationPreviewContextKeyRef.current;
+    relationPreviewAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    relationPreviewAbortControllerRef.current = controller;
     relationPreviewRequestKindRef.current = kind;
     setRelationPreviewRequestKind(kind);
     try {
@@ -2040,27 +1973,35 @@ export default function ReconciliationWorkbenchPage() {
         ? await previewWorkbenchConfirmLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
-            expectedReadModelVersion,
-          })
+            rowTypes,
+          }, controller.signal)
         : await previewWorkbenchWithdrawLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
-            expectedReadModelVersion,
-          });
-      if (
-        relationPreviewContextKeyRef.current !== requestContextKey
-        || activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
-      ) {
+            rowTypes,
+          }, controller.signal);
+      if (controller.signal.aborted || relationPreviewContextKeyRef.current !== requestContextKey) {
         return;
       }
       setRelationPreviewDialog({
         preview,
         rowIds,
+        rowTypes,
+        canonicalEpoch: canonicalEpochRef.current,
         caseId: kind === "withdraw" ? resolveSelectedCaseId(rows) : undefined,
         idempotencyKey: crypto.randomUUID(),
       });
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        return;
+      }
+      throw error;
     } finally {
-      if (relationPreviewRequestKindRef.current === kind) {
+      const isCurrentRequest = relationPreviewAbortControllerRef.current === controller;
+      if (isCurrentRequest) {
+        relationPreviewAbortControllerRef.current = null;
+      }
+      if (isCurrentRequest && relationPreviewRequestKindRef.current === kind) {
         relationPreviewRequestKindRef.current = null;
         setRelationPreviewRequestKind(null);
       }
@@ -2082,69 +2023,58 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       throw new Error("当前状态不允许执行写操作。");
     }
-    const { preview, rowIds, caseId, idempotencyKey } = relationPreviewDialog;
+    const {
+      preview,
+      rowIds,
+      rowTypes,
+      canonicalEpoch: previewCanonicalEpoch,
+      caseId,
+      idempotencyKey,
+    } = relationPreviewDialog;
+    if (previewCanonicalEpoch !== canonicalEpochRef.current) {
+      throw new Error("关联台数据已更新，请关闭后重新选择记录并重新预览。");
+    }
     if (preview.operation === "confirm_link") {
-      let submittedResult: WorkbenchActionResult | null = null;
-      const message = await executeWorkbenchActionWithFreshness({
+      const message = await executeWorkbenchActionAndReread({
         loadingMessage: "正在确认关联...",
         onProgress,
         action: async () => {
           const result = await confirmWorkbenchLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
-            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+            rowTypes,
             caseId,
             note,
             idempotencyKey,
           });
-          submittedResult = result;
           return result;
         },
       });
-      if (submittedResult) {
-        clearOpenSelection();
-      }
       setLastActionMessage(message);
       setRelationPreviewDialog(null);
       return;
     }
 
     const operationCopy = relationPreviewOperationCopy(preview);
-    let submittedResult: WorkbenchActionResult | null = null;
-    let deferredWorkbenchFreshApplied = false;
-    const message = await executeWorkbenchActionWithFreshness({
+    const message = await executeWorkbenchActionAndReread({
       loadingMessage: operationCopy.submittingMessage,
       onProgress,
-      waitForFreshWorkbenchLoad: true,
-      deferFreshWorkbenchApply: true,
-      onFreshWorkbenchPayload: (freshWorkbenchPayload) => {
-        deferredWorkbenchFreshApplied = true;
-        setRelationPreviewDialog(null);
-        applyWorkbenchInitialPageResult(freshWorkbenchPayload, zoneServerPageQueries);
-      },
       action: async () => {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
-          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
+          rowTypes,
           note,
           operationType: "withdraw_relation",
           previewId: preview.previewId,
           expectedVersions: preview.submitExpectedVersions,
           idempotencyKey,
         });
-        submittedResult = result;
         return result;
       },
     });
-    if (submittedResult) {
-      clearPairedSelection();
-      clearOpenSelection();
-    }
     setLastActionMessage(message);
-    if (!deferredWorkbenchFreshApplied) {
-      setRelationPreviewDialog(null);
-    }
+    setRelationPreviewDialog(null);
   };
 
   const handleConfirmOpenSelection = async () => {
@@ -2233,9 +2163,11 @@ export default function ReconciliationWorkbenchPage() {
       });
       return;
     }
-    const selectedPairedRowIds = new Set(selectedPairedRows.map((row) => row.id));
+    const selectedPairedRowIdentityKeys = new Set(selectedPairedRows.map(workbenchRowIdentityKey));
     const selectedRelationRows = pairedSelectionSourceGroups
-      .filter((group) => group.canWithdraw && flattenGroups([group]).some((row) => selectedPairedRowIds.has(row.id)))
+      .filter((group) => group.canWithdraw && flattenGroups([group]).some((row) => (
+        selectedPairedRowIdentityKeys.has(workbenchRowIdentityKey(row))
+      )))
       .flatMap((group) => flattenGroups([group]));
     try {
       await openWithdrawPreview(selectedRelationRows.length > 0 ? selectedRelationRows : selectedPairedRows);
@@ -2251,22 +2183,34 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench() || !group.oaInvoiceAnomaly) {
       return;
     }
-    const succeeded = await runBlockingAction({
+    handleCloseDetail();
+    const outcome = await runOperation({
       loadingMessage: ignored ? "正在忽略异常..." : "正在撤回忽略...",
-      action: () => setWorkbenchOaInvoiceAnomalyIgnored({
-        month: WORKBENCH_VIEW_MONTH,
-        zone: group.groupType,
-        groupId: group.id,
-        fingerprint: group.oaInvoiceAnomaly!.fingerprint,
-        expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
-      }, ignored),
+      action: async ({ setMessage }) => {
+        const result = await setWorkbenchOaInvoiceAnomalyIgnored({
+          month: WORKBENCH_VIEW_MONTH,
+          zone: group.groupType,
+          groupId: group.id,
+          fingerprint: group.oaInvoiceAnomaly!.fingerprint,
+        }, ignored);
+        setMessage("异常处理已写入，正在重新读取当前异常列表...");
+        if (
+          !exceptionDrawerOpenRef.current
+          || !await loadExceptionDrawer(exceptionDrawerBucketRef.current)
+        ) {
+          throw new Error("异常处理已写入，但当前异常列表重新读取失败；请勿重复提交，稍后重新打开异常抽屉确认。");
+        }
+        return actionResultMessage(result);
+      },
     });
-    if (!succeeded) {
-      return;
+    if (outcome.status === "success") {
+      setLastActionMessage(outcome.value);
     }
   }, [
     ensureCanWriteWorkbench,
-    runBlockingAction,
+    handleCloseDetail,
+    loadExceptionDrawer,
+    runOperation,
   ]);
 
   const pairedPanes = useMemo<WorkbenchPane[]>(
@@ -2310,27 +2254,26 @@ export default function ReconciliationWorkbenchPage() {
     [handleOpenExceptionDrawer, ignoredExceptionCount, workbenchData?.summary.exceptionCount],
   );
 
-  const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
-  const oaStatus = workbenchData?.oaStatus ?? null;
-  const isOaReady = oaStatus?.code === "ready";
-  const oaStatusPanelMessage = oaStatus && !isOaReady ? `${oaStatus.message}，本次结果未包含完整 OA 数据。` : null;
+  const isOaReady = oaSyncStatus?.status === "synced" && oaSyncStatus.dirtyScopes.length === 0;
+  const oaStatusPanelMessage = oaSyncStatus && !isOaReady
+    ? `${oaSyncStatus.message || "OA 同步状态异常"}，本次结果未包含完整 OA 数据。`
+    : null;
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
   const pairedSearchPending = pairedDisplayState !== deferredPairedDisplayState
-    || (isRefreshing && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired);
+    || zoneQueryLoadingByZone.paired;
   const unpairedSearchPending = openDisplayState !== deferredOpenDisplayState
-    || (isRefreshing && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired);
-  const pairedSearchError = backgroundLoadError && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired
-    ? backgroundLoadError
-    : null;
-  const unpairedSearchError = backgroundLoadError && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired
-    ? backgroundLoadError
-    : null;
-  const retryCurrentSearch = () => {
+    || zoneQueryLoadingByZone.unpaired;
+  const retryZoneSearch = (zone: "paired" | "unpaired") => {
+    void loadZoneFirstPage(zone, zoneServerPageQueries[zone], zoneServerPageQueryKeys[zone]);
+  };
+  const retryWorkbenchDirectRead = () => {
     void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
-      background: true,
-      zoneQueries: zoneServerPageQueries,
+      background: workbenchData !== null,
+      includeAuxiliary: workbenchData === null,
+      zoneQueries: latestZoneServerPageQueriesRef.current,
+      forceFresh: true,
     });
   };
   const pairedZoneElement = (
@@ -2353,8 +2296,8 @@ export default function ReconciliationWorkbenchPage() {
       displayState={pairedDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
       onSearchQueryChange={(query) => handleSearchQueryChange("paired", query)}
-      onRetrySearch={retryCurrentSearch}
-      searchError={pairedSearchError}
+      onRetrySearch={() => retryZoneSearch("paired")}
+      searchError={zoneQueryErrorByZone.paired}
       searchPending={pairedSearchPending}
       searchQuery={pairedDisplayState.searchQuery}
       onTogglePaneSort={handleTogglePaneSort}
@@ -2405,8 +2348,8 @@ export default function ReconciliationWorkbenchPage() {
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
       onSearchQueryChange={(query) => handleSearchQueryChange("unpaired", query)}
-      onRetrySearch={retryCurrentSearch}
-      searchError={unpairedSearchError}
+      onRetrySearch={() => retryZoneSearch("unpaired")}
+      searchError={zoneQueryErrorByZone.unpaired}
       searchPending={unpairedSearchPending}
       searchQuery={openDisplayState.searchQuery}
       onTogglePaneSort={handleTogglePaneSort}
@@ -2443,23 +2386,23 @@ export default function ReconciliationWorkbenchPage() {
                   ariaLabel="关联台数据统计"
                   loading={isLoading && !workbenchData}
                   coreItems={[
-                    { label: "OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.oaCount : null, unit: "条" },
-                    { label: "流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.bankTransactionCount : null, unit: "笔" },
-                    { label: "进项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.inputInvoiceCount : null, unit: "张" },
-                    { label: "销项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.outputInvoiceCount : null, unit: "张" },
+                    { label: "OA", value: statistics?.oaCount, unit: "条" },
+                    { label: "流水", value: statistics?.bankTransactionCount, unit: "笔" },
+                    { label: "进项", value: statistics?.inputInvoiceCount, unit: "张" },
+                    { label: "销项", value: statistics?.outputInvoiceCount, unit: "张" },
                   ]}
                   detailItems={[
-                    { label: "已配对组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedGroupCount : null, unit: "组", tone: "success" },
-                    { label: "未配对对象", value: workbenchPageReadModelStatus === "fresh" ? statistics?.unpairedObjectCount : null, unit: "个", tone: "warning" },
-                    { label: "支出流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.expenseTransactionCount : null, unit: "笔", tone: "expense" },
-                    { label: "收入流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incomeTransactionCount : null, unit: "笔", tone: "income" },
-                    { label: "已配对 OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedOaCount : null, unit: "条" },
-                    { label: "已配对流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedBankTransactionCount : null, unit: "笔" },
-                    { label: "已配对发票", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedInvoiceCount : null, unit: "张" },
-                    { label: "不完整关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incompleteGroupCount : null, unit: "组", tone: "warning" },
-                    { label: "缺 OA 关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingOaGroupCount : null, unit: "组", tone: "warning" },
-                    { label: "缺流水关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingBankGroupCount : null, unit: "组", tone: "warning" },
-                    { label: "缺发票关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingInvoiceGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "已配对组", value: statistics?.pairedGroupCount, unit: "组", tone: "success" },
+                    { label: "未配对对象", value: statistics?.unpairedObjectCount, unit: "个", tone: "warning" },
+                    { label: "支出流水", value: statistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+                    { label: "收入流水", value: statistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+                    { label: "已配对 OA", value: statistics?.pairedOaCount, unit: "条" },
+                    { label: "已配对流水", value: statistics?.pairedBankTransactionCount, unit: "笔" },
+                    { label: "已配对发票", value: statistics?.pairedInvoiceCount, unit: "张" },
+                    { label: "不完整关系组", value: statistics?.incompleteGroupCount, unit: "组", tone: "warning" },
+                    { label: "缺 OA 关系组", value: statistics?.missingOaGroupCount, unit: "组", tone: "warning" },
+                    { label: "缺流水关系组", value: statistics?.missingBankGroupCount, unit: "组", tone: "warning" },
+                    { label: "缺发票关系组", value: statistics?.missingInvoiceGroupCount, unit: "组", tone: "warning" },
                   ]}
                 />
                 {canAdminAccess ? (
@@ -2467,23 +2410,41 @@ export default function ReconciliationWorkbenchPage() {
                   ariaLabel="Audit 关联台"
                   pageKey="reconciliation-workbench"
                   label="关联台"
-                  auditContextKey={`${activeWorkbenchReadModelVersion ?? "none"}:${workbenchPageReadModelStatus}`}
+                  auditContextKey={`${WORKBENCH_VIEW_MONTH}:${canonicalEpoch}`}
                 />
                 ) : null}
               </div>
             </div>
           </div>
         </header>
-        {loadError ? <div className="state-panel error">{loadError}</div> : null}
-        {!loadError && !isLoading && !isWorkbenchPageFresh ? (
-          <div className={`state-panel${["failed", "unavailable"].includes(workbenchPageReadModelStatus) ? " error" : ""}`}>
-            {workbenchReadModelStatusMessage(workbenchPageReadModelStatus) ?? "关联台数据当前不可写，请等待刷新完成。"}
+        {loadError ? (
+          <div className="state-panel error">
+            <span>{loadError}</span>
+            <Button isDisabled={isLoading} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
+              重新读取
+            </Button>
           </div>
         ) : null}
-        {!loadError && oaStatusPanelMessage ? (
-          <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
+        {!loadError && backgroundLoadError ? (
+          <div className="state-panel error">
+            <span>{backgroundLoadError}</span>
+            <Button isDisabled={isRefreshing} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
+              重新读取
+            </Button>
+          </div>
         ) : null}
-        {!isLoading && !loadError && isEmpty && isOaReady && isWorkbenchPageFresh ? (
+        {!loadError && oaSyncStatusError ? (
+          <div className="state-panel error">
+            <span>{oaSyncStatusError}</span>
+            <Button onPress={() => void pollOaSyncStatus()} size="sm" variant="secondary">
+              重试 OA 状态
+            </Button>
+          </div>
+        ) : null}
+        {!loadError && !oaSyncStatusError && oaStatusPanelMessage ? (
+          <div className={`state-panel${oaSyncStatus?.status === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
+        ) : null}
+        {!isLoading && !loadError && isEmpty && isOaReady ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
         ) : null}
 
@@ -2505,7 +2466,6 @@ export default function ReconciliationWorkbenchPage() {
           preview={relationPreviewDialog.preview}
           columnLayouts={workbenchSettings?.workbenchColumnLayouts}
           onClose={() => setRelationPreviewDialog(null)}
-          onReadModelRejected={refreshAfterReadModelRejection}
           onSubmit={handleSubmitRelationPreview}
         />
       ) : null}
@@ -2520,6 +2480,7 @@ export default function ReconciliationWorkbenchPage() {
       <WorkbenchExceptionDrawer
         bucket={exceptionDrawerBucket}
         canMutateData={canWriteWorkbench}
+        contentGeneration={exceptionDrawerContentGeneration}
         error={exceptionDrawerError}
         groups={exceptionDrawerGroups}
         loading={exceptionDrawerLoading}
@@ -2528,15 +2489,18 @@ export default function ReconciliationWorkbenchPage() {
         onClose={handleCloseExceptionDrawer}
         onIgnoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, true)}
         onRestoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, false)}
+        hasMore={exceptionDrawerPages.paired.hasMore || exceptionDrawerPages.unpaired.hasMore}
+        loadingMore={exceptionDrawerLoadingMore}
+        total={exceptionDrawerPages.paired.total + exceptionDrawerPages.unpaired.total}
+        onEnsureGroupDetail={ensureExceptionGroupDetail}
+        onLoadMore={loadMoreExceptionDrawer}
       />
       {workbenchExceptionDialog ? (
         <WorkbenchExceptionModal
           month={WORKBENCH_VIEW_MONTH}
           rows={workbenchExceptionDialog.rows}
-          expectedReadModelVersion={activeWorkbenchReadModelVersionRef.current}
           onApplied={handleWorkbenchExceptionApplied}
           onClose={handleCloseWorkbenchExceptionDialog}
-          onReadModelRejected={refreshAfterReadModelRejection}
         />
       ) : null}
       {cashTicketPurchaseDialog ? (
@@ -2676,8 +2640,8 @@ function relationPreviewPhaseLabel(phase: RelationPreviewSubmitState["phase"]) {
   if (phase === "submitting") {
     return "提交中";
   }
-  if (phase === "syncing") {
-    return "同步中";
+  if (phase === "rereading") {
+    return "重新读取中";
   }
   if (phase === "loading") {
     return "加载中";
@@ -2692,13 +2656,11 @@ function RelationPreviewDialog({
   preview,
   columnLayouts,
   onClose,
-  onReadModelRejected,
   onSubmit,
 }: {
   preview: WorkbenchRelationPreview;
   columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
   onClose: () => void;
-  onReadModelRejected: (error: unknown) => void;
   onSubmit: (note: string, onProgress: WorkbenchActionProgressHandler) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
@@ -2709,7 +2671,7 @@ function RelationPreviewDialog({
   });
   const operationCopy = relationPreviewOperationCopy(preview);
   const noteRequired = preview.requiresNote;
-  const isBusy = submitState.phase === "submitting" || submitState.phase === "syncing" || submitState.phase === "loading";
+  const isBusy = submitState.phase === "submitting" || submitState.phase === "rereading" || submitState.phase === "loading";
   const isCommittedError = submitState.phase === "error" && submitState.committed;
   const isNonRetryableError = submitState.phase === "error" && !submitState.retryable;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
@@ -2733,9 +2695,6 @@ function RelationPreviewDialog({
     try {
       await onSubmit(note.trim(), setProgress);
     } catch (error) {
-      if (isWorkbenchReadModelRejected(error)) {
-        onReadModelRejected(error);
-      }
       const message = actionErrorMessage(error);
       const retryable = !committed && isRelationPreviewRetryableSubmitError(message);
       setSubmitState({
@@ -2743,7 +2702,7 @@ function RelationPreviewDialog({
         committed,
         retryable,
         message: committed
-          ? `关系已写入，关联台刷新未完成：${message}`
+          ? `关系已写入，页面重新读取失败：${message} 请勿重复提交。`
           : retryable
             ? message
             : relationPreviewNonRetryableMessage(message),
@@ -2874,41 +2833,4 @@ function mergeWorkbenchGroupsByIdReplacingExisting(
   const byId = new Map(existingGroups.map((group) => [group.id, group]));
   incomingGroups.forEach((group) => byId.set(group.id, group));
   return Array.from(byId.values());
-}
-
-function applyOperationProjectionToGroups(
-  existingGroups: WorkbenchRelationGroup[],
-  incomingGroups: WorkbenchRelationGroup[],
-  affectedRowIds: Set<string>,
-) {
-  const filteredGroups = existingGroups.flatMap((group) => {
-    const nextGroup: WorkbenchRelationGroup = {
-      ...group,
-      rows: {
-        oa: group.rows.oa.filter((row) => !affectedRowIds.has(row.id)),
-        bank: group.rows.bank.filter((row) => !affectedRowIds.has(row.id)),
-        invoice: group.rows.invoice.filter((row) => !affectedRowIds.has(row.id)),
-      },
-    };
-    return flattenGroups([nextGroup]).length > 0 ? [nextGroup] : [];
-  });
-  return mergeWorkbenchGroupsByIdReplacingExisting(filteredGroups, incomingGroups);
-}
-
-function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
-  return new Set(
-    [
-      ...cleanWorkbenchScopeList(result.affected_row_ids),
-      ...(result.operationProjection
-        ? flattenGroups([
-          ...result.operationProjection.after.pairedGroups,
-          ...result.operationProjection.after.unpairedGroups,
-        ]).map((row) => row.id)
-        : []),
-    ].filter(Boolean),
-  );
-}
-
-function hasOperationProjection(projection: WorkbenchOperationProjection | undefined) {
-  return Boolean(projection);
 }

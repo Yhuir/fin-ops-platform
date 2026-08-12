@@ -19,7 +19,7 @@
 
 页面不拥有自动候选、matching decision 或第三种关系状态。确定性引擎满足安全规则时直接通过正式关系命令边界创建 active relation；不满足时不写关系，事实仍保持可见的未配对单行。
 
-已配对区和未配对区三栏的表头下拉不再从浏览器已加载页推导。菜单打开后通过同一 active generation 的 `/api/workbench/filter-options` 读取完整候选域；主表继续按 50 组分页，候选菜单独立按 100 项分页并支持搜索。目标列自己的筛选条件不限制其候选，其余区域搜索、列筛选和时间筛选保持生效。
+已配对区和未配对区三栏的表头下拉不再从浏览器已加载页推导。菜单打开后通过 direct canonical `/api/workbench/filter-options` 读取完整候选域；主表按 50 组的 opaque keyset cursor 分页，候选菜单独立按 100 项 keyset 分页并支持搜索。目标列自己的筛选条件不限制其候选，其余区域搜索、列筛选和时间筛选保持生效。
 
 候选菜单使用紧凑的 HeroUI Popover/SearchField/Checkbox 布局并允许长标签自然换行。OA 申请事由直接显示完整文本，不再创建 hover 浮层，避免浮层测量导致表格滚动条抖动。
 
@@ -31,37 +31,31 @@ OA 栏在已配对和未配对区域都只承担行选择与详情查看，不�
 
 ```text
 canonical fact repositories
-  -> PostgresWorkbenchFormalRelationFactRepository
-  -> WorkbenchFreeMatchingEngine (pure, no I/O)
-  -> WorkbenchMatchingOrchestrator
-  -> WorkbenchRelationCommandService + relation UoW
-  -> app.workbench_pair_relations/history + durable outbox
-  -> workbench/workbench_relation workers
-  -> active generation
-  -> WorkbenchRelationGroupingService
-  -> paired / unpaired API
+  + app.workbench_pair_relations/history
+  -> PostgresWorkbenchPageQueryRepository (RR/RO, scope-first SQL)
+  -> WorkbenchQueryFacade
+  -> paired / unpaired direct API
   -> ReconciliationWorkbenchPage
 ```
 
-`workbench` 保留 active-generation 原子发布模型。页面、route 和 cache 不得绕过 freshness/status/enqueue 边界，也不得从旧 snapshot、旧 candidate/decision 表或 row metadata 恢复关系。
+页面为 direct-only：不读 projection/Redis，不比较 generation/freshness，不投递 page refresh，也不从旧 snapshot、旧 candidate/decision 表或 row metadata 恢复关系。自动匹配仍由 `workbench-matching` 通过 relation UoW 写 active relations；共享 `workbench_relation` read model 只为其它明确消费者服务，不参与 Workbench page read path。
 
 ## 代码入口
 
 - 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
+- Direct page SQL：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
 - OA/发票异常：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_amount_mismatch_exception_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 - 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
-- SQL projection/read model：`backend/src/fin_ops_platform/services/workbench_sql_projection.py`、`postgres_repositories/read_models.py`
-- Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`
-- 固定契约版本：`backend/src/fin_ops_platform/services/workbench_read_model_version.py`
+- 保留的独立 Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_relation_read_model_worker.py`
 
 ## OA/发票异常合同
 
 - 日常报销按 OA 子付款项与全部显式绑定发票比较；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；子付款项有上传附件但零已解析绑定发票时生成 `OA发票附件缺失`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
-- active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 generation、异常桶、计数、主区可见性或 source freshness。
+- active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 direct group spine、异常桶、计数、主区可见性或页面查询结果。
 - 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常，已忽略展示 ignored OA/发票异常。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、legacy WEX/row-ignore 抽屉入口、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 
@@ -89,6 +83,6 @@ canonical fact repositories
 ## 维护文档
 
 - `boundary-io.md`：模块边界、I/O、依赖方向、迁移与删除条件。
-- `state-machine.md`：页面、正式关系与 read model 状态。
+- `state-machine.md`：页面 direct query 与正式关系状态。
 - `tests.md`：七类测试、命令和生产核验。
 - `implementation-notes.md`：历史实施记录，不是当前业务事实源。

@@ -13,7 +13,10 @@ from fin_ops_platform.services.workbench_relation_modes import (
     relation_mode_can_be_restored_on_withdraw,
     workbench_relations_have_same_row_set,
 )
-from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+from fin_ops_platform.services.workbench_row_identity import (
+    canonical_workbench_row_type,
+    row_type_for_workbench_row_id,
+)
 
 
 ACTIVE_PAIR_RELATION_STATUS = "active"
@@ -191,31 +194,37 @@ class WorkbenchPairRelationService:
         timestamp = created_at or self._timestamp()
         existing_relation = self._pair_relations.get(resolved_case_id)
         normalized_row_ids, normalized_row_types = self._normalize_relation_entries(row_ids, row_types)
-        requested_row_ids = set(normalized_row_ids)
+        requested_members = set(
+            zip(normalized_row_types, normalized_row_ids, strict=True)
+        )
         if isinstance(existing_relation, dict) and existing_relation.get("status") == ACTIVE_PAIR_RELATION_STATUS:
-            existing_row_ids = {
-                str(row_id).strip()
-                for row_id in list(existing_relation.get("row_ids") or [])
-                if str(row_id).strip()
-            }
-            if existing_row_ids and requested_row_ids and existing_row_ids.isdisjoint(requested_row_ids):
+            existing_ids, existing_types = self._normalize_relation_entries(
+                list(existing_relation.get("row_ids") or []),
+                list(existing_relation.get("row_types") or []),
+            )
+            existing_members = set(zip(existing_types, existing_ids, strict=True))
+            if existing_members and requested_members and existing_members.isdisjoint(requested_members):
                 raise ValueError(f"pair relation case_id already active for different rows: {resolved_case_id}")
-        if requested_row_ids:
+        if requested_members:
             for active_case_id, active_relation in self._pair_relations.items():
                 if active_case_id == resolved_case_id:
                     continue
                 if active_relation.get("status") != ACTIVE_PAIR_RELATION_STATUS:
                     continue
-                active_row_ids = {
-                    str(row_id).strip()
-                    for row_id in list(active_relation.get("row_ids") or [])
-                    if str(row_id).strip()
-                }
-                overlapping_row_ids = requested_row_ids.intersection(active_row_ids)
-                if overlapping_row_ids:
+                active_ids, active_types = self._normalize_relation_entries(
+                    list(active_relation.get("row_ids") or []),
+                    list(active_relation.get("row_types") or []),
+                )
+                overlapping_members = requested_members.intersection(
+                    zip(active_types, active_ids, strict=True)
+                )
+                if overlapping_members:
                     raise ValueError(
-                        "pair relation row already active in another case: "
-                        f"{','.join(sorted(overlapping_row_ids))}"
+                        "pair relation typed row already active in another case: "
+                        + ",".join(
+                            f"{row_type}:{row_id}"
+                            for row_type, row_id in sorted(overlapping_members)
+                        )
                     )
         relation = self._normalize_relation(
             {
@@ -274,6 +283,29 @@ class WorkbenchPairRelationService:
                 relations_by_case_id[str(relation.get("case_id", ""))] = deepcopy(relation)
         return list(relations_by_case_id.values())
 
+    def active_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
+        normalized_ids, normalized_types = self._normalize_relation_entries(
+            row_ids,
+            row_types,
+        )
+        requested = set(zip(normalized_types, normalized_ids, strict=True))
+        relations: list[dict[str, Any]] = []
+        for relation in self._pair_relations.values():
+            if relation.get("status") != ACTIVE_PAIR_RELATION_STATUS:
+                continue
+            relation_ids, relation_types = self._normalize_relation_entries(
+                list(relation.get("row_ids") or []),
+                list(relation.get("row_types") or []),
+            )
+            members = set(zip(relation_types, relation_ids, strict=True))
+            if requested.intersection(members):
+                relations.append(deepcopy(relation))
+        return relations
+
     def replace_with_confirmed_relation(
         self,
         *,
@@ -298,7 +330,10 @@ class WorkbenchPairRelationService:
         display_tags: list[str] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         normalized_row_ids, normalized_row_types = self._normalize_relation_entries(row_ids, row_types)
-        active_before_relations = self.active_relations_for_row_ids(normalized_row_ids)
+        active_before_relations = self.active_relations_for_typed_rows(
+            normalized_row_ids,
+            normalized_row_types,
+        )
         replacement_relation = {
             "row_ids": normalized_row_ids,
             "row_types": normalized_row_types,
@@ -387,6 +422,26 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
         )
         return deepcopy(normalized_relation), history
+
+    def update_special_metadata_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        special_metadata: dict[str, Any],
+        updated_by: str,
+        note: str | None = None,
+        updated_at: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        active_relation = self._active_relation_for_typed_rows(row_ids, row_types)
+        return self.update_relation_metadata_for_case_id(
+            str(active_relation.get("case_id") or ""),
+            special_metadata=special_metadata,
+            updated_by=updated_by,
+            note=note,
+            updated_at=updated_at,
+            operation_type="update_special_relation",
+        )
 
     def update_relation_metadata_for_case_id(
         self,
@@ -488,6 +543,49 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
         )
         return deepcopy(normalized_relation), history
+
+    def clear_special_metadata_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        updated_by: str,
+        note: str | None = None,
+        updated_at: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        active_relation = self._active_relation_for_typed_rows(row_ids, row_types)
+        return self.update_relation_metadata_for_case_id(
+            str(active_relation.get("case_id") or ""),
+            special_metadata={},
+            replace_special_metadata=True,
+            updated_by=updated_by,
+            note=note,
+            updated_at=updated_at,
+            operation_type="clear_special_relation",
+        )
+
+    def _active_relation_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> dict[str, Any]:
+        relations = self.active_relations_for_typed_rows(row_ids, row_types)
+        if len(relations) != 1:
+            raise KeyError("workbench_pair_relation_not_found")
+        relation = relations[0]
+        requested_ids, requested_types = self._normalize_relation_entries(
+            row_ids,
+            row_types,
+        )
+        relation_ids, relation_types = self._normalize_relation_entries(
+            list(relation.get("row_ids") or []),
+            list(relation.get("row_types") or []),
+        )
+        requested = set(zip(requested_types, requested_ids, strict=True))
+        members = set(zip(relation_types, relation_ids, strict=True))
+        if requested != members or len(requested_ids) != len(relation_ids):
+            raise ValueError("cash special update requires the complete typed relation selection.")
+        return relation
 
     def preview_withdraw_for_row_ids(
         self,
@@ -945,26 +1043,25 @@ class WorkbenchPairRelationService:
     def _normalize_relation_entries(cls, row_ids: list[Any], row_types: list[Any]) -> tuple[list[str], list[str]]:
         normalized_row_ids: list[str] = []
         normalized_row_types: list[str] = []
-        seen_indexes: dict[str, int] = {}
+        seen_entries: set[tuple[str, str]] = set()
         raw_row_types = list(row_types or [])
         for index, raw_row_id in enumerate(list(row_ids or [])):
             row_id = str(raw_row_id).strip()
             if not row_id:
                 continue
-            row_type = (
+            raw_row_type = (
                 str(raw_row_types[index]).strip()
                 if index < len(raw_row_types)
                 else ""
+            )
+            row_type = canonical_workbench_row_type(
+                raw_row_type,
+                unknown="",
             ) or cls._row_type_for_row_id(row_id)
-            seen_index = seen_indexes.get(row_id)
-            if seen_index is not None:
-                existing_type = normalized_row_types[seen_index]
-                if row_type != existing_type and "unknown" not in {row_type, existing_type}:
-                    raise ValueError(f"pair relation row_id has conflicting row type: {row_id}")
-                if existing_type == "unknown" and row_type != "unknown":
-                    normalized_row_types[seen_index] = row_type
+            identity = (row_type, row_id)
+            if identity in seen_entries:
                 continue
-            seen_indexes[row_id] = len(normalized_row_ids)
+            seen_entries.add(identity)
             normalized_row_ids.append(row_id)
             normalized_row_types.append(row_type)
         return normalized_row_ids, normalized_row_types

@@ -164,7 +164,7 @@
 - `tests/test_platform_runtime_boundary_guards.py`
 - `tests/test_app_status_overview_service.py`
 
-跨页面 cleanup 已删除 OA 专属 registry/deploy/worker；当前共享运行时只保留 `workbench` 与 `workbench_relation`，由各自回归保护。
+跨页面 cleanup 已删除 OA 专属 registry/deploy/worker；当前 read-model runtime 只保留共享 `workbench_relation`，关联台页面 direct API 与 matching 是独立 owner，由各自回归保护。
 
 ## 性能验收
 

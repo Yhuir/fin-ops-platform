@@ -4,7 +4,7 @@
 
 ## 模块目标
 
-关联台是银行流水、OA 单据、正式发票/OA 附件发票、ETC 和异常关系的统一核销工作台。它必须让用户在真实浏览器中查看未配对行、选择至少 2 个不同 canonical 成员完成确认、从 paired/unpaired active relation 执行关系级撤回，并通过右上统一抽屉处理系统自动异常；未配对工具栏不再提供人工“异常处理”。普通写后只让当前可见页面重新 GET，其他页面在访问时各自收敛，并且不能在 read model 非 fresh 时伪装成功。
+关联台是银行流水、OA 单据、正式发票/OA 附件发票、ETC 和异常关系的统一核销工作台。它必须让用户在真实浏览器中查看未配对行、选择至少 2 个不同 canonical 成员完成确认、从 paired/unpaired active relation 执行关系级撤回，并通过右上统一抽屉处理系统自动异常；未配对工具栏不再提供人工“异常处理”。页面以 direct canonical API 为唯一事实源；普通写成功后恰好一次 normal GET，其他页面在访问时按自身 owner 合同收敛，不得回退 Workbench projection/cache 或 generation polling。
 
 ## 用户角色
 
@@ -20,10 +20,10 @@
 | 状态 | 验收标准 |
 | --- | --- |
 | loading | 初次请求时显示加载，不把旧 snapshot 当事实。 |
-| empty | 只有 fresh active generation 下目标 zone/group 为空时才显示空态。 |
-| refreshing/stale | 展示刷新/陈旧提示；不能把空 rows 当真实无候选；普通 Workbench active generation stale 不全局禁用无关 group 写操作。 |
+| empty | 只有 direct canonical GET 成功且目标 zone/group 精确 total 为零时才显示空态。 |
+| query unavailable/timeout | 展示可重试 direct read 错误，不显示空 rows，不读旧 projection/cache，不轮询 refresh-status。 |
 | error | 展示可恢复错误；不泄露底层 SQL；写入成功但 refetch 失败时必须提示 relation 已写入但页面刷新未完成。 |
-| operation pending | 只覆盖确认/撤回 HTTP 请求本身，禁用重复提交和备注编辑；canonical command 成功后关闭写阻塞，当前关联台通过正常 GET 进入 refreshing/fresh，不等待 operation barrier。 |
+| operation pending | 只覆盖确认/撤回 HTTP 请求本身，禁用重复提交和备注编辑；canonical command 成功后关闭写阻塞，清理 selection/cursor 并运行一次 normal direct GET，不等待 operation barrier。 |
 
 ## Spec 场景
 
@@ -34,20 +34,20 @@
 | `RECON-WB-E2E-003` | 关联台 confirm 后待找发票状态更新 | P0 | 待找发票从 `已支付待开票` 变为 `已支付已开票`，显示发票号码和 OA 申请人。 |
 | `RECON-WB-E2E-004` | paired/unpaired active relation withdraw preview/submit | P0 | 两区 active relation 均可关系级撤回，未配对 singleton 不可撤回；显式 row ids 在 preview/submit 都必须与目标 case 的完整 active typed member set 精确相等。preview identity 绑定 current/after relation 的 case/version/status/排序成员和 confirm-history identity。提交在同一 UoW 内依次锁 current 与 predecessor topology，重验 canonical member、restored case 和唯一 active owner后，才从最近 confirm history 的 `before_relations` 恢复上一稳定拓扑；冲突整笔 fail closed，无 predecessor 的成员回 singleton。通过当前页正常 GET 收敛且不等待跨页面 target。 |
 | `RECON-WB-E2E-005` | 无正式关系的对象保持可见 | P0 | 历史非正式 automatic metadata 不应合并对象；没有 active relation 时每个对象必须独立显示在 unpaired，撤回 preview 必须拒绝。 |
-| `RECON-WB-E2E-006` | stale/refreshing/read model failed 状态 | P0 | stale/refreshing 时页面提示状态；不能把空 rows 当真实无候选；OA sync dirty/refreshing 禁写，普通 Workbench stale 不全局禁用无关 group。 |
+| `RECON-WB-E2E-006` | direct query failed/timeout 状态 | P0 | direct query 503/超时时显示可重试错误，不显示 false-empty、不读旧 projection/cache、不请求 refresh-status；OA sync dirty/refreshing 仍按独立安全合同禁写。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认、关系级撤回和异常抽屉内写操作，并且不会发出 mutation API；未配对工具栏对任何角色都不显示旧人工“异常处理”。 |
 | `RECON-WB-E2E-009` | 统一异常抽屉与 OA/发票异常 ignore/restore | P1 | 只有按 OA 子付款项/支付申请比较的精确金额差异和 `OA发票附件缺失` 从统一右侧抽屉处理；未配对工具栏“异常处理”及其人工 handler 不存在。`290=145+145`、`405=350+55` 同行且无误报，一个比较单元只显示一个 chip。历史 WEX/row-ignore 记录继续可审计，但 canonical rows 留在 paired/unpaired 主区且不进入抽屉或计数。右上入口显示 `异常 n | 已忽略 m`，抽屉默认折叠三栏计数/总金额、展开完整成员；异常可忽略并撤回，主表 chip 与计数同步；操作后只通过当前关联台正常 GET 更新页面，零 downstream job。 |
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 两区首屏各保留 50 组且没有手动“加载更多”；滚动接近区底部才自动读取下一页，失败不循环重试；区域搜索可命中尚未加载的全部服务端数据并高亮；详情、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |
-| `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；关联台专属 OA 状态恢复且 active generation fresh/version ready 后自动恢复，不等待较慢的全局 App Health 聚合刷新。 |
+| `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；OA 状态恢复后按权威 OA status 自动恢复，不引入 Workbench generation/version gate。 |
 | `RECON-WB-E2E-013` | 已配对现金流水特殊处理 | P1 | full-access 用户可从已配对银行流水更多菜单执行 `确认为过账`、`确认为买票` 和 `取消现金处理`；买票弹窗必须校验买票成本和项目名称；三个 mutation 都必须携带完整 group row ids，成功后只重跑当前页 GET、零 operation barrier，并且不能出现隐藏错误、浏览器异常或 stale UI。 |
 | `RECON-WB-E2E-014` | 关联台金额与 OA 完成时间搜索 | P1 | `202`、`202.0`、`202.00`、`￥202.00`、`¥202.00` 命中同一完整关系组；OA 申请日期和完成时间都可命中。搜索不改变 group membership、异常状态或选择状态。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
-- 真实生产 active generation 全量回放。
-- 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+- 真实生产 direct SQL planner/buffer/temp-spill 与长尾。
+- 真实 PostgreSQL 连接池，以及保留的 RabbitMQ/systemd relation/matching worker drain。
 - 真实 OA Mongo/iframe/cookie。
 - 大数据 P95/P99 性能和生产历史污染 repair。
 

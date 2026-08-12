@@ -25,6 +25,68 @@ from fin_ops_platform.services.workbench_write_facade import (
 )
 
 
+class _TypedFixtureWorkbenchWriteFacade(WorkbenchWriteFacade):
+    """Keeps legacy behavior tests focused while exercising the typed public contract."""
+
+    @staticmethod
+    def _typed_payload(payload: dict[str, object]) -> dict[str, object]:
+        result = dict(payload)
+        if "row_types" in result or not isinstance(result.get("row_ids"), list):
+            return result
+        result["row_types"] = [
+            "oa"
+            if str(row_id).startswith("oa")
+            else "invoice"
+            if str(row_id).startswith(("invoice", "inv", "etc-summary-"))
+            else "bank"
+            for row_id in list(result["row_ids"])
+        ]
+        return result
+
+    @staticmethod
+    def _typed_single_payload(payload: dict[str, object]) -> dict[str, object]:
+        result = dict(payload)
+        if "row_type" in result or result.get("row_id") is None:
+            return result
+        row_id = str(result["row_id"])
+        result["row_type"] = (
+            "oa"
+            if row_id.startswith("oa")
+            else "invoice"
+            if row_id.startswith(("invoice", "inv", "etc-summary-"))
+            else "bank"
+        )
+        return result
+
+    def preview_confirm_link(self, payload: dict[str, object]):
+        return super().preview_confirm_link(self._typed_payload(payload))
+
+    def confirm_link(self, payload: dict[str, object], **kwargs: object):
+        return super().confirm_link(self._typed_payload(payload), **kwargs)
+
+    def preview_withdraw_link(self, payload: dict[str, object]):
+        return super().preview_withdraw_link(self._typed_payload(payload))
+
+    def withdraw_link(self, payload: dict[str, object], **kwargs: object):
+        return super().withdraw_link(self._typed_payload(payload), **kwargs)
+
+    def cancel_link(self, payload: dict[str, object], **kwargs: object):
+        return super().cancel_link(self._typed_single_payload(payload), **kwargs)
+
+    def ignore_row(self, payload: dict[str, object]):
+        return super().ignore_row(self._typed_single_payload(payload))
+
+    def unignore_row(self, payload: dict[str, object]):
+        return super().unignore_row(self._typed_single_payload(payload))
+
+    def confirm_personal_advance_repayment(
+        self, payload: dict[str, object], **kwargs: object
+    ):
+        return super().confirm_personal_advance_repayment(
+            self._typed_payload(payload), **kwargs
+        )
+
+
 class _RecordingUoW:
     def __init__(self) -> None:
         self.replay_commands: list[object] = []
@@ -49,7 +111,31 @@ class _RecordingUoW:
                 "message": "已取消关联并回退为待处理。",
             }
         if action_name == "withdraw_link":
-            ctx = type("UoWContext", (), {"transaction": object(), "pair_relations": object()})()
+            canonical_query = type(
+                "CanonicalQuery",
+                (),
+                {
+                    "validate_workbench_relation_selection_in_current_transaction": staticmethod(
+                        lambda **_: [
+                            {"pane": row_type, "row_id": row_id}
+                            for row_type, row_id in zip(
+                                list(getattr(command, "row_types")),
+                                list(getattr(command, "row_ids")),
+                                strict=True,
+                            )
+                        ]
+                    )
+                },
+            )()
+            ctx = type(
+                "UoWContext",
+                (),
+                {
+                    "transaction": object(),
+                    "pair_relations": object(),
+                    "canonical_query": canonical_query,
+                },
+            )()
             return handler(ctx)
         return {
             "success": True,
@@ -94,7 +180,7 @@ class _HandlerCallingUoW:
         return None
 
     def run(self, command: object, handler: object) -> dict[str, object]:
-        canonical_rows = self._canonical_rows or {
+        canonical_rows_by_id = self._canonical_rows or {
             row_id: {
                 "pane": (
                     "oa"
@@ -110,6 +196,19 @@ class _HandlerCallingUoW:
             }
             for row_id in list(getattr(command, "row_ids", []))
         }
+        canonical_rows = [
+            {
+                **dict(canonical_rows_by_id[row_id]),
+                "row_id": row_id,
+                "pane": row_type,
+            }
+            for row_type, row_id in zip(
+                list(getattr(command, "row_types")),
+                list(getattr(command, "row_ids")),
+                strict=True,
+            )
+            if row_id in canonical_rows_by_id
+        ]
         canonical_query = type(
             "CanonicalQuery",
             (),
@@ -157,13 +256,25 @@ class _CanonicalConfirmRepositoryFactory:
         self.pair_relations = object()
 
     def __call__(self, _transaction: object) -> object:
-        canonical_rows = self._canonical_rows
+        canonical_rows_by_id = self._canonical_rows
         canonical_query = type(
             "CanonicalQuery",
             (),
             {
                 "validate_workbench_relation_selection_in_current_transaction": staticmethod(
-                    lambda **_: canonical_rows
+                    lambda **kwargs: [
+                        {
+                            **dict(canonical_rows_by_id[row_id]),
+                            "row_id": row_id,
+                            "pane": row_type,
+                        }
+                        for row_type, row_id in zip(
+                            list(kwargs["row_types"]),
+                            list(kwargs["row_ids"]),
+                            strict=True,
+                        )
+                        if row_id in canonical_rows_by_id
+                    ]
                 )
             },
         )()
@@ -186,6 +297,16 @@ class _PairRelationService:
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         return []
+
+    def active_relations_for_typed_rows(
+        self, row_ids: list[str], row_types: list[str]
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                **self.get_active_relation_by_row_id(row_ids[0]),
+                "row_types": [row_types[0], "bank"],
+            }
+        ]
 
     def snapshot(self) -> dict[str, object]:
         return {}
@@ -506,7 +627,7 @@ def _new_facade(
         _month: str | None,
         *,
         row_ids: list[str],
-        expected_read_model_version: str | None,
+        row_types: list[str],
     ) -> WorkbenchQueryResult:
         fixture_rows_by_id = {
             str(row.get("id") or row.get("row_id") or ""): dict(row)
@@ -536,12 +657,11 @@ def _new_facade(
                 "selected_rows": rows,
                 "context_rows": [],
                 "rows": rows,
-                "read_model_status": "fresh",
-                "read_model_version": expected_read_model_version,
+                "selected_row_types": list(row_types),
             },
         )
 
-    return WorkbenchWriteFacade(
+    return _TypedFixtureWorkbenchWriteFacade(
         relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(resolved_pair_relation_service),
         relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
             resolved_pair_relation_service
@@ -630,8 +750,15 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             ) -> dict[str, object]:
                 return {**row, "ignored": True, "comment": comment, "exception_case_id": exception_case_id}
 
-        def resolve_rows(row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
-            resolver_calls.append({"row_ids": row_ids, "month_hint": month_hint})
+        def resolve_rows(
+            row_ids: list[str],
+            *,
+            row_types: list[str] | None = None,
+            month_hint: str | None = None,
+        ) -> list[dict[str, object]]:
+            resolver_calls.append(
+                {"row_ids": row_ids, "row_types": row_types, "month_hint": month_hint}
+            )
             return [{"id": row_ids[0], "type": "invoice", "issue_date": "2026-05-01"}]
 
         facade = _new_facade(
@@ -644,7 +771,16 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_row_ids"], ["invoice-1"])
-        self.assertEqual(resolver_calls, [{"row_ids": ["invoice-1"], "month_hint": "2026-05"}])
+        self.assertEqual(
+            resolver_calls,
+            [
+                {
+                    "row_ids": ["invoice-1"],
+                    "row_types": ["invoice"],
+                    "month_hint": "2026-05",
+                }
+            ],
+        )
 
     def test_unignore_row_uses_injected_narrow_ignored_row_loader(self) -> None:
         loader_calls: list[str] = []
@@ -804,14 +940,14 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(result.payload["error"], "invalid_confirm_link_request")
-        self.assertIn("at least two distinct canonical rows", str(result.payload["message"]))
+        self.assertIn("duplicate typed row", str(result.payload["message"]))
 
     def test_confirm_link_rejects_unresolved_or_unsupported_canonical_members(self) -> None:
         cases = (
             (
                 "unresolved",
                 lambda _row_ids, **_: [{"id": "oa-1", "type": "oa"}],
-                "workbench_row_not_found",
+                "invalid_confirm_link_request",
             ),
             (
                 "unsupported",
@@ -941,9 +1077,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        projection_after = result.payload["operation_projection"]["after"]
-        self.assertEqual(projection_after["paired_groups"], [])
-        self.assertEqual(projection_after["unpaired_groups"][0]["group_id"], "case:CASE-NEW")
+        self.assertNotIn("operation_projection", result.payload)
 
     def test_confirm_link_three_pane_operation_projection_uses_paired_groups(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
@@ -983,9 +1117,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        projection_after = result.payload["operation_projection"]["after"]
-        self.assertEqual(projection_after["unpaired_groups"], [])
-        self.assertEqual(projection_after["paired_groups"][0]["group_id"], "case:CASE-NEW")
+        self.assertNotIn("operation_projection", result.payload)
 
     def test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month(self) -> None:
         uow = _RecordingUoW()
@@ -1273,7 +1405,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(result.payload["operation_projection"], {})
+        self.assertNotIn("operation_projection", result.payload)
         self.assertNotIn("freshness_targets", result.payload)
 
     def test_withdraw_link_uow_submit_reuses_alias_map_in_postprocess(self) -> None:
@@ -1488,6 +1620,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-1", "bank-1"],
+                "row_types": ["oa", "bank"],
                 "case_id": "CASE-REL-1",
                 "note": "人工确认",
             },
@@ -1525,12 +1658,14 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-1", "bank-1"],
+                "row_types": ["oa", "bank"],
             }
         )
         submit = facade.withdraw_link(
             {
                 "month": "2026-05",
                 "row_ids": ["oa-1", "bank-1"],
+                "row_types": ["oa", "bank"],
                 "operation_type": "withdraw_relation",
                 "preview_id": preview.payload["preview_id"],
                 "expected_versions": preview.payload["submit_expected_versions"],
@@ -1562,13 +1697,13 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
+            row_types: list[str],
         ) -> WorkbenchQueryResult:
             selection_calls.append(
                 {
                     "month": month,
                     "row_ids": list(row_ids),
-                    "expected_read_model_version": expected_read_model_version,
+                    "row_types": list(row_types),
                 }
             )
             rows = [
@@ -1582,8 +1717,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": expected_read_model_version,
                 },
             )
 
@@ -1599,7 +1732,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-1", "bank-1"],
-                "expected_read_model_version": "generation-1",
             }
         )
 
@@ -1974,10 +2106,12 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 payload: dict[str, object],
                 *,
                 actor_id: str,
+                tenant_id: str,
                 request_id: str | None = None,
             ) -> object:
                 captured["exception_apply"] = {
                     "actor_id": actor_id,
+                    "tenant_id": tenant_id,
                     "request_id": request_id,
                     "client_actor": payload.get("actor"),
                 }
@@ -2026,6 +2160,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             captured["exception_apply"],
             {
                 "actor_id": "oa-user-1",
+                "tenant_id": "default",
                 "request_id": "req-exception-apply",
                 "client_actor": None,
             },

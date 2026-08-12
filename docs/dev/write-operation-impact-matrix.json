@@ -280,7 +280,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -291,6 +290,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "bank-flow-rule-batches",
         "cost-statistics",
@@ -337,7 +337,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -348,6 +347,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "bank-flow-rule-batches",
         "cost-statistics",
@@ -394,7 +394,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -408,6 +407,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "cost-statistics",
         "imports.bank-transactions",
@@ -458,15 +458,14 @@
       ],
       "pairing_relation_fact_sources": [],
       "expected_outbox_scope_types": [],
-      "target_read_model_keys": [
-        "workbench"
-      ],
+      "target_read_model_keys": [],
       "target_page_keys": [
         "turnover-ledger",
         "bank-details",
         "reconciliation-workbench"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "turnover-ledger"
       ],
@@ -519,7 +518,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -530,6 +528,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics",
         "etc-tickets",
         "imports.etc-invoices",
@@ -577,7 +576,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -591,6 +589,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics",
         "imports.invoices",
         "input-invoice-usage",
@@ -645,7 +644,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -654,6 +652,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-flow-rule-batches",
         "cost-statistics"
       ],
@@ -739,7 +738,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -749,6 +747,7 @@
         "input-invoice-usage"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "input-invoice-usage",
         "pending-invoices"
@@ -795,7 +794,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -807,6 +805,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "cost-statistics",
         "input-invoice-usage",
@@ -856,7 +855,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -865,6 +863,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics",
         "turnover-ledger"
       ],
@@ -992,7 +991,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1000,6 +998,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics"
       ],
       "production_gate": {
@@ -1043,7 +1042,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1051,6 +1049,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics"
       ],
       "production_gate": {
@@ -1095,7 +1094,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1118,7 +1116,9 @@
         "workbench",
         "workbench_relation"
       ],
-      "direct_canonical_target_page_keys": []
+      "direct_canonical_target_page_keys": [
+        "reconciliation-workbench"
+      ]
     },
     {
       "operation": "workbench_relation_withdraw_bank_invoice",
@@ -1139,7 +1139,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1162,7 +1161,9 @@
         "workbench",
         "workbench_relation"
       ],
-      "direct_canonical_target_page_keys": []
+      "direct_canonical_target_page_keys": [
+        "reconciliation-workbench"
+      ]
     },
     {
       "operation": "workbench_relation_confirm_cross_page",
@@ -1184,7 +1185,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1196,6 +1196,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "cost-statistics",
         "input-invoice-usage",
@@ -1250,7 +1251,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1262,6 +1262,7 @@
         "cost-statistics"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "cost-statistics",
         "input-invoice-usage",
@@ -1317,7 +1318,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1327,6 +1327,7 @@
         "input-invoice-usage"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "input-invoice-usage",
         "pending-invoices"
@@ -1374,7 +1375,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1384,6 +1384,7 @@
         "input-invoice-usage"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "bank-details",
         "input-invoice-usage",
         "pending-invoices"
@@ -1431,7 +1432,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1440,6 +1440,7 @@
         "turnover-ledger"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics",
         "turnover-ledger"
       ],
@@ -1486,7 +1487,6 @@
       ],
       "expected_outbox_scope_types": [],
       "target_read_model_keys": [
-        "workbench",
         "workbench_relation"
       ],
       "target_page_keys": [
@@ -1495,6 +1495,7 @@
         "turnover-ledger"
       ],
       "direct_canonical_target_page_keys": [
+        "reconciliation-workbench",
         "cost-statistics",
         "turnover-ledger"
       ],

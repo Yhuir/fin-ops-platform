@@ -187,7 +187,13 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
             normalized_sql = " ".join(sql.lower().split())
             assert "for key share" in normalized_sql
             if "from app.oa_applications" in normalized_sql:
-                return [{"row_id": "oa-present"}]
+                assert "from app.oa_pending_payment_admissions" in normalized_sql
+                assert params == (
+                    ["oa-deleted", "oa-present"],
+                    "tenant-a",
+                    ["oa-deleted", "oa-present"],
+                )
+                return [{"row_id": "oa-present", "source_count": 1}]
             if "from app.bank_transactions" in normalized_sql:
                 return [{"row_id": "bank-present"}]
             if "from app.invoices" in normalized_sql:
@@ -198,6 +204,7 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
     missing = PostgresWorkbenchRelationRepository(connection).lock_canonical_relation_members(
         ["oa-present", "oa-deleted", "bank-present", "invoice-present"],
         row_types=["oa", "oa", "bank", "invoice"],
+        tenant_id="tenant-a",
     )
 
     assert missing == ["oa:oa-deleted"]

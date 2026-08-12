@@ -56,7 +56,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertIn("critical_failed_outbox_count", summary)
         self.assertIn("critical_failed_dirty_scope_count", summary)
         self.assertIn("critical_stale_dirty_scope_count", summary)
-        self.assertEqual(set(summary["critical_read_models"]), {"workbench", "workbench_relation"})
+        self.assertEqual(set(summary["critical_read_models"]), {"workbench_relation"})
 
     def test_outbox_events_runtime_columns_exist(self) -> None:
         columns = (

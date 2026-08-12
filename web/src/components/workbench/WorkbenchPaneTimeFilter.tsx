@@ -7,7 +7,7 @@ import type { WorkbenchFilterOptionsPage } from "../../features/workbench/types"
 type WorkbenchPaneTimeFilterProps = {
   paneTitle: string;
   filter: WorkbenchPaneTimeFilter;
-  loadYears?: (page: number, signal?: AbortSignal) => Promise<WorkbenchFilterOptionsPage>;
+  loadYears?: (cursor: string | null, signal?: AbortSignal) => Promise<WorkbenchFilterOptionsPage>;
   onChange: (filter: WorkbenchPaneTimeFilter) => void;
 };
 
@@ -34,14 +34,13 @@ function WorkbenchPaneTimeFilter({ paneTitle, filter, loadYears, onChange }: Wor
       setError(null);
       try {
         const nextYears: string[] = [];
-        let page = 1;
+        let cursor: string | null = null;
         let hasMore = true;
         while (hasMore) {
-          const result = await loadYears(page, controller.signal);
-          if (result.readModelStatus !== "fresh") throw new Error("数据正在刷新，请稍后重试");
+          const result = await loadYears(cursor, controller.signal);
           nextYears.push(...result.options.map((option) => option.value));
           hasMore = result.hasMore;
-          page += 1;
+          cursor = result.nextCursor;
         }
         const uniqueYears = Array.from(new Set(nextYears)).sort((left, right) => right.localeCompare(left, "zh-CN"));
         setYears(uniqueYears);

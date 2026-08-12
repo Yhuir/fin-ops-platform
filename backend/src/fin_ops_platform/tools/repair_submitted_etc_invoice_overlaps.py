@@ -8,8 +8,10 @@ from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 
 
 SUBMITTED_ETC_OVERLAP_SQL = """
@@ -113,6 +115,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             reason=str(args.reason).strip(),
             operator=str(args.operator).strip(),
             queue_repository=queue_repository,
+            matching_dirty_repository=PostgresReadModelRepository(connection),
         )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0 if report["summary"]["manual_review_candidate_count"] == 0 else 1
@@ -150,7 +153,7 @@ def audit_submitted_etc_invoice_overlaps(*, connection: Any, example_limit: int 
         "auto_fix_candidate_count": len(auto_fix_candidates),
         "manual_review_candidate_count": len(manual_review_candidates),
         "no_action_candidate_count": len(no_action_candidates),
-        "affected_workbench_scopes": affected_months + (["all"] if affected_months else []),
+        "affected_months": affected_months,
         "apply_required_confirmation": bool(auto_fix_candidates),
     }
     return {
@@ -184,6 +187,7 @@ def apply_submitted_etc_invoice_overlap_repair(
     reason: str,
     operator: str,
     queue_repository: Any | None = None,
+    matching_dirty_repository: Any | None = None,
 ) -> dict[str, Any]:
     normalized_reason = str(reason or "").strip()
     normalized_operator = str(operator or "").strip()
@@ -218,23 +222,34 @@ def apply_submitted_etc_invoice_overlap_repair(
             operator=normalized_operator,
         )
 
-    enqueued_scopes: list[str] = []
+    relation_scopes: list[str] = []
     if queue_repository is not None and affected_months:
         gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        enqueued_scopes = gateway.enqueue_many(
-            "workbench",
-            affected_months + ["all"],
+        relation_scopes = gateway.enqueue_many(
+            "workbench_relation",
+            affected_months,
             reason="submitted_etc_invoice_overlap_repair",
             priority="high",
             metadata={"reason": normalized_reason, "operator": normalized_operator},
         )
+    matching_dirty_scopes = (
+        WorkbenchReconciliationDirtyQueue(repository=matching_dirty_repository).mark_dirty_expanded(
+            affected_months,
+            reason="submitted_etc_invoice_overlap_repair",
+            source_versions={},
+            debounce_seconds=0,
+        )
+        if matching_dirty_repository is not None and affected_months
+        else []
+    )
 
     return {
         "applied": True,
         "requested_count": len(auto_fix_candidates),
         "updated_count": updated_count,
-        "affected_workbench_scopes": affected_months + (["all"] if affected_months else []),
-        "enqueued_workbench_scopes": enqueued_scopes,
+        "affected_months": affected_months,
+        "workbench_relation_scopes": relation_scopes,
+        "matching_dirty_scopes": matching_dirty_scopes,
     }
 
 

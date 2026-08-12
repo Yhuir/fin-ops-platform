@@ -249,7 +249,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(call_names.count("queue_declare"), len(SUPPORTED_EVENT_TYPES) * 2)
         self.assertEqual(call_names.count("queue_bind"), len(SUPPORTED_EVENT_TYPES) * 2)
         declared_queues = [kwargs["queue"] for name, kwargs in channel.calls if name == "queue_declare"]
-        self.assertIn("finops.workbench.read_model.refresh", declared_queues)
+        self.assertNotIn("finops.workbench.read_model.refresh", declared_queues)
         self.assertIn("finops.workbench_relation.read_model.refresh", declared_queues)
         self.assertNotIn("finops.no_oa_bank_batch.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
@@ -316,10 +316,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         routes = rabbitmq_event_routes(settings)
         topology = RabbitMqTopologyManager(settings).plan()
 
-        retained_read_model_events = {
-            "workbench.read_model.refresh",
-            "workbench_relation.read_model.refresh",
-        }
+        retained_read_model_events = {"workbench_relation.read_model.refresh"}
         self.assertEqual(
             {
                 event_type
@@ -337,6 +334,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             retained_read_model_events,
         )
         self.assertEqual(routes["workbench_relation.read_model.refresh"].queue, "finops.workbench_relation.read_model.refresh")
+        self.assertNotIn("workbench.read_model.refresh", routes)
         self.assertNotIn("no_oa_bank_batch.read_model.refresh", routes)
 
     def test_consumer_subscribes_to_queues_for_registered_event_types(self) -> None:
@@ -348,13 +346,13 @@ class RabbitMqRuntimeTests(unittest.TestCase):
             queue_repository=queue,
             worker=FakeWorker(),
             worker_id="worker-1",
-            event_types=["workbench.read_model.refresh", "workbench_relation.read_model.refresh"],
+            event_types=["workbench_relation.read_model.refresh", "import.process.requested"],
             lock_timeout_seconds=300,
         )
 
         self.assertEqual(
             consumer._queue_names_for_event_types(),
-            ["finops.workbench.read_model.refresh", "finops.workbench_relation.read_model.refresh"],
+            ["finops.workbench_relation.read_model.refresh", "finops.import.process.requested"],
         )
 
     def test_consumer_claims_postgres_event_before_acknowledging_rabbitmq(self) -> None:
@@ -560,7 +558,10 @@ class RabbitMqRuntimeTests(unittest.TestCase):
 
         self.assertEqual(set(routes), set(SUPPORTED_EVENT_TYPES))
         self.assertEqual(len(SUPPORTED_EVENT_TYPES), len(set(SUPPORTED_EVENT_TYPES)))
-        self.assertIn("workbench.read_model.refresh", routes)
+        self.assertNotIn("workbench.read_model.refresh", routes)
+        self.assertIn("workbench_relation.read_model.refresh", routes)
+        self.assertIn("oa.sync", routes)
+        self.assertIn("import.process.requested", routes)
         self.assertNotIn("bank_detail.read_model.refresh", routes)
         self.assertNotIn("pending_invoice.read_model.refresh", routes)
         self.assertNotIn("tax_offset.read_model.refresh", routes)

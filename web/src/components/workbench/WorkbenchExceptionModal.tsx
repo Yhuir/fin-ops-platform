@@ -15,10 +15,8 @@ import type { WorkbenchRecord } from "../../features/workbench/types";
 type WorkbenchExceptionModalProps = {
   month: string;
   rows: WorkbenchRecord[];
-  expectedReadModelVersion: string;
   onClose: () => void;
   onApplied: (result: WorkbenchExceptionApplyResult, onProgress: WorkbenchExceptionProgressHandler) => Promise<void> | void;
-  onReadModelRejected?: (error: unknown) => void;
 };
 
 type WorkbenchExceptionDraft = {
@@ -35,7 +33,7 @@ const DRAFT_INITIAL_VALUE: WorkbenchExceptionDraft = {
   dueDate: "",
 };
 
-type WorkbenchExceptionProgressPhase = "submitting" | "syncing" | "loading";
+type WorkbenchExceptionProgressPhase = "submitting" | "rereading" | "loading";
 
 type WorkbenchExceptionProgress = {
   phase: WorkbenchExceptionProgressPhase;
@@ -56,13 +54,15 @@ const DRAFT_SCHEMA_VERSION = 2;
 export default function WorkbenchExceptionModal({
   month,
   rows,
-  expectedReadModelVersion,
   onClose,
   onApplied,
-  onReadModelRejected,
 }: WorkbenchExceptionModalProps) {
   const rowIds = useMemo(() => rows.map((row) => row.id), [rows]);
-  const rowIdKey = rowIds.join("\u001f");
+  const rowTypes = useMemo(() => rows.map((row) => row.recordType), [rows]);
+  const rowIdentityKey = useMemo(
+    () => rows.map((row) => `${row.recordType}:${row.id}`).join("\u001f"),
+    [rows],
+  );
   const [preview, setPreview] = useState<WorkbenchExceptionPreview | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(true);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -94,7 +94,7 @@ export default function WorkbenchExceptionModal({
     setApplyError(null);
     setPreview(null);
 
-    void previewWorkbenchException({ month, rowIds, expectedReadModelVersion })
+    void previewWorkbenchException({ month, rowIds, rowTypes })
       .then((result) => {
         if (!active) {
           return;
@@ -106,7 +106,6 @@ export default function WorkbenchExceptionModal({
         if (!active) {
           return;
         }
-        onReadModelRejected?.(error);
         setPreviewError(readErrorMessage(error));
         setIsPreviewLoading(false);
       });
@@ -114,7 +113,7 @@ export default function WorkbenchExceptionModal({
     return () => {
       active = false;
     };
-  }, [expectedReadModelVersion, month, onReadModelRejected, rowIdKey, rowIds]);
+  }, [month, rowIdentityKey, rowIds, rowTypes]);
 
   const automaticActions = preview?.automaticActions ?? [];
   const availableActions = preview?.availableActions ?? [];
@@ -219,7 +218,7 @@ export default function WorkbenchExceptionModal({
       const result = await applyWorkbenchException({
         month,
         rowIds,
-        expectedReadModelVersion,
+        rowTypes,
         scenarioCode: preview.scenario.scenarioCode,
         actionCode: selectedAction.actionCode,
         payload: buildPayload(),
@@ -230,22 +229,19 @@ export default function WorkbenchExceptionModal({
         setSubmitState({ ...progress, committed });
       };
       setProgress({
-        phase: "syncing",
-        message: "异常处理已写入，正在同步关联台最新数据...",
+        phase: "rereading",
+        message: "异常处理已写入，正在重新读取关联台最新数据...",
         committed: true,
       });
       await onApplied(result, setProgress);
       draftSession.reset();
       onClose();
     } catch (error) {
-      if (!committed) {
-        onReadModelRejected?.(error);
-      }
       const message = readErrorMessage(error);
-      setApplyError(committed ? `异常处理已写入，关联台刷新未完成：${message}` : message);
+      setApplyError(committed ? `异常处理已写入，页面重新读取失败：${message}` : message);
       setSubmitState({
         phase: "error",
-        message: committed ? `异常处理已写入，关联台刷新未完成：${message}` : message,
+        message: committed ? `异常处理已写入，页面重新读取失败：${message}` : message,
         committed,
       });
     } finally {
@@ -439,8 +435,8 @@ function exceptionSubmitPhaseLabel(phase: WorkbenchExceptionProgressPhase) {
   if (phase === "submitting") {
     return "提交中";
   }
-  if (phase === "syncing") {
-    return "同步中";
+  if (phase === "rereading") {
+    return "重新读取中";
   }
   return "加载中";
 }

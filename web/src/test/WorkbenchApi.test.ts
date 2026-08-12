@@ -2,19 +2,29 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   applyWorkbenchException,
+  cancelWorkbenchCashSpecial,
+  cancelWorkbenchLink,
+  confirmWorkbenchCashPassThrough,
+  confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
+  confirmWorkbenchPersonalAdvanceRepayment,
   fetchWorkbenchGroupDetail,
   fetchWorkbenchFilterOptions,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
+  fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   importManualOaRows,
+  ignoreWorkbenchRow,
+  markWorkbenchException,
   previewWorkbenchConfirmLink,
   previewWorkbenchException,
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
   setWorkbenchOaInvoiceAnomalyIgnored,
+  updateWorkbenchBankException,
+  withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
 } from "../features/workbench/api";
@@ -31,6 +41,22 @@ const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
 test("keeps the combined initial and subsequent group pages at a 50-group first screen", () => {
   expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(50);
+});
+
+test("does not infer a safe OA write state when the status contract is missing", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ dirty_scopes: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+
+  await expect(fetchWorkbenchOaSyncStatus()).resolves.toMatchObject({
+    status: "unknown",
+    message: "OA 同步状态异常",
+    dirtyScopes: [],
+  });
+  fetchSpy.mockRestore();
 });
 
 function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterparty: string): WorkbenchRecord {
@@ -90,7 +116,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test("maps withdraw relation preview lock fields", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           operation: "withdraw_link",
@@ -128,13 +154,17 @@ describe("workbench api bank amount mapping", () => {
     const preview = await previewWorkbenchWithdrawLink({
       month: "all",
       rowIds: ["bank-candidate"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["bank"],
     });
 
     expect(preview.operation).toBe("withdraw_link");
     expect(preview.operationType).toBe("withdraw_relation");
     expect(preview.previewId).toBe("withdraw_relation:abc123");
     expect(preview.submitExpectedVersions).toEqual({ "relation:relation-1": 3 });
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+      row_ids: ["bank-candidate"],
+      row_types: ["bank"],
+    });
     expect(preview.after.groups[0]).toMatchObject({
       groupType: "unpaired",
       rawGroupType: "selection",
@@ -142,7 +172,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test("maps preview-only selection groups from their unpaired zone without widening page group types", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           operation: "confirm_link",
@@ -198,7 +228,7 @@ describe("workbench api bank amount mapping", () => {
     const preview = await previewWorkbenchConfirmLink({
       month: "all",
       rowIds: ["oa-1", "bank-1"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["oa", "bank"],
     });
 
     expect(preview.before.groups[0]).toMatchObject({
@@ -208,6 +238,10 @@ describe("workbench api bank amount mapping", () => {
     expect(preview.after.groups[0]).toMatchObject({
       groupType: "paired",
       rawGroupType: "relation",
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+      row_ids: ["oa-1", "bank-1"],
+      row_types: ["oa", "bank"],
     });
   });
 
@@ -240,7 +274,7 @@ describe("workbench api bank amount mapping", () => {
     await expect(previewWorkbenchWithdrawLink({
       month: "all",
       rowIds: ["oa-1"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["oa"],
     })).rejects.toThrow("Invalid Workbench relation preview group");
   });
 
@@ -255,8 +289,7 @@ describe("workbench api bank amount mapping", () => {
           total: 1,
           row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
           has_more: false,
-          read_model_status: "fresh",
-          read_model_version: "generation-set-1",
+          next_cursor: null,
           groups: [{
             group_id: "selected",
             group_type: "selection",
@@ -273,7 +306,7 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.toThrow(
       "Unsupported Workbench group type: selection",
     );
   });
@@ -307,7 +340,7 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    const page = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50);
+    const page = await fetchWorkbenchGroupsPage("all", "unpaired", null, 50);
 
     expect(page.groups[0]?.groupType).toBe("unpaired");
     expect(page.groups[0]?.rawGroupType).toBe("processed_exception");
@@ -325,7 +358,7 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    const error = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50).catch((caught) => caught);
+    const error = await fetchWorkbenchGroupsPage("all", "unpaired", null, 50).catch((caught) => caught);
 
     expect(error).toBeInstanceOf(WorkbenchApiError);
     expect(error).toMatchObject({
@@ -338,7 +371,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test.each([
-    ["workbench_read_model_version_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],
+    ["canonical_selection_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],
     ["workbench_relation_preview_stale", 409, "关联预览已失效，请重新预览。"],
     ["workbench_row_not_found", 404, "所选关联台记录已不可用，请刷新后重新选择。"],
     ["workbench_row_detail_invariant_broken", 503, "关联台详情数据不完整，请稍后重试或联系管理员。"],
@@ -360,8 +393,8 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(expectedMessage);
-    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.toThrow(expectedMessage);
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
   });
 
   test("never exposes a non-JSON response body", async () => {
@@ -372,14 +405,14 @@ describe("workbench api bank amount mapping", () => {
       }),
     );
 
-    const error = await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50).catch((caught) => caught);
+    const error = await fetchWorkbenchGroupsPage("all", "unpaired", null, 50).catch((caught) => caught);
 
     expect(error).toBeInstanceOf(WorkbenchApiError);
     expect(error.message).toBe("关联台服务暂时不可用，请稍后重试。");
     expect(error.message).not.toContain("RAW PARSER SENTINEL");
   });
 
-  test("maps two-pane confirm operation projection as a formal relation", async () => {
+  test("accepts any two canonical members in a successful direct confirm response", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -389,41 +422,6 @@ describe("workbench api bank amount mapping", () => {
           affected_row_ids: ["oa-partial", "bank-partial"],
           affected_months: ["2026-05"],
           affected_scope_keys: ["2026-05"],
-          operation_projection: {
-            after: {
-              paired_groups: [
-                {
-                  group_id: "case:CASE-PARTIAL",
-                  group_type: "relation",
-                  relation_mode: "manual_confirmed",
-                  match_confidence: "medium",
-                  reason: "active_formal_relation",
-                  oa_rows: [
-                    {
-                      id: "oa-partial",
-                      type: "oa",
-                      applicant: "刘际涛",
-                      amount: "400.00",
-                      counterparty_name: "云南溯源科技",
-                      oa_bank_relation: { code: "manual_confirmed", label: "已关联流水", tone: "success" },
-                    },
-                  ],
-                  bank_rows: [
-                    {
-                      id: "bank-partial",
-                      type: "bank",
-                      trade_time: "2026-05-02 10:30",
-                      debit_amount: "400.00",
-                      counterparty_name: "云南溯源科技",
-                      invoice_relation: { code: "manual_confirmed", label: "已关联OA", tone: "success" },
-                    },
-                  ],
-                  invoice_rows: [],
-                },
-              ],
-              unpaired_groups: [],
-            },
-          },
           message: "已确认 2 条记录关联。",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -433,26 +431,16 @@ describe("workbench api bank amount mapping", () => {
     const result = await confirmWorkbenchLink({
       month: "2026-05",
       rowIds: ["oa-partial", "bank-partial"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["oa", "bank"],
       caseId: "CASE-PARTIAL",
       idempotencyKey: "confirm-partial-1",
     });
 
-    expect(result.operationProjection?.after.pairedGroups).toHaveLength(1);
-    expect(result.operationProjection?.after.pairedGroups[0]).toMatchObject({
-      id: "case:CASE-PARTIAL",
-      groupType: "paired",
-      rawGroupType: "relation",
-      relationMode: "manual_confirmed",
-    });
-    expect(result.operationProjection?.after.pairedGroups[0].rows.oa.map((row) => row.id)).toEqual(["oa-partial"]);
-    expect(result.operationProjection?.after.pairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
-    expect(result.operationProjection?.after.pairedGroups[0].rows.invoice).toEqual([]);
-    expect(result.operationProjection?.after.unpairedGroups).toEqual([]);
+    expect(result.affected_row_ids).toEqual(["oa-partial", "bank-partial"]);
     expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 
-  test("maps snake-case unpaired groups from a two-pane confirm projection", async () => {
+  test("returns affected scopes without a client-side topology projection", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -461,21 +449,6 @@ describe("workbench api bank amount mapping", () => {
           month: "all",
           affected_row_ids: ["bank-only", "invoice-only"],
           affected_scope_keys: ["2026-06", "2026-07"],
-          operation_projection: {
-            after: {
-              paired_groups: [],
-              unpaired_groups: [
-                {
-                  group_id: "case:CASE-TWO-PANE",
-                  group_type: "relation",
-                  relation_mode: "manual_confirmed",
-                  bank_rows: [{ id: "bank-only", type: "bank" }],
-                  invoice_rows: [{ id: "invoice-only", type: "invoice" }],
-                  oa_rows: [],
-                },
-              ],
-            },
-          },
           message: "已确认 2 条记录关联。",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -485,23 +458,138 @@ describe("workbench api bank amount mapping", () => {
     const result = await confirmWorkbenchLink({
       month: "all",
       rowIds: ["bank-only", "invoice-only"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["bank", "invoice"],
       caseId: "CASE-TWO-PANE",
       idempotencyKey: "confirm-two-pane-1",
     });
 
-    expect(result.operationProjection?.after.pairedGroups).toEqual([]);
-    expect(result.operationProjection?.after.unpairedGroups).toHaveLength(1);
-    expect(result.operationProjection?.after.unpairedGroups[0]).toMatchObject({
-      id: "case:CASE-TWO-PANE",
-      rawGroupType: "relation",
-      relationMode: "manual_confirmed",
-    });
-    expect(result.operationProjection?.after.unpairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-only"]);
-    expect(result.operationProjection?.after.unpairedGroups[0].rows.invoice.map((row) => row.id)).toEqual(["invoice-only"]);
+    expect(result.affected_row_ids).toEqual(["bank-only", "invoice-only"]);
+    expect(result.affectedScopeKeys).toEqual(["2026-06", "2026-07"]);
   });
 
-  test("coalesces concurrent identical initial workbench loads into one versioned request", async () => {
+  test("keeps typed row identity order in confirm and withdraw submissions", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
+      new Response(
+        JSON.stringify({ success: true, affected_row_ids: ["same-id", "same-id"] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ));
+
+    await confirmWorkbenchLink({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["bank", "invoice"],
+      idempotencyKey: "typed-confirm-1",
+    });
+    await withdrawWorkbenchLink({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["bank", "invoice"],
+      operationType: "withdraw_relation",
+      previewId: "withdraw-relation-1",
+      expectedVersions: { "relation:1": 2 },
+      idempotencyKey: "typed-withdraw-1",
+    });
+
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+      row_ids: ["same-id", "same-id"],
+      row_types: ["bank", "invoice"],
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toMatchObject({
+      row_ids: ["same-id", "same-id"],
+      row_types: ["bank", "invoice"],
+    });
+  });
+
+  test("keeps typed identity on every remaining Workbench row mutation", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
+      new Response(
+        JSON.stringify({ success: true, affected_row_ids: ["same-id", "same-id"] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ));
+
+    await markWorkbenchException({
+      month: "all",
+      rowId: "same-id",
+      rowType: "invoice",
+      exceptionCode: "missing_invoice",
+    });
+    await cancelWorkbenchLink({
+      month: "all",
+      rowId: "same-id",
+      rowType: "bank",
+      idempotencyKey: "typed-cancel-1",
+    });
+    await updateWorkbenchBankException({
+      month: "all",
+      rowId: "same-id",
+      rowType: "bank",
+      relationCode: "needs_review",
+      relationLabel: "待复核",
+    });
+    await confirmWorkbenchPersonalAdvanceRepayment({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["oa", "bank"],
+    });
+    await ignoreWorkbenchRow({
+      month: "all",
+      rowId: "same-id",
+      rowType: "invoice",
+    });
+    await confirmWorkbenchCashPassThrough({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["oa", "bank"],
+    });
+    await confirmWorkbenchCashTicketPurchase({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["oa", "bank"],
+      cashAmount: "100.00",
+      ticketCostAmount: "20.00",
+    });
+    await cancelWorkbenchCashSpecial({
+      month: "all",
+      rowIds: ["same-id", "same-id"],
+      rowTypes: ["oa", "bank"],
+    });
+
+    const bodiesByPath = Object.fromEntries(fetchSpy.mock.calls.map(([input, init]) => [
+      String(input),
+      JSON.parse(String(init?.body)),
+    ]));
+    expect(bodiesByPath["/api/workbench/actions/mark-exception"]).toMatchObject({
+      row_id: "same-id",
+      row_type: "invoice",
+    });
+    expect(bodiesByPath["/api/workbench/actions/cancel-link"]).toMatchObject({
+      row_id: "same-id",
+      row_type: "bank",
+    });
+    expect(bodiesByPath["/api/workbench/actions/update-bank-exception"]).toMatchObject({
+      row_id: "same-id",
+      row_type: "bank",
+    });
+    for (const path of [
+      "/api/workbench/actions/confirm-personal-advance-repayment",
+      "/api/workbench/actions/confirm-cash-pass-through",
+      "/api/workbench/actions/confirm-cash-ticket-purchase",
+      "/api/workbench/actions/cancel-cash-special",
+    ]) {
+      expect(bodiesByPath[path]).toMatchObject({
+        row_ids: ["same-id", "same-id"],
+        row_types: ["oa", "bank"],
+      });
+    }
+    expect(bodiesByPath["/api/workbench/actions/ignore-row"]).toMatchObject({
+      row_id: "same-id",
+      row_type: "invoice",
+    });
+  });
+
+  test("coalesces concurrent identical direct combined initial loads", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.startsWith("/api/workbench?")) {
@@ -509,6 +597,7 @@ describe("workbench api bank amount mapping", () => {
           new Response(
             JSON.stringify({
               month: "all",
+              scope_key: "all",
               summary: {
                 oa_count: 1,
                 bank_count: 1,
@@ -530,7 +619,6 @@ describe("workbench api bank amount mapping", () => {
                 paired_group_count: -1,
                 unpaired_object_count: 3.5,
               },
-              oa_status: { code: "ready", message: "OA 已同步" },
               invoice_inventory: {
                 system_total: 9,
                 manual_import_total: 7,
@@ -540,9 +628,6 @@ describe("workbench api bank amount mapping", () => {
                 etc_summary_batch_count: 3,
                 oa_attachment_total: 5,
               },
-              read_model_status: "fresh",
-              read_model_version: "generation-set-1",
-              generated_at: "2026-05-22T09:30:00+00:00",
               paired: {
                 month: "all",
                 zone: "paired",
@@ -550,6 +635,7 @@ describe("workbench api bank amount mapping", () => {
                 page_size: 200,
                 total: 1,
                 has_more: false,
+                next_cursor: null,
                 row_counts: { oa: 0, bank: 7, invoice: 0, rows: 7 },
                 groups: [
                   {
@@ -570,6 +656,7 @@ describe("workbench api bank amount mapping", () => {
                 page_size: 200,
                 total: 1,
                 has_more: false,
+                next_cursor: null,
                 row_counts: { oa: 3, bank: 0, invoice: 5, rows: 8 },
                 groups: [
                   {
@@ -610,7 +697,6 @@ describe("workbench api bank amount mapping", () => {
                   invoice_rows: [],
                 },
               ],
-              read_model_status: "fresh",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -638,7 +724,6 @@ describe("workbench api bank amount mapping", () => {
                   invoice_rows: [],
                 },
               ],
-              read_model_status: "fresh",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -669,7 +754,7 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(result.data.invoiceInventory.systemTotal).toBe(9);
     expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
-    expect(result.data.oaStatus.message).toBe("OA 已同步");
+    expect(result.data).not.toHaveProperty("oaStatus");
     expect(result.statistics).toEqual(expect.objectContaining({
       oaCount: 800,
       bankTransactionCount: 900,
@@ -679,8 +764,8 @@ describe("workbench api bank amount mapping", () => {
       unpairedObjectCount: undefined,
     }));
     expect(result.pages.unpaired.hasMore).toBe(false);
-    expect(result.pages.paired.readModelVersion).toBe("generation-set-1");
-    expect(result.pages.unpaired.readModelVersion).toBe("generation-set-1");
+    expect(result.pages.paired.nextCursor).toBeNull();
+    expect(result.pages.unpaired.nextCursor).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const initialUrl = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(initialUrl.pathname).toBe("/api/workbench");
@@ -690,6 +775,72 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(await fetchWorkbenchInitialPage("all", undefined, undefined, zoneQueries)).toEqual(result);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("forces a non-coalesced no-store direct reread while an identical pre-commit read is in flight", async () => {
+    let resolvePreCommit!: (response: Response) => void;
+    const preCommitResponse = new Promise<Response>((resolve) => {
+      resolvePreCommit = resolve;
+    });
+    const initialPayload = (marker: string) => ({
+      month: "race",
+      scope_key: "race",
+      summary: {
+        oa_count: 0,
+        bank_count: 0,
+        invoice_count: 0,
+        paired_count: 0,
+        unpaired_count: 0,
+        exception_count: 0,
+        ignored_exception_count: 0,
+      },
+      paired: {
+        page_size: 50,
+        total: 0,
+        row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
+        has_more: false,
+        next_cursor: null,
+        groups: [],
+      },
+      unpaired: {
+        page_size: 50,
+        total: 0,
+        row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
+        has_more: false,
+        next_cursor: null,
+        groups: [],
+      },
+      marker,
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => preCommitResponse)
+      .mockResolvedValueOnce(new Response(JSON.stringify(initialPayload("post-commit")), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+
+    const preCommitRead = fetchWorkbenchInitialPage("race");
+    const postCommitRead = fetchWorkbenchInitialPage(
+      "race",
+      undefined,
+      undefined,
+      {},
+      { forceFresh: true },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1][1]).toMatchObject({
+      method: "GET",
+      cache: "no-store",
+    });
+    expect(new Headers(fetchSpy.mock.calls[1][1]?.headers).get("Cache-Control")).toBe("no-cache");
+    await expect(postCommitRead).resolves.toMatchObject({ data: { month: "race" } });
+
+    resolvePreCommit(new Response(JSON.stringify(initialPayload("pre-commit")), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    await expect(preCommitRead).resolves.toMatchObject({ data: { month: "race" } });
   });
 
   test("maps formal relation groups from workbench group pages", async () => {
@@ -792,13 +943,12 @@ describe("workbench api bank amount mapping", () => {
               ],
             },
           ],
-          read_model_status: "fresh",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    const result = await fetchWorkbenchGroupsPage("2026-05", "paired", 1, 50);
+    const result = await fetchWorkbenchGroupsPage("2026-05", "paired", null, 50);
     const group = result.groups[0];
     expect(group.groupType).toBe("paired");
     expect(group.rawGroupType).toBe("relation");
@@ -855,14 +1005,14 @@ describe("workbench api bank amount mapping", () => {
           page_size: 25,
           total: 0,
           has_more: false,
+          next_cursor: null,
           groups: [],
-          read_model_status: "fresh",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    await fetchWorkbenchGroupsPage("all", "unpaired", 2, 25, undefined, {
+    await fetchWorkbenchGroupsPage("all", "unpaired", "opaque-page-2", 25, undefined, {
       search: "供应商A",
       status: "unpaired",
       sourceKind: "bank_transaction",
@@ -878,13 +1028,14 @@ describe("workbench api bank amount mapping", () => {
         bank: { mode: "month", month: "2026-04" },
       },
       exceptionBucket: "processed",
-    }, "generation-set-1");
+    }, 2);
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/groups");
     expect(url.searchParams.get("month")).toBe("all");
     expect(url.searchParams.get("zone")).toBe("unpaired");
-    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.has("page")).toBe(false);
+    expect(url.searchParams.get("cursor")).toBe("opaque-page-2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("search")).toBe("供应商A");
     expect(url.searchParams.has("search_mode")).toBe(false);
@@ -894,7 +1045,6 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
     expect(url.searchParams.get("exception_bucket")).toBe("processed");
-    expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
       bank: { amount: ["建行 8106", "支出"], counterparty: ["云南溯源科技有限公司"] },
     });
@@ -903,14 +1053,12 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
-  test("serializes the active-generation filter facet query and maps missing labels", async () => {
+  test("serializes the direct cursor filter facet query and maps missing labels", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({
-        page: 2,
         page_size: 100,
         has_more: true,
-        read_model_status: "fresh",
-        read_model_version: "generation-set-1",
+        next_cursor: "filter-cursor-2",
         options: [
           { value: "杨丽萍", label: "杨丽萍", missing: false },
           { value: "__workbench_missing__", label: "未填写", missing: true },
@@ -923,12 +1071,12 @@ describe("workbench api bank amount mapping", () => {
       facet: "column",
       column: "applicant",
       optionSearch: "杨",
-      page: 2,
+      cursor: "filter-cursor-1",
     }, {
       search: "1320",
       filtersByPaneAndColumn: { oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] } },
       timeFilterByPane: { bank: { mode: "year", year: "2026" } },
-    }, "generation-set-1");
+    });
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/filter-options");
@@ -936,16 +1084,15 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("facet")).toBe("column");
     expect(url.searchParams.get("column")).toBe("applicant");
     expect(url.searchParams.get("option_search")).toBe("杨");
-    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.has("page")).toBe(false);
+    expect(url.searchParams.get("cursor")).toBe("filter-cursor-1");
     expect(url.searchParams.get("page_size")).toBe("100");
-    expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
       oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] },
     });
     expect(result).toMatchObject({
       hasMore: true,
-      readModelStatus: "fresh",
-      readModelVersion: "generation-set-1",
+      nextCursor: "filter-cursor-2",
       options: [
         { value: "杨丽萍", label: "杨丽萍", missing: false },
         { value: "__workbench_missing__", label: "未填写", missing: true },
@@ -959,7 +1106,6 @@ describe("workbench api bank amount mapping", () => {
         JSON.stringify({
           success: true,
           affected_scope_keys: ["2026-05"],
-          read_model_status: "refreshing",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -970,7 +1116,6 @@ describe("workbench api bank amount mapping", () => {
       zone: "paired",
       groupId: "case:CASE-1",
       fingerprint: "a".repeat(64),
-      expectedReadModelVersion: "generation-set-1",
     }, true);
 
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -982,39 +1127,34 @@ describe("workbench api bank amount mapping", () => {
           zone: "paired",
           group_id: "case:CASE-1",
           fingerprint: "a".repeat(64),
-          expected_read_model_version: "generation-set-1",
         }),
       }),
     );
   });
 
-  test("preserves the 409 version conflict contract for callers", async () => {
+  test("preserves a canonical selection conflict for mutation callers", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          error: "read_model_version_conflict",
-          message: "关联台数据版本已更新，请刷新后重试。",
-          read_model_version: "generation-v2",
+          error: "canonical_selection_conflict",
+          message: "所选记录的 canonical 关系已变化，请重新预览。",
         }),
         { status: 409, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    const error = await fetchWorkbenchGroupsPage(
-      "all",
-      "paired",
-      2,
-      50,
-      undefined,
-      {},
-      "generation-v1",
-    ).catch((reason: unknown) => reason);
+    const error = await confirmWorkbenchLink({
+      month: "all",
+      rowIds: ["oa-1", "bank-1"],
+      rowTypes: ["oa", "bank"],
+      idempotencyKey: "canonical-conflict-1",
+    }).catch((reason: unknown) => reason);
 
     expect(error).toBeInstanceOf(Error);
-    expect(error).toMatchObject({ status: 409, code: "read_model_version_conflict" });
+    expect(error).toMatchObject({ status: 409, code: "canonical_selection_conflict" });
   });
 
-  test("sends the active generation when loading row detail", async () => {
+  test("loads the latest committed row detail without a read-model version", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1032,13 +1172,13 @@ describe("workbench api bank amount mapping", () => {
 
     const row = await fetchWorkbenchRowDetail("bank-1", {
       month: "all",
-      expectedReadModelVersion: "generation-v1",
+      rowType: "bank",
     });
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/rows/bank-1");
     expect(url.searchParams.get("month")).toBe("all");
-    expect(url.searchParams.get("expected_read_model_version")).toBe("generation-v1");
+    expect(url.searchParams.get("row_type")).toBe("bank");
     expect(row.id).toBe("bank-1");
   });
 
@@ -1086,7 +1226,6 @@ describe("workbench api bank amount mapping", () => {
           scope_key: "all",
           zone: "paired",
           group_id: "case:etc",
-          read_model_status: "fresh",
           group: {
             group_id: "case:etc",
             group_type: "relation",
@@ -1112,14 +1251,14 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    const group = await fetchWorkbenchGroupDetail("all", "paired", "case:etc", "generation-set-1");
+    const group = await fetchWorkbenchGroupDetail("all", "paired", "case:etc", "CASE-ETC-1");
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/groups/detail");
     expect(url.searchParams.get("month")).toBe("all");
     expect(url.searchParams.get("zone")).toBe("paired");
     expect(url.searchParams.get("group_id")).toBe("case:etc");
-    expect(url.searchParams.get("expected_read_model_version")).toBe("generation-set-1");
+    expect(url.searchParams.get("detail_key")).toBe("CASE-ETC-1");
     expect(group.id).toBe("case:etc");
     expect(group.rows.oa).toHaveLength(1);
     expect(group.rows.bank).toHaveLength(1);
@@ -1147,7 +1286,7 @@ describe("workbench api bank amount mapping", () => {
     );
 
     await expect(
-      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "generation-set-1"),
+      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "CASE-NO-OA"),
     ).rejects.toThrow("invalid_workbench_group_detail_contract");
   });
 
@@ -1174,7 +1313,7 @@ describe("workbench api bank amount mapping", () => {
     );
 
     await expect(
-      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "generation-set-1"),
+      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "CASE-NO-OA"),
     ).rejects.toThrow("incomplete_workbench_group_detail");
   });
 
@@ -1389,7 +1528,7 @@ describe("workbench groups summary contract", () => {
       ),
     );
 
-    const result = await fetchWorkbenchGroupsPage("all", "paired", 1, 50, undefined, { detailLevel: "summary" });
+    const result = await fetchWorkbenchGroupsPage("all", "paired", null, 50, undefined, { detailLevel: "summary" });
     const group = result.groups[0];
 
     expect(group.rowCounts).toEqual({ oa: 5, bank: 8, invoice: 2 });
@@ -1427,7 +1566,7 @@ describe("workbench groups summary contract", () => {
       ),
     );
 
-    const result = await fetchWorkbenchGroupsPage("all", "paired", 1, 50, undefined, { detailLevel: "summary" });
+    const result = await fetchWorkbenchGroupsPage("all", "paired", null, 50, undefined, { detailLevel: "summary" });
 
     expect(countWorkbenchGroupRows(result.groups[0])).toBe(10);
   });
@@ -1499,7 +1638,7 @@ describe("workbench exception api", () => {
     const preview = await previewWorkbenchException({
       month: "all",
       rowIds: ["oa-1", "bank-1"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["oa", "bank"],
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1509,7 +1648,7 @@ describe("workbench exception api", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-1", "bank-1"],
-          expected_read_model_version: "generation-set-1",
+          row_types: ["oa", "bank"],
         }),
       }),
     );
@@ -1565,7 +1704,7 @@ describe("workbench exception api", () => {
     });
   });
 
-  test("applyWorkbenchException maps freshness without restoring a local operation barrier", async () => {
+  test("applyWorkbenchException maps the committed direct result without freshness metadata", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1575,8 +1714,6 @@ describe("workbench exception api", () => {
           updated_rows: [{ id: "bank-1" }],
           affected_row_ids: ["bank-1"],
           affected_scope_keys: ["2026-05"],
-          freshness_targets: [],
-          workbench_refresh_required: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -1585,7 +1722,7 @@ describe("workbench exception api", () => {
     const result = await applyWorkbenchException({
       month: "all",
       rowIds: ["bank-1"],
-      expectedReadModelVersion: "generation-set-1",
+      rowTypes: ["bank"],
       scenarioCode: "expense_bank_invoice_missing_oa",
       actionCode: "manual_oa_exempt",
       payload: {
@@ -1602,7 +1739,7 @@ describe("workbench exception api", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["bank-1"],
-          expected_read_model_version: "generation-set-1",
+          row_types: ["bank"],
           scenario_code: "expense_bank_invoice_missing_oa",
           action_code: "manual_oa_exempt",
           payload: {
@@ -1620,8 +1757,6 @@ describe("workbench exception api", () => {
       updatedRows: [{ id: "bank-1" }],
       affectedRowIds: ["bank-1"],
       affectedScopeKeys: ["2026-05"],
-      freshnessTargets: [],
-      workbenchRefreshRequired: true,
     });
     expect(result).not.toHaveProperty("operationBarrierTargets");
   });

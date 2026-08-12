@@ -16,10 +16,21 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 
 class StaticWorkbenchRows:
     def __init__(self, rows: list[dict[str, object]]) -> None:
-        self._rows = {str(row["id"]): dict(row) for row in rows}
+        self._rows = {
+            (str(row["type"]), str(row["id"])): dict(row)
+            for row in rows
+        }
 
-    def __call__(self, month: str, row_ids: list[str]) -> list[dict[str, object]]:
-        return [dict(self._rows[row_id]) for row_id in row_ids]
+    def __call__(
+        self,
+        month: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, object]]:
+        return [
+            dict(self._rows[(row_type, row_id)])
+            for row_type, row_id in zip(row_types, row_ids, strict=True)
+        ]
 
 
 class FreshRelationFacade:
@@ -124,7 +135,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             row_provider=StaticWorkbenchRows(rows),
             case_service=case_service or WorkbenchExceptionCaseService(),
             exception_evidence_provider=(
-                (lambda _month, _row_ids: [dict(item) for item in exception_evidence])
+                (lambda _month, _row_ids, _row_types: [dict(item) for item in exception_evidence])
                 if exception_evidence is not None
                 else None
             ),
@@ -143,7 +154,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             exception_evidence=exception_evidence,
         )
 
-        preview = service.preview({"month": "2026-05", "row_ids": ["oa-001", "bank-001"]})
+        preview = service.preview({"month": "2026-05", "row_ids": ["oa-001", "bank-001"], "row_types": ["oa", "bank"]})
 
         self.assertEqual(preview["scenario"]["business_line"], "expense")
         self.assertEqual(preview["scenario"]["scenario_code"], "expense_oa_bank_missing_input_invoice_equal")
@@ -153,7 +164,26 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         self.assertTrue(preview["can_apply"])
         self.assertEqual(case_service.snapshot()["cases"], {})
         self.assertEqual(pair_relation_service.snapshot()["pair_relations"], {})
-        self.assertEqual(exception_evidence, [{"evidence_id": "evidence-1", "rule_code": "oa_bank_exact_amount"}])
+
+    def test_preview_requires_aligned_typed_identities_and_preserves_cross_pane_collision(self) -> None:
+        rows = [
+            expense_bank_row(row_id="same-text-id"),
+            input_invoice_row(row_id="same-text-id"),
+        ]
+        service = self.build_service(rows)
+
+        with self.assertRaisesRegex(ValueError, "row_ids and row_types"):
+            service.preview({"month": "2026-05", "row_ids": ["same-text-id"]})
+        preview = service.preview(
+            {
+                "month": "2026-05",
+                "row_ids": ["same-text-id", "same-text-id"],
+                "row_types": ["bank", "invoice"],
+            }
+        )
+
+        self.assertEqual(preview["scenario"]["scenario_code"], "expense_bank_input_invoice_missing_oa_equal")
+        self.assertTrue(preview["can_apply"])
 
     def test_apply_wait_input_invoice_creates_open_v2_case_without_pair_relation(self) -> None:
         pair_relation_service = WorkbenchPairRelationService()
@@ -166,6 +196,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-001", "bank-001"],
+                "row_types": ["oa", "bank"],
                 "scenario_code": "expense_oa_bank_missing_input_invoice_equal",
                 "action_code": "wait_input_invoice",
                 "payload": {"note": "继续追票"},
@@ -183,7 +214,10 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         self.assertEqual(case["resolution"]["note"], "继续追票")
         self.assertEqual(case["workflow_projection"]["state"], "WAIT_INPUT_INVOICE")
         self.assertEqual(case["candidate_ids"], [])
+        self.assertEqual(case["row_ids"], ["oa-001", "bank-001"])
+        self.assertEqual(case["row_types"], ["oa", "bank"])
         self.assertIsNone(result["pair_relation"])
+        self.assertNotIn("workbench_refresh_required", result)
         self.assertEqual(pair_relation_service.snapshot()["pair_relations"], {})
 
     def test_apply_three_party_closed_creates_closed_case_and_pair_relation(self) -> None:
@@ -197,6 +231,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-001", "bank-001", "invoice-001"],
+                "row_types": ["oa", "bank", "invoice"],
                 "scenario_code": "expense_all_equal",
                 "action_code": "confirm_closed",
                 "payload": {},
@@ -225,6 +260,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["oa-001", "bank-001", "invoice-001"],
+                "row_types": ["oa", "bank", "invoice"],
                 "scenario_code": "expense_all_equal",
                 "action_code": "confirm_closed",
                 "payload": {},
@@ -243,6 +279,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["bank-001"],
+                "row_types": ["bank"],
                 "scenario_code": "expense_only_bank_auto_oa_exempt",
                 "action_code": "confirm_oa_exempt_auto",
                 "payload": {},
@@ -266,6 +303,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "row_ids": ["bank-001", "invoice-001"],
+                "row_types": ["bank", "invoice"],
                 "scenario_code": "expense_bank_input_invoice_missing_oa_equal",
                 "action_code": "confirm_oa_exempt_manual",
                 "payload": {
@@ -297,6 +335,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         payload = {
             "month": "2026-05",
             "row_ids": ["oa-001", "bank-001", "invoice-001"],
+            "row_types": ["oa", "bank", "invoice"],
             "scenario_code": "expense_all_equal",
             "action_code": "confirm_closed",
             "payload": {},
@@ -330,6 +369,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
                 {
                     "month": "2026-05",
                     "row_ids": ["bank-001"],
+                    "row_types": ["bank"],
                     "scenario_code": "expense_only_bank_auto_oa_exempt",
                     "action_code": "confirm_oa_exempt_auto",
                     "payload": {},
@@ -342,7 +382,7 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
     def test_preview_income_side_with_oa_returns_data_anomaly(self) -> None:
         service = self.build_service([oa_row(), income_bank_row()])
 
-        preview = service.preview({"month": "2026-05", "row_ids": ["oa-001", "bank-income-001"]})
+        preview = service.preview({"month": "2026-05", "row_ids": ["oa-001", "bank-income-001"], "row_types": ["oa", "bank"]})
 
         self.assertEqual(preview["scenario"]["business_line"], "data_anomaly")
         self.assertEqual(preview["scenario"]["scenario_code"], "income_contains_oa_data_anomaly")

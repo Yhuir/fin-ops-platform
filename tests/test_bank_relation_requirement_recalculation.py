@@ -148,8 +148,6 @@ def test_handler_recomputes_full_tag_set_and_refreshes_only_exact_months() -> No
     assert writes[1]["special_metadata"]["requires_oa"] is False
     assert writes[1]["special_metadata"]["requires_invoice"] is True
     assert {(row["scope_type"], row["scope_key"]) for row in refreshes} == {
-        ("workbench", "2026-05"),
-        ("workbench", "2026-07"),
         ("workbench_relation", "2026-05"),
         ("workbench_relation", "2026-07"),
     }
@@ -244,7 +242,6 @@ def test_handler_derives_exact_scope_from_canonical_bank_month_for_legacy_relati
     assert len(writes) == 1
     assert summary["affected_months"] == ["2026-05"]
     assert {(row["scope_type"], row["scope_key"]) for row in refreshes} == {
-        ("workbench", "2026-05"),
         ("workbench_relation", "2026-05"),
     }
     assert dirty_calls == [["2026-05"]]

@@ -3,7 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = Number(process.env.FIN_OPS_E2E_PORT ?? 5177);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`;
 const skipWebServer = process.env.FIN_OPS_E2E_SKIP_WEBSERVER === "1";
-const workbenchVisibilitySloEnabled = process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1";
+const workbenchDirectCommitVisibilityEnabled = (
+  process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY === "1"
+);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,9 +19,9 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,
-    trace: workbenchVisibilitySloEnabled ? "off" : "retain-on-failure",
-    screenshot: workbenchVisibilitySloEnabled ? "off" : "only-on-failure",
-    video: workbenchVisibilitySloEnabled ? "off" : "retain-on-failure",
+    trace: workbenchDirectCommitVisibilityEnabled ? "off" : "retain-on-failure",
+    screenshot: workbenchDirectCommitVisibilityEnabled ? "off" : "only-on-failure",
+    video: workbenchDirectCommitVisibilityEnabled ? "off" : "retain-on-failure",
   },
   webServer: skipWebServer
     ? undefined

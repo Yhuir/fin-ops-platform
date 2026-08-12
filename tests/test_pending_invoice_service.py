@@ -317,6 +317,47 @@ class PairServiceWorkbenchRelationRepository:
             }
         }
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+
+        def canonical_row_type(value: object) -> str:
+            normalized = str(value or "").strip().lower()
+            return {
+                "oa_application": "oa",
+                "bank_transaction": "bank",
+                "input_invoice": "invoice",
+                "output_invoice": "invoice",
+                "invoice_record": "invoice",
+            }.get(normalized, normalized)
+
+        requested = {
+            (canonical_row_type(row_type), str(row_id).strip())
+            for row_id, row_type in zip(row_ids, row_types, strict=True)
+            if str(row_id).strip()
+        }
+        normalized_case_ids = {str(case_id).strip() for case_id in list(case_ids or []) if str(case_id).strip()}
+        relations: dict[str, object] = {}
+        for relation in self._pair_service.list_active_relations():
+            relation_identities = {
+                (canonical_row_type(row_type), str(row_id).strip())
+                for row_id, row_type in zip(
+                    list(relation.get("row_ids") or []),
+                    list(relation.get("row_types") or []),
+                    strict=True,
+                )
+            }
+            case_id = str(relation.get("case_id") or "")
+            if case_id in normalized_case_ids or requested.intersection(relation_identities):
+                relations[case_id] = relation
+        return {"pair_relations": relations}
+
     def load_active_workbench_pair_relation_by_case_id(
         self,
         case_id: str,

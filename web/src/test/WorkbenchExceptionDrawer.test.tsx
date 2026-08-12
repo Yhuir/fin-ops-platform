@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
@@ -61,6 +61,44 @@ const group: WorkbenchRelationGroup = {
 };
 
 describe("Workbench amount mismatch exception UI", () => {
+  test("requests bounded summary pages and defers detail until a group expands", async () => {
+    const user = userEvent.setup();
+    const onEnsureGroupDetail = vi.fn(async (candidate: WorkbenchRelationGroup) => candidate);
+    const onLoadMore = vi.fn();
+
+    render(
+      <WorkbenchExceptionDrawer
+        bucket="active"
+        canMutateData
+        contentGeneration={0}
+        error={null}
+        groups={[group]}
+        hasMore
+        loading={false}
+        loadingMore={false}
+        open
+        total={2}
+        onBucketChange={vi.fn()}
+        onClose={vi.fn()}
+        onEnsureGroupDetail={onEnsureGroupDetail}
+        onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onLoadMore={onLoadMore}
+        onRestoreOaInvoiceAnomaly={vi.fn()}
+      />,
+    );
+
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    expect(within(drawer).getByText("1 / 2 项")).toBeInTheDocument();
+    expect(onEnsureGroupDetail).not.toHaveBeenCalled();
+    await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    expect(onEnsureGroupDetail).not.toHaveBeenCalled();
+
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    expect(await within(drawer).findByText("测试供应商")).toBeInTheDocument();
+    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(1);
+  });
+
   test("renders a collapsed three-pane outline and expands all details together", async () => {
     const user = userEvent.setup();
     const onIgnore = vi.fn();
@@ -69,13 +107,19 @@ describe("Workbench amount mismatch exception UI", () => {
       <WorkbenchExceptionDrawer
         bucket="active"
         canMutateData
+        contentGeneration={0}
         error={null}
         groups={[group]}
+        hasMore={false}
         loading={false}
+        loadingMore={false}
         open
+        total={1}
         onBucketChange={vi.fn()}
         onClose={vi.fn()}
+        onEnsureGroupDetail={async (candidate) => candidate}
         onIgnoreOaInvoiceAnomaly={onIgnore}
+        onLoadMore={vi.fn()}
         onRestoreOaInvoiceAnomaly={vi.fn()}
       />,
     );
@@ -85,7 +129,8 @@ describe("Workbench amount mismatch exception UI", () => {
     expect(within(drawer).getByText("流水 · 0项")).toBeInTheDocument();
     expect(within(drawer).getByText("发票 · 1项")).toBeInTheDocument();
     expect(within(drawer).getByText("99.99")).toBeInTheDocument();
-    expect(within(drawer).getByRole("radio", { name: "进行中的异常" })).toHaveAttribute("aria-checked", "true");
+    const activeBucketControl = within(drawer).getByRole("radio", { name: "进行中的异常" });
+    expect(activeBucketControl).toHaveAttribute("aria-checked", "true");
     expect(within(drawer).getByRole("radio", { name: "已忽略的异常" })).toBeInTheDocument();
     expect(within(drawer).queryByTestId("pane-invoice")).not.toBeInTheDocument();
 
@@ -95,6 +140,7 @@ describe("Workbench amount mismatch exception UI", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "忽略" }));
     expect(onIgnore).toHaveBeenCalledWith(group);
+    expect(activeBucketControl).toHaveFocus();
   });
 
   test("shows the anomaly chip directly after the invoice source row", () => {
@@ -185,13 +231,19 @@ describe("Workbench amount mismatch exception UI", () => {
       <WorkbenchExceptionDrawer
         bucket="processed"
         canMutateData
+        contentGeneration={0}
         error={null}
         groups={[ignoredGroup]}
+        hasMore={false}
         loading={false}
+        loadingMore={false}
         open
+        total={1}
         onBucketChange={vi.fn()}
         onClose={vi.fn()}
+        onEnsureGroupDetail={async (candidate) => candidate}
         onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onLoadMore={vi.fn()}
         onRestoreOaInvoiceAnomaly={onRestore}
       />,
     );
@@ -218,13 +270,19 @@ describe("Workbench amount mismatch exception UI", () => {
       <WorkbenchExceptionDrawer
         bucket="active"
         canMutateData
+        contentGeneration={0}
         error={null}
         groups={[group, secondGroup]}
+        hasMore={false}
         loading={false}
+        loadingMore={false}
         open
+        total={2}
         onBucketChange={vi.fn()}
         onClose={vi.fn()}
+        onEnsureGroupDetail={async (candidate) => candidate}
         onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onLoadMore={vi.fn()}
         onRestoreOaInvoiceAnomaly={vi.fn()}
       />,
     );
@@ -235,5 +293,43 @@ describe("Workbench amount mismatch exception UI", () => {
     expect(triggers[0]).toHaveAttribute("aria-expanded", "true");
     await user.click(within(drawer).getAllByRole("button", { name: "展开异常明细" })[0]);
     expect(triggers[0]).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("drops expanded detail cache when a fresh bucket generation replaces the canonical page", async () => {
+    const user = userEvent.setup();
+    const onEnsureGroupDetail = vi.fn(async (candidate: WorkbenchRelationGroup) => candidate);
+    const drawer = (contentGeneration: number) => (
+      <WorkbenchExceptionDrawer
+        bucket="active"
+        canMutateData
+        contentGeneration={contentGeneration}
+        error={null}
+        groups={[group]}
+        hasMore={false}
+        loading={false}
+        loadingMore={false}
+        open
+        total={1}
+        onBucketChange={vi.fn()}
+        onClose={vi.fn()}
+        onEnsureGroupDetail={onEnsureGroupDetail}
+        onIgnoreOaInvoiceAnomaly={vi.fn()}
+        onLoadMore={vi.fn()}
+        onRestoreOaInvoiceAnomaly={vi.fn()}
+      />
+    );
+    const { rerender } = render(drawer(1));
+
+    await user.click(screen.getByRole("button", { name: "展开异常明细" }));
+    expect(await screen.findByText("测试供应商")).toBeInTheDocument();
+    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(1);
+
+    rerender(drawer(2));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "展开异常明细" })).toHaveAttribute("aria-expanded", "false");
+    });
+    await user.click(screen.getByRole("button", { name: "展开异常明细" }));
+    expect(await screen.findByText("测试供应商")).toBeInTheDocument();
+    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(2);
   });
 });

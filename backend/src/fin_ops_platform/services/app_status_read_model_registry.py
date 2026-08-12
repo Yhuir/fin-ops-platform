@@ -14,13 +14,6 @@ class AppStatusReadModelDefinition:
 
 
 APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
-    "workbench": AppStatusReadModelDefinition(
-        key="workbench",
-        scope_type="workbench",
-        worker_instance="workbench",
-        refresh_event_type="workbench.read_model.refresh",
-        readiness_strategy="active_generation",
-    ),
     "workbench_relation": AppStatusReadModelDefinition(
         key="workbench_relation",
         scope_type="workbench_relation",

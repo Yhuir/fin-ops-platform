@@ -5,10 +5,7 @@ import { createMinimalXlsx } from "./xlsx";
 export type AccessTier = "denied" | "read_export_only" | "full_access" | "admin";
 
 type SessionMode = "admin" | "full_access" | "read_export_only" | "forbidden" | "expired" | "error";
-type OaSyncMockMode = "idle" | "dirty" | "refreshing" | "error";
-type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
-type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
-type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
+type OaSyncMockMode = "synced" | "dirty" | "refreshing" | "error";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
 type BankDetailCategoryOverride = {
@@ -59,7 +56,6 @@ type ApiMockOptions = {
   invoiceImportPreviewDelayMs?: number;
   bankFlowRuleCostFanout?: boolean;
   bankFlowRuleWorkbenchConvergence?: boolean;
-  bankFlowRuleWorkbenchConvergenceReads?: number;
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
@@ -129,10 +125,10 @@ type ApiMockOptions = {
   workbenchConfirmSubmitDelayMs?: number;
   workbenchConfirmSubmitError?: boolean;
   workbenchConfirmSubmitFailuresBeforeSuccess?: number;
-  workbenchFreshRefetchError?: boolean;
+  workbenchCombinedRereadError?: boolean;
   workbenchGroupsFailuresBeforeSuccess?: number;
-  workbenchHealthStatus?: WorkbenchHealthMockStatus;
   workbenchCashSpecialActions?: boolean;
+  workbenchExceptionDatasetSize?: number;
   workbenchInitialExceptionApplied?: boolean;
   workbenchAmountMismatchScenario?: boolean;
   workbenchInitialIncompleteRelation?: boolean;
@@ -143,9 +139,6 @@ type ApiMockOptions = {
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchOaExpenseItemsScenario?: boolean;
-  workbenchPageEmpty?: boolean;
-  workbenchPageStatus?: WorkbenchPageMockStatus;
-  workbenchRefreshStatus?: WorkbenchRefreshMockStatus;
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
@@ -233,27 +226,18 @@ function appStatusWriteSafety(blocksMutations = false, reason = blocksMutations 
   };
 }
 
-function appStatusWorkbenchDomain(status: WorkbenchHealthMockStatus = "ready") {
-  const readModelStatus = status === "ready" ? "ready" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale";
-  const level = status === "error" ? "blocked" : status === "ready" ? "ok" : "busy";
-  const reason = status === "ready"
-    ? "关联台已同步"
-    : status === "rebuilding"
-      ? "关联台刷新中"
-      : status === "error"
-        ? "关联台刷新失败"
-        : "关联台待刷新";
+function appStatusWorkbenchDomain() {
   return {
     key: "workbench",
     label: "关联台",
     route: "/",
-    level,
-    status: readModelStatus,
-    reason,
+    level: "ok",
+    status: "ready",
+    reason: "关联台可用",
     details: [],
-    read_models: ["workbench"],
+    read_models: [],
     read_model_scopes: [],
-    workers: ["workbench-read-model"],
+    workers: [],
     job_ids: [],
     updated_at: "2026-06-17T01:00:00Z",
   };
@@ -270,15 +254,6 @@ function appStatusOverall(options: ApiMockOptions = {}) {
       write_safety: writeSafety,
     };
   }
-  if (options.workbenchHealthStatus === "error") {
-    return {
-      level: "blocked",
-      color: "red",
-      reason: "关联台刷新失败",
-      blocks_mutations: false,
-      write_safety: writeSafety,
-    };
-  }
   if (options.oaSyncMode === "refreshing") {
     return {
       level: "busy",
@@ -288,20 +263,11 @@ function appStatusOverall(options: ApiMockOptions = {}) {
       write_safety: writeSafety,
     };
   }
-  if (options.oaSyncMode === "dirty" || options.workbenchHealthStatus === "stale") {
+  if (options.oaSyncMode === "dirty") {
     return {
       level: "busy",
       color: "yellow",
       reason: "关联台待刷新",
-      blocks_mutations: false,
-      write_safety: writeSafety,
-    };
-  }
-  if (options.workbenchHealthStatus === "rebuilding") {
-    return {
-      level: "busy",
-      color: "yellow",
-      reason: "关联台刷新中",
       blocks_mutations: false,
       write_safety: writeSafety,
     };
@@ -320,15 +286,15 @@ function appStatusOverview(options: ApiMockOptions = {}) {
     version: 1,
     generated_at: "2026-06-17T01:00:00Z",
     overall: appStatusOverall(options),
-    domains: [appStatusWorkbenchDomain(options.workbenchHealthStatus)],
+    domains: [appStatusWorkbenchDomain()],
     background_tasks: [],
     alerts: [],
   };
 }
 
-function oaSyncPayload(mode: OaSyncMockMode = "idle") {
+function oaSyncPayload(mode: OaSyncMockMode = "synced") {
   return {
-    status: mode === "dirty" ? "idle" : mode,
+    status: mode === "dirty" ? "refreshing" : mode,
     message: mode === "refreshing"
       ? "OA 正在同步"
       : mode === "dirty"
@@ -343,44 +309,6 @@ function oaSyncPayload(mode: OaSyncMockMode = "idle") {
   };
 }
 
-function workbenchReadModelHealthPayload(status: WorkbenchHealthMockStatus = "ready") {
-  return {
-    status,
-    read_model_status: status === "ready" ? "fresh" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale",
-    dirty_scopes: status === "ready" ? [] : ["2026-03"],
-    matching_dirty_scopes: status === "ready" ? [] : ["2026-03"],
-    matching_running_scopes: status === "rebuilding" ? ["2026-03"] : [],
-    stale_scopes: status === "ready" ? [] : ["2026-03"],
-    rebuilding_scopes: status === "rebuilding" ? ["2026-03"] : [],
-    last_matching_error: status === "error" ? "browser workbench refresh failed" : null,
-  };
-}
-
-function workbenchRefreshStatusPayload(status: WorkbenchRefreshMockStatus = "fresh") {
-  const scopeStatus = status === "fresh"
-    ? "completed"
-    : status === "failed" || status === "unavailable"
-      ? "failed"
-      : "processing";
-  return {
-    scope_key: "all",
-    read_model_status: status,
-    read_model_version: "workbench-refresh-e2e-001",
-    active_generation_id: "workbench-generation-e2e-001",
-    dirty_scopes: status === "fresh"
-      ? []
-      : [
-        {
-          scope_key: "2026-03",
-          status: scopeStatus,
-          last_error: status === "failed" ? "browser refresh failed" : null,
-        },
-      ],
-    last_error: status === "failed" ? "browser refresh failed" : null,
-    retryable: status === "failed",
-  };
-}
-
 function appHealthPayload(options: ApiMockOptions = {}) {
   return {
     status: "ok",
@@ -389,7 +317,6 @@ function appHealthPayload(options: ApiMockOptions = {}) {
     app_status: appStatusOverview(options),
     session: { status: "authenticated" },
     oa_sync: oaSyncPayload(options.oaSyncMode),
-    workbench_read_model: workbenchReadModelHealthPayload(options.workbenchHealthStatus),
     background_jobs: {
       active: 0,
       queued: 0,
@@ -507,7 +434,7 @@ function operationsDashboardPayload() {
       queues: [],
       read_models: [
         {
-          key: "workbench",
+          key: "workbench_relation",
           refresh_duration_ms: percentile(120),
           refresh_duration_windows: {
             recent_15m: {
@@ -523,7 +450,7 @@ function operationsDashboardPayload() {
       ],
       workers: [
         {
-          worker_kind: "workbench-read-model",
+          worker_kind: "runtime-worker",
           heartbeat_lag_seconds: 1,
           status: "available",
         },
@@ -638,9 +565,10 @@ function settingsDataResetJobPayload(params: {
           action: params.action,
           status: "completed",
           job_id: params.jobId,
-          cleared_collections: ["workbench_read_models"],
+          cleared_collections: ["workbench_row_overrides", "workbench_pair_relations"],
           deleted_counts: {
-            workbench_read_models: 1,
+            workbench_row_overrides: 0,
+            workbench_pair_relations: 0,
           },
           protected_targets: ["form_data_db.form_data"],
           rebuild_status: params.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
@@ -809,6 +737,37 @@ function buildAmountMismatchWorkbenchGroup(ignored: boolean) {
       total_with_tax: "57999.99",
     })),
   };
+}
+
+function buildAmountMismatchWorkbenchGroups(count: number, ignored: boolean) {
+  return Array.from({ length: Math.max(1, count) }, (_, index) => {
+    const base = buildAmountMismatchWorkbenchGroup(ignored);
+    if (index === 0) {
+      return withWorkbenchDetailKey(base);
+    }
+    const suffix = String(index + 1).padStart(3, "0");
+    const caseId = `CASE-EXCEPTION-${suffix}`;
+    const oaRows = base.oa_rows.map((row) => ({ ...row, id: `oa-exception-${suffix}`, case_id: caseId }));
+    const bankRows = base.bank_rows.map((row) => ({ ...row, id: `bk-exception-${suffix}`, case_id: caseId }));
+    const invoiceRows = base.invoice_rows.map((row) => ({ ...row, id: `iv-exception-${suffix}`, case_id: caseId }));
+    return withWorkbenchDetailKey({
+      ...base,
+      group_id: `case:${caseId}`,
+      oa_rows: oaRows,
+      bank_rows: bankRows,
+      invoice_rows: invoiceRows,
+      oa_invoice_anomaly: {
+        ...base.oa_invoice_anomaly,
+        fingerprint: `${suffix.padEnd(64, "a")}`,
+        items: base.oa_invoice_anomaly.items.map((item) => ({
+          ...item,
+          fingerprint: `${suffix.padEnd(64, "b")}`,
+          comparison_unit_id: `case:${caseId}`,
+          invoice_row_ids: invoiceRows.map((row) => row.id),
+        })),
+      },
+    });
+  });
 }
 
 function buildUnpairedWorkbenchGroup(
@@ -1138,12 +1097,6 @@ function bankFlowRuleConfirmResultPayload() {
     case_id: "bank_flow_rule_batch_e2e_invoice_required",
     affected_months: ["2026-05"],
     affected_scope_keys: ["2026-05"],
-    operation_projection: {
-      after: {
-        paired_groups: [bankFlowRuleInvoiceRequiredGroup("paired", true)],
-        unpaired_groups: [],
-      },
-    },
     message: "已确认流水规则批次补票关联。",
   };
 }
@@ -1285,6 +1238,37 @@ function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unkno
   };
 }
 
+function withWorkbenchDetailKey<T extends {
+  group_id: string;
+  group_type?: string;
+  oa_rows: Array<Record<string, unknown>>;
+  bank_rows: Array<Record<string, unknown>>;
+  invoice_rows: Array<Record<string, unknown>>;
+}>(group: T) {
+  const firstRow = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows][0];
+  const relationKey = group.group_type === "relation" && typeof firstRow?.case_id === "string"
+    ? firstRow.case_id
+    : "";
+  const rowKey = typeof firstRow?.id === "string" ? firstRow.id : "";
+  return {
+    ...group,
+    detail_key: relationKey || rowKey || group.group_id,
+  };
+}
+
+function parseWorkbenchCursor(cursor: string | null, prefix: string) {
+  if (!cursor?.startsWith(prefix)) {
+    return 0;
+  }
+  const offset = Number(cursor.slice(prefix.length));
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+}
+
+function nextWorkbenchCursor(prefix: string, offset: number, pageSize: number, total: number) {
+  const nextOffset = offset + pageSize;
+  return nextOffset < total ? `${prefix}${nextOffset}` : null;
+}
+
 const workbenchSearchableRowFields = [
   "label",
   "status",
@@ -1406,23 +1390,10 @@ function workbenchSummary(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
-  pageEmpty = false,
   largeDataset = false,
   amountMismatchScenario = false,
   amountMismatchIgnored = false,
 ) {
-  if (pageEmpty) {
-    return {
-      oa_count: 0,
-      bank_count: 0,
-      invoice_count: 0,
-      paired_count: 0,
-      unpaired_count: 0,
-      exception_count: 0,
-      ignored_exception_count: rowIgnored ? 1 : 0,
-      ignored_count: rowIgnored ? 1 : 0,
-    };
-  }
   if (largeDataset) {
     return {
       oa_count: 210,
@@ -1452,34 +1423,25 @@ function workbenchGroupsPayload(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
-  pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
-  page = 1,
+  cursor: string | null = null,
   pageSize = 50,
   search = "",
   exceptionBucket = "",
   amountMismatchScenario = false,
   amountMismatchIgnored = false,
 ) {
-  const readModelVersion = amountMismatchIgnored
-    ? "workbench-generation-e2e-003"
-    : relationConfirmed || exceptionApplied || rowIgnored
-      ? "workbench-generation-e2e-002"
-      : "workbench-generation-e2e-001";
-  const allGroups = pageEmpty
-    ? []
-    : workbenchGroups(
-      zone,
-      relationConfirmed,
-      exceptionApplied,
-      rowIgnored,
-      largeDataset,
-      includeCashSpecialActions,
-      amountMismatchScenario,
-      amountMismatchIgnored,
-    );
+  const allGroups = workbenchGroups(
+    zone,
+    relationConfirmed,
+    exceptionApplied,
+    rowIgnored,
+    largeDataset,
+    includeCashSpecialActions,
+    amountMismatchScenario,
+    amountMismatchIgnored,
+  ).map(withWorkbenchDetailKey);
   const normalizedSearch = search.trim().toLowerCase();
   const searchedGroups = normalizedSearch
     ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
@@ -1493,22 +1455,17 @@ function workbenchGroupsPayload(
     }
     return true;
   });
-  const boundedPage = Math.max(1, page);
   const boundedPageSize = Math.max(1, pageSize);
-  const start = (boundedPage - 1) * boundedPageSize;
+  const cursorPrefix = `workbench:${zone}:`;
+  const start = parseWorkbenchCursor(cursor, cursorPrefix);
   const pageGroups = groups.slice(start, start + boundedPageSize);
   return {
-    month: "all",
-    zone,
-    page: boundedPage,
-    page_size: boundedPageSize,
+    groups: pageGroups,
     total: groups.length,
     row_counts: countWorkbenchRows(groups),
+    page_size: boundedPageSize,
     has_more: start + pageGroups.length < groups.length,
-    groups: pageGroups,
-    read_model_status: pageStatus,
-    read_model_version: readModelVersion,
-    active_generation_id: readModelVersion,
+    next_cursor: nextWorkbenchCursor(cursorPrefix, start, boundedPageSize, groups.length),
   };
 }
 
@@ -1545,26 +1502,21 @@ function workbenchFilterOptionsPayload(
     .filter(Boolean)
     .filter((value) => !search || value.toLocaleLowerCase("zh-CN").includes(search))
     .sort((left, right) => left.localeCompare(right, "zh-CN"));
-  const page = Math.max(1, Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1);
   const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") ?? "100", 10) || 100);
-  const start = (page - 1) * pageSize;
-  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
-    ? "workbench-generation-e2e-002"
-    : "workbench-generation-e2e-001";
+  const cursorPrefix = `workbench-option:${zone}:${pane}:${facet}:${column}:`;
+  const start = parseWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
   return {
     options: options.slice(start, start + pageSize).map((value) => ({ value, label: value, missing: false })),
-    page,
     page_size: pageSize,
     has_more: start + pageSize < options.length,
-    read_model_status: "fresh",
-    read_model_version: readModelVersion,
+    next_cursor: nextWorkbenchCursor(cursorPrefix, start, pageSize, options.length),
   };
 }
 
 function bankFlowRuleWorkbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
-  page = 1,
+  cursor: string | null = null,
   pageSize = 200,
   search = "",
   includeFeeGroup = true,
@@ -1574,25 +1526,17 @@ function bankFlowRuleWorkbenchGroupsPayload(
   const groups = normalizedSearch
     ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
     : allGroups;
-  const boundedPage = Math.max(1, page);
   const boundedPageSize = Math.max(1, pageSize);
-  const start = (boundedPage - 1) * boundedPageSize;
-  const pageGroups = groups.slice(start, start + boundedPageSize);
-  const readModelVersion = relationConfirmed
-    ? "workbench-generation-e2e-002"
-    : "workbench-generation-e2e-001";
+  const cursorPrefix = `workbench-bank-flow:${zone}:`;
+  const start = parseWorkbenchCursor(cursor, cursorPrefix);
+  const pageGroups = groups.slice(start, start + boundedPageSize).map(withWorkbenchDetailKey);
   return {
-    month: "all",
-    zone,
-    page: boundedPage,
-    page_size: boundedPageSize,
+    groups: pageGroups,
     total: groups.length,
     row_counts: countWorkbenchRows(groups),
+    page_size: boundedPageSize,
     has_more: start + pageGroups.length < groups.length,
-    groups: pageGroups,
-    read_model_status: "fresh",
-    read_model_version: readModelVersion,
-    active_generation_id: readModelVersion,
+    next_cursor: nextWorkbenchCursor(cursorPrefix, start, boundedPageSize, groups.length),
   };
 }
 
@@ -1676,31 +1620,41 @@ function workbenchInitialPayload(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
-  pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
   zoneSearch: Partial<Record<WorkbenchZone, string>> = {},
   amountMismatchScenario = false,
   amountMismatchIgnored = false,
 ) {
-  const readModelVersion = amountMismatchIgnored
-    ? "workbench-generation-e2e-003"
-    : relationConfirmed || exceptionApplied || rowIgnored
-      ? "workbench-generation-e2e-002"
-      : "workbench-generation-e2e-001";
+  const summary = workbenchSummary(
+    relationConfirmed,
+    exceptionApplied,
+    rowIgnored,
+    largeDataset,
+    amountMismatchScenario,
+    amountMismatchIgnored,
+  );
   return {
     month: "all",
-    summary: workbenchSummary(
-      relationConfirmed,
-      exceptionApplied,
-      rowIgnored,
-      pageEmpty,
-      largeDataset,
-      amountMismatchScenario,
-      amountMismatchIgnored,
-    ),
-    oa_status: { code: "ready", message: "OA 已同步" },
+    scope_key: "all",
+    summary,
+    statistics: {
+      oa_count: summary.oa_count,
+      bank_transaction_count: summary.bank_count,
+      input_invoice_count: summary.invoice_count,
+      output_invoice_count: 0,
+      paired_group_count: summary.paired_count,
+      unpaired_object_count: summary.unpaired_count,
+      expense_transaction_count: 0,
+      income_transaction_count: 0,
+      paired_oa_count: relationConfirmed ? 1 : 0,
+      paired_bank_transaction_count: relationConfirmed ? 1 : 0,
+      paired_invoice_count: relationConfirmed ? 1 : 0,
+      incomplete_group_count: 0,
+      missing_oa_group_count: 0,
+      missing_bank_group_count: 0,
+      missing_invoice_group_count: 0,
+    },
     invoice_inventory: {
       system_total: largeDataset ? 210 : 1,
       manual_import_total: 0,
@@ -1715,11 +1669,9 @@ function workbenchInitialPayload(
       relationConfirmed,
       exceptionApplied,
       rowIgnored,
-      pageStatus,
-      pageEmpty,
       largeDataset,
       includeCashSpecialActions,
-      1,
+      null,
       50,
       zoneSearch.paired ?? "",
       "",
@@ -1731,21 +1683,15 @@ function workbenchInitialPayload(
       relationConfirmed,
       exceptionApplied,
       rowIgnored,
-      pageStatus,
-      pageEmpty,
       largeDataset,
       includeCashSpecialActions,
-      1,
+      null,
       50,
       zoneSearch.unpaired ?? "",
       "",
       amountMismatchScenario,
       amountMismatchIgnored,
     ),
-    read_model_status: pageStatus,
-    read_model_version: readModelVersion,
-    active_generation_id: readModelVersion,
-    generated_at: "2026-06-17T01:00:00Z",
   };
 }
 
@@ -1780,17 +1726,17 @@ function withIncompleteUnpairedRelation(payload: ReturnType<typeof workbenchInit
 
 function incompleteRelationGroupsPayload(
   zone: WorkbenchZone,
-  pageStatus: WorkbenchPageMockStatus,
-  page: number,
+  cursor: string | null,
   pageSize: number,
 ) {
   const relationGroups = zone === "unpaired" ? [buildIncompleteUnpairedRelationGroup()] : [];
   return {
-    ...workbenchGroupsPayload(zone, true, false, false, pageStatus, false, false, false, page, pageSize),
+    ...workbenchGroupsPayload(zone, true, false, false, false, false, cursor, pageSize),
     total: relationGroups.length,
     row_counts: countWorkbenchRows(relationGroups),
     has_more: false,
-    groups: relationGroups,
+    next_cursor: null,
+    groups: relationGroups.map(withWorkbenchDetailKey),
   };
 }
 
@@ -6394,12 +6340,6 @@ function confirmResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    operation_projection: {
-      after: {
-        paired_groups: [buildPairedWorkbenchGroup()],
-        unpaired_groups: [],
-      },
-    },
     message: "已确认 3 条记录关联。",
   };
 }
@@ -6433,12 +6373,6 @@ function withdrawResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    operation_projection: {
-      after: {
-        paired_groups: [],
-        unpaired_groups: buildUnpairedWorkbenchGroups(),
-      },
-    },
     message: "已撤回 3 条记录关联。",
   };
 }
@@ -6505,7 +6439,6 @@ function workbenchExceptionApplyResultPayload() {
     updated_rows: [],
     affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     affected_scope_keys: ["2026-03"],
-    workbench_refresh_required: true,
     message: "已提交统一异常处理。",
   };
 }
@@ -6550,12 +6483,6 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    operation_projection: {
-      after: {
-        paired_groups: [buildPairedWorkbenchGroup(true)],
-        unpaired_groups: [],
-      },
-    },
     message: messages[action],
   };
 }
@@ -8257,8 +8184,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchAmountMismatchIgnored = false;
   let workbenchConfirmSubmitAttempts = 0;
+  let workbenchMutationCommitted = false;
   let workbenchGroupsFailuresRemaining = options.workbenchGroupsFailuresBeforeSuccess ?? 0;
-  const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
   let bankDetailsCategoryOverride: BankDetailCategoryOverride | null = null;
   let bankAutoTagRulesVersion = 1;
   let bankAutoTagRulesSalarySubLabel = "工资";
@@ -8326,8 +8253,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     ? "etc-recon-e2e-001"
     : "etc-recon-workflow-e2e-001";
   let bankFlowRuleBatchStatus: BankFlowRuleBrowserBatchStatus = "draft";
-  let bankFlowRuleWorkbenchRefreshReads = 0;
-  const bankFlowRuleWorkbenchConvergenceReads = Math.max(2, options.bankFlowRuleWorkbenchConvergenceReads ?? 4);
   let bankFlowRuleBatchFailuresRemaining =
     options.bankFlowRuleBatchFailuresBeforeSuccess ?? (options.bankFlowRuleBatchFailOnce ? 1 : 0);
   const bankFlowRuleMutationScope = options.bankFlowRuleBatchScenario === "internalTransferPairs" ? "2026-01" : "2026-05";
@@ -8436,29 +8361,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/oa-sync/status") {
       return json(route, oaSyncPayload(options.oaSyncMode));
-    }
-
-    if (path === "/api/workbench/refresh-status") {
-      if (options.bankFlowRuleWorkbenchConvergence && bankFlowRuleBatchStatus === "submitted") {
-        bankFlowRuleWorkbenchRefreshReads += 1;
-        const converged = bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
-        return json(route, {
-          scope_key: "all",
-          read_model_status: converged ? "fresh" : "stale",
-          read_model_version: converged
-            ? "workbench-generation-e2e-002"
-            : "workbench-generation-e2e-001",
-          active_generation_id: converged
-            ? "workbench-generation-e2e-002"
-            : "workbench-generation-e2e-001",
-          refresh_scope_keys: converged ? [] : ["2026-05"],
-          dirty_scopes: converged
-            ? []
-            : [{ scope_key: "2026-05", status: "processing", active_event: true }],
-          retryable: false,
-        });
-      }
-      return json(route, workbenchRefreshStatusPayload(options.workbenchRefreshStatus));
     }
 
     if (path === "/api/operation-barrier/status") {
@@ -9358,7 +9260,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/submit-selection") {
       bankFlowRuleBatchStatus = "submitted";
-      bankFlowRuleWorkbenchRefreshReads = 0;
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
         bankFlowRuleMutationScope,
@@ -9376,7 +9277,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-001/withdraw") {
       bankFlowRuleBatchStatus = "withdrawn";
-      bankFlowRuleWorkbenchRefreshReads = 0;
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
         bankFlowRuleMutationScope,
@@ -9458,7 +9358,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench") {
-      if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
+      if (options.workbenchCombinedRereadError && workbenchMutationCommitted) {
         return json(route, {
           error: "browser_workbench_refetch_failed",
           message: "browser workbench refetch failed",
@@ -9481,9 +9381,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           relationConfirmed,
           workbenchExceptionApplied,
           workbenchRowIgnored,
-          workbenchPageStatus,
         );
-        const groups = relationConfirmed ? [] : [buildOaExpenseItemsWorkbenchGroup()];
+        const groups = relationConfirmed ? [] : [withWorkbenchDetailKey(buildOaExpenseItemsWorkbenchGroup())];
         return json(route, {
           ...payload,
           summary: {
@@ -9504,12 +9403,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.workbenchBankFlowRuleBatchScenario) {
         const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
           && bankFlowRuleBatchStatus === "submitted"
-          && bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
-        const readModelVersion = relationConfirmed || bankFlowRuleConverged
-          ? "workbench-generation-e2e-002"
-          : "workbench-generation-e2e-001";
+          ;
         return json(route, {
           month: "all",
+          scope_key: "all",
           summary: {
             oa_count: 0,
             bank_count: 5,
@@ -9519,7 +9416,23 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             exception_count: 0,
             ignored_count: 0,
           },
-          oa_status: { code: "ready", message: "OA 已同步" },
+          statistics: {
+            oa_count: 0,
+            bank_transaction_count: 5,
+            input_invoice_count: relationConfirmed ? 1 : 0,
+            output_invoice_count: 0,
+            paired_group_count: relationConfirmed ? 2 : 1,
+            unpaired_object_count: relationConfirmed ? 0 : 1,
+            expense_transaction_count: 5,
+            income_transaction_count: 0,
+            paired_oa_count: 0,
+            paired_bank_transaction_count: 5,
+            paired_invoice_count: relationConfirmed ? 1 : 0,
+            incomplete_group_count: 0,
+            missing_oa_group_count: 0,
+            missing_bank_group_count: 0,
+            missing_invoice_group_count: 0,
+          },
           invoice_inventory: {
             system_total: 0,
             manual_import_total: 0,
@@ -9532,7 +9445,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           paired: bankFlowRuleWorkbenchGroupsPayload(
             "paired",
             relationConfirmed,
-            1,
+            null,
             200,
             initialZoneSearch("paired"),
             !options.bankFlowRuleWorkbenchConvergence || bankFlowRuleConverged,
@@ -9540,22 +9453,16 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           unpaired: bankFlowRuleWorkbenchGroupsPayload(
             "unpaired",
             relationConfirmed,
-            1,
+            null,
             200,
             initialZoneSearch("unpaired"),
           ),
-          read_model_status: "fresh",
-          read_model_version: readModelVersion,
-          active_generation_id: readModelVersion,
-          generated_at: "2026-06-17T01:00:00Z",
         });
       }
       const payload = workbenchInitialPayload(
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
-        workbenchPageStatus,
-        options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
         {
@@ -9772,23 +9679,39 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "关联台下一页暂时加载失败，请重试。",
         }, 503);
       }
-      if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
-        return json(route, {
-          error: "browser_workbench_refetch_failed",
-          message: "browser workbench refetch failed",
-        }, 500);
-      }
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
-      const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+      const requestedCursor = url.searchParams.get("cursor");
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
+      const exceptionBucket = url.searchParams.get("exception_bucket");
+      if (exceptionBucket && options.workbenchExceptionDatasetSize) {
+        const allExceptionGroups = zone === "paired"
+          ? buildAmountMismatchWorkbenchGroups(options.workbenchExceptionDatasetSize, workbenchAmountMismatchIgnored)
+          : [];
+        const exceptionGroups = allExceptionGroups.filter((group) => (
+          exceptionBucket === "processed"
+            ? group.oa_invoice_anomaly.state === "ignored"
+            : group.oa_invoice_anomaly.state === "active"
+        ));
+        const boundedPageSize = Number.isFinite(requestedPageSize) ? Math.max(1, requestedPageSize) : 50;
+        const cursorPrefix = `workbench-exception:${zone}:${exceptionBucket}:`;
+        const offset = parseWorkbenchCursor(requestedCursor, cursorPrefix);
+        const groups = exceptionGroups.slice(offset, offset + boundedPageSize);
+        return json(route, {
+          groups,
+          total: exceptionGroups.length,
+          row_counts: countWorkbenchRows(exceptionGroups),
+          page_size: boundedPageSize,
+          has_more: offset + groups.length < exceptionGroups.length,
+          next_cursor: nextWorkbenchCursor(cursorPrefix, offset, boundedPageSize, exceptionGroups.length),
+        });
+      }
       if (options.workbenchBankFlowRuleBatchScenario) {
         const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
-          && bankFlowRuleBatchStatus === "submitted"
-          && bankFlowRuleWorkbenchRefreshReads >= bankFlowRuleWorkbenchConvergenceReads;
+          && bankFlowRuleBatchStatus === "submitted";
         return json(route, bankFlowRuleWorkbenchGroupsPayload(
           zone,
           relationConfirmed,
-          Number.isFinite(requestedPage) ? requestedPage : 1,
+          requestedCursor,
           Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
           url.searchParams.get("search") ?? "",
           !options.bankFlowRuleWorkbenchConvergence || bankFlowRuleConverged,
@@ -9803,19 +9726,22 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             relationConfirmed,
             workbenchExceptionApplied,
             workbenchRowIgnored,
-            workbenchPageStatus,
+            false,
+            false,
+            requestedCursor,
+            Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
           ),
           total: groups.length,
           row_counts: countWorkbenchRows(groups),
           has_more: false,
-          groups,
+          next_cursor: null,
+          groups: groups.map(withWorkbenchDetailKey),
         });
       }
       if (options.workbenchInitialIncompleteRelation && relationConfirmed) {
         return json(route, incompleteRelationGroupsPayload(
           zone,
-          workbenchPageStatus,
-          Number.isFinite(requestedPage) ? requestedPage : 1,
+          requestedCursor,
           Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
         ));
       }
@@ -9824,34 +9750,43 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
-        workbenchPageStatus,
-        options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
-        Number.isFinite(requestedPage) ? requestedPage : 1,
+        requestedCursor,
         Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
         url.searchParams.get("search") ?? "",
-        url.searchParams.get("exception_bucket") ?? "",
+        exceptionBucket ?? "",
         options.workbenchAmountMismatchScenario === true,
         workbenchAmountMismatchIgnored,
       ));
     }
 
-    if (path === "/api/workbench/groups/detail" && options.workbenchBankFlowRuleBatchScenario) {
+    if (path === "/api/workbench/groups/detail") {
       const zone = url.searchParams.get("zone") === "unpaired" ? "unpaired" : "paired";
       const groupId = url.searchParams.get("group_id") ?? "";
-      const group = bankFlowRuleWorkbenchGroups(zone, relationConfirmed, true)
-        .find((candidate) => candidate.group_id === groupId);
+      const sourceGroups = options.workbenchBankFlowRuleBatchScenario
+        ? bankFlowRuleWorkbenchGroups(zone, relationConfirmed, true)
+        : options.workbenchExceptionDatasetSize
+          ? buildAmountMismatchWorkbenchGroups(options.workbenchExceptionDatasetSize, workbenchAmountMismatchIgnored)
+          : workbenchGroups(
+            zone,
+            relationConfirmed,
+            workbenchExceptionApplied,
+            workbenchRowIgnored,
+            options.workbenchLargeDataset === true,
+            options.workbenchCashSpecialActions === true,
+            options.workbenchAmountMismatchScenario === true,
+            workbenchAmountMismatchIgnored,
+          );
+      const group = sourceGroups.find((candidate) => candidate.group_id === groupId);
       if (!group) {
         return json(route, { error: "workbench_group_not_found" }, 404);
       }
-      return json(route, {
-        group,
-        read_model_status: "fresh",
-        read_model_version: relationConfirmed
-          ? "workbench-generation-e2e-002"
-          : "workbench-generation-e2e-001",
-      });
+      const detailedGroup = withWorkbenchDetailKey(group);
+      if (url.searchParams.get("detail_key") !== detailedGroup.detail_key) {
+        return json(route, { error: "workbench_group_detail_key_required" }, 400);
+      }
+      return json(route, { group: detailedGroup });
     }
 
     const workbenchRowDetailMatch = path.match(/^\/api\/workbench\/rows\/([^/]+)$/);
@@ -9870,6 +9805,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           error: "workbench_row_not_found",
           message: "关联台记录不存在。",
         }, 404);
+      }
+      if (url.searchParams.get("row_type") !== row.type) {
+        return json(route, { error: "workbench_row_type_required" }, 400);
       }
       return json(route, { row });
     }
@@ -9919,6 +9857,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }, 500);
       }
       relationConfirmed = true;
+      workbenchMutationCommitted = true;
       if (options.workbenchBankFlowRuleBatchScenario) {
         return json(route, bankFlowRuleConfirmResultPayload());
       }
@@ -9946,6 +9885,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/withdraw-link") {
       await delay(Math.max(0, options.workbenchWithdrawSubmitDelayMs ?? 200));
       relationConfirmed = false;
+      workbenchMutationCommitted = true;
       return json(route, withdrawResultPayload());
     }
 
@@ -9958,6 +9898,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       relationConfirmed = false;
       workbenchRowIgnored = false;
       workbenchExceptionApplied = true;
+      workbenchMutationCommitted = true;
       return json(route, workbenchExceptionApplyResultPayload());
     }
 
@@ -9965,6 +9906,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       await delay(200);
       workbenchExceptionApplied = false;
       relationConfirmed = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchExceptionActionResultPayload("cancel_exception"));
     }
 
@@ -9973,23 +9915,25 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       workbenchRowIgnored = true;
       workbenchExceptionApplied = false;
       relationConfirmed = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchExceptionActionResultPayload("ignore_row"));
     }
 
     if (path === "/api/workbench/actions/unignore-row") {
       await delay(200);
       workbenchRowIgnored = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchExceptionActionResultPayload("unignore_row"));
     }
 
     if (path === "/api/workbench/exceptions/amount-mismatch/ignore") {
       await delay(200);
       workbenchAmountMismatchIgnored = true;
+      workbenchMutationCommitted = true;
       return json(route, {
         status: "ignored",
         changed: true,
         affected_scope_keys: ["2026-03"],
-        read_model_status: "refreshing",
         message: "已忽略金额异常。",
       });
     }
@@ -9997,11 +9941,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/exceptions/amount-mismatch/restore") {
       await delay(200);
       workbenchAmountMismatchIgnored = false;
+      workbenchMutationCommitted = true;
       return json(route, {
         status: "cancelled",
         changed: true,
         affected_scope_keys: ["2026-03"],
-        read_model_status: "refreshing",
         message: "已撤回忽略。",
       });
     }
@@ -10011,6 +9955,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       relationConfirmed = true;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_pass_through"));
     }
 
@@ -10019,6 +9964,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       relationConfirmed = true;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_ticket_purchase"));
     }
 
@@ -10027,6 +9973,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       relationConfirmed = true;
       workbenchExceptionApplied = false;
       workbenchRowIgnored = false;
+      workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("cancel_cash_special"));
     }
 

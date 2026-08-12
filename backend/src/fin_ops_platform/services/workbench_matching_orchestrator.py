@@ -230,6 +230,7 @@ class WorkbenchMatchingOrchestrator:
                     actor_id=AUTO_RELATION_ACTOR,
                     etc_batch_links=plan_links,
                     paired_requirements_by_case_id=command.paired_requirements_by_case_id,
+                    tenant_id=command.tenant_id,
                 )
                 enrichment_result = service.enrich_etc_batch_links(
                     existing_links, actor_id=AUTO_RELATION_ACTOR

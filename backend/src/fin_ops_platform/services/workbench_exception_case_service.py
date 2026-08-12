@@ -5,6 +5,10 @@ from datetime import UTC, datetime
 from itertools import count
 from typing import Any
 
+from fin_ops_platform.services.workbench_row_identity import (
+    workbench_row_identity_key,
+)
+
 
 EXCEPTION_CASE_DEFINITIONS: dict[str, dict[str, str]] = {
     "oa_missing_bank": {
@@ -78,9 +82,11 @@ class WorkbenchExceptionCaseService:
         self._cases = self._normalize_cases(cases or {})
         self._case_counter_value = max(int(case_counter), self._max_case_counter(self._cases))
         self._case_counter = count(self._case_counter_value + 1)
-        self._row_case_index = self._normalize_row_case_index(row_case_index or {})
-        if not self._row_case_index:
-            self._row_case_index = self._build_row_case_index()
+        # Cases are the durable source of truth.  Rebuild the derived index so
+        # legacy snapshots keyed only by row_id cannot collapse two panes that
+        # legitimately share the same textual id.
+        _ = row_case_index
+        self._row_case_index = self._build_row_case_index()
 
     @classmethod
     def from_snapshot(cls, snapshot: dict[str, Any] | None) -> "WorkbenchExceptionCaseService":
@@ -130,7 +136,10 @@ class WorkbenchExceptionCaseService:
         normalized_code = self._normalize_exception_code(exception_code)
         normalized_label = self._non_empty_text(exception_label, "exception_label")
         normalized_category = self._non_empty_text(category, "category")
-        active_case_ids = self.case_ids_for_rows([row["id"] for row in normalized_rows])
+        active_case_ids = self.case_ids_for_typed_rows(
+            [row["id"] for row in normalized_rows],
+            [row["type"] for row in normalized_rows],
+        )
         if active_case_ids:
             raise ValueError(f"rows already have active exception cases: {', '.join(active_case_ids)}")
 
@@ -144,7 +153,7 @@ class WorkbenchExceptionCaseService:
             "exception_label": normalized_label,
             "category": normalized_category,
             "row_ids": row_ids,
-            "row_types": self._unique_preserve_order(row["type"] for row in normalized_rows),
+            "row_types": [row["type"] for row in normalized_rows],
             "scope_months": self._normalize_scope_months(scope_months, normalized_rows),
             "comment": comment,
             "created_at": now,
@@ -159,8 +168,10 @@ class WorkbenchExceptionCaseService:
         }
         self._ensure_v2_compat_fields(case_payload)
         self._cases[case_id] = case_payload
-        for row_id in row_ids:
-            self._row_case_index[row_id] = case_id
+        for row in normalized_rows:
+            self._row_case_index[
+                self._row_index_key(row["type"], row["id"])
+            ] = case_id
         return deepcopy(case_payload)
 
     def create_settlement_case(
@@ -187,7 +198,7 @@ class WorkbenchExceptionCaseService:
             "exception_label": normalized_label,
             "category": normalized_category,
             "row_ids": row_ids,
-            "row_types": self._unique_preserve_order(row["type"] for row in normalized_rows),
+            "row_types": [row["type"] for row in normalized_rows],
             "scope_months": self._normalize_scope_months(scope_months, normalized_rows),
             "comment": comment,
             "created_at": now,
@@ -228,7 +239,10 @@ class WorkbenchExceptionCaseService:
         result_status = str(action.get("result_status") or "").strip()
         status = result_status if result_status in {"open", "closed"} else "open"
         if status in ACTIVE_CASE_STATUSES:
-            active_case_ids = self.case_ids_for_rows([row["id"] for row in normalized_rows])
+            active_case_ids = self.case_ids_for_typed_rows(
+                [row["id"] for row in normalized_rows],
+                [row["type"] for row in normalized_rows],
+            )
             if active_case_ids:
                 raise ValueError(f"rows already have active exception cases: {', '.join(active_case_ids)}")
 
@@ -262,7 +276,7 @@ class WorkbenchExceptionCaseService:
             "scenario_label": scenario_label,
             "rule_version": rule_version,
             "row_ids": row_ids,
-            "row_types": self._unique_preserve_order(row["type"] for row in normalized_rows),
+            "row_types": [row["type"] for row in normalized_rows],
             "scope_months": self._normalize_scope_months(None, normalized_rows),
             "amount_summary": deepcopy(amount_summary if isinstance(amount_summary, dict) else {}),
             "resolution": resolution,
@@ -297,8 +311,10 @@ class WorkbenchExceptionCaseService:
         }
         self._cases[case_id] = case_payload
         if status in ACTIVE_CASE_STATUSES:
-            for row_id in row_ids:
-                self._row_case_index[row_id] = case_id
+            for row in normalized_rows:
+                self._row_case_index[
+                    self._row_index_key(row["type"], row["id"])
+                ] = case_id
         return deepcopy(case_payload)
 
     def get_case(self, case_id: str) -> dict[str, Any] | None:
@@ -319,10 +335,14 @@ class WorkbenchExceptionCaseService:
                 return deepcopy(case_payload)
         return None
 
-    def preview_existing_case_conflicts(self, row_ids: list[str]) -> list[dict[str, Any]]:
+    def preview_existing_case_conflicts(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
         return [
             deepcopy(self._cases[case_id])
-            for case_id in self.case_ids_for_rows(row_ids)
+            for case_id in self.case_ids_for_typed_rows(row_ids, row_types)
             if isinstance(self._cases.get(case_id), dict)
         ]
 
@@ -379,8 +399,11 @@ class WorkbenchExceptionCaseService:
         rows: list[dict[str, Any]],
         comment: str | None = None,
     ) -> list[dict[str, Any]]:
-        row_ids = [row["id"] for row in self._normalize_rows(rows)]
-        case_ids = self.case_ids_for_rows(row_ids)
+        normalized_rows = self._normalize_rows(rows)
+        case_ids = self.case_ids_for_typed_rows(
+            [row["id"] for row in normalized_rows],
+            [row["type"] for row in normalized_rows],
+        )
         cancelled: list[dict[str, Any]] = []
         for case_id in case_ids:
             case_payload = self._cases.get(case_id)
@@ -395,7 +418,10 @@ class WorkbenchExceptionCaseService:
         if normalized_row["type"] != "invoice":
             raise ValueError("ignore_row only supports invoice rows.")
 
-        existing_case_ids = self.case_ids_for_rows([normalized_row["id"]])
+        existing_case_ids = self.case_ids_for_typed_rows(
+            [normalized_row["id"]],
+            [normalized_row["type"]],
+        )
         if existing_case_ids:
             existing_case = self._cases[existing_case_ids[0]]
             if existing_case.get("status") == "ignored":
@@ -417,7 +443,10 @@ class WorkbenchExceptionCaseService:
 
     def unignore_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
         normalized_row = self._normalize_rows([row])[0]
-        case_ids = self.case_ids_for_rows([normalized_row["id"]])
+        case_ids = self.case_ids_for_typed_rows(
+            [normalized_row["id"]],
+            [normalized_row["type"]],
+        )
         if not case_ids:
             return None
         case_payload = self._cases.get(case_ids[0])
@@ -428,17 +457,41 @@ class WorkbenchExceptionCaseService:
         return self._transition_case(case_payload, action="unignored", status="cancelled", comment=None)
 
     def case_ids_for_rows(self, row_ids: list[str]) -> list[str]:
+        requested = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
         case_ids: list[str] = []
-        seen: set[str] = set()
-        for row_id in row_ids:
-            case_id = self._row_case_index.get(str(row_id))
-            if not case_id or case_id in seen:
+        for case_id, case_payload in self._cases.items():
+            if case_payload.get("status") not in ACTIVE_CASE_STATUSES:
                 continue
-            case_payload = self._cases.get(case_id)
-            if not isinstance(case_payload, dict) or case_payload.get("status") not in ACTIVE_CASE_STATUSES:
+            case_row_ids = {
+                str(row_id).strip()
+                for row_id in list(case_payload.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            if requested.intersection(case_row_ids):
+                case_ids.append(case_id)
+        return case_ids
+
+    def case_ids_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[str]:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        requested = {
+            (str(row_type or "").strip(), str(row_id or "").strip())
+            for row_type, row_id in zip(row_types, row_ids, strict=True)
+        }
+        case_ids: list[str] = []
+        for case_id, case_payload in self._cases.items():
+            if case_payload.get("status") not in ACTIVE_CASE_STATUSES:
                 continue
-            seen.add(case_id)
-            case_ids.append(case_id)
+            case_row_ids = [str(value or "").strip() for value in list(case_payload.get("row_ids") or [])]
+            case_row_types = [str(value or "").strip() for value in list(case_payload.get("row_types") or [])]
+            if len(case_row_ids) != len(case_row_types):
+                raise ValueError(f"exception case has unaligned typed rows: {case_id}")
+            if requested.intersection(zip(case_row_types, case_row_ids, strict=True)):
+                case_ids.append(case_id)
         return case_ids
 
     def _transition_case(
@@ -463,45 +516,45 @@ class WorkbenchExceptionCaseService:
         if isinstance(audit, list):
             audit.append({"event": action, "actor": "system", "at": now, "payload": {"comment": comment}})
         if status not in ACTIVE_CASE_STATUSES:
-            for row_id in list(case_payload.get("row_ids") or []):
-                if self._row_case_index.get(str(row_id)) == case_payload["id"]:
-                    del self._row_case_index[str(row_id)]
+            row_ids = [str(value or "").strip() for value in list(case_payload.get("row_ids") or [])]
+            row_types = [str(value or "").strip() for value in list(case_payload.get("row_types") or [])]
+            if len(row_ids) != len(row_types):
+                raise ValueError("exception case has unaligned typed rows.")
+            for row_type, row_id in zip(row_types, row_ids, strict=True):
+                index_key = self._row_index_key(row_type, row_id)
+                if self._row_case_index.get(index_key) == case_payload["id"]:
+                    del self._row_case_index[index_key]
         else:
-            for row_id in list(case_payload.get("row_ids") or []):
-                resolved_row_id = str(row_id).strip()
-                if resolved_row_id:
-                    self._row_case_index[resolved_row_id] = str(case_payload["id"])
+            row_ids = [str(value or "").strip() for value in list(case_payload.get("row_ids") or [])]
+            row_types = [str(value or "").strip() for value in list(case_payload.get("row_types") or [])]
+            if len(row_ids) != len(row_types):
+                raise ValueError("exception case has unaligned typed rows.")
+            for row_type, row_id in zip(row_types, row_ids, strict=True):
+                self._row_case_index[
+                    self._row_index_key(row_type, row_id)
+                ] = str(case_payload["id"])
         return deepcopy(case_payload)
 
     def _next_case_id(self) -> str:
         self._case_counter_value = next(self._case_counter)
         return f"WEX-{self._case_counter_value:06d}"
 
-    def _normalize_row_case_index(self, row_case_index: dict[str, Any]) -> dict[str, str]:
-        normalized: dict[str, str] = {}
-        for row_id, case_id in row_case_index.items():
-            resolved_row_id = str(row_id).strip()
-            resolved_case_id = str(case_id).strip()
-            case_payload = self._cases.get(resolved_case_id)
-            if not resolved_row_id or not isinstance(case_payload, dict):
-                continue
-            if case_payload.get("status") not in ACTIVE_CASE_STATUSES:
-                continue
-            if resolved_row_id not in set(case_payload.get("row_ids") or []):
-                continue
-            normalized[resolved_row_id] = resolved_case_id
-        return normalized
-
     def _build_row_case_index(self) -> dict[str, str]:
         index: dict[str, str] = {}
         for case_id, case_payload in self._cases.items():
             if case_payload.get("status") not in ACTIVE_CASE_STATUSES:
                 continue
-            for row_id in case_payload.get("row_ids") or []:
-                resolved_row_id = str(row_id).strip()
-                if resolved_row_id:
-                    index[resolved_row_id] = case_id
+            row_ids = [str(value or "").strip() for value in list(case_payload.get("row_ids") or [])]
+            row_types = [str(value or "").strip() for value in list(case_payload.get("row_types") or [])]
+            if len(row_ids) != len(row_types):
+                raise ValueError(f"exception case has unaligned typed rows: {case_id}")
+            for row_type, row_id in zip(row_types, row_ids, strict=True):
+                index[self._row_index_key(row_type, row_id)] = case_id
         return index
+
+    @staticmethod
+    def _row_index_key(row_type: object, row_id: object) -> str:
+        return workbench_row_identity_key(row_type, row_id)
 
     @classmethod
     def _normalize_cases(cls, cases: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -546,7 +599,7 @@ class WorkbenchExceptionCaseService:
         if not isinstance(rows, list) or not rows:
             raise ValueError("rows must contain at least one row.")
         normalized: list[dict[str, str]] = []
-        seen_row_ids: set[str] = set()
+        seen_identities: set[tuple[str, str]] = set()
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("rows must contain dictionaries.")
@@ -556,9 +609,10 @@ class WorkbenchExceptionCaseService:
                 raise ValueError("row id is required.")
             if row_type not in ROW_TYPES:
                 raise ValueError(f"unsupported row type: {row_type}")
-            if row_id in seen_row_ids:
-                raise ValueError(f"duplicate row id: {row_id}")
-            seen_row_ids.add(row_id)
+            identity = (row_type, row_id)
+            if identity in seen_identities:
+                raise ValueError(f"duplicate typed row: {row_type}:{row_id}")
+            seen_identities.add(identity)
             normalized.append(
                 {
                     "id": row_id,
@@ -623,7 +677,11 @@ class WorkbenchExceptionCaseService:
 
     @staticmethod
     def _normalize_row_types(values: Any) -> list[str]:
-        row_types = WorkbenchExceptionCaseService._normalize_text_list(values, "row_types")
+        if not isinstance(values, list):
+            raise ValueError("row_types must be a list.")
+        row_types = [str(value or "").strip() for value in values]
+        if not row_types or any(not row_type for row_type in row_types):
+            raise ValueError("row_types must not be empty.")
         unsupported = [row_type for row_type in row_types if row_type not in ROW_TYPES]
         if unsupported:
             raise ValueError(f"unsupported row type: {unsupported[0]}")

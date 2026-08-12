@@ -18,48 +18,68 @@ BANK_FLOW_RULE_BATCH_SPEC_PATH = E2E_DIR / "bank-flow-rule-batches-flow.spec.ts"
 
 
 class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
-    def test_workbench_visibility_slo_is_explicit_bounded_and_same_clock(self) -> None:
+    def test_workbench_direct_commit_visibility_slo_is_explicit_bounded_and_same_clock(self) -> None:
         helper = OPERATION_LATENCY_PATH.read_text(encoding="utf-8")
         spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")
 
         for required in (
-            "createWorkbenchVisibilitySegmentRecorder",
+            "createWorkbenchDirectCommitVisibilityRecorder",
             "performance.now()",
             "Math.round",
-            "t0",
-            "t1",
-            "t2",
-            "t3",
-            "t4",
-            "segmentSumMicroseconds",
-            "totalMicroseconds",
+            "startAtMutationReceipt",
+            "markCanonicalReadVisible",
+            "markDomVisible",
+            "canonical_read_us",
+            "browser_render_us",
+            "receipt_to_dom_us",
             "isolated",
             "production_smoke",
-            "40-workbench-visibility-p99.json",
+            "40-workbench-direct-commit-visibility-p99.json",
             "import.meta.url",
         ):
             self.assertIn(required, helper)
 
         for required in (
-            'process.env.FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO === "1"',
-            "FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO_SAMPLES",
-            "FIN_OPS_E2E_WORKBENCH_SLO_FIXTURE_MANIFEST",
+            'process.env.FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY === "1"',
+            "FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_MODE",
+            "FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_SAMPLES",
+            "FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY_FIXTURE_MANIFEST",
             "fixture_ownership",
             "test_owned",
             "context().request.post",
+            "page.waitForResponse",
+            'page.goto("/")',
+            'url.pathname !== "/api/workbench"',
+            'url.searchParams.get("month") !== "all"',
+            "transaction_ids",
+            "business_identity",
+            "withdraw",
+            "production_smoke",
+            "startAtMutationReceipt",
+            "markCanonicalReadVisible",
+            "markDomVisible",
+        ):
+            self.assertIn(required, spec)
+
+        receipt_start = spec.index("startAtMutationReceipt")
+        canonical_read = spec.index("markCanonicalReadVisible", receipt_start)
+        dom_visible = spec.index("markDomVisible", canonical_read)
+        self.assertLess(receipt_start, canonical_read)
+        self.assertLess(canonical_read, dom_visible)
+
+        self.assertNotIn("Date.now()", helper)
+        for retired in (
             "/api/workbench/refresh-status",
             "active_generation_id",
             "refresh_scope_keys",
             "dirty_scopes",
-            "business_identity",
-            "withdraw",
-            "production_smoke",
-            "commit-to-visible same-clock",
+            "browser_poller",
+            "t0",
+            "t4",
         ):
-            self.assertIn(required, spec)
+            self.assertNotIn(retired, helper + "\n" + spec)
 
-        self.assertNotIn("Date.now()", helper)
-    def test_workbench_visibility_slo_manifest_and_production_run_fail_closed(self) -> None:
+    def test_workbench_direct_commit_visibility_manifest_and_production_run_fail_closed(self) -> None:
         helper = OPERATION_LATENCY_PATH.read_text(encoding="utf-8")
         spec = BANK_FLOW_RULE_BATCH_SPEC_PATH.read_text(encoding="utf-8")
         config = PLAYWRIGHT_CONFIG_PATH.read_text(encoding="utf-8")
@@ -71,7 +91,7 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             "metadata.mode & 0o077",
             "templates.length !== 1",
             "isolated_repeat_count",
-            "isolated_prod_equivalent_browser_poller",
+            "isolated_prod_equivalent_direct_canonical_get",
             "transaction_ids",
             "exact_scope",
             "submit",
@@ -83,10 +103,10 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         for binding in ("sample_id", "batch_id", "business_identity", "exact_scope"):
             self.assertIn(f"{binding}: redact(binding.{binding})", helper)
         self.assertIn("binding.transaction_ids.map(redact)", helper)
-        self.assertIn("FIN_OPS_E2E_WORKBENCH_VISIBILITY_SLO", config)
+        self.assertIn("FIN_OPS_E2E_WORKBENCH_DIRECT_COMMIT_VISIBILITY", config)
         for artifact in ("trace", "screenshot", "video"):
-            self.assertRegex(config, rf'{artifact}: workbenchVisibilitySloEnabled \? "off"')
-        self.assertNotIn("test.skip(!workbenchVisibilitySloEnabled", spec)
+            self.assertRegex(config, rf'{artifact}: workbenchDirectCommitVisibilityEnabled \? "off"')
+        self.assertNotIn("test.skip(!workbenchDirectCommitVisibilityEnabled", spec)
 
     def test_every_e2e_spec_uses_strict_browser_diagnostics_fixture(self) -> None:
         direct_imports: list[str] = []

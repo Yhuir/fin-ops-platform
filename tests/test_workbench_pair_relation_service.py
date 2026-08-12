@@ -101,21 +101,48 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         self.assertEqual(relation["row_types"], ["oa", "bank", "invoice"])
         self.assertEqual(service.get_active_relation_by_row_id("oa-001"), relation)
 
-    def test_create_active_relation_rejects_duplicate_row_id_with_conflicting_type(self) -> None:
+    def test_create_active_relation_keeps_same_text_id_for_distinct_row_types(self) -> None:
         service = WorkbenchPairRelationService()
 
-        with self.assertRaisesRegex(ValueError, "conflicting row type"):
-            service.create_active_relation(
-                case_id="CASE-PAIR-CONFLICT",
-                row_ids=["oa-001", "oa-001"],
-                row_types=["oa", "invoice"],
-                relation_mode="manual_confirmed",
-                created_by="YNSYLP005",
-                month_scope="all",
-                created_at="2026-04-08T10:00:00+00:00",
-            )
+        relation = service.create_active_relation(
+            case_id="CASE-PAIR-COLLISION",
+            row_ids=["same-id", "same-id"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="all",
+            created_at="2026-04-08T10:00:00+00:00",
+        )
 
-        self.assertIsNone(service.get_active_relation_by_case_id("CASE-PAIR-CONFLICT"))
+        self.assertEqual(relation["row_ids"], ["same-id", "same-id"])
+        self.assertEqual(relation["row_types"], ["bank", "invoice"])
+
+    def test_replace_only_cancels_relation_owning_requested_typed_member(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-INVOICE-OWNER",
+            row_ids=["same-id", "invoice-1"],
+            row_types=["invoice", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+        )
+
+        service.replace_with_confirmed_relation(
+            case_id="CASE-BANK-OWNER",
+            row_ids=["same-id", "oa-1"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+        )
+
+        self.assertEqual(
+            service.get_active_relation_by_case_id("CASE-INVOICE-OWNER")["status"],
+            "active",
+        )
+        self.assertEqual(
+            service.get_active_relation_by_case_id("CASE-BANK-OWNER")["status"],
+            "active",
+        )
 
     def test_from_snapshot_dedupes_duplicate_row_ids(self) -> None:
         service = WorkbenchPairRelationService.from_snapshot(

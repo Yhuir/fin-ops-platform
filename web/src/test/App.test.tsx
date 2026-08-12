@@ -266,10 +266,11 @@ describe("Finance operations shell", () => {
   test("keeps global status independent while warning when OA data is incomplete", async () => {
     window.history.pushState({}, "", "/");
     installMockApiFetch({
-      workbenchOaStatus: {
-        code: "error",
+      workbenchOaSyncStatuses: [{
+        status: "error",
         message: "OA 连接失败",
-      },
+        dirty_scopes: ["all"],
+      }],
     });
 
     render(<App />);

@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.workbench_read_model_version import (
-    WorkbenchReadModelVersionConflictError,
-)
-
-
 class WorkbenchAmountMismatchConflict(ValueError):
     pass
 
@@ -27,26 +22,29 @@ class WorkbenchAmountMismatchExceptionService:
         zone = str(payload.get("zone") or "").strip()
         group_id = str(payload.get("group_id") or "").strip()
         fingerprint = str(payload.get("fingerprint") or "").strip().lower()
-        expected_version = str(payload.get("expected_read_model_version") or "").strip()
         if zone not in {"paired", "unpaired"}:
             raise ValueError("zone must be paired or unpaired.")
-        if not scope_key or not group_id or not fingerprint or not expected_version:
-            raise ValueError("month, group_id, fingerprint and expected_read_model_version are required.")
-        group = self._group_repository.get_workbench_group_detail(
+        if not scope_key or not group_id or not fingerprint:
+            raise ValueError("month, group_id and fingerprint are required.")
+        detail = self._group_repository.get_workbench_group_detail(
             scope_key=scope_key,
             zone=zone,
             group_id=group_id,
-            expected_read_model_version=expected_version,
         )
+        group = detail.get("group") if isinstance(detail, dict) else None
+        if not isinstance(group, dict) and isinstance(detail, dict):
+            group = detail
         if not isinstance(group, dict):
             raise WorkbenchAmountMismatchConflict("金额异常关系组已变化，请刷新后重试。")
         anomaly = group.get("oa_invoice_anomaly")
         if not isinstance(anomaly, dict) or str(anomaly.get("fingerprint") or "") != fingerprint:
             raise WorkbenchAmountMismatchConflict("金额异常已变化或已消失，请刷新后重试。")
         group_scope = str(
-            group.get("source_scope_key")
+            (detail.get("source_scope_key") if isinstance(detail, dict) else None)
+            or group.get("source_scope_key")
             or group.get("scope_month")
             or group.get("month")
+            or self._group_row_scope(group)
             or group.get("scope_key")
             or scope_key
         ).strip()
@@ -63,8 +61,28 @@ class WorkbenchAmountMismatchExceptionService:
         return {
             **result,
             "affected_scope_keys": [decision_scope_key],
-            "read_model_version": expected_version,
         }
+
+    @staticmethod
+    def _group_row_scope(group: dict[str, object]) -> str:
+        scopes = {
+            str(
+                row.get("source_scope_key")
+                or row.get("scope_month")
+                or row.get("month")
+                or ""
+            ).strip()[:7]
+            for pane in ("oa", "bank", "invoice")
+            for row in list(group.get(f"{pane}_rows") or [])
+            if isinstance(row, dict)
+            and str(
+                row.get("source_scope_key")
+                or row.get("scope_month")
+                or row.get("month")
+                or ""
+            ).strip()
+        }
+        return next(iter(scopes)) if len(scopes) == 1 else ""
 
 
 __all__ = [

@@ -195,6 +195,68 @@ class PostgresWorkbenchRelationRepository:
             }
         }
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_row_ids = text_list(row_ids)
+        normalized_row_types = text_list(row_types)
+        if len(normalized_row_ids) != len(normalized_row_types):
+            raise ValueError("row_types must align with row_ids.")
+        normalized_case_ids = text_list(case_ids)
+        predicates: list[str] = []
+        params: list[Any] = []
+        if normalized_row_ids:
+            predicates.append(
+                """
+                exists (
+                    select 1
+                    from unnest(relation.row_ids, relation.row_types)
+                         as member(row_id, row_type)
+                    join unnest(%s::text[], %s::text[])
+                         as requested(row_id, row_type)
+                      on requested.row_id = member.row_id
+                     and requested.row_type = case
+                         when member.row_type in ('oa', 'oa_application') then 'oa'
+                         when member.row_type in ('bank', 'bank_transaction') then 'bank'
+                         when member.row_type in (
+                             'invoice', 'invoice_record', 'formal', 'formal_invoice',
+                             'input', 'input_invoice', 'output', 'output_invoice',
+                             'etc_summary', 'etc_invoice_summary'
+                         ) then 'invoice'
+                         else member.row_type
+                     end
+                )
+                """
+            )
+            params.extend((normalized_row_ids, normalized_row_types))
+        if normalized_case_ids:
+            predicates.append("relation.case_id = any(%s::text[])")
+            params.append(normalized_case_ids)
+        if not predicates:
+            return {"pair_relations": {}}
+        rows = self._connection.fetch_all(
+            f"""
+            select relation.case_id as key, relation.raw_payload
+            from app.workbench_pair_relations relation
+            where relation.status = 'active'
+              and cardinality(relation.row_ids) = cardinality(relation.row_types)
+              and ({' or '.join(predicates)})
+            order by relation.case_id
+            """,
+            tuple(params),
+        )
+        return {
+            "pair_relations": {
+                str(row.get("key")): payload
+                for row in rows
+                if isinstance((payload := row_payload(row, "raw_payload")), dict)
+            }
+        }
+
     def workbench_relation_source_bundle_from_source(
         self,
         *,
@@ -346,9 +408,11 @@ class PostgresWorkbenchRelationRepository:
         row_ids: list[str],
         *,
         row_types: list[str],
+        tenant_id: str | None = None,
     ) -> list[str]:
         normalized_row_ids = text_list(row_ids)
         normalized_row_types = text_list(row_types)
+        normalized_tenant_id = text(tenant_id) or ""
         if len(normalized_row_ids) != len(normalized_row_types):
             raise ValueError("Workbench relation member ids and types must stay aligned.")
 
@@ -359,14 +423,6 @@ class PostgresWorkbenchRelationRepository:
         }
         found: set[tuple[str, str]] = set()
         queries = {
-            "oa": """
-                select row_id
-                from app.oa_applications
-                where row_id = any(%s::text[])
-                  and status <> 'deleted'
-                order by row_id
-                for key share
-            """,
             "bank": """
                 select coalesce(legacy_mongo_id, id::text) as row_id
                 from app.bank_transactions
@@ -384,6 +440,55 @@ class PostgresWorkbenchRelationRepository:
                 for key share
             """,
         }
+        oa_row_ids = sorted(
+            row_id for member_type, row_id in requested if member_type == "oa"
+        )
+        if oa_row_ids:
+            oa_rows = self._connection.fetch_all(
+                """
+                with completed_oa as materialized (
+                    select oa.row_id
+                    from app.oa_applications oa
+                    where oa.row_id = any(%s::text[])
+                      and oa.status <> 'deleted'
+                      and (
+                            oa.workflow_status is null
+                            or oa.workflow_status = ''
+                            or oa.workflow_status in (
+                                'completed', '已完成', 'approved',
+                                'APPROVED', 'Approved', '2'
+                            )
+                      )
+                    order by oa.row_id
+                    for key share of oa
+                ),
+                in_progress_oa as materialized (
+                    select admission.oa_id as row_id
+                    from app.oa_pending_payment_admissions admission
+                    where admission.tenant_id = %s
+                      and admission.oa_id = any(%s::text[])
+                      and admission.workflow_status = 'in_progress'
+                    order by admission.oa_id, admission.scope_key
+                    for key share of admission
+                ),
+                source_candidates as (
+                    select row_id from completed_oa
+                    union all
+                    select row_id from in_progress_oa
+                )
+                select row_id, count(*)::integer as source_count
+                from source_candidates
+                group by row_id
+                order by row_id
+                """,
+                (oa_row_ids, normalized_tenant_id, oa_row_ids),
+            )
+            found.update(
+                ("oa", resolved_row_id)
+                for row in oa_rows
+                if int(row.get("source_count") or 0) == 1
+                if (resolved_row_id := text(row.get("row_id")))
+            )
         for row_type, sql in queries.items():
             typed_row_ids = sorted(row_id for member_type, row_id in requested if member_type == row_type)
             if not typed_row_ids:

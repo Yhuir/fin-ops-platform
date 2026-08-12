@@ -17,7 +17,7 @@
 | Import worker / queue | idempotency key、small RabbitMQ envelope、unknown processor failure、registered processor success、worker check、RabbitMQ confirm queue | `tests/test_import_job_queue.py`、`tests/test_runtime_worker_registry.py` |
 | Import worker 跨进程恢复 | worker 启动后新增 file session 仍须在 job 执行时从 PostgreSQL 重载，禁止使用启动时陈旧 session/canonical snapshot | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_runtime_import_processor_reloads_durable_state_after_worker_bootstrap` |
 | Import API 跨进程恢复 | API 重启后 session GET/confirm/retry 从显式 PostgreSQL import/file-session loaders 恢复当前 session，且不调用 legacy/full-state load | `tests/test_runtime_bootstrap.py::RuntimeBootstrapTests::test_postgres_file_import_boundary_reloads_current_session_without_full_state_load` |
-| 下游访问收敛 | bank import confirmed 推进 canonical fact/version；银行明细/余额、成本等 direct 页面在下一次 canonical GET 读取新事实，关联台按正式 `workbench` freshness 合同收敛 | `tests/test_import_job_queue.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、`tests/test_bank_details_canonical_query.py` |
+| 下游访问收敛 | bank import confirmed 推进 canonical fact/version；银行明细/余额、成本和关联台等 direct 页面在下一次 canonical GET 读取新事实；共享 `workbench_relation` 按自己的 owner 合同收敛 | `tests/test_import_job_queue.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、`tests/test_bank_details_canonical_query.py` |
 | App Status/App Health | imports bank domain route、import worker/job、file import explicit affected domain、generic import job fallback 不误指发票页、global status plane | `tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 边界/旧代码 guard | 银行流水前端只走 `/imports/files/*`；`server.py` 不重新持有 import confirm processor wrapper | `tests/test_platform_runtime_boundary_guards.py` |
 | Page Audit 时间点一致性 | 无时区中国本地交易时间与等价 UTC `timestamptz` 必须视为同一时刻；真实时间漂移必须阻断 | `tests/test_audit_bank_transaction_import_page.py::BankTransactionImportPageAuditPostgresTests::test_naive_china_trade_time_is_compared_as_the_same_instant_and_real_drift_blocks` |
@@ -43,7 +43,7 @@
 | file/session confirm 只处理 selected files 并返回银行导入 domain targets | covered | `test_confirm_files_imports_only_selected_files_from_session`、`test_confirm_bank_transaction_file_job_reports_bank_import_domain`、`test_file_import_confirm_job_returns_import_write_targets` |
 | 旧 JSON HTTP route、`general_import.confirm` processor 和 server confirm wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_exposes_legacy_json_import_write_routes`、`test_server_no_longer_owns_import_confirm_processors` |
 | 银行导入确认返回空页面 freshness/barrier targets，当前页结束写命令 | covered | `test_file_import_confirm_job_returns_import_write_targets` |
-| bank import 写后零 direct-page refresh 事件；直接读取页面通过下一次 canonical GET 收敛，关联台按自身 freshness gate 收敛 | covered | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、各页面 canonical query/API tests |
+| bank import 写后零 direct-page refresh 事件；银行明细与关联台都通过下一次 canonical GET 收敛 | covered | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、各页面 canonical query/API tests |
 | Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/冲突取消零提交/冲突确认/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | read_export_only 不能上传/预览/确认导入 | covered | `web/e2e/permissions-role-matrix.spec.ts` |
 
@@ -92,7 +92,7 @@
 
 1. 上传银行流水 XLS/XLSX -> 为每个文件选择银行账户 -> 自动归一成功，或对缺失 canonical 字段完成一次人工映射 retry -> 展示 audit counts、重复组和跳过明细；240 行合成重复组本地回归只允许一个 confirmable representative。
 2. 预览后底层数据变化 -> 确认返回 `preview_stale` -> 前端提示重新预览，不创建导入 job，不调用 operation barrier 或 Workbench 页面 API。
-3. 确认可导入银行流水文件 -> 创建 background `file_import` job，`affected_domains=["imports_bank_transactions"]`、`route="/imports/bank-transactions"` -> import worker event -> worker confirm -> 必要的 Workbench matching 领域任务；银行明细下一次 canonical GET 读取新事实，关联台经 `workbench` freshness gate/worker 读取新 active generation。
+3. 确认可导入银行流水文件 -> 创建 background `file_import` job，`affected_domains=["imports_bank_transactions"]`、`route="/imports/bank-transactions"` -> import worker event -> worker confirm -> 必要的 Workbench matching 领域任务；银行明细与关联台都在下一次 canonical GET 读取新事实，关联台不等待 page worker/generation。
 4. 损坏文件 + 正常文件混合上传 -> 损坏文件显示 file-level error 和未导入项明细 -> 正常文件仍可确认，confirm body 只包含正常文件 ID。
 5. 导入完成后进入银行明细和成本统计，确认 normal canonical GET 直接返回新账户余额、导入行和成本证据，响应不含页面 freshness/status/job 字段。
 6. Staging write-flow audit：真实银行流水确认后运行 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，必须证明退休页面 refresh/dirty delta 为零；随后对银行明细、账户余额、关联台和成本统计执行只读结果与延迟验证。

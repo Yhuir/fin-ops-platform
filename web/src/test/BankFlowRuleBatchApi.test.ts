@@ -248,7 +248,6 @@ describe("bank flow rule batch API", () => {
     ]);
     expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
     expect(payload).not.toHaveProperty("readModelStatus");
-    expect(payload).not.toHaveProperty("readModelVersion");
   });
 
   test("maps legacy unsubmitted batch status to draft in the unsubmitted bucket", async () => {

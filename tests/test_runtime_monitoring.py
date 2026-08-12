@@ -23,7 +23,7 @@ class FakeConnection:
                 {
                     "read_model_key": "workbench_relation",
                     "scope_type": "workbench_relation",
-                    "scope_key": "all",
+                    "scope_key": "2026-01",
                     "status": "fresh",
                 },
             ]
@@ -405,12 +405,18 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["last_fresh_at"], "2026-06-13 03:00:01+08")
-        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "workbench")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-workbench-2")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "workbench")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
-        self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
+        self.assertEqual(len(summary["read_model_refresh_by_key"]), 1)
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-workbench-1")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "workbench_relation")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "all")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 29000.0)
         self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
+        self.assertFalse(
+            any(
+                event["event_type"] == "workbench.read_model.refresh"
+                for event in summary["read_model_refresh_slow_events"]
+            )
+        )
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["event_id"], "event-current-workbench-1")
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["key"], "workbench_relation")
         self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["scope_key"], "all")
@@ -529,7 +535,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["critical_failed_outbox_count"], 0)
         self.assertEqual(summary["critical_failed_dirty_scope_count"], 0)
         self.assertEqual(summary["critical_stale_dirty_scope_count"], 0)
-        self.assertEqual(summary["critical_read_models"]["workbench"]["status"], "fresh")
+        self.assertEqual(set(summary["critical_read_models"]), {"workbench_relation"})
+        self.assertEqual(summary["critical_read_models"]["workbench_relation"]["status"], "fresh")
         self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench_relation.read_model.refresh")
         self.assertEqual(summary["dirty_scopes_by_scope"][0]["scope_key"], "all")
         self.assertNotIn("read_model_refresh_duration_ms", summary)

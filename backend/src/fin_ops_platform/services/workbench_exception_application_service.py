@@ -12,9 +12,9 @@ from fin_ops_platform.services.workbench_exception_rules import ACTION_DEFINITIO
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
-RowProvider = Callable[[str, list[str]], list[dict[str, Any]]]
+RowProvider = Callable[[str, list[str], list[str]], list[dict[str, Any]]]
 SourceVersionsProvider = Callable[[], dict[str, Any]]
-ExceptionEvidenceProvider = Callable[[str, list[str]], list[dict[str, Any]]]
+ExceptionEvidenceProvider = Callable[[str, list[str], list[str]], list[dict[str, Any]]]
 
 
 class WorkbenchExceptionApplicationConflict(ValueError):
@@ -42,10 +42,44 @@ class WorkbenchExceptionApplicationService:
         self._source_versions_provider = source_versions_provider or (lambda: {})
         self._relation_command_service = relation_command_service
 
+    def with_write_dependencies(
+        self,
+        *,
+        case_service: WorkbenchExceptionCaseService,
+        relation_command_service: Any,
+        row_provider: RowProvider | None = None,
+    ) -> "WorkbenchExceptionApplicationService":
+        """Bind one apply operation to its transaction-owned write ports."""
+
+        return WorkbenchExceptionApplicationService(
+            row_provider=row_provider or self._row_provider,
+            case_service=case_service,
+            exception_evidence_provider=self._exception_evidence_provider,
+            classifier=self._classifier,
+            source_versions_provider=self._source_versions_provider,
+            relation_command_service=relation_command_service,
+        )
+
+    def apply_idempotency_key(self, request: dict[str, Any]) -> str:
+        month, row_ids, row_types = self._request_month_and_typed_rows(request)
+        scenario_code = str(request.get("scenario_code") or "").strip()
+        action_code = str(request.get("action_code") or "").strip()
+        if not scenario_code:
+            raise ValueError("scenario_code is required.")
+        if not action_code:
+            raise ValueError("action_code is required.")
+        return self._idempotency_key(
+            month=month,
+            row_ids=row_ids,
+            row_types=row_types,
+            scenario_code=scenario_code,
+            action_code=action_code,
+        )
+
     def preview(self, request: dict[str, Any]) -> dict[str, Any]:
-        month, row_ids = self._request_month_and_row_ids(request)
-        rows = self._resolve_rows(month, row_ids)
-        candidate_evidence = self._candidate_evidence(month, row_ids)
+        month, row_ids, row_types = self._request_month_and_typed_rows(request)
+        rows = self._resolve_rows(month, row_ids, row_types)
+        candidate_evidence = self._candidate_evidence(month, row_ids, row_types)
         classification = self._classifier.preview(
             {
                 "month": month,
@@ -55,8 +89,8 @@ class WorkbenchExceptionApplicationService:
             }
         )
         warnings = self._normalized_classifier_warnings(classification.get("warnings"))
-        active_cases = self._case_service.preview_existing_case_conflicts(row_ids)
-        active_relations = self._active_relations_for_row_ids(row_ids)
+        active_cases = self._active_cases_for_typed_rows(row_ids, row_types)
+        active_relations = self._active_relations_for_typed_rows(row_ids, row_types)
         if active_cases:
             warnings.append(
                 self._warning(
@@ -82,14 +116,20 @@ class WorkbenchExceptionApplicationService:
         )
 
     def apply(self, request: dict[str, Any], *, actor: str = "system") -> dict[str, Any]:
-        month, row_ids = self._request_month_and_row_ids(request)
+        month, row_ids, row_types = self._request_month_and_typed_rows(request)
         scenario_code = str(request.get("scenario_code") or "").strip()
         action_code = str(request.get("action_code") or "").strip()
         if not scenario_code:
             raise ValueError("scenario_code is required.")
         if not action_code:
             raise ValueError("action_code is required.")
-        idempotency_key = self._idempotency_key(month=month, row_ids=row_ids, scenario_code=scenario_code, action_code=action_code)
+        idempotency_key = self._idempotency_key(
+            month=month,
+            row_ids=row_ids,
+            row_types=row_types,
+            scenario_code=scenario_code,
+            action_code=action_code,
+        )
         existing_case = self._case_service.find_case_by_idempotency_key(idempotency_key)
         if existing_case is not None:
             relation = self._active_relation_by_case_id(str(existing_case.get("id") or ""))
@@ -97,11 +137,14 @@ class WorkbenchExceptionApplicationService:
                 case=existing_case,
                 pair_relation=relation,
                 row_ids=row_ids,
+                row_types=row_types,
                 updated_rows=[],
                 idempotent=True,
             )
 
-        preview = self.preview({"month": month, "row_ids": row_ids})
+        preview = self.preview(
+            {"month": month, "row_ids": row_ids, "row_types": row_types}
+        )
         self._raise_preview_conflict(preview)
         actual_scenario_code = str(preview["scenario"]["scenario_code"])
         if scenario_code != actual_scenario_code:
@@ -127,7 +170,7 @@ class WorkbenchExceptionApplicationService:
             if callable(preflight):
                 preflight(row_ids=row_ids, month_scope=month)
         case_payload = self._case_service.create_case_from_action(
-            rows=self._resolve_rows(month, row_ids),
+            rows=self._resolve_rows(month, row_ids, row_types),
             scenario={
                 **deepcopy(preview["scenario"]),
                 "rule_version": str(preview.get("rule_version") or RULE_VERSION),
@@ -150,6 +193,7 @@ class WorkbenchExceptionApplicationService:
                 action_payload=action_for_case,
                 resolution_payload=resolution_payload,
                 row_ids=row_ids,
+                row_types=row_types,
                 month=month,
                 actor=actor,
                 relation_command_service=relation_command_service,
@@ -159,34 +203,63 @@ class WorkbenchExceptionApplicationService:
             case=case_payload,
             pair_relation=pair_relation,
             row_ids=row_ids,
+            row_types=row_types,
             updated_rows=[],
             idempotent=False,
         )
 
-    def _request_month_and_row_ids(self, request: dict[str, Any]) -> tuple[str, list[str]]:
+    def _request_month_and_typed_rows(
+        self,
+        request: dict[str, Any],
+    ) -> tuple[str, list[str], list[str]]:
         if not isinstance(request, dict):
             raise ValueError("request must be a dict.")
         month = str(request.get("month") or "").strip()
         if not month:
             raise ValueError("month is required.")
         raw_row_ids = request.get("row_ids")
+        raw_row_types = request.get("row_types")
         if raw_row_ids is None and request.get("row_id") is not None:
             raw_row_ids = [request.get("row_id")]
-        row_ids = self._normalize_row_ids(list(raw_row_ids or []))
-        return month, row_ids
+            raw_row_types = [request.get("row_type")]
+        identities = self._normalize_typed_rows(raw_row_ids, raw_row_types)
+        return (
+            month,
+            [row_id for _row_type, row_id in identities],
+            [row_type for row_type, _row_id in identities],
+        )
 
-    def _resolve_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
-        rows = self._row_provider(month, row_ids)
-        rows_by_id = {str(row.get("id") or ""): deepcopy(row) for row in rows if isinstance(row, dict)}
-        missing = [row_id for row_id in row_ids if row_id not in rows_by_id]
+    def _resolve_rows(
+        self,
+        month: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
+        rows = self._row_provider(month, row_ids, row_types)
+        rows_by_identity = {
+            (str(row.get("type") or "").strip(), str(row.get("id") or "").strip()): deepcopy(row)
+            for row in rows
+            if isinstance(row, dict)
+        }
+        identities = list(zip(row_types, row_ids, strict=True))
+        missing = [identity for identity in identities if identity not in rows_by_identity]
         if missing:
-            raise KeyError(missing[0])
-        return [rows_by_id[row_id] for row_id in row_ids]
+            raise KeyError(f"{missing[0][0]}:{missing[0][1]}")
+        return [rows_by_identity[identity] for identity in identities]
 
-    def _candidate_evidence(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
+    def _candidate_evidence(
+        self,
+        month: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
         if self._exception_evidence_provider is None:
             return []
-        raw_evidence = self._exception_evidence_provider(month, list(row_ids))
+        raw_evidence = self._exception_evidence_provider(
+            month,
+            list(row_ids),
+            list(row_types),
+        )
         if not isinstance(raw_evidence, list):
             raise ValueError("exception_evidence_provider must return a list.")
         return [deepcopy(item) for item in raw_evidence if isinstance(item, dict)]
@@ -373,6 +446,7 @@ class WorkbenchExceptionApplicationService:
         action_payload: dict[str, Any],
         resolution_payload: dict[str, Any],
         row_ids: list[str],
+        row_types: list[str],
         month: str,
         actor: str,
         relation_command_service: Any,
@@ -391,7 +465,7 @@ class WorkbenchExceptionApplicationService:
         result = confirm_relation(
             case_id=str(case_payload["id"]),
             row_ids=row_ids,
-            row_types=[str(row_type) for row_type in list(case_payload.get("row_types") or [])],
+            row_types=list(row_types),
             relation_mode=relation_mode,
             actor_id=actor or "system",
             month_scope=month,
@@ -423,17 +497,25 @@ class WorkbenchExceptionApplicationService:
         return WorkbenchRelationCommandError(
             "workbench_relation_command_unavailable",
             "Workbench relation command service is not configured.",
-            payload={"read_model_status": "unavailable"},
+            payload={"relation_command_status": "unavailable"},
         )
 
-    def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+    def _active_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
         relation_command_service = self._require_relation_command_service()
-        active_relations = getattr(relation_command_service, "active_relations_for_row_ids", None)
+        active_relations = getattr(
+            relation_command_service,
+            "active_relations_for_typed_rows",
+            None,
+        )
         if not callable(active_relations):
             raise self._relation_command_unavailable_error()
         return [
             deepcopy(relation)
-            for relation in list(active_relations(list(row_ids or [])) or [])
+            for relation in list(active_relations(list(row_ids), list(row_types)) or [])
             if isinstance(relation, dict)
         ]
 
@@ -461,6 +543,7 @@ class WorkbenchExceptionApplicationService:
         case: dict[str, Any],
         pair_relation: dict[str, Any] | None,
         row_ids: list[str],
+        row_types: list[str],
         updated_rows: list[dict[str, Any]],
         idempotent: bool,
     ) -> dict[str, Any]:
@@ -470,15 +553,22 @@ class WorkbenchExceptionApplicationService:
             "pair_relation": deepcopy(pair_relation) if isinstance(pair_relation, dict) else None,
             "updated_rows": deepcopy(updated_rows),
             "affected_row_ids": list(row_ids),
-            "workbench_refresh_required": True,
+            "affected_row_types": list(row_types),
             "idempotent": idempotent,
         }
 
     @staticmethod
-    def _idempotency_key(*, month: str, row_ids: list[str], scenario_code: str, action_code: str) -> str:
+    def _idempotency_key(
+        *,
+        month: str,
+        row_ids: list[str],
+        row_types: list[str],
+        scenario_code: str,
+        action_code: str,
+    ) -> str:
         payload = {
             "month": month,
-            "row_ids": sorted(row_ids),
+            "typed_rows": sorted(zip(row_types, row_ids, strict=True)),
             "scenario_code": scenario_code,
             "action_code": action_code,
         }
@@ -488,18 +578,54 @@ class WorkbenchExceptionApplicationService:
         return f"workbench_exception_apply:{digest}"
 
     @staticmethod
-    def _normalize_row_ids(row_ids: list[Any]) -> list[str]:
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for row_id in row_ids:
-            resolved = str(row_id or "").strip()
-            if not resolved or resolved in seen:
-                continue
-            seen.add(resolved)
-            normalized.append(resolved)
-        if not normalized:
+    def _normalize_typed_rows(
+        row_ids: Any,
+        row_types: Any,
+    ) -> list[tuple[str, str]]:
+        if not isinstance(row_ids, list) or not isinstance(row_types, list):
+            raise ValueError("row_ids and row_types must be lists.")
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        identities: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for raw_type, raw_id in zip(row_types, row_ids, strict=True):
+            row_type = str(raw_type or "").strip().lower()
+            row_id = str(raw_id or "").strip()
+            if row_type not in {"oa", "bank", "invoice"} or not row_id:
+                raise ValueError("row_types must contain only oa, bank or invoice.")
+            identity = (row_type, row_id)
+            if identity in seen:
+                raise ValueError("duplicate typed Workbench row selection.")
+            seen.add(identity)
+            identities.append(identity)
+        if not identities:
             raise ValueError("row_ids must contain at least one row id.")
-        return normalized
+        return identities
+
+    def _active_cases_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
+        requested = set(zip(row_types, row_ids, strict=True))
+        snapshot = self._case_service.snapshot()
+        cases = [
+            case
+            for case in dict(snapshot.get("cases") or {}).values()
+            if isinstance(case, dict)
+        ]
+        return [
+            case
+            for case in cases
+            if str(case.get("status") or "") in {"open", "ignored", "reopened", "legacy_confirmed", "confirmed"}
+            and requested.intersection(
+                zip(
+                    [str(value).strip() for value in list(case.get("row_types") or [])],
+                    [str(value).strip() for value in list(case.get("row_ids") or [])],
+                    strict=False,
+                )
+            )
+        ]
 
     @staticmethod
     def _unique_tags(tags: list[str]) -> list[str]:

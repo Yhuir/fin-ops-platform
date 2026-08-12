@@ -1644,7 +1644,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             RuntimeQueueRepository(transaction_connection)._json_param({"scope": "2026-02"}),
             Jsonb,
         )
-        self.assertEqual(refresh_gateway.enqueue_many.call_count, 2)
+        refresh_gateway.enqueue_many.assert_called_once()
+        self.assertEqual(refresh_gateway.enqueue_many.call_args.args[0], "workbench_relation")
         self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
         report = json.loads(output.getvalue())
         self.assertEqual(report["apply_result"]["transaction_delete_count"], 674)

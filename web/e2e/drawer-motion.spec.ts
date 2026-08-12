@@ -158,7 +158,6 @@ test.describe("right drawer motion", () => {
     const workbenchSelfConvergenceCalls = new Set([
       "GET /api/oa-sync/status",
       "GET /api/workbench",
-      "GET /api/workbench/refresh-status",
     ]);
     const businessCallCount = () => api.calls.filter(
       (call) => !workbenchSelfConvergenceCalls.has(call),

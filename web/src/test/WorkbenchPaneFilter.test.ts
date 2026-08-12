@@ -248,10 +248,15 @@ describe("Workbench pane display model", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(String(input), "http://localhost");
-        const unpairedQuery = JSON.parse(url.searchParams.get("unpaired_query") ?? "{}") as Record<string, unknown>;
-        return url.pathname === "/api/workbench" && unpairedQuery.search === "智能工厂";
+        return url.pathname === "/api/workbench/groups"
+          && url.searchParams.get("zone") === "unpaired"
+          && url.searchParams.get("search") === "智能工厂";
       })).toBe(true);
     }, { timeout: 3_000 });
+    expect(fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/workbench";
+    })).toHaveLength(1);
   });
 
   test("loads complete column options from the workbench facet API and clears the active filter", async () => {
@@ -271,8 +276,7 @@ describe("Workbench pane display model", () => {
       return url.pathname === "/api/workbench/filter-options"
         && url.searchParams.get("zone") === "unpaired"
         && url.searchParams.get("pane") === "oa"
-        && url.searchParams.get("column") === "applicant"
-        && url.searchParams.get("expected_read_model_version") === "mock-workbench-generation-1";
+        && url.searchParams.get("column") === "applicant";
     })).toBe(true);
     fireEvent.click(chenOption);
 
@@ -324,13 +328,18 @@ describe("Workbench pane display model", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(String(input), "http://localhost");
-        const unpairedQuery = JSON.parse(url.searchParams.get("unpaired_query") ?? "{}") as Record<string, unknown>;
-        return url.pathname === "/api/workbench"
-          && unpairedQuery.search === "智能工厂"
-          && !("search_by_pane" in unpairedQuery)
-          && !("search_mode" in unpairedQuery);
+        const columnFilters = JSON.parse(url.searchParams.get("column_filters") ?? "{}") as Record<string, unknown>;
+        return url.pathname === "/api/workbench/groups"
+          && url.searchParams.get("zone") === "unpaired"
+          && url.searchParams.get("search") === "智能工厂"
+          && Object.keys(columnFilters).length > 0
+          && !url.searchParams.has("cursor");
       })).toBe(true);
     }, { timeout: 3000 });
+    expect(fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("zone") === "paired";
+    })).toHaveLength(0);
   });
 
   test("combines linked search with bank dropdown filters without forcing the same row", () => {

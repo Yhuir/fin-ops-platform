@@ -12,7 +12,7 @@ from fin_ops_platform.app.server import Application
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
-    install_fresh_workbench_write_gate,
+    install_direct_workbench_selection_repository,
 )
 
 from tests.test_workbench_uow_contract import (
@@ -623,12 +623,11 @@ def _json_response(response: object) -> dict[str, object]:
 
 
 class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
-    READ_MODEL_VERSION = "idempotency-test-generation-1"
-
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
-        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
+        app._oa_sync_status_payload = lambda: {"status": "synced", "dirty_scopes": []}
+        install_direct_workbench_selection_repository(app)
         return app
 
     def _workbench_payload(self, app: Application, month: str = "2026-03") -> dict[str, object]:
@@ -653,6 +652,7 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
     def test_confirm_link_accepts_optional_idempotency_key_without_response_shape_change(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
+        row_types = [app._row_type_for_row_id(row_id) for row_id in row_ids]
 
         with self._suppress_background_persistence(app) as pair_relation_persist:
             response = self._post(
@@ -661,11 +661,11 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_ids": row_ids,
+                    "row_types": row_types,
                     "case_id": "CASE-IDEM-COMPAT",
                     "idempotency_key": "confirm:compat-1",
                     "request_idempotency_key": "confirm:compat-1",
                     "note": "idempotency compatibility covers documented mismatch path",
-                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 

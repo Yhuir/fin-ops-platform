@@ -20,6 +20,7 @@ from fin_ops_platform.tools.http_slo_probe import DEFAULT_API_PROBES  # noqa: E4
 MATRIX_PATH = REPO_ROOT / "docs" / "dev" / "page-read-model-fact-display-matrix.json"
 PAGE_REGISTRY_PATH = REPO_ROOT / "web" / "src" / "app" / "pageRegistry.tsx"
 DIRECT_CANONICAL_FRONTEND_PATHS = (
+    "web/src/features/workbench",
     "web/src/features/bankDetails",
     "web/src/features/oaPendingPayments",
     "web/src/features/bankFlowRuleBatches",
@@ -40,6 +41,7 @@ DIRECT_CANONICAL_FRONTEND_PATHS = (
     "web/src/pages/OutputInvoiceCollectionsPage.tsx",
     "web/src/pages/CostStatisticsPage.tsx",
     "web/src/pages/TurnoverLedgerPage.tsx",
+    "web/src/pages/ReconciliationWorkbenchPage.tsx",
 )
 
 RELATION_DISPLAY_PAGE_KEYS = {
@@ -56,6 +58,7 @@ RELATION_DISPLAY_PAGE_KEYS = {
 }
 
 DIRECT_CANONICAL_PAGE_KEYS = {
+    "reconciliation-workbench",
     "bank-details",
     "oa-pending-payments",
     "bank-flow-rule-batches",
@@ -136,6 +139,18 @@ class PageReadModelFactDisplayMatrixTests(unittest.TestCase):
         bank_flow_row = self.rows_by_page_key["bank-flow-rule-batches"]
         self.assertEqual(bank_flow_row["read_model_keys"], [])
         self.assertEqual(bank_flow_row["route"], "/bank-flow-rule-batches")
+
+        workbench_row = self.rows_by_page_key["reconciliation-workbench"]
+        self.assertEqual(workbench_row["read_model_keys"], [])
+        self.assertEqual(
+            workbench_row["freshness_probe_names"],
+            [
+                "workbench_initial_all",
+                "workbench_groups_all_paired",
+                "workbench_groups_all_unpaired",
+                "workbench_filter_options_all_paired",
+            ],
+        )
 
     def test_direct_canonical_frontends_do_not_reintroduce_page_read_model_runtime(self) -> None:
         forbidden = (

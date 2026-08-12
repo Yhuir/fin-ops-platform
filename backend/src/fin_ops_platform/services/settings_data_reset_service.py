@@ -260,9 +260,10 @@ class SettingsDataResetService:
 
     def _oa_target_ids(self) -> tuple[list[str], list[str]]:
         row_ids = [
-            str(row_id)
-            for row_id, override in self._row_overrides().items()
-            if self._is_oa_workbench_row_override(row_id, override)
+            str(override.get("row_id") or override_key)
+            for override_key, override in self._row_overrides().items()
+            if isinstance(override, dict)
+            and self._is_oa_workbench_row_override(override_key, override)
         ]
         case_ids = [
             str(case_id)
@@ -289,7 +290,9 @@ class SettingsDataResetService:
             return True
         if not isinstance(override, dict):
             return False
-        if str(override.get("type") or "").strip().lower() == "oa":
+        if str(
+            override.get("row_type") or override.get("type") or ""
+        ).strip().lower() == "oa":
             return True
         return cls._payload_references_oa_derived_row(override)
 

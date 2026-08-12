@@ -18,7 +18,7 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
 ## Hardening 基线
 
 - 普通用户写入默认只提交 canonical facts/source version/audit/idempotency 与必要领域任务，返回信息性 affected scopes；不得直接产生页面 read-model dirty/outbox，也不得返回页面 operation-barrier targets。
-- 直接读取页面的 route mount、focus 或 hidden→visible 只执行 normal canonical GET，不比较 read-model version，也不 enqueue。`workbench` 与 `workbench_relation` 通过各自 query owner 比较 expected/actual versions；精确 scope non-fresh 时才经 `ReadModelRefreshGateway` 入队。
+- 直接读取页面的 route mount、focus 或 hidden→visible 只执行 normal canonical GET，不比较 read-model version，也不 enqueue。关联台页面只经 `WorkbenchPageQueryService` 读 canonical facts 与 active relations；`workbench_relation` 仍是独立的共享 read model，只能由它自身的 query owner 比较 expected/actual versions，精确 scope non-fresh 时才经 `ReadModelRefreshGateway` 入队。
 - `workbench_relation` 的 expected proof 必须覆盖 exact scope 的 active relation count 与稳定 typed membership digest；局部 relation delta 必须先批量解析 canonical UUID/legacy aliases。只比较 `max(updated_at)` 或复用旧 scope proof 会漏掉旧关系撤回，禁止作为 fresh 证明。
 - `all` / full-history 只允许显式 authoritative integration、data reset、repair/backfill/reapply 或人工 maintenance 使用；必须在 App Health 标记为 `full_history_batch`，不能伪装成普通 current-scope 工作。
 - SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。
@@ -58,9 +58,9 @@ read model 刷新状态事实源，systemd 管 worker 进程，App 只负责写�
   `fin-ops-worker@*.service`，对已启用、运行或失败但不在 registry 中的实例执行 stop/disable；不删除实例 env，
   因而可通过恢复含该 registration 的 release 受控回滚。禁止把 WIP 性能 worker 或手工 systemd 实例留在
   registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`。当前 6 个 required instance 精确为
-  `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance`；
-  read-model worker 只允许 `workbench` 与 `workbench-relation`。registry 未登记实例必须由 release helper stop/disable。`workbench-matching` 是独立领域
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`。当前 5 个 required instance 精确为
+  `oa-sync`、`workbench-matching`、`workbench-relation`、`import`、`settings-maintenance`；
+  read-model worker 只允许 `workbench-relation`。registry 未登记实例必须由 release helper stop/disable。`workbench-matching` 是独立领域
   批处理，不是 read model，使用 `0.25s` poll 支撑 relation enrichment 的 3 秒写后可读 SLO。
 - OA 待付款、进项使用和销项收款页面没有 read-model worker。OA 页面写回外部系统成功后，API 进程通过窄
   PostgreSQL canonical writer 更新状态与 watermark；失败返回可重试错误。运维不得恢复页面 refresh event、
@@ -108,10 +108,10 @@ python -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
 python -m fin_ops_platform.tools.runtime_worker_manifest --instances
 
 # 某个 worker 的 env 模板名
-python -m fin_ops_platform.tools.runtime_worker_manifest --env-example workbench
+python -m fin_ops_platform.tools.runtime_worker_manifest --env-example workbench-relation
 
 # 某个 worker 的生产 smoke check 命令
-python -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench
+python -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench-relation
 ```
 
 不要在部署脚本、文档或 runbook 中手写另一份 required worker 列表。新增 read model refresh
@@ -149,8 +149,8 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
   使用候选 release 的严格校验器验证并原子安装；helper 拒绝链接、不安全权限、非 finops-deploy
   所有者、超限文件和不完整 scenario，并保留 root-owned `.previous` 作为恢复点。
 - Workbench relation 的 test-owned checkpoint 必须显式执行三步 I/O：先按目标月份读取
-  `/api/workbench?month=...` 并捕获 `read_model_version`，再让 preview 与 mutation 同时携带该精确版本；
-  confirm 后的 withdraw 必须重新读取版本，禁止复用上一个 generation、隐藏重试或省略写前置条件。
+  `/api/workbench?month=...` 并捕获精确 typed member 集合，再让 preview 产生 `preview_id`、成员实体版本和指纹；
+  submit 保留 idempotency/CAS 并在同一 relation UoW 内重验 canonical selection。confirm 后 withdraw 必须通过一次 normal GET 重取已提交关系，禁止复用旧预览、隐藏重试或恢复页面 read-model 版本前置条件。
 - 成本统计 consumer 只使用当前 explorer 合同：query 为 `scope/view/project_scope/page_size`，业务行根为
   `rows`。旧 `month` query 与 `time_rows` / `bank_flow_time_rows` / `project_rows` /
   `expense_type_rows` response root 已退出生产合同，不得继续用于 write smoke 或作为兼容 fallback。
@@ -225,7 +225,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - `read_model_stale_reasons`
 - `refresh_enqueued`
 
-Redis cache key 必须包含 schema/source versions/generation/query hash。RabbitMQ 只能作为可选
+Redis cache key 必须包含 schema/source versions/query hash。RabbitMQ 只能作为可选
 transport/wakeup，不能作为 read model 状态事实源。
 
 ## Read Model 刷新链路
@@ -265,8 +265,8 @@ worker、dirty scope 或 outbox event。
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
-dependency refresh 只有在 source manifest entry 的 `read_dependencies` 显式登记目标时才允许补投；当前两个保留
-read model 均未声明跨模型依赖。manifest 外 event 和已退休页面 scope 不得因为旧错误文本重新进入 runtime queue。
+dependency refresh 只有在 source manifest entry 的 `read_dependencies` 显式登记目标时才允许补投；当前唯一保留的
+`workbench_relation` 未声明跨模型依赖。manifest 外 event 和已退休页面 scope 不得因为旧错误文本重新进入 runtime queue。
 成本统计等 direct-canonical 页面没有 downstream projection 或 dependency enqueue；请求由 canonical repository
 在单个 `REPEATABLE READ READ ONLY` snapshot 中完成读取，失败直接返回错误供客户端重试。
 
@@ -406,26 +406,20 @@ scripts/check-read-model-scope-contracts.py \
 不删除合法但 stale 的 dirty scope。合法 stale scope 应由 worker dependency refresh 自动补投，或通过
 对应 read model 的正常 refresh 入口恢复。
 
-### 关联台 Workbench generation runtime
+### 关联台 Workbench direct canonical runtime
 
-关联台页面继续读取 `read_model.workbench_*` active generations；批量账务保持 direct canonical read，
-不得借用关联台 projection。`workbench` generation worker、repository、rehydrate CLI、prune helper、
-systemd service/timer 与部署安装逻辑均为当前运行时合同。生产可以投递
-`workbench.read_model.refresh`，但必须经 scope gateway/durable queue；generation retention 只能删除
-非 active 且超过保留窗口的版本。版本化 `finops-prune-workbench-generations` helper 通过
-`FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE`（默认 `1`）和
-`FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS`（默认 `60` 秒）分别传递
-`--delete-batch-size` 与 `--statement-timeout-seconds`。CLI 在构造 repository 前把专用 connection 的
-statement timeout 设置为对应毫秒值；repository 最多选择 500 个 `superseded|failed` 终态候选，先按 scope
-分组，再在每个 scope 内按 `1..100` 个 generation 分块并让每块使用独立事务；每批先按 generation id 固定
-顺序锁定元数据并复核 scope、tenant 与终态，再删除子表，`active|building` 不进入清理，后续批失败不会回滚
-已提交批次。`keep_recent_generations_per_scope` 下限仍为
-`1`；当前仅由 timer 驱动，generation 发布成功后的异步清理尚未接入。
-当前完整生产默认策略为 `keep_recent=1`、`keep_days=0`、`limit=500`、delete batch `1` 与 statement
-timeout `60` 秒。helper 在运行时读取 root-owned `/etc/fin-ops/fin-ops.common.env`；缺失参数时使用内置
-fallback。release activation 只安装版本化 helper/service/timer 并 enable timer，不自动合并服务器已有
-common env；调参必须由 operator 显式更新该文件。helper 的 `psql` 只用于前后状态/计数诊断，所有删除 SQL
-仍由 repository 执行。
+关联台页面不再拥有 read model、generation、freshness gate、Redis page cache 或 refresh worker。页面 API 在短生命
+`REPEATABLE READ READ ONLY` 事务内由 `WorkbenchPageQueryService` 直读 canonical facts 与 active relations；一次请求返回的
+summary、两区精确计数和首页 keys 必须来自同一 snapshot。分页使用绑定 scope/query/sort/filter 的 opaque keyset cursor，
+不持有跨 HTTP 事务，也不把 cursor 当作写入 CAS。
+
+当前 release 必须满足以下零运行时 I/O 合同：不读写 `read_model.workbench_*`，不访问 Workbench page Redis key，
+不投递、publish、claim 或 handle `workbench.read_model.refresh`，不提供 `/api/workbench/refresh-status`，不运行
+`fin-ops-worker@workbench.service`或 generation prune timer/helper。旧 projection 表和历史 migration 只作为上一 immutable release 的
+短期回滚证据，新代码不得访问；稳定窗口关闭后若需物理清理，必须另立非破坏性审核和 forward migration。
+
+`workbench_relation` 共享 read model、`workbench-matching` 领域 worker、relation command/UoW、OA/import 与 no-OA 独立链路不属于
+本退役范围，必须保留并按自身 owner 合同运行。
 
 ### Workbench matching source-version recovery
 
@@ -464,12 +458,9 @@ active relation/history hash、520/未配对集合、queue/freshness/Audit 和�
 Release B 才可用届时下一个可用 migration version 发布旧状态 drop；不得复用已被 OA 使用的 0104，
 也不得提前创建空 migration 预留版本。该 migration 只 forward-drop 旧 candidate/decision 派生表和旧 app-setting，不修改 OA、银行流水、发票、正式 relation 或 history；
 Release B 后不允许回滚到读取旧表的应用版本。不能通过原地更新旧 generation、恢复旧表或隐藏不一致行完成迁移。
-现行 deploy-control 保留 `workbench-rehydrate`，只用于冷启动、回滚恢复或明确批准的受控重建；
-正常页面访问必须通过 freshness gate 精确 enqueue，不得把全量 rehydrate 当作请求 fallback。
-
-Workbench `all` active generation 从 month shard 聚合时必须传播单一且完整的
-`workbench_matching_rules_version`。如果 all scope 缺失该版本证明，先通过正式 Workbench refresh 重建
-month/all active generation，并检查 `workbench-matching` worker heartbeat 与 dirty scope 收敛。
+该段只描述 2026-07-14 的历史发布。direct canonical 迁移后，当前 release 不再提供 `workbench-rehydrate`、
+Workbench generation freshness 或 page refresh fallback；仅回滚编排可以在 maintenance 中调用上一 immutable release 自带的
+rehydrate 工具，完成 canonical audit 后才能恢复旧 release 流量。
 
 ## 生产启动合同
 
@@ -477,8 +468,8 @@ month/all active generation，并检查 `workbench-matching` worker heartbeat �
 
 ```bash
 python -m fin_ops_platform.app.worker \
-  --registration workbench \
-  --worker-instance workbench \
+  --registration workbench-relation \
+  --worker-instance workbench-relation \
   --check
 ```
 
@@ -491,7 +482,7 @@ python -m fin_ops_platform.app.worker \
 - `registration.postgres_claim_event_types`
 - `registration.rabbitmq_claim_event_types`
 
-旧的 `--enable-*` flag 保留给本地开发和迁移期测试，不作为生产 systemd 主合同。
+生产及本地运行时均使用 registration contract；退役的 `--enable-workbench-read-model-refresh` 不再是可接受参数。
 
 ## 开发者日常操作
 
@@ -512,14 +503,14 @@ PYTHONPATH=backend/src DATABASE_URL=postgresql://... \
 
 ```bash
 sudo systemctl status 'fin-ops-worker@*.service'
-sudo systemctl status fin-ops-worker@workbench.service
-sudo journalctl -u fin-ops-worker@workbench.service -n 200 --no-pager
+sudo systemctl status fin-ops-worker@workbench-relation.service
+sudo journalctl -u fin-ops-worker@workbench-relation.service -n 200 --no-pager
 ```
 
 服务器重启单个 worker：
 
 ```bash
-sudo systemctl restart fin-ops-worker@workbench.service
+sudo systemctl restart fin-ops-worker@workbench-relation.service
 ```
 
 重启前先跑对应 check：
@@ -528,12 +519,12 @@ sudo systemctl restart fin-ops-worker@workbench.service
 release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
 cd "$release_src"
 set -a
-source /etc/fin-ops/fin-ops.worker.workbench.env
+source /etc/fin-ops/fin-ops.worker.workbench-relation.env
 set +a
 PYTHONPATH="$release_src/backend/src" \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.app.worker \
-    --registration workbench \
-    --worker-instance workbench \
+    --registration workbench-relation \
+    --worker-instance workbench-relation \
     --check
 ```
 
@@ -542,12 +533,14 @@ PYTHONPATH="$release_src/backend/src" \
 公开 `activate` 命令已删除。`finops-deploy-control release-gate-activate <release>` 是唯一正常激活入口，
 其内部受控激活阶段的 worker 顺序是：
 
-1. 执行 PostgreSQL migration。
-2. 写入 API、worker、dispatcher release drop-in。
-3. 调用 `/usr/local/sbin/finops-ensure-runtime-workers <release-src>`。
-4. 重启 API、worker、dispatcher。
-5. 等待 `/health` worker readiness 收敛。
-6. 输出状态。
+1. PRE 通过后、停止任何服务前，把 live `/etc/fin-ops/fin-ops.worker.workbench.env` 精确复制到 candidate release tree 之外的 gate evidence 目录；目录必须是 `root:root 0700`，env backup 与只含 owner/mode/SHA-256 的 metadata 必须是 `root:root 0600`，禁止输出 env 内容。
+2. 记录 dispatcher 和现行 worker 状态，先停 dispatcher，再停 worker/API，避免候选 registry 切换期间继续 publish 退役事件。
+3. 执行 PostgreSQL migration；本迁移不 DROP Workbench page projection 表，不删除主数据库。
+4. 删除 live `fin-ops-worker@workbench` env/unit 与 generation prune helper/service/timer，并把 dispatcher allowlist 原子同步为候选 registry。
+5. 连续两次检查 Workbench page outbox/dirty scope：`pending|processing|publishing` 必须为零，count/watermark 不得增长；历史 failed/dead-letter 只作为终态证据。
+6. 写入 API、worker、dispatcher release drop-in，调用 `/usr/local/sbin/finops-ensure-runtime-workers <release-src>` 安装精确 5 个 worker。
+7. 重启 API 和候选 worker，仅在 dispatcher 原先处于启用/运行状态时恢复 dispatcher。
+8. 等待 `/health` worker readiness 收敛，再输出绑定精确 release/Git SHA 的状态。
 
 API release drop-in 必须声明 `RuntimeDirectory=fin-ops`，保证 Gunicorn pidfile 目录由 systemd 创建并
 管理。启动命令由目标 release 的实际模块决定：新 runtime 使用 Gunicorn；自动回滚到尚无 WSGI/Gunicorn
@@ -560,8 +553,8 @@ API release drop-in 必须声明 `RuntimeDirectory=fin-ops`，保证 Gunicorn pi
 `pg_temp` 临时表完成隔离 insert/read/delete/rollback 探针，并在 runtime 收敛后执行只读页面 canonical
 audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实业务关系。每次检查都必须使用真实 PostgreSQL 和 RabbitMQ，
 验证 exact registry/systemd inventory、worker readiness、dirty scope、pending/processing outbox、durable 与
-RabbitMQ dead letter、domain audit、真实页面 read-model freshness 和 API/health 性能；自动发布门禁不 enqueue
-synthetic read-model refresh，避免局部 scope 改写 workbench 全局 active generation。HTTP 三样本窗口仅在所有请求成功、fresh、p99
+RabbitMQ dead letter、domain audit、真实页面 canonical proof 和 API/health 性能；自动发布门禁不 enqueue
+synthetic read-model refresh，且要证明 Workbench page event、cache和 projection I/O 为零。HTTP 三样本窗口仅在所有请求成功、合同完整、p99
 合格而 p95 单窗超标时允许一次重采样，连续两窗超标仍 fail closed。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 `preflight` 由候选 gate 代码执行，但 worker readiness 的 required instance 集合必须显式取自当前 stable
@@ -586,10 +579,16 @@ release 与 Git commit。PRE 失败时，部署命令只返回不含 token、环
 - `page_canonical_audit_status = pass`
 - `terminal_publish_reconciliation_stable = true`
 - `queue_stable_after_300_seconds = true`
+- `retired_workbench_page_runtime_zero_delta = true`（首次从 page read model 切到 direct API 时，候选 T+0 前至 T+300 后的 event/scope total+watermark 与旧 projection statement/table stats 均零增量；Redis page cache 由绑定 candidate commit 的 source/runtime owner 缺席证明，不把 source proof 冒充动态计数）
 
 任一 checkpoint、最终证据写入或证据合同校验失败，只能自动恢复带 `settings-access-control-v1`
 capability 且 source/migration fingerprint 有效的 previous release，并在回滚后执行 `preflight` checkpoint；
 previous 不安全或不存在时 API 保持 maintenance，保留 0133/CHECK 并 forward repair。pre checkpoint 失败不修改任何 helper。
+若 previous release 仍登记 Workbench page worker，回滚必须先从上述 private evidence 按原 owner/mode/SHA-256
+原子恢复 exact live env，再用本次已验证的固定 ensure helper 按 previous release manifest 启动 worker；不得把固定 helper
+降级为 previous release 的旧 helper，也不得以仓库 example 代替或迁移该 exact env。
+backup 只在 candidate 的 T+300、最终 evidence contract 均 PASS 后，或 previous rollback checkpoint 已验证成功后删除；
+任何恢复、ensure 或 rollback 验证失败都保持 maintenance 并保留 backup 供人工精确恢复。metadata 作为不含 secret 的审计证据保留。
 pre 与 rollback checkpoint 使用候选 release 的门禁代码检查实际运行 release；worker inventory 仍按实际
 运行 release 的 registry 核对。这样首次启用新门禁时不依赖旧 release 中尚不存在的检查逻辑。
 页面 audit 默认以候选 release 的 `PAGE_AUDIT_REGISTRY` 为预期集合。仅在 `preflight` 检查仍在运行的
@@ -733,7 +732,7 @@ pending/processing 和非 critical 历史记录不阻断。
 
 ## App Status Readiness Convergence
 
-`read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。
+`read_model.app_status_readiness` 是全局状态 icon 允许登记 read model 变绿的证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 projection、schema/source version 和 row count 做 convergence。历史 Workbench page active generation 不属于当前 readiness 输入。
 
 发布或迁移后的固定顺序：
 
@@ -770,7 +769,9 @@ cd "$release_src"
 
 ### Direct canonical page runtime retirement
 
-`0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记：不终止或删除历史 outbox/dirty/readiness，也不 DROP 旧表，因此上一 release 回滚时仍保有完整 backlog、状态和 projection 证据。`finops-deploy-control release-gate-activate` 的内部受控激活阶段必须先停止/disable 新 registry 未登记的退休页面 instance，再查询 PostgreSQL，确认非当前 manifest 的 read-model outbox 与 dirty scope 均无 `processing`；门禁通过后才停止其余上一版本 worker、运行 migration 并激活。门禁失败时不得运行 migration 或激活新版本，且已登记的 6 个 required worker 继续运行，避免生产 runtime 被留在全停状态。新版本的 registry、RabbitMQ dispatcher 和 App Status 不 claim/展示退休历史。仅 `workbench`、`workbench_relation` 保留 read-model runtime；Search 与 no-OA projection 已退役，ETC 只使用 import worker。
+`0127_direct_canonical_page_runtime_retirement.sql` 是纯 no-op 退休标记：不终止或删除历史 outbox/dirty/readiness，也不 DROP 旧表，因此上一 release 回滚时仍保有完整 backlog、状态和 projection 证据。`finops-deploy-control release-gate-activate` 在停止 dispatcher/worker/API 后同步候选 registry，删除 Workbench page worker 与 prune timer，再连续两次证明 page outbox/dirty scope 无 active 行且 watermark 不增长；失败时不得激活候选。新版本的 registry、RabbitMQ dispatcher 和 App Status 不 claim/展示退役历史。仅 `workbench_relation` 保留 read-model runtime；`workbench-matching` 保留为独立领域 worker，Search 与 no-OA projection 已退役，ETC 只使用 import worker。
+
+候选激活后的自动回滚不能直接暴露上一 release 的 stale generation。回滚必须保持 maintenance，调用 previous release 自带的 rehydrate 工具，核对 fresh generation、canonical consistency、dirty/outbox watermark，成功后才激活 previous API/frontend/workers 并按其 registry 恢复 generation timer；任一步失败时继续 maintenance 并 forward-fix。
 
 Bank-flow 未提交候选由页面 API 请求内实时推导，没有 canonical draft event、queue、worker、env 或 replay。`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务状态和审计历史；运维不得投递 draft refresh、启动 bank-flow worker、手工写 draft 或恢复旧 `bank_flow_rule_batch.read_model.refresh`。
 

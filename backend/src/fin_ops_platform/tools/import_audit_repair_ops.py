@@ -334,8 +334,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                         )
                     )
                     completion["refresh_scopes"] = {
-                        scope_type: refresh_gateway.enqueue_many(
-                            scope_type,
+                        "workbench_relation": refresh_gateway.enqueue_many(
+                            "workbench_relation",
                             locked_plan["affected_months"],
                             reason="invoice_header_fact_repair",
                             metadata={
@@ -343,7 +343,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                                 "source_fingerprint": locked_plan["source_fingerprint"],
                             },
                         )
-                        for scope_type in ("workbench", "workbench_relation")
                     }
                 AuditTrailService(
                     PostgresOperationsAuditRepository(transaction)
@@ -837,8 +836,8 @@ def _complete_bank_repair_transaction(
         queue_repository=RuntimeQueueRepository(transaction_connection)
     )
     refresh_scopes = {
-        scope_type: refresh_gateway.enqueue_many(
-            scope_type,
+        "workbench_relation": refresh_gateway.enqueue_many(
+            "workbench_relation",
             locked_plan["affected_months"],
             reason="bank_import_identity_v3_recovery",
             metadata={
@@ -846,7 +845,6 @@ def _complete_bank_repair_transaction(
                 "source_fingerprint": locked_plan["source_fingerprint"],
             },
         )
-        for scope_type in ("workbench", "workbench_relation")
     }
     return public_bank_import_dedup_repair_report(
         locked_plan,

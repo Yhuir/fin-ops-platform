@@ -159,15 +159,14 @@ function WorkbenchZone({
   const contextualSelectionTotal = Math.max(0, (selectionSummary?.total ?? 0) - explicitSelectionTotal);
   const activePaneIds = panes.filter((_, index) => widths[index] > 0.0001).map((pane) => pane.id);
   const loadBankTimeYears = useMemo(() => loadFilterOptions
-    ? (page: number, signal?: AbortSignal) => loadFilterOptions(zoneId, {
+    ? (cursor: string | null, signal?: AbortSignal) => loadFilterOptions(zoneId, {
       pane: "bank",
       facet: "time_year",
-      page,
+      cursor,
     }, signal)
     : undefined, [loadFilterOptions, zoneId]);
   const canRequestNextPage = Boolean(
     pageInfo?.hasMore
-    && pageInfo.readModelStatus === "fresh"
     && !loadingMore
     && !loadMoreError
     && !searchPending

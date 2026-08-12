@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | Dirty scope/outbox | runtime queue | 经 gateway 或等价事务合同 |
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
-| `etc_business_batch_changed` event | historical ETC repair | 仅按修复得到的精确月份输出维护计划；统一 runtime port 在 lifecycle 之外复用 `ReadModelRefreshGateway` 投递同一组精确 Workbench scope，覆盖“成员变化但正式关系无变化”的 generation 收敛；普通 ETC import、submit/revoke 不调用，不投 `all`。 |
+| `etc_business_batch_changed` event | historical ETC repair | 仅按修复得到的精确月份输出维护计划；关联台页面 direct GET 直接观察 canonical ETC/link 事实，不再投递 Workbench page scope。若修复改变正式关系，只由关系 owner 按 `workbench_relation` shared read model 合同投递精确 scope；普通 ETC import、submit/revoke 不调用，不投 `all`。 |
 | `settings_reset_completed` event | admin data reset | reset canonical/state 完成并 reload runtime 后执行显式全域维护；不是普通 settings Drawer 保存路径。 |
 | Import/OA/category/rule facts | 各 canonical owner | 只推进 canonical/source/rule version；消费页面在访问时比较版本并 enqueue 自己的精确 scope，不经过本模块。 |
 
@@ -64,11 +64,11 @@
 
 - `tests/test_derived_data_lifecycle_service.py`
 - `tests/test_runtime_worker_read_model_refresh_scopes.py`
-- `tests/test_workbench_canonical_query_repository.py`
+- `tests/test_workbench_page_query_repository.py`
 - `tests/test_workbench_dirty_queue_wiring.py`
 - `web/src/test/PageRouteHost.test.tsx`（旧前端刷新模块/业务 BroadcastChannel 删除守卫）
 
 ## 当前缺口和删除条件
 
-- 新增 lifecycle event 必须先证明无法由页面访问 freshness 收敛，列出权限、审计、影响 read models 和 scope fan-out，并在 app 执行边界提供 executor 与回归测试。
+- 新增 lifecycle event 必须先证明无法由 owning consumer 的正常读取或既有精确 read-model 合同收敛，列出权限、审计、影响 read models 和 scope fan-out，并在 app 执行边界提供 executor 与回归测试。
 - 如果未来再出现 import/OA/category/rule 普通写 fan-out、`import.fact.changed` worker bridge、`after_mutation` callback 或 executor 隐式刷新其它页面，视为边界回归。

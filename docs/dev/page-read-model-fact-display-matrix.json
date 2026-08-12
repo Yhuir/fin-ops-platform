@@ -6,8 +6,8 @@
       "module": "reconciliation-workbench",
       "page_key": "reconciliation-workbench",
       "route": "/",
-      "read_model_keys": ["workbench"],
-      "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired"],
+      "read_model_keys": [],
+      "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired", "workbench_groups_all_unpaired", "workbench_filter_options_all_paired"],
       "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
@@ -20,7 +20,7 @@
           "required_markers": ["withdraw_relation:CASE-202603-101", "expected_versions", "candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:workbench_initial_all", "http_slo_probe:workbench_groups_all_paired"]
+      "production_readonly_gates": ["http_slo_probe:workbench_initial_all", "http_slo_probe:workbench_groups_all_paired", "http_slo_probe:workbench_groups_all_unpaired", "http_slo_probe:workbench_filter_options_all_paired"]
     },
     {
       "module": "cost-statistics",

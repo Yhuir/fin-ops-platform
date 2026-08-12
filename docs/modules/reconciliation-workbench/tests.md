@@ -1,6 +1,15 @@
 # 关联台测试与验证
 
-日期：2026-08-12
+日期：2026-08-13
+
+## 2026-08-13 Direct canonical API 与 page runtime 退役
+
+- Repository/SQL：首屏在一个 `REPEATABLE READ READ ONLY` snapshot 中构造一次 scope-first typed group spine，同时得到 summary、inventory、paired/unpaired exact totals 与两区各 50 个 keys；只批量 hydration 可见页。普通 groups 使用 query-bound opaque keyset cursor，facet 一条有界 SQL，detail 只按 case 或 typed identity 窄查。搜索只覆盖展示字段并转义 literal wildcard；非法 scope/filter/sort/status/source/page size/cursor 返回 400。
+- Typed identity：页面、preview 与 submit 都以有序 `(row_type,row_id)` 表达成员；同一文本 ID 跨 OA/银行/发票不得冲突或错绑。active relation member array 形状、typed 重复、missing canonical member、completed/pending OA 双源冲突都 fail closed。
+- API/frontend：响应删除 page generation/freshness/version/job；`/api/workbench/refresh-status` 404。mount 使用 combined initial + 独立 OA sync status；区域 search/filter 只重读受影响 zone；异常抽屉 cursor 增量读取，展开才取详情。写成功恰好一次 normal canonical GET，refetch 失败不重试 mutation。
+- Runtime：manifest/App Status/scope 只保留 `workbench_relation`；required worker 精确为 5 个。`workbench.read_model.refresh`、page worker/env、Redis page cache、generation rehydrate/prune/convergence current tooling 全部退役，matching 与 shared relation 保留。
+- Performance：迁移前生产基线已分别记录 combined/groups/facet；发布后以相同参数复测。阻断合同为 HTTP error=0、专项 P95≤1000ms、P99≤2000ms；P50≤600ms/P95≤800ms/P99≤1200ms 是优化目标，不伪称百万级已证明。
+- 下方 2026-08-12 及更早章节是当时验证记录。其中 generation/freshness/cache/worker 断言已由本节替代，不是当前合同。
 
 ## 2026-08-12 关系撤回事务安全闭环（专项已验证）
 
@@ -23,7 +32,7 @@
 - Business core：人工 confirm 对 normalize 后 requested selection 断言至少 2 个不同 canonical IDs，逐个精确解析为 `oa|bank|invoice`；覆盖 OA-only、bank-only、invoice-only 与跨栏组合，1 个成员、重复 ID、missing/unknown row、active overlap/version drift、非法 summary 零写。金额不一致或方向不确定只触发既有 `amount_check.requires_note` + `note`，材料不完整不阻止 active relation 创建，分组仍可保持同-case `unpaired`。
 - Service layer：confirm/withdraw 继续走 `WorkbenchRelationCommandService` + UoW，保护 canonical revalidation、idempotency、history/audit、partial-failure rollback 与 immutable OA attachment/ETC 既有约束。未配对 active case 撤回必须要求 exact full active member set，并从最近 confirm history 的 `before_relations` 恢复上一稳定拓扑；在同一事务锁内重验 canonical member、restored case 与唯一 owner，历史不可证明或 owner 冲突时 fail closed，不做部分恢复。
 - API contract：继续复用 `confirm-link/preview -> confirm-link` 与 `withdraw-link/preview -> withdraw-link`；response shape、error envelope、权限和 `amount_check.requires_note`/`note` 字段不变。preview/submit 覆盖同栏人工关系、`requires_note=true` 时缺 note 拒绝/带 note 成功、材料不完整成功后仍 unpaired、两区 active case 可撤回、singleton 撤回拒绝、exact selection 400 和 topology/canonical/version drift 409。
-- Read model/cache/worker：覆盖 relation mutation 后既有 exact scope 变 stale、当前页 access-time refresh、active generation 原子发布和 unpaired relation topology 恢复；明确不新增 scope、queue、worker、cache owner 或 schema version，旧 fresh payload 不能掩盖新 canonical history。
+- Read model/cache/worker（历史当时合同）：当时覆盖 relation mutation 后 exact scope 与 generation；2026-08-13 起由 direct normal GET 和 page runtime 零引用合同替代，unpaired relation topology 恢复仍保持。
 - Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护选择任意至少 2 个不同成员后确认可用、`requires_note=true` 时差额说明必填、未完整关系提交后仍在未配对区、unpaired active relation 显示关系级撤回、singleton 不显示撤回，以及未配对工具栏“异常处理”完全删除。右上 `异常 n | 已忽略 m`、`WorkbenchExceptionDrawer`、自动异常 chip 和 ignore/restore 回归继续通过。
 - End-to-end：`workbench-withdraw-flow.spec.ts` 承担 paired/unpaired active relation 撤回与上一稳定拓扑恢复；relation/network flows 承担同栏/跨栏 confirm、`requires_note` 路径、fresh 收敛与幂等；permissions/stale/exception flows 保护权限、non-fresh gate 和删除人工入口后系统异常链仍可用。覆盖映射以 `e2e-coverage.md` 的实际落地状态为准。
 - Regression：自动 matching exact-sum/证据/唯一性/资源保护与撤回 fingerprint 不放宽；paired/unpaired 完整性、520/13 张发票、OA attachment、ETC、no-OA、batch accounting、turnover 和下游 linked/unlinked 保持原合同。
@@ -48,7 +57,7 @@
 - Business core：`tests/test_workbench_relation_grouping.py` 覆盖材料完整但进行中的关系仍为 unpaired、`oa_in_progress` 阻断、多 OA 任一进行中阻断和完成后同 case paired。
 - Service/read model：`tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_sql_runtime.py` 保护 admission canonical rows/source proof、删除 pending claim exclusion、v21 淘汰 v20 generation/cache。
 - Frontend：`OaWorkflowStatusChip.test.tsx` 与 `WorkbenchColumns.test.tsx` 保护 HeroUI 申请类型及“已完成/进行中/状态未知”chip；API mapper传播 `blockingReasons`。
-- Regression：1 秒 refresh-status、active-generation原子发布和其它 relation mode不变；没有新增 read model、worker、queue、缓存或第三个 zone。
+- Regression（历史记录）：当时验证过 1 秒 refresh-status 与 active-generation 原子发布；这两条页面合同已在 2026-08-13 direct canonical 迁移中退役。其它 relation mode 不变，且没有新增 read model、worker、queue、缓存或第三个 zone。
 
 ## 2026-08-05 历史 WEX 运行时退役与搜索合同 v20
 
@@ -108,9 +117,9 @@
 
 ## 2026-07-25 关联台写后恢复读放大回归
 
-- `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_refresh_status_uses_fast_freshness_status_instead_of_heavy_diagnostic` 证明公开 refresh-status 优先使用既有轻量 groups freshness port，完整 generation/outbox/worker diagnostic 不进入页面轮询热路径；旧 repository fallback 与 timeout 合同保持。
+- 历史 `tests/test_workbench_query_facade.py` 曾验证公开 refresh-status 与 generation cache；该文件及对应 runtime 已在 2026-08-13 退役，当前由 direct query repository、HTTP 503 与零 fallback 合同取代。
 - `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_groups_cache_miss_waits_for_same_generation_fill_before_querying` 证明同一 fresh generation + query 的缓存回填并发只由锁 owner 查询 PostgreSQL，follower 等待后读取精确代际缓存；缓存未生成时仍有界退回原 repository 路径。
-- `web/src/test/WorkbenchSelection.test.tsx` 的 withdraw 完整恢复用例把 combined initial 保持为一次 recovery trigger 和一次最终 fresh payload，共 2 次；中间 refreshing 只调用轻量 refresh-status，最终仍验证 OA、银行、发票分别恢复为完整 unpaired singleton。
+- 历史 withdraw 用例曾等待 refresh-status；当前写成功后只执行一次 `no-store` canonical GET，并继续验证 OA、银行、发票分别恢复为完整 unpaired singleton。
 - `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_filters_workbench_groups_page_from_structured_group_rows` 锁定 active-member CTE 为 `NOT MATERIALIZED`，防止 all-scope 条件查询恢复“先复制全部 active members、再应用搜索/筛选”的优化屏障；同文件搜索、pane/列/时间、total/row counts 和数据库内有界分页回归继续保护原业务语义，并断言不再构造 matching id 数组。
 - 现有 Workbench Selection 全文件继续覆盖 confirm operation projection、withdraw blocking UI、generation version conflict、failed/stale 状态、权限、筛选和详情交互；没有增加 retry fallback、第二轮询器或放宽 fresh 判断。
 
@@ -160,16 +169,15 @@
 | 1. Business core | 是 | 人工至少 2 个不同 canonical members（同栏/跨栏）、`requires_note` 门禁、上一稳定拓扑撤回恢复；确定性证据、365/30 日边界、N:M:K exact-sum、歧义/金额-only/红冲 fail-closed、撤回阻断指纹、paired/unpaired 精确分区 |
 | 2. Service layer | 是 | repository 输入、relation/matching 单 UoW、幂等、rollback、history/`before_relations` restore、普通 relation 写零 dirty/outbox、旧状态清理 |
 | 3. API contract | 是 | paired/unpaired shape、分页/search/detail、filter-options、confirm/withdraw shape 不变、差额 note、版本冲突、权限、unknown state fail-fast |
-| 4. Read model/cache/worker | 是 | active generation 原子发布、freshness、all-scope 组合、exact generation stats、stats 缺失/发布竞态 fail-closed、bulk refresh、旧 generation 不冒充 fresh |
+| 4. Read model/cache/worker | 是 | page runtime 零 manifest/worker/cache/queue/generation；normal GET 只走一个 read-only canonical snapshot；共享 `workbench_relation` 与 matching 继续按各自 exact-scope 合同收敛 |
 | 5. Frontend interaction | 是 | 两区渲染、singleton/active relation 未配对、任意至少 2 个成员选择/preview、两区关系级撤回、旧人工异常入口缺席且系统异常抽屉保留、loading/empty/error/stale、权限与分页 |
 | 6. End-to-end | 是 | canonical import/OA -> matching；人工同栏/跨栏 confirm -> paired/unpaired；两区 active relation withdraw -> previous stable topology/singletons；跨页独立收敛与非消费者隔离 |
 | 7. Regression | 是 | 520 样例、13 张发票、ETC/OA 附件、no-OA、batch accounting、turnover、cost/search/invoice lifecycle |
 
-本轮 generation retention 修复覆盖 Category 1/2/4/7：`tests/test_workbench_sql_runtime.py`
-验证每轮候选上限 500、只选择 `superseded|failed`、按 scope 分组、`delete_batch_size=1..100`、每批独立事务、
-事务内锁行复核 default tenant/scope/终态、后批失败不回滚已完成批次、dry-run/空候选零事务，以及 CLI 专用
-60 秒 statement timeout；`tests/test_deploy_runtime_examples.py` 验证版本化 helper 的环境变量默认值与参数透传。
-Category 3/5/6 不适用：本轮不改变 HTTP、前端或业务流程，也不连接真实数据库或执行生产清理。
+本轮 direct canonical 迁移覆盖 Category 1–7：direct repository/facade/API tests 保护 typed identity、bounded
+snapshot query、HTTP shape 与 fail-closed；runtime registry/gateway/boundary tests 保护 page scope 零链路；既有组件和
+Browser tests 保护两区交互与写后一次 normal GET。历史 generation retention 测试记录保留在下方日期章节，不再是
+current runtime gate。
 
 ## 核心固定测试
 
@@ -178,7 +186,9 @@ Category 3/5/6 不适用：本轮不改变 HTTP、前端或业务流程，也不
 - `tests/test_workbench_matching_orchestrator.py`
 - `tests/test_workbench_relation_grouping.py`
 - `tests/test_workbench_relation_alignment_service.py`
-- `tests/test_workbench_sql_runtime.py`
+- `tests/test_workbench_direct_query_facade.py`
+- `tests/test_workbench_page_query_repository.py`
+- `tests/test_workbench_query_postgres_integration.py`
 - `tests/test_workbench_v2_api.py`
 - `tests/test_workbench_query_service.py`
 - `tests/test_postgres_migrations.py`
@@ -204,19 +214,19 @@ Category 3/5/6 不适用：本轮不改变 HTTP、前端或业务流程，也不
 - UoW 失败时 relation、history、idempotency 和 outbox 不得半写入。
 - source payload 即使把无 active relation 的 row 放在旧 paired section，最终也必须降级为 unpaired singleton。
 - E2E mock 不得用共享历史 `case_id` 构造未配对组；每区单一搜索词必须扫描该区三类结构化行，任一行命中后保留完整组上下文，隐藏 pane 与折叠明细也必须可命中。
-- 未配对 canonical row 若携带旧 `candidate:` / `decision:` / `temp:` ownership，输出必须清理与该候选 ownership 绑定的 mode 装饰且仍保持 singleton；control owner 优先级只允许 active formal relation > 有效非异常 override。正式关系成员不能携带旧 override/WEX decoration；历史 `exception_case`、`handled_exception` 与 row-ignore 必须在 generation 边界被丢弃，`pending_input_invoice` 等合法非异常 override fields 仍与 canonical override 精确一致。回归测试必须同时覆盖最终 `workbench_rows.payload` 写入形状和 Page Audit SQL 的相同优先级。
+- 未配对 canonical row 若携带旧 `candidate:` / `decision:` / `temp:` ownership，direct descriptor 必须清理与该候选 ownership 绑定的 mode 装饰且仍保持 singleton；control owner 优先级只允许 active formal relation > 有效非异常 override。正式关系成员不能携带旧 override/WEX decoration；历史 `exception_case`、`handled_exception` 与 row-ignore 不得进入 direct page DTO，`pending_input_invoice` 等合法非异常 override fields 仍与 canonical override 精确一致。
 - ETC collapsed-summary 必须同时物化 summary row 和全部 invoice detail rows；paired/unpaired 只改变 zone/status，不得丢失、重复或隐藏明细。
-- Workbench groups page cache schema 必须与 projection schema 同步，projection 行为升级后旧 Redis payload 必须自动失效。
-- combined initial 两区首屏必须各为 50 groups、`has_more` 保留真实 total，默认 batch SQL 每区读取最多 51 条用于判定后续页；前端不得显示“已加载 N / total”或手动“加载更多”，仅在 fresh、查询稳定且用户滚动接近区域底部时自动请求下一页；同区请求必须去重，搜索/筛选/version 变化时旧响应不得并入新结果，失败后停止自动重试并提供显式重试。后续 `/groups` 必须绑定同一 `expected_read_model_version`，不得为性能退回 200-group 首屏或全量 payload。
-- 默认无筛选 all-scope `/groups` 的 total/row_counts 必须来自当前 active-month generation-set digest 对应的两条 `workbench_generation_stats`；统计缺失或查询前后 digest 改变时返回 refreshing，不得执行旧的全量 distinct row count。月 generation 发布与该统计必须处于同一事务，多个 scope 同批发布只生成一次最终 digest 统计。
-- all-scope 区域搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；计数 SQL 只返回 total 与 row counts，分页在数据库内复用相同 member 条件并只读取 `page_size + 1` 条 payload，禁止把全部 matching group ids 聚合并传入 Python。搜索必须覆盖展示字段、排除内部 identity/detail-only 值、转义 ILIKE 通配符并限制 200 字符。测试必须断言 SQL 不读取历史 generation/payload 做计数，也不构造无界 ID 参数。
-- 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时使用既有 deferred combined initial 单请求，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中折叠明细时仍返回对应关联组，但闭合态只显示摘要，不显示折叠成员且不发详情请求。搜索和非搜索状态下，ETC 发票与流水规则批次都只能由用户显式点击展开；收起后必须恢复摘要，搜索切换期间完成的旧详情请求不得重新展开新结果。
-- 搜索框在首个 combined initial 完成前已可输入时，不得提前消费新的 zone query key；初始稳定数据安装后必须补发包含该 query 的 combined initial 请求，不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
-- 关联台 Audit 绿色结果必须绑定 active Workbench read-model version + 页面 freshness status；generation/status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 属于 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 属于 freshness 阻断。
-- matching source-version 回归必须证明纯 Workbench projection schema 不进入 matching provider；bank-flow/no-OA read-model provider 仍保留自身所需的 Workbench projection dependency。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。
+- Workbench page GET 不得访问 Redis page payload、generation/projection 表或 refresh queue；同一请求的 SQL 条数必须有界且与成员数无关。
+- combined initial 两区首屏必须各为 50 groups、`has_more` 保留 exact total，candidate SQL 每区读取最多 51 个 keys；前端不显示手动“加载更多”，只在查询稳定且滚动接近底部时请求下一 cursor。同区请求去重，搜索/筛选变化会清 cursor，旧响应不得并入新结果；不得退回 OFFSET、200-group 首屏或全量 payload。
+- 默认 all-scope `/groups` 的 total/row_counts 由同一 direct group spine 精确计算；keyset 只优化深分页，不能把 exact count 伪装成近似值。候选和 hydration 的 SQL 数必须与成员数无关、无 N+1。
+- all-scope 区域搜索、来源、pane/列/时间筛选只扫描 scope-first canonical facts/active formal relations，条件按既有 AND/OR 语义相交；分页只 hydration `page_size` 可见 groups。搜索覆盖展示字段、排除内部 identity/raw payload、转义 ILIKE 通配符并限制 200 字符。
+- 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时只请求受影响 zone，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中折叠明细时仍返回对应关联组，但闭合态只显示摘要，不显示折叠成员且不发详情请求。搜索和非搜索状态下，ETC 发票与流水规则批次都只能由用户显式点击展开；收起后必须恢复摘要，搜索切换期间完成的旧详情请求不得重新展开新结果。
+- 搜索框在首个 combined initial 完成前已可输入时，initial 安装后必须补发该 zone 的权威 direct query；不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
+- 关联台 Audit 绿色结果只绑定本次 immutable canonical snapshot 的 expected-set、typed membership、active relations、异常与关键字段；下一次 dashboard refresh 清除旧结果。matching scope 是独立 domain 诊断，不是页面 GET freshness。
+- matching source-version 回归必须证明 Workbench page direct SQL 不进入 matching provider；bank-flow/no-OA 的独立 read-model provider 只保留自身真实依赖。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。
-- group detail 必须稳定输出三个 pane 数组；展开 Promise 只有在同一 active read-model version 的完整详情已安装后才能成功。详情保持 click-only lazy load，禁止恢复 mount/update 自动预取或静默吞错。row detail 的 active version 校验与详情读取必须处于同一个 repeatable-read 快照；version 冲突或 row miss 时前端只允许等待一次 combined initial 刷新并重试一次，期间保持抽屉请求身份，禁止循环重试或让旧响应覆盖新 generation。
-- 每个可见非 summary group row 必须在同 generation 具有 `workbench_rows` 详情行；发布前校验与 active generation consistency Audit 都必须阻断缺失行。健康 generation 遇到完全相同的 `source_versions` 必须保持 generation version，不得制造无事实变化的版本漂移；同版本但 consistency 失败时必须重建。
+- group detail 必须稳定输出三个 pane 数组；详情保持 click-only lazy load，按 case/typed detail key 在一个 repeatable-read snapshot 中窄查，禁止 mount/update 自动预取、全区 scan 或静默吞错。row miss 返回明确 404，不做 generation reload/retry loop。
+- 每个 visible summary member 必须能在同一请求 page-only hydration 中解析为 typed canonical row；缺成员或 identity drift 整个请求 fail closed，不回退历史 `workbench_rows` 或 member payload。
 
 ## 验证命令
 
@@ -228,15 +238,18 @@ python3 -m pytest -q \
   tests/test_workbench_relation_grouping.py
 
 python3 -m pytest -q \
-  tests/test_workbench_sql_runtime.py \
-  tests/test_workbench_query_facade.py \
+  tests/test_workbench_page_cursor.py \
+  tests/test_workbench_page_query_repository.py \
+  tests/test_workbench_page_selection_repository.py \
+  tests/test_workbench_direct_query_facade.py \
+  tests/test_workbench_query_postgres_integration.py \
   tests/test_workbench_v2_api.py \
-  tests/test_workbench_query_service.py \
+  tests/test_workbench_routes.py \
   tests/test_postgres_migrations.py
 
 # 需设置一次性本地 FIN_OPS_TEST_DATABASE_URL
 python3 -m pytest -q \
-  tests/test_postgres_state_store_integration.py::PostgresStateStoreIntegrationTests::test_workbench_all_groups_use_exact_generation_stats_and_fail_closed_when_missing
+  tests/test_workbench_query_postgres_integration.py
 
 cd web && npm test -- --run \
   src/test/RelationGroupGrid.test.tsx \
@@ -269,22 +282,22 @@ cd web && npm test -- --run \
   src/test/WorkbenchExceptionDrawer.test.tsx
 ```
 
-发布后：
+发布后只读验证：
 
 ```bash
-scripts/with-production-admin-token.sh python3 scripts/rehydrate-workbench-read-models.py
-scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_workbench_relation_display --month all
+scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_slo_probe \
+  --profile workbench-direct --warmup 2 --requests 100
 ```
 
 生产命令的实际参数和 release 环境以 `docs/operations/runtime-worker-governance.md` 与 deploy control 为准；不得输出 token。
 
 ## 数据安全验收
 
-- migration 前后 canonical OA/银行流水/发票 counts 与金额 checksum 不得减少。
-- migration 不修改 `app.workbench_pair_relations` 或 history。
-- rehydrate 只发布新 generation，不原地改旧 generation。
+- 本次不创建或恢复 canonical 数据备份，不删除或重建主数据库，也不修改已应用历史 migration。
+- direct GET 必须是 `REPEATABLE READ READ ONLY`，不得修改 OA、银行流水、发票、正式关系或 history。
+- 发布切换不 drop 历史 page-generation 表；它们只作为上一 immutable release 的离线回滚材料，当前 release 零读写。
 - Audit 必须证明满足冻结 requirement 的 active relation typed members 与 paired display 双向相等；未满足 requirement 的 active relation 必须保持同 case、显式 incomplete 并进入 unpaired；无 active owner 的其余 canonical facts 全部 singleton unpaired。
-- 520 case、发票号和 OA row id 必须在 fresh generation 中同组；13 张样例必须完整可见。
+- 520 case、发票号和 OA row id 必须在 direct canonical response 中同组；13 张样例必须完整可见。
 
 ## 2026-07-28 OA 子项对齐与完整性回归
 
@@ -365,7 +378,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - `bank_oa_invoice` 的 affected consumers 固定为关联台、银行明细、待找发票、进项使用、OA 待付款、成本统计；销项收款与税务抵扣只作 isolation。测试按当前 scenario entry 断言 role，不使用其它 relation shape 的 affected 联集。
 - 同条件旧/新 10 次 characterization 继续采用 Task 30-02 的同一 PostgreSQL fixture、scope/version/row IDs、连接与 warm-up：新路径固定每次 6 条 counted SQL、完整 generation scan 为 0、formal snapshot dependency 为 0，最大新样本 5.089ms。
 - 相同 URL、无独立 `AbortSignal`、仍在进行的 combined initial 必须只产生一个 HTTP 请求；所有调用方都获得同一映射结果。请求完成或失败后必须移除 in-flight entry，后续读取重新访问服务器；搜索/筛选可取消请求不得被该合并吞掉。
-- 正式 confirm/withdraw 的 canonical row resolver 必须读取生产已配置的 `_workbench_sql_read_repository.get_workbench_row_detail(...)`；不得重新引用已退役、未注入的 `_workbench_canonical_query_repository` 而静默回退到全量 live builder。preview selection 仍只用于 preview，正式 command/UoW 不得消费 preview DTO。
+- 正式 confirm/withdraw 的 canonical row resolver 必须读取生产已配置的 `PostgresWorkbenchPageSelectionRepository` typed canonical port；不得静默回退到全量 live builder。preview 与 submit 都携带同序 `row_ids` + `row_types`，正式 command/UoW 在事务内按 exact typed set 重新校验，不能消费页面 DTO。
 - relation preview 必须保留首尾 fresh/version drift 门禁，但同一次 selection 只允许一次 generation proof；末次 freshness 的 active version 是结束 version 证据，不得再次执行等价 proof。`active_relations_for_row_ids` 必须走 active-only repository loader，不能为 active lookup 读取 relation history；withdraw restore preview 仍保留 history loader。
 - `tests/test_workbench_relation_command_repository_adapter.py::WorkbenchRelationCommandRepositoryAdapterTests::test_scoped_load_filters_in_memory_snapshot_when_repository_has_no_scope_boundary` 使用禁止 `snapshot()` 的 service，证明撤回 scoped read 直接调用既有 `snapshot_for_row_ids(...)`，只复制目标 relation/history，不重建全量进程内状态。
 - 本地 release gate：700 项定向 backend/deploy unittest、123 项 scoped Vitest、3 项 Chromium E2E、repository lint、docs gate 与 production build 全部通过。没有运行 pytest、完整 CI 或 183 项 Browser suite。
@@ -391,7 +404,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 
 ## 2026-08-06 - visible self-convergence 与 writer 零通知
 
-- Backend/API：`tests/test_workbench_query_facade.py`、`tests/test_workbench_routes.py` 与 `tests/test_read_model_refresh_gateway.py` 保护公开 refresh-status 只 enqueue canonical proof 返回的 exact scopes，并复用既有 gateway/queue 去重；`all` 不作为普通 stale fallback。
+- Backend/API（历史记录）：旧 refresh-status/gateway/enqueue 合同已经退役；当前 `tests/test_workbench_direct_query_facade.py`、`tests/test_workbench_routes.py` 与 runtime boundary guards 保护 direct GET 零 enqueue、零 cache、零 fallback。
 - Service/PostgreSQL：`tests/test_workbench_source_proof_contract.py` 覆盖所有 mutable Workbench dependency 的 writer→proof 变化、无关 scope 不变、bank-flow writer 零 dirty/outbox，以及既有 worker 原子发布新 generation 后 status 回到 fresh。
 - Frontend：`web/src/test/WorkbenchSelection.test.tsx` 保护 visible entry/focus immediate、每次 settle+1000ms、hidden pause、single-flight，以及 changed fresh generation 只经既有 300ms debounce reload 一次。
 - Browser：`web/e2e/bank-flow-rule-batches-flow.spec.ts` 保护 bank-flow 写响应零 Workbench target，并由持续可见关联台的 status→generation→业务 identity 链收敛；性能样本使用同一 Node monotonic clock，不能用 mock、混合时钟或最快样本替代 p99。

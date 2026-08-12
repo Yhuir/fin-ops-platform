@@ -80,9 +80,14 @@ class CaptureRepository:
         row_ids: list[str],
         *,
         row_types: list[str],
+        tenant_id: str | None = None,
     ) -> list[str]:
         self.canonical_lock_calls.append(
-            {"row_ids": list(row_ids), "row_types": list(row_types)}
+            {
+                "row_ids": list(row_ids),
+                "row_types": list(row_types),
+                "tenant_id": tenant_id,
+            }
         )
         return ["oa:oa-missing"]
 
@@ -103,12 +108,19 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         missing = adapter.lock_canonical_relation_members(
             ["oa-missing", "bank-1"],
             row_types=["oa", "bank"],
+            tenant_id="tenant-a",
         )
 
         self.assertEqual(missing, ["oa:oa-missing"])
         self.assertEqual(
             repository.canonical_lock_calls,
-            [{"row_ids": ["oa-missing", "bank-1"], "row_types": ["oa", "bank"]}],
+            [
+                {
+                    "row_ids": ["oa-missing", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                    "tenant_id": "tenant-a",
+                }
+            ],
         )
 
     def test_load_prefers_repository_when_repository_is_configured(self) -> None:

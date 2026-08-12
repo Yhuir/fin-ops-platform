@@ -76,6 +76,13 @@ test.describe("workbench large dataset browser flow", () => {
 
   test("keeps automatic pagination, full search, tri-pane scroll, detail drawer, and selection controls usable", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
+    const groupRequestUrls: URL[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.pathname === "/api/workbench/groups") {
+        groupRequestUrls.push(url);
+      }
+    });
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchLargeDataset: true,
@@ -87,6 +94,7 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toHaveCount(0);
     await expect(openZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBe(0);
 
     await openZone.getByRole("button", { name: "筛选 申请人" }).click();
@@ -102,6 +110,8 @@ test.describe("workbench large dataset browser flow", () => {
     });
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-099")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
+    expect(groupRequestUrls[0]?.searchParams.get("cursor")).toBeTruthy();
+    expect(groupRequestUrls[0]?.searchParams.has("page")).toBe(false);
 
     const pairedSearch = page.getByRole("searchbox", { name: "搜索已配对区域" });
     const unpairedSearch = openZone.getByRole("searchbox", { name: "搜索未配对区域" });
@@ -113,6 +123,9 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toHaveCount(0);
     await expect(targetGroup.locator("mark.search-hit", { hasText: "长列表供应商155" })).toBeVisible();
     await expect(pairedSearch).toHaveValue("");
+    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(2);
+    expect(groupRequestUrls[1]?.searchParams.get("search")).toBe("长列表供应商155");
+    expect(groupRequestUrls[1]?.searchParams.has("cursor")).toBe(false);
 
     await targetGroup.getByRole("row", { name: /长列表供应商155/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
@@ -128,12 +141,17 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(openZone.getByText("已选 1")).toBeVisible();
     await openZone.getByRole("button", { name: "清空搜索" }).click();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
+    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(3);
+    expect(groupRequestUrls[2]?.searchParams.has("search")).toBe(false);
+    expect(groupRequestUrls[2]?.searchParams.has("cursor")).toBe(false);
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
     await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066")).toBeVisible();
-    expect(api.count("GET /api/workbench/groups")).toBe(2);
+    expect(api.count("GET /api/workbench/groups")).toBe(4);
+    expect(groupRequestUrls[3]?.searchParams.get("cursor")).toBeTruthy();
+    expect(groupRequestUrls[3]?.searchParams.has("page")).toBe(false);
     await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("cell").first().click();
     await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("cell").first().click();
     await expect(openZone.getByText("已选 3")).toBeVisible();
@@ -172,7 +190,7 @@ test.describe("workbench large dataset browser flow", () => {
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
 
-    await expect(openZone.getByRole("alert")).toContainText("自动加载下一页失败，请重试。");
+    await expect(openZone.getByRole("alert")).toContainText("关联台服务暂时不可用，请稍后重试。");
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     await page.waitForTimeout(500);
     expect(api.count("GET /api/workbench/groups")).toBe(1);

@@ -155,7 +155,7 @@ def collect_baseline(
             "page_first_response_p95_ms": 1000,
             "page_first_response_p99_ms": 2000,
             "write_operation_to_fresh_p99_ms": 3000,
-            "retained_read_model_keys": ["workbench", "workbench_relation"],
+            "retained_read_model_keys": ["workbench_relation"],
         },
         **sections,
         "api_performance": {

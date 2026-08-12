@@ -83,7 +83,6 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(
             graph,
             {
-                "workbench": (),
                 "workbench_relation": (),
             },
         )
@@ -288,7 +287,6 @@ class ReadModelManifestTests(unittest.TestCase):
 
     def test_manifest_repository_owner_uses_retained_read_model_ports(self) -> None:
         expected_port_owners = {
-            "workbench": "PostgresReadModelRepository.workbench",
             "workbench_relation": "WorkbenchRelationReadModelRepositoryPort",
         }
 
@@ -378,11 +376,9 @@ class ReadModelManifestTests(unittest.TestCase):
                 self.assertNotIn("read_model.workbench_relation_groups", shared_source)
                 self.assertNotIn("read_model.workbench_relation_scopes", shared_source)
 
-    def test_workbench_page_and_relation_manifests_remain(self) -> None:
-        workbench = READ_MODEL_MANIFEST["workbench"]
+    def test_only_workbench_relation_manifest_remains(self) -> None:
         relation = READ_MODEL_MANIFEST["workbench_relation"]
-        self.assertEqual(workbench.projection_strategy, "active_generation_scoped_publish")
-        self.assertEqual(workbench.primary_worker_instance, "workbench")
+        self.assertNotIn("workbench", READ_MODEL_MANIFEST)
         self.assertEqual(relation.projection_strategy, "scoped_incremental_distribution")
         self.assertEqual(relation.primary_worker_instance, "workbench-relation")
 

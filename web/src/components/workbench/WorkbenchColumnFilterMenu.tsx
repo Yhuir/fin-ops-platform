@@ -47,9 +47,10 @@ function WorkbenchColumnFilterMenu({
   onChange,
 }: WorkbenchColumnFilterMenuProps) {
   const requestIdRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | null>(null);
   const [optionSearch, setOptionSearch] = useState("");
   const [options, setOptions] = useState<WorkbenchFilterOption[]>([]);
-  const [page, setPage] = useState(1);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,13 +58,16 @@ function WorkbenchColumnFilterMenu({
   useEffect(() => {
     if (!open) return undefined;
     const requestId = ++requestIdRef.current;
+    requestControllerRef.current?.abort();
     const controller = new AbortController();
+    requestControllerRef.current = controller;
     const timeout = window.setTimeout(async () => {
       if (!loadFilterOptions || !zoneId || !paneId || !columnKey) {
         setOptions((staticOptions ?? [])
           .filter((option) => !optionSearch || option.toLocaleLowerCase("zh-CN").includes(optionSearch.toLocaleLowerCase("zh-CN")))
           .map((option) => ({ value: option, label: option, missing: false })));
         setHasMore(false);
+        setNextCursor(null);
         setError(staticOptions ? null : "筛选选项暂不可用");
         return;
       }
@@ -75,18 +79,12 @@ function WorkbenchColumnFilterMenu({
           facet: "column",
           column: columnKey,
           optionSearch,
-          page: 1,
+          cursor: null,
         }, controller.signal);
         if (requestId !== requestIdRef.current) return;
-        if (result.readModelStatus !== "fresh") {
-          setOptions([]);
-          setHasMore(false);
-          setError("数据正在刷新，请稍后重试");
-          return;
-        }
         setOptions(result.options);
-        setPage(1);
         setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
       } catch (reason) {
         if (controller.signal.aborted || requestId !== requestIdRef.current) return;
         setOptions([]);
@@ -99,13 +97,17 @@ function WorkbenchColumnFilterMenu({
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
+      if (requestControllerRef.current === controller) requestControllerRef.current = null;
     };
   }, [columnKey, loadFilterOptions, open, optionSearch, paneId, staticOptions, zoneId]);
 
   const handleLoadMore = async () => {
     if (!loadFilterOptions || !zoneId || !paneId || !columnKey || loading || !hasMore) return;
-    const nextPage = page + 1;
+    if (!nextCursor) return;
     const requestId = ++requestIdRef.current;
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
     setLoading(true);
     setError(null);
     try {
@@ -114,21 +116,22 @@ function WorkbenchColumnFilterMenu({
         facet: "column",
         column: columnKey,
         optionSearch,
-        page: nextPage,
-      });
+        cursor: nextCursor,
+      }, controller.signal);
       if (requestId !== requestIdRef.current) return;
       setOptions((current) => {
         const byValue = new Map(current.map((option) => [option.value, option]));
         result.options.forEach((option) => byValue.set(option.value, option));
         return Array.from(byValue.values());
       });
-      setPage(nextPage);
       setHasMore(result.hasMore);
+      setNextCursor(result.nextCursor);
     } catch (reason) {
-      if (requestId === requestIdRef.current) {
+      if (!controller.signal.aborted && requestId === requestIdRef.current) {
         setError(reason instanceof Error ? reason.message : "筛选选项加载失败");
       }
     } finally {
+      if (requestControllerRef.current === controller) requestControllerRef.current = null;
       if (requestId === requestIdRef.current) setLoading(false);
     }
   };

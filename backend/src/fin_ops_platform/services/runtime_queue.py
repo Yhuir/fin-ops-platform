@@ -2881,6 +2881,12 @@ def _event_type_tuple(raw: Any, *, default: tuple[str, ...], name: str) -> tuple
     values = tuple(part.strip() for part in str(raw).replace(";", ",").split(",") if part.strip())
     if not values:
         raise RuntimeQueueDataError(f"{name} must include at least one event type.")
+    unsupported = sorted(set(values) - set(default))
+    if unsupported:
+        raise RuntimeQueueDataError(
+            f"{name} contains event types outside the active runtime registry: "
+            f"{', '.join(unsupported)}."
+        )
     return values
 
 

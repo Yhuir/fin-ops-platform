@@ -14,15 +14,27 @@ from fin_ops_platform.tools import http_slo_probe
 
 
 class HttpSloProbeTests(unittest.TestCase):
-    def test_default_probe_set_includes_lightweight_workbench_refresh_status(self) -> None:
-        probe = next(
+    def test_default_workbench_probes_are_unique_direct_canonical_reads(self) -> None:
+        probes = [
             probe
             for probe in http_slo_probe.DEFAULT_API_PROBES
-            if probe.name == "workbench_refresh_status_all"
-        )
+            if probe.name.startswith("workbench_") and probe.name != "workbench_settings"
+        ]
 
-        self.assertEqual(probe.path, "/api/workbench/refresh-status?month=all")
-        self.assertEqual(probe.expected_statuses, (200,))
+        self.assertEqual(
+            {probe.name for probe in probes},
+            {
+                "workbench_initial_all",
+                "workbench_groups_all_paired",
+                "workbench_groups_all_unpaired",
+                "workbench_filter_options_all_paired",
+            },
+        )
+        self.assertEqual(len({probe.name for probe in probes}), len(probes))
+        self.assertEqual(len({probe.path for probe in probes}), len(probes))
+        self.assertTrue(all(probe.expected_statuses == (200,) for probe in probes))
+        self.assertTrue(all("page=" not in probe.path for probe in probes))
+        self.assertTrue(all("/refresh-status" not in probe.path for probe in probes))
 
     def test_capacity_targets_are_derived_from_anonymous_rolling_sixty_second_counts(self) -> None:
         counts = [1] * 19_152 + [5] * 1_008
@@ -302,7 +314,9 @@ class HttpSloProbeTests(unittest.TestCase):
             self.assertIn(path, http_slo_probe.DEFAULT_PAGE_PATHS)
 
         for name in (
+            "workbench_initial_all",
             "workbench_groups_all_paired",
+            "workbench_groups_all_unpaired",
             "workbench_filter_options_all_paired",
             "operations_app_health_dashboard",
             "pending_invoices_rows",
@@ -327,9 +341,14 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("date_from=", probe_paths["bank_details_transactions"])
         self.assertIn("include_statistics=false", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("date_to=", probe_paths["bank_details_transactions"])
-        self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])
+        self.assertNotIn("page=", probe_paths["workbench_groups_all_paired"])
+        self.assertNotIn("page=", probe_paths["workbench_groups_all_unpaired"])
+        self.assertNotIn("page=", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page_size=50", probe_paths["workbench_groups_all_paired"])
         self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_paired"])
+        self.assertIn("zone=unpaired", probe_paths["workbench_groups_all_unpaired"])
+        self.assertIn("page_size=50", probe_paths["workbench_groups_all_unpaired"])
+        self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_unpaired"])
         self.assertIn("column=applicant", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page_size=100", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page=1", probe_paths["pending_invoices_rows"])
@@ -356,6 +375,8 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("oa_page=1", probe_paths["batch_accounting"])
         self.assertIn("oa_page_size=200", probe_paths["batch_accounting"])
         self.assertNotIn("search_all", probe_paths)
+        self.assertNotIn("workbench_refresh_status_all", probe_paths)
+        self.assertNotIn("/api/workbench/refresh-status", "\n".join(probe_paths.values()))
         admin_probe = next(probe for probe in http_slo_probe.DEFAULT_API_PROBES if probe.name == "operations_app_health_dashboard")
         self.assertEqual(admin_probe.auth_scope, "admin")
 

@@ -1,3 +1,5 @@
+import type { WorkbenchRecordType } from "./types";
+
 export type WorkbenchExceptionBusinessLine = "expense" | "income" | "data_anomaly" | (string & {});
 
 export type WorkbenchExceptionResultStatus = "closed" | "open" | "ignored" | "cancelled" | (string & {});
@@ -56,22 +58,16 @@ export type WorkbenchExceptionPreview = {
 export type WorkbenchExceptionPreviewPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
 };
 
 export type WorkbenchExceptionApplyPayload = {
   month: string;
   rowIds: string[];
-  expectedReadModelVersion: string;
+  rowTypes: WorkbenchRecordType[];
   scenarioCode: string;
   actionCode: string;
   payload: Record<string, unknown>;
-};
-
-export type WorkbenchExceptionFreshnessTarget = {
-  readModelKey: string;
-  scopeKey: string;
-  scopeType?: string;
 };
 
 export type WorkbenchExceptionApplyResult = {
@@ -81,7 +77,5 @@ export type WorkbenchExceptionApplyResult = {
   updatedRows: Array<Record<string, unknown>>;
   affectedRowIds: string[];
   affectedScopeKeys: string[];
-  freshnessTargets: WorkbenchExceptionFreshnessTarget[];
-  workbenchRefreshRequired: boolean;
   message?: string;
 };

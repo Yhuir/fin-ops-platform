@@ -14,6 +14,69 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+class OAAttachmentMaintenanceBoundaryTests(unittest.TestCase):
+    def test_script_has_no_retired_page_read_model_runtime_symbols(self) -> None:
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertNotIn("workbench", source.lower())
+        for retired_symbol in (
+            "PostgresReadModelRepository",
+            "RuntimeQueueRepository",
+            "WorkbenchSqlProjectionBuilder",
+            "--profile-internal",
+            "rebuild_workbench_read_model_scope",
+            "get_workbench_refresh_status",
+            "complete_read_model_refresh",
+            "job.read_model_dirty_scopes",
+            "read_model.workbench_",
+        ):
+            with self.subTest(retired_symbol=retired_symbol):
+                self.assertNotIn(retired_symbol, source)
+
+    def test_invocation_without_an_oa_attachment_action_fails_before_connecting(self) -> None:
+        with (
+            patch.object(sys, "argv", ["rehydrate-workbench-read-models.py"]),
+            patch.object(MODULE.PostgresSettings, "from_env") as settings_from_env,
+            self.assertRaisesRegex(ValueError, "exactly one OA attachment maintenance action"),
+        ):
+            MODULE.main()
+
+        settings_from_env.assert_not_called()
+
+    def test_structured_attachment_diagnostics_stays_on_the_canonical_oa_path(self) -> None:
+        connection = _RuntimeConnection()
+        diagnostic_report = {"scope_key": "2026-05", "plan": ["Index Scan"]}
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "rehydrate-workbench-read-models.py",
+                    "--explain-structured-attachments",
+                    "--scope",
+                    "2026-05",
+                    "--json",
+                ],
+            ),
+            patch.object(MODULE.PostgresSettings, "from_env", return_value=object()),
+            patch.object(MODULE, "PostgresConnection", return_value=connection),
+            patch.object(
+                MODULE,
+                "_structured_attachment_query_diagnostic",
+                return_value=diagnostic_report,
+            ) as diagnostic,
+            patch.object(MODULE, "_print_report", return_value=0) as print_report,
+        ):
+            self.assertEqual(MODULE.main(), 0)
+
+        diagnostic.assert_called_once_with(connection, "2026-05")
+        report = print_report.call_args.args[0]
+        self.assertEqual(report["action"], "explain_structured_attachments")
+        self.assertTrue(report["read_only"])
+        self.assertEqual(report["structured_attachment_diagnostics"], [diagnostic_report])
+
+
 class AttachmentIdentityBridgeRepairTests(unittest.TestCase):
     def test_dry_run_fingerprint_is_deterministic(self) -> None:
         first = MODULE._fingerprint_rows(
@@ -56,6 +119,15 @@ class AttachmentIdentityBridgeRepairTests(unittest.TestCase):
         insert_sql = next(sql for sql in connection.sql if "insert into app.oa_attachment_invoice_cache_sources" in sql)
         self.assertIn("is distinct from", insert_sql)
         self.assertEqual(result["applied"]["total"], 1)
+
+    def test_rollback_only_deletes_attachment_identity_bridge_sources(self) -> None:
+        connection = _Connection()
+
+        result = MODULE._rollback_attachment_identity_bridge(connection, apply_changes=True)
+
+        delete_sql = next(sql for sql in connection.sql if "delete from app.oa_attachment_invoice_cache_sources" in sql)
+        self.assertIn("where source_kind like 'attachment_identity_%%'", delete_sql)
+        self.assertEqual(result["deleted"]["total"], 1)
 
 
 class OAAttachmentInvoicePromotionRoutingTests(unittest.TestCase):

@@ -184,8 +184,6 @@ def _raw_relation_checkpoint(
     relation_state_after: str,
 ) -> dict[str, object]:
     is_withdraw = name == "withdraw-link"
-    read_model_version_name = f"{name}_read_model_version"
-    expected_read_model_version = f"${{{read_model_version_name}}}"
     preview_captures = (
         {
             f"{name}_preview_id": "/preview_id",
@@ -197,7 +195,6 @@ def _raw_relation_checkpoint(
     mutation_json: dict[str, object] = {
         "month": "2026-07",
         "row_ids": ["bank-test-1", "invoice-test-1"],
-        "expected_read_model_version": expected_read_model_version,
         "idempotency_key": idempotency_key,
     }
     if is_withdraw:
@@ -213,13 +210,6 @@ def _raw_relation_checkpoint(
         "operation": operation,
         "steps": [
             {
-                "name": f"{name}-read-version",
-                "method": "GET",
-                "path": "/api/workbench?month=2026-07",
-                "mutation": False,
-                "captures": {read_model_version_name: "/read_model_version"},
-            },
-            {
                 "name": f"{name}-preview",
                 "method": "POST",
                 "path": f"/api/workbench/actions/{name}/preview",
@@ -227,7 +217,6 @@ def _raw_relation_checkpoint(
                 "json": {
                     "month": "2026-07",
                     "row_ids": ["bank-test-1", "invoice-test-1"],
-                    "expected_read_model_version": expected_read_model_version,
                 },
                 "captures": preview_captures,
             },
@@ -574,10 +563,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         def request_fn(
             url: str, method: str, headers, body, timeout_seconds: float
         ) -> http_slo_probe.HttpProbeResponse:
-            if url.endswith("/api/workbench?month=2026-07"):
-                payload = {"read_model_version": "generation:test"}
-                request_id = "read-version"
-            elif url.endswith(write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH):
+            if url.endswith(write_operation_e2e_smoke.CONFIRM_PREVIEW_PATH):
                 preview_counts["confirm"] += 1
                 payload = {"operation": "confirm_link", "can_submit": True}
                 request_id = f"confirm-preview-{preview_counts['confirm']}"
@@ -1579,7 +1565,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
     def test_reversible_scenario_rejects_noncanonical_mutation_audit_override_and_unbound_assertion(self) -> None:
         cases: list[tuple[str, dict[str, object], str]] = []
         wrong_endpoint = _raw_bank_invoice_scenario("wrong-endpoint", "strict-1")
-        wrong_endpoint["checkpoints"][0]["steps"][2]["path"] = "/api/legacy/confirm"  # type: ignore[index]
+        wrong_endpoint["checkpoints"][0]["steps"][1]["path"] = "/api/legacy/confirm"  # type: ignore[index]
         cases.append(("endpoint", wrong_endpoint, "canonical Workbench"))
 
         audit_override = _raw_bank_invoice_scenario("audit-override", "strict-2")
@@ -1603,7 +1589,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         cases.append(("consumer-path", wrong_consumer_path, "consumer paths"))
 
         swapped_withdraw_lock = _raw_bank_invoice_scenario("swapped-lock", "strict-5")
-        withdraw_body = swapped_withdraw_lock["checkpoints"][1]["steps"][2]["json"]  # type: ignore[index]
+        withdraw_body = swapped_withdraw_lock["checkpoints"][1]["steps"][1]["json"]  # type: ignore[index]
         withdraw_body["preview_id"], withdraw_body["expected_versions"] = (  # type: ignore[index]
             withdraw_body["expected_versions"],
             withdraw_body["preview_id"],
@@ -1817,14 +1803,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(len(scenarios[0].checkpoints), 2)
         for checkpoint in (*scenarios[0].checkpoints, scenarios[0].recovery_checkpoint):
             assert checkpoint is not None
-            self.assertEqual(len(checkpoint.steps), 3)
-            read_version, preview, mutation = checkpoint.steps
-            self.assertEqual(read_version.method, "GET")
-            self.assertEqual(read_version.path, "/api/workbench?month=2026-07")
-            self.assertEqual(read_version.captures[0][1], "/read_model_version")
-            expected_version = f"${{{read_version.captures[0][0]}}}"
-            self.assertEqual(preview.json_body["expected_read_model_version"], expected_version)
-            self.assertEqual(mutation.json_body["expected_read_model_version"], expected_version)
+            self.assertEqual(len(checkpoint.steps), 2)
+            preview, mutation = checkpoint.steps
+            self.assertEqual(preview.path, f"/api/workbench/actions/{checkpoint.name}/preview")
+            self.assertNotIn("expected_read_model_version", preview.json_body)
+            self.assertNotIn("expected_read_model_version", mutation.json_body)
         self.assertEqual(
             {consumer.page_key for consumer in scenarios[0].checkpoints[0].consumers},
             set(_BANK_INVOICE_CONSUMER_PAGES),
@@ -3059,8 +3042,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         ) -> http_slo_probe.HttpProbeResponse:
             if "page-audit" in url:
                 payload = _system_audit_payload("system-audit:preimage")
-            elif method == "GET" and "/api/workbench?month=2026-07" in url:
-                payload = {"read_model_version": "workbench-version-1"}
             elif method == "POST" and url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
                 payload = {
                     "operation": "withdraw_link",
@@ -3126,9 +3107,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             if "page-audit" in url:
                 status_code = 200
                 payload = _system_audit_payload("system-audit:inactive-preimage")
-            elif method == "GET" and "/api/workbench?month=2026-07" in url:
-                status_code = 200
-                payload = {"read_model_version": "workbench-version-1"}
             elif method == "POST" and url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
                 status_code = 400
                 payload = {"error": "workbench_relation_not_found"}
@@ -3194,12 +3172,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             if "page-audit" in url:
                 status_code = 200
                 payload = _system_audit_payload("system-audit:unknown-preimage")
-            elif method == "GET" and "/api/workbench?month=2026-07" in url:
-                status_code = 200
-                payload = {"read_model_version": "workbench-version-1"}
             elif method == "POST" and url.endswith(write_operation_e2e_smoke.WITHDRAW_PREVIEW_PATH):
                 status_code = 409
-                payload = {"error": "read_model_version_conflict"}
+                payload = {"error": "workbench_relation_version_conflict"}
             else:
                 raise AssertionError(f"unexpected read-only preimage request: {method} {url}")
             return http_slo_probe.HttpProbeResponse(

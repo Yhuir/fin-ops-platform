@@ -459,13 +459,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ### Workbench OA/发票异常 API
 
-`GET /api/workbench/groups` 保持现有 month/zone/search/filter/sort/pagination/generation 合同，并支持可选 `exception_bucket=active|processed`。`active` 返回 active OA/发票异常或 legacy active exception 的完整关系组；`processed` 返回 ignored OA/发票异常或 legacy processed/ignored exception。过滤在 total/row counts 和分页之前完成。
+`GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=active|processed`。`active` 返回 active OA/发票异常的关系组；`processed` 返回 fingerprint-bound ignored OA/发票异常。过滤在 exact total/row counts 和 keyset 分页之前完成，不读 page generation 或 legacy WEX bucket。
 
 关系组可携带 additive `oa_invoice_anomaly`：`{code="oa_invoice_anomaly",fingerprint,state="active|ignored",items[]}`。每个 item 包含 `code="oa_invoice_amount_mismatch|oa_invoice_attachment_missing"`、`label`、`display_label`、`fingerprint`、`comparison_unit_id`、`source_oa_id`、`source_expense_item_id`、`oa_total`、`invoice_total`、`amount_delta`、`invoice_row_ids[]` 和 `attachment_file_count`。日常报销每个子付款项只产生一个异常 item；支付申请没有子项时按关系组总额生成一个 item。缺失 bundle 表示当前关系没有 OA/发票异常；旧 `amount_anomaly` 和发票行复制字段不再发布。
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
-`POST /api/workbench/exceptions/amount-mismatch/ignore` 与 `POST /api/workbench/exceptions/amount-mismatch/restore` 保留既有持久化命令路径，接受 `{month,zone,group_id,fingerprint,expected_read_model_version}`；fingerprint 是整个 `oa_invoice_anomaly` bundle 的当前指纹。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；active generation 或 fingerprint 漂移返回 409；当前状态的幂等重复成功但不重复写 audit。成功后返回决定与精确 affected Workbench scope，页面重新 GET，不修改正式关系、canonical 金额、附件或发票事实。
+`POST /api/workbench/exceptions/amount-mismatch/ignore` 与 `POST /api/workbench/exceptions/amount-mismatch/restore` 保留既有持久化命令路径，接受 `{month,zone,group_id,fingerprint}`；fingerprint 是整个 `oa_invoice_anomaly` bundle 的当前指纹。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；canonical anomaly fingerprint 漂移返回 409；当前状态的幂等重复成功但不重复写 audit。成功后返回决定与精确 affected Workbench scope，页面恰好一次 normal GET，不修改正式关系、canonical 金额、附件或发票事实。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 
@@ -852,16 +852,16 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 ## 工作台 DTO
 
-工作台 DTO 必须保留稳定的分页、summary、group、relation、exception、read model status 和 source version 字段。新增字段只能向后兼容添加；删除、重命名或改变含义需要同步更新前端 DTO、测试和本文档。
+工作台 DTO 是 direct canonical 页面合同，保留稳定的 summary、group、relation、exception 和 opaque cursor；不返回 page read-model status/version、generation、source-version freshness 或 refresh job。响应列表只包含 compact summary rows，raw payload、OCR、附件全文和完整 detail 只能经惰性详情端点读取。
 
 `GET /api/workbench?month=...`
 
-- 该接口是 Workbench 唯一首屏读入口，在一个 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 freshness/version、summary 和 paired/unpaired 各首页。
-- summary 与两区 groups 必须共用同一 generation-set version；缺失或混合 version 必须 fail closed。
-- 默认无筛选首屏固定 `page=1`、`page_size=50`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。paired/unpaired 的剩余数据继续使用既有 `/api/workbench/groups` 分页接口。
-- 搜索、筛选、后续分页和详情使用已有窄接口，并必须携带 `expected_read_model_version`。
-- `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填受支持的 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page` 从 1 开始，`page_size` 默认 100、最大 200；响应包含 `options[{value,label,missing}]`、`has_more`、`read_model_status` 和 `read_model_version`。接口与 `/groups` 使用同一 active-generation/freshness/version gate，候选来自完整 generation，而非当前页 groups；目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。GET 不建立独立 read model、表、Redis cache、worker 或逐菜单 refresh。
-- 旧独立 summary HTTP 不是公开 API；内部 summary repository I/O 仅用于组合上述同快照响应。
+- 该接口是 Workbench 唯一首屏读入口，在一个短生命 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 `month`、`scope_key`、`summary`、`statistics`、`invoice_inventory`、`paired` 和 `unpaired`。summary、精确计数和两区首页 keys 必须来自同一 candidate spine/snapshot，不得串行重建三次全 scope 事实。
+- 每区 shape 固定为 `groups,total,row_counts,page_size,has_more,next_cursor`。首屏 `page_size=50`，候选 SQL 返回 `page_size+1` keys 判定 `has_more`，再 set-based hydration 只完整装配当前页的 groups。
+- `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket` 的明确白名单合同。`cursor` 绑定 scope/zone/search/filter/sort 和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback。
+- `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填白名单 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page_size` 默认 100、最大 200，使用 opaque `cursor`；响应固定为 `options[{value,label,missing}],page_size,has_more,next_cursor`。候选来自完整 eligible group domain，目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。
+- `exception_bucket=active|processed` 在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 进行精确筛选/计数；异常抽屉使用同一有界 summary cursor 分页，展开单组时再惰性读 detail，不在浏览器 drain 全部 full-detail pages。
+- 旧独立 summary HTTP、`/api/workbench/refresh-status`、page Redis cache、refresh enqueue 和 generation/version 参数均不是当前 API。
 
 关系分区只允许 `paired` / `unpaired`：
 
@@ -872,9 +872,9 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 - 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
 - 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。
 
-Workbench row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于后端投影审计、跨区重复治理和详情解释；前端不得依赖它们替代 row id 执行动作，旧客户端未读取这些字段时响应仍必须可用。
+Workbench row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于 canonical 审计、跨区重复治理和详情解释；前端动作仍以 typed canonical identity 和 preview proof 为准，不得用展示字段推测身份。
 
-Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的后端事实证据；银行流水或发票行有确定归属时应由 Workbench SQL active generation 写入，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 和审计工具暴露。
+Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的 canonical 事实证据；银行流水或发票行有确定归属时由 page hydration 批量组装，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 暴露。
 
 日常报销 OA row 可以额外返回 `expense_items`：
 
@@ -1015,46 +1015,20 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 ### 工作台 row detail
 
-`GET /api/workbench/rows/{row_id}?month=all`
+`GET /api/workbench/rows/{row_id}?month=all&row_type=oa|bank|invoice`
 
-该接口返回单条 OA、银行流水或发票 row 的详情 payload，用于三栏详情弹窗。`row_id` 必须 URL encode；`month` 可为 `all` 或 `YYYY-MM`，作为 SQL active generation 读取 scope hint。
+该接口返回单条 OA、银行流水或发票 row 的 latest-committed 详情 payload，用于三栏详情弹窗。`row_id` 必须 URL encode；`month` 可为 `all` 或 `YYYY-MM`；`row_type` 必须是列表返回的 typed identity，防止不同 pane 的同文本 ID 碰撞。
 
 契约要求：
 
-- 唯一生产链路是 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`；不读取 live service/in-memory cache，不从 row id 猜月份，也不回退 group member payload。
-- 客户端必须携带列表返回的 `expected_read_model_version`。版本校验与详情读取处于同一 `REPEATABLE READ / READ ONLY` 快照；expected generation 已切换返回 `409 workbench_read_model_version_conflict`，前端只对此错误重新读取一次列表并重试。
-- exact stable generation 中存在详情行时返回 `200`，即使 canonical source 已更新；响应保留 repository 给出的 `read_model_status=fresh|refreshing|stale`。详情 GET 不执行第二次 canonical source proof，不写 dirty scope/outbox，也不 enqueue refresh。
-- active group 中真实不存在的 row 返回 `404 workbench_row_not_found`；可见非 summary group member 缺少同 generation `workbench_rows` 详情行返回 `503 workbench_row_detail_invariant_broken`；repository、migration 或查询超时返回 `503 workbench_detail_unavailable`。
+- 唯一生产链路是 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> PostgresWorkbenchPageQueryRepository`；按 typed identity 直查对应 canonical source 并用 active relation typed membership 复核，不读 page projection/cache，不构建全 scope group CTE，也不从 row id 猜 pane。
+- 客户端不携带 `expected_read_model_version`。detail 默认采用 latest-committed 语义；如列表之后成员被撤回/删除，返回明确 404，前端不自动重放业务写入。
+- typed canonical row 存在时返回 `200`；不存在返回 `404 workbench_row_not_found`；repository、migration 或查询超时返回 `503 workbench_query_unavailable`，不返回部分 payload。
 - ETC 与流水规则批次 summary 只用于折叠展开，不提供 row detail 入口。该接口不写 relation，也不接入 `WorkbenchRelationCommandService`。
 
-### 工作台 read model 刷新状态
+### 工作台退役接口
 
-`GET /api/workbench/refresh-status?month=all`
-
-该接口是关联工作台页面判断后台加载是否完成的轻量事实源，不返回 group、行、附件正文或 snapshot payload。
-
-响应字段：
-
-| 字段 | 说明 |
-| --- | --- |
-| `scope_key` | 当前 read model scope，例如 `all` 或 `2026-05`。 |
-| `read_model_status` | `fresh`、`refreshing`、`stale`、`failed`、`unavailable`。 |
-| `generated_at` | 最近稳定投影生成时间；未知为 `null`。 |
-| `active_generation_id` | 当前稳定可读 generation。未知为 `null`。 |
-| `building_generation_id` | 正在构建但不可读的 generation。没有后台构建时为 `null`。 |
-| `failed_generation_id` | 最近失败 generation。没有失败时为 `null`。 |
-| `read_model_version` | 可用于前端去重的版本，优先等于 `active_generation_id`；未知为 `null`。 |
-| `generations` | 最近 generation 摘要，仅包含元数据、计数和错误摘要，不包含业务 payload。 |
-| `dirty_scopes` | dirty scope 摘要，包含 `scope_key`、`status`、`updated_at`、`last_error`、`source_version`。 |
-| `running_scopes` | 正在执行的 scope 列表；未知或无执行为 `[]`。 |
-| `processed_count` / `total_count` | 后台进度。无法可靠计算时返回 `null`，不得返回伪造的 `0`。 |
-| `worker_lag_seconds` | 最近 worker heartbeat 延迟；未知为 `null`。 |
-| `last_error` | 最近失败摘要；没有失败为 `null`。 |
-| `retryable` | 当前状态是否可通过后台任务重试或重新排队。 |
-
-`GET /api/workbench/refresh-status?month=all`
-
-返回 Workbench 当前 scope 的 read model 状态。前端只使用有界 polling，并在 `read_model_version` / `active_generation_id` 变化或状态进入 terminal 时重新读取当前查询上下文的 summary/groups 分页。旧 `/api/workbench/events` SSE route 已删除并返回 `404`。
+`GET /api/workbench/refresh-status` 和旧 `/api/workbench/events` 都不是当前合同，并返回 `404`。客户端不轮询 page freshness/generation；route entry、查询变更、显式重试或写成功后只执行 normal canonical GET。App Health、OA sync 和 background jobs 保留各自的独立状态 API，不得借用 Workbench 页面合同。
 
 ## ETC 业务批次 API
 
@@ -1077,7 +1051,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `POST /api/etc/business-batches/{id}/invoice-pdf/repair` 是管理员专用的 submitted 历史附件恢复入口。multipart 请求包含一个或多个原始 ZIP、当前 `expectedVersion` 和非空 `reason`；只允许补回该批次已有发票当前不可读的 PDF/XML。既有 hash 存在时原始内容 SHA-256 必须完全相等；只有附件路径/hash、导入 batch/session 全空且 `zip_source_name=canonical_invoice:*` 的历史后补成员可以从原始来源 bootstrap，并且必须同时恢复单页 PDF/XML、核对发票号/日期/双方名称税号/金额税额合计/PDF 文本、校验 business/submission 成员一致。bootstrap 同步采用原始 XML 的通行日期、车牌、车型和来源并重算提交批次汇总；成功按 CAS 递增版本并写逐发票变更审计，持久化失败必须回滚元数据并删除本次新对象，重复执行不递增版本并返回零修复。该接口不得新增发票、改变批次成员、OA、relation 或 submitted 状态。
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - ETC invoice list 只保留 `GET /api/etc/invoices` 读侧入口；旧 `/api/etc/invoices/revoke-submitted` 已删除，不得通过 invoice id 直接回退 submitted 状态。提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机。
-- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并把 `source_kind=etc_invoice_summary` 作为 canonical display fact 投影到关联台。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算；散票继续作为折叠明细，每条明细必须写入同一 active generation 的 `workbench_rows`。若 summary 已属于 active relation，则随完整关系进入 paired；否则作为 unpaired singleton 显示。
+- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务；关联台 direct query/hydration 将其作为 `source_kind=etc_invoice_summary` 的 canonical display fact。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算；散票只在用户展开时作为同组明细批量读取，不写 `workbench_rows`。若 summary 已属于 active relation，则随完整关系进入 paired；否则作为 unpaired singleton 显示。
 - `etc_invoice_summary` 不存在 pending/open 关系状态。没有 active relation 时是 unpaired；正式关系创建后进入 paired。
 - `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时通过 canonical relation command 取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。`workbench_relation` distribution/read model 非 fresh 不得阻断该删除/reset；写安全以权限、expected version、canonical relation 状态、持久化和 outbox/refresh enqueue 为准，失败时返回对应稳定错误码。
 - ETC 对账任务和业务批次源文件上传必须先落对象存储，再追加 source file 元数据。对象存储不可写时返回稳定错误码 `reconciliation_file_storage_unavailable` 和 HTTP 503，上传不得留下半写入的 source file、版本号或审计事件。慢解析/OCR 的结果提交必须与 source file 删除互斥；提交前来源已删除时返回 HTTP 409、`{ "error": "source_file_deleted_during_parse", "message": "源文件在解析完成前已被删除，请重新上传。" }`，不得留下孤儿解析结果或明细。`/api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`/ticket-root-files`、`/ticket-root-texts`、`/supplement-evidences` 使用直接错误结构 `{ "error": "...", "message": "..." }`；`/api/etc/business-batches/{id}/source-files` 使用 business batch envelope `{ "ok": false, "error": { "code": "...", "message": "..." } }`。
@@ -1305,7 +1279,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- 关联台登记为 `registered_read_model_keys=["workbench"]`；其通过状态必须证明 active generation、source proof 和 durable queue 已收敛，但不依赖 `workbench_relation` distribution。成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、外部往来款、ETC 票据、税金抵扣、待找发票、进项发票使用情况和销项发票收款情况登记为 `registered_read_model_keys=[]`；这些 direct 页面的通过状态不得依赖 page read model、dirty scope、refresh outbox 或 shared relation projection。
+- 关联台登记为 `registered_read_model_keys=[]`，是 direct-canonical 页面且不消费 `workbench_relation` distribution。其 Audit 必须在一个 RR/RO snapshot 中重算 canonical facts、typed active relation membership、paired/unpaired 覆盖、异常和 exact counts，并证明 page event/cache/projection I/O 为零。成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、外部往来款、ETC 票据、税金抵扣、待找发票、进项发票使用情况和销项发票收款情况同样登记为 `registered_read_model_keys=[]`；这些 direct 页面的通过状态不得依赖 page read model、dirty scope、refresh outbox 或 shared relation projection。
 - `overall_status="pass"`、`audit_status.integrity="pass"` 且 `audit_contract.database_snapshot=true` 才能声明该页面在已登记的 App 内部 canonical facts 和 active relation 合同内一致。`freshness="fresh"` 与 `queue="drained"` 对 direct-canonical 页面表示本页没有待收敛的异步读链路，不是伪造 page read-model freshness。
 - `overall_status="issues_found"` 时返回有上限的 `issues` 样本；样本字段不可解释为精确总数。
 - 关联台 `workbench` 与共享 `workbench_relation` read model 由系统级运行时审计验证；Search 与 no-OA projection 已退休，不进入 direct 页面 GET 或页面成功合同。

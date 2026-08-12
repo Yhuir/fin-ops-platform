@@ -54,7 +54,7 @@
 
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
-- 关联台 paired/unpaired 展示归 `reconciliation-workbench` projection builder/active generation；
+- 关联台 paired/unpaired 展示归 `reconciliation-workbench` direct query/hydration；
   bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、
   `invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用
   `no_oa_bank_batch_summary` 或 `免OA` 标签。

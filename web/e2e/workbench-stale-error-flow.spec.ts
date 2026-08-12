@@ -22,87 +22,21 @@ async function openConfirmRelationPreview(page: Page) {
   return { openGroup, previewDialog };
 }
 
-test.describe("workbench stale and error browser flow", () => {
-  test("shows workbench stale status without globally disabling selected group actions", async ({ page }) => {
-    await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchHealthStatus: "stale",
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
-    const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
-    await expect(openGroup).toBeVisible();
-
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).getByRole("cell").first().click();
-    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-    await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
-  });
-
-  test("shows workbench refreshing status and blocks writes against a non-fresh generation", async ({ page }) => {
-    await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchHealthStatus: "rebuilding",
-      workbenchPageStatus: "refreshing",
-      workbenchRefreshStatus: "refreshing",
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: /关联台刷新中/ })).toBeVisible();
-    await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
-
-    const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
-    await expect(openGroup).toBeVisible();
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).getByRole("cell").first().click();
-    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-
-    await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
-  });
-
-  test("does not present stale empty payload as a true empty workbench", async ({ page }) => {
-    await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchHealthStatus: "stale",
-      workbenchPageEmpty: true,
-      workbenchPageStatus: "stale",
-      workbenchRefreshStatus: "stale",
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
-    await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
-    await expect(page.getByTestId("zone-unpaired").getByText("未配对 0 项").first()).toBeVisible();
-    await expect(page.getByTestId("zone-paired").getByText("已配对 0 项").first()).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
-  });
-
+test.describe("workbench direct error browser flow", () => {
   test("blocks Workbench writes while OA sync is dirty", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       oaSyncMode: "dirty",
-      workbenchHealthStatus: "ready",
     });
 
     await page.goto("/");
 
-    await expect(page.getByRole("button", { name: /关联台待刷新/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
-
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
   });
@@ -111,7 +45,6 @@ test.describe("workbench stale and error browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       oaSyncMode: "refreshing",
-      workbenchHealthStatus: "ready",
     });
 
     await page.goto("/");
@@ -120,35 +53,14 @@ test.describe("workbench stale and error browser flow", () => {
     const openZone = page.getByTestId("zone-unpaired");
     const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
-
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
   });
 
-  test("surfaces refresh failure while keeping the current active generation inspectable", async ({ page }) => {
-    await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchHealthStatus: "error",
-      workbenchRefreshStatus: "failed",
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: /关联台刷新失败/ })).toBeVisible();
-    const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
-    await expect(openGroup).toBeVisible();
-
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
-    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-    await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
-  });
-
-  test("keeps rows in place when confirm submit fails in the preview dialog", async ({ page }) => {
+  test("keeps rows in place and allows retry when the mutation itself fails", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchConfirmSubmitError: true,
@@ -157,54 +69,37 @@ test.describe("workbench stale and error browser flow", () => {
     await page.goto("/");
 
     const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
+    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
 
     await expect(previewDialog.getByRole("alert")).toContainText("关联台服务暂时不可用，请稍后重试。");
-    await expect(previewDialog.getByRole("alert")).not.toContainText("browser confirm failed");
-    await expect(previewDialog.getByRole("button", { name: "重试" })).toBeEnabled();
+    await expect(previewDialog.getByRole("button", { name: "重试确认" })).toBeEnabled();
+    await expect(openGroup).toBeVisible();
+    expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSubmit);
+  });
+
+  test("does not retry a committed mutation when the single combined reread fails", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchCombinedRereadError: true,
+    });
+
+    await page.goto("/");
+
+    const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
+    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
+    await previewDialog.getByRole("button", { name: "确认关联" }).click();
+
+    await expect(previewDialog.getByRole("alert")).toContainText("关系已写入，页面重新读取失败");
+    await expect(previewDialog.getByRole("alert")).toContainText("请勿重复提交");
+    await expect(previewDialog.getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
+    await expect(previewDialog.getByRole("button", { name: /重试确认|确认关联/ })).toHaveCount(0);
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-  });
-
-  test("does not let a legacy operation barrier block a committed relation", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      operationBarrierMode: "refreshing",
-    });
-
-    await page.goto("/");
-
-    const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
-    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
-    await previewDialog.getByRole("button", { name: "确认关联" }).click();
-
-    await expect(previewDialog).toHaveCount(0);
-    await expect(openGroup).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSubmit + 1);
+    await page.waitForTimeout(300);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeSubmit);
-  });
-
-  test("keeps projected relation committed when the background fresh refetch fails", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
-      workbenchFreshRefetchError: true,
-    });
-
-    await page.goto("/");
-
-    const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
-    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
-    await previewDialog.getByRole("button", { name: "确认关联" }).click();
-
-    await expect(previewDialog).toHaveCount(0);
-    await expect(openGroup).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
-    expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeSubmit);
   });
 });

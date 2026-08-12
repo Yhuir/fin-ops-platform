@@ -35,6 +35,10 @@ import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 type RelationGroupGridProps = {
   zoneId: "paired" | "unpaired";
   panes: WorkbenchPane[];
@@ -319,8 +323,8 @@ function RelationGroupGrid({
       setLoadingPaneGroups((current) => new Set(current).add(key));
       try {
         await onEnsureGroupDetail(zoneId, group.id);
-      } catch {
-        if (searchGenerationRef.current === searchGeneration) {
+      } catch (error) {
+        if (!isAbortError(error) && searchGenerationRef.current === searchGeneration) {
           setFailedPaneGroups((current) => new Set(current).add(key));
         }
         return;

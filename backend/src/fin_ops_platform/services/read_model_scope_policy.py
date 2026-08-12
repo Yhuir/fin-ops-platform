@@ -10,6 +10,7 @@ class ReadModelScopeError(ValueError):
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+RETIRED_READ_MODEL_SCOPE_TYPES = frozenset({"workbench"})
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,10 @@ class ReadModelScopePolicyRegistry:
         normalized_scope_type = str(scope_type or "").strip()
         if not normalized_scope_type:
             raise ReadModelScopeError("read model refresh scope_type is required.")
+        if normalized_scope_type in RETIRED_READ_MODEL_SCOPE_TYPES:
+            raise ReadModelScopeError(
+                f"Retired read model refresh scope_type is not enqueueable: {normalized_scope_type}"
+            )
         return self._policies.get(normalized_scope_type, _generic_scope_policy(normalized_scope_type))
 
     def normalize_and_validate(self, scope_type: str, scope_keys: list[str]) -> list[str]:
@@ -97,7 +102,6 @@ def _dedupe_text(values: list[str]) -> list[str]:
 
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
-        "workbench": _month_or_all_scope_policy("workbench"),
         "workbench_relation": _month_or_all_scope_policy("workbench_relation"),
     }
 )

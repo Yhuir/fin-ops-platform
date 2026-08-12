@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -20,7 +19,6 @@ from fin_ops_platform.services.state_store_protocol import (
 from fin_ops_platform.services.workbench_object_identity_arbitration import (
     WorkbenchObjectIdentityArbitrationService,
 )
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 DEFAULT_TEST_OA_TOKEN = "test-suite-oa-token"
@@ -242,7 +240,8 @@ def build_grouped_workbench_projection(
         if str(getattr(fact, "id", "")).strip()
     ]
     if fact_ids:
-        for row in application._resolve_live_rows_direct(fact_ids, month_hint=normalized_month):  # noqa: SLF001
+        local_repository = DirectWorkbenchSelectionRepository(application)
+        for row in local_repository.get_canonical_rows_by_ids(fact_ids).values():
             rows_by_id[str(row["id"])] = dict(row)
 
     active_relations = [
@@ -258,11 +257,21 @@ def build_grouped_workbench_projection(
         if str(row_id).strip() and str(row_id) not in rows_by_id
     ]
     if missing_relation_row_ids:
-        for row in application._resolve_live_rows_direct(  # noqa: SLF001
-            list(dict.fromkeys(missing_relation_row_ids)),
-            month_hint=normalized_month,
-        ):
+        local_repository = DirectWorkbenchSelectionRepository(application)
+        for row in local_repository.get_canonical_rows_by_ids(
+            list(dict.fromkeys(missing_relation_row_ids))
+        ).values():
             rows_by_id[str(row["id"])] = dict(row)
+
+    for relation in active_relations:
+        for row_id in list(relation.get("row_ids") or []):
+            normalized_row_id = str(row_id).strip()
+            row = rows_by_id.get(normalized_row_id)
+            if row is None:
+                continue
+            rows_by_id[normalized_row_id] = application._workbench_override_service.apply_to_row(  # noqa: SLF001
+                application._apply_pair_relation_to_row(row, relation)  # noqa: SLF001
+            )
 
     WorkbenchObjectIdentityArbitrationService().arbitrate_rows(rows_by_id)
     return WorkbenchRelationGroupingService().group_payload(
@@ -272,90 +281,97 @@ def build_grouped_workbench_projection(
     )
 
 
-class FreshWorkbenchWriteGateRepository:
-    def __init__(
-        self,
-        version: str,
-        *,
-        source_versions_provider: Callable[[str], dict[str, object]],
-        application: Application,
-    ) -> None:
-        self.version = str(version)
-        self._source_versions_provider = source_versions_provider
+class DirectWorkbenchSelectionRepository:
+    """Test-only direct selection port backed by the local app's canonical facts."""
+
+    def __init__(self, application: Application) -> None:
         self._application = application
 
-    def get_workbench_groups_freshness_status(
+    def _candidates_by_identity(
         self,
+        row_ids: list[str],
+    ) -> dict[tuple[str, str], dict[str, object]]:
+        normalized_ids = list(
+            dict.fromkeys(str(row_id).strip() for row_id in row_ids if str(row_id).strip())
+        )
+        candidates: dict[tuple[str, str], dict[str, object]] = {}
+        for row_id in normalized_ids:
+            try:
+                row = self._application._workbench_query_service.get_row_detail(row_id)  # noqa: SLF001
+            except KeyError:
+                continue
+            row_type = str(row.get("type") or "").strip().lower()
+            if row_type:
+                candidates[(row_type, row_id)] = dict(row)
+        for row_id, row in self._application._live_workbench_service.get_rows_detail(  # noqa: SLF001
+            normalized_ids
+        ).items():
+            row_type = str(row.get("type") or "").strip().lower()
+            if row_type:
+                candidates[(row_type, str(row_id))] = dict(row)
+        return candidates
+
+    def get_canonical_rows_by_ids(
+        self,
+        row_ids: list[str],
         *,
-        scope_key: str,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        return {
-            "read_model_status": "fresh",
-            "read_model_version": self.version,
-            "source_versions": self._source_versions_provider(scope_key),
-        }
+        row_types: list[str] | None = None,
+    ) -> dict[str, dict[str, object]]:
+        if row_types is not None and len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        candidates = self._candidates_by_identity(row_ids)
+        result: dict[str, dict[str, object]] = {}
+        for index, raw_row_id in enumerate(row_ids):
+            row_id = str(raw_row_id).strip()
+            if not row_id:
+                continue
+            if row_types is not None:
+                row_type = str(row_types[index]).strip().lower()
+                row = candidates.get((row_type, row_id))
+            else:
+                matches = [
+                    candidate
+                    for (candidate_type, candidate_id), candidate in candidates.items()
+                    if candidate_id == row_id and candidate_type in {"oa", "bank", "invoice"}
+                ]
+                if len(matches) > 1:
+                    raise ValueError(f"Ambiguous canonical Workbench row: {row_id}.")
+                row = matches[0] if matches else None
+            if isinstance(row, dict):
+                result[row_id] = dict(row)
+        return result
 
     def get_workbench_relation_preview_selection(
         self,
         *,
         scope_key: str,
         row_ids: list[str],
-        expected_read_model_version: str,
+        row_types: list[str],
     ) -> dict[str, object]:
-        if str(expected_read_model_version) != self.version:
-            raise WorkbenchReadModelVersionConflictError(
-                expected=str(expected_read_model_version),
-                current=self.version,
-            )
-        rows = self._application._resolve_live_rows_direct(  # noqa: SLF001
-            list(row_ids),
-            month_hint=scope_key,
-        )
+        candidates = self._candidates_by_identity(row_ids)
+        selected_rows = []
+        for row_id, row_type in zip(row_ids, row_types, strict=True):
+            identity = (str(row_type).strip().lower(), str(row_id).strip())
+            if identity not in candidates:
+                raise ValueError(f"Canonical Workbench row is missing: {identity[0]}:{identity[1]}.")
+            row = dict(candidates[identity])
+            selected_rows.append(row)
         return {
             "scope_key": scope_key,
             "selected_row_ids": list(row_ids),
-            "selected_rows": rows,
+            "selected_row_types": list(row_types),
+            "selected_rows": selected_rows,
             "context_rows": [],
-            "rows": rows,
+            "rows": selected_rows,
             "memberships": [],
             "context_groups": [],
-            "source_versions": self._source_versions_provider(scope_key),
-            "generation_set": [
-                {"scope_key": scope_key, "generation_id": self.version}
-            ],
-            "active_generation_id": self.version,
-            "read_model_version": self.version,
-            "read_model_status": "fresh",
-        }
-
-    def active_workbench_source_versions_by_scope(
-        self,
-        *,
-        scope_keys: list[str],
-    ) -> dict[str, dict[str, object]]:
-        return {
-            scope_key: self._source_versions_provider(scope_key)
-            for scope_key in scope_keys
         }
 
 
-def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
-    """Install only the generation precondition I/O required by local write-contract tests."""
-
-    application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(  # noqa: SLF001
-        version,
-        source_versions_provider=application._workbench_sql_read_model_source_versions,  # noqa: SLF001
-        application=application,
+def install_direct_workbench_selection_repository(application: Application) -> None:
+    application._workbench_page_selection_repository = DirectWorkbenchSelectionRepository(  # noqa: SLF001
+        application
     )
-    application._workbench_sql_projection_builder = SimpleNamespace(  # noqa: SLF001
-        list_workbench_scope_shards=lambda _scope_key: ["2026-01"],
-        source_versions_for_scopes=lambda scope_keys: {
-            scope_key: application._workbench_sql_read_model_source_versions(scope_key)  # noqa: SLF001
-            for scope_key in scope_keys
-        },
-    )
-    return str(version)
 
 
 class DurableImportQueueHarness:

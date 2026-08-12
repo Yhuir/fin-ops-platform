@@ -1,6 +1,6 @@
 # 关联台与正式关系产品口径
 
-更新日期：2026-08-12
+更新日期：2026-08-13
 
 ## 用户可见状态
 
@@ -17,7 +17,7 @@
 - `paired` 与 `unpaired` 不相交，二者并集必须精确等于 `C`；任何事实不得遗漏、重复显示或同时属于两个 active case。
 - 历史 `case_id`、row 上残留的 `case_id`、来源标签和旧 case 前缀都不能决定分组。含银行流水的普通关系只读取 canonical relation 当前持久化的 `requires_oa` / `requires_invoice`；缺失证明 fail closed，不得在读路径临时回查当前规则或按旧 case 前缀放行。规则保存后的增量任务必须先通过正式 relation command 更新 metadata/history，再刷新精确 Workbench 月份。
 - 普通 OA 付款关系必须包含银行流水才算完整；OA 与附件发票的 immutable binding 只表达不可拆分 ownership，缺银行时整组保留 active case 但位于 `unpaired`。显式 batch-accounting 与 ETC batch relation 继续按登记豁免处理。
-- 进行中 OA 可以与银行流水和发票写入同一正式关系，也可以扩展唯一已存在的银行-发票 active case；不得为进行中 OA 建立第二套 pending relation 或隐藏银行流水。关系满足全部材料要求后仍停留在 `unpaired`，直到所有 OA 完成；OA sync 将同一 OA 迁入 completed projection 后，原 case 不变并在下一次 Workbench refresh 进入 `paired`。多 OA 关系中任一 OA 进行中即阻断整组。
+- 进行中 OA 可以与银行流水和发票写入同一正式关系，也可以扩展唯一已存在的银行-发票 active case；不得为进行中 OA 建立第二套 pending relation 或隐藏银行流水。关系满足全部材料要求后仍停留在 `unpaired`，直到所有 OA 完成；OA sync 将同一 OA 迁入 completed canonical projection 后，原 case 不变并在下一次 Workbench normal GET 进入 `paired`。多 OA 关系中任一 OA 进行中即阻断整组。
 - `app.oa_pending_payment_admissions` 是进行中 OA 的唯一 canonical 读取源；`app.workbench_pair_relations` 是 completed/in-progress 共用的唯一 active relation owner。历史 `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件只读审计，不参与运行时分组、占用、source proof 或 promotion。
 - 一条 active relation 可以是任意非空的 OA/银行流水/发票成员组合，包括一对一、一对多、多对一以及 `N:M:K`。关系来源不形成用户可见的业务状态区分。
 
@@ -48,7 +48,7 @@
 
 ## 页面与下游
 
-- 前端只消费 active generation 发布的 `paired.groups` 与 `unpaired.groups`，不得本地拼关系或按旧 `case_id` 合并未配对事实。
+- 前端只消费 direct canonical API 在同一只读 snapshot 返回的 `paired.groups` 与 `unpaired.groups`，不得本地拼关系或按旧 `case_id` 合并未配对事实。后续分页使用与查询条件绑定的 opaque cursor；cursor 只表达读取位置，不是写 CAS 或 read-model version。
 - 页面只保留紧凑三栏，已配对与未配对始终同时可见，不提供经典布局或区域放大。每个区域标题栏最右侧提供独立的银行流水“全部 + 年月”筛选，紧邻只包含 OA、银行流水、进销项发票的栏显示菜单；栏显示至少保留一栏。时间筛选只使用既有银行交易日期服务端筛选合同，不改变关系成员、分区、选择或 mutation。
 - 日常报销仍以外层 OA 作为唯一 canonical relation member。其付款明细只作为该 OA 的嵌套展示事实，不得独立选择、配对或撤回；点击任一付款明细等价于选择父 OA。
 - 多付款明细日常报销在 OA 栏显示为一个复合行：申请人栏显示申请人、申请类型和日期；项目名称栏先显示“多个项目 · N”及父 OA 金额，再逐项显示真实项目名称；金额栏只显示逐项金额。不得显示按项目聚合金额，不得增加“付款明细”列，也不得在项目名称栏显示关系或附件解析状态 chip。
@@ -58,7 +58,7 @@
 - 未配对工具栏只保留关系确认/撤回等关系动作，旧“异常处理”人工入口及其触发链已删除。系统仍自动计算 OA/发票异常；右上 `异常 n | 已忽略 m` 入口、统一异常抽屉、忽略与撤回忽略能力保持不变。
 - 关系 provenance、规则版本、证据摘要、actor 和时间只用于审计，不拆分用户可见关系状态。
 - `workbench_relation` 下游只输出 `linked` / `unlinked`。只有 active 正式关系能驱动已支付、已关联、成本、待找发票、OA 待付款或银行关系标签。
-- stale/refreshing/failed read model 不得伪装 fresh；页面必须显示诊断并按写安全合同禁用相关写入口。
+- direct query 超时或依赖不可用时不得返回部分数据或伪装空结果；页面必须显示明确的读取错误。写入口继续独立服从 session/permission、系统 mutation block、OA sync 安全状态和 canonical preview/CAS，不依赖页面 generation/freshness。
 
 ## OA 与发票异常
 
@@ -67,7 +67,7 @@
 - 日常报销子付款项声明已上传附件，但该 item 没有任何已解析且显式绑定的发票时，产生 `oa_invoice_attachment_missing`。发票栏在对应 item 行只显示一个不可选择、不可写入 canonical 数据的 `OA发票附件缺失` 占位 chip，不再显示历史 `未识别附件` 来源标签；它只属于展示和异常处理，不是发票事实。
 - active 异常持续自动进入统一“异常处理”右侧抽屉的“进行中的异常”。入口固定显示 `异常 n | 已忽略 m`；抽屉默认按关系组折叠为一行，只显示 OA、银行流水和发票各自的成员数与总金额，展开后才显示完整三栏，同一时间最多展开一组。该系统异常入口独立于已删除的未配对工具栏“异常处理”人工入口。
 - full-access/admin 可以按关系组忽略 active 异常；忽略不修改正式关系、canonical 金额或附件事实，chip 改为 `已忽略：金额不一致` 或 `已忽略：OA发票附件缺失`，并进入“已忽略的异常”。用户可通过“撤回忽略”恢复；read-export 只可查看，不显示写按钮。
-- 忽略决定绑定 relation、比较单元、成员集合、金额/附件状态和当前 active generation。任一输入变化导致 fingerprint 变化时旧决定不再命中；写入时 generation 或 fingerprint 已变化必须返回冲突。
+- 忽略决定绑定 relation、比较单元、完整 typed 成员集合、金额/附件状态和 anomaly fingerprint。任一输入变化导致 fingerprint 变化时旧决定不再命中；写入时 canonical topology、entity version 或 fingerprint 已变化必须返回冲突。
 
 ## 固定验收样例
 

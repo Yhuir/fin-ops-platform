@@ -140,7 +140,7 @@ Canonical facts：
 - 业务核心：paired policy、冻结历史、内部转账金额、占用、CAS/幂等。
 - Service/repository：同 snapshot、固定查询数、canonical-only SQL、active relation、delta writer。
 - API：权限、非法参数、空集、筛选、分页、summary、详情和旧字段缺失。
-- Read model/worker：页面不读 projection、不 polling；规则 worker 只 enqueue 实际变化关系的精确 `workbench` / `workbench_relation` 月份并标记同月份 matching dirty，禁止 `all`。
+- Read model/worker：页面不读 projection、不 polling；规则 worker 只对实际变化关系维护 canonical relation/matching 事实，并按共享消费者合同 enqueue 精确 `workbench_relation` 月份，禁止恢复已退役的 page `workbench` event 或 `all` fan-out。
 - Frontend：loading/empty/error、交互、一次写后 GET。
 - E2E：提交 -> canonical relation/batch -> 当前页 GET -> 关联台。
 - 生产可逆门禁：只接受 `fixture_ownership=test_owned` 的固定流水，执行 submit -> withdraw -> resubmit，并以 withdraw recovery 保证最终 inactive；同时验证五个受影响页面和四个隔离页面。

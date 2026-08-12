@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 
-ACTIVE_SCOPE_TYPES = ("workbench", "workbench_relation")
+ACTIVE_SCOPE_TYPES = ("workbench_relation",)
 
 
 class FakeQueue:

@@ -17,6 +17,7 @@ from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIde
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from fin_ops_platform.services.workbench_row_identity import workbench_row_identity_key
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.test_workbench_uow_contract import (
     _RecordingConnection,
@@ -74,13 +75,40 @@ class _CanonicalSelectionRepository:
         *,
         scope_key: str,
         row_ids: list[str],
-    ) -> dict[str, dict[str, object]]:
+        row_types: list[str],
+    ) -> list[dict[str, object]]:
         del scope_key
-        return {
-            row_id: dict(self._rows[row_id])
-            for row_id in row_ids
+        return [
+            {
+                **dict(self._rows[row_id]),
+                "row_id": row_id,
+                "pane": row_type,
+            }
+            for row_id, row_type in zip(row_ids, row_types, strict=True)
             if row_id in self._rows
+        ]
+
+
+class _FixtureTypedSelectionRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = {
+            (str(row.get("type") or ""), str(row.get("id") or "")): dict(row)
+            for row in rows
         }
+
+    def get_workbench_relation_preview_selection(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> dict[str, object]:
+        del scope_key
+        selected_rows = [
+            dict(self._rows[(row_type, row_id)])
+            for row_id, row_type in zip(row_ids, row_types, strict=True)
+        ]
+        return {"selected_rows": selected_rows, "context_rows": []}
 
 
 class WorkbenchWriteCharacterizationTests(unittest.TestCase):
@@ -109,15 +137,22 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         calls: list[dict[str, object]] = []
 
         class Repository:
-            def get_workbench_row_detail(self, **kwargs: object) -> dict[str, object]:
-                calls.append(dict(kwargs))
-                row_id = str(kwargs["row_id"])
-                return {"row": {"id": row_id, "type": "oa" if row_id.startswith("oa") else "bank"}}
+            def get_canonical_rows_by_ids(
+                self, row_ids: list[str], *, row_types: list[str] | None
+            ) -> dict[str, dict[str, object]]:
+                calls.append({"row_ids": list(row_ids), "row_types": row_types})
+                return {
+                    row_id: {
+                        "id": row_id,
+                        "type": "oa" if row_id.startswith("oa") else "bank",
+                    }
+                    for row_id in row_ids
+                }
 
         app = Application.__new__(Application)
-        app._workbench_sql_read_repository = Repository()
+        app._workbench_page_selection_repository = Repository()
 
-        rows = app._resolve_rows_from_workbench_canonical_query(
+        rows = app._resolve_rows_from_workbench_canonical_selection(
             ["oa-1", "bank-1"],
             month_hint="2026-05",
         )
@@ -126,48 +161,86 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                {"scope_key": "2026-05", "row_id": "oa-1"},
-                {"scope_key": "2026-05", "row_id": "bank-1"},
+                {"row_ids": ["oa-1", "bank-1"], "row_types": None},
             ],
         )
 
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
+        app._oa_sync_status_payload = lambda: {"status": "synced", "dirty_scopes": []}
         query_facade = app._workbench_query_facade()
-        query_facade.write_precondition = lambda _month, expected_read_model_version: WorkbenchQueryResult(
-            HTTPStatus.OK,
-            {
-                "read_model_status": "fresh",
-                "read_model_version": str(expected_read_model_version),
-            },
-        )
+
+        def fixture_rows_by_ids(
+            row_ids: list[str], *, row_types: list[str] | None = None
+        ) -> dict[str, dict[str, object]]:
+            rows_by_id = {
+                str(row.get("id") or ""): row
+                for row in app._workbench_query_service.get_workbench("2026-03")[
+                    "unpaired"
+                ]["oa"]
+                + app._workbench_query_service.get_workbench("2026-03")[
+                    "unpaired"
+                ]["bank"]
+                + app._workbench_query_service.get_workbench("2026-03")[
+                    "unpaired"
+                ]["invoice"]
+            }
+            selected = {
+                row_id: {**dict(rows_by_id[row_id]), "month": "2026-03"}
+                for row_id in row_ids
+                if row_id in rows_by_id
+            }
+            if row_types is not None:
+                for row_id, row_type in zip(row_ids, row_types, strict=True):
+                    if (
+                        row_id in selected
+                        and str(selected[row_id].get("type") or "") != row_type
+                    ):
+                        raise ValueError("typed canonical selection mismatch")
+            return selected
 
         def relation_preview_selection(
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
+            row_types: list[str],
         ) -> WorkbenchQueryResult:
-            rows = app._resolve_live_rows_direct(
-                row_ids,
-                month_hint=str(month or "all"),
-            )
+            rows_by_id = fixture_rows_by_ids(row_ids, row_types=row_types)
+            rows = [rows_by_id[row_id] for row_id in row_ids]
             return WorkbenchQueryResult(
                 HTTPStatus.OK,
                 {
                     "scope_key": str(month or "all"),
                     "selected_row_ids": list(row_ids),
+                    "selected_row_types": list(row_types),
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": str(expected_read_model_version),
                 },
             )
 
         query_facade.relation_preview_selection = relation_preview_selection
         app._workbench_query_facade = lambda: query_facade
+        class _CanonicalSelection:
+            @staticmethod
+            def get_canonical_rows_by_ids(
+                row_ids: list[str], *, row_types: list[str] | None = None
+            ) -> dict[str, dict[str, object]]:
+                return fixture_rows_by_ids(row_ids, row_types=row_types)
+
+            @staticmethod
+            def get_workbench_relation_preview_selection(
+                *, scope_key: str, row_ids: list[str], row_types: list[str]
+            ) -> dict[str, object]:
+                rows_by_id = fixture_rows_by_ids(row_ids, row_types=row_types)
+                selected_rows = [rows_by_id[row_id] for row_id in row_ids]
+                for row, row_type in zip(selected_rows, row_types, strict=True):
+                    if str(row.get("type") or "") != row_type:
+                        raise ValueError("typed canonical selection mismatch")
+                return {"selected_rows": selected_rows, "context_rows": []}
+
+        app._workbench_page_selection_repository = _CanonicalSelection()
         return app
 
     def _default_open_row_ids(self, app: Application) -> list[str]:
@@ -188,7 +261,34 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         }
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
-        payload.setdefault("expected_read_model_version", "characterization-generation")
+        typed_multi_paths = {
+            "/api/workbench/actions/confirm-link",
+            "/api/workbench/actions/confirm-link/preview",
+            "/api/workbench/actions/withdraw-link",
+            "/api/workbench/actions/withdraw-link/preview",
+            "/api/workbench/actions/confirm-cash-pass-through",
+            "/api/workbench/actions/confirm-cash-ticket-purchase",
+            "/api/workbench/actions/cancel-cash-special",
+            "/api/workbench/actions/oa-bank-exception",
+            "/api/workbench/actions/confirm-personal-advance-repayment",
+            "/api/workbench/actions/cancel-exception",
+        }
+        if path in typed_multi_paths:
+            row_ids = list(payload.get("row_ids") or [])
+            payload.setdefault(
+                "row_types",
+                [app._row_type_for_row_id(str(row_id)) for row_id in row_ids],
+            )
+        typed_single_paths = {
+            "/api/workbench/actions/cancel-link",
+            "/api/workbench/actions/mark-exception",
+            "/api/workbench/actions/ignore-row",
+            "/api/workbench/actions/unignore-row",
+        }
+        if path in typed_single_paths and payload.get("row_id") is not None:
+            payload.setdefault("row_type", app._row_type_for_row_id(str(payload["row_id"])))
+        if path == "/api/workbench/actions/update-bank-exception":
+            payload.setdefault("row_type", "bank")
         if path == "/api/workbench/actions/confirm-link":
             self._ensure_documented_mismatch_confirm_note(payload)
         return app.handle_request("POST", path, json.dumps(payload))
@@ -412,8 +512,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         payload = _json_response(response)
         self.assertEqual(payload["case_id"], "CASE-UOW-CONFIRM")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
-        self.assertTrue(payload["operation_projection"]["before"]["unpaired_groups"])
-        self.assertTrue(payload["operation_projection"]["after"]["paired_groups"])
+        self.assertNotIn("operation_projection", payload)
         self.assertEqual(payload["outbox_event_ids"], [call["event_id"] for call in writer.calls])
         self.assertEqual(pair_relation_persist.call_count, 0)
         self.assertEqual(connection.opened, 1)
@@ -424,8 +523,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIn("CASE-UOW-CONFIRM", persisted[0]["changed_case_ids"])
         history = persisted[0]["snapshot"]["pair_relation_history"][0]
         self.assertTrue(str(history["request_id"]))
-        self.assertTrue(history["operation_projection"]["before"]["unpaired_groups"])
-        self.assertTrue(history["operation_projection"]["after"]["paired_groups"])
+        self.assertNotIn("operation_projection", history)
         self.assertEqual(writer.calls, [])
         self.assertEqual(repository_factory.created_for_transactions, [connection.transaction_obj])
 
@@ -481,7 +579,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(connection.commits, 1)
-        self.assertTrue(_json_response(response)["operation_projection"]["after"]["paired_groups"])
+        self.assertNotIn("operation_projection", _json_response(response))
 
     def test_confirm_link_uow_rejects_same_idempotency_key_with_different_payload(self) -> None:
         app = self._build_app()
@@ -536,9 +634,9 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         request_payload = {
             "month": "2026-03",
             "row_ids": row_ids,
+            "row_types": [app._row_type_for_row_id(row_id) for row_id in row_ids],
             "case_id": "CASE-UOW-FAILED",
             "idempotency_key": "confirm:uow-idem-failed",
-            "expected_read_model_version": "characterization-generation",
         }
         self._ensure_documented_mismatch_confirm_note(request_payload)
         request_fingerprint = workbench_request_fingerprint(
@@ -762,6 +860,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         request_payload = {
             "month": "2026-03",
             "row_id": "missing-row",
+            "row_type": "bank",
             "idempotency_key": "cancel:uow-idem-failed",
             "expected_read_model_version": "characterization-generation",
         }
@@ -897,6 +996,44 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         case = app._workbench_exception_case_service.snapshot()["cases"][first_payload["exception_case_id"]]
         self.assertEqual(case["status"], "open")
 
+    def test_legacy_replay_requires_same_typed_identity_not_only_same_text_id(self) -> None:
+        app = self._build_app()
+        app._workbench_exception_case_service.create_case_from_action(
+            rows=[{"id": "same-id", "type": "invoice", "month": "2026-03"}],
+            scenario={
+                "business_line": "invoice",
+                "scenario_code": "invoice_manual_review",
+                "scenario_label": "发票人工复核",
+                "rule_version": "exception_rules_v1",
+            },
+            action={
+                "action_code": "manual_review",
+                "label": "人工复核",
+                "result_status": "open",
+            },
+            amount_summary={},
+            workflow_projection={"state": "OPEN"},
+            actor="tester",
+            payload={"legacy_exception_code": "pending_collection"},
+        )
+        facade = app._workbench_write_facade()
+
+        invoice_replay = facade._legacy_replay_scenario_code(
+            month="2026-03",
+            row_ids=["same-id"],
+            row_types=["invoice"],
+            legacy_payload={"legacy_exception_code": "pending_collection"},
+        )
+        bank_replay = facade._legacy_replay_scenario_code(
+            month="2026-03",
+            row_ids=["same-id"],
+            row_types=["bank"],
+            legacy_payload={"legacy_exception_code": "pending_collection"},
+        )
+
+        self.assertEqual(invoice_replay, "invoice_manual_review")
+        self.assertEqual(bank_replay, "")
+
     def test_duplicate_exception_apply_is_service_idempotent_at_http_boundary(self) -> None:
         app = self._build_app()
         rows = [
@@ -921,12 +1058,15 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         request_payload = {
             "month": "2026-05",
             "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
+            "row_types": ["oa", "bank", "invoice"],
             "scenario_code": "expense_all_equal",
             "action_code": "confirm_closed",
             "payload": {},
         }
 
-        with patch.object(app, "_resolve_live_rows_direct", return_value=rows), self._suppress_background_persistence(app):
+        app._workbench_page_selection_repository = _FixtureTypedSelectionRepository(rows)
+        app._configure_workbench_exception_application_service()
+        with self._suppress_background_persistence(app):
             first_response = self._post(app, "/api/workbench/exception/apply", request_payload)
             second_response = self._post(app, "/api/workbench/exception/apply", request_payload)
 
@@ -1006,7 +1146,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIn(ignore_payload["conflict"]["reason"], {"stale_row_status", "stale_relation_identity"})
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-IGNORE-CONFIRMED"))
         self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
-        self.assertNotIn(invoice_row_id, app._workbench_override_service.snapshot()["row_overrides"])
+        self.assertNotIn(
+            workbench_row_identity_key("invoice", invoice_row_id),
+            app._workbench_override_service.snapshot()["row_overrides"],
+        )
         self.assertEqual(pair_relation_persist.call_count, 1)
 
     def test_stale_cancel_after_replaced_cancels_current_relation_by_row_id(self) -> None:
@@ -1219,25 +1362,15 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def test_formal_confirm_and_withdraw_use_bounded_canonical_selection(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
-        query_facade = app._workbench_query_facade()
-        canonical_selection = query_facade.relation_preview_selection
         selection_calls: list[list[str]] = []
+        canonical_selection = app._workbench_page_selection_repository
+        canonical_get = canonical_selection.get_workbench_relation_preview_selection
 
-        def record_canonical_selection(
-            month: str | None,
-            *,
-            row_ids: list[str],
-            expected_read_model_version: str | None,
-        ) -> WorkbenchQueryResult:
-            selection_calls.append(list(row_ids))
-            return canonical_selection(
-                month,
-                row_ids=row_ids,
-                expected_read_model_version=expected_read_model_version,
-            )
+        def record_canonical_selection(**kwargs: object) -> dict[str, object]:
+            selection_calls.append(list(kwargs.get("row_ids") or []))
+            return canonical_get(**kwargs)
 
-        query_facade.relation_preview_selection = record_canonical_selection
-        app._workbench_query_facade = lambda: query_facade
+        canonical_selection.get_workbench_relation_preview_selection = record_canonical_selection
         self._install_confirm_link_uow(app)
 
         with self._suppress_background_persistence(app):
@@ -1281,13 +1414,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             month: str | None,
             *,
             row_ids: list[str],
-            expected_read_model_version: str | None,
+            row_types: list[str],
         ) -> WorkbenchQueryResult:
             selection_calls.append(
                 {
                     "month": month,
                     "row_ids": list(row_ids),
-                    "expected_read_model_version": expected_read_model_version,
+                    "row_types": list(row_types),
                 }
             )
             return WorkbenchQueryResult(
@@ -1297,8 +1430,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                     "selected_rows": rows,
                     "context_rows": [],
                     "rows": rows,
-                    "read_model_status": "fresh",
-                    "read_model_version": expected_read_model_version,
                 },
             )
 
@@ -1876,7 +2007,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertIn(bank_row["id"], app._workbench_override_service.snapshot()["row_overrides"])
+        self.assertIn(
+            workbench_row_identity_key("bank", bank_row["id"]),
+            app._workbench_override_service.snapshot()["row_overrides"],
+        )
 
     def test_duplicate_oa_bank_exception_reuses_case_and_reschedules_current_behavior(self) -> None:
         app = self._build_app()
@@ -1957,8 +2091,14 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertIn(rows["oa"]["id"], app._workbench_override_service.snapshot()["row_overrides"])
-        self.assertIn(rows["bank"]["id"], app._workbench_override_service.snapshot()["row_overrides"])
+        self.assertIn(
+            workbench_row_identity_key("oa", rows["oa"]["id"]),
+            app._workbench_override_service.snapshot()["row_overrides"],
+        )
+        self.assertIn(
+            workbench_row_identity_key("bank", rows["bank"]["id"]),
+            app._workbench_override_service.snapshot()["row_overrides"],
+        )
 
 
 

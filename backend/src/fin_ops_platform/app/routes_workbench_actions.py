@@ -8,7 +8,6 @@ from fin_ops_platform.services.workbench_amount_mismatch_exception_service impor
     WorkbenchAmountMismatchConflict,
     WorkbenchAmountMismatchExceptionService,
 )
-from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
 
 
 class WorkbenchActionApiRoutes:
@@ -43,13 +42,6 @@ class WorkbenchActionApiRoutes:
                 actor_id=actor_id,
                 ignored=ignored,
             )
-        except WorkbenchReadModelVersionConflictError as error:
-            return HTTPStatus.CONFLICT, {
-                "error": "workbench_read_model_version_conflict",
-                "message": "关联台数据已变化，请刷新后重试。",
-                "expected_read_model_version": error.expected,
-                "read_model_version": error.current,
-            }
         except WorkbenchAmountMismatchConflict as error:
             return HTTPStatus.CONFLICT, {
                 "error": "workbench_amount_mismatch_changed",
@@ -79,11 +71,13 @@ class WorkbenchActionApiRoutes:
         payload: dict[str, Any],
         *,
         actor_id: str,
+        tenant_id: str,
         request_id: str | None = None,
     ) -> Any:
         return self._write_facade_provider().apply_exception(
             payload,
             actor=actor_id,
+            tenant_id=tenant_id,
             request_id=request_id,
             action_name="exception_apply",
         )

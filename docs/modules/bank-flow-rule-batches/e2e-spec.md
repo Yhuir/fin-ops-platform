@@ -62,7 +62,7 @@
 1. 在关联台查看尚无 active relation 的银行/发票事实。
 2. 确认它们分别位于 unpaired singleton。
 3. 选择对应事实并通过确认关联预览提交。
-4. 通过关联台自己的正常 GET 等待其 freshness gate 收敛。
+4. 通过关联台自己的 normal canonical GET 直接读取已提交关系，不等待 page freshness/generation。
 
 验收：
 

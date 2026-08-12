@@ -98,14 +98,25 @@ test.describe("workbench relation browser flow", () => {
     await expect(bankRowBefore.getByText("无发票")).toBeVisible();
     const bankTransactionRequestCountBefore = api.count("GET /api/bank-details/transactions");
 
+    let workbenchLoadsBeforeSubmit = 0;
     await confirmWorkbenchRelation(page, recordLatency, async () => {
+      workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
       await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeVisible();
       await expect(page.getByRole("button", { name: "正在准备确认预览" })).toBeDisabled();
     });
 
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(1);
+    expect(api.lastBody("POST /api/workbench/actions/confirm-link/preview")).toMatchObject({
+      row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+      row_types: ["oa", "bank", "invoice"],
+    });
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
+    expect(api.lastBody("POST /api/workbench/actions/confirm-link")).toMatchObject({
+      row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+      row_types: ["oa", "bank", "invoice"],
+    });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSubmit + 1);
 
     await recordLatency({
       route: "/bank-details",

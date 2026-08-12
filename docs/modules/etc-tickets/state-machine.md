@@ -50,17 +50,17 @@
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。
   - submitted delete confirm：仅尚无正式 OA 行的本地 submitted 批次允许 reset；已绑定 `oa_row_id` 时后端 fail fast。历史错误 tombstone 恢复为原 submitted 状态，重复执行不追加第二次恢复审计。
-- stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
+- OA sync safety：ETC 页面本身不触发 OA 自动检测；关联台独立读取 `/api/oa-sync/status` 作为写安全状态，不再展示 page read-model stale/refreshing。
 - permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；read-export 用户在 actor scope 内仍可下载 OA 草稿或正式已提交批次的发票合并 PDF；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
 
-## Read Model / Worker 状态
+## Canonical 可见性 / Worker 状态
 
-- ETC 业务批次列表直接读取业务批次事实源；关联台是否出现 `etc_invoice_summary` 由 Workbench SQL projection/read model 决定。
-- `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench open 区投影一条合并行；投影失败时不应把批次回滚成未提交。
-- `etc_invoice_summary` 与 ETC 页面金额统一显示无千分位的两位小数；read model 同时持久化结构化金额，用于 `workbench_rows.amount`、无分组金额搜索文本和金额过滤。
-- refresh 触发来源：ETC 导入确认、OA 草稿创建、人工提交确认、人工未提交确认、业务批次本地删除/重置、关联台普通配对关系确认或撤回。
+- ETC 业务批次列表直接读取业务批次事实源；关联台在同一 direct canonical GET 中由已提交 ETC business batch/links 构造 `etc_invoice_summary`，不读取 page projection。
+- `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench 未配对区在下一次 normal GET 显示一条合并行；关联台读取失败不得回滚已经提交的业务批次。
+- `etc_invoice_summary` 与 ETC 页面金额统一显示无千分位的两位小数；关联台 direct descriptor/hydration 保留结构化金额，用于展示、金额搜索和过滤，禁止恢复 `workbench_rows` 物化字段。
+- ETC 导入确认、OA 草稿创建、人工提交/未提交确认、业务批次本地删除/重置只提交 owner canonical facts；关联台下一次 normal GET 自然可见，不 enqueue page refresh。正式关系变化仍按 shared relation/matching 的独立合同处理。
 - canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认只能把 ETC metadata 关联到已存在的 canonical invoice，不得从 ETC 专用表创建 canonical invoice。
-- 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
+- 失败恢复：业务命令失败时通过正式 ETC/import job 重试；关联台 direct GET 失败只重试读取，不触发 rebuild。业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
 - 生产残留清理：若历史部署已留下“业务批次已删除但 reconciliation task 仍存在”的 task-only 行，使用 `fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks` 按显式 `--task-id` dry-run/execute 清理；工具必须走 service 删除边界，不直接 SQL 删除任务行。
 
 ## 变更记录

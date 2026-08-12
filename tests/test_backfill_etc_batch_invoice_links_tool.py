@@ -107,6 +107,23 @@ class _SchemaProbeConnection:
         return {"table_name": self.table_name}
 
 
+class _QueueRepository:
+    def __init__(self) -> None:
+        self.enqueued: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.enqueued.append(dict(kwargs))
+
+
+class _MatchingDirtyRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def mark_workbench_matching_dirty_scopes(self, **kwargs: object) -> list[str]:
+        self.calls.append(dict(kwargs))
+        return list(kwargs["scope_months"])
+
+
 class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
     def test_dry_run_classifies_auto_manual_and_existing_links_with_rollback_plan(self) -> None:
         report = audit_etc_batch_invoice_link_backfill(connection=_BackfillConnection(), example_limit=10)
@@ -115,7 +132,7 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
         self.assertEqual(report["summary"]["auto_backfill_count"], 1)
         self.assertEqual(report["summary"]["manual_review_count"], 1)
         self.assertEqual(report["summary"]["already_linked_count"], 1)
-        self.assertEqual(report["summary"]["affected_workbench_scopes"], ["2026-02", "all"])
+        self.assertEqual(report["summary"]["affected_months"], ["2026-02"])
         self.assertTrue(report["summary"]["rollback_plan_available"])
         self.assertEqual(report["auto_backfill_candidates"][0]["invoice_id"], "invoice-auto")
         self.assertEqual(report["manual_review_candidates"][0]["failed_checks"], ["invoice_date"])
@@ -124,6 +141,8 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
 
     def test_apply_requires_reason_and_operator_and_only_applies_auto_candidates(self) -> None:
         connection = _BackfillConnection()
+        queue = _QueueRepository()
+        matching = _MatchingDirtyRepository()
         report = audit_etc_batch_invoice_link_backfill(connection=connection, example_limit=10)
 
         with self.assertRaises(ValueError):
@@ -136,11 +155,34 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
             auto_backfill_candidates=report["auto_backfill_candidates"],
             reason="unit",
             operator="tester",
+            queue_repository=queue,
+            matching_dirty_repository=matching,
         )
 
         self.assertEqual(result["requested_count"], 1)
         self.assertEqual(result["linked_count"], 1)
-        self.assertEqual(result["affected_workbench_scopes"], ["2026-02", "all"])
+        self.assertEqual(result["affected_months"], ["2026-02"])
+        self.assertEqual(result["workbench_relation_scopes"], ["2026-02"])
+        self.assertEqual(
+            [(item["scope_type"], item["scope_key"], item["priority"]) for item in queue.enqueued],
+            [("workbench_relation", "2026-02", "high")],
+        )
+        self.assertEqual(
+            matching.calls,
+            [
+                {
+                    "tenant_id": "default",
+                    "scope_months": ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04"],
+                    "reason": "etc_batch_invoice_link_backfill",
+                    "source_versions": {},
+                    "debounce_seconds": 0,
+                }
+            ],
+        )
+        self.assertEqual(
+            result["matching_dirty_scopes"],
+            ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04"],
+        )
         self.assertEqual(len(connection.fetch_one_calls), 1)
 
     def test_apply_guard_requires_exact_candidate_row_set_in_report(self) -> None:

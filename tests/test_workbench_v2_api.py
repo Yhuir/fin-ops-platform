@@ -249,6 +249,46 @@ class BankDetailCanonicalQueryFixture:
         }
 
 class WorkbenchV2ApiTests(unittest.TestCase):
+    @staticmethod
+    def _wsgi_get(app: Application, path: str, query_string: str) -> tuple[str, dict[str, object]]:
+        statuses: list[str] = []
+
+        def start_response(status: str, _headers: list[tuple[str, str]]) -> None:
+            statuses.append(status)
+
+        body = b"".join(
+            WsgiHttpAdapter(app)(
+                {
+                    "REQUEST_METHOD": "GET",
+                    "PATH_INFO": path,
+                    "QUERY_STRING": query_string,
+                    "wsgi.input": BytesIO(),
+                },
+                start_response,
+            )
+        )
+        return statuses[0], json.loads(body.decode("utf-8"))
+
+    def test_workbench_invalid_month_stays_bad_request_when_metric_is_emitted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            for path, query, expected_error in (
+                ("/api/workbench", "month=2026-13", "invalid_workbench_initial_query"),
+                (
+                    "/api/workbench/groups",
+                    "month=2026-13&zone=paired",
+                    "invalid_workbench_groups_query",
+                ),
+                (
+                    "/api/workbench/filter-options",
+                    "month=2026-13&zone=paired&pane=invoice&facet=column&column=sellerName",
+                    "invalid_workbench_filter_options_query",
+                ),
+            ):
+                status, payload = self._wsgi_get(app, path, query)
+                self.assertEqual(status, "400 Bad Request")
+                self.assertEqual(payload["error"], expected_error)
+
     def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
         app._workbench_query_service = query_service
 
@@ -874,15 +914,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             MongoOAAdapter._attachment_invoice_cache_parser_version(),
         )
 
-    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
-        class SqlReadRepository:
+    def test_get_api_workbench_ignored_uses_canonical_override_repository(self) -> None:
+        class CanonicalOverrideRepository:
             def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
                 self.scope_key = scope_key
                 return [{"id": "bk-sql-ignored-001", "type": "bank"}]
 
         app = build_application()
-        repository = SqlReadRepository()
-        app._workbench_sql_read_repository = repository
+        repository = CanonicalOverrideRepository()
+        app._workbench_page_selection_repository = repository
 
         response = app.handle_request("GET", "/api/workbench/ignored?month=all")
 
@@ -930,24 +970,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(metadata["requires_oa"])
         self.assertFalse(metadata["requires_invoice"])
 
-    def test_confirm_link_ignores_empty_row_ids_in_minimal_hot_path(self) -> None:
-        app = build_application()
-
-        response = app._handle_live_workbench_confirm_link(
-            {
-                "month": "2026-03",
-                "row_ids": ["oa-o-202603-001", None, "  ", "bk-o-202603-001"],
-                "case_id": "CASE-NORMALIZE-ROWIDS-001",
-            }
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertEqual(
-            payload["affected_row_ids"],
-            ["oa-o-202603-001", "bk-o-202603-001"],
-        )
-
     def test_cancel_link_does_not_resolve_source_rows_in_hot_path(self) -> None:
         app = build_application()
         app._workbench_pair_relation_service.create_active_relation(
@@ -964,6 +986,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_id": "bk-o-202603-001",
+                    "row_type": "bank",
                     "comment": "reopen",
                 }
             )
@@ -975,135 +998,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
         )
         self.assertNotIn("updated_rows", cancel_payload)
-
-    def test_cancel_exception_resolves_all_scope_bank_rows_without_oa_query_service(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="cancel-exception-bank-fast-path.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220031",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-03-10",
-                    "trade_time": "2026-03-10 09:00:00",
-                    "pay_receive_time": "2026-03-10 09:00:00",
-                    "counterparty_name": "测试取消异常流水",
-                    "debit_amount": "100.00",
-                    "credit_amount": "",
-                    "summary": "测试取消异常流水",
-                },
-            ],
-        )
-        app._import_service.confirm_import(preview.id)
-        bank_row_id = next(
-            transaction.id
-            for transaction in app._import_service.list_transactions()
-            if transaction.source_batch_id == preview.id
-        )
-        app.handle_request("GET", "/api/workbench?month=all")
-
-        exception_response = app._handle_live_workbench_oa_bank_exception(
-            {
-                "month": "all",
-                "row_ids": [bank_row_id],
-                "exception_code": "oa_bank_amount_mismatch",
-                "exception_label": "金额不一致，继续异常",
-                "comment": "测试异常处理",
-            }
-        )
-        self.assertEqual(exception_response.status_code, 200)
-
-        with patch.object(
-            app._workbench_query_service,
-            "get_row_record",
-            side_effect=AssertionError("bank rows should resolve from live detail without OA query service"),
-        ):
-            cancel_response = app._handle_live_workbench_cancel_exception(
-                {
-                    "month": "all",
-                    "row_ids": [bank_row_id],
-                    "comment": "撤回异常处理",
-                }
-            )
-
-        self.assertEqual(cancel_response.status_code, 200)
-        cancel_payload = json.loads(cancel_response.body)
-        self.assertTrue(cancel_payload["success"])
-        self.assertEqual(cancel_payload["action"], "cancel_exception")
-        self.assertEqual(cancel_payload["affected_row_ids"], [bank_row_id])
-
-    def test_confirm_link_accepts_unbalanced_same_type_rows_and_rebuilds_live_cache_once(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="multi-bank.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220031",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-03-10",
-                    "trade_time": "2026-03-10 09:00:00",
-                    "pay_receive_time": "2026-03-10 09:00:00",
-                    "counterparty_name": "测试对方A",
-                    "debit_amount": "100.00",
-                    "credit_amount": "",
-                    "summary": "测试流水A",
-                },
-                {
-                    "account_no": "62220032",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-03-10",
-                    "trade_time": "2026-03-10 09:05:00",
-                    "pay_receive_time": "2026-03-10 09:05:00",
-                    "counterparty_name": "测试对方B",
-                    "debit_amount": "250.00",
-                    "credit_amount": "",
-                    "summary": "测试流水B",
-                },
-            ],
-        )
-        app._import_service.confirm_import(preview.id)
-        row_ids = [transaction.id for transaction in app._import_service.list_transactions() if transaction.source_batch_id == preview.id]
-
-        with patch.object(
-            app._live_workbench_service,
-            "get_rows_detail",
-            wraps=app._live_workbench_service.get_rows_detail,
-        ) as get_rows_detail:
-            confirm_response = app._handle_live_workbench_confirm_link(
-                {
-                    "month": "2026-03",
-                    "row_ids": row_ids,
-                    "case_id": "CASE-LIVE-BULK-001",
-                }
-            )
-
-        self.assertEqual(confirm_response.status_code, 200)
-        confirm_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirm_payload["action"], "confirm_link")
-        self.assertCountEqual(confirm_payload["affected_row_ids"], row_ids)
-        get_rows_detail.assert_called_once_with(row_ids)
-
-    def test_confirm_link_resolves_underlying_live_row_services_without_group_payload_dependency(self) -> None:
-        app = build_application()
-        app._live_workbench_service = _StubLiveWorkbenchService()
-        app._workbench_row_detail_api_routes = app._build_workbench_row_detail_api_routes()
-
-        confirm_response = app._handle_live_workbench_confirm_link(
-            {
-                "month": "2026-03",
-                "row_ids": ["oa-o-202603-001", "txn-live-202603-001"],
-            }
-        )
-
-        self.assertEqual(confirm_response.status_code, 200)
-        confirm_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirm_payload["action"], "confirm_link")
-        self.assertEqual(confirm_payload["affected_row_ids"], ["oa-o-202603-001", "txn-live-202603-001"])
-
 
     def test_oa_sync_status_endpoint_reads_durable_queue_status(self) -> None:
         app = build_application()

@@ -66,7 +66,7 @@
 - 外部往来款可在自己的同一只读快照内复用 repository 的 set-based effective-category rows helper；该 helper 只返回指定 tag codes 的 canonical rows，不返回 Bank Details 页面 DTO、relation 标签或 freshness 状态。
 - 流水规则批量处理的 canonical repository 可复用公开的 `bank_category_classification_cte(...)` SQL compiler，在自己的只读 snapshot 内取得完整 effective category；调用方仍拥有自己的批次、关系、筛选和分页 I/O，不读取银行明细页面 payload。
 - 批量账务可对精确业务流水 IDs 复用 `effective_category_projection_rows(...)`，取得 current effective code/label/source；筛选、分页、Settings 选择和提交资格仍由批量账务 owner 负责。
-- 关联台 generation builder 可对目标银行 identity 一次批量复用同一 canonical classifier，取得 effective category 与 resolution status；该调用由关联台 read model owner 负责 freshness/publish，银行明细写链不恢复跨页面 fan-out。
+- 关联台 direct page hydration 可对本页目标银行 identity 一次批量复用同一 canonical classifier，取得 effective category 与 resolution status；该调用由关联台 query owner 在同一只读请求内负责，银行明细写链不恢复跨页面 fan-out。
 - accounts 固定使用 settings、账户余额聚合和账户范围计数查询；不得在 Python 全量累计。
 - 内部转账匹配使用 SQL `±2 days` bounded context；自动规则只为实际使用的匹配字段构建文本 normalization。
 - 账户和精确日期先限定页面目标行；合法金额 keyword 在确认不可能命中配置标签文案后，可把 canonical 金额/余额及既有可搜索原始字段下推到规则分类候选。内部转账仍保留完整 bounded context，最终完整筛选不得删除。

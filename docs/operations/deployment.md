@@ -86,7 +86,7 @@ Worker 实例、event types、env 模板和 check 命令只以 registry 为事�
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --json
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest --worker-check-command workbench-relation
 ```
 
 生产 systemd 只使用 registration contract：
@@ -109,44 +109,33 @@ python -m fin_ops_platform.app.worker \
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
-- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.worker.oa-sync.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench.env.example`
-- `deploy/oa/env/fin-ops.worker.workbench-relation.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-lifecycle.env.example`
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
-- `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
-- `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
-- `deploy/oa/env/fin-ops.worker.turnover-ledger.env.example`
-- `deploy/oa/env/fin-ops.worker.search-pending.env.example`
-- `deploy/oa/env/fin-ops.worker.search.env.example`
-- `deploy/oa/env/fin-ops.worker.search-secondary.env.example`
-- `deploy/oa/env/fin-ops.worker.search-tertiary.env.example`
-- `deploy/oa/env/fin-ops.worker.pending-invoice.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
-- `deploy/oa/env/fin-ops.worker.invoice-lifecycle-secondary.env.example`
-- `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
-- `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
+- `deploy/oa/env/fin-ops.worker.workbench-relation.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
+- `deploy/oa/env/fin-ops.worker.settings-maintenance.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 systemd `.service.example` 中的 `REPLACE_WITH_RELEASE` 只用于 bootstrap 占位；标准发布通过
-`finops-deploy-control activate` 生成 `99-deploy-release.conf`，把 API、worker 和 dispatcher 指向
-实际 `/opt/fin-ops/releases/<release>/src`。
+`./scripts/deploy-oa.sh` 调用固定 root helper 的 `release-gate-activate`，生成
+`99-deploy-release.conf`，把 API、worker 和 dispatcher 指向实际
+`/opt/fin-ops/releases/<release>/src`。公开 `activate` 命令已经删除。
 
 生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码、OA payment status MySQL 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
 
-最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。标准 release 发布会自动运行：
+最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。普通 release 使用唯一发布入口：
 
 ```bash
-sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
+./scripts/deploy-oa.sh --release-name <release-name>
 ```
 
-`activate` 内部必须调用 `/usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"`。该 helper 必须是服务器 root-owned 固定 helper，不能从 release 目录直接
+若候选同时修改 deploy-control，必须按 `deploy/oa/README.md` 的三阶段流程执行：先
+`--no-activate` 上传并校验 exact release，再以批准 SHA-256 由 root 原子 bootstrap candidate
+deploy-control，最后用 `--activate-existing --release-name <exact-release>` 零重传激活。激活内部必须调用
+`/usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"`。该 helper 必须是服务器 root-owned 固定 helper，不能从 release 目录直接
 `sudo /bin/bash` 执行上传脚本。仓库内的 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是 helper 源文件，历史服务器首次接入时应由 root 安装：
 
 ```bash
@@ -203,8 +192,8 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 ## 全量 Backfill / Drain
 
 发布 PostgreSQL read model 或 OA projection 变更后，先补结构化 OA 子表，并只为
-`workbench`、`workbench_relation` 两个保留 read model enqueue `all` fan-out 命令，再由登记 worker drain。
-Search/no-OA projection runtime 已退役，不得重新 enqueue：
+`workbench_relation` 这一个保留 read model enqueue 它自身登记的 exact scopes，再由登记 worker drain。
+Workbench page、Search/no-OA projection runtime 已退役，不得重新 enqueue：
 
 ```bash
 set -a

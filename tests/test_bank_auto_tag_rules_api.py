@@ -9,12 +9,6 @@ from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.state_store import ApplicationStateStore
-from fin_ops_platform.services.workbench_read_model_version import (
-    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
-)
-from fin_ops_platform.services.workbench_sql_projection import (
-    WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-)
 
 
 def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
@@ -1058,54 +1052,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             fee["rules"],
         )
         self.assertEqual(app._audit_service.as_dicts(), [])
-
-    def test_workbench_source_versions_include_bank_auto_tag_rules_version(self) -> None:
-        app = build_application()
-
-        with patch.object(app, "_current_bank_auto_tag_rules_version", return_value=42):
-            matching_versions = app._workbench_matching_source_versions()
-            sql_versions = app._workbench_sql_read_model_source_versions()
-            aggregate_sql_versions = app._workbench_sql_read_model_source_versions("all")
-
-        self.assertEqual(matching_versions["bank_auto_tag_rules_version"], 42)
-        self.assertNotIn("workbench_read_model_schema_version", matching_versions)
-        self.assertEqual(sql_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(sql_versions["builder"], WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
-        self.assertEqual(aggregate_sql_versions["bank_auto_tag_rules_version"], 42)
-        self.assertEqual(aggregate_sql_versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
-
-    def test_workbench_refresh_status_marks_old_bank_auto_tag_generation_stale(self) -> None:
-        app = build_application()
-
-        class WorkbenchRepository:
-            def get_workbench_refresh_status(self, *, scope_key: str) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "read_model_status": "fresh",
-                    "active_generation_id": "gen-1",
-                    "generations": [
-                        {
-                            "generation_id": "gen-1",
-                            "status": "active",
-                            "source_versions": {
-                                "builder": "2026-05-25-oa-attachment-source-groups",
-                                "bank_auto_tag_rules_version": 1,
-                                "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                                "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                            },
-                        }
-                    ],
-                }
-
-        app._workbench_sql_read_repository = WorkbenchRepository()
-
-        with patch.object(app, "_current_bank_auto_tag_rules_version", return_value=2):
-            response = app._handle_api_workbench_refresh_status("2026-05")
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
 
     def test_put_derives_label_from_required_primary_and_optional_sub_label(self) -> None:
         app = build_application()

@@ -195,14 +195,13 @@ class BankRelationRequirementRecalculationJobHandler:
             "force_refresh": True,
         }
         gateway = ReadModelRefreshGateway(queue_repository=self._queue)
-        for scope_type in ("workbench", "workbench_relation"):
-            gateway.enqueue_many(
-                scope_type,
-                sorted(affected_months),
-                reason="bank_relation_requirement_recalculation",
-                priority="high",
-                metadata=metadata,
-            )
+        gateway.enqueue_many(
+            "workbench_relation",
+            sorted(affected_months),
+            reason="bank_relation_requirement_recalculation",
+            priority="high",
+            metadata=metadata,
+        )
         dirty_months = (
             self._matching_dirty_marker(sorted(affected_months))
             if self._matching_dirty_marker is not None and affected_months

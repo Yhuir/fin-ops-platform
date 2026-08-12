@@ -209,16 +209,17 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("def _load_persisted_state", source)
         self.assertNotIn("_initialize_runtime_services(self._load_persisted_state", source)
 
-    def test_production_postgres_workbench_requires_sql_read_model_repository(self) -> None:
+    def test_production_postgres_workbench_requires_direct_query_repository(self) -> None:
         app = object.__new__(server_module.Application)
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
-        app._workbench_sql_read_repository = None
+        app._workbench_page_query_repository = None
+        app._workbench_page_selection_repository = None
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
         response = app._handle_api_workbench("2026-05")
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("read_model_unavailable", response.body)
+        self.assertIn("workbench_query_unavailable", response.body)
 
     def test_production_postgres_bank_details_transactions_fail_closed_without_canonical_query(self) -> None:
         app = object.__new__(server_module.Application)

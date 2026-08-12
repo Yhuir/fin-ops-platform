@@ -82,11 +82,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
         from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 
-        registered_scope_types = [
-            "workbench",
-            "workbench_relation",
-            "workbench_relation",
-        ]
+        registered_scope_types = ["workbench_relation"]
 
         for scope_type in registered_scope_types:
             with self.subTest(scope_type=scope_type):
@@ -99,29 +95,17 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 with self.assertRaises(ReadModelScopeError):
                     gateway.enqueue_many(scope_type, ["active:2026-03"], reason="unit_test")
 
-    def test_workbench_policy_accepts_all_and_month_scopes_only(self) -> None:
+    def test_retired_workbench_page_scope_cannot_be_enqueued(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
         from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 
         queue = QueueRecorder()
         gateway = ReadModelRefreshGateway(queue_repository=queue)
 
-        enqueued = gateway.enqueue_many(
-            "workbench",
-            ["2026-06", "all", "2026-06"],
-            reason="unit_test",
-        )
-
-        self.assertEqual(enqueued, ["2026-06", "all"])
-        self.assertEqual(
-            queue.refreshes,
-            [
-                {"scope_type": "workbench", "scope_key": "2026-06", "reason": "unit_test"},
-                {"scope_type": "workbench", "scope_key": "all", "reason": "unit_test"},
-            ],
-        )
         with self.assertRaises(ReadModelScopeError):
-            gateway.enqueue_many("workbench", ["active:2026-06"], reason="unit_test")
+            gateway.enqueue_many("workbench", ["2026-06", "all"], reason="unit_test")
+
+        self.assertEqual(queue.refreshes, [])
 
     def test_scope_policy_registry_contains_only_active_shared_read_models(self) -> None:
         from fin_ops_platform.services.read_model_scope_policy import (
@@ -130,7 +114,7 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
 
         self.assertEqual(
             set(DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types()),
-            {"workbench", "workbench_relation", "workbench", "workbench_relation"},
+            {"workbench_relation"},
         )
 
     def test_metadata_is_passed_to_queue_repository(self) -> None:
@@ -163,7 +147,6 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
         for scope_type, scope_key, reason in (
-            ("workbench", "2026-02", "api_no_oa_read_model_missing"),
             ("workbench_relation", "2026-02", "api_stale"),
             ("workbench_relation", "2026-02", "workbench_relation_month_shard"),
             ("workbench_relation", "2026-02", "workbench_relation_write_precondition"),

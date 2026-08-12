@@ -15,7 +15,7 @@
 ### 负责
 
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
-- 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 Workbench/read-model consumer 使用自己的 freshness gateway。
+- 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
 - 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。

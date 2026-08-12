@@ -40,10 +40,15 @@ class DecisionRepository:
 def test_service_uses_actual_month_from_all_scope_group_and_server_actor() -> None:
     group_repository = GroupRepository(
         {
-            "group_id": "case:CASE-1",
-            "scope_key": "all",
             "source_scope_key": "2026-05",
-            "oa_invoice_anomaly": {"fingerprint": FINGERPRINT, "state": "active"},
+            "group": {
+                "group_id": "case:CASE-1",
+                "scope_key": "all",
+                "oa_invoice_anomaly": {
+                    "fingerprint": FINGERPRINT,
+                    "state": "active",
+                },
+            },
         }
     )
     decision_repository = DecisionRepository()
@@ -58,7 +63,6 @@ def test_service_uses_actual_month_from_all_scope_group_and_server_actor() -> No
             "zone": "paired",
             "group_id": "case:CASE-1",
             "fingerprint": FINGERPRINT,
-            "expected_read_model_version": "generation-set-1",
         },
         actor_id="YNSYLP005",
         ignored=True,
@@ -74,7 +78,14 @@ def test_service_uses_actual_month_from_all_scope_group_and_server_actor() -> No
         }
     ]
     assert result["affected_scope_keys"] == ["2026-05"]
-    assert result["read_model_version"] == "generation-set-1"
+    assert "read_model_version" not in result
+    assert group_repository.calls == [
+        {
+            "scope_key": "all",
+            "zone": "paired",
+            "group_id": "case:CASE-1",
+        }
+    ]
 
 
 def test_service_rejects_stale_or_changed_anomaly() -> None:
@@ -92,7 +103,6 @@ def test_service_rejects_stale_or_changed_anomaly() -> None:
                 "zone": "paired",
                 "group_id": "case:CASE-1",
                 "fingerprint": FINGERPRINT,
-                "expected_read_model_version": "generation-set-1",
             },
             actor_id="YNSYLP005",
             ignored=True,
@@ -194,17 +204,9 @@ class AmountMismatchHandlerHarness:
         return status_code, payload
 
 
-@pytest.mark.parametrize(
-    ("changed", "expected_status", "expected_enqueued"),
-    [
-        (True, "refreshing", [("2026-05", "amount_mismatch_decision")]),
-        (False, None, []),
-    ],
-)
-def test_server_refreshes_amount_mismatch_projection_only_after_state_changes(
+@pytest.mark.parametrize("changed", [True, False])
+def test_server_amount_mismatch_decision_does_not_enqueue_page_read_model(
     changed: bool,
-    expected_status: str | None,
-    expected_enqueued: list[tuple[str, str]],
 ) -> None:
     harness = AmountMismatchHandlerHarness(changed=changed)
 
@@ -216,8 +218,8 @@ def test_server_refreshes_amount_mismatch_projection_only_after_state_changes(
     )
 
     assert status_code == 200
-    assert payload.get("read_model_status") == expected_status
-    assert harness.enqueued == expected_enqueued
+    assert "read_model_status" not in payload
+    assert harness.enqueued == []
 
 
 def test_action_route_returns_service_contract_without_accepting_client_actor() -> None:
@@ -259,6 +261,7 @@ def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() ->
             payload: dict[str, object],
             *,
             actor: str,
+            tenant_id: str,
             request_id: str | None,
             action_name: str,
         ) -> object:
@@ -266,6 +269,7 @@ def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() ->
                 {
                     "payload": payload,
                     "actor": actor,
+                    "tenant_id": tenant_id,
                     "request_id": request_id,
                     "action_name": action_name,
                 }
@@ -281,6 +285,7 @@ def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() ->
     result = routes.exception_apply(
         payload,
         actor_id="YNSYLP005",
+        tenant_id="default",
         request_id="req-exception-apply",
     )
 
@@ -288,6 +293,7 @@ def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() ->
     assert captured == {
         "payload": payload,
         "actor": "YNSYLP005",
+        "tenant_id": "default",
         "request_id": "req-exception-apply",
         "action_name": "exception_apply",
     }

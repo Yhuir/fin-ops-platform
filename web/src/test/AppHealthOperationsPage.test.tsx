@@ -337,7 +337,7 @@ describe("AppHealthOperationsPage", () => {
           ],
           read_models: [
             {
-              key: "workbench",
+              key: "workbench_relation",
               refresh_duration_ms: { p50: null, p95: null, p99: null },
               stale_count: null,
               unavailable_count: null,

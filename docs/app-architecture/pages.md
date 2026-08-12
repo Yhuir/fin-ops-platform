@@ -25,7 +25,7 @@
 
 | 页面域 | 前端入口 | API / 后端 owner | 主要事实来源 | 刷新来源 |
 | --- | --- | --- | --- | --- |
-| 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、workbench service、read model service | 银行流水、OA 单据、发票、确认关系、active generation | route 进入/重进、页面查询变化、当前页写后 reconcile、手动重试 |
+| 银企核销 / 关联台 | `web/src/pages/ReconciliationPage.tsx`、workbench 页面组件 | reconciliation/workbench routes、`WorkbenchQueryFacade`、direct canonical repository | 同一只读快照中的银行流水、completed/in-progress OA、发票/ETC、active formal relations | route 进入/重进、页面查询变化、当前页写后一次 direct GET、手动重试；无 page freshness polling |
 | 银行明细 | `web/src/pages/BankDetailsPage.tsx` | bank detail routes、`BankDetailsCanonicalQueryService` | canonical 银行流水、分类/标签、账户映射、active Workbench pair relations | route 进入/重进、查询变化、当前页写后一次 GET、用户重试 |
 | 往来款管理 | `web/src/pages/TurnoverLedgerPage.tsx` | turnover ledger routes/service、workbench pair relation service | 外部往来候选、人工闭环、利息、项目归因、Workbench pair relation | 银行明细、关联台、人工闭环/撤回 |
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
@@ -51,15 +51,14 @@
 
 所有页面必须通过后端 domain registry 接入全局状态平面。新增页面、read model、worker 或后台任务类型时，需要同步更新 registry、readiness projection 和测试，不能只在前端页面里显示局部状态。canonical 直读页面的 domain readiness 只能依赖 PostgreSQL/runtime 健康，不得虚构页面 read model readiness。
 
-domain registry 是页面域入口；`AppStatusReadModelRegistry` 只登记 `workbench` 页面 read model
-和共享 `workbench_relation` read model。它们从
+domain registry 是页面域入口；`AppStatusReadModelRegistry` 只登记共享 `workbench_relation` read model。它从
 `read_model.app_status_readiness` 和 current-effective queue 状态得到
 `fresh/missing/refreshing/stale/failed/unavailable`，但不作为 canonical 页面 GET 的
 freshness gate。
 
 | domain key | route | 当前数据/任务来源 |
 | --- | --- | --- |
-| `workbench` | `/` | `workbench`、`workbench_relation`、workbench workers、workbench matching/rebuild jobs |
+| `workbench` | `/` | direct canonical PostgreSQL、OA sync safety、`workbench_relation`、workbench matching/domain jobs；无 page worker/generation |
 | `imports_bank_transactions` | `/imports/bank-transactions` | import worker、银行流水导入任务 |
 | `imports_invoices` | `/imports/invoices` | import worker、发票导入任务 |
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |
@@ -80,7 +79,7 @@ freshness gate。
 ## 页面职责边界
 
 - 页面可以决定筛选、排序、分页、空状态、导出列、drawer/dialog 状态。
-- canonical 直读页面的写操作只等待当前 canonical command 完成；成功后当前页执行一次 normal GET。关联台写入还必须遵守自身 freshness/write gate。
+- canonical 直读页面的写操作只等待当前 canonical command 完成；成功后当前页执行一次 normal GET。关联台写门禁只保留 permission、global mutation block 与 OA sync safety，不存在 page freshness/version gate。
 - 页面切换时 `PageRouteHost` 只挂载当前匹配 route；离开页面会卸载页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU 策略或页面数据 snapshot。返回页面时页面重新 mount，并通过现有 API/read boundary 重新加载数据。
 - 页面注册表不声明保活策略；`AppPageRoute` 只维护 `path`、`pageKey`、`component`、`preload()` 和 `end`。侧栏分组继续从页面注册表派生，不能在侧栏里维护第二份路由事实。
 - `PageRuntimeContext` 仅为当前挂载页面提供稳定的 `pageKey/active` 上下文；它不监听浏览器生命周期，不携带业务 DTO，也不协调跨页刷新。
@@ -104,20 +103,20 @@ freshness gate。
   和业务 CAS；其它页面在下次正常进入/查询/手动刷新时读取同一事实源。
 - 大批量 import/reapply/repair 可以保留独立 durable job，但 job 不是页面 read model。
 
-关联台不适用本节：它继续使用 active-generation read model，查询先走 freshness gate，写入遵守 stale/write gate，refresh 由 durable queue 和 Workbench worker 完成。
+关联台适用本节。其 combined initial、zone groups、filter options、exception bucket 和 detail 都由 page-specific direct repository 读取；opaque cursor 只表示分页位置，不是 snapshot/version/CAS。
 
 ## 前端刷新合同
 
 - 普通写入不发送 finance domain event、window 自定义刷新事件或业务 `BroadcastChannel`。
 - 当前页面可在命令成功后用自己的 normal GET 更新；其他页面不自动读取。
 - route 进入/重进、页面查询变化、浏览器手动刷新和明确的页面重试是普通业务页面 load 入口。
-- App Health、后台任务、导入/reapply/repair 进度与 Workbench refresh-status 属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。
+- App Health、后台任务、导入/reapply/repair 进度属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。Workbench page refresh-status 已退役。
 
 ## 共享 Read Model 与后台任务
 
-- `workbench`、`workbench_relation` 通过 gateway、durable queue、worker 和 App Status 闭环，只服务各自登记消费者。
+- `workbench_relation` 通过 gateway、durable queue、worker 和 App Status 闭环，只服务登记消费者；Workbench 页面不消费它，也不登记自己的 read model。
 - Search API/index runtime 已删除；legacy no-OA 列表请求内从 canonical batch facts 推导，不读取 projection、readiness 或 queue。
-- Workbench matching/rebuild、OA sync 和 import processing 是 canonical integration/domain jobs。
+- Workbench matching、OA sync 和 import processing 是 canonical integration/domain jobs；page generation rebuild 已退役。
 - `bank_flow_rule_batches` 的未提交候选由请求内 live builder 实时推导，没有 event、worker、replay 或页面 projection；正式 submitted/withdrawn/history 继续读取持久化事实。
 - `/api/operation-barrier/status` 只保留给合同明确返回非空 target 的 maintenance/job；
   普通页面 mutation 不调用。

@@ -611,8 +611,7 @@ describe("Workbench candidate grouping layout", () => {
   function buildNoOaWorkbenchPayload() {
     return {
       month: "all",
-      read_model_status: "fresh",
-      read_model_version: "test-generation-1",
+      scope_key: "all",
       oa_status: { code: "ready", message: "OA 已同步" },
       summary: {
         oa_count: 0,
@@ -625,6 +624,14 @@ describe("Workbench candidate grouping layout", () => {
           paired: { groups: 1, oa: 0, bank: 3, invoice: 0, rows: 3 },
           unpaired: { groups: 0, oa: 0, bank: 0, invoice: 0, rows: 0 },
         },
+      },
+      statistics: {
+        oa_count: 0,
+        bank_transaction_count: 3,
+        input_invoice_count: 0,
+        output_invoice_count: 0,
+        paired_group_count: 1,
+        unpaired_object_count: 0,
       },
       invoice_inventory: {},
       paired: {
@@ -772,19 +779,6 @@ describe("Workbench candidate grouping layout", () => {
               : { oa: 0, bank: 0, invoice: 0, rows: 0 },
             has_more: false,
             groups,
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.pathname === "/api/workbench/refresh-status") {
-        return new Response(
-          JSON.stringify({
-            scope_key: payload.month,
-            read_model_status: "fresh",
-            read_model_version: "test-generation-1",
-            active_generation_id: "test-generation-1",
-            dirty_scopes: [],
-            running_scopes: [],
           }),
           { status: 200 },
         );

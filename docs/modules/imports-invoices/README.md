@@ -51,7 +51,7 @@
 
 税务平台多 sheet 工作簿若包含唯一的 `发票基础信息`，该 sheet 是每张 canonical 发票的唯一表头事实源；不得因前面的 `信息汇总表` 可以解析就提前返回。`信息汇总表` 只作为同票商品/服务行证据附着到表头行，不参与 canonical 金额、税额、价税合计或商品行字段的顶层赋值。`发票基础信息` 重名、无法识别、无有效发票或与明细强身份不一致时整文件 fail closed，不回退旧首 sheet 链；不含该 sheet 的历史单 sheet 模板继续使用共享模板识别合同。
 
-导入确认不是下游 fresh 的事实源。确认只能说明发票事实写入或确认 job 已排队；关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计和搜索必须通过 derived lifecycle、dirty scope、read model freshness 与 worker readiness 判断是否可读。
+导入确认不是所有下游页面已经完成读取的证明。确认只能说明发票事实写入或确认 job 已排队；job 完成后，关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款和成本统计分别通过下一次 canonical normal GET 读取已提交事实。共享 `workbench_relation` 与 matching 仍按自己的 durable worker 合同收敛，不得恢复 Workbench page refresh 或已退休 Search runtime。
 
 核心 fan-out：
 
@@ -60,7 +60,7 @@
 | 文件预览 | `FileImportSession`、`ImportPreviewAuditCounts` | 当前导入页重复审计和 confirm eligibility |
 | 文件确认排队 | `file_import` background job + durable `import.process.requested` | 导入页 job feedback、App Status import worker；发票文件确认必须进入 PostgreSQL durable queue，并报告 `affected_domains=["imports_invoices"]` 和 route `/imports/invoices`；RabbitMQ 仅可选 wakeup |
 | 文件确认处理 | `ImportNormalizationService.confirm_import(...)` | input/output invoice facts、source links、duplicate decisions |
-| 发票导入生命周期 | `invoice_import_confirmed` | Workbench、Workbench relation/matching、invoice lifecycle、tax offset、cost statistics、search |
+| 发票导入生命周期 | `invoice_import_confirmed` | canonical invoice/source-link versions、Workbench relation/matching；各 direct 页面下次 normal GET 读取，已退休 page/Search projection不入队 |
 | 预览过期 | API `409 preview_stale` | 当前导入页必须要求重新预览，不能继续确认旧结果 |
 
 页面统一 Audit 不读取下游 read model。它独立证明已登记 input/output file/session、batch/row、canonical invoice 与 `manual_invoice_import` source-link 的双向集合和关键字段，并仅以归属于这些 session/file 的 job/outbox 判断 queue。下游页面必须继续通过各自 Audit 证明，原始税务导出是否漏票也必须由外部对账证明。

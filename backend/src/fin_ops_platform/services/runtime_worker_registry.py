@@ -54,18 +54,6 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         dependencies=("postgres", "workbench_matching_dirty_scopes"),
     ),
     RuntimeWorkerRegistration(
-        instance_name="workbench",
-        worker_kind="workbench-read-model",
-        handler_flags=("--enable-workbench-read-model-refresh",),
-        event_types=("workbench.read_model.refresh",),
-        required=True,
-        rabbitmq_eligible=True,
-        env_example="fin-ops.worker.workbench.env.example",
-        rabbitmq_env_example="fin-ops.worker.workbench-rabbitmq.env.example",
-        read_model_key="workbench",
-        read_model_scope_type="workbench",
-    ),
-    RuntimeWorkerRegistration(
         instance_name="workbench-relation",
         worker_kind="workbench-relation-read-model",
         handler_flags=("--enable-workbench-relation-read-model-refresh",),

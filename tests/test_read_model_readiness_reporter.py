@@ -160,12 +160,12 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         expected_assignments = (
-            'handlers["workbench.read_model.refresh"] = _read_model_handler',
             "handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler",
         )
         for assignment in expected_assignments:
             self.assertIn(assignment, worker_source)
         self.assertEqual(worker_source.count(" = _read_model_handler("), len(expected_assignments))
+        self.assertNotIn('handlers["workbench.read_model.refresh"]', worker_source)
         self.assertNotIn("SEARCH_REFRESH_EVENT_TYPE", worker_source)
         self.assertNotIn("NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE", worker_source)
         for retired_event in (

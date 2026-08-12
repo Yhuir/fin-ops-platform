@@ -40,7 +40,7 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 - Worker 从 durable queue claim event，重建 SQL projection 后 complete dirty scope。
 - Redis 只缓存 freshness gate 后的 payload。
 - RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
-- 关联台继续读取 `read_model.workbench_*` active generations，并保留 reader、writer、worker 与 retention timer；其它目标页面直接读取 canonical facts，不得借用该 projection。
+- 关联台与其它 direct 页面都在 normal GET 中读取已提交 canonical facts；设置变化不得 enqueue、读取或恢复 `read_model.workbench_*` page generation。共享 `workbench_relation` 和 matching 仍按各自 owner 合同增量收敛，禁止借用历史 page projection。
 - Runtime queue 历史有受控保留策略：`job.outbox_events` 与
   `job.read_model_dirty_scopes` 只删除 `status='done'` 的完成态历史，默认保留 30 天且每个
   event/scope type 至少保留最近 512 条，dirty scope 还会按
@@ -86,8 +86,10 @@ PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
 
 普通 `delete`/`vacuum` 只能让 PostgreSQL 复用空间，不保证把空间还给文件系统。只有
 `TRUNCATE`、`VACUUM FULL`、`pg_repack` 或表重建会降低 `df` 看到的占用；其中 `VACUUM FULL` 和
-`pg_repack` 需要额外重写空间。Workbench read model 属于可重建投影，执行清空/重建必须进入维护
-窗口、停止 API/worker、使用精确白名单表名且不使用 `CASCADE`，并通过 rehydrate 验证 fresh。
+`pg_repack` 需要额外重写空间。历史 Workbench page generation 表只作为 previous immutable
+release 的短期离线回滚材料，当前 runtime 不得清空、重建或访问；确需回滚时必须进入维护窗口，
+由 release gate 使用上一版本代码执行 exact rehydrate/audit 后再开放旧 runtime。当前唯一可重建的共享
+read model 是 `workbench_relation`，其刷新必须走登记的 gateway/worker 合同。
 
 ## 部署和回滚
 

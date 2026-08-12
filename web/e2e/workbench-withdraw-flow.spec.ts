@@ -44,7 +44,9 @@ test.describe("workbench withdraw browser flow", () => {
     const previewBody = api.lastBody("POST /api/workbench/actions/withdraw-link/preview");
     expect(previewBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
+    expect(previewBody.row_types).toEqual(["oa", "bank", "invoice"]);
 
+    const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "确认撤回" }).click();
     await expect(previewDialog.getByText("正在撤回关联...")).toBeVisible();
     await expect(previewDialog).toHaveCount(0);
@@ -56,6 +58,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeWithdraw + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
@@ -103,6 +106,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(previewBody).toMatchObject({ month: "all" });
     expect(previewBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
+    expect(previewBody.row_types).toEqual(["oa", "bank", "invoice"]);
 
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     await previewDialog.getByRole("textbox", { name: "撤回说明" }).fill("浏览器撤回主链路回归");
@@ -134,10 +138,11 @@ test.describe("workbench withdraw browser flow", () => {
     });
     expect(submitBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
+    expect(submitBody.row_types).toEqual(["oa", "bank", "invoice"]);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeWithdraw);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeWithdraw + 1);
 
     await page.getByRole("link", { name: "银行明细" }).click();
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });

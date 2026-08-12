@@ -66,13 +66,13 @@
 
 - Own read model：无独立 manifest entry。
 - 页面 Audit：direct canonical，registry `read_model_keys=()` 且 relation proof 不适用；只证明 persisted singleton、非敏感 credential registration 与 reset job state。下游 read model 不属于本页 consumer。
-- 影响 read model：仅在 `workbench` 或 `workbench_relation` 明确登记的 maintenance/reset 合同中产生精确
-  scope；设置模块不广播“全部 read model”。
+- 影响 read model：仅在 `workbench_relation` 明确登记的 maintenance/reset 合同中产生精确 scope；
+  设置模块不广播“全部 read model”，关联台页面下一次 normal GET 直接读取设置与 canonical facts。
 - OA 手工导入只提交 canonical OA facts、audit 和信息性 affected scopes；管理员精确
   `refresh-attachments` 由 OA integration owner 在附件 promotion 边界补发 bounded matching scope，
   settings route 不自行构造或重复入队；OA 待付款、
-  税金抵扣、成本统计等 direct 页面在下一次 normal GET 读取最新事实。关联台按 `workbench`
-  freshness/refresh 合同收敛；`workbench_relation` 是否刷新由其 owner 的显式合同决定。
+  税金抵扣、成本统计和关联台等 direct 页面在下一次 normal GET 读取最新事实；
+  `workbench_relation` 是否刷新由其 owner 的显式合同决定。
 - Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签规则版本的受控 read port；`get_cost_statistics_tag_selection_payload()` / `update_cost_statistics_tag_selection(...)` 是 selection schema v2 收支标签规则的受控 read/write port，由成本统计 route 暴露给页面抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
 
 ## 文件范围

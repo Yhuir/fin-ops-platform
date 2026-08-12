@@ -222,11 +222,11 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
 
-    def test_stale_read_model_event_enqueues_successor_before_ack(self) -> None:
+    def test_stale_relation_read_model_event_enqueues_successor_before_ack(self) -> None:
         claimed = RuntimeQueueEvent(
             **{
-                **event("workbench.read_model.refresh").__dict__,
-                "scope_type": "workbench",
+                **event("workbench_relation.read_model.refresh").__dict__,
+                "scope_type": "workbench_relation",
                 "scope_key": "2026-07",
                 "source_version": 7,
             }
@@ -236,10 +236,10 @@ class RuntimeWorkerTests(unittest.TestCase):
             queue_repository=queue,
             config=RuntimeWorkerConfig(
                 worker_id="worker-1",
-                event_types=["workbench.read_model.refresh"],
+                event_types=["workbench_relation.read_model.refresh"],
             ),
             handlers={
-                "workbench.read_model.refresh": lambda _event: {
+                "workbench_relation.read_model.refresh": lambda _event: {
                     "skipped": True,
                     "skip_reason": "stale_source_version",
                 }
@@ -254,7 +254,7 @@ class RuntimeWorkerTests(unittest.TestCase):
             queue.enqueued_read_model_refreshes,
             [
                 {
-                    "scope_type": "workbench",
+                    "scope_type": "workbench_relation",
                     "scope_key": "2026-07",
                     "reason": "stale_source_version_successor",
                     "metadata": {"action_name": "stale_source_version"},

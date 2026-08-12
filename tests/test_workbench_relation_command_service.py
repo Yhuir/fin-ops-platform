@@ -69,6 +69,38 @@ class FakeRelationRepository:
         }
         return {"pair_relations": relations}
 
+    def load_active_workbench_pair_relations_for_typed_rows(
+        self,
+        row_ids: list[str],
+        row_types: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        if len(row_ids) != len(row_types):
+            raise ValueError("row_types must align with row_ids.")
+        self.scoped_load_calls.append(
+            {
+                "row_ids": list(row_ids or []),
+                "row_types": list(row_types or []),
+                "case_ids": list(case_ids or []),
+            }
+        )
+        requested = set(zip(row_types, row_ids, strict=True))
+        normalized_case_ids = set(case_ids or [])
+        relations: dict[str, object] = {}
+        for case_id, relation in dict(self.snapshot.get("pair_relations") or {}).items():
+            if not isinstance(relation, dict) or relation.get("status") != "active":
+                continue
+            relation_ids = list(relation.get("row_ids") or [])
+            relation_types = list(relation.get("row_types") or [])
+            if len(relation_ids) != len(relation_types):
+                raise ValueError("workbench_relation_member_arrays_misaligned")
+            if case_id in normalized_case_ids or requested.intersection(
+                zip(relation_types, relation_ids, strict=True)
+            ):
+                relations[str(case_id)] = deepcopy(relation)
+        return {"pair_relations": relations}
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, object],
@@ -130,9 +162,14 @@ class FakeRelationRepository:
         row_ids: list[str],
         *,
         row_types: list[str],
+        tenant_id: str | None = None,
     ) -> list[str]:
         self.canonical_lock_calls.append(
-            {"row_ids": list(row_ids or []), "row_types": list(row_types or [])}
+            {
+                "row_ids": list(row_ids or []),
+                "row_types": list(row_types or []),
+                "tenant_id": tenant_id,
+            }
         )
         return list(self.missing_canonical_member_keys)
 
@@ -459,7 +496,11 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(repository.load_calls, 0)
         self.assertEqual(
             repository.scoped_load_calls[0],
-            {"row_ids": ["bank-1", "oa-1"], "case_ids": ["case-new"]},
+            {
+                "row_ids": ["bank-1", "oa-1"],
+                "row_types": ["bank", "oa"],
+                "case_ids": ["case-new"],
+            },
         )
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
@@ -538,7 +579,10 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "confirmed")
         self.assertEqual(len(facade.calls), 1)
-        self.assertEqual(repository.scoped_load_calls, [{"row_ids": ["bank-1"], "case_ids": []}])
+        self.assertEqual(
+            repository.scoped_load_calls,
+            [{"row_ids": ["bank-1"], "row_types": ["bank"], "case_ids": []}],
+        )
         self.assertEqual(
             repository.save_calls[-1]["snapshot"]["pair_relation_history"],
             [result["history"]],

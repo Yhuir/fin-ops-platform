@@ -31,7 +31,13 @@
 
 成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是登记的 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费页面 read model、Redis、refresh status、queue 或 worker。
 
-关联台是唯一仍使用页面 read model 的财务页面：继续使用 `workbench` active-generation read model、freshness/status/enqueue、Redis fresh cache 和 Workbench worker。`workbench_relation` 作为唯一共享 relation distribution read model，继续服务仍登记的独立消费者。Search API/index runtime 已删除；legacy no-OA 列表改为请求内 canonical query，不再依赖 projection、freshness 或 worker。
+关联台同样使用 page-specific canonical direct-read：`WorkbenchQueryFacade` 在一个
+`REPEATABLE READ READ ONLY` snapshot 中查询 canonical facts、active formal relations
+与异常决策；页面不再拥有 active generation、freshness/status/enqueue、Redis payload
+cache 或专属 worker。`workbench_relation` 是唯一登记的共享 relation distribution read
+model，继续服务仍登记的独立消费者；`workbench-matching` 是 canonical relation producer，
+不属于 read model registry。Search API/index runtime 已删除；legacy no-OA 列表也在请求内
+直接查询 canonical facts。
 
 ## 金额展示与搜索合同
 
