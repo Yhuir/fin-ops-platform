@@ -242,8 +242,8 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
       await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
       await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-      await expect(unpairedZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-      await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
+      await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+      await expect(unpairedZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);

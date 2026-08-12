@@ -15,7 +15,7 @@
 
 ## 当前业务边界
 
-关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。
+关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。人工确认允许至少 2 个不同 canonical 成员，不以跨栏、金额相等或材料完整为创建门槛；只有既有 `amount_check.requires_note=true` 时才要求 `note`，创建后仍按页面完成合同分区。银行分类不选择人工写入链：选择中的银行成员部分或全部为 `internal_transfer` 时，`confirm-link` 仍以 `manual_confirmed` 进入标准 relation command/UoW，不得转交 no-OA batch；独立 no-OA batch 功能及其业务入口保持不变。
 
 页面不拥有自动候选、matching decision 或第三种关系状态。确定性引擎满足安全规则时直接通过正式关系命令边界创建 active relation；不满足时不写关系，事实仍保持可见的未配对单行。
 
@@ -23,7 +23,7 @@
 
 候选菜单使用紧凑的 HeroUI Popover/SearchField/Checkbox 布局并允许长标签自然换行。OA 申请事由直接显示完整文本，不再创建 hover 浮层，避免浮层测量导致表格滚动条抖动。
 
-OA 栏在已配对和未配对区域都只承担行选择与详情查看，不存在逐行“确认关联”“异常处理”或撤回按钮，也不显示操作列。确认、撤回和人工统一异常处理只走区域表头选择动作；自动识别的 OA/发票异常只走统一异常抽屉。银行流水和发票保留各自独立的行级能力合同。
+OA 栏在已配对和未配对区域都只承担行选择与详情查看，不存在逐行“确认关联”“异常处理”或撤回按钮，也不显示操作列。确认从未配对区域表头选择动作进入；已配对和未配对 active relation 的撤回都从关系级选择动作进入，并恢复上一可证明的稳定拓扑。未配对工具栏“异常处理”及其人工 drawer 触发链已删除；自动识别的 OA/发票异常仍只走右上统一异常抽屉。银行流水和发票保留各自独立的行级能力合同。
 
 关系来源（人工、历史或系统）只进入审计 provenance，不参与页面分区。历史 case id 的字符串前缀不能覆盖当前 active relation 状态。
 
@@ -63,6 +63,7 @@ canonical fact repositories
 - 日常报销按 OA 子付款项与全部显式绑定发票比较；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；子付款项有上传附件但零已解析绑定发票时生成 `OA发票附件缺失`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
 - active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 generation、异常桶、计数、主区可见性或 source freshness。
 - 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常，已忽略展示 ignored OA/发票异常。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、legacy WEX/row-ignore 抽屉入口、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
+- 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 
 ## 三栏纵向展示合同
 
@@ -83,6 +84,7 @@ canonical fact repositories
 - 无 active owner 的未配对事实永远是 singleton；未闭环 active relation 只能按其 canonical case 分组，旧 `case_id` 和候选 metadata 不能合并无 owner 事实。
 - 一个 canonical member 最多属于一个 active relation。
 - 未知 zone、group type、relation mode、重复 identity、缺失 active member 或跨 case 占用冲突均 fail fast。
+- 人工确认至少包含 2 个不同 canonical identity；金额/方向差异只触发既有备注门禁，不阻止创建。自动匹配的 exact-sum、强证据与唯一性门禁不随之放宽。
 
 ## 维护文档
 

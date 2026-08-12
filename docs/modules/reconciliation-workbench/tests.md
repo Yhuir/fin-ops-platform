@@ -1,6 +1,33 @@
 # 关联台测试与验证
 
-日期：2026-08-11
+日期：2026-08-12
+
+## 2026-08-12 关系撤回事务安全闭环（专项已验证）
+
+- Business core / service：显式 row ids 在 preview 与 submit 都必须与目标 case 当前完整 active typed member set 精确相等；子集、超集、显式空集合或 case/rows 不一致返回 `workbench_relation_exact_selection_required`，零写。case-only 仅保留给可信内部 owner 调用。
+- Transaction / repository：同一 relation UoW 内先锁 current case 与持久化 members，再按稳定顺序锁 predecessor case/members；随后重载 current/restored scope，重验目标 topology、canonical member 存在与类型、restored case 未复用和唯一 active owner。缺 canonical 返回 `workbench_relation_canonical_member_missing`，case/owner 冲突返回 `workbench_relation_restore_conflict`，整笔 rollback。
+- Version / stale preview：新关系 version=`1`；status 或 typed member set 变化单调 `+1`，cancel `+1`，restore predecessor 使用 `max(数据库当前 predecessor version, history snapshot version)+1`。withdraw preview fingerprint 覆盖 `operation_type`、current/after relation 的 case/version/status/排序 typed members，以及 confirm history 的 operation id/type/created at；任一拓扑或历史漂移都拒绝旧 preview。
+- API / idempotency / audit：exact selection 映射 HTTP 400；canonical/restore drift 映射 HTTP 409。相同 idempotency key 重放不产生第二次 relation save；withdraw history `created_by` 取认证 actor。兼容 `POST /api/workbench/exception/apply` 忽略 payload `actor` / `confirmed_by`，只使用认证 session actor；自动异常/行级异常后端能力继续保留。
+- Regression：`internal_transfer` 人工确认继续统一走标准 relation UoW，独立 no-OA API 保留；没有新增旧分流、fallback、read model、worker、queue 或 schema。
+- 当前证据：本轮 direct/UoW/repository 专项共 `106 passed`，后端 lint 与 diff-check 已通过。该数字只证明本轮专项，不声明全后端、Browser、生产部署或真实 PostgreSQL 并发门禁已经在本轮重跑。
+
+## 2026-08-12 人工 confirm-link 内部转账旧分流删除（已验证）
+
+- Business core / service：分别覆盖全 `internal_transfer` 银行成员、`internal_transfer` 与其它银行分类混合、普通银行分类三种人工选择；三者都必须以 `manual_confirmed` 进入同一 `WorkbenchRelationCommandService` + relation UoW，并保留 canonical revalidation、active overlap、幂等、history 与 rollback，不得调用 no-OA batch callback。
+- API contract：继续复用既有 preview/confirm request 与 response shape；mixed 选择不得再返回 `no_oa_bank_batch_selection_internal_transfer_conflict`，全 `internal_transfer` 选择不得返回 no-OA batch response。既有 `amount_check.requires_note=true` 时的 `note` 门禁、权限、版本与错误 envelope 不变。
+- Boundary / regression：静态边界 guard 保护 `submit_internal_transfer_rows_from_workbench`、`_bank_only_internal_transfer_confirm_status` 和 `_confirm_internal_transfer_rows_via_no_oa_batch` 不再进入 facade 组装或人工确认调用图；独立 no-OA batch API/service、其关系 mode 和既有批次测试必须继续通过。
+- E2E 非适用：该删除不改变前端选择、HTTP shape、页面分区或用户操作序列，不新增仅用于观察内部 dispatch 的 Browser case；内部路由由 474 项关系专项矩阵与 4259 项全后端回归中的 service/API、真实 UoW 幂等及边界 guard 证明。
+
+## 2026-08-12 人工关系准入、未配对撤回与旧异常入口删除
+
+- Business core：人工 confirm 对 normalize 后 requested selection 断言至少 2 个不同 canonical IDs，逐个精确解析为 `oa|bank|invoice`；覆盖 OA-only、bank-only、invoice-only 与跨栏组合，1 个成员、重复 ID、missing/unknown row、active overlap/version drift、非法 summary 零写。金额不一致或方向不确定只触发既有 `amount_check.requires_note` + `note`，材料不完整不阻止 active relation 创建，分组仍可保持同-case `unpaired`。
+- Service layer：confirm/withdraw 继续走 `WorkbenchRelationCommandService` + UoW，保护 canonical revalidation、idempotency、history/audit、partial-failure rollback 与 immutable OA attachment/ETC 既有约束。未配对 active case 撤回必须要求 exact full active member set，并从最近 confirm history 的 `before_relations` 恢复上一稳定拓扑；在同一事务锁内重验 canonical member、restored case 与唯一 owner，历史不可证明或 owner 冲突时 fail closed，不做部分恢复。
+- API contract：继续复用 `confirm-link/preview -> confirm-link` 与 `withdraw-link/preview -> withdraw-link`；response shape、error envelope、权限和 `amount_check.requires_note`/`note` 字段不变。preview/submit 覆盖同栏人工关系、`requires_note=true` 时缺 note 拒绝/带 note 成功、材料不完整成功后仍 unpaired、两区 active case 可撤回、singleton 撤回拒绝、exact selection 400 和 topology/canonical/version drift 409。
+- Read model/cache/worker：覆盖 relation mutation 后既有 exact scope 变 stale、当前页 access-time refresh、active generation 原子发布和 unpaired relation topology 恢复；明确不新增 scope、queue、worker、cache owner 或 schema version，旧 fresh payload 不能掩盖新 canonical history。
+- Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护选择任意至少 2 个不同成员后确认可用、`requires_note=true` 时差额说明必填、未完整关系提交后仍在未配对区、unpaired active relation 显示关系级撤回、singleton 不显示撤回，以及未配对工具栏“异常处理”完全删除。右上 `异常 n | 已忽略 m`、`WorkbenchExceptionDrawer`、自动异常 chip 和 ignore/restore 回归继续通过。
+- End-to-end：`workbench-withdraw-flow.spec.ts` 承担 paired/unpaired active relation 撤回与上一稳定拓扑恢复；relation/network flows 承担同栏/跨栏 confirm、`requires_note` 路径、fresh 收敛与幂等；permissions/stale/exception flows 保护权限、non-fresh gate 和删除人工入口后系统异常链仍可用。覆盖映射以 `e2e-coverage.md` 的实际落地状态为准。
+- Regression：自动 matching exact-sum/证据/唯一性/资源保护与撤回 fingerprint 不放宽；paired/unpaired 完整性、520/13 张发票、OA attachment、ETC、no-OA、batch accounting、turnover 和下游 linked/unlinked 保持原合同。
+- 非适用：无 DB schema/migration/backfill、API response shape、read-model scope、worker topology 或新依赖变化，因此不新增迁移兼容、worker registry/manifest 或部署拓扑测试；用现有边界 guard 证明未扩散即可。
 
 ## 2026-08-11 自动匹配旧快照并发回归
 
@@ -130,13 +157,19 @@
 
 | 类别 | 适用 | 主要覆盖 |
 | --- | --- | --- |
-| 1. Business core | 是 | 确定性证据、通用 365 日与员工报销 30 日边界、N:M:K exact-sum、未完整 active relation 唯一补全、歧义/金额-only/红冲 fail-closed、撤回阻断指纹、paired/unpaired 精确分区 |
-| 2. Service layer | 是 | repository 输入、orchestrator 单 UoW、幂等、rollback、history、普通 relation 写零 dirty/outbox、旧状态清理 |
-| 3. API contract | 是 | paired/unpaired shape、分页/search/detail、完整 filter-options 候选/分页/target-self-filter 排除、confirm/withdraw、版本冲突、权限、unknown state fail-fast |
+| 1. Business core | 是 | 人工至少 2 个不同 canonical members（同栏/跨栏）、`requires_note` 门禁、上一稳定拓扑撤回恢复；确定性证据、365/30 日边界、N:M:K exact-sum、歧义/金额-only/红冲 fail-closed、撤回阻断指纹、paired/unpaired 精确分区 |
+| 2. Service layer | 是 | repository 输入、relation/matching 单 UoW、幂等、rollback、history/`before_relations` restore、普通 relation 写零 dirty/outbox、旧状态清理 |
+| 3. API contract | 是 | paired/unpaired shape、分页/search/detail、filter-options、confirm/withdraw shape 不变、差额 note、版本冲突、权限、unknown state fail-fast |
 | 4. Read model/cache/worker | 是 | active generation 原子发布、freshness、all-scope 组合、exact generation stats、stats 缺失/发布竞态 fail-closed、bulk refresh、旧 generation 不冒充 fresh |
-| 5. Frontend interaction | 是 | 两区渲染、singleton 未配对、选择/preview/撤回、HeroUI 候选菜单的惰性读取/搜索/分页/清空、loading/empty/error/stale、权限与分页 |
-| 6. End-to-end | 是 | canonical import/OA -> matching -> formal relation；当前页访问触发 Workbench fresh 后 paired；withdraw -> 当前页访问后 singleton unpaired；跨页访问时独立收敛与非消费者隔离 |
+| 5. Frontend interaction | 是 | 两区渲染、singleton/active relation 未配对、任意至少 2 个成员选择/preview、两区关系级撤回、旧人工异常入口缺席且系统异常抽屉保留、loading/empty/error/stale、权限与分页 |
+| 6. End-to-end | 是 | canonical import/OA -> matching；人工同栏/跨栏 confirm -> paired/unpaired；两区 active relation withdraw -> previous stable topology/singletons；跨页独立收敛与非消费者隔离 |
 | 7. Regression | 是 | 520 样例、13 张发票、ETC/OA 附件、no-OA、batch accounting、turnover、cost/search/invoice lifecycle |
+
+本轮 generation retention 修复覆盖 Category 1/2/4/7：`tests/test_workbench_sql_runtime.py`
+验证每轮候选上限 500、只选择 `superseded|failed`、按 scope 分组、`delete_batch_size=1..100`、每批独立事务、
+事务内锁行复核 default tenant/scope/终态、后批失败不回滚已完成批次、dry-run/空候选零事务，以及 CLI 专用
+60 秒 statement timeout；`tests/test_deploy_runtime_examples.py` 验证版本化 helper 的环境变量默认值与参数透传。
+Category 3/5/6 不适用：本轮不改变 HTTP、前端或业务流程，也不连接真实数据库或执行生产清理。
 
 ## 核心固定测试
 
@@ -160,6 +193,8 @@
 - 520 元历史 case 前缀不影响 active relation 进入 paired。
 - 13 张合计 1709.49 元发票保持 13 个 unpaired singleton。
 - `paired ∩ unpaired = ∅`，`paired ∪ unpaired = canonical identities`。
+- 人工 confirm 只以 normalize 后至少 2 个不同 canonical rows 为最低成员门槛；同类型集合合法。每个 exact requested ID 必须解析为支持类型，1 个成员、duplicate/missing/unknown row 与 active owner/version 冲突均零写。只有 `amount_check.requires_note=true` 时才必须填写既有 `note`；金额相等和完整性不得重新成为人工创建门槛。
+- paired/unpaired active relation 都可按关系级撤回；最近 confirm history 的 `before_relations` 是上一稳定拓扑恢复源，未配对 singleton、row `case_id` 和 display metadata 不能触发或决定恢复。
 - 装饰字段、输入顺序和旧 candidate/decision metadata 不改变 membership/group id。
 - OA 附件来源 alias 与 canonical OA row id 不同的情况下，正式关系 alignment 仍指向 canonical OA；复合行只按显式 source item + 唯一 row index 映射 canonical expense item id，且不修改 canonical 发票来源字段。
 - 同金额竞争、exact single 与 exact sum 竞争、duplicate reference、currency/direction mismatch、fuzzy/date-only evidence 均不写关系。
@@ -212,6 +247,26 @@ cd web && npm test -- --run \
 
 bash scripts/verify.sh lint
 bash scripts/verify.sh docs
+```
+
+本次行为变更的最小定向验证还包括：
+
+```bash
+python3 -m pytest -q \
+  tests/test_workbench_v2_api.py \
+  tests/test_workbench_pair_relation_service.py \
+  tests/test_workbench_relation_command_service.py \
+  tests/test_workbench_uow_contract.py \
+  tests/test_workbench_idempotency_contract.py \
+  tests/test_workbench_relation_grouping.py \
+  tests/test_platform_runtime_boundary_guards.py
+
+cd web && npm test -- --run \
+  src/test/WorkbenchSelection.test.tsx \
+  src/test/WorkbenchZone.test.tsx \
+  src/test/WorkbenchApi.test.ts \
+  src/test/WorkbenchWriteGate.test.ts \
+  src/test/WorkbenchExceptionDrawer.test.tsx
 ```
 
 发布后：

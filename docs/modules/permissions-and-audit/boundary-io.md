@@ -34,6 +34,7 @@
 | Permission check | `server.py` + `route_access_policy.py` + module-owned guard | 受保护 unsafe method 默认要求 mutation；只有登记的只读 POST 可豁免；module-owned OA pending guard 保持独立且必须等价 fail closed |
 | ACL audit event | Settings repository critical section | actor 来自后端 admin session，request id 来自受信 HTTP adapter；与 canonical version 同事务，no-op/失败无 success audit |
 | Audit event | business service/route | 记录对象、动作、服务端 session 的 actor id/name/account 快照、结果，不信任 body actor |
+| Workbench exception compatibility command | `POST /api/workbench/exception/apply` | 兼容 API 继续保留自动异常/行级异常能力，但 route 的 actor 只来自已认证 session；body `actor` / `confirmed_by` 不能覆盖业务或审计身份。删除未配对工具栏人工“异常处理”不等于删除该后端兼容能力。 |
 | Data reset audit | Settings request repository / settings-maintenance worker | queued 与 receipt 消费/job/outbox 同事务；started/success/partial/failed 由 worker durable audit 记录。actor 来自 admin session，reason 必填，记录 request/job/action/fingerprint/receipt，不记录 OA 密码。 |
 | Page Audit request | admin session + registered frontend page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；18 页只允许有限 executor；未实现 proof fail closed，不动态选择函数。`operation-history` 只检查覆盖点与 append-only 数据库保护，不触发业务写。 |
 | App Health system Audit request | admin session + `page=app-health-operations` | 只读；由 system owner 在一个 caller-owned PostgreSQL snapshot 内编排其余 17 页 proof。权限边界只授权读取，不授予 refresh、repair、写 read model 或生产修复能力 |

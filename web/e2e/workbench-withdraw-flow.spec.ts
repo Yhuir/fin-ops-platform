@@ -11,6 +11,54 @@ const workbenchRowIds = [
 ];
 
 test.describe("workbench withdraw browser flow", () => {
+  test("withdraws one exact active relation directly from the unpaired zone", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchInitialIncompleteRelation: true,
+      workbenchWithdrawPreviewDelayMs: 250,
+      workbenchWithdrawSubmitDelayMs: 250,
+    });
+
+    await page.goto("/");
+    const unpairedZone = page.getByTestId("zone-unpaired");
+    const relationGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const confirmButton = unpairedZone.getByRole("button", { name: "确认关联" });
+    const withdrawButton = unpairedZone.getByRole("button", { name: "撤回关联" });
+
+    await expect(relationGroup).toBeVisible();
+    await expect(confirmButton).toBeDisabled();
+    await expect(withdrawButton).toBeDisabled();
+    await expect(unpairedZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
+
+    await relationGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await expect(unpairedZone.getByText("已选 1")).toBeVisible();
+    await expect(unpairedZone.getByText("带入 2")).toBeVisible();
+    await expect(confirmButton).toBeDisabled();
+    await expect(withdrawButton).toBeEnabled();
+
+    await withdrawButton.click();
+    await expect(unpairedZone.getByRole("button", { name: "正在准备撤回预览" })).toBeDisabled();
+    const previewDialog = page.getByRole("dialog", { name: "撤回关联" });
+    await expect(previewDialog).toBeVisible();
+
+    const previewBody = api.lastBody("POST /api/workbench/actions/withdraw-link/preview");
+    expect(previewBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
+    expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
+
+    await previewDialog.getByRole("button", { name: "确认撤回" }).click();
+    await expect(previewDialog.getByText("正在撤回关联...")).toBeVisible();
+    await expect(previewDialog).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();
+
+    expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
+    expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
+    expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("withdraws a paired relation after preview lock and current-page refetch", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       costStatisticsRelationFanout: true,

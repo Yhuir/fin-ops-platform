@@ -39,6 +39,7 @@
 | Runtime worker manifest | `runtime_worker_manifest.py` | 必须匹配 registry |
 | Verify command | `scripts/verify.sh` | `dependency-audit` 使用独立锁定的审计工具检查生产 requirements；`all` 必须先通过该门禁，再按 backend/web/docs/ops 分类执行。`check-release` 在候选 release 的隔离临时 venv 中执行同一审计，发现已知漏洞即停止发布，不把审计工具安装进 runtime venv。 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
+| Workbench generation retention | `finops-prune-workbench-generations.timer` + versioned helper env | helper 从 root-owned common env 读取 `FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE`（默认 1）与 `FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS`（默认 60 秒）并传递 CLI 参数；一次运行最多 500 个 `superseded|failed` 候选，删除 SQL 只走 read-model repository 的 scope-isolated 小事务与终态 guard，shell 仅执行只读 PostgreSQL、磁盘和 health 诊断；末尾 ready health 失败时 helper 必须非零退出，禁止 systemd/监控误报成功。release 不自动合并已有 common env |
 | HTTP runtime | systemd + Gunicorn + Nginx | systemd 只启动 Gunicorn WSGI；当前单 worker/有界 gthread 保持进程内 command state 一致。Gunicorn 约束 threads/backlog/recycling/graceful timeout，Nginx 约束 client body/upstream timeout；pidfile 只写入 systemd `RuntimeDirectory`。 |
 | Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。scenario 只接受固定 root-owned `0600` 标准文件，或 `finops-deploy` 持有且不可 group/world write 的 `/tmp/finops-write-e2e-*.json`；可选 preview sample count 只接受 `1..20`，默认 1，且只重复只读 preview。mutation response 显式 `outbox_event_ids: []` 是普通写零 fan-out receipt，runner 不得把它误当 receipt 缺失而强制查询 disabled-by-default durable idempotency；字段缺失时才允许走 durable receipt 查询。每个 checkpoint 必须清除上一 checkpoint 的 receipt。同一受影响页面可声明最多三个明确 scope probe，用于逐一模拟用户访问该页的 active/all 等正式 scope；`bank_oa_invoice` 的 Cost probes 必须至少包含一个 `project_scope=active` 的 Workbench-dependent semantic probe，可追加 `project_scope=all` 以收敛 System Audit，但二者都不得使用 time/bank_tag 冒充 relation proof。不得以多 scope probe 投递 sibling scope 或放宽业务 fan-out。isolation 页面仍必须恰好一个 probe。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate。consumer `target_ms` 同时约束单次 fresh HTTP 和该 consumer 首次访问到 fresh/业务可见的总耗时；`operation_commit_to_visible_ms` 仅保留为观察值，不得把访问前的 zero-fan-out 审计时间算入访问 SLO。任一强制门超限都必须 fail closed |
 | Bank-flow reversible shape | operator | `bank_flow_rule_batch` 只接受 `test_owned` 流水，固定执行 submit -> withdraw -> resubmit 并配置 withdraw recovery；四个 checkpoint 必须复用同一组 bounded row ids。该业务 command 使用 batch/version 生成的内部幂等键，runner 禁止在 API body 塞入不生效的外部 idempotency key；无 response receipt 时仅用本 checkpoint 时间窗/profile 与精确 consumer identity 证据，响应歧义必须 fail closed |
@@ -77,7 +78,7 @@
 | --- | --- |
 | Scripts | `scripts/deploy-oa.sh`、`scripts/deploy_oa.py`、`scripts/verify.sh` |
 | CI | `.github/workflows/nightly-ci.yml` |
-| Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh` |
+| Deploy control | `deploy/oa/bin/finops-deploy-control.sh`、`finops-ensure-runtime-workers.sh`、`finops-prune-workbench-generations.sh` |
 | Examples | `deploy/oa/nginx.fin-ops.conf.example`、`deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example` |
 | Worker manifest | `backend/src/fin_ops_platform/tools/runtime_worker_manifest.py`、`runtime_worker_registry.py` |
 | ACL evidence | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |

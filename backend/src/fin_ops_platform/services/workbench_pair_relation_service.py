@@ -251,6 +251,12 @@ class WorkbenchPairRelationService:
                     else timestamp
                 ),
                 "updated_at": timestamp,
+                "version": self._next_topology_version(
+                    existing_relation,
+                    status=ACTIVE_PAIR_RELATION_STATUS,
+                    row_ids=normalized_row_ids,
+                    row_types=normalized_row_types,
+                ),
             },
             fallback_case_id=resolved_case_id,
         )
@@ -492,6 +498,17 @@ class WorkbenchPairRelationService:
         active_relation = self._active_relation_for_any_row_id(row_ids)
         if not isinstance(active_relation, dict):
             raise KeyError("workbench_pair_relation_not_found")
+        return self.preview_withdraw_for_active_relation(
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        )
+
+    def preview_withdraw_for_active_relation(
+        self,
+        active_relation: dict[str, Any],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         confirm_history = self._latest_confirm_history_for_relation(active_relation)
         after_relations = (
             self._restorable_relation_snapshots(
@@ -525,6 +542,29 @@ class WorkbenchPairRelationService:
         row_id_aliases: dict[str, str] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         preview = self.preview_withdraw_for_row_ids(row_ids, row_id_aliases=row_id_aliases)
+        return self.withdraw_latest_for_active_relation(
+            preview["active_relation"],
+            created_by=created_by,
+            note=note,
+            created_at=created_at,
+            fallback_after_relations=fallback_after_relations,
+            row_id_aliases=row_id_aliases,
+        )
+
+    def withdraw_latest_for_active_relation(
+        self,
+        active_relation: dict[str, Any],
+        *,
+        created_by: str,
+        note: str | None = None,
+        created_at: str | None = None,
+        fallback_after_relations: list[dict[str, Any]] | None = None,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        preview = self.preview_withdraw_for_active_relation(
+            active_relation,
+            row_id_aliases=row_id_aliases,
+        )
         active_relation = preview["active_relation"]
         if self.is_immutable_oa_attachment_binding_relation(
             active_relation,
@@ -543,17 +583,28 @@ class WorkbenchPairRelationService:
             active_relation=active_relation,
             row_id_aliases=row_id_aliases,
         )
+        self._assert_restored_relation_ownership_available(
+            active_relation=active_relation,
+            restored_relations=restored_relations,
+            row_id_aliases=row_id_aliases,
+        )
         timestamp = created_at or self._timestamp()
         self.cancel_relation(str(active_relation.get("case_id", "")), cancelled_at=timestamp)
         normalized_restored_relations: list[dict[str, Any]] = []
         for relation in restored_relations:
             if not isinstance(relation, dict):
                 continue
+            existing_relation = self._pair_relations.get(str(relation.get("case_id") or "").strip())
             restored = self._normalize_relation(
                 {
                     **deepcopy(relation),
                     "status": ACTIVE_PAIR_RELATION_STATUS,
                     "updated_at": timestamp,
+                    "version": max(
+                        self._relation_version(existing_relation),
+                        self._relation_version(relation),
+                    )
+                    + 1,
                 },
                 fallback_case_id=str(relation.get("case_id", "")),
             )
@@ -576,6 +627,69 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
         )
         return deepcopy(normalized_restored_relations), history
+
+    def assert_restored_relations_available(
+        self,
+        *,
+        active_relation: dict[str, Any],
+        restored_relations: list[dict[str, Any]],
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> None:
+        self._assert_restored_relation_ownership_available(
+            active_relation=active_relation,
+            restored_relations=restored_relations,
+            row_id_aliases=row_id_aliases,
+        )
+
+    def _assert_restored_relation_ownership_available(
+        self,
+        *,
+        active_relation: dict[str, Any],
+        restored_relations: list[dict[str, Any]],
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> None:
+        active_case_id = str(active_relation.get("case_id") or "").strip()
+        restored_case_ids: set[str] = set()
+        restored_row_owners: dict[str, str] = {}
+        for relation in list(restored_relations or []):
+            if not isinstance(relation, dict):
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id or case_id == active_case_id or case_id in restored_case_ids:
+                raise ValueError("workbench_relation_restore_case_reused")
+            restored_case_ids.add(case_id)
+            existing = self._pair_relations.get(case_id)
+            if isinstance(existing, dict) and existing.get("status") == ACTIVE_PAIR_RELATION_STATUS:
+                raise ValueError("workbench_relation_restore_case_reused")
+            if isinstance(existing, dict) and self._relation_member_entries(
+                existing,
+                row_id_aliases=row_id_aliases,
+            ) != self._relation_member_entries(
+                relation,
+                row_id_aliases=row_id_aliases,
+            ):
+                raise ValueError("workbench_relation_restore_case_reused")
+            for row_id in self._relation_row_id_set(
+                relation,
+                row_id_aliases=row_id_aliases,
+            ):
+                previous_owner = restored_row_owners.get(row_id)
+                if previous_owner and previous_owner != case_id:
+                    raise ValueError("workbench_relation_restore_owner_conflict")
+                restored_row_owners[row_id] = case_id
+
+        for relation in self._pair_relations.values():
+            if relation.get("status") != ACTIVE_PAIR_RELATION_STATUS:
+                continue
+            owner_case_id = str(relation.get("case_id") or "").strip()
+            if owner_case_id == active_case_id:
+                continue
+            owned_row_ids = self._relation_row_id_set(
+                relation,
+                row_id_aliases=row_id_aliases,
+            )
+            if owned_row_ids.intersection(restored_row_owners):
+                raise ValueError("workbench_relation_restore_owner_conflict")
 
     def cancel_active_relations_for_row_ids(
         self,
@@ -689,6 +803,12 @@ class WorkbenchPairRelationService:
                 **deepcopy(relation),
                 "status": CANCELLED_PAIR_RELATION_STATUS,
                 "updated_at": cancelled_at or self._timestamp(),
+                "version": self._next_topology_version(
+                    relation,
+                    status=CANCELLED_PAIR_RELATION_STATUS,
+                    row_ids=list(relation.get("row_ids") or []),
+                    row_types=list(relation.get("row_types") or []),
+                ),
             },
             fallback_case_id=resolved_case_id,
         )
@@ -752,6 +872,7 @@ class WorkbenchPairRelationService:
         )
         normalized["row_ids"] = normalized_row_ids
         normalized["row_types"] = normalized_row_types
+        normalized["version"] = cls._relation_version(relation)
         normalized["status"] = str(relation.get("status") or ACTIVE_PAIR_RELATION_STATUS)
         normalized["relation_mode"] = str(relation.get("relation_mode") or "manual_confirmed")
         normalized["month_scope"] = str(relation.get("month_scope") or "all")
@@ -776,6 +897,49 @@ class WorkbenchPairRelationService:
         normalized["created_at"] = str(relation.get("created_at") or cls._timestamp())
         normalized["updated_at"] = str(relation.get("updated_at") or normalized["created_at"])
         return normalized
+
+    @classmethod
+    def _next_topology_version(
+        cls,
+        existing_relation: dict[str, Any] | None,
+        *,
+        status: str,
+        row_ids: list[Any],
+        row_types: list[Any],
+    ) -> int:
+        if not isinstance(existing_relation, dict):
+            return 1
+        existing_entries = set(
+            zip(
+                *cls._normalize_relation_entries(
+                    list(existing_relation.get("row_ids") or []),
+                    list(existing_relation.get("row_types") or []),
+                ),
+                strict=True,
+            )
+        )
+        requested_entries = set(
+            zip(
+                *cls._normalize_relation_entries(row_ids, row_types),
+                strict=True,
+            )
+        )
+        topology_changed = (
+            str(existing_relation.get("status") or ACTIVE_PAIR_RELATION_STATUS) != str(status)
+            or existing_entries != requested_entries
+        )
+        return cls._relation_version(existing_relation) + (1 if topology_changed else 0)
+
+    @staticmethod
+    def _relation_version(relation: dict[str, Any] | None) -> int:
+        if not isinstance(relation, dict):
+            return 0
+        version = relation.get("version")
+        if type(version) is int and version > 0:
+            return version
+        if isinstance(version, str) and version.strip().isdigit() and int(version.strip()) > 0:
+            return int(version.strip())
+        return 1
 
     @classmethod
     def _normalize_relation_entries(cls, row_ids: list[Any], row_types: list[Any]) -> tuple[list[str], list[str]]:
@@ -982,6 +1146,25 @@ class WorkbenchPairRelationService:
             cls._canonical_relation_row_id(row_id, row_id_aliases=row_id_aliases)
             for row_id in list(relation.get("row_ids") or [])
             if str(row_id).strip()
+        }
+
+    @classmethod
+    def _relation_member_entries(
+        cls,
+        relation: dict[str, Any],
+        *,
+        row_id_aliases: dict[str, str] | None = None,
+    ) -> set[tuple[str, str]]:
+        row_ids, row_types = cls._normalize_relation_entries(
+            list(relation.get("row_ids") or []),
+            list(relation.get("row_types") or []),
+        )
+        return {
+            (
+                cls._canonical_relation_row_id(row_id, row_id_aliases=row_id_aliases),
+                row_types[index],
+            )
+            for index, row_id in enumerate(row_ids)
         }
 
     @staticmethod

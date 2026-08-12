@@ -909,7 +909,7 @@ describe("Workbench columns and inline actions", () => {
     const unpairedZone = screen.getByTestId("zone-unpaired");
 
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeInTheDocument();
-    expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeInTheDocument();
     expect(within(unpairedZone).getByRole("button", { name: "清空选择" })).toBeInTheDocument();
     expect(within(unpairedGroup).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
     expect(within(unpairedGroup).queryByRole("button", { name: "标记异常" })).not.toBeInTheDocument();

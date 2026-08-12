@@ -135,6 +135,7 @@ type ApiMockOptions = {
   workbenchCashSpecialActions?: boolean;
   workbenchInitialExceptionApplied?: boolean;
   workbenchAmountMismatchScenario?: boolean;
+  workbenchInitialIncompleteRelation?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
   workbenchInitialRowIgnored?: boolean;
   workbenchWithdrawPreviewDelayMs?: number;
@@ -763,6 +764,18 @@ function buildPairedWorkbenchGroup(includeCashSpecialActions = false) {
       oa_amount: "58000.00",
       amount_delta: "0.00",
       requires_note: false,
+    },
+  };
+}
+
+function buildIncompleteUnpairedRelationGroup(includeCashSpecialActions = false) {
+  return {
+    ...buildPairedWorkbenchGroup(includeCashSpecialActions),
+    reason: "browser_e2e_active_formal_relation_incomplete",
+    completion: {
+      is_complete: false,
+      missing_row_types: [],
+      blocking_reasons: ["browser_e2e_incomplete_relation"],
     },
   };
 }
@@ -1733,6 +1746,51 @@ function workbenchInitialPayload(
     read_model_version: readModelVersion,
     active_generation_id: readModelVersion,
     generated_at: "2026-06-17T01:00:00Z",
+  };
+}
+
+function withIncompleteUnpairedRelation(payload: ReturnType<typeof workbenchInitialPayload>) {
+  const relationGroups = payload.paired.groups.map((group) => ({
+    ...group,
+    ...buildIncompleteUnpairedRelationGroup(),
+  }));
+  return {
+    ...payload,
+    summary: {
+      ...payload.summary,
+      paired_count: 0,
+      unpaired_count: relationGroups.length,
+    },
+    paired: {
+      ...payload.paired,
+      total: 0,
+      row_counts: countWorkbenchRows([]),
+      has_more: false,
+      groups: [],
+    },
+    unpaired: {
+      ...payload.unpaired,
+      total: relationGroups.length,
+      row_counts: countWorkbenchRows(relationGroups),
+      has_more: false,
+      groups: relationGroups,
+    },
+  };
+}
+
+function incompleteRelationGroupsPayload(
+  zone: WorkbenchZone,
+  pageStatus: WorkbenchPageMockStatus,
+  page: number,
+  pageSize: number,
+) {
+  const relationGroups = zone === "unpaired" ? [buildIncompleteUnpairedRelationGroup()] : [];
+  return {
+    ...workbenchGroupsPayload(zone, true, false, false, pageStatus, false, false, false, page, pageSize),
+    total: relationGroups.length,
+    row_counts: countWorkbenchRows(relationGroups),
+    has_more: false,
+    groups: relationGroups,
   };
 }
 
@@ -8193,7 +8251,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
   const calls: string[] = [];
   const requestBodies = new Map<string, Record<string, unknown>[]>();
-  let relationConfirmed = options.workbenchInitialRelationConfirmed === true;
+  let relationConfirmed = options.workbenchInitialRelationConfirmed === true
+    || options.workbenchInitialIncompleteRelation === true;
   let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchAmountMismatchIgnored = false;
@@ -9491,7 +9550,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           generated_at: "2026-06-17T01:00:00Z",
         });
       }
-      return json(route, workbenchInitialPayload(
+      const payload = workbenchInitialPayload(
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
@@ -9505,7 +9564,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         },
         options.workbenchAmountMismatchScenario === true,
         workbenchAmountMismatchIgnored,
-      ));
+      );
+      return json(route, options.workbenchInitialIncompleteRelation && relationConfirmed
+        ? withIncompleteUnpairedRelation(payload)
+        : payload);
     }
 
     if (path === "/imports/files/preview") {
@@ -9748,6 +9810,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           has_more: false,
           groups,
         });
+      }
+      if (options.workbenchInitialIncompleteRelation && relationConfirmed) {
+        return json(route, incompleteRelationGroupsPayload(
+          zone,
+          workbenchPageStatus,
+          Number.isFinite(requestedPage) ? requestedPage : 1,
+          Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+        ));
       }
       return json(route, workbenchGroupsPayload(
         zone,

@@ -62,7 +62,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `标记无需开票` | pending income status |
 | `标记现金收入` | pending income status |
 | `标记异常` | workbench/ETC exception |
-| `异常处理` | workbench exception |
+| `异常处理` | Workbench 统一异常抽屉标题及其它仍登记的异常能力；不代表未配对工具栏人工动作 |
 | `取消异常处理` | workbench exception recovery |
 | `提交异常` | workbench exception submit |
 | `继续报异常` | workbench exception continue |
@@ -128,14 +128,16 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `turnoverLedger/api.ts` | `turnover-ledger` | 外部往来标签、闭环、撤回和 extra 写入口。 |
 | `workbench/api.ts` | `reconciliation-workbench`, `settings` | 关联台 command、settings 保存和访问控制写入口。 |
 
+后端兼容 `POST /api/workbench/exception/apply` 仍属于 `reconciliation-workbench` mutation 边界，用于既有自动异常/行级异常流程，不代表恢复已删除的未配对工具栏人工“异常处理”入口。其 actor 只来自服务端认证 session，request body 的 `actor` / `confirmed_by` 不属于身份或审计事实源。
+
 ## Role matrix 动态 opener registry
 
 `web/e2e/permissions-role-matrix.spec.ts` 中的 role matrix opener registry 维护已安全打开并复扫 DOM 写控件候选的动态区域；不同初始数据态可以拆成独立 opener 数组和独立测试。`tests/test_permissions_write_entry_inventory.py` 会双向校验 opener id：Playwright 里的 opener 必须在本节登记，本节登记的 opener 也必须在 Playwright 实现，防止权限文档声明了不存在的 Browser 覆盖。
 
 | Opener ID | Module | 已打开区域 | 当前证明 |
 | --- | --- | --- | --- |
-| `reconciliation-workbench:unpaired-actions` | `reconciliation-workbench` | 未配对行选择后的确认/异常写入口和列顺序拖拽设置保存入口 | read-export 下列拖拽 handle 全部 disabled，尝试拖拽不会进入 column-layout dragging 或触发 `POST /api/workbench/settings`；选择未配对行后确认关联、异常处理禁用，行级忽略/标记异常/确认关联入口隐藏，且复扫写控件。 |
-| `reconciliation-workbench:paired-withdraw-actions` | `reconciliation-workbench` | 已配对候选选择后的撤回关联写入口 | read-export 下选择已配对三栏候选后撤回关联禁用，更多/取消关联/异常处理入口隐藏，withdraw durable mutation 零调用，且复扫候选。 |
+| `reconciliation-workbench:unpaired-actions` | `reconciliation-workbench` | 未配对行选择后的确认/关系级撤回入口、旧人工异常入口缺席断言和列顺序拖拽设置保存入口 | read-export 下列拖拽 handle 全部 disabled，尝试拖拽不会进入 column-layout dragging 或触发 `POST /api/workbench/settings`；选择未配对行后确认关联和关系级撤回禁用，未配对工具栏精确文案“异常处理”以及行级旧异常/确认入口不存在，且复扫写控件。统一异常抽屉由 `reconciliation-workbench:exception-drawer` 单独覆盖。 |
+| `reconciliation-workbench:paired-withdraw-actions` | `reconciliation-workbench` | 已配对 active relation 选择后的关系级撤回入口 | read-export 下选择已配对关系后撤回关联禁用，行级更多/取消关联/人工异常入口不存在，withdraw durable mutation 零调用，且复扫当前关系。 |
 | `reconciliation-workbench:cash-special-actions` | `reconciliation-workbench` | 已配对银行行的现金过账、现金买票和取消现金处理行级菜单 | deterministic mock 暴露 `confirm_cash_pass_through`、`confirm_cash_ticket_purchase`、`cancel_cash_special` 后，read-export 下更多菜单不可见，确认为过账/确认为买票/取消现金处理 menuitem 和确认买票成本弹窗均不可见，三个现金处理 durable mutation 零调用，且复扫候选。 |
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
 | `cost-statistics:tag-rules` | `cost-statistics` | 成本统计标签规则抽屉 | read-export 下可查看规则，但 `保存` disabled，`PUT /api/cost-statistics/tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
@@ -175,7 +177,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 写入口 | 当前状态 | 当前证据 | 下一步 |
 | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | confirm、withdraw、candidate split、exception apply/cancel/ignore/unignore、OA/发票异常 ignore/restore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对候选并打开统一异常抽屉，断言确认、撤回、OA/发票异常忽略/恢复和 legacy 异常恢复入口隐藏或禁用；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
+| `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、OA/发票自动异常 ignore/restore、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、OA/发票自动异常 ignore/restore 写入口隐藏；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、自动异常、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
 | `imports-bank-transactions` | 文件选择、preview、confirm import、账户冲突确认 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 主链路 | 新增清空/重试/批量导入 mutation 时补按钮矩阵。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |
@@ -202,4 +204,4 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 ## 仍未完全闭合
 
-`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台统一异常抽屉处理与恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。
+`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对确认/关系级撤回与旧人工异常入口缺席断言、关联台已配对关系级撤回、关联台现金处理行级菜单、关联台统一自动异常抽屉 ignore/restore、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。

@@ -64,7 +64,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Canonical source proof | 各 projection producer | 必须包含 own schema version 与实际依赖版本；Workbench proof 包含 completed OA 与 in-progress admission version，不包含历史 pending bank claim；dirty `source_version` 只作发布 CAS 令牌 |
 | Query request | facade/API | payload I/O 前检查 durable dirty/outbox 与 canonical source proof；cache 不能替代 proof |
 | Workbench OA/invoice anomaly | Workbench grouping / exception decision repository | active generation payload 可携带 additive `oa_invoice_anomaly` comparison units；decision 按 exact month/scenario 读取，bucket 查询只过滤既有 group payload。不得为金额差异或附件缺失新增 manifest、scope、worker、queue、Redis owner 或第二 read model。 |
-| Maintenance command | `scripts/backfill-runtime-read-models.py` | `--enqueue-missing` 只向两个 active scope type 写入 `all` fan-out command；该 CLI 不提供 retired Search/no-OA 或 BankFlow draft replay |
+| Maintenance command | `scripts/backfill-runtime-read-models.py` / `finops-prune-workbench-generations` | `--enqueue-missing` 只向两个 active scope type 写入 `all` fan-out command；Workbench generation prune 每轮最多选择 500 个 `superseded|failed` 终态候选，按 scope 分组并以 1～100 个 generation 独立事务删除，默认 batch 为 1、专用 statement timeout 为 60 秒；`active|building` 不进入清理。两种 CLI 都不提供 retired Search/no-OA 或 BankFlow draft replay |
 
 ## 输出 I/O
 
@@ -94,7 +94,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
 | Freshness / query | `read_model_freshness.py`、`read_model_query_gateway.py` |
 | Repository | `postgres_repositories/read_models.py` 与 Workbench relation narrow repository port |
 | Worker | `runtime_worker.py`、`runtime_worker_handlers.py`、两个 active read-model handlers |
-| Maintenance | `scripts/backfill-runtime-read-models.py`、`tools/read_model_slo_smoke.py` |
+| Maintenance | `scripts/backfill-runtime-read-models.py`、`tools/read_model_slo_smoke.py`、`tools/prune_workbench_generations.py`、`deploy/oa/bin/finops-prune-workbench-generations.sh` |
 | Migration | `postgres/migrations/0127_direct_canonical_page_runtime_retirement.sql` |
 
 ## 依赖方向
@@ -110,7 +110,7 @@ affected months；不得为隐藏页面 enqueue refresh、返回 operation barri
   `tests/test_read_model_scope_contract.py`。
 - Gateway/freshness：`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_query_gateway.py`。
 - Runtime/RabbitMQ：`tests/test_runtime_worker.py`、`tests/test_rabbitmq_runtime.py`。
-- 维护入口：`tests/test_runtime_read_model_backfill.py`。
+- 维护入口：`tests/test_runtime_read_model_backfill.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_deploy_runtime_examples.py`。
 - 页面 direct/canonical 与零 fan-out：
   `tests/test_page_read_model_fact_display_matrix.py`、`tests/test_write_operation_impact_matrix.py`、
   `tests/test_platform_runtime_boundary_guards.py`。

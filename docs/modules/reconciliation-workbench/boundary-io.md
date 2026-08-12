@@ -1,13 +1,13 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-08
+日期：2026-08-12
 
 ## 职责
 
 ### 负责
 
 - 查询 active generation，并把 canonical facts 精确划分为 `paired` / `unpaired`。
-- 提供分页、搜索、详情、选择、正式配对、撤回和异常处理页面交互。
+- 提供分页、搜索、详情、选择、人工正式配对、active relation 关系级撤回和系统异常抽屉交互；未配对工具栏不再提供人工“异常处理”入口。
 - 暴露 freshness/status/source versions，阻止 stale 数据伪装 fresh。
 - 普通 writer 成功后只推进 canonical proof；当前可见关联台通过公开 refresh-status 自行重校验 scope，非 fresh 时显示 refreshing，不等待或接收写路径扇出的 notification/operation barrier。
 
@@ -30,8 +30,9 @@
 | exception bucket query | Workbench API / read repository | `/groups` 可选 `exception_bucket=active|processed`；repository 只在 active generation group payload 上按 `oa_invoice_anomaly.state` 过滤后计算 total/row counts 并执行有界分页。历史 WEX/row-ignore 不进入异常桶，前端也不得拉取后再合并。 |
 | filter option query | Workbench API / read repository | `GET /api/workbench/filter-options` 只读当前 scope、zone 和 expected active generation；`pane=oa|bank|invoice`，`facet=column|time_year`，`column` 只允许当前表配置中的可筛选字段，`page_size` 默认 100、最大 200。候选按完整 active generation 成员集合计算，不依赖主表已加载页；保留当前区域 search、其它列和其它 pane 的过滤条件，但移除目标列自己的 filter，`time_year` 移除目标 pane 自己的时间条件。普通列输出稳定 value/label 和 `未填写` sentinel；银行金额列输出收支方向与付款账号。查询只取 `page_size + 1` 个 distinct 值并在返回前复核 generation；fresh 时复用既有 Workbench Redis owner，以 active generation version 和完整 query hash 做 read-through，generation 变化自动失效，stale/refreshing 不读写缓存；不新增表、worker、cache owner 或 per-column refresh。 |
 | amount mismatch decision | Workbench action route | `POST /api/workbench/exceptions/amount-mismatch/ignore|restore` 只接受当前 month/zone/group、64 位 fingerprint 和 expected active generation version；actor 只来自后端 session。service 在写入前从当前 active generation 重读关系、重算 fingerprint 并解析实际 source month；版本、关系或 fingerprint 漂移返回冲突。状态改变后只 enqueue 精确 Workbench month scope；幂等重复零 audit、零额外状态写。 |
+| exception compatibility command | Workbench action route | `POST /api/workbench/exception/apply` 继续服务既有自动异常/行级异常兼容链路，但不重新暴露已删除的未配对工具栏人工“异常处理”入口。route 只使用服务端已认证 session 的 actor；request body 中的 `actor` / `confirmed_by` 不是身份或审计事实，即使伪造也必须被忽略。 |
 | row/group detail | Workbench read repository | row detail 的 active generation 版本校验与 `workbench_rows` 详情读取必须处于同一个只读 repeatable-read 快照；列表已绑定的稳定 generation 即使 canonical source 已前进也继续纯读返回，并沿用 repository 的 `fresh/refreshing/stale` 状态，GET 不做第二次 canonical proof、不 enqueue refresh。expected generation 不再可读返回 `409 workbench_read_model_version_conflict`；active group 中不存在该 row 返回 `404 workbench_row_not_found`；可见非 summary member 缺同 generation detail row 返回 `503 workbench_row_detail_invariant_broken`；repository/migration/timeout 不可用返回 `503 workbench_detail_unavailable`。任何 miss 都不得合成占位行、读取旧 generation 或回退 `workbench_group_rows.payload`；ETC 与流水规则 summary 是展开占位，不提供 row detail 入口。group detail 的既有 freshness/展开合同不变。 |
-| confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。unsafe route 先通过共享 mutation guard，confirm/cancel/withdraw 复用同一已认证 session 生成 actor/tenant，不重复身份 I/O、不信任 body actor。所有人工或自动 formal confirm 必须在 relation UoW 内、取得 relation advisory lock 之前，按 typed row identity 重读并 `FOR KEY SHARE` 锁定当前 OA/流水/发票 canonical rows；任一成员已删除或不可用时整条命令以 `workbench_relation_canonical_member_missing` fail closed，禁止把事务外 matching batch 的旧成员重新写回 active relation。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系 |
+| confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。unsafe route 先通过共享 mutation guard，confirm/cancel/withdraw 复用同一已认证 session 生成 actor/tenant，不重复身份 I/O、不信任 body actor。所有人工或自动 formal confirm 必须在 relation UoW 内、取得 relation advisory lock 之前，按 typed row identity 重读并 `FOR KEY SHARE` 锁定当前 OA/流水/发票 canonical rows；任一成员已删除或不可用时整条命令以 `workbench_relation_canonical_member_missing` fail closed，禁止把事务外 matching batch 的旧成员重新写回 active relation。Workbench withdraw 的 preview 和 submit 若显式携带 row ids，二者都必须与目标 case 当前完整 active typed member set 精确相等；子集、超集、混入其它 case 或 case/rows 不一致返回 `workbench_relation_exact_selection_required`，不能由后端静默扩张。case-only 只保留给已证明 owner 的内部调用。preview fingerprint 绑定 current/after relations 的 case/version/status/排序后 typed members，以及 confirm history 的 operation id/type/created at。submit 在同一 UoW 内先锁 current case/members，再锁 predecessor case/members，重载并重算 topology；恢复前重验 canonical member、restored case 未复用和唯一 active owner，缺 canonical 返回 `workbench_relation_canonical_member_missing`，case/owner 冲突返回 `workbench_relation_restore_conflict`，整笔 fail closed。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系。 |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史。OA 附件正式发票 promotion 复用现有五个月 dirty window，并在同一 PostgreSQL 事务内完成 canonical invoice 写入与 scope 标脏；禁止只写发票后依赖页面访问、全库 stale scan 或前端临时拼接补关系。 |
 | matching source versions | matching worker / orchestrator | 只跟踪会改变正式关系计算结果的输入；Workbench 展示投影 schema 不是 matching 输入，禁止因纯展示版本升级重算历史月份。 |
 | generation source versions | Workbench normal GET / projection builder | expected 与 published generation 使用同一个 scope vector：所有状态的 relation、有效非异常 override、新 OA/发票异常决定、in-progress admission、requested month 与 relation 跨月成员的 OA/银行流水/发票 canonical `updated_at`、银行分类器实际读取的同额时间邻域、银行分类事实 `updated_at`、分类确认事实的 confirm/revoke 时间、ETC submission/business/invoice/link 四类直接投影输入，以及 Workbench 实际消费的银行自动标签规则版本和账户映射 fingerprint。历史 pending claim、WEX/row-ignore 与无关 settings 字段不进入 proof。relation 撤回、soft delete、OA workflow 状态变化、跨月成员/分类上下文变化、银行分类确认/撤销和 ETC link/owner 变化必须让每个真实受影响月份 stale；`turnover_manual_closure` 仍属于 Workbench 主 generation canonical proof，但不属于共享 `workbench_relation` distribution。`all` query 使用 active 月分片对应的完整 vector。canonical 变化只让被访问 scope 判 stale 并走现有 gateway，禁止恢复写后 fan-out。 |
@@ -49,7 +50,7 @@
 | --- | --- | --- |
 | `paired.groups` | 前端 | 每组恰好对应一条冻结要求已满足且关系内全部 OA 已完成的 active formal relation，`group_type=relation` |
 | `unpaired.groups` | 前端 | 无 active owner 的 canonical fact 为 `group_type=unpaired` singleton；冻结要求未满足或包含进行中 OA 的 active relation 保持同 case、`group_type=relation`，并返回 `completion.is_complete=false`、`missing_row_types` 与可选 `blocking_reasons=['oa_in_progress']` |
-| OA row capabilities | 前端 | `paired` / `unpaired` 的 OA row 都只暴露 `available_actions=['detail']`。OA 栏不渲染操作列；正式确认、撤回和统一异常处理只从区域选择与表头动作进入。旧 generation 即使携带 OA 行级 `confirm_link`、`mark_exception`、`cancel_link` 或 `cancel_exception`，前端 API 映射边界也必须收敛为 detail-only，不能恢复逐行 mutation。 |
+| OA row capabilities | 前端 | `paired` / `unpaired` 的 OA row 都只暴露 `available_actions=['detail']`。OA 栏不渲染操作列；人工确认从未配对选择动作进入，paired/unpaired active relation 的撤回从关系级选择动作进入。未配对工具栏不提供人工“异常处理”；自动 OA/发票异常继续从右上统计入口进入统一异常抽屉。旧 generation 即使携带 OA 行级 `confirm_link`、`mark_exception`、`cancel_link` 或 `cancel_exception`，前端 API 映射边界也必须收敛为 detail-only，不能恢复逐行 mutation。 |
 | OA expense-item display | 前端 | 父 OA 是唯一可选/可撤回成员；投影在同一 active formal relation 内先用父 OA 自身字段及其 FK-owned 付款明细/附件的显式 source alias 识别附件，再用唯一 `source_expense_row_index` 把发票展示字段归一为 `expense_items.id`，前端以一次 item-id 索引按原付款项顺序构造复合展示带，并在“申请事由”列显示该项的费用内容/费用说明。canonical 发票事实仍保留原始 `source_expense_item_id`；冲突、缺失或重复 row index 保留在父 OA 摘要行，不按金额、项目名或顺序猜测。子项 UI 复用父 OA selection id，不能产生虚拟 canonical row、独立 action 或第二关系链路。 |
 | bank category display | 前端 | 流水金额列固定为金额、方向+付款账号、分类 chip 三层；`needs_confirmation` 显示“待确认”，`unmatched` 显示“待分类”，其余显示 canonical effective category。对方户名列不再渲染“完全关联/已关联/待补发票”等 relation status chip；关系事实仍保留在 DTO/业务链路中，不能用展示删除改变搜索、分区或 relation ownership。 |
 | zone controls | 前端 `WorkbenchZone` | 页面固定使用紧凑三栏。银行流水“全部 + 年月”筛选位于每个区域标题栏最右侧、栏显示菜单之前，复用既有 `displayState.timeFilterByPane.bank`、`time_filters.bank` 与 filter-options 年份 I/O；paired/unpaired 状态独立。栏显示菜单只包含 OA、银行流水、进销项发票，并禁止隐藏最后一栏。不存在经典布局、区域放大或第二套请求/选择状态。 |
@@ -63,7 +64,7 @@
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
 | read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；每个可见非 summary group row 都必须有同 generation 的 `workbench_rows` 详情行，否则拒绝发布。active generation 健康且 `source_versions` 完全相同时必须保持现有 generation；building/failed 不可读为 fresh |
 | all-scope query statistics | Workbench groups query | all-scope total、三类 row counts 与标题 statistics 直接从当前 active monthly generations 的 canonical group/member owner 集合计算；不写第二份 all-scope statistics，不把全历史聚合放进月份发布事务。查询返回前必须复核 generation-set digest，切换时 fail closed |
-| superseded generation retention | `finops-prune-workbench-generations.timer` | 低峰期有界删除非 active generation；发布热路径不得同步扫描/删除旧 generation，清理失败不得影响 fresh generation 或页面写后可见性 |
+| superseded generation retention | `finops-prune-workbench-generations.timer` | 低峰期每轮最多选择 500 个 `superseded|failed` 终态 generation，先按 scope 隔离，再在同 scope 内按 1～100 个 generation 小批次独立事务删除；每批删除子表前必须锁定并复核 scope、tenant 与终态，`active|building` 不得进入候选。当前发布热路径不触发清理；单批失败不得回滚已提交批次，也不得影响 fresh generation 或页面写后可见性 |
 | refreshing query status | Workbench initial/detail query | 返回 refreshing/遮罩状态；读入口不得再次补投 `all` refresh，只有真正 missing 或 freshness gate 已证明的 exact stale scope 才能请求恢复，避免读 I/O 扩成全月份写 fan-out |
 | ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
 | relation action preview selection | confirm/withdraw preview | `WorkbenchQueryFacade.relation_preview_selection -> PostgresReadModelRepository.get_workbench_relation_preview_selection` 按 expected generation/generation-set 一次读取最多 20 个 selected rows 及必要 OA attachment context；month/all 都在读取前后复核 fresh/version。`month=all` 中同一 canonical row 被跨月 relation 投影到多个 active shard 时，规范化内容完全相同才合并为一个逻辑 row；同 row id 内容不一致、missing、跨 generation 或 drift 一律 fail closed。该 DTO 只供 preview group/amount/alias 投影，不进入正式 command/UoW，不读取 `workbench:all` 完整 payload、live builder 或 `workbench_relation` projection |
@@ -79,7 +80,7 @@
 - `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。
 - 前端每秒刷新状态检查必须 fail closed：网络/解析失败立即把两区状态标记为 `unavailable` 并阻断确认、撤回等写操作，同时保留当前稳定 generation 的只读行；后续成功轮询按既有状态机恢复或重载新 generation。不得保留上一次 `fresh` 写门禁，也不得把短暂失败清空成 false-empty。
-- 前端 OA 行只负责选择与打开详情；关系 mutation 由区域表头动作统一编排，自动识别的 OA/发票异常由统一异常抽屉处理。银行流水和发票的现有行级能力保持各自边界，不因 OA 操作列删除而改变。
+- 前端 OA 行只负责选择与打开详情；人工确认与关系级撤回由区域选择动作统一编排，自动识别的 OA/发票异常由右上统一异常抽屉处理。未配对选择工具栏的人工“异常处理”按钮和 handler 已删除；银行流水和发票的现有行级能力保持各自边界，不因该入口删除而改变。
 - 前端三栏根节点使用合法 `grid/rowgroup/row/columnheader/cell` 语义并提供区域名称；窄屏时三栏和记录自身的最小内容宽度只能在各 pane 内滚动，不得把文档宽度撑出视口。
 - 前端三栏只从已加载 DTO 线性计算单条精确一一对应、显式 `sourceExpenseItemId` 费用子项附件发票合计同行、残余展示和等分高度；允许完整 source group 内方向已知、双方唯一的单条精确金额展示兜底，禁止无显式费用子项归属的金额组合/顺序猜测、栏位级额外请求、DOM 测量或第二套布局状态。
 - 前端区域标题栏只拥有展示控制：银行时间筛选沿用既有服务端筛选合同，栏显示只改变本区 DOM；不得用经典/放大状态改变 API 查询、selection identity、mutation 或另一关系区的可见性。
@@ -113,6 +114,9 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - in-memory matching dirty-scope fallback 作为生产状态源。
 - `CandidateGroupGrid` / `CandidateGroupCell` 组件和候选取消写入口。
 - OA 行级确认/异常/撤回按钮、OA 操作列、`cancel-exception-only` 渲染模式及其前端孤立请求链；后端审计/兼容 API 不因 UI 删除而扩散到页面运行链。
+- 未配对选择工具栏“异常处理”按钮及其 `handleOpenSelectionException` 人工 drawer 触发链；不得以别名按钮、行级入口或旧 capability 恢复。该删除不包括右上 `异常 n | 已忽略 m`、`WorkbenchExceptionDrawer`、自动异常投影及 ignore/restore API。
+- 人工确认的旧“至少两个 pane / 必须含银行 / 完整材料 / 金额相等”前后端门禁，以及只允许 paired zone 撤回 active relation 的旧 UI gate；不得以 preview `can_submit`、客户端 selection summary 或兼容分支恢复。
+- 人工 `confirm-link` 按银行 `internal_transfer` 分类转交 no-OA batch 的旧分流，包括 facade 注入的 `submit_internal_transfer_rows_from_workbench` 与 `_bank_only_internal_transfer_confirm_status` / `_confirm_internal_transfer_rows_via_no_oa_batch` helper；mixed 或全 `internal_transfer` 银行成员都必须进入标准 `manual_confirmed` relation command/UoW。此删除不影响独立 no-OA batch 入口、owner 或关系 mode。
 - `groupDisplayModel` 枚举 2～6 条金额组合、按输入顺序/项目名猜测归属或因当前筛选隐藏重复项而制造唯一性的旧 fallback；展示级兜底只允许完整 source group 内方向已知、双方唯一的单条精确金额，不得写入正式关系。
 - 仅凭 `case:decision:*`、row `case_id` 或旧 section 判断显示归属。
 - legacy `GET /api/workbench` provider/API assembler 与所有跨页面 full-payload consumer；当前首屏只走 `WorkbenchQueryFacade.initial_page(...)`，ignored、Batch Accounting、Cost Statistics 和 Settings 各自使用既有专属窄 I/O。
@@ -142,12 +146,22 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 
 confirm/withdraw preview 的行输入只能来自上述 relation-preview selection port，且每次请求只允许一次 selection load。preview 可输出 `group_type=selection` 与 `zone/status=unpaired`，但正式页面 active generation 仍只有 `paired/unpaired`；正式 confirm/withdraw 必须重新进入 canonical relation command/UoW，不能缓存、转交或信任 preview selection DTO。
 
-前端只在 relation preview mapper 中接受 `selection`：必须同时满足 `zone=status=unpaired`，映射为页面 `groupType=unpaired` 并保留 `rawGroupType=selection`；`relation` 必须同时满足 `zone=status=paired`。普通 combined initial/groups mapper 继续拒绝 `selection`。confirm/withdraw preview 共用一个同步防重入边界，pending 期间 toolbar 与 inline 入口不得产生第二个 POST；selection、scope 或 active read-model version 变化后返回的旧成功响应不得打开 drawer。API 错误只通过 module-owned 安全类型向页面传递批准的中文文案，`status/code/requestId` 仅作为支持字段保留，后端 message、raw response 与 parser exception 不得直接进入 UI。
+前端只在 relation preview mapper 中接受 `selection`：必须同时满足 `zone=status=unpaired`，映射为页面 `groupType=unpaired` 并保留 `rawGroupType=selection`；正式 relation preview 可来自 paired 或 unpaired active case，仍由 `group_type=relation` 和 canonical case/member identity 证明，不把 zone 当作 relation existence。普通 combined initial/groups mapper 继续拒绝 `selection`。confirm/withdraw preview 共用一个同步防重入边界，pending 期间 toolbar 与 inline 入口不得产生第二个 POST；selection、scope 或 active read-model version 变化后返回的旧成功响应不得打开 drawer。API 错误只通过 module-owned 安全类型向页面传递批准的中文文案，`status/code/requestId` 仅作为支持字段保留，后端 message、raw response 与 parser exception 不得直接进入 UI。
+
+## 本次合同不变项
+
+- HTTP 继续复用 `POST /api/workbench/actions/confirm-link/preview` -> `confirm-link` 和 `POST /api/workbench/actions/withdraw-link/preview` -> `withdraw-link`；request/response shape、error envelope 和权限角色不变。金额/方向差异继续使用已有 `amount_check.requires_note` 与 `note`，不新增 DTO 字段。
+- `confirm-link` 不读取银行分类来选择 mutation owner；mixed 或全 `internal_transfer` 银行成员与其它合法 canonical selection 一样进入 `WorkbenchRelationCommandService` + relation UoW，旧 `no_oa_bank_batch_selection_internal_transfer_conflict` 不再属于该 action。独立 no-OA batch 仍只由其专属入口与 owner 处理。
+- `workbench` / `workbench_relation` read model scope、freshness/source-version、exact-month enqueue、active generation publish 和 access-time self-convergence 合同不变；不新增 read model、cache owner、queue、worker 或 worker registry/manifest 配置。
+- `app.workbench_pair_relations`、history、idempotency、audit 与异常决定继续使用现有表和 repository；不新增 migration、列、索引、DB schema、backfill 或双写。
+- 变更只调整人工 relation 准入、未配对 active case 的关系级撤回和页面入口。确定性自动匹配的 exact-sum、currency/direction、强证据、唯一性、资源上限和撤回 fingerprint 均不变。
 
 正式关系是关系 ownership 的唯一事实源。projection builder 必须在读取有效非异常 override 前先从已经加载的 active relations 计算 member row ids，并从 control I/O 集合排除这些成员；不能把旧 candidate/WEX ownership 写入正式成员，再依靠字段覆盖或 Audit 豁免掩盖冲突。未配对 row 只允许有效非异常 override 改变展示；历史 WEX/row-ignore 不参与 projection。
 
 ## 数据恢复与回滚
 
+- 本次没有 DB schema、migration、backfill、read model scope 或 worker 变化，不需要为该功能单独创建数据库备份或执行全量 rehydrate。部署回滚使用既有 release rollback；生产可逆验证只能操作 test-owned canonical members，并通过 confirm -> fresh -> withdraw -> fresh 恢复操作前稳定拓扑。
+- 下列备份、rehydrate 与 Release A/B 条款只适用于对应旧状态迁移或显式维护，不是本次功能发布步骤：
 - 发布前备份 relation facts、history、active generation metadata 和 queue 状态；candidate/decision 表是派生旧状态，不进入业务备份恢复源。
 - Release B 的旧状态 drop migration 只做 forward drop 和旧 app-setting 清理，不改 canonical facts；Release A 不携带该 migration，也不提前预留空版本。
 - 发布后运行 `scripts/rehydrate-workbench-read-models.py`，等待 matching/workbench/workbench_relation scopes fresh，再运行页面 Audit。

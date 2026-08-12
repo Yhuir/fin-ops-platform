@@ -16,6 +16,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.test_workbench_uow_contract import (
     _RecordingConnection,
@@ -83,6 +84,27 @@ class _CanonicalSelectionRepository:
 
 
 class WorkbenchWriteCharacterizationTests(unittest.TestCase):
+    def test_relation_restore_state_conflicts_map_to_http_conflict(self) -> None:
+        for error_code in (
+            "workbench_relation_canonical_member_missing",
+            "workbench_relation_restore_conflict",
+        ):
+            with self.subTest(error_code=error_code):
+                result = WorkbenchWriteFacade._relation_command_error_result(
+                    WorkbenchRelationCommandError(error_code, "relation topology changed")
+                )
+
+                self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+                self.assertEqual(result.payload["error"], error_code)
+
+        invalid_selection = WorkbenchWriteFacade._relation_command_error_result(
+            WorkbenchRelationCommandError(
+                "workbench_relation_exact_selection_required",
+                "complete active relation selection required",
+            )
+        )
+        self.assertEqual(invalid_selection.status_code, HTTPStatus.BAD_REQUEST)
+
     def test_formal_write_row_resolution_uses_configured_sql_read_repository(self) -> None:
         calls: list[dict[str, object]] = []
 
@@ -1287,7 +1309,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         with (
             patch.object(app, "_expand_confirm_link_row_ids_for_existing_context", side_effect=legacy_scan),
             patch.object(app, "_resolve_rows_for_amount_check", side_effect=legacy_scan),
-            patch.object(app, "_resolved_row_types_for_row_ids", side_effect=legacy_scan),
         ):
             response = self._post(
                 app,
@@ -1327,6 +1348,151 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "所选工作台记录已变化，请刷新后重试。",
         )
         self.assertTrue(response.headers.get("X-Request-ID"))
+
+    def test_confirm_preview_accepts_same_type_canonical_members_and_requires_note_for_mismatch(self) -> None:
+        app = self._build_app()
+        invoice_rows = [
+            dict(row)
+            for row in app._workbench_query_service.get_workbench("2026-03")["unpaired"]["invoice"][:2]
+        ]
+        row_ids = [str(row["id"]) for row in invoice_rows]
+        app._workbench_query_facade().relation_preview_selection = lambda *_args, **_kwargs: WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {
+                "selected_row_ids": row_ids,
+                "selected_rows": invoice_rows,
+                "context_rows": [],
+                "rows": invoice_rows,
+                "read_model_status": "fresh",
+                "read_model_version": "characterization-generation",
+            },
+        )
+        app._amount_check_for_rows_by_type = lambda _rows: {
+            "status": "mismatch",
+            "requires_note": True,
+            "amount_delta": "1.00",
+        }
+
+        response = self._post(
+            app,
+            "/api/workbench/actions/confirm-link/preview",
+            {"month": "2026-03", "row_ids": row_ids},
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK, response.body)
+        payload = _json_response(response)
+        self.assertEqual(payload["operation"], "confirm_link")
+        self.assertTrue(payload["can_submit"])
+        self.assertTrue(payload["requires_note"])
+        self.assertEqual(payload["amount_summary"]["status"], "mismatch")
+
+    def test_confirm_preview_rejects_duplicate_unresolved_and_unsupported_canonical_members(self) -> None:
+        app = self._build_app()
+        query_facade = app._workbench_query_facade()
+        cases = (
+            (
+                "duplicate",
+                ["oa-o-202603-001", "oa-o-202603-001"],
+                [{"id": "oa-o-202603-001", "type": "oa"}],
+            ),
+            (
+                "unresolved",
+                ["oa-o-202603-001", "missing-1"],
+                [{"id": "oa-o-202603-001", "type": "oa"}],
+            ),
+            (
+                "unsupported",
+                ["oa-o-202603-001", "candidate-1"],
+                [
+                    {"id": "oa-o-202603-001", "type": "oa"},
+                    {"id": "candidate-1", "type": "candidate"},
+                ],
+            ),
+        )
+        for label, row_ids, selected_rows in cases:
+            with self.subTest(label=label):
+                query_facade.relation_preview_selection = lambda *_args, **_kwargs: WorkbenchQueryResult(
+                    HTTPStatus.OK,
+                    {
+                        "selected_row_ids": list(row_ids),
+                        "selected_rows": list(selected_rows),
+                        "context_rows": [],
+                        "rows": list(selected_rows),
+                        "read_model_status": "fresh",
+                        "read_model_version": "characterization-generation",
+                    },
+                )
+                response = self._post(
+                    app,
+                    "/api/workbench/actions/confirm-link/preview",
+                    {"month": "2026-03", "row_ids": list(row_ids)},
+                )
+
+                self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST, response.body)
+                self.assertEqual(_json_response(response)["error"], "invalid_confirm_link_preview_request")
+
+    def test_withdraw_full_unpaired_relation_restores_previous_stable_topology(self) -> None:
+        app = self._build_app()
+        bank_rows = [
+            dict(row)
+            for row in app._workbench_query_service.get_workbench("2026-03")["unpaired"]["bank"][:2]
+        ]
+        row_ids = [str(row["id"]) for row in bank_rows]
+        previous_case_ids = ["CASE-BANK-PREVIOUS-1", "CASE-BANK-PREVIOUS-2"]
+        for case_id, row_id in zip(previous_case_ids, row_ids, strict=True):
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id=case_id,
+                row_ids=[row_id],
+                row_types=["bank"],
+                relation_mode="manual_confirmed",
+                created_by="finance",
+                month_scope="2026-03",
+            )
+
+        with self._suppress_background_persistence(app):
+            confirm = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-BANK-UNPAIRED-FULL",
+                    "note": "同类型关系人工确认",
+                },
+            )
+            active_relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(
+                "CASE-BANK-UNPAIRED-FULL"
+            )
+            assert active_relation is not None
+            groups = app._workbench_write_facade()._relation_groups(
+                [active_relation],
+                selected_rows=bank_rows,
+            )
+            withdraw = self._post(
+                app,
+                "/api/workbench/actions/withdraw-link",
+                {"month": "2026-03", "row_ids": row_ids},
+            )
+
+        self.assertEqual(confirm.status_code, HTTPStatus.OK, confirm.body)
+        self.assertEqual(groups[0]["zone"], "unpaired")
+        self.assertEqual(withdraw.status_code, HTTPStatus.OK, withdraw.body)
+        payload = _json_response(withdraw)
+        self.assertEqual(payload["operation"], "withdraw_link")
+        self.assertCountEqual(
+            [str(relation["case_id"]) for relation in payload["restored_relations"]],
+            previous_case_ids,
+        )
+        self.assertIsNone(
+            app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-UNPAIRED-FULL")
+        )
+        self.assertCountEqual(
+            [
+                app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)["case_id"]
+                for row_id in row_ids
+            ],
+            previous_case_ids,
+        )
 
     def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()

@@ -22,7 +22,7 @@
 | `PERM-E2E-003` | read-export 高风险写入口禁用/隐藏 | P0 | settings、tax、imports、no-OA、bank details、output/input invoice、workbench 等高风险入口对 `read_export_only` 隐藏/禁用，直接或间接 durable mutation 为 0。 |
 | `PERM-E2E-004` | full-access 业务写入口与 admin gate | P0 | `full_access` 可见普通业务写入口和 import file input，但不能进入访问账户、数据重置、OA 凭据或 AppHealth dashboard。 |
 | `PERM-E2E-005` | admin 高风险入口 | P0 | `admin` 可进入 settings 访问账户、OA 申请人凭据、数据重置和 AppHealth dashboard；admin-only API 被调用且页面可见。 |
-| `PERM-E2E-006` | API guard 和 body actor spoofing | P0 | read/write/admin API 区分 401/403；mutation endpoint 不信任 body actor；只读 session 直接调用 mutation API 时后端拒绝且不调用下游写服务。 |
+| `PERM-E2E-006` | API guard 和 body actor spoofing | P0 | read/write/admin API 区分 401/403；mutation endpoint 不信任 body actor；尤其兼容 `POST /api/workbench/exception/apply` 必须忽略 body `actor` / `confirmed_by` 并只使用认证 session actor。只读 session 直接调用 mutation API 时后端拒绝且不调用下游写服务。 |
 | `PERM-E2E-007` | 审计和事务一致性 | P0 | 高风险写入、设置变化、标签规则、relation command、批量提交/撤回、data reset、导出等记录 actor/tenant/action/metadata；失败 rollback 不留下半写 audit。 |
 | `PERM-E2E-008` | 敏感数据不泄露 | P0 | token、密码、DSN、凭据密文、附件正文不出现在 response、settings payload、audit metadata、日志或前端 state。 |
 | `PERM-E2E-009` | Browser hidden-error safety | P0 | role matrix Browser 流不得出现隐藏 `pageerror`、`console.error`、非 abort request failure 或未预期 dialog；认证 gate 的预期 401 只能在专门 session gate 流中显式豁免。 |

@@ -113,6 +113,23 @@ class PostgresConnectionTests(unittest.TestCase):
         self.assertTrue(pool.closed)
         self.assertEqual(connection.pool_stats(), {})
 
+    def test_statement_timeout_override_is_applied_when_preparing_a_connection(self) -> None:
+        connection = PostgresConnection(
+            PostgresSettings(
+                database_url="postgresql://user:secret@db/fin_ops",
+                statement_timeout_ms=10_000,
+            )
+        )
+        raw_connection = FakeRawConnection()
+
+        connection.set_statement_timeout_ms(60_000)
+        connection._prepare_connection(raw_connection)
+
+        self.assertEqual(
+            raw_connection.executed,
+            [("select set_config('statement_timeout', %s, false)", ("60000",))],
+        )
+
     def test_execute_many_values_batches_insert_values(self) -> None:
         connection = FakeRawConnection()
         transaction = PostgresTransaction(connection)

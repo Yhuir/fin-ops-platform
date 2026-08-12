@@ -14,7 +14,6 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
-from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -177,8 +176,6 @@ class WorkbenchWriteFacade:
         next_case_id: Callable[[], str],
         normalize_row_ids: Callable[[list[object]], list[str]],
         relation_preview_selection: Callable[..., Any],
-        resolved_row_types_for_row_ids: Callable[..., list[str]],
-        can_confirm_link_row_types: Callable[..., bool],
         expand_confirm_link_row_ids_for_existing_context: Callable[..., list[str]],
         resolve_rows_for_amount_check: Callable[..., list[dict[str, object]]],
         merge_relation_snapshots: Callable[..., list[dict[str, object]]],
@@ -207,7 +204,6 @@ class WorkbenchWriteFacade:
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
         bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
-        submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
         relation_command_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
     ) -> None:
@@ -219,8 +215,6 @@ class WorkbenchWriteFacade:
         self._next_case_id = next_case_id
         self._normalize_row_ids = normalize_row_ids
         self._relation_preview_selection = relation_preview_selection
-        self._resolved_row_types_for_row_ids = resolved_row_types_for_row_ids
-        self._can_confirm_link_row_types = can_confirm_link_row_types
         self._expand_confirm_link_row_ids_for_existing_context = expand_confirm_link_row_ids_for_existing_context
         self._resolve_rows_for_amount_check = resolve_rows_for_amount_check
         self._merge_relation_snapshots = merge_relation_snapshots
@@ -249,7 +243,6 @@ class WorkbenchWriteFacade:
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
         self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
-        self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
 
@@ -300,26 +293,17 @@ class WorkbenchWriteFacade:
             for row in list(selection.get("context_rows") or [])
             if isinstance(row, dict)
         ]
-        requested_rows_by_id = {
-            str(row.get("id") or row.get("row_id") or ""): row
-            for row in selected_rows
-            if str(row.get("id") or row.get("row_id") or "").strip()
-        }
-        requested_row_types = [
-            str(requested_rows_by_id[row_id].get("type") or requested_rows_by_id[row_id].get("source_kind") or "")
-            for row_id in row_ids
-            if row_id in requested_rows_by_id
-        ]
-        if not self._can_confirm_link_row_types(
-            row_ids=row_ids,
-            row_types=requested_row_types,
-            month=month,
-        ):
+        try:
+            requested_row_types = self._canonical_confirm_link_row_types(
+                row_ids,
+                selected_rows,
+            )
+        except (KeyError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_confirm_link_preview_request",
-                    "message": "confirm link requires rows from at least two panes.",
+                    "message": str(exc),
                 },
             )
         has_selected_bank_context = "bank" in requested_row_types
@@ -511,22 +495,14 @@ class WorkbenchWriteFacade:
         try:
             selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
             rows_by_type = self._rows_by_type(selected_rows)
-            requested_row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
+            self._canonical_confirm_link_row_types(row_ids, selected_rows)
             amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-            if not self._can_confirm_link_resolved_selection(row_types=requested_row_types, amount_check=amount_check):
-                return WorkbenchWriteResult(
-                    HTTPStatus.BAD_REQUEST,
-                    {
-                        "error": "invalid_confirm_link_request",
-                        "message": "confirm link requires rows from at least two panes.",
-                    },
-                )
             row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
             if set(row_ids) != {str(row.get("id") or "") for row in selected_rows}:
                 selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
                 rows_by_type = self._rows_by_type(selected_rows)
                 amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-            row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
+            row_types = self._canonical_row_types(row_ids, selected_rows)
         except KeyError as exc:
             row_id = str(exc.args[0] if exc.args else "").strip()
             return WorkbenchWriteResult(
@@ -536,6 +512,11 @@ class WorkbenchWriteFacade:
                     "message": f"所选关联台记录不可用，请刷新后重试。{f' row_id={row_id}' if row_id else ''}",
                     "row_id": row_id,
                 },
+            )
+        except ValueError as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_confirm_link_request", "message": str(exc)},
             )
         if amount_check.get("requires_note") and not note:
             return WorkbenchWriteResult(
@@ -573,27 +554,6 @@ class WorkbenchWriteFacade:
             amount_check=amount_check,
             paired_policy_metadata=paired_policy_metadata,
         )
-        internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
-            row_ids=row_ids,
-            row_types=row_types,
-            selected_rows=selected_rows,
-        )
-        if internal_transfer_status == "mixed":
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "no_oa_bank_batch_selection_internal_transfer_conflict",
-                    "message": "内部往来流水必须与对应内部往来流水一起提交。",
-                },
-            )
-        if internal_transfer_status == "all":
-            return self._confirm_internal_transfer_rows_via_no_oa_batch(
-                row_ids=row_ids,
-                month=month,
-                actor_id=actor_id,
-                note=note,
-                amount_check=amount_check,
-            )
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
             self._synthetic_existing_case_relations(
@@ -907,98 +867,6 @@ class WorkbenchWriteFacade:
             operation_projection=dict(operation_projection),
         )
 
-    def _bank_only_internal_transfer_confirm_status(
-        self,
-        *,
-        row_ids: list[str],
-        row_types: list[str],
-        selected_rows: list[dict[str, object]],
-    ) -> str:
-        if not row_ids or set(row_types) != {"bank"}:
-            return "none"
-        categories_by_row_id: dict[str, str] = {}
-        if self._bank_transaction_category_codes_for_row_ids is not None:
-            categories_by_row_id.update(self._bank_transaction_category_codes_for_row_ids(row_ids))
-        for row in selected_rows:
-            if not isinstance(row, dict) or str(row.get("type") or "") != "bank":
-                continue
-            row_id = str(row.get("id") or row.get("row_id") or "").strip()
-            if not row_id or categories_by_row_id.get(row_id):
-                continue
-            category_code = str(row.get("category_code") or row.get("effective_category_code") or "").strip()
-            if category_code:
-                categories_by_row_id[row_id] = category_code
-        selected_codes = [str(categories_by_row_id.get(row_id) or "").strip() for row_id in row_ids]
-        has_internal_transfer = any(code == "internal_transfer" for code in selected_codes)
-        if not has_internal_transfer:
-            return "none"
-        return "all" if all(code == "internal_transfer" for code in selected_codes) else "mixed"
-
-    def _confirm_internal_transfer_rows_via_no_oa_batch(
-        self,
-        *,
-        row_ids: list[str],
-        month: str,
-        actor_id: str | None,
-        note: str,
-        amount_check: dict[str, object],
-    ) -> WorkbenchWriteResult:
-        if self._submit_internal_transfer_rows_from_workbench is None:
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "no_oa_bank_batch_internal_transfer_submit_unavailable",
-                    "message": "内部往来免OA提交入口不可用。",
-                },
-            )
-        try:
-            result = self._submit_internal_transfer_rows_from_workbench(
-                row_ids=list(row_ids),
-                actor=_normalize_actor_id(actor_id),
-                note=note or None,
-            )
-        except ValueError as exc:
-            error_code = str(exc).strip() or "invalid_no_oa_bank_batch_request"
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {"error": error_code, "message": error_code},
-            )
-        except NoOaBankBatchPersistenceError as exc:
-            return WorkbenchWriteResult(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc) or "免OA流水批次保存失败，请稍后重试。",
-                },
-            )
-        batch = dict(result.get("batch") or {})
-        relation = dict(result.get("pair_relation") or {})
-        case_id = str(relation.get("case_id") or batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
-        affected_row_ids = [
-            str(row_id).strip()
-            for row_id in list(batch.get("row_ids") or row_ids)
-            if str(row_id).strip()
-        ]
-        affected_months = [
-            str(month_value).strip()
-            for month_value in list(result.get("affected_months") or [month])
-            if str(month_value).strip()
-        ]
-        return WorkbenchWriteResult(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "confirm_link",
-                "month": month,
-                "case_id": case_id,
-                "affected_row_ids": affected_row_ids,
-                "affected_months": affected_months,
-                "affected_scope_keys": affected_months,
-                "amount_check": amount_check,
-                "message": f"已确认 {len(affected_row_ids)} 条记录关联。",
-            },
-        )
-
     @staticmethod
     def _confirm_link_response_payload(result: dict[str, object]) -> dict[str, object]:
         affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
@@ -1259,9 +1127,11 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteFacade._relation_preview_conflict_result(exc)
         conflict_errors = {
             "workbench_relation_active_row_conflict",
+            "workbench_relation_canonical_member_missing",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_multiple_groups_selected",
             "workbench_relation_read_model_not_fresh",
+            "workbench_relation_restore_conflict",
         }
         unavailable_errors = {
             "workbench_relation_command_unavailable",
@@ -1816,6 +1686,7 @@ class WorkbenchWriteFacade:
                 actor_id=actor_id,
                 reason=note,
                 row_id_aliases=row_id_aliases,
+                row_ids=row_ids,
             )
         except WorkbenchRelationCommandError as exc:
             return self._relation_command_error_result(exc)
@@ -1924,121 +1795,6 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         if result is None:
             return None
-        return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_link_response_payload(result))
-
-    def _withdraw_link_with_uow(
-        self,
-        *,
-        payload: dict[str, object],
-        request_id: str | None,
-        actor_id: str | None,
-        tenant_id: str | None,
-        month: str,
-        row_ids: list[str],
-        active_relation: dict[str, object],
-        case_id: str,
-        preview: dict[str, object],
-        note: str,
-        row_id_aliases: dict[str, str] | None = None,
-        operation_projection: dict[str, object] | None = None,
-    ) -> WorkbenchWriteResult:
-        action_name = "withdraw_link"
-        affected_row_ids = list(preview.get("affected_row_ids") or active_relation.get("row_ids") or row_ids)
-        changed_scope_keys = self._withdraw_changed_scope_keys(
-            month=month,
-            active_relation=active_relation,
-            preview=preview,
-            affected_row_ids=affected_row_ids,
-        )
-        command = _WorkbenchWithdrawLinkCommand(
-            action_name=action_name,
-            month=month,
-            row_ids=list(row_ids),
-            case_id=case_id,
-            scope_keys=list(changed_scope_keys),
-            payload=dict(payload),
-            idempotency_key=self._idempotency_key_from_payload(payload),
-            expected_versions=dict(payload.get("expected_versions") or {})
-            if isinstance(payload.get("expected_versions"), dict)
-            else {},
-            tenant_id=_normalize_tenant_id(tenant_id),
-            actor_id=_normalize_actor_id(actor_id),
-        )
-
-        def handler(ctx: object) -> dict[str, object]:
-            transaction = getattr(ctx, "transaction", None)
-            if transaction is None:
-                raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
-            relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
-            if relation_command is None:
-                raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
-            pair_relation_started_at = monotonic()
-            result = self._withdraw_relation_via_command_service(
-                relation_command,
-                payload=payload,
-                case_id=case_id,
-                actor_id=actor_id,
-                reason=note,
-                idempotency_key=None,
-                row_id_aliases=row_id_aliases,
-            )
-            self._emit_timing_if_requested(
-                request_id=request_id,
-                action_name=action_name,
-                phase="pair_relation_update",
-                started_at=pair_relation_started_at,
-                detail=f"case_id={case_id}",
-            )
-            canonical_affected_row_ids = self._canonicalize_withdraw_row_ids(
-                list(result.get("affected_row_ids") or affected_row_ids),
-                selected_row_ids=row_ids,
-                month=month,
-                alias_map=row_id_aliases,
-            )
-            canonical_restored_relations = self._canonicalize_withdraw_relations(
-                list(result.get("restored_relations") or []),
-                selected_row_ids=row_ids,
-                month=month,
-                alias_map=row_id_aliases,
-            )
-            canonical_restored_relations = self._withdraw_restored_relations_excluding_active(
-                canonical_restored_relations,
-                active_relation=self._canonical_withdraw_active_relation(
-                    preview=preview,
-                    active_relation=active_relation,
-                    alias_map=row_id_aliases or {},
-                ),
-            )
-            return {
-                "success": True,
-                "operation": action_name,
-                "action": action_name,
-                "month": month,
-                "case_id": case_id,
-                "changed_scopes": list(result.get("affected_months") or changed_scope_keys),
-                "affected_months": list(result.get("affected_months") or changed_scope_keys),
-                "affected_scope_keys": list(result.get("affected_months") or changed_scope_keys),
-                "affected_row_ids": canonical_affected_row_ids,
-                "restored_relations": canonical_restored_relations,
-                "operation_projection": dict(operation_projection or {}),
-                "message": "已撤回 1 组关联。",
-            }
-
-        try:
-            result = self._withdraw_link_uow.run(command, handler)
-        except WorkbenchIdempotencyKeyConflict as exc:
-            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except WorkbenchIdempotencyInProgress as exc:
-            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except WorkbenchIdempotencyFailed as exc:
-            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
-        except WorkbenchWriteConflict as exc:
-            conflict_payload = exc.to_response_payload()
-            return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
-        except WorkbenchRelationCommandError as exc:
-            return self._relation_command_error_result(exc)
-        except Exception:
-            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_link_response_payload(result))
 
     def _withdraw_link_with_uow_from_row_ids(
@@ -2244,7 +2000,7 @@ class WorkbenchWriteFacade:
             withdraw_relation(
                 case_id=case_id,
                 actor_id=_normalize_actor_id(actor_id),
-                row_ids=list(row_ids or []),
+                row_ids=None if row_ids is None else list(row_ids),
                 reason=reason,
                 idempotency_key=resolved_idempotency_key,
                 history_operation_type="withdraw_link",
@@ -3355,30 +3111,36 @@ class WorkbenchWriteFacade:
                 rows_by_type[row_type].append(row)
         return rows_by_type
 
-    def _row_types_from_rows(
-        self,
+    @staticmethod
+    def _canonical_row_types(
         row_ids: list[str],
         rows: list[dict[str, object]],
-        *,
-        month: str,
     ) -> list[str]:
-        rows_by_id = {str(row.get("id") or ""): row for row in rows}
-        row_types = [str(rows_by_id.get(row_id, {}).get("type") or "unknown") for row_id in row_ids]
-        if "unknown" not in row_types:
-            return row_types
-        fallback_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        return [fallback_types[index] if row_type == "unknown" and index < len(fallback_types) else row_type for index, row_type in enumerate(row_types)]
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for row in rows:
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            if row_id:
+                rows_by_id[row_id] = row
+        row_types: list[str] = []
+        for row_id in row_ids:
+            row = rows_by_id.get(row_id)
+            if row is None:
+                raise KeyError(row_id)
+            row_type = str(row.get("type") or "").strip()
+            if row_type not in {"oa", "bank", "invoice"}:
+                raise ValueError(f"unsupported canonical row type for confirm link: {row_type or '<empty>'}.")
+            row_types.append(row_type)
+        return row_types
 
-    @staticmethod
-    def _can_confirm_link_resolved_selection(
-        *,
-        row_types: list[str],
-        amount_check: dict[str, object],
-    ) -> bool:
-        known_types = {str(row_type).strip() for row_type in row_types if str(row_type).strip() and row_type != "unknown"}
-        if len(known_types) >= 2:
-            return True
-        return known_types == {"bank"} and str(amount_check.get("status") or "") == "matched" and not amount_check.get("requires_note")
+    @classmethod
+    def _canonical_confirm_link_row_types(
+        cls,
+        row_ids: list[str],
+        rows: list[dict[str, object]],
+    ) -> list[str]:
+        if len(row_ids) < 2:
+            raise ValueError("confirm link requires at least two distinct canonical rows.")
+        return cls._canonical_row_types(row_ids, rows)
 
     def _personal_advance_repayment_amount_summary(self, rows: list[dict[str, object]]) -> dict[str, str]:
         oa_total = Decimal("0.00")

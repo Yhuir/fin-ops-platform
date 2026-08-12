@@ -62,6 +62,8 @@ type WorkbenchZoneProps = {
   onTertiarySelectionAction?: () => void;
   primarySelectionActionPending?: boolean;
   primarySelectionActionPendingLabel?: string;
+  secondarySelectionActionPending?: boolean;
+  secondarySelectionActionPendingLabel?: string;
   primarySelectionActionDisabled?: boolean;
   secondarySelectionActionDisabled?: boolean;
   tertiarySelectionActionDisabled?: boolean;
@@ -129,6 +131,8 @@ function WorkbenchZone({
   onTertiarySelectionAction,
   primarySelectionActionPending = false,
   primarySelectionActionPendingLabel,
+  secondarySelectionActionPending = false,
+  secondarySelectionActionPendingLabel,
   primarySelectionActionDisabled,
   secondarySelectionActionDisabled,
   tertiarySelectionActionDisabled,
@@ -170,6 +174,7 @@ function WorkbenchZone({
     && onRequestNextPage,
   );
   const primarySelectionActionBusyLabel = primarySelectionActionPendingLabel ?? primarySelectionActionLabel;
+  const secondarySelectionActionBusyLabel = secondarySelectionActionPendingLabel ?? secondarySelectionActionLabel;
 
   return (
     <section
@@ -271,13 +276,22 @@ function WorkbenchZone({
                 </Button>
                 {secondarySelectionActionLabel ? (
                   <Button
+                    aria-label={secondarySelectionActionPending ? secondarySelectionActionBusyLabel : undefined}
                     className="zone-selection-btn warning"
                     isDisabled={secondarySelectionActionDisabled}
+                    isPending={secondarySelectionActionPending}
                     onPress={onSecondarySelectionAction}
                     size="sm"
                     variant="tertiary"
                   >
-                    {secondarySelectionActionLabel}
+                    {secondarySelectionActionPending ? (
+                      <>
+                        <span aria-label={secondarySelectionActionBusyLabel} role="status">
+                          <Spinner aria-hidden="true" color="current" size="sm" />
+                        </span>
+                        {secondarySelectionActionBusyLabel}
+                      </>
+                    ) : secondarySelectionActionLabel}
                   </Button>
                 ) : null}
                 {tertiarySelectionActionLabel ? (

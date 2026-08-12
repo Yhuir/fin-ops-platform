@@ -74,10 +74,16 @@ class WorkbenchActionApiRoutes:
             }
         return HTTPStatus.OK, preview
 
-    def exception_apply(self, payload: dict[str, Any], *, request_id: str | None = None) -> Any:
+    def exception_apply(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        request_id: str | None = None,
+    ) -> Any:
         return self._write_facade_provider().apply_exception(
             payload,
-            actor=str(payload.get("actor") or payload.get("confirmed_by") or "system"),
+            actor=actor_id,
             request_id=request_id,
             action_name="exception_apply",
         )

@@ -275,6 +275,8 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.service.example`
 - `deploy/oa/systemd/finops-prune-runtime-queue-history.timer.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
 
@@ -296,8 +298,15 @@ systemd 模板位于：
 
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
-发布激活会安装一个版本化 retention timer 和一个 OA sync enqueue timer：
+发布激活会安装两个版本化 retention timers 和一个 OA sync enqueue timer：
 
+- `finops-prune-workbench-generations.timer`：清理 `superseded|failed` Workbench generations，
+  `active|building` 不进入候选。每轮最多选择 500 个候选，按 scope 分组后默认逐 generation 独立事务删除；
+  当前策略为 `keep_recent=1`、`keep_days=0`、`limit=500`、delete batch `1`、statement timeout
+  `60` 秒。helper 从 root-owned `/etc/fin-ops/fin-ops.common.env` 读取对应
+  `FINOPS_WORKBENCH_PRUNE_*` 参数；缺失时使用上述内置默认。发布只安装 helper/unit/timer，不自动合并已有
+  common env，调参必须由 operator 显式更新该文件。删除 SQL 只由版本化 Python repository 执行；helper
+  另做只读 PostgreSQL、磁盘和 health 诊断。删除前 repository 锁定并复核 default tenant、scope 与终态。
 - `finops-prune-runtime-queue-history.timer`：清理 `job.outbox_events` /
   `job.read_model_dirty_scopes` 的完成态历史。默认 `keep_days=30`、
   `keep_recent_per_type=512`、`limit=20000`，只删除 `status='done'`，并为每个 exact

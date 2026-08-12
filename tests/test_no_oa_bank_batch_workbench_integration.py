@@ -83,11 +83,6 @@ class PairSnapshotRelationFacade:
         }
 
 
-class FailingConfirmLinkUow:
-    def run(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-        raise AssertionError("internal transfer confirm-link must be submitted through no-OA, not workbench UoW")
-
-
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
     def _enable_no_oa_tags(self, app: object, tag_codes: list[str]) -> None:
         selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
@@ -188,48 +183,45 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_confirm_internal_transfer_bank_rows_submits_no_oa_batch(self) -> None:
+    def _post_confirm_link_preview(self, app: object, row_ids: list[str]):
+        read_model_version = install_fresh_workbench_write_gate(app)
+        return app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            body=json.dumps(
+                {
+                    "month": "2026-02",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-WORKBENCH-INTERNAL-TRANSFER",
+                    "expected_read_model_version": read_model_version,
+                }
+            ),
+        )
+
+    def test_workbench_confirm_internal_transfer_bank_rows_uses_manual_relation_chain(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
             category_codes=["internal_transfer", "internal_transfer"]
         )
-        app._workbench_confirm_link_uow_override = FailingConfirmLinkUow()
 
+        preview = self._post_confirm_link_preview(app, row_ids)
         response = self._post_confirm_link(app, row_ids)
 
+        self.assertEqual(preview.status_code, 200, preview.body)
+        preview_payload = json.loads(preview.body)
+        self.assertEqual(preview_payload["operation"], "confirm_link")
+        self.assertTrue(preview_payload["can_submit"])
         self.assertEqual(response.status_code, 200, response.body)
         relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
         self.assertIsNotNone(relation)
         assert relation is not None
-        self.assertEqual(relation["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(relation["relation_mode"], "manual_confirmed")
         self.assertCountEqual(relation["row_ids"], row_ids)
+        history = app._workbench_pair_relation_service.snapshot()["pair_relation_history"]
+        self.assertEqual(history[-1]["operation_type"], "confirm_link")
 
         app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
-        app._no_oa_bank_batch_application_service().refresh_batches()
         submitted = app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
-        internal_transfer_batches = [
-            batch for batch in submitted
-            if batch["batch_type"] == "internal_transfer"
-            and set(batch["row_ids"]) == set(row_ids)
-        ]
-        self.assertEqual(len(internal_transfer_batches), 1)
-        self.assertEqual(internal_transfer_batches[0]["status"], "submitted")
-
-        unsubmitted = app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
-        self.assertFalse(
-            any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted)
-        )
-
-        payload = build_grouped_workbench_projection(app, "all")
-        paired_group = next(
-            group for group in payload["paired"]["groups"]
-            if group.get("relation_mode") == "no_oa_bank_batch"
-        )
-        self.assertNotIn("display_mode", paired_group)
-        self.assertCountEqual(
-            [row["id"] for row in paired_group["bank_rows"]],
-            row_ids,
-        )
-        self.assertNotIn("collapsed_rows", paired_group)
+        self.assertEqual(submitted, [])
 
     def test_workbench_confirm_non_internal_bank_only_rows_keeps_manual_relation(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
@@ -249,17 +241,28 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         submitted = app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
         self.assertEqual(submitted, [])
 
-    def test_workbench_confirm_mixed_internal_transfer_bank_rows_rejects_no_oa_conflict(self) -> None:
+    def test_workbench_confirm_mixed_internal_transfer_bank_rows_uses_manual_relation_chain(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
             category_codes=["internal_transfer", "fee"]
         )
 
+        preview = self._post_confirm_link_preview(app, row_ids)
         response = self._post_confirm_link(app, row_ids)
 
-        self.assertEqual(response.status_code, 400, response.body)
-        payload = json.loads(response.body)
-        self.assertEqual(payload["error"], "no_oa_bank_batch_selection_internal_transfer_conflict")
-        self.assertEqual(app._workbench_pair_relation_service.list_active_relations(), [])
+        self.assertEqual(preview.status_code, 200, preview.body)
+        self.assertEqual(json.loads(preview.body)["operation"], "confirm_link")
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "manual_confirmed")
+        self.assertCountEqual(relation["row_ids"], row_ids)
+        history = app._workbench_pair_relation_service.snapshot()["pair_relation_history"]
+        self.assertEqual(history[-1]["operation_type"], "confirm_link")
+
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        submitted = app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+        self.assertEqual(submitted, [])
 
     def test_application_service_submits_internal_transfer_rows_from_workbench_via_batch_submit(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
@@ -362,7 +365,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             all(row["invoice_relation"]["code"] == "bank_flow_rule_batch" for row in paired_group["bank_rows"])
         )
 
-    def test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact(self) -> None:
+    def test_workbench_confirm_after_no_oa_submit_previews_withdraw_then_manual_replace(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
             category_codes=["internal_transfer", "internal_transfer"]
         )
@@ -385,15 +388,18 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         original_case_id = submitted_payload["pair_relation"]["case_id"]
 
         app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        preview_response = self._post_confirm_link_preview(app, row_ids)
         confirm_response = self._post_confirm_link(app, row_ids)
 
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        self.assertEqual(json.loads(preview_response.body)["operation"], "withdraw_link")
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         confirm_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirm_payload["case_id"], original_case_id)
+        self.assertEqual(confirm_payload["case_id"], "CASE-WORKBENCH-INTERNAL-TRANSFER")
         active_relations = app._workbench_pair_relation_service.list_active_relations()
         self.assertEqual(len(active_relations), 1)
-        self.assertEqual(active_relations[0]["case_id"], original_case_id)
-        self.assertEqual(active_relations[0]["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(active_relations[0]["case_id"], "CASE-WORKBENCH-INTERNAL-TRANSFER")
+        self.assertEqual(active_relations[0]["relation_mode"], "manual_confirmed")
         self.assertCountEqual(active_relations[0]["row_ids"], row_ids)
 
         application_service.refresh_batches()

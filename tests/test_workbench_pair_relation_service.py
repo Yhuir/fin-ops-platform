@@ -18,6 +18,7 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(relation["status"], "active")
+        self.assertEqual(relation["version"], 1)
         self.assertEqual(service.get_active_relation_by_case_id("CASE-PAIR-001"), relation)
         self.assertEqual(service.get_active_relation_by_row_id("oa-001"), relation)
         self.assertEqual(service.get_active_relation_by_row_id("bk-001"), relation)
@@ -167,6 +168,7 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         self.assertIsNotNone(cancelled)
         assert cancelled is not None
         self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["version"], 2)
         self.assertEqual(cancelled["updated_at"], "2026-04-08T11:00:00+00:00")
         self.assertIsNone(service.get_active_relation_by_case_id("CASE-PAIR-001"))
         self.assertIsNone(service.get_active_relation_by_row_id("oa-001"))
@@ -605,6 +607,50 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         restored = service.get_active_relation_by_row_id("oa-001")
         assert restored is not None
         self.assertEqual(restored["case_id"], "CASE-PARTIAL")
+        self.assertEqual(restored["version"], 2)
+
+    def test_withdraw_restored_relation_version_advances_past_existing_topology_version(self) -> None:
+        previous = {
+            "case_id": "CASE-PARTIAL",
+            "row_ids": ["oa-001", "invoice-001"],
+            "row_types": ["oa", "invoice"],
+            "status": "cancelled",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-04",
+            "version": 4,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active = {
+            "case_id": "CASE-FULL",
+            "row_ids": ["oa-001", "bank-001", "invoice-001"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-04",
+            "version": 7,
+        }
+        service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {"CASE-PARTIAL": previous, "CASE-FULL": active},
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-restore-version",
+                        "operation_type": "confirm_link",
+                        "before_relations": [{**previous, "version": 2, "status": "active"}],
+                        "after_relations": [active],
+                    }
+                ],
+            }
+        )
+
+        restored, _history = service.withdraw_latest_for_active_relation(
+            active,
+            created_by="finance",
+        )
+
+        self.assertEqual(restored[0]["version"], 5)
+        cancelled = service.snapshot()["pair_relations"]["CASE-FULL"]
+        self.assertEqual(cancelled["version"], 8)
 
     def test_withdraw_restores_previous_relations_from_turnover_manual_closure_history(self) -> None:
         service = WorkbenchPairRelationService()

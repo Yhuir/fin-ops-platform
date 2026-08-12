@@ -202,3 +202,32 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
 
     assert missing == ["oa:oa-deleted"]
     assert len(connection.fetch_all_calls) == 3
+
+
+def test_relation_member_lock_includes_case_identity_and_persisted_members_in_stable_order() -> None:
+    class RelationLockConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+            self.fetch_all_calls.append((sql, params))
+            normalized_sql = " ".join(sql.lower().split())
+            if "from app.workbench_pair_relations" in normalized_sql:
+                return [
+                    {
+                        "case_id": "CASE-1",
+                        "row_ids": ["invoice-1", "bank-1"],
+                        "row_types": ["invoice", "bank"],
+                    }
+                ]
+            if "pg_advisory_xact_lock" in normalized_sql:
+                assert params == (
+                    ["bank:bank-1", "case:CASE-1", "invoice:invoice-1"],
+                )
+            return []
+
+    connection = RelationLockConnection()
+    locked = PostgresWorkbenchRelationRepository(connection).acquire_relation_member_locks(
+        [],
+        case_ids=["CASE-1"],
+    )
+
+    assert locked == ["bank:bank-1", "case:CASE-1", "invoice:invoice-1"]
+    assert len(connection.fetch_all_calls) == 2

@@ -412,7 +412,20 @@ scripts/check-read-model-scope-contracts.py \
 不得借用关联台 projection。`workbench` generation worker、repository、rehydrate CLI、prune helper、
 systemd service/timer 与部署安装逻辑均为当前运行时合同。生产可以投递
 `workbench.read_model.refresh`，但必须经 scope gateway/durable queue；generation retention 只能删除
-非 active 且超过保留窗口的版本。
+非 active 且超过保留窗口的版本。版本化 `finops-prune-workbench-generations` helper 通过
+`FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE`（默认 `1`）和
+`FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS`（默认 `60` 秒）分别传递
+`--delete-batch-size` 与 `--statement-timeout-seconds`。CLI 在构造 repository 前把专用 connection 的
+statement timeout 设置为对应毫秒值；repository 最多选择 500 个 `superseded|failed` 终态候选，先按 scope
+分组，再在每个 scope 内按 `1..100` 个 generation 分块并让每块使用独立事务；每批先按 generation id 固定
+顺序锁定元数据并复核 scope、tenant 与终态，再删除子表，`active|building` 不进入清理，后续批失败不会回滚
+已提交批次。`keep_recent_generations_per_scope` 下限仍为
+`1`；当前仅由 timer 驱动，generation 发布成功后的异步清理尚未接入。
+当前完整生产默认策略为 `keep_recent=1`、`keep_days=0`、`limit=500`、delete batch `1` 与 statement
+timeout `60` 秒。helper 在运行时读取 root-owned `/etc/fin-ops/fin-ops.common.env`；缺失参数时使用内置
+fallback。release activation 只安装版本化 helper/service/timer 并 enable timer，不自动合并服务器已有
+common env；调参必须由 operator 显式更新该文件。helper 的 `psql` 只用于前后状态/计数诊断，所有删除 SQL
+仍由 repository 执行。
 
 ### Workbench matching source-version recovery
 

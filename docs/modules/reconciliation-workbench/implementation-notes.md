@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-12 - generation retention 小批事务与专用超时
+
+- 根因：旧 prune 一次 preview 最多 500 个跨 scope generation，并在一个事务内依次删除六张子表；生产默认 10 秒 statement timeout 在 `workbench_group_rows` 删除处中止，导致整批回滚，历史 generation 持续堆积。
+- 修复：候选上限固定为 500 且只接受 `superseded|failed` 终态，先按 scope 隔离，再以默认 1、最大 100 个 generation 的小批次独立事务删除。每批按 generation id 固定顺序锁定元数据并复核 default tenant、scope 与终态，再删除子表；`active|building` 不进入清理，后续批失败不会回滚已提交批次，`deleted_count` 使用真实元数据删除数。
+- 运维合同：CLI 新增 `--delete-batch-size` 和正整数 `--statement-timeout-seconds`，默认 1 / 60 秒；版本化 helper 通过对应 `FINOPS_WORKBENCH_PRUNE_*` 环境变量传递并记录非敏感策略。当前仍由 daily timer 驱动；`keep_recent=0` 与发布成功后的异步清理留给后续变更。
+- 测试覆盖：repository scope/chunk/事务边界、并发 active 复核、部分失败、候选与 batch 上限、dry-run/空候选，CLI timeout 应用顺序/参数校验及 helper 默认值/透传。未连接真实 PostgreSQL，也未执行 helper、部署或生产清理。
+
 ## 2026-08-11 - 自动匹配旧快照重建已删除 OA 关系闭环
 
 - 真实根因：自动匹配先在 relation UoW 外读取 canonical batch，再进入写事务；如果 OA 权威快照恰好在两步之间删除 OA 并清理旧关系，旧 matching plan 仍可创建新的 `CASE-AUTO-*`，因此首次修复后会在后续 worker 周期复发。
@@ -424,7 +431,7 @@
 
 - 目标：补齐生产根分区 99% 且当天 superseded generation 堆积时的受控清理入口，避免 Workbench refresh 因磁盘不足持续失败。
 - 影响范围：`PostgresReadModelRepository.preview_workbench_generation_retention(...)`、`fin_ops_platform.tools.prune_workbench_generations` 和 runtime worker 运维文档。
-- 关键决策：默认 retention 保留每个 scope 最近 1 个非 active generation，其余当天 superseded/failed generation 也允许删除。repository 删除仍限定 `status <> 'active'`，不触碰 `app.*`、`job.*` 或业务事实表。
+- 关键决策：默认 retention 保留每个 scope 最近 1 个非 active generation，其余当天 superseded/failed generation 也允许删除。当时 repository 以 `status <> 'active'` 作为删除保护；2026-08-12 已进一步收紧为只接受 `superseded|failed` 终态，不触碰 `active|building`、`app.*`、`job.*` 或业务事实表。
 - 文档影响：更新 `docs/operations/runtime-worker-governance.md`，记录 `--keep-days 0` 是默认策略，并修正 `workbench_generation_stats` 表名。
 - 测试覆盖：新增 CLI 显式 `--keep-days 0` 合同测试和 repository preview 参数传递测试。
 - 验证命令：见本轮最终说明。

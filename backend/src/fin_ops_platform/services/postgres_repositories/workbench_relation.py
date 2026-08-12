@@ -291,6 +291,7 @@ class PostgresWorkbenchRelationRepository:
         normalized_row_types = text_list(row_types)
         normalized_case_ids = text_list(case_ids)
         member_keys: set[str] = set()
+        member_keys.update(f"case:{case_id}" for case_id in normalized_case_ids)
         for index, row_id in enumerate(normalized_row_ids):
             row_type = (
                 normalized_row_types[index]

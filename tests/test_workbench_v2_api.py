@@ -1034,7 +1034,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(cancel_payload["action"], "cancel_exception")
         self.assertEqual(cancel_payload["affected_row_ids"], [bank_row_id])
 
-    def test_confirm_link_rebuilds_live_cache_once_for_multiple_live_rows(self) -> None:
+    def test_confirm_link_accepts_unbalanced_same_type_rows_and_rebuilds_live_cache_once(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -1059,8 +1059,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "trade_time": "2026-03-10 09:05:00",
                     "pay_receive_time": "2026-03-10 09:05:00",
                     "counterparty_name": "测试对方B",
-                    "debit_amount": "",
-                    "credit_amount": "100.00",
+                    "debit_amount": "250.00",
+                    "credit_amount": "",
                     "summary": "测试流水B",
                 },
             ],
@@ -1082,6 +1082,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             )
 
         self.assertEqual(confirm_response.status_code, 200)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirm_payload["action"], "confirm_link")
+        self.assertCountEqual(confirm_payload["affected_row_ids"], row_ids)
         get_rows_detail.assert_called_once_with(row_ids)
 
     def test_confirm_link_resolves_underlying_live_row_services_without_group_payload_dependency(self) -> None:

@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: verifying
 stopped_at: Completed 40-08-PLAN.md
-last_updated: "2026-08-06T10:32:49.882Z"
-last_activity: 2026-08-06 -- Completed 40-08 capacity, browser p99 and production release closure
+last_updated: "2026-08-12T12:50:38Z"
+last_activity: 2026-08-12 -- Completed scoped Workbench generation retention timeout and batching fix
 progress:
   total_phases: 38
   completed_phases: 12
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 40 (performance-contract-hot-path-closure) — COMPLETE
 Plan: 8 of 8
 Status: Phase complete — ready for verification
-Last activity: 2026-08-06 -- Completed 40-08 capacity, browser p99 and production release closure
+Last activity: 2026-08-12 -- Completed scoped Workbench generation retention timeout and batching fix
 
 Progress: [██████████] 8/8 plans complete
 
@@ -295,6 +295,7 @@ None yet.
 | 260729-nh8 | 关联台跨月 canonical row 预览去重并保留真实冲突阻断 | 2026-07-29 | bf429ea3e | [260729-nh8](./quick/260729-nh8-canonical-row-fail-closed/) |
 | 260729-ohq | ETC 已提交批次四张缺失成员修复、Workbench/Search 收敛与生产验证 | 2026-07-29 | 0bbeb2d4b | [260729-ohq](./quick/260729-ohq-repair-submitted-etc-batch-etc-20260720-/) |
 | 260803-2x7 | 关联台非一一对应栏位完整高度与严格一一对应 | 2026-08-03 | 12097b67f | [260803-2x7](./quick/260803-2x7-workbench-pane-equal-height/) |
+| 260812-roj | Workbench generation 按 scope/小批次独立事务清理与专用超时 | 2026-08-12 | — | [260812-roj](./quick/260812-roj-workbench-generation-scope-generation-st/) |
 
 ## Deferred Items
 

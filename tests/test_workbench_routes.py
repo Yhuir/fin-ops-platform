@@ -414,7 +414,10 @@ class WorkbenchActionGenerationGateTests(unittest.TestCase):
     def test_every_workbench_preview_and_write_handler_stops_at_generation_gate(self) -> None:
         handler_cases = {
             "_handle_api_workbench_exception_preview": {},
-            "_handle_api_workbench_exception_apply": {"request_id": "req-1"},
+            "_handle_api_workbench_exception_apply": {
+                "request_id": "req-1",
+                "headers": {},
+            },
             "_handle_api_workbench_confirm_link": {"request_id": "req-1", "headers": {}},
             "_handle_api_workbench_confirm_link_preview": {},
             "_handle_api_workbench_mark_exception": {},

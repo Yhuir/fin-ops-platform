@@ -109,6 +109,8 @@ python -m fin_ops_platform.app.worker \
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.service.example`
 - `deploy/oa/systemd/finops-enqueue-oa-sync.timer.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.service.example`
+- `deploy/oa/systemd/finops-prune-workbench-generations.timer.example`
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
 - `deploy/oa/env/fin-ops.postgres-migrator.env.example`

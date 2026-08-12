@@ -1045,7 +1045,7 @@ def _workbench_withdraw_action(
         require_fresh_relations=False,
     )
     preview = command_service.preview_withdraw_relation(
-        row_ids=[bank_rows[0]],
+        row_ids=row_ids,
         month_scope=_text(relation.get("month_scope")) or "all",
     )
     if preview.get("can_submit") is not True or list(preview.get("after_relations") or []):

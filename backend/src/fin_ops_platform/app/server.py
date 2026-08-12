@@ -1860,7 +1860,12 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/exception/preview":
             return self._handle_api_workbench_exception_preview(body)
         if method == "POST" and route_path == "/api/workbench/exception/apply":
-            return self._handle_api_workbench_exception_apply(body, request_id=request_id)
+            return self._handle_api_workbench_exception_apply(
+                body,
+                request_id=request_id,
+                headers=headers,
+                access_session=access_session,
+            )
         if method == "POST" and route_path in {
             "/api/workbench/exceptions/amount-mismatch/ignore",
             "/api/workbench/exceptions/amount-mismatch/restore",
@@ -2563,8 +2568,6 @@ class Application:
             next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
             relation_preview_selection=self._workbench_query_facade().relation_preview_selection,
-            resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
-            can_confirm_link_row_types=self._can_confirm_link_row_types,
             expand_confirm_link_row_ids_for_existing_context=self._expand_confirm_link_row_ids_for_existing_context,
             resolve_rows_for_amount_check=self._resolve_rows_for_amount_check,
             merge_relation_snapshots=self._merge_relation_snapshots,
@@ -2593,9 +2596,6 @@ class Application:
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
             bank_flow_rule_tag_rules_payload=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
-            submit_internal_transfer_rows_from_workbench=lambda **kwargs: (
-                self._no_oa_bank_batch_application_service().submit_internal_transfer_rows_from_workbench(**kwargs)
-            ),
             relation_command_service_factory=lambda repository=None: self._workbench_relation_command_service(
                 repository=repository,
             ),
@@ -6754,6 +6754,8 @@ class Application:
         body: str | None,
         *,
         request_id: str | None = None,
+        headers: dict[str, str] | None = None,
+        access_session: OARequestSession | None = None,
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6761,7 +6763,15 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard(payload)
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_action_api_routes.exception_apply(payload, request_id=request_id)
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, _tenant_id = auth_context
+        result = self._workbench_action_api_routes.exception_apply(
+            payload,
+            actor_id=actor_id,
+            request_id=request_id,
+        )
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
@@ -9719,47 +9729,6 @@ class Application:
     def _plain_money(value: Decimal) -> str:
         return f"{value.quantize(Decimal('0.01')):.2f}"
 
-    def _can_confirm_link_row_types(self, *, row_ids: list[str], row_types: list[str], month: str) -> bool:
-        known_types = {row_type for row_type in row_types if row_type != "unknown"}
-        if len(known_types) >= 2:
-            return True
-        if known_types == {"bank"}:
-            return self._is_balanced_bank_only_selection(row_ids=row_ids, month=month)
-        return False
-
-    def _resolved_row_types_for_row_ids(self, row_ids: list[str], *, month: str) -> list[str]:
-        fallback_types = self._row_types_for_row_ids(row_ids)
-        if "unknown" not in fallback_types:
-            return fallback_types
-        rows = self._resolve_rows_for_amount_check(row_ids, month=month)
-        rows_by_id = {str(row.get("id", "")): row for row in rows}
-        resolved_types: list[str] = []
-        for index, row_id in enumerate(row_ids):
-            row_type = str(rows_by_id.get(row_id, {}).get("type") or fallback_types[index])
-            resolved_types.append(row_type if row_type else "unknown")
-        return resolved_types
-
-    def _is_balanced_bank_only_selection(self, *, row_ids: list[str], month: str) -> bool:
-        if len(row_ids) < 2:
-            return False
-        rows = self._resolve_rows_for_amount_check(row_ids, month=month)
-        debit_total = Decimal("0.00")
-        credit_total = Decimal("0.00")
-        has_debit = False
-        has_credit = False
-        for row in rows:
-            if str(row.get("type", "")) != "bank":
-                return False
-            debit = self._decimal_from_value(row.get("debit_amount"))
-            credit = self._decimal_from_value(row.get("credit_amount"))
-            if debit is not None and debit > 0:
-                debit_total += debit
-                has_debit = True
-            if credit is not None and credit > 0:
-                credit_total += credit
-                has_credit = True
-        return has_debit and has_credit and debit_total == credit_total
-
     def _withdraw_rows_and_after_relations(
         self,
         *,
@@ -9967,9 +9936,6 @@ class Application:
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
         return row_type_for_workbench_row_id(row_id)
-
-    def _row_types_for_row_ids(self, row_ids: list[str]) -> list[str]:
-        return [self._row_type_for_row_id(row_id) for row_id in row_ids]
 
     def _month_scope_for_selected_row_ids(self, *, month: str, row_ids: list[str]) -> str:
         if month != "all":

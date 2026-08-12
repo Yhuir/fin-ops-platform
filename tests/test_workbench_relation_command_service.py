@@ -629,7 +629,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
 
         preview = service.preview_withdraw_relation(
-            row_ids=["invoice-1"],
+            row_ids=["oa-1", "bank-1", "invoice-1"],
             month_scope="2026-05",
         )
 
@@ -641,6 +641,81 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(preview["submit_expected_versions"], {"relation:case-new": 2})
         self.assertEqual(facade.calls[0]["row_ids"], ["oa-1", "bank-1", "invoice-1"])
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
+        self.assertEqual(repository.save_calls, [])
+
+    def test_preview_withdraw_relation_requires_exact_active_member_set(self) -> None:
+        active_relation = {
+            "case_id": "case-exact",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        service = WorkbenchRelationCommandService(
+            relation_repository=FakeRelationRepository(
+                {"pair_relations": {"case-exact": active_relation}}
+            )
+        )
+
+        for selected in (["bank-1"], ["bank-1", "invoice-1", "bank-extra"]):
+            with self.subTest(selected=selected):
+                with self.assertRaises(WorkbenchRelationCommandError) as context:
+                    service.preview_withdraw_relation(row_ids=list(selected), month_scope="2026-05")
+                self.assertEqual(
+                    context.exception.error_code,
+                    "workbench_relation_exact_selection_required",
+                )
+
+    def test_withdraw_relation_case_and_explicit_rows_must_identify_same_exact_relation(self) -> None:
+        active_relation = {
+            "case_id": "case-exact",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {"pair_relations": {"case-exact": active_relation}}
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(
+                case_id="case-exact",
+                row_ids=["bank-1"],
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_exact_selection_required")
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_explicit_empty_rows_does_not_become_case_only_request(self) -> None:
+        active_relation = {
+            "case_id": "case-exact",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {"pair_relations": {"case-exact": active_relation}}
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(
+                case_id="case-exact",
+                row_ids=[],
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_exact_selection_required")
         self.assertEqual(repository.save_calls, [])
 
     def test_preview_withdraw_relation_blocks_plain_oa_attachment_binding(self) -> None:
@@ -745,7 +820,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
 
         preview = service.preview_withdraw_relation(
-            row_ids=["invoice-1"],
+            row_ids=["bank-1", "invoice-1"],
             month_scope="2026-05",
         )
         result = service.withdraw_relation(
@@ -830,13 +905,78 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "withdrawn")
-        self.assertEqual(repository.scoped_load_calls, [{"row_ids": [], "case_ids": ["case-new"]}])
+        self.assertEqual(
+            repository.scoped_load_calls,
+            [
+                {"row_ids": [], "case_ids": ["case-new"]},
+                {"row_ids": ["bank-1", "bank-2"], "case_ids": ["case-new"]},
+            ],
+        )
         self.assertEqual(
             repository.lock_calls,
-            [{"row_ids": [], "row_types": [], "case_ids": ["case-new"]}],
+            [
+                {
+                    "row_ids": ["bank-1", "bank-2"],
+                    "row_types": ["bank", "bank"],
+                    "case_ids": ["case-new"],
+                },
+            ],
         )
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
+
+    def test_prepared_withdraw_locks_active_and_restored_topology_in_one_call(self) -> None:
+        previous_relation = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "cancelled",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case-old": previous_relation,
+                    "case-new": active_relation,
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-confirm-new",
+                        "operation_type": "confirm_link",
+                        "before_relations": [previous_relation],
+                        "after_relations": [active_relation],
+                        "created_at": "2026-05-02T10:00:00+00:00",
+                    }
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        preparation = service.prepare_withdraw_relation(case_id="case-new")
+
+        self.assertEqual(preparation.before_relation["case_id"], "case-new")
+        self.assertEqual(
+            repository.lock_calls,
+            [
+                {
+                    "row_ids": ["bank-1", "invoice-1"],
+                    "row_types": ["bank", "invoice"],
+                    "case_ids": ["case-new", "case-old"],
+                }
+            ],
+        )
 
     def test_prepared_withdraw_rejects_a_different_case(self) -> None:
         active_relation = {
@@ -938,6 +1078,283 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(context.exception.error_code, "workbench_relation_preview_conflict")
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_preview_fingerprint_changes_with_topology_and_history_identity(self) -> None:
+        relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "version": 2,
+        }
+        previous = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "cancelled",
+            "version": 3,
+        }
+
+        base = WorkbenchRelationCommandService._withdraw_preview_id(
+            operation_type="withdraw_relation",
+            active_relation=relation,
+            after_relations=[previous],
+            confirm_history={
+                "operation_id": "hist-1",
+                "operation_type": "confirm_link",
+                "created_at": "2026-05-01T10:00:00+00:00",
+            },
+        )
+        changed_version = WorkbenchRelationCommandService._withdraw_preview_id(
+            operation_type="withdraw_relation",
+            active_relation={**relation, "version": 3},
+            after_relations=[previous],
+            confirm_history={
+                "operation_id": "hist-1",
+                "operation_type": "confirm_link",
+                "created_at": "2026-05-01T10:00:00+00:00",
+            },
+        )
+        changed_history = WorkbenchRelationCommandService._withdraw_preview_id(
+            operation_type="withdraw_relation",
+            active_relation=relation,
+            after_relations=[previous],
+            confirm_history={
+                "operation_id": "hist-2",
+                "operation_type": "confirm_link",
+                "created_at": "2026-05-01T10:00:00+00:00",
+            },
+        )
+        changed_after_members = WorkbenchRelationCommandService._withdraw_preview_id(
+            operation_type="withdraw_relation",
+            active_relation=relation,
+            after_relations=[
+                {
+                    **previous,
+                    "row_ids": ["bank-1", "invoice-1"],
+                    "row_types": ["bank", "invoice"],
+                }
+            ],
+            confirm_history={
+                "operation_id": "hist-1",
+                "operation_type": "confirm_link",
+                "created_at": "2026-05-01T10:00:00+00:00",
+            },
+        )
+
+        self.assertEqual(len({base, changed_version, changed_history, changed_after_members}), 4)
+
+    def test_withdraw_relation_replays_same_idempotency_key_without_second_save(self) -> None:
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-new": active_relation}})
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        first = service.withdraw_relation(
+            case_id="case-new",
+            actor_id="finance-user",
+            idempotency_key="withdraw-1",
+        )
+        second = service.withdraw_relation(
+            case_id="case-new",
+            actor_id="finance-user",
+            idempotency_key="withdraw-1",
+        )
+
+        self.assertEqual(first["relation"], second["relation"])
+        self.assertTrue(second["idempotent_replay"])
+        self.assertEqual(len(repository.save_calls), 1)
+
+    def test_withdraw_relation_rejects_missing_canonical_restored_member(self) -> None:
+        previous_relation = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "cancelled",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {"case-old": previous_relation, "case-new": active_relation},
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-1",
+                        "operation_type": "confirm_link",
+                        "before_relations": [previous_relation],
+                        "after_relations": [active_relation],
+                    }
+                ],
+            }
+        )
+        repository.missing_canonical_member_keys = ["bank:bank-1"]
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(case_id="case-new", actor_id="finance-user")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_canonical_member_missing")
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_rejects_reused_predecessor_case(self) -> None:
+        previous_relation = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 5,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {"case-old": previous_relation, "case-new": active_relation},
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-1",
+                        "operation_type": "confirm_link",
+                        "before_relations": [{**previous_relation, "status": "cancelled", "version": 1}],
+                        "after_relations": [active_relation],
+                    }
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(case_id="case-new", actor_id="finance-user")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_restore_conflict")
+        self.assertIn("case_reused", str(context.exception.payload.get("reason")))
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_rejects_cancelled_predecessor_case_reused_for_other_members(self) -> None:
+        previous_snapshot = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "cancelled",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case-old": {**previous_snapshot, "row_ids": ["bank-other"], "version": 4},
+                    "case-new": active_relation,
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-1",
+                        "operation_type": "confirm_link",
+                        "before_relations": [previous_snapshot],
+                        "after_relations": [active_relation],
+                    }
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(case_id="case-new", actor_id="finance-user")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_restore_conflict")
+        self.assertIn("case_reused", str(context.exception.payload.get("reason")))
+        self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_rejects_restored_member_owned_by_another_active_case(self) -> None:
+        previous_relation = {
+            "case_id": "case-old",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "status": "cancelled",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        conflicting_relation = {
+            "case_id": "case-conflict",
+            "row_ids": ["bank-1", "invoice-2"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 3,
+        }
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case-old": previous_relation,
+                    "case-new": active_relation,
+                    "case-conflict": conflicting_relation,
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-1",
+                        "operation_type": "confirm_link",
+                        "before_relations": [previous_relation],
+                        "after_relations": [active_relation],
+                    }
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(case_id="case-new", actor_id="finance-user")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_restore_conflict")
+        self.assertIn("owner_conflict", str(context.exception.payload.get("reason")))
         self.assertEqual(repository.save_calls, [])
 
     def test_confirm_relation_saves_changed_case_and_audit_history(self) -> None:

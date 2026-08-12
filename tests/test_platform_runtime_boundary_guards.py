@@ -1718,15 +1718,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def exception_apply",
             "write_facade_provider",
             "apply_exception",
-            "confirmed_by",
+            "actor_id",
             "exception_apply",
         ):
             if marker not in route_class:
                 violations.append(f"exception apply route owner is missing marker {marker}")
 
         handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_exception_apply")
-        if "_workbench_action_api_routes.exception_apply(payload, request_id=request_id)" not in handler_source:
+        if "_workbench_action_api_routes.exception_apply(" not in handler_source:
             violations.append("server.py exception apply wrapper does not delegate to the route owner")
+        if "actor_id=actor_id" not in handler_source:
+            violations.append("server.py exception apply wrapper does not inject the authenticated actor")
+        if "_workbench_write_auth_context(headers, session=access_session)" not in handler_source:
+            violations.append("server.py exception apply wrapper does not enforce the authenticated write boundary")
         if "_workbench_write_freshness_guard(payload)" not in handler_source:
             violations.append("server.py exception apply wrapper no longer preserves the freshness guard")
         if "_workbench_write_response(result)" not in handler_source:
@@ -1734,6 +1738,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for forbidden in (
             "_workbench_write_facade().apply_exception",
             "payload.get(\"confirmed_by\")",
+            "payload.get(\"actor\")",
             "action_name=\"exception_apply\"",
         ):
             if forbidden in handler_source:

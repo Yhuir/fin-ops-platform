@@ -8,12 +8,16 @@ from unittest.mock import patch
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyInProgress
+from fin_ops_platform.services.workbench_idempotency import (
+    InMemoryWorkbenchIdempotencyRepository,
+    WorkbenchIdempotencyInProgress,
+)
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationPreviewGroupingService,
 )
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteFacade,
     WorkbenchWriteRelationReadSnapshotPort,
@@ -125,6 +129,54 @@ class _HandlerCallingUoW:
             },
         )()
         return handler(ctx)
+
+
+class _RecordingTransactionContext:
+    def __init__(self, connection: "_RecordingTransactionConnection") -> None:
+        self._connection = connection
+
+    def __enter__(self) -> object:
+        self._connection.transactions += 1
+        return object()
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        return False
+
+
+class _RecordingTransactionConnection:
+    def __init__(self) -> None:
+        self.transactions = 0
+
+    def transaction(self) -> _RecordingTransactionContext:
+        return _RecordingTransactionContext(self)
+
+
+class _CanonicalConfirmRepositoryFactory:
+    def __init__(self, canonical_rows: dict[str, dict[str, object]]) -> None:
+        self._canonical_rows = canonical_rows
+        self.pair_relations = object()
+
+    def __call__(self, _transaction: object) -> object:
+        canonical_rows = self._canonical_rows
+        canonical_query = type(
+            "CanonicalQuery",
+            (),
+            {
+                "validate_workbench_relation_selection_in_current_transaction": staticmethod(
+                    lambda **_: canonical_rows
+                )
+            },
+        )()
+        return type(
+            "Repositories",
+            (),
+            {
+                "pair_relations": self.pair_relations,
+                "exception_cases": object(),
+                "row_overrides": object(),
+                "canonical_query": canonical_query,
+            },
+        )()
 
 
 class _PairRelationService:
@@ -416,7 +468,6 @@ def _new_facade(
     scope_keys_for_rows: object | None = None,
     resolve_rows_for_amount_check: object | None = None,
     resolve_live_rows_direct: object | None = None,
-    resolved_row_types_for_row_ids: object | None = None,
     pair_relation_service: object | None = None,
     bank_transaction_category_codes_for_row_ids: object | None = None,
     bank_flow_rule_tag_rules_payload: object | None = None,
@@ -425,9 +476,31 @@ def _new_facade(
     amount_check_for_rows_by_type: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
+
+    def default_row_type(row_id: object) -> str:
+        value = str(row_id)
+        if value.startswith("oa"):
+            return "oa"
+        if value.startswith(("invoice", "inv", "etc-summary-")):
+            return "invoice"
+        return "bank"
+
     resolved_amount_rows = resolve_rows_for_amount_check or (
-        lambda row_ids, **_: [{"id": row_id} for row_id in row_ids]
+        lambda row_ids, **_: [{"id": row_id, "type": default_row_type(row_id)} for row_id in row_ids]
     )
+
+    def normalize_row_ids(values: list[object]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            row_id = str(value).strip()
+            if not row_id or row_id in seen:
+                continue
+            seen.add(row_id)
+            normalized.append(row_id)
+        if not normalized:
+            raise ValueError("at least one row_id is required.")
+        return normalized
 
     def default_relation_preview_selection(
         _month: str | None,
@@ -477,12 +550,8 @@ def _new_facade(
         exception_case_service=exception_case_service or object(),
         override_service=override_service or object(),
         next_case_id=lambda: "CASE-NEW",
-        normalize_row_ids=lambda values: [str(value) for value in values],
+        normalize_row_ids=normalize_row_ids,
         relation_preview_selection=relation_preview_selection or default_relation_preview_selection,
-        resolved_row_types_for_row_ids=resolved_row_types_for_row_ids or (
-            lambda row_ids, **_: ["oa" if str(row_id).startswith("oa") else "bank" for row_id in row_ids]
-        ),
-        can_confirm_link_row_types=lambda **_: True,
         expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
         resolve_rows_for_amount_check=resolved_amount_rows,
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
@@ -635,6 +704,188 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
         self.assertEqual(getattr(command, "tenant_id"), "default")
 
+    def test_confirm_link_accepts_two_distinct_canonical_members_of_each_supported_same_type(self) -> None:
+        for row_type in ("oa", "bank", "invoice"):
+            with self.subTest(row_type=row_type):
+                row_ids = [f"{row_type}-1", f"{row_type}-2"]
+                relation_command = _RecordingRelationCommandService()
+                facade = _new_facade(
+                    confirm_uow=_HandlerCallingUoW(),
+                    relation_command_service=relation_command,
+                    resolve_rows_for_amount_check=lambda selected_row_ids, **_: [
+                        {"id": row_id, "type": row_type}
+                        for row_id in selected_row_ids
+                    ],
+                )
+
+                result = facade.confirm_link(
+                    {
+                        "month": "2026-05",
+                        "row_ids": row_ids,
+                        "idempotency_key": f"confirm:same-type:{row_type}",
+                    },
+                    actor_id="oa-user-1",
+                    tenant_id="default",
+                )
+
+                self.assertEqual(result.status_code, HTTPStatus.OK)
+                self.assertEqual(result.payload["action"], "confirm_link")
+                self.assertEqual(relation_command.confirm_calls[0]["row_ids"], row_ids)
+                self.assertEqual(relation_command.confirm_calls[0]["row_types"], [row_type, row_type])
+
+    def test_internal_transfer_confirm_uses_relation_uow_and_idempotent_replay(self) -> None:
+        row_ids = ["bank-internal-transfer", "bank-fee"]
+        canonical_rows = {
+            row_id: {"pane": "bank", "source_kind": "bank_transaction"}
+            for row_id in row_ids
+        }
+        connection = _RecordingTransactionConnection()
+        repository_factory = _CanonicalConfirmRepositoryFactory(canonical_rows)
+        relation_command = _RecordingRelationCommandService()
+        uow = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=repository_factory,
+            idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
+        )
+        facade = _new_facade(
+            confirm_uow=uow,
+            relation_command_service=relation_command,
+            resolve_rows_for_amount_check=lambda selected_row_ids, **_: [
+                {"id": row_id, "type": "bank"}
+                for row_id in selected_row_ids
+            ],
+            bank_transaction_category_codes_for_row_ids=lambda _: {
+                "bank-internal-transfer": "internal_transfer",
+                "bank-fee": "fee",
+            },
+        )
+        payload = {
+            "month": "2026-05",
+            "row_ids": row_ids,
+            "case_id": "CASE-INTERNAL-TRANSFER-MIXED",
+            "idempotency_key": "confirm:internal-transfer:mixed",
+        }
+
+        first = facade.confirm_link(
+            payload,
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+        replay = facade.confirm_link(
+            payload,
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(first.status_code, HTTPStatus.OK)
+        self.assertEqual(replay.status_code, HTTPStatus.OK)
+        self.assertEqual(first.payload, replay.payload)
+        self.assertEqual(connection.transactions, 1)
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["row_ids"], row_ids)
+        self.assertEqual(call["row_types"], ["bank", "bank"])
+        self.assertEqual(call["relation_mode"], "manual_confirmed")
+        self.assertEqual(call["history_operation_type"], "confirm_link")
+        self.assertIsNone(call["idempotency_key"])
+
+    def test_confirm_link_rejects_selection_that_normalizes_to_one_canonical_member(self) -> None:
+        facade = _new_facade(confirm_uow=_RecordingUoW())
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "oa-1"],
+                "idempotency_key": "confirm:duplicate-canonical-member",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(result.payload["error"], "invalid_confirm_link_request")
+        self.assertIn("at least two distinct canonical rows", str(result.payload["message"]))
+
+    def test_confirm_link_rejects_unresolved_or_unsupported_canonical_members(self) -> None:
+        cases = (
+            (
+                "unresolved",
+                lambda _row_ids, **_: [{"id": "oa-1", "type": "oa"}],
+                "workbench_row_not_found",
+            ),
+            (
+                "unsupported",
+                lambda row_ids, **_: [
+                    {"id": row_id, "type": "candidate" if row_id == "candidate-1" else "oa"}
+                    for row_id in row_ids
+                ],
+                "invalid_confirm_link_request",
+            ),
+        )
+        for label, resolver, expected_error in cases:
+            with self.subTest(label=label):
+                facade = _new_facade(
+                    confirm_uow=_RecordingUoW(),
+                    resolve_rows_for_amount_check=resolver,
+                )
+
+                result = facade.confirm_link(
+                    {
+                        "month": "2026-05",
+                        "row_ids": ["oa-1", "candidate-1"],
+                        "idempotency_key": f"confirm:{label}",
+                    },
+                    actor_id="oa-user-1",
+                    tenant_id="default",
+                )
+
+                self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(result.payload["error"], expected_error)
+
+    def test_confirm_link_same_type_amount_mismatch_remains_note_only_gate(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        amount_check = {
+            "status": "mismatch",
+            "requires_note": True,
+            "amount_delta": "50.00",
+        }
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+            resolve_rows_for_amount_check=lambda row_ids, **_: [
+                {"id": row_id, "type": "invoice"}
+                for row_id in row_ids
+            ],
+            amount_check_for_rows_by_type=lambda _: amount_check,
+        )
+
+        blocked = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["invoice-1", "invoice-2"],
+                "idempotency_key": "confirm:mismatch:no-note",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+        confirmed = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["invoice-1", "invoice-2"],
+                "note": "金额差异已人工复核",
+                "idempotency_key": "confirm:mismatch:with-note",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(blocked.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(blocked.payload["error"], "workbench_pair_relation_note_required")
+        self.assertEqual(confirmed.status_code, HTTPStatus.OK)
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        self.assertEqual(relation_command.confirm_calls[0]["note"], "金额差异已人工复核")
+        self.assertEqual(relation_command.confirm_calls[0]["amount_check"], amount_check)
+
     def test_confirm_link_response_omits_retired_downstream_freshness_targets(self) -> None:
         facade = _new_facade(confirm_uow=_RecordingUoW())
 
@@ -713,10 +964,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         facade = _new_facade(
             confirm_uow=_RecordingUoW(),
             relation_groups=relation_groups,
-            resolved_row_types_for_row_ids=lambda row_ids, **_: [
-                "oa" if str(row_id).startswith("oa") else "invoice" if str(row_id).startswith("inv") else "bank"
-                for row_id in row_ids
-            ],
             resolve_rows_for_amount_check=lambda row_ids, **_: [
                 {"id": "oa-1", "type": "oa"},
                 {"id": "bank-1", "type": "bank"},
@@ -1301,6 +1548,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.preview_withdraw_calls[1]["month_scope"], "2026-05")
         self.assertEqual(len(relation_command.withdraw_calls), 1)
         self.assertEqual(relation_command.withdraw_calls[0]["case_id"], "CASE-1")
+        self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], ["oa-1", "bank-1"])
         self.assertEqual(relation_command.withdraw_calls[0]["preview_id"], "withdraw_relation:CASE-1:3")
         self.assertEqual(relation_command.withdraw_calls[0]["operation_type"], "withdraw_relation")
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
@@ -1664,12 +1912,10 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
     def test_personal_advance_repayment_rejects_invoice_canonical_row(self) -> None:
         rows = [*_personal_advance_rows(), {"id": "invoice-advance-1", "type": "invoice", "amount": "1000.00"}]
-        row_types = {str(row["id"]): str(row["type"]) for row in rows}
         facade = _new_facade(
             relation_command_service=_RecordingRelationCommandService(),
             exception_case_service=_RecordingExceptionCaseService(),
             live_rows=rows,
-            resolved_row_types_for_row_ids=lambda row_ids, **_: [row_types[str(row_id)] for row_id in row_ids],
         )
 
         result = facade.confirm_personal_advance_repayment(
@@ -1722,9 +1968,25 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 captured["withdraw"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}
                 return object()
 
+        class ActionRoutes:
+            def exception_apply(
+                self,
+                payload: dict[str, object],
+                *,
+                actor_id: str,
+                request_id: str | None = None,
+            ) -> object:
+                captured["exception_apply"] = {
+                    "actor_id": actor_id,
+                    "request_id": request_id,
+                    "client_actor": payload.get("actor"),
+                }
+                return object()
+
         app._handle_live_workbench_confirm_link = live_confirm
         app._handle_live_workbench_cancel_link = live_cancel
         app._workbench_write_facade = lambda: WithdrawFacade()
+        app._workbench_action_api_routes = ActionRoutes()
         app._workbench_write_response = lambda result: Response(status_code=200, body="{}")
 
         with patch("fin_ops_platform.app.server.resolve_oa_request_session", return_value=session):
@@ -1740,6 +2002,12 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 request_id="req-cancel",
                 headers={"Authorization": "Bearer token"},
             )
+            exception_apply_response = Application._handle_api_workbench_exception_apply(
+                app,
+                "{}",
+                request_id="req-exception-apply",
+                headers={"Authorization": "Bearer token"},
+            )
             withdraw_response = Application._handle_api_workbench_withdraw_link(
                 app,
                 "{}",
@@ -1750,9 +2018,18 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(withdraw_response.status_code, 200)
+        self.assertEqual(exception_apply_response.status_code, 200)
         self.assertEqual(captured["confirm"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-confirm"})
         self.assertEqual(captured["cancel"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-cancel"})
         self.assertEqual(captured["withdraw"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-withdraw"})
+        self.assertEqual(
+            captured["exception_apply"],
+            {
+                "actor_id": "oa-user-1",
+                "request_id": "req-exception-apply",
+                "client_actor": None,
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -248,3 +248,46 @@ def test_action_route_returns_service_contract_without_accepting_client_actor() 
 
     assert status_code == 200
     assert payload == {"status": "ignored", "affected_scope_keys": ["2026-05"]}
+
+
+def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() -> None:
+    captured: dict[str, object] = {}
+
+    class WriteFacade:
+        def apply_exception(
+            self,
+            payload: dict[str, object],
+            *,
+            actor: str,
+            request_id: str | None,
+            action_name: str,
+        ) -> object:
+            captured.update(
+                {
+                    "payload": payload,
+                    "actor": actor,
+                    "request_id": request_id,
+                    "action_name": action_name,
+                }
+            )
+            return object()
+
+    routes = WorkbenchActionApiRoutes(
+        exception_service=object(),  # type: ignore[arg-type]
+        write_facade_provider=WriteFacade,
+    )
+    payload = {"actor": "spoofed-user", "confirmed_by": "spoofed-confirmed-by"}
+
+    result = routes.exception_apply(
+        payload,
+        actor_id="YNSYLP005",
+        request_id="req-exception-apply",
+    )
+
+    assert result is not None
+    assert captured == {
+        "payload": payload,
+        "actor": "YNSYLP005",
+        "request_id": "req-exception-apply",
+        "action_name": "exception_apply",
+    }

@@ -1435,8 +1435,9 @@ export default function ReconciliationWorkbenchPage() {
   );
 
   const selectedOpenRows = openSelectionContext.includedRows;
+  const selectedOpenActionableRows = selectedOpenRows.filter((row) => !row.displayOnly);
+  const selectedOpenActionableRowIds = selectedOpenActionableRows.map((row) => row.id);
   const selectedPairedRows = pairedSelectionContext.includedRows;
-  const explicitOpenRows = openSelectionContext.explicitRows;
   const openSelectionSummary = openSelectionContext.summary;
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
@@ -1455,14 +1456,31 @@ export default function ReconciliationWorkbenchPage() {
     return (zoneId === "unpaired" ? contextualOpenRowIds : contextualPairedRowIds).has(row.id) ? "related" : "idle";
   }, [contextualOpenRowIds, contextualPairedRowIds, getRowState]);
 
-  const canConfirmOpenSelection = openSelectionSummary.bank > 0 && openSelectionSummary.oa + openSelectionSummary.invoice > 0;
-  const canHandleOpenSelectionException = openSelectionSummary.total > 0;
+  const selectedOpenGroupsForUnifiedAction = useMemo(() => {
+    const selectedRowIdSet = new Set(openSelectionContext.includedRowIds);
+    return openSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
+  }, [openSelectionContext.includedRowIds, openSelectionSourceGroups]);
+  const selectedOpenWithdrawableRelationGroups = selectedOpenGroupsForUnifiedAction.filter(
+    (group) => group.rawGroupType === "relation" && group.canWithdraw,
+  );
+  const selectedOpenWithdrawableRelationRows = flattenGroups(selectedOpenWithdrawableRelationGroups)
+    .filter((row) => !row.displayOnly);
+  const selectedOpenWithdrawableRelationRowIdSet = new Set(
+    selectedOpenWithdrawableRelationRows.map((row) => row.id),
+  );
+  const isExactOpenRelationSelection = selectedOpenActionableRowIds.length >= 2
+    && selectedOpenGroupsForUnifiedAction.length === 1
+    && selectedOpenWithdrawableRelationGroups.length === 1
+    && selectedOpenActionableRowIds.length === selectedOpenWithdrawableRelationRowIdSet.size
+    && selectedOpenActionableRowIds.every((rowId) => selectedOpenWithdrawableRelationRowIdSet.has(rowId));
+  const canConfirmOpenSelection = selectedOpenActionableRowIds.length >= 2 && !isExactOpenRelationSelection;
+  const canWithdrawOpenSelection = isExactOpenRelationSelection;
   const selectedPairedGroupsForUnifiedAction = useMemo(() => {
     const selectedRowIdSet = new Set(pairedSelectionContext.includedRowIds);
     return pairedSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
   }, [pairedSelectionContext.includedRowIds, pairedSelectionSourceGroups]);
   const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
-  const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
+  const isOpenWithdrawSelectionDisabled = !canWithdrawOpenSelection;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
   const pairedSelectionActionNotice = pairedSelectionSummary.total > 0 && !workbenchWriteGate.allowed
     ? workbenchWriteGate.message
@@ -1472,7 +1490,8 @@ export default function ReconciliationWorkbenchPage() {
     : !workbenchWriteGate.allowed
       ? workbenchWriteGate.message
       : !canConfirmOpenSelection
-        ? "确认关联至少需要 1 条银行流水，以及 1 条 OA 或发票。"
+        && !canWithdrawOpenSelection
+        ? "确认关联至少需要选择 2 个不同记录。"
         : null;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
@@ -2132,16 +2151,16 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    if (openSelectionSummary.total === 0) {
+    if (selectedOpenActionableRows.length === 0) {
       openActionResultDialog("请先选择待处理记录。");
       return;
     }
     if (!canConfirmOpenSelection) {
-      openActionResultDialog("确认关联至少需要选择 1 条银行流水，并同时选择 OA 或发票。");
+      openActionResultDialog("确认关联至少需要选择 2 个不同记录。");
       return;
     }
     try {
-      await openConfirmPreview(selectedOpenRows);
+      await openConfirmPreview(selectedOpenActionableRows);
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }
@@ -2156,15 +2175,19 @@ export default function ReconciliationWorkbenchPage() {
     setLastActionMessage("已清空当前选择。");
   };
 
-  const handleOpenSelectionException = async () => {
+  const handleWithdrawOpenSelection = async () => {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    if (!canHandleOpenSelectionException) {
-      openActionResultDialog("请先选择待处理记录。");
+    if (!canWithdrawOpenSelection) {
+      openActionResultDialog("请精确选择一个现有正式关系。");
       return;
     }
-    openWorkbenchExceptionDialog(explicitOpenRows);
+    try {
+      await openWithdrawPreview(selectedOpenWithdrawableRelationRows);
+    } catch (error) {
+      openRelationPreviewErrorDialog(error);
+    }
   };
 
   const handleClearPairedSelection = () => {
@@ -2372,8 +2395,12 @@ export default function ReconciliationWorkbenchPage() {
       primarySelectionActionPendingLabel="正在准备确认预览"
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
-      onSecondarySelectionAction={handleOpenSelectionException}
-      secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
+      onSecondarySelectionAction={handleWithdrawOpenSelection}
+      secondarySelectionActionDisabled={
+        isOpenWithdrawSelectionDisabled || !canWriteWorkbench || relationPreviewRequestKind !== null
+      }
+      secondarySelectionActionPending={relationPreviewRequestKind === "withdraw"}
+      secondarySelectionActionPendingLabel="正在准备撤回预览"
       selectionActionNotice={openSelectionActionNotice}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
@@ -2396,7 +2423,7 @@ export default function ReconciliationWorkbenchPage() {
       highlightedRowId={null}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"
-      secondarySelectionActionLabel="异常处理"
+      secondarySelectionActionLabel="撤回关联"
       selectionSummary={openSelectionSummary}
       title={`未配对 ${unpairedZoneItemCount} 项`}
       tone="warning"

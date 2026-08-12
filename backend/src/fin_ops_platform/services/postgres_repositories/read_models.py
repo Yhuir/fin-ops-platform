@@ -6004,7 +6004,7 @@ class PostgresReadModelRepository:
     ) -> dict[str, Any]:
         keep_recent = max(1, int_value(keep_recent_generations_per_scope, 3))
         keep_days_value = max(0, int_value(keep_days, 14))
-        limit_value = min(5000, max(1, int_value(limit, 500)))
+        limit_value = min(500, max(1, int_value(limit, 500)))
         normalized_scope_keys = self._normalize_workbench_retention_scope_keys(scope_keys)
         scope_filter = ""
         params: list[Any] = []
@@ -6038,7 +6038,7 @@ class PostgresReadModelRepository:
                 ) as scope_rank
               from read_model.workbench_generations
               where tenant_id = 'default'
-                and status <> 'active'
+                and status in ('failed', 'superseded')
                 {scope_filter}
             )
             select generation_id, scope_key, status, activated_at::text as activated_at,
@@ -6070,32 +6070,57 @@ class PostgresReadModelRepository:
         keep_days: int = 14,
         limit: int = 500,
         dry_run: bool = True,
+        delete_batch_size: int = 1,
         scope_keys: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
+        normalized_delete_batch_size = min(100, max(1, int_value(delete_batch_size, 1)))
         preview = self.preview_workbench_generation_retention(
             keep_recent_generations_per_scope=keep_recent_generations_per_scope,
             keep_days=keep_days,
             limit=limit,
             scope_keys=scope_keys,
         )
+        generation_ids_by_scope: dict[str, list[str]] = {}
+        for row in preview["generations"]:
+            if not isinstance(row, dict):
+                continue
+            generation_id = text(row.get("generation_id"))
+            scope_key = text(row.get("scope_key"))
+            if generation_id and scope_key:
+                generation_ids_by_scope.setdefault(scope_key, []).append(generation_id)
         generation_ids = [
-            text(row.get("generation_id"))
-            for row in preview["generations"]
-            if isinstance(row, dict) and text(row.get("generation_id"))
+            generation_id
+            for scope_generation_ids in generation_ids_by_scope.values()
+            for generation_id in scope_generation_ids
         ]
         if dry_run or not generation_ids:
             result = dict(preview)
             result["dry_run"] = dry_run
+            result["delete_batch_size"] = normalized_delete_batch_size
             result["deleted_count"] = 0
             return result
 
-        def delete(connection: Any) -> None:
-            self._delete_workbench_generations(connection, generation_ids=generation_ids)
+        deleted_count = 0
+        for scope_key, scope_generation_ids in generation_ids_by_scope.items():
+            for offset in range(0, len(scope_generation_ids), normalized_delete_batch_size):
+                generation_id_chunk = scope_generation_ids[offset : offset + normalized_delete_batch_size]
 
-        run_in_transaction(self._connection, delete)
+                def delete(
+                    connection: Any,
+                    generation_ids: list[str] = generation_id_chunk,
+                    generation_scope_key: str = scope_key,
+                ) -> int:
+                    return self._delete_workbench_generations(
+                        connection,
+                        scope_key=generation_scope_key,
+                        generation_ids=generation_ids,
+                    )
+
+                deleted_count += run_in_transaction(self._connection, delete)
         result = dict(preview)
         result["dry_run"] = False
-        result["deleted_count"] = len(generation_ids)
+        result["delete_batch_size"] = normalized_delete_batch_size
+        result["deleted_count"] = deleted_count
         return result
 
     @staticmethod
@@ -6112,22 +6137,69 @@ class PostgresReadModelRepository:
         return sorted(normalized)
 
     @staticmethod
-    def _delete_workbench_generations(connection: Any, *, generation_ids: list[str]) -> None:
-        params = (generation_ids,)
-        connection.execute("delete from read_model.workbench_generation_stats where generation_id = any(%s)", params)
-        connection.execute("delete from read_model.workbench_group_rows where generation_id = any(%s)", params)
-        connection.execute("delete from read_model.workbench_groups where generation_id = any(%s)", params)
-        connection.execute("delete from read_model.workbench_rows where generation_id = any(%s)", params)
-        connection.execute("delete from read_model.workbench_summary where generation_id = any(%s)", params)
-        connection.execute("delete from read_model.workbench_snapshots where generation_id = any(%s)", params)
+    def _delete_workbench_generations(
+        connection: Any,
+        *,
+        scope_key: str,
+        generation_ids: list[str],
+    ) -> int:
+        locked_rows = connection.fetch_all(
+            """
+            select generation_id
+            from read_model.workbench_generations
+            where generation_id = any(%s)
+              and tenant_id = 'default'
+              and scope_key = %s
+              and status in ('failed', 'superseded')
+            order by generation_id
+            for update
+            """,
+            (generation_ids, scope_key),
+        )
+        locked_generation_ids = {
+            generation_id
+            for row in locked_rows
+            if isinstance(row, dict) and (generation_id := text(row.get("generation_id")))
+        }
+        deletable_generation_ids = [
+            generation_id for generation_id in generation_ids if generation_id in locked_generation_ids
+        ]
+        if not deletable_generation_ids:
+            return 0
+        params = (deletable_generation_ids, scope_key)
         connection.execute(
+            "delete from read_model.workbench_generation_stats where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        connection.execute(
+            "delete from read_model.workbench_group_rows where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        connection.execute(
+            "delete from read_model.workbench_groups where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        connection.execute(
+            "delete from read_model.workbench_rows where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        connection.execute(
+            "delete from read_model.workbench_summary where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        connection.execute(
+            "delete from read_model.workbench_snapshots where generation_id = any(%s) and scope_key = %s",
+            params,
+        )
+        return connection.execute(
             """
             delete from read_model.workbench_generations
             where generation_id = any(%s)
               and tenant_id = 'default'
-              and status <> 'active'
+              and scope_key = %s
+              and status in ('failed', 'superseded')
             """,
-            params,
+            (deletable_generation_ids, scope_key),
         )
 
     @staticmethod

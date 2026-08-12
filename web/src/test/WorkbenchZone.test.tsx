@@ -123,7 +123,7 @@ describe("WorkbenchZone", () => {
         primarySelectionActionDisabled
         primarySelectionActionLabel="确认关联"
         selectionActionNotice="OA 正在同步，完成后将自动恢复关联操作。"
-        secondarySelectionActionLabel="异常处理"
+        secondarySelectionActionLabel="撤回关联"
         selectionSummary={{
           explicitTotal: 2,
           total: 3,
@@ -167,7 +167,7 @@ describe("WorkbenchZone", () => {
     })).toBeInTheDocument();
 
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "清空选择" }));
-    await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "异常处理" }));
+    await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "撤回关联" }));
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "取消异常" }));
     await user.click(within(zone).getByRole("button", { name: "查看已忽略异常" }));
 
@@ -210,6 +210,42 @@ describe("WorkbenchZone", () => {
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).toHaveAttribute("data-pending", "true");
     expect(within(button).getByRole("status", { name: "正在准备确认预览" })).toBeInTheDocument();
+  });
+
+  test("renders an accessible busy secondary selection action on the next render", () => {
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        primarySelectionActionLabel="确认关联"
+        secondarySelectionActionLabel="撤回关联"
+        secondarySelectionActionPending
+        secondarySelectionActionPendingLabel="正在准备撤回预览"
+        selectionSummary={{
+          total: 2,
+          oa: 1,
+          bank: 0,
+          invoice: 1,
+          amounts: { oa: "128,000.00", bank: "0.00", invoice: "144,640.00" },
+        }}
+        title="未配对"
+        tone="warning"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onClearSelection={() => {}}
+        onOpenDetail={() => {}}
+        onPrimarySelectionAction={() => {}}
+        onRowAction={() => {}}
+        onSecondarySelectionAction={() => {}}
+        onSelectRow={() => {}}
+        panes={panes}
+        zoneId="unpaired"
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "正在准备撤回预览" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("data-pending", "true");
+    expect(within(button).getByRole("status", { name: "正在准备撤回预览" })).toBeInTheDocument();
   });
 
   test("keeps the bank time filter and pane-only controls at the right of the zone header", async () => {

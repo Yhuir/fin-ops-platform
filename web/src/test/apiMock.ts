@@ -85,6 +85,7 @@ type MockApiOptions = {
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
   workbenchWithdrawPreview?: Record<string, unknown>;
+  transformWorkbenchPayload?: (body: Record<string, unknown>) => Record<string, unknown>;
   transformWorkbenchConfirmActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   transformWorkbenchWithdrawActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   workbenchExceptionPreviewStatus?: number;
@@ -4772,10 +4773,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : ["mock-workbench-generation-1"];
       workbenchReadModelVersion = versions[Math.min(workbenchReadModelVersionIndex, versions.length - 1)];
       workbenchReadModelVersionIndex += 1;
-      const payload = toGroupedWorkbenchPayload(
+      const mappedPayload = toGroupedWorkbenchPayload(
         mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
         options.workbenchOaStatus,
       );
+      const payload = options.transformWorkbenchPayload
+        ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
+        : mappedPayload;
       const pageForZone = (zone: "paired" | "unpaired") => {
         const query = parseWorkbenchGroupJsonParam(url.searchParams.get(`${zone}_query`));
         const groups = sortMockWorkbenchGroups(
@@ -4820,7 +4824,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
-      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const mappedPayload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const payload = options.transformWorkbenchPayload
+        ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
+        : mappedPayload;
       const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
       if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
         return {

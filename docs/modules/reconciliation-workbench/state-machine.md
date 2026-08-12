@@ -1,6 +1,6 @@
 # 关联台状态机
 
-日期：2026-07-21
+日期：2026-08-12
 
 ## 页面关系状态
 
@@ -40,23 +40,29 @@ durable dirty scope
 ## 人工确认与撤回
 
 ```text
-unpaired singleton selection
+unpaired selection with >=2 distinct canonical members
   -> preview locks canonical row set + expected versions
+  -> amount/direction mismatch requires existing note; completeness does not block create
   -> command/UoW creates active relation only
   -> current page normal GET compares relation/rule versions and scoped completed/in-progress OA, bank and invoice canonical versions
   -> exact Workbench scope converges on access
-  -> paired group
+  -> paired group when completion contract passes; otherwise same-case unpaired relation group
 
-paired group
-  -> withdraw preview locks active case + expected versions
-  -> command/UoW withdraws/cancels relation only
+paired or unpaired active relation group
+  -> withdraw preview requires the exact full active typed member set
+  -> fingerprint binds current/after case + version + status + sorted members and confirm-history identity
+  -> command/UoW locks current case/members, then predecessor case/members
+  -> reloads and revalidates target topology, canonical members, predecessor case and unique owners
+  -> withdraws/cancels current relation and restores previous provable stable topology
   -> current page normal GET compares the same canonical vector and converges on access
-  -> each no-longer-owned fact becomes an unpaired singleton
+  -> previous groups are restored; members without a predecessor become unpaired singletons
 ```
 
 preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm|withdraw) -> idle`。进入 pending 必须在发出请求前同步完成，并在下一次 render 输出 spinner、busy label、disabled、`aria-disabled` 和 `aria-busy`；confirm 与 withdraw 不允许并行或重复请求。成功响应仅在发起时的 selection、scope 和 active read-model version 仍一致时打开正式 preview drawer，否则直接丢弃。请求失败恢复入口并展示安全中文错误；该临时状态不改变 preview drawer 已有 submit/sync/load 状态机，也不会新增第三种正式页面关系状态。
 
-旧 row `case_id` 不能让撤回后的 facts 继续同组。没有 active relation 的行不能执行撤回。
+人工确认允许同栏或跨栏成员，不再要求“银行 + OA/发票”；只有少于 2 个不同 canonical identity、成员不可用、active owner/version 冲突或非法 summary 才阻止进入预览/提交。Workbench 撤回若显式携带 row ids，preview 与 submit 都必须精确等于当前 active relation 的完整 typed member set；子集、超集、跨 case 混选或 case/rows 不一致返回 `workbench_relation_exact_selection_required`，不能自动补齐。case-only 撤回只保留给已证明 owner 的内部调用。旧 row `case_id` 不能让撤回后的 facts 继续同组；上一稳定拓扑只能由 canonical relation history 证明。恢复必须在同一事务锁内重新证明 canonical member 存在、restored case 没有被复用、每个成员只有唯一 active owner；缺 canonical 返回 `workbench_relation_canonical_member_missing`，case/owner 冲突返回 `workbench_relation_restore_conflict`，不允许部分恢复。没有 active relation 的行不能执行撤回。
+
+relation version 是拓扑并发令牌：新关系从 `1` 开始，active relation 的 status 或 typed member set 改变时单调 `+1`，取消同样 `+1`；恢复 predecessor 时使用 `max(数据库当前 predecessor version, history snapshot version)+1`，不得回退到历史旧版本。withdraw preview fingerprint 包含 current/after relation 的 `case_id`、`version`、`status`、排序后的完整 typed members，以及所选 confirm history 的 `operation_id`、`operation_type`、`created_at`；拓扑或恢复历史任一漂移都拒绝旧 preview。
 
 ## Read model 状态
 
@@ -112,3 +118,5 @@ ignored --restore--> active
 该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。“进行中的异常”与“已忽略的异常”由同一个右侧抽屉读取；后者可按关系组执行“撤回忽略”。
 
 只有当前 generation 计算出的 `oa_invoice_anomaly` 及其 `oa_invoice_amount_mismatch` 决定进入这套状态机。历史 WEX/row-ignore 记录仅保留审计：不得改变 `paired|unpaired`、成员、主区可见性、异常抽屉、异常计数、搜索结果或 source freshness。
+
+未配对工具栏不再提供人工“异常处理”状态入口。删除该入口不改变上述自动异常状态机、右上 `异常 n | 已忽略 m`、统一异常抽屉或 ignore/restore 转换。

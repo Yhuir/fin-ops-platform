@@ -23,6 +23,9 @@ DEPLOYMENT_DOC = REPO_ROOT / "docs/operations/deployment.md"
 OA_DEPLOY_README = REPO_ROOT / "deploy/oa/README.md"
 RUNTIME_QUEUE_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 OA_SYNC_ENQUEUE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-enqueue-oa-sync.sh"
+WORKBENCH_GENERATION_PRUNE_HELPER = REPO_ROOT / "deploy/oa/bin/finops-prune-workbench-generations.sh"
+WORKBENCH_GENERATION_PRUNE_SERVICE = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.service.example"
+WORKBENCH_GENERATION_PRUNE_TIMER = REPO_ROOT / "deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
@@ -289,6 +292,34 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         )
         self.assertIn("install_workbench_generation_retention", deploy_control)
         self.assertIn("finops-prune-workbench-generations", deploy_control)
+
+    def test_workbench_generation_prune_helper_uses_bounded_batch_and_statement_timeout_defaults(self) -> None:
+        helper = WORKBENCH_GENERATION_PRUNE_HELPER.read_text(encoding="utf-8")
+        common_env = COMMON_ENV.read_text(encoding="utf-8")
+        service = WORKBENCH_GENERATION_PRUNE_SERVICE.read_text(encoding="utf-8")
+        timer = WORKBENCH_GENERATION_PRUNE_TIMER.read_text(encoding="utf-8")
+
+        self.assertIn('KEEP_RECENT="${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}"', helper)
+        self.assertIn('KEEP_DAYS="${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}"', helper)
+        self.assertIn('LIMIT="${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}"', helper)
+        self.assertIn('DELETE_BATCH_SIZE="${FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE:-1}"', helper)
+        self.assertIn('STATEMENT_TIMEOUT_SECONDS="${FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS:-60}"', helper)
+        self.assertIn('--delete-batch-size "$DELETE_BATCH_SIZE"', helper)
+        self.assertIn('--statement-timeout-seconds "$STATEMENT_TIMEOUT_SECONDS"', helper)
+        self.assertIn('delete_batch_size=$DELETE_BATCH_SIZE statement_timeout_seconds=$STATEMENT_TIMEOUT_SECONDS', helper)
+        self.assertIn('if curl -fsS --max-time 20 "$HEALTH_URL" >/dev/null; then', helper)
+        self.assertIn('echo "health=failed url=$HEALTH_URL"\n  exit 3', helper)
+        self.assertIn("--execute", helper)
+        self.assertNotIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-0", helper)
+        self.assertLess(helper.index('source "$SECRETS_ENV"'), helper.index('DELETE_BATCH_SIZE="${FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE:-1}"'))
+        self.assertIn("FINOPS_WORKBENCH_PRUNE_KEEP_RECENT=1", common_env)
+        self.assertIn("FINOPS_WORKBENCH_PRUNE_KEEP_DAYS=0", common_env)
+        self.assertIn("FINOPS_WORKBENCH_PRUNE_LIMIT=500", common_env)
+        self.assertIn("FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE=1", common_env)
+        self.assertIn("FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS=60", common_env)
+        self.assertIn("ExecStart=/usr/local/sbin/finops-prune-workbench-generations", service)
+        self.assertIn("OnCalendar=*-*-* 03:35:00", timer)
+        self.assertIn("RandomizedDelaySec=15m", timer)
 
     def test_runtime_queue_history_prune_helper_uses_controlled_retention_defaults(self) -> None:
         helper = RUNTIME_QUEUE_PRUNE_HELPER.read_text(encoding="utf-8")

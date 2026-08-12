@@ -868,43 +868,155 @@ class WorkbenchGenerationStatsConnection(ActiveWorkbenchGenerationConnection):
 
 
 class WorkbenchGenerationRetentionConnection(WorkbenchSqlReadConnection):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        candidates: list[dict[str, object]] | None = None,
+        *,
+        locked_generation_ids: set[str] | None = None,
+        fail_transaction_number: int | None = None,
+    ) -> None:
         super().__init__()
         self.execute_calls: list[tuple[str, tuple]] = []
+        default_candidates = [
+            {
+                "generation_id": "old-gen",
+                "scope_key": "2026-01",
+                "status": "superseded",
+                "activated_at": "2026-05-01T00:00:00+00:00",
+                "completed_at": "2026-05-01T00:00:00+00:00",
+                "updated_at": "2026-05-01T00:00:00+00:00",
+            }
+        ]
+        self.candidates = list(default_candidates if candidates is None else candidates)
+        self.locked_generation_ids = locked_generation_ids
+        self.fail_transaction_number = fail_transaction_number
+        self.transaction_events: list[str] = []
+        self.transaction_generation_ids: list[list[str]] = []
+        self.transaction_scope_chunks: list[tuple[str, list[str]]] = []
+        self.committed_generation_ids: list[str] = []
+        self.child_generation_ids_by_table = {
+            table_name: {
+                str(candidate["generation_id"])
+                for candidate in self.candidates
+                if candidate.get("generation_id")
+            }
+            for table_name in (
+                "workbench_generation_stats",
+                "workbench_group_rows",
+                "workbench_groups",
+                "workbench_rows",
+                "workbench_summary",
+                "workbench_snapshots",
+            )
+        }
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
+        if "from read_model.workbench_generations" in normalized and "for update" in normalized:
+            raise AssertionError("retention metadata locks must run inside a transaction")
+        if "from read_model.workbench_generations" in normalized and "status in ('failed', 'superseded')" in normalized:
+            limit = int(params[-1])
             return [
-                {
-                    "generation_id": "old-gen",
-                    "scope_key": "2026-01",
-                    "status": "superseded",
-                    "activated_at": "2026-05-01T00:00:00+00:00",
-                    "completed_at": "2026-05-01T00:00:00+00:00",
-                    "updated_at": "2026-05-01T00:00:00+00:00",
-                }
-            ]
+                dict(candidate)
+                for candidate in self.candidates
+                if candidate.get("status") in {"failed", "superseded"}
+            ][:limit]
         return []
 
-    def execute(self, sql: str, params: tuple = ()) -> int:
-        normalized = " ".join(sql.lower().split())
-        self.execute_calls.append((normalized, params))
-        return 1
+    def execute(self, _sql: str, _params: tuple = ()) -> int:
+        raise AssertionError("retention deletes must run inside a transaction")
 
     def transaction(self):
         class Transaction:
             def __init__(self, connection: WorkbenchGenerationRetentionConnection) -> None:
                 self.connection = connection
+                self.transaction_number = len(connection.transaction_scope_chunks) + 1
+                self.pending_child_deletes: dict[str, set[str]] = {}
+                self.pending_generation_deletes: set[str] = set()
 
             def __enter__(self):
-                return self.connection
+                self.connection.transaction_events.append("enter")
+                self.connection.transaction_generation_ids.append([])
+                return self
 
-            def __exit__(self, exc_type, exc, tb) -> bool:
+            def __exit__(self, exc_type, _exc, _tb) -> bool:
+                if exc_type is None:
+                    for table_name, generation_ids in self.pending_child_deletes.items():
+                        self.connection.child_generation_ids_by_table[table_name].difference_update(generation_ids)
+                    self.connection.candidates = [
+                        candidate
+                        for candidate in self.connection.candidates
+                        if str(candidate.get("generation_id")) not in self.pending_generation_deletes
+                    ]
+                    self.connection.committed_generation_ids.extend(sorted(self.pending_generation_deletes))
+                    self.connection.transaction_events.append("commit")
+                else:
+                    self.connection.transaction_events.append("rollback")
                 return False
 
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.connection.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_generations" not in normalized or "for update" not in normalized:
+                    return []
+                requested_generation_ids = list(params[0])
+                scope_key = str(params[1])
+                self.connection.transaction_scope_chunks.append((scope_key, requested_generation_ids))
+                permitted_generation_ids = (
+                    set(requested_generation_ids)
+                    if self.connection.locked_generation_ids is None
+                    else self.connection.locked_generation_ids
+                )
+                candidates_by_id = {
+                    str(candidate.get("generation_id")): candidate
+                    for candidate in self.connection.candidates
+                }
+                return [
+                    {"generation_id": generation_id}
+                    for generation_id in requested_generation_ids
+                    if generation_id in permitted_generation_ids
+                    and (candidate := candidates_by_id.get(generation_id)) is not None
+                    and candidate.get("scope_key") == scope_key
+                    and candidate.get("status") in {"failed", "superseded"}
+                ]
+
+            def execute(self, sql: str, params: tuple = ()) -> int:
+                normalized = " ".join(sql.lower().split())
+                self.connection.execute_calls.append((normalized, params))
+                if (
+                    self.connection.fail_transaction_number == self.transaction_number
+                    and "delete from read_model.workbench_group_rows" in normalized
+                ):
+                    raise RuntimeError("simulated statement timeout")
+                if "delete from read_model.workbench_generations" in normalized:
+                    generation_ids = set(params[0])
+                    scope_key = str(params[1])
+                    deletable_ids = {
+                        str(candidate.get("generation_id"))
+                        for candidate in self.connection.candidates
+                        if str(candidate.get("generation_id")) in generation_ids
+                        and candidate.get("scope_key") == scope_key
+                        and candidate.get("status") in {"failed", "superseded"}
+                    }
+                    self.pending_generation_deletes.update(deletable_ids)
+                    return len(deletable_ids)
+                for table_name in self.connection.child_generation_ids_by_table:
+                    if f"delete from read_model.{table_name}" not in normalized:
+                        continue
+                    generation_ids = set(params[0])
+                    self.pending_child_deletes.setdefault(table_name, set()).update(generation_ids)
+                    if table_name == "workbench_generation_stats":
+                        self.connection.transaction_generation_ids[-1].extend(params[0])
+                    return len(generation_ids)
+                return 0
+
         return Transaction(self)
+
+
+class FailingWorkbenchGenerationRetentionConnection(WorkbenchGenerationRetentionConnection):
+    def __init__(self, candidates: list[dict[str, object]]) -> None:
+        super().__init__(candidates, fail_transaction_number=2)
 
 
 class WorkbenchConsistencySqlConnection:
@@ -3502,7 +3614,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
 
     def test_repository_workbench_generation_retention_never_deletes_active_generations(self) -> None:
-        connection = WorkbenchGenerationRetentionConnection()
+        connection = WorkbenchGenerationRetentionConnection(locked_generation_ids=set())
         repository = PostgresReadModelRepository(connection)
 
         result = repository.prune_workbench_generations(
@@ -3511,15 +3623,199 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             dry_run=False,
         )
 
+        self.assertEqual(result["deleted_count"], 0)
+        lock_sql, lock_params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "for update" in sql
+        )
+        self.assertIn("status in ('failed', 'superseded')", lock_sql)
+        self.assertIn("order by generation_id for update", lock_sql)
+        self.assertIn("tenant_id = 'default'", lock_sql)
+        self.assertEqual(lock_params, (["old-gen"], "2026-01"))
+        self.assertEqual(connection.execute_calls, [])
+
+    def test_repository_workbench_generation_retention_rechecks_scope_and_active_status_before_child_deletes(
+        self,
+    ) -> None:
+        candidates = [
+            {"generation_id": "still-old", "scope_key": "2026-01", "status": "superseded"},
+            {"generation_id": "became-active", "scope_key": "2026-01", "status": "superseded"},
+        ]
+        connection = WorkbenchGenerationRetentionConnection(
+            candidates,
+            locked_generation_ids={"still-old"},
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.prune_workbench_generations(dry_run=False, delete_batch_size=2)
+
         self.assertEqual(result["deleted_count"], 1)
-        self.assertTrue(connection.execute_calls)
+        self.assertEqual(connection.transaction_generation_ids, [["still-old"]])
+        child_deletes = [
+            (sql, params)
+            for sql, params in connection.execute_calls
+            if "delete from read_model.workbench_" in sql
+            and "delete from read_model.workbench_generations" not in sql
+        ]
+        self.assertEqual(len(child_deletes), 6)
+        self.assertTrue(all("scope_key = %s" in sql for sql, _params in child_deletes))
+        self.assertTrue(all(params == (["still-old"], "2026-01") for _sql, params in child_deletes))
+        self.assertTrue(
+            all(
+                "became-active" not in params[0]
+                for sql, params in connection.execute_calls
+                if "generation_id = any(%s)" in sql
+            )
+        )
         self.assertTrue(
             any(
                 "delete from read_model.workbench_generations" in sql
-                and "status <> 'active'" in sql
+                and "status in ('failed', 'superseded')" in sql
+                and "tenant_id = 'default'" in sql
+                and "scope_key = %s" in sql
                 for sql, _params in connection.execute_calls
             )
         )
+
+    def test_repository_workbench_generation_retention_chunks_per_scope_in_independent_transactions(self) -> None:
+        candidates = [
+            {"generation_id": "jan-1", "scope_key": "2026-01", "status": "superseded"},
+            {"generation_id": "jan-2", "scope_key": "2026-01", "status": "superseded"},
+            {"generation_id": "jan-3", "scope_key": "2026-01", "status": "superseded"},
+            {"generation_id": "feb-1", "scope_key": "2026-02", "status": "superseded"},
+            {"generation_id": "feb-2", "scope_key": "2026-02", "status": "superseded"},
+        ]
+        connection = WorkbenchGenerationRetentionConnection(candidates)
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.prune_workbench_generations(dry_run=False, delete_batch_size=2)
+
+        self.assertEqual(result["delete_batch_size"], 2)
+        self.assertEqual(result["deleted_count"], 5)
+        self.assertEqual(
+            connection.transaction_generation_ids,
+            [["jan-1", "jan-2"], ["jan-3"], ["feb-1", "feb-2"]],
+        )
+        self.assertEqual(
+            connection.transaction_scope_chunks,
+            [
+                ("2026-01", ["jan-1", "jan-2"]),
+                ("2026-01", ["jan-3"]),
+                ("2026-02", ["feb-1", "feb-2"]),
+            ],
+        )
+        self.assertEqual(connection.transaction_events, ["enter", "commit"] * 3)
+        self.assertTrue(
+            all(
+                not (
+                    {"jan-1", "jan-2", "jan-3"} & set(chunk)
+                    and {"feb-1", "feb-2"} & set(chunk)
+                )
+                for chunk in connection.transaction_generation_ids
+            )
+        )
+
+    def test_repository_workbench_generation_retention_commits_completed_chunks_before_later_failure(self) -> None:
+        candidates = [
+            {"generation_id": "jan-1", "scope_key": "2026-01", "status": "superseded"},
+            {"generation_id": "jan-2", "scope_key": "2026-01", "status": "superseded"},
+        ]
+        connection = FailingWorkbenchGenerationRetentionConnection(candidates)
+        repository = PostgresReadModelRepository(connection)
+
+        with self.assertRaisesRegex(RuntimeError, "simulated statement timeout"):
+            repository.prune_workbench_generations(dry_run=False)
+
+        self.assertEqual(connection.transaction_generation_ids, [["jan-1"], ["jan-2"]])
+        self.assertEqual(connection.transaction_events, ["enter", "commit", "enter", "rollback"])
+        self.assertEqual(connection.committed_generation_ids, ["jan-1"])
+        self.assertEqual(
+            [candidate["generation_id"] for candidate in connection.candidates],
+            ["jan-2"],
+        )
+        self.assertTrue(
+            all(
+                generation_ids == {"jan-2"}
+                for generation_ids in connection.child_generation_ids_by_table.values()
+            )
+        )
+        first_generation_delete = [
+            params
+            for sql, params in connection.execute_calls
+            if "delete from read_model.workbench_generations" in sql
+        ]
+        self.assertEqual(first_generation_delete, [(["jan-1"], "2026-01")])
+
+        connection.fail_transaction_number = None
+        result = repository.prune_workbench_generations(dry_run=False)
+
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(connection.committed_generation_ids, ["jan-1", "jan-2"])
+        self.assertEqual(connection.candidates, [])
+        self.assertTrue(
+            all(not generation_ids for generation_ids in connection.child_generation_ids_by_table.values())
+        )
+
+    def test_repository_workbench_generation_retention_bounds_delete_batch_size(self) -> None:
+        candidates = [
+            {"generation_id": f"gen-{index:03d}", "scope_key": "2026-01", "status": "superseded"}
+            for index in range(101)
+        ]
+
+        lower_connection = WorkbenchGenerationRetentionConnection(candidates[:2])
+        lower_result = PostgresReadModelRepository(lower_connection).prune_workbench_generations(
+            dry_run=False,
+            delete_batch_size=0,
+        )
+        upper_connection = WorkbenchGenerationRetentionConnection(candidates)
+        upper_result = PostgresReadModelRepository(upper_connection).prune_workbench_generations(
+            dry_run=False,
+            delete_batch_size=101,
+        )
+        default_connection = WorkbenchGenerationRetentionConnection(candidates[:2])
+        default_result = PostgresReadModelRepository(default_connection).prune_workbench_generations(dry_run=True)
+
+        self.assertEqual(lower_result["delete_batch_size"], 1)
+        self.assertEqual(lower_connection.transaction_generation_ids, [["gen-000"], ["gen-001"]])
+        self.assertEqual(upper_result["delete_batch_size"], 100)
+        self.assertEqual([len(chunk) for chunk in upper_connection.transaction_generation_ids], [100, 1])
+        self.assertEqual(default_result["delete_batch_size"], 1)
+        self.assertEqual(default_connection.transaction_events, [])
+
+    def test_repository_workbench_generation_retention_limits_candidates_and_skips_empty_transactions(self) -> None:
+        candidates = [
+            {"generation_id": f"gen-{index:03d}", "scope_key": "2026-01", "status": "superseded"}
+            for index in range(501)
+        ]
+        connection = WorkbenchGenerationRetentionConnection(candidates)
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.prune_workbench_generations(limit=999, dry_run=True)
+        lower_result = repository.prune_workbench_generations(limit=0, dry_run=True)
+        empty_connection = WorkbenchGenerationRetentionConnection([])
+        empty_result = PostgresReadModelRepository(empty_connection).prune_workbench_generations(dry_run=False)
+
+        self.assertEqual(result["limit"], 500)
+        self.assertEqual(result["candidate_count"], 500)
+        self.assertIn("limit %s", connection.fetch_all_calls[0][0])
+        self.assertEqual(connection.fetch_all_calls[0][1][-1], 500)
+        self.assertEqual(lower_result["limit"], 1)
+        self.assertEqual(lower_result["candidate_count"], 1)
+        self.assertEqual(connection.fetch_all_calls[1][1][-1], 1)
+        self.assertEqual(connection.transaction_events, [])
+        self.assertEqual(empty_result["deleted_count"], 0)
+        self.assertEqual(empty_connection.transaction_events, [])
+
+    def test_repository_workbench_generation_retention_only_selects_terminal_non_active_generations(self) -> None:
+        connection = WorkbenchGenerationRetentionConnection([])
+        repository = PostgresReadModelRepository(connection)
+
+        repository.preview_workbench_generation_retention()
+
+        preview_sql = connection.fetch_all_calls[0][0]
+        self.assertIn("status in ('failed', 'superseded')", preview_sql)
+        self.assertNotIn("status <> 'active'", preview_sql)
 
     def test_repository_generation_consistency_filters_active_generations_before_aggregating_read_models(self) -> None:
         connection = WorkbenchConsistencySqlConnection()
@@ -3640,9 +3936,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         calls: list[dict[str, object]] = []
 
+        events: list[tuple[str, object]] = []
+
+        class FakeConnection:
+            def set_statement_timeout_ms(self, value: int) -> None:
+                events.append(("timeout", value))
+
         class FakeRepository:
             def __init__(self, _connection: object) -> None:
-                pass
+                events.append(("repository", _connection))
 
             def prune_workbench_generations(self, **kwargs: object) -> dict[str, object]:
                 calls.append(dict(kwargs))
@@ -3654,7 +3956,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 }
 
         with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
-            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=object()):
+            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=FakeConnection()):
                 with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
                     exit_code = prune_workbench_generations.main([], stdout=StringIO())
 
@@ -3663,11 +3965,67 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(calls[0]["keep_days"], 0)
         self.assertEqual(calls[0]["limit"], 500)
         self.assertEqual(calls[0]["dry_run"], True)
+        self.assertEqual(calls[0]["delete_batch_size"], 1)
+        self.assertEqual(events[0], ("timeout", 60000))
+        self.assertEqual(events[1][0], "repository")
+
+    def test_prune_workbench_generations_cli_applies_custom_batch_and_statement_timeout(self) -> None:
+        from fin_ops_platform.tools import prune_workbench_generations
+
+        calls: list[dict[str, object]] = []
+        events: list[tuple[str, object]] = []
+
+        class FakeConnection:
+            def set_statement_timeout_ms(self, value: int) -> None:
+                events.append(("timeout", value))
+
+        class FakeRepository:
+            def __init__(self, connection: object) -> None:
+                events.append(("repository", connection))
+
+            def prune_workbench_generations(self, **kwargs: object) -> dict[str, object]:
+                calls.append(dict(kwargs))
+                events.append(("prune", dict(kwargs)))
+                return {"dry_run": kwargs.get("dry_run"), "candidate_count": 0, "deleted_count": 0, "generations": []}
+
+        connection = FakeConnection()
+        with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
+            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=connection):
+                with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
+                    exit_code = prune_workbench_generations.main(
+                        [
+                            "--delete-batch-size", "20",
+                            "--statement-timeout-seconds", "15",
+                            "--keep-recent-generations-per-scope", "2",
+                            "--keep-days", "3",
+                            "--limit", "40",
+                            "--execute",
+                        ],
+                        stdout=StringIO(),
+                    )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(events[:2], [("timeout", 15000), ("repository", connection)])
+        self.assertEqual(calls[0]["delete_batch_size"], 20)
+        self.assertEqual(calls[0]["keep_recent_generations_per_scope"], 2)
+        self.assertEqual(calls[0]["keep_days"], 3)
+        self.assertEqual(calls[0]["limit"], 40)
+        self.assertEqual(calls[0]["dry_run"], False)
+
+    def test_prune_workbench_generations_cli_rejects_non_positive_statement_timeout(self) -> None:
+        from fin_ops_platform.tools import prune_workbench_generations
+
+        with self.assertRaises(SystemExit):
+            prune_workbench_generations.build_parser().parse_args(["--statement-timeout-seconds", "0"])
 
     def test_prune_workbench_generations_cli_allows_zero_keep_days_for_emergency_cleanup(self) -> None:
         from fin_ops_platform.tools import prune_workbench_generations
 
         calls: list[dict[str, object]] = []
+
+        class FakeConnection:
+            def set_statement_timeout_ms(self, _value: int) -> None:
+                pass
 
         class FakeRepository:
             def __init__(self, _connection: object) -> None:
@@ -3683,7 +4041,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 }
 
         with patch.object(prune_workbench_generations.PostgresSettings, "from_env", return_value=object()):
-            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=object()):
+            with patch.object(prune_workbench_generations, "PostgresConnection", return_value=FakeConnection()):
                 with patch.object(prune_workbench_generations, "PostgresReadModelRepository", FakeRepository):
                     exit_code = prune_workbench_generations.main(
                         ["--keep-days", "0", "--dry-run"],
@@ -3707,12 +4065,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         repository = PostgresReadModelRepository(connection)
 
         result = repository.preview_workbench_generation_retention(
-            keep_recent_generations_per_scope=1,
+            keep_recent_generations_per_scope=0,
             keep_days=0,
             limit=10,
         )
 
         self.assertEqual(result["keep_days"], 0)
+        self.assertEqual(result["keep_recent_generations_per_scope"], 1)
         self.assertEqual(connection.fetch_all_calls[0][1], (1, 0, 10))
 
     def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
@@ -5413,7 +5772,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         retention_reads = [
             sql
             for sql, _params in connection.fetch_all_calls
-            if "from read_model.workbench_generations" in sql and "status <> 'active'" in sql
+            if "from read_model.workbench_generations" in sql
+            and (
+                "status <> 'active'" in sql
+                or "status in ('failed', 'superseded')" in sql
+            )
         ]
         self.assertEqual(retention_reads, [])
         self.assertFalse(

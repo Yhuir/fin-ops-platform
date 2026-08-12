@@ -504,7 +504,6 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"case_id": resolved_case_id},
             )
-        self._acquire_relation_member_locks([], case_ids=[resolved_case_id])
         pair_service = self._pair_service_for_case_ids([resolved_case_id])
         before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(before_relation, dict):
@@ -523,10 +522,9 @@ class WorkbenchRelationCommandService:
             row_ids=before_row_ids,
             month_scope=before_month_scope,
         )
-        current_preview = self._preview_withdraw_relation_from_pair_service(
-            pair_service,
-            row_ids=before_row_ids,
-            month_scope=before_month_scope,
+        pair_service, before_relation, current_preview = self._lock_and_revalidate_withdraw_topology(
+            pair_service=pair_service,
+            before_relation=before_relation,
             freshness=freshness,
             row_id_aliases=row_id_aliases,
         )
@@ -1423,27 +1421,34 @@ class WorkbenchRelationCommandService:
         month_scope: str = "all",
         freshness: dict[str, Any] | None = None,
         row_id_aliases: dict[str, str] | None = None,
+        active_relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
-        if not active_relations:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_not_found",
-                "Workbench relation is not active or does not exist.",
-                payload={"row_ids": [str(row_id) for row_id in list(row_ids or [])]},
-            )
-        if len(active_relations) > 1:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_multiple_groups_selected",
-                "Only one workbench relation group can be withdrawn at a time.",
-                payload={
-                    "case_ids": [
-                        str(relation.get("case_id") or "")
-                        for relation in active_relations
-                        if str(relation.get("case_id") or "").strip()
-                    ],
-                },
-            )
-        active_relation = active_relations[0]
+        if not isinstance(active_relation, dict):
+            active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
+            if not active_relations:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_not_found",
+                    "Workbench relation is not active or does not exist.",
+                    payload={"row_ids": [str(row_id) for row_id in list(row_ids or [])]},
+                )
+            if len(active_relations) > 1:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_multiple_groups_selected",
+                    "Only one workbench relation group can be withdrawn at a time.",
+                    payload={
+                        "case_ids": [
+                            str(relation.get("case_id") or "")
+                            for relation in active_relations
+                            if str(relation.get("case_id") or "").strip()
+                        ],
+                    },
+                )
+            active_relation = active_relations[0]
+        self._assert_exact_withdraw_selection(
+            row_ids,
+            active_relation=active_relation,
+            row_id_aliases=row_id_aliases,
+        )
         active_row_ids = [
             str(row_id)
             for row_id in list(active_relation.get("row_ids") or [])
@@ -1460,6 +1465,7 @@ class WorkbenchRelationCommandService:
                 operation_type="withdraw_relation",
                 active_relation=active_relation,
                 after_relations=after_relations,
+                confirm_history=None,
             )
             return {
                 "operation": "withdraw_link",
@@ -1482,8 +1488,8 @@ class WorkbenchRelationCommandService:
             month_scope=resolved_month_scope,
         )
         try:
-            preview = pair_service.preview_withdraw_for_row_ids(
-                active_row_ids,
+            preview = pair_service.preview_withdraw_for_active_relation(
+                active_relation,
                 row_id_aliases=row_id_aliases,
             )
         except KeyError as exc:
@@ -1503,6 +1509,11 @@ class WorkbenchRelationCommandService:
             operation_type="withdraw_relation",
             active_relation=active_relation,
             after_relations=after_relations,
+            confirm_history=(
+                dict(preview.get("confirm_history") or {})
+                if isinstance(preview.get("confirm_history"), dict)
+                else None
+            ),
         )
         return {
             "operation": "withdraw_link",
@@ -1581,10 +1592,6 @@ class WorkbenchRelationCommandService:
             freshness = deepcopy(preparation.freshness)
             current_preview = deepcopy(preparation.current_preview)
         else:
-            self._acquire_relation_member_locks(
-                selected_row_ids,
-                case_ids=[resolved_case_id] if resolved_case_id else None,
-            )
             if resolved_case_id:
                 pair_service = self._pair_service_for_case_ids([resolved_case_id])
                 before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
@@ -1616,6 +1623,12 @@ class WorkbenchRelationCommandService:
             for row_id in list(before_relation.get("row_ids") or [])
             if str(row_id).strip()
         ]
+        if row_ids is not None:
+            self._assert_exact_withdraw_selection(
+                selected_row_ids,
+                active_relation=before_relation,
+                row_id_aliases=row_id_aliases,
+            )
         before_month_scope = str(before_relation.get("month_scope") or "all")
         if pair_service.is_immutable_oa_attachment_binding_relation(
             before_relation,
@@ -1631,20 +1644,24 @@ class WorkbenchRelationCommandService:
                 row_ids=before_row_ids,
                 month_scope=before_month_scope,
             )
-            current_preview = self._preview_withdraw_relation_from_pair_service(
-                pair_service,
-                row_ids=before_row_ids,
-                month_scope=before_month_scope,
+            pair_service, before_relation, current_preview = self._lock_and_revalidate_withdraw_topology(
+                pair_service=pair_service,
+                before_relation=before_relation,
                 freshness=freshness,
                 row_id_aliases=row_id_aliases,
             )
+        before_row_ids = [
+            str(row_id)
+            for row_id in list(before_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
         self._assert_withdraw_preview_lock(
             preview=current_preview,
             preview_id=preview_id,
             expected_versions=expected_versions,
         )
-        restored_relations, history = pair_service.withdraw_latest_for_row_ids(
-            before_row_ids,
+        restored_relations, history = pair_service.withdraw_latest_for_active_relation(
+            before_relation,
             created_by=actor_id,
             note=reason,
             created_at=occurred_at,
@@ -1718,25 +1735,54 @@ class WorkbenchRelationCommandService:
         operation_type: str,
         active_relation: dict[str, Any],
         after_relations: list[dict[str, Any]],
+        confirm_history: dict[str, Any] | None = None,
     ) -> str:
         payload = {
             "operation_type": operation_type,
-            "active_relation": cls._relation_identity(active_relation),
-            "active_row_ids": [
-                str(row_id)
-                for row_id in list(active_relation.get("row_ids") or [])
-                if str(row_id).strip()
-            ],
-            "after_relations": [
-                cls._relation_identity(relation)
-                for relation in list(after_relations or [])
-                if isinstance(relation, dict)
-            ],
+            "active_relation": cls._relation_topology_identity(active_relation),
+            "after_relations": sorted(
+                [
+                    cls._relation_topology_identity(relation)
+                    for relation in list(after_relations or [])
+                    if isinstance(relation, dict)
+                ],
+                key=lambda relation: str(relation.get("case_id") or ""),
+            ),
+            "confirm_history": (
+                {
+                    "operation_id": str(confirm_history.get("operation_id") or ""),
+                    "operation_type": str(confirm_history.get("operation_type") or ""),
+                    "created_at": str(confirm_history.get("created_at") or ""),
+                }
+                if isinstance(confirm_history, dict)
+                else None
+            ),
         }
         digest = sha256(
             json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True).encode("utf-8")
         ).hexdigest()[:24]
         return f"{operation_type}:{digest}"
+
+    @classmethod
+    def _relation_topology_identity(cls, relation: dict[str, Any]) -> dict[str, Any]:
+        identity = cls._relation_identity(relation)
+        row_ids = list(relation.get("row_ids") or [])
+        row_types = list(relation.get("row_types") or [])
+        return {
+            **identity,
+            "status": str(relation.get("status") or ""),
+            "members": sorted(
+                [
+                    {
+                        "row_id": str(row_id).strip(),
+                        "row_type": str(row_types[index] if index < len(row_types) else "").strip(),
+                    }
+                    for index, row_id in enumerate(row_ids)
+                    if str(row_id).strip()
+                ],
+                key=lambda member: (member["row_type"], member["row_id"]),
+            ),
+        }
 
     @staticmethod
     def _relation_version(relation: dict[str, Any]) -> int:
@@ -1864,6 +1910,236 @@ class WorkbenchRelationCommandService:
                     "prepared_row_ids": prepared_row_ids,
                 },
             )
+
+    @staticmethod
+    def _canonical_withdraw_row_id(
+        row_id: str,
+        *,
+        row_id_aliases: dict[str, str] | None,
+    ) -> str:
+        value = str(row_id).strip()
+        if not value or not row_id_aliases:
+            return value
+        seen = {value}
+        current = value
+        while True:
+            candidate = str(row_id_aliases.get(current, current)).strip()
+            if not candidate or candidate == current or candidate in seen:
+                return current
+            seen.add(candidate)
+            current = candidate
+
+    @classmethod
+    def _assert_exact_withdraw_selection(
+        cls,
+        row_ids: list[str],
+        *,
+        active_relation: dict[str, Any],
+        row_id_aliases: dict[str, str] | None,
+    ) -> None:
+        requested = {
+            cls._canonical_withdraw_row_id(
+                str(row_id),
+                row_id_aliases=row_id_aliases,
+            )
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        current = {
+            cls._canonical_withdraw_row_id(
+                str(row_id),
+                row_id_aliases=row_id_aliases,
+            )
+            for row_id in list(active_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        if requested != current:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_exact_selection_required",
+                "Withdraw relation requires the complete active relation member set.",
+                payload={
+                    "case_id": str(active_relation.get("case_id") or ""),
+                    "requested_row_ids": sorted(requested),
+                    "current_row_ids": sorted(current),
+                },
+            )
+
+    def _lock_and_revalidate_withdraw_topology(
+        self,
+        *,
+        pair_service: WorkbenchPairRelationService,
+        before_relation: dict[str, Any],
+        freshness: dict[str, Any],
+        row_id_aliases: dict[str, str] | None,
+    ) -> tuple[WorkbenchPairRelationService, dict[str, Any], dict[str, Any]]:
+        before_case_id = str(before_relation.get("case_id") or "").strip()
+        before_row_ids = [
+            str(row_id).strip()
+            for row_id in list(before_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        provisional = pair_service.preview_withdraw_for_active_relation(
+            before_relation,
+            row_id_aliases=row_id_aliases,
+        )
+        provisional_after = [
+            deepcopy(relation)
+            for relation in list(provisional.get("after_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        restored_row_ids, restored_row_types = self._canonical_relation_members(
+            provisional_after,
+            row_id_aliases=row_id_aliases,
+        )
+        restored_case_ids = self._changed_case_ids(provisional_after)
+        before_row_types = [
+            str(row_type).strip()
+            for row_type in list(before_relation.get("row_types") or [])
+        ]
+        lock_row_ids, lock_row_types = self._merge_relation_members(
+            before_row_ids,
+            before_row_types,
+            restored_row_ids,
+            restored_row_types,
+        )
+        lock_case_ids = list(dict.fromkeys([before_case_id, *restored_case_ids]))
+        self._acquire_relation_member_locks(
+            lock_row_ids,
+            row_types=lock_row_types,
+            case_ids=lock_case_ids,
+        )
+        locked_pair_service = self._pair_service_for_row_ids(
+            list(dict.fromkeys([*before_row_ids, *restored_row_ids])),
+            case_ids=lock_case_ids,
+        )
+        locked_before = locked_pair_service.get_active_relation_by_case_id(before_case_id)
+        if not isinstance(locked_before, dict):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preview_conflict",
+                "Withdraw relation topology changed while acquiring locks.",
+                payload={"reason": "active_relation_changed", "case_id": before_case_id},
+            )
+        if self._relation_topology_identity(locked_before) != self._relation_topology_identity(
+            before_relation
+        ):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preview_conflict",
+                "Withdraw relation topology changed while acquiring locks.",
+                payload={"reason": "active_relation_changed", "case_id": before_case_id},
+            )
+        locked_preview = self._preview_withdraw_relation_from_pair_service(
+            locked_pair_service,
+            row_ids=list(locked_before.get("row_ids") or []),
+            month_scope=str(locked_before.get("month_scope") or "all"),
+            freshness=freshness,
+            row_id_aliases=row_id_aliases,
+            active_relation=locked_before,
+        )
+        locked_after = [
+            deepcopy(relation)
+            for relation in list(locked_preview.get("after_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        provisional_after_topology = sorted(
+            [self._relation_topology_identity(relation) for relation in provisional_after],
+            key=lambda relation: str(relation.get("case_id") or ""),
+        )
+        locked_after_topology = sorted(
+            [self._relation_topology_identity(relation) for relation in locked_after],
+            key=lambda relation: str(relation.get("case_id") or ""),
+        )
+        if locked_after_topology != provisional_after_topology:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preview_conflict",
+                "Withdraw relation topology changed while acquiring locks.",
+                payload={"reason": "restored_topology_changed", "case_id": before_case_id},
+            )
+        locked_row_ids, locked_row_types = self._canonical_relation_members(
+            locked_after,
+            row_id_aliases=row_id_aliases,
+        )
+        if locked_row_ids:
+            self._assert_canonical_relation_members_available(
+                locked_row_ids,
+                row_types=locked_row_types,
+            )
+        try:
+            locked_pair_service.assert_restored_relations_available(
+                active_relation=locked_before,
+                restored_relations=locked_after,
+                row_id_aliases=row_id_aliases,
+            )
+        except ValueError as exc:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_restore_conflict",
+                "Previous Workbench relation topology can no longer be restored safely.",
+                payload={"reason": str(exc)},
+            ) from exc
+        return locked_pair_service, deepcopy(locked_before), locked_preview
+
+    @staticmethod
+    def _merge_relation_members(
+        first_row_ids: list[str],
+        first_row_types: list[str],
+        second_row_ids: list[str],
+        second_row_types: list[str],
+    ) -> tuple[list[str], list[str]]:
+        entries: dict[tuple[str, str], None] = {}
+        for row_ids, row_types in (
+            (list(first_row_ids or []), list(first_row_types or [])),
+            (list(second_row_ids or []), list(second_row_types or [])),
+        ):
+            for index, row_id in enumerate(row_ids):
+                normalized_row_id = str(row_id).strip()
+                normalized_row_type = str(
+                    row_types[index] if index < len(row_types) else ""
+                ).strip()
+                if not normalized_row_id or not normalized_row_type:
+                    continue
+                entries[(normalized_row_type, normalized_row_id)] = None
+        ordered_entries = sorted(entries)
+        return (
+            [row_id for _, row_id in ordered_entries],
+            [row_type for row_type, _ in ordered_entries],
+        )
+
+    @classmethod
+    def _canonical_relation_members(
+        cls,
+        relations: list[dict[str, Any]],
+        *,
+        row_id_aliases: dict[str, str] | None,
+    ) -> tuple[list[str], list[str]]:
+        row_ids: list[str] = []
+        row_types: list[str] = []
+        seen: set[str] = set()
+        for relation in list(relations or []):
+            relation_row_ids = list(relation.get("row_ids") or [])
+            relation_row_types = list(relation.get("row_types") or [])
+            for index, row_id in enumerate(relation_row_ids):
+                resolved_row_id = cls._canonical_withdraw_row_id(
+                    str(row_id),
+                    row_id_aliases=row_id_aliases,
+                )
+                if not resolved_row_id or resolved_row_id in seen:
+                    continue
+                resolved_row_type = str(
+                    relation_row_types[index] if index < len(relation_row_types) else ""
+                ).strip()
+                if resolved_row_type not in {"oa", "bank", "invoice"}:
+                    raise WorkbenchRelationCommandError(
+                        "workbench_relation_restore_conflict",
+                        "Previous Workbench relation contains an invalid member type.",
+                        payload={
+                            "reason": "invalid_restored_member_type",
+                            "row_id": resolved_row_id,
+                            "row_type": resolved_row_type,
+                        },
+                    )
+                seen.add(resolved_row_id)
+                row_ids.append(resolved_row_id)
+                row_types.append(resolved_row_type)
+        return row_ids, row_types
 
     def _acquire_relation_member_locks(
         self,

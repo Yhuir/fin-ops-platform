@@ -131,15 +131,17 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
-    def test_canonical_no_oa_routes_and_workbench_command_consumer_remain(self) -> None:
+    def test_canonical_no_oa_routes_remain_but_workbench_confirm_has_no_no_oa_callback(self) -> None:
         route_source = (SOURCE_ROOT / "app" / "routes_no_oa_bank_batches.py").read_text(encoding="utf-8")
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
         workbench_source = (SOURCE_ROOT / "services" / "workbench_write_facade.py").read_text(encoding="utf-8")
 
         self.assertIn('route_path == "/api/no-oa-bank-batches"', route_source)
         self.assertIn("NoOaBankBatchApiRoutes(", server_source)
-        self.assertIn("submit_internal_transfer_rows_from_workbench", server_source)
-        self.assertIn("_submit_internal_transfer_rows_from_workbench", workbench_source)
+        self.assertIn("NoOaBankBatchApplicationService(", server_source)
+        self.assertNotIn("submit_internal_transfer_rows_from_workbench", workbench_source)
+        self.assertNotIn("_bank_only_internal_transfer_confirm_status", workbench_source)
+        self.assertNotIn("no_oa_bank_batch_selection_internal_transfer_conflict", workbench_source)
 
     def test_input_invoice_usage_app_level_projection_helpers_do_not_return(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")

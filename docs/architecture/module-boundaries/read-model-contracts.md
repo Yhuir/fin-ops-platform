@@ -33,6 +33,7 @@ Manifest、scope policy、App Status registry 与所有带 `read_model_key` 的 
 - Redis 只缓存已通过 freshness gate 的 groups 和 filter-options payload；cache key 必须包含 active generation version 与完整 query hash。stale、refreshing 或 failed 时，groups 只允许按当前 active generation 的精确 payload version 只读命中，filter-options 禁止读写缓存；Redis 不得参与 freshness 判定。Workbench 若已有 active generation，可返回该稳定 generation 并显式标记 non-fresh、阻断写入；缺失 active generation 时仍 fail closed，不得用 false-empty 覆盖页面。恢复请求继续经 gateway enqueue 精确月份 scope。
 - Workbench matching 是独立 canonical domain job；`workbench_relation` 是独立共享 distribution，二者都不能替代页面 active generation。
 - Workbench relation grouping 在 generation payload 中发布 additive `oa_invoice_anomaly`，其 `items[]` 按日常报销子付款项或支付申请关系组表达 `oa_invoice_amount_mismatch|oa_invoice_attachment_missing`；ignore/restore 决定来自既有 exception case 表的独立 scenario，并按 exact month 加载。异常抽屉的 `active|processed` 查询只过滤当前 active generation payload，combined initial summary 以 additive `ignored_exception_count` 汇总 ignored OA/发票异常、legacy processed group 和 payload `ignored=true` 独立行；不新增 read model、scope、worker、queue 或 cache owner，异常状态和 display-only 缺失占位不能改变 generation 的 paired/unpaired、relation membership 或 canonical invoice facts。
+- Workbench superseded/failed generation 只能经 retention repository 删除。每轮候选最多 500 个 `superseded|failed` 终态 generation，按 scope 隔离后以 1～100 个 generation 小批次独立事务删除；事务按 generation id 固定顺序锁定元数据并复核 default tenant、scope 与终态，再删除同 generation 子表，`active|building` 不进入清理。默认 batch 为 1，maintenance connection 默认 statement timeout 为 60 秒；当前仅由版本化 timer 驱动。
 
 ### `workbench_relation`
 

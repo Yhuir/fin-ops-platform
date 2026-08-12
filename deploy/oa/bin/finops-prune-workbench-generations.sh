@@ -10,10 +10,6 @@ COMMON_ENV="${FINOPS_COMMON_ENV:-/etc/fin-ops/fin-ops.common.env}"
 SECRETS_ENV="${FINOPS_SECRETS_ENV:-/etc/fin-ops/fin-ops.secrets.env}"
 HEALTH_URL="${FINOPS_HEALTH_URL:-http://127.0.0.1:18001/health/ready}"
 
-KEEP_RECENT="${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}"
-KEEP_DAYS="${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}"
-LIMIT="${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}"
-
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/workbench-generation-prune-$(date +%Y%m%d).log"
 exec >>"$LOG_FILE" 2>&1
@@ -46,8 +42,21 @@ if [[ ! -f "$prune_script" ]]; then
   exit 2
 fi
 
+set -a
+# shellcheck disable=SC1090
+source "$COMMON_ENV"
+# shellcheck disable=SC1090
+source "$SECRETS_ENV"
+set +a
+
+KEEP_RECENT="${FINOPS_WORKBENCH_PRUNE_KEEP_RECENT:-1}"
+KEEP_DAYS="${FINOPS_WORKBENCH_PRUNE_KEEP_DAYS:-0}"
+LIMIT="${FINOPS_WORKBENCH_PRUNE_LIMIT:-500}"
+DELETE_BATCH_SIZE="${FINOPS_WORKBENCH_PRUNE_DELETE_BATCH_SIZE:-1}"
+STATEMENT_TIMEOUT_SECONDS="${FINOPS_WORKBENCH_PRUNE_STATEMENT_TIMEOUT_SECONDS:-60}"
+
 echo "active_src=$active_src"
-echo "policy keep_recent=$KEEP_RECENT keep_days=$KEEP_DAYS limit=$LIMIT"
+echo "policy keep_recent=$KEEP_RECENT keep_days=$KEEP_DAYS limit=$LIMIT delete_batch_size=$DELETE_BATCH_SIZE statement_timeout_seconds=$STATEMENT_TIMEOUT_SECONDS"
 echo "disk_before=$(df -h / | awk 'NR==2 {print $0}')"
 if [[ -d /var/lib/pgsql/data/pg_wal ]]; then
   echo "pg_wal_before=$(du -sh /var/lib/pgsql/data/pg_wal 2>/dev/null || true)"
@@ -56,12 +65,6 @@ fi
 echo "generation_status_before"
 sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from read_model.workbench_generations group by status order by status;" || true
 
-set -a
-# shellcheck disable=SC1090
-source "$COMMON_ENV"
-# shellcheck disable=SC1090
-source "$SECRETS_ENV"
-set +a
 export PYTHONPATH="$active_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
 export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
 
@@ -69,6 +72,8 @@ export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
   --execute \
   --keep-recent-generations-per-scope "$KEEP_RECENT" \
   --keep-days "$KEEP_DAYS" \
+  --delete-batch-size "$DELETE_BATCH_SIZE" \
+  --statement-timeout-seconds "$STATEMENT_TIMEOUT_SECONDS" \
   --limit "$LIMIT")
 
 echo "generation_status_after"
@@ -81,5 +86,10 @@ if [[ -d /var/lib/pgsql/data/pg_wal ]]; then
 fi
 
 echo "health_check"
-curl -fsS --max-time 20 "$HEALTH_URL" >/dev/null && echo "health=ready" || echo "health=failed url=$HEALTH_URL"
+if curl -fsS --max-time 20 "$HEALTH_URL" >/dev/null; then
+  echo "health=ready"
+else
+  echo "health=failed url=$HEALTH_URL"
+  exit 3
+fi
 echo "== done $(date -Is) =="
