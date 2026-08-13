@@ -167,6 +167,7 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 - Downstream outputs: bank detail/account balance、workbench、turnover ledger、no-OA batch 可比较的 canonical source-version 变化；保留 read model 的访问 gateway 创建精确 dirty scope，其他页面直接查询 canonical facts。
 - Forbidden paths: 银行流水页面不得调用旧 JSON `/imports/preview`、`/imports/confirm`；production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
 - Old code deletion: 已删除旧 JSON HTTP route/handler/entrypoint、`general_import.confirm` job producer/processor 及只为该链服务的 preview scope dependencies；snapshot 银行流水 fallback、直接跨模块写银行事实路径必须保持删除。migration/audit/rollback 工具和 file/session worker restore 端口保留不算 closure。
+- Import file batch binding: migration 0097 已删除 `app.import_files.import_batch_id`；批次撤回必须按 `raw_payload.normalized_payload.batch_id/preview_batch_id` 定位文件，不得恢复旧列依赖。
 
 ## Audit v19 provenance 版本边界（2026-07-12）
 

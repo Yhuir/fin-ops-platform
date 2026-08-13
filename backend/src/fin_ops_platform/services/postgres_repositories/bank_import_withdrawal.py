@@ -198,13 +198,12 @@ class PostgresBankImportWithdrawalRepository:
                     ),
                   true
                 )
-            where import_batch_id = %s::uuid
-               or coalesce(
+            where coalesce(
                     raw_payload->'normalized_payload'->>'batch_id',
                     raw_payload->'normalized_payload'->>'preview_batch_id'
                   ) = (select coalesce(legacy_mongo_id, id::text) from app.import_batches where id = %s::uuid)
             """,
-            (summary_json, batch_uuid, batch_uuid),
+            (summary_json, batch_uuid),
         )
 
     def append_audit_event(

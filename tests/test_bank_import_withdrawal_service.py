@@ -151,6 +151,17 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
         source = getsource(PostgresBankImportWithdrawalRepository.cleanup_removable_state)
         self.assertNotIn("bank_transaction_relation_claims", source)
 
+    def test_repository_uses_current_import_file_batch_binding(self) -> None:
+        from inspect import getsource
+
+        from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
+            PostgresBankImportWithdrawalRepository,
+        )
+
+        source = getsource(PostgresBankImportWithdrawalRepository.mark_withdrawn)
+        self.assertNotIn("where import_batch_id", source)
+        self.assertIn("raw_payload->'normalized_payload'->>'batch_id'", source)
+
     def test_rejects_updated_or_partially_owned_batch_and_supports_idempotent_replay(self) -> None:
         repository = FakeWithdrawalRepository()
         service, _, _ = self.build_service(repository)
