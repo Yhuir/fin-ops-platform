@@ -79,6 +79,7 @@
 | 2026-08-14 误选银行覆盖账户 | 冲突预览不得继续确认；后端二次拒绝；账户 identity/尾号优先真实完整账号且展示行优先一致 metadata；旧强制导入弹窗和样式已删除。 | fixed by `tests/test_import_file_service.py`、`tests/test_bank_account_balance_canonical_rows.py`、Browser tests |
 | 2026-08-14 导入批次撤回 | 只删除本批次独占创建流水，保留 OA/发票/import provenance/audit；普通 Workbench relation 走正式 command，生效业务引用 fail closed。 | fixed by `tests/test_bank_import_withdrawal_service.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
 | 2026-08-14 撤回后发布门禁误阻断 | 银行导入 Page Audit 必须承认正式 `withdrawn` 历史状态；撤回已删除其 `created` 流水时不得要求已不存在的 canonical transaction，同时任意未知状态继续 fail closed。 | fixed by `tests/test_audit_bank_transaction_import_page.py` |
+| 2026-08-14 撤回批次列表读取 | 通用导入批次 DTO 必须能反序列化正式 `withdrawn` 状态；银行导入生产探针必须限定 `batch_type=bank_transaction`，避免其它导入类型污染银行页面验证。 | fixed by `tests/test_postgres_repositories_core.py`、`tests/test_http_slo_probe.py` |
 | 2026-06-19 Browser e2e | 损坏银行流水文件与正常文件混合上传时，页面必须保留正常文件 preview，不整批失败，确认时不得提交损坏文件 ID。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水预览耗时较长时，用户不能重复点击预览、清空文件或提前确认，避免多个 `/imports/files/preview` 请求或半状态。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-08-14 OA-first 成本隔离 | 银行流水导入后，流水可进入成本统计银行事实视图，但没有完成 OA 正式关系时不得进入按项目/银行/OA 费用类型。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |

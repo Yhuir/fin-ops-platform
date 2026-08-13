@@ -1604,3 +1604,9 @@
 
 - 关联台页面早已 direct-read canonical facts；匹配后台工作仍由 `job.workbench_matching_dirty_scopes` 和独立 `workbench-matching` worker 承担。
 - 删除无执行 owner 的 `workbench_matching` BackgroundJob 创建路径。它不是页面 read model，也不能作为“正在生成正式配对关系”的全局页面进度。真实 dirty/running/failure 运维事实仍由 App Health 诊断，不隐藏匹配故障。
+
+## 2026-08-14 - direct 首屏发票事实单次物化
+
+- 生产只读采样确认 combined initial 的连接获取不是瓶颈，主要耗时来自同一首屏 SQL 三次重复执行正式发票可见性、来源类型和强身份计算。
+- 只在既有 `PostgresWorkbenchPageQueryRepository` 私有 SQL 边界内把可见发票窄事实集物化一次，并由 scope、强身份去重和候选构造共同复用；响应 DTO、分页、完整性 guard、事务隔离、SQL 条数和其它页面 I/O 均不改变。
+- 同一生产快照的旧/新 payload SHA-256 完全一致；只读 `EXPLAIN ANALYZE` 的主查询执行时间由约 `471ms` 降到约 `388ms`，shared blocks 从约 `25.7k` 降到约 `20.3k`，无 temp spill。该证据用于候选优化选择，最终性能仍以发布后的 authenticated HTTP 样本为准。

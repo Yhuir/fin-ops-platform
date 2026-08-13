@@ -374,6 +374,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("bank_page_size=200", probe_paths["batch_accounting"])
         self.assertIn("oa_page=1", probe_paths["batch_accounting"])
         self.assertIn("oa_page_size=200", probe_paths["batch_accounting"])
+        self.assertIn("batch_type=bank_transaction", probe_paths["import_facts_batches"])
         self.assertNotIn("search_all", probe_paths)
         self.assertNotIn("workbench_refresh_status_all", probe_paths)
         self.assertNotIn("/api/workbench/refresh-status", "\n".join(probe_paths.values()))

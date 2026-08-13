@@ -191,7 +191,11 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("etc_invoices", "/api/etc/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("etc_business_batches", "/api/etc/business-batches?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("etc_reconciliation_tasks", "/api/etc/reconciliation-tasks?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe(
+        "import_facts_batches",
+        "/api/import-facts/batches?batch_type=bank_transaction&page=1&page_size=50",
+        expected_statuses=(200, 202),
+    ),
     HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
 )

@@ -192,6 +192,30 @@ def test_core_repository_loads_domain_snapshots_accepted_by_services() -> None:
     assert sessions["session_1"].files[0].normalized_rows[0]["invoice_no"] == "INV-001"
 
 
+def test_core_repository_deserializes_withdrawn_bank_import_batch() -> None:
+    repository = PostgresCoreRepository(CoreReadConnection())
+
+    batch = repository._batch_from_row(
+        {
+            "legacy_id": "batch_withdrawn_1",
+            "batch_type": BatchType.BANK_TRANSACTION.value,
+            "source_name": "bank.xlsx",
+            "imported_by": "tester",
+            "row_count": 2,
+            "success_count": 2,
+            "error_count": 0,
+            "duplicate_count": 0,
+            "suspected_duplicate_count": 0,
+            "updated_count": 0,
+            "status": "withdrawn",
+            "imported_at": datetime(2026, 8, 13, tzinfo=UTC),
+            "raw_payload": {},
+        }
+    )
+
+    assert batch.status == BatchStatus.WITHDRAWN
+
+
 class LegacyJoinedBatchFileConnection:
     def __init__(self) -> None:
         self.sql: str = ""

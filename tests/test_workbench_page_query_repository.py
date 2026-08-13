@@ -228,6 +228,15 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert all("ignored_anomaly_fingerprints" not in row for row in page_rows)
 
 
+def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
+
+    assert sql.count("visible_invoice_facts as materialized") == 1
+    assert sql.count("from visible_invoice_facts invoice") == 2
+    assert sql.count("join visible_invoice_facts invoice") == 1
+    assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
+
+
 def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 

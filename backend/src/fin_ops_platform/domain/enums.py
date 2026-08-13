@@ -110,6 +110,7 @@ class BatchStatus(StrEnum):
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     REVERTED = "reverted"
+    WITHDRAWN = "withdrawn"
     FAILED = "failed"
 
 

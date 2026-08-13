@@ -211,6 +211,52 @@ requested_scope as (
         case when %s::text = 'all' then null else %s::date end as scope_month,
         %s::text as tenant_id
 ),
+visible_invoice_facts as materialized (
+    select
+        coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
+        case when exists (
+            select 1
+            from jsonb_array_elements(
+                case when jsonb_typeof(invoice.source_links) = 'array'
+                     then invoice.source_links else '[]'::jsonb end
+            ) source_link
+            where coalesce(
+                source_link->>'source_type', source_link->>'type', source_link->>'source'
+            ) = 'oa_attachment_invoice'
+        ) then 'oa_attachment_invoice'
+        when exists (
+            select 1
+            from jsonb_array_elements(
+                case
+                    when jsonb_typeof(invoice.source_links) = 'array'
+                        then invoice.source_links
+                    when jsonb_typeof(invoice.raw_payload->'source_links') = 'array'
+                        then invoice.raw_payload->'source_links'
+                    else '[]'::jsonb
+                end
+            ) source_link
+            where coalesce(
+                source_link->>'source_type', source_link->>'type', source_link->>'source'
+            ) = 'manual_invoice_import'
+        ) then 'manual_invoice_import'
+        else 'invoice' end as source_kind,
+        invoice.invoice_month,
+        invoice.invoice_date,
+        invoice.updated_at,
+        invoice.seller_name,
+        invoice.buyer_name,
+        invoice.invoice_type,
+        case
+            when nullif(invoice.digital_invoice_no, '') is not null
+                then 'digital:' || invoice.digital_invoice_no
+            when nullif(invoice.invoice_code, '') is not null
+             and nullif(invoice.invoice_no, '') is not null
+                then 'code-no:' || invoice.invoice_code || ':' || invoice.invoice_no
+            else 'row:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
+        end as hard_identity
+    from app.invoices invoice
+    where {_VISIBLE_INVOICE_SQL}
+),
 etc_summary_source_keys as materialized (
     select
         coalesce(
@@ -324,11 +370,10 @@ scoped_source_keys as materialized (
       on scope.scope_key = 'all' or bank.txn_month = scope.scope_month
     where bank.status <> 'deleted'
     union
-    select 'invoice'::text, coalesce(invoice.legacy_mongo_id, invoice.id::text)
+    select 'invoice'::text, invoice.row_id
     from requested_scope scope
-    join app.invoices invoice
+    join visible_invoice_facts invoice
       on scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month
-    where {_VISIBLE_INVOICE_SQL}
     union
     select 'invoice'::text, summary.row_id
     from requested_scope scope
@@ -599,51 +644,17 @@ bank_candidates as materialized (
     where bank.status <> 'deleted'
 ),
 requested_invoice_hard_identities as materialized (
-    select distinct
-        case
-            when nullif(invoice.digital_invoice_no, '') is not null
-                then 'digital:' || invoice.digital_invoice_no
-            when nullif(invoice.invoice_code, '') is not null
-             and nullif(invoice.invoice_no, '') is not null
-                then 'code-no:' || invoice.invoice_code || ':' || invoice.invoice_no
-            else 'row:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
-        end as hard_identity
-    from app.invoices invoice
+    select distinct invoice.hard_identity
+    from visible_invoice_facts invoice
     join needed_keys needed
       on needed.row_type = 'invoice'
-     and needed.row_id = coalesce(invoice.legacy_mongo_id, invoice.id::text)
-    where {_VISIBLE_INVOICE_SQL}
+     and needed.row_id = invoice.row_id
 ),
 invoice_candidates as materialized (
     select
-        coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
+        invoice.row_id,
         'invoice'::text as pane,
-        case when exists (
-            select 1
-            from jsonb_array_elements(
-                case when jsonb_typeof(invoice.source_links) = 'array'
-                     then invoice.source_links else '[]'::jsonb end
-            ) source_link
-            where coalesce(
-                source_link->>'source_type', source_link->>'type', source_link->>'source'
-            ) = 'oa_attachment_invoice'
-        ) then 'oa_attachment_invoice'
-        when exists (
-            select 1
-            from jsonb_array_elements(
-                case
-                    when jsonb_typeof(invoice.source_links) = 'array'
-                        then invoice.source_links
-                    when jsonb_typeof(invoice.raw_payload->'source_links') = 'array'
-                        then invoice.raw_payload->'source_links'
-                    else '[]'::jsonb
-                end
-            ) source_link
-            where coalesce(
-                source_link->>'source_type', source_link->>'type', source_link->>'source'
-            ) = 'manual_invoice_import'
-        ) then 'manual_invoice_import'
-        else 'invoice' end as source_kind,
+        invoice.source_kind,
         invoice.invoice_month as scope_month,
         invoice.invoice_date as sort_date,
         invoice.updated_at,
@@ -654,30 +665,18 @@ invoice_candidates as materialized (
             'invoiceType', invoice.invoice_type,
             'issueDate', invoice.invoice_date::text
         )) as column_values,
-        case
-            when nullif(invoice.digital_invoice_no, '') is not null
-                then 'digital:' || invoice.digital_invoice_no
-            when nullif(invoice.invoice_code, '') is not null
-             and nullif(invoice.invoice_no, '') is not null
-                then 'code-no:' || invoice.invoice_code || ':' || invoice.invoice_no
-            else 'row:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
-        end as hard_identity,
+        invoice.hard_identity,
         exists (
             select 1
             from app.workbench_pair_relations owner_relation
             where owner_relation.status = 'active'
               and cardinality(owner_relation.row_ids) = cardinality(owner_relation.row_types)
-              and owner_relation.row_ids @> array[
-                  coalesce(invoice.legacy_mongo_id, invoice.id::text)
-              ]::text[]
+              and owner_relation.row_ids @> array[invoice.row_id]::text[]
               and exists (
                   select 1
                   from unnest(owner_relation.row_ids, owner_relation.row_types)
                        as owner_member(row_id, row_type)
-                  where owner_member.row_id = coalesce(
-                            invoice.legacy_mongo_id,
-                            invoice.id::text
-                        )
+                  where owner_member.row_id = invoice.row_id
                     and case lower(owner_member.row_type)
                             when 'invoice_record' then 'invoice'
                             when 'formal_invoice' then 'invoice'
@@ -692,17 +691,9 @@ invoice_candidates as materialized (
               )
         ) as active_relation_member,
         null::text as external_etc_batch_id
-    from app.invoices invoice
+    from visible_invoice_facts invoice
     join requested_invoice_hard_identities requested
-      on requested.hard_identity = case
-            when nullif(invoice.digital_invoice_no, '') is not null
-                then 'digital:' || invoice.digital_invoice_no
-            when nullif(invoice.invoice_code, '') is not null
-             and nullif(invoice.invoice_no, '') is not null
-                then 'code-no:' || invoice.invoice_code || ':' || invoice.invoice_no
-            else 'row:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
-         end
-    where {_VISIBLE_INVOICE_SQL}
+      on requested.hard_identity = invoice.hard_identity
 ),
 ranked_invoices as materialized (
     select candidate.*,
