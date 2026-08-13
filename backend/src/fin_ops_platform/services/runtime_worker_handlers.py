@@ -320,7 +320,7 @@ class WorkbenchMatchingWorkerFactory:
     ) -> WorkbenchMatchingDirtyScopeWorker:
         state_store = self._state_store()
         read_model_repository = getattr(state_store, "read_model_repository", None)
-        app_settings_service = _app_settings_service(state_store)
+        app_settings_service = _WorkbenchMatchingSettingsReader(state_store)
         category_service = BankTransactionCategoryService.from_snapshot(
             state_store.load_bank_transaction_categories()
         )
@@ -384,6 +384,36 @@ class WorkbenchMatchingWorkerFactory:
             etc_batch_links=PostgresWorkbenchFormalRelationFactRepository(transaction),
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
+        )
+
+
+class _WorkbenchMatchingSettingsReader:
+    """Expose only the persisted settings required by the matching worker."""
+
+    def __init__(self, state_store: Any) -> None:
+        self._state_store = state_store
+
+    def get_bank_auto_tag_rules_payload(
+        self,
+        *,
+        can_save: bool = False,
+        read_model_status: str | None = None,
+    ) -> dict[str, Any]:
+        settings = self._settings()
+        return BankTransactionCategoryService.auto_tag_rules_payload(
+            settings["bank_transaction_tags"],
+            can_save=can_save,
+            read_model_status=read_model_status,
+        )
+
+    def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, Any]:
+        return AppSettingsService.bank_category_relation_policy_snapshot(
+            self._settings()
+        )["paired_policy"]
+
+    def _settings(self) -> dict[str, Any]:
+        return AppSettingsService.normalize_settings_payload(
+            self._state_store.load_app_settings()
         )
 
 

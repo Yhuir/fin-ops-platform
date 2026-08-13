@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
+from fin_ops_platform.services.runtime_worker_handlers import (
+    ImportRuntimeProcessorFactory,
+    WorkbenchMatchingWorkerFactory,
+)
 from fin_ops_platform.services.runtime_worker import (
     DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
     RuntimeWorker,
@@ -61,6 +64,36 @@ class ImportRuntimeProcessorFactoryTests(unittest.TestCase):
             )
 
         state_store.save_import_delta.assert_not_called()
+
+
+class WorkbenchMatchingWorkerFactoryTests(unittest.TestCase):
+    def test_build_reads_only_settings_instead_of_full_import_snapshot(self) -> None:
+        state_store = SimpleNamespace(
+            read_model_repository=Mock(),
+            load_app_settings=Mock(return_value={}),
+            load_bank_transaction_categories=Mock(return_value={}),
+            load_imports_snapshot=Mock(
+                side_effect=AssertionError("matching startup must not load all imports")
+            ),
+        )
+        factory = WorkbenchMatchingWorkerFactory(data_dir="/tmp", connection=Mock())
+        factory._state_store = Mock(return_value=state_store)
+
+        worker = factory.build_dirty_scope_worker(
+            heartbeat_recorder=Mock(),
+            worker_id="matching-test",
+            poll_interval_seconds=0.25,
+            batch_size=10,
+            lease_seconds=600,
+            retry_delay_seconds=60,
+            max_iterations=1,
+        )
+
+        source_versions = worker._source_versions_provider()
+
+        self.assertEqual(source_versions["bank_auto_tag_rules_version"], 1)
+        state_store.load_app_settings.assert_called_once_with()
+        state_store.load_imports_snapshot.assert_not_called()
 
 
 class FakeQueue:
