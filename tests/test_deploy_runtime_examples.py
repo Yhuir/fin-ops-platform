@@ -407,6 +407,36 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn('chown --reference="$RABBITMQ_DISPATCHER_ENV"', deploy_control)
         self.assertIn('chmod --reference="$RABBITMQ_DISPATCHER_ENV"', deploy_control)
 
+    def test_direct_candidate_repairs_legacy_identity_and_bootstraps_before_workers(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        activate = deploy_control.split("activate_release() {", 1)[1].split(
+            "\nrepair_active_api_runtime() {", 1
+        )[0]
+        compatibility = deploy_control.split(
+            "run_workbench_direct_compatibility_preflight() {", 1
+        )[1].split("\nassert_retired_page_runtime_quiesced() {", 1)[0]
+
+        self.assertIn("repair_workbench_legacy_typed_identities", compatibility)
+        self.assertEqual(
+            compatibility.count("repair_workbench_legacy_typed_identities"),
+            2,
+        )
+        self.assertIn("Workbench compatibility repair is not idempotent", compatibility)
+        self.assertIn("workbench_direct_application_bootstrap_probe", compatibility)
+        self.assertIn('chmod 0600 "$temporary"', compatibility)
+        self.assertLess(
+            activate.index("sync_python_envs"),
+            activate.index("run_workbench_direct_compatibility_preflight"),
+        )
+        self.assertLess(
+            activate.index("run_workbench_direct_compatibility_preflight"),
+            activate.index("install_runtime_worker_helper"),
+        )
+        self.assertLess(
+            activate.index("run_workbench_direct_compatibility_preflight"),
+            activate.index("ensure_runtime_workers"),
+        )
+
     def test_rollback_rehydrates_previous_page_runtime_before_activation(self) -> None:
         deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
         rollback = deploy_control.split("rollback_release_gate() {", 1)[1].split("\n}", 1)[0]

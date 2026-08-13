@@ -532,6 +532,8 @@ class PostgresWorkbenchRepository:
             """
             select row_id, row_type, override_payload, raw_payload
             from app.workbench_row_overrides
+            where status = 'active'
+              and row_type in ('oa', 'bank', 'invoice')
             order by row_type, row_id
             """
         )
@@ -578,7 +580,281 @@ class PostgresWorkbenchRepository:
         )
         if not rows:
             return {}
-        return {"cases": {str(row.get("key")): row_payload(row, "raw_payload") for row in rows}}
+        return {
+            "cases": {
+                str(row.get("key")): row_payload(row, "raw_payload")
+                for row in rows
+            }
+        }
+
+    def repair_legacy_workbench_typed_identities(
+        self,
+        *,
+        tenant_id: str,
+    ) -> dict[str, int]:
+        normalized_tenant_id = text(tenant_id)
+        if not normalized_tenant_id:
+            raise ValueError("tenant_id is required for legacy workbench identity repair.")
+
+        def repair(connection: Any) -> dict[str, int]:
+            from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
+                PostgresWorkbenchPageSelectionRepository,
+            )
+
+            identity_resolver = PostgresWorkbenchPageSelectionRepository(
+                connection,
+                tenant_id=normalized_tenant_id,
+            ).resolve_canonical_identity_type_candidates_in_current_transaction
+            override_counts = self._repair_locked_legacy_workbench_override_identities(
+                connection,
+                identity_resolver=identity_resolver,
+            )
+            locked_rows = connection.fetch_all(
+                """
+                select case_id as key, raw_payload
+                from app.workbench_exception_cases
+                where scenario is distinct from %s
+                  and jsonb_typeof(raw_payload#>'{normalized_payload,row_ids}') = 'array'
+                  and jsonb_typeof(raw_payload#>'{normalized_payload,row_types}') = 'array'
+                  and jsonb_array_length(raw_payload#>'{normalized_payload,row_ids}')
+                      <> jsonb_array_length(raw_payload#>'{normalized_payload,row_types}')
+                order by case_id
+                for update
+                """,
+                (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,),
+            )
+            exception_repaired = self._repair_locked_legacy_workbench_exception_case_identities(
+                connection,
+                locked_rows,
+                identity_resolver=identity_resolver,
+            )
+            counts = {
+                **override_counts,
+                "exception_repaired": exception_repaired,
+            }
+            if counts["override_repaired"] + counts["exception_repaired"] > 0:
+                audit_payload = {
+                    **counts,
+                    "contract_schema": "workbench_typed_identity",
+                    "contract_version": 1,
+                }
+                connection.execute(
+                    """
+                    insert into audit.events(
+                        event_type, object_type, object_id, actor_id, scope,
+                        payload, raw_payload
+                    ) values (
+                        'workbench.legacy_typed_identity.repaired',
+                        'workbench_typed_identity_contract',
+                        'workbench_typed_identity:v1',
+                        'system:direct-api-bootstrap',
+                        %s,
+                        %s,
+                        %s
+                    )
+                    """,
+                    (
+                        normalized_tenant_id,
+                        jsonb(audit_payload),
+                        jsonb({"normalized_payload": audit_payload}),
+                    ),
+                )
+            return counts
+
+        return run_in_transaction(self._connection, repair)
+
+    @classmethod
+    def _repair_locked_legacy_workbench_override_identities(
+        cls,
+        connection: Any,
+        *,
+        identity_resolver: Callable[[list[str]], dict[str, list[str]]],
+    ) -> dict[str, int]:
+        locked_rows = connection.fetch_all(
+            """
+            select id::text as override_id, row_id, override_payload, raw_payload
+            from app.workbench_row_overrides
+            where status = 'active'
+              and lower(btrim(row_type)) = 'unknown'
+            order by id
+            for update
+            """
+        )
+        if not locked_rows:
+            return {
+                "override_repaired": 0,
+                "override_unresolved_missing_source": 0,
+            }
+
+        requested_row_ids = sorted(
+            {
+                row_id
+                for row in locked_rows
+                if (row_id := text(row.get("row_id")))
+            }
+        )
+        source_hits_by_row_id = identity_resolver(requested_row_ids)
+        repaired_count = 0
+        unresolved_count = 0
+        for row in locked_rows:
+            override_id = text(row.get("override_id"))
+            row_id = text(row.get("row_id"))
+            payload = row_payload(row, "override_payload", "raw_payload")
+            if not override_id or not row_id or not isinstance(payload, dict):
+                raise ValueError("Legacy workbench override has invalid persisted identity or payload.")
+            source_hits = sorted(source_hits_by_row_id.get(row_id, []))
+            if len(source_hits) > 1:
+                raise ValueError(
+                    f"Legacy workbench override row {row_id} resolves to multiple canonical source rows: "
+                    + ", ".join(source_hits)
+                )
+            if not source_hits:
+                unresolved_count += 1
+                continue
+
+            row_type = source_hits[0]
+            composite_identity = workbench_row_identity_key(row_type, row_id)
+            collision = connection.fetch_one(
+                """
+                select id::text as override_id
+                from app.workbench_row_overrides
+                where id <> %s::uuid
+                  and (
+                        (row_id = %s and row_type = %s)
+                        or legacy_mongo_id = %s
+                  )
+                for update
+                """,
+                (override_id, row_id, row_type, composite_identity),
+            )
+            if collision:
+                raise ValueError(
+                    f"Legacy workbench override row {row_id} collides with typed identity "
+                    f"{row_type}:{row_id}."
+                )
+            normalized_payload = dict(payload)
+            normalized_payload["row_id"] = row_id
+            normalized_payload["row_type"] = row_type
+            normalized_payload["legacy_identity_repair"] = {
+                "status": "typed",
+            }
+            affected = connection.execute(
+                """
+                update app.workbench_row_overrides
+                set legacy_mongo_id = %s,
+                    row_type = %s,
+                    override_payload = %s,
+                    raw_payload = %s,
+                    updated_at = now()
+                where id = %s::uuid
+                  and status = 'active'
+                  and lower(btrim(row_type)) = 'unknown'
+                """,
+                (
+                    composite_identity,
+                    row_type,
+                    jsonb(normalized_payload),
+                    jsonb({"normalized_payload": normalized_payload}),
+                    override_id,
+                ),
+            )
+            if affected != 1:
+                raise RuntimeError(
+                    f"Legacy workbench override repair lost its locked row: {override_id}"
+                )
+            repaired_count += 1
+        return {
+            "override_repaired": repaired_count,
+            "override_unresolved_missing_source": unresolved_count,
+        }
+
+    @staticmethod
+    def _workbench_exception_case_needs_typed_identity_repair(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        row_ids = payload.get("row_ids")
+        row_types = payload.get("row_types")
+        return (
+            isinstance(row_ids, list)
+            and isinstance(row_types, list)
+            and len(row_ids) != len(row_types)
+        )
+
+    @classmethod
+    def _repair_locked_legacy_workbench_exception_case_identities(
+        cls,
+        connection: Any,
+        locked_rows: list[dict[str, Any]],
+        *,
+        identity_resolver: Callable[[list[str]], dict[str, list[str]]],
+    ) -> int:
+        malformed_cases: dict[str, tuple[dict[str, Any], list[str]]] = {}
+        for row in locked_rows:
+            case_id = str(row.get("key") or "").strip()
+            payload = row_payload(row, "raw_payload")
+            if not cls._workbench_exception_case_needs_typed_identity_repair(payload):
+                continue
+            raw_row_ids = payload.get("row_ids")
+            if not isinstance(raw_row_ids, list):
+                raise ValueError(f"Legacy workbench exception case {case_id} has invalid row_ids.")
+            row_ids = [str(value or "").strip() for value in raw_row_ids]
+            if not row_ids or any(not row_id for row_id in row_ids):
+                raise ValueError(f"Legacy workbench exception case {case_id} has invalid row_ids.")
+            malformed_cases[case_id] = (payload, row_ids)
+
+        if not malformed_cases:
+            return 0
+
+        requested_row_ids = sorted(
+            {
+                row_id
+                for _payload, row_ids in malformed_cases.values()
+                for row_id in row_ids
+            }
+        )
+        source_hits_by_row_id = identity_resolver(requested_row_ids)
+
+        repaired: dict[str, dict[str, Any]] = {}
+        for case_id, (payload, row_ids) in malformed_cases.items():
+            row_types: list[str] = []
+            for row_id in row_ids:
+                source_hits = sorted(source_hits_by_row_id.get(row_id, []))
+                if not source_hits:
+                    raise ValueError(
+                        f"Legacy workbench exception case {case_id} row {row_id} "
+                        "has no canonical source row."
+                    )
+                if len(source_hits) != 1:
+                    raise ValueError(
+                        f"Legacy workbench exception case {case_id} row {row_id} "
+                        "resolves to multiple canonical source rows: "
+                        + ", ".join(source_hits)
+                    )
+                row_types.append(source_hits[0])
+            normalized_payload = dict(payload)
+            normalized_payload["row_ids"] = row_ids
+            normalized_payload["row_types"] = row_types
+            repaired[case_id] = normalized_payload
+
+        for case_id, normalized_payload in repaired.items():
+            affected = connection.execute(
+                """
+                update app.workbench_exception_cases
+                set row_ids = %s,
+                    raw_payload = %s
+                where case_id = %s
+                """,
+                (
+                    normalized_payload["row_ids"],
+                    jsonb({"normalized_payload": normalized_payload}),
+                    case_id,
+                ),
+            )
+            if affected != 1:
+                raise RuntimeError(
+                    f"Legacy workbench exception case repair lost its locked row: {case_id}"
+                )
+        return len(repaired)
 
     def load_workbench_amount_mismatch_decisions(self, *, scope_key: str | None = None) -> dict[str, str]:
         normalized_scope_key = str(scope_key or "").strip()

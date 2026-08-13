@@ -580,7 +580,7 @@ class WorkbenchExceptionCaseService:
                 case_payload.get("category") or case_payload.get("business_line") or "manual",
                 "category",
             )
-            row_ids = cls._normalize_text_list(case_payload.get("row_ids"), "row_ids")
+            row_ids = cls._normalize_positional_text_list(case_payload.get("row_ids"), "row_ids")
             row_types = cls._normalize_row_types(case_payload.get("row_types"))
             case_payload["row_ids"] = row_ids
             case_payload["row_types"] = row_types
@@ -664,6 +664,15 @@ class WorkbenchExceptionCaseService:
             raise ValueError(f"{field_name} must be a list.")
         normalized = WorkbenchExceptionCaseService._unique_preserve_order(str(value).strip() for value in values if str(value).strip())
         if not normalized:
+            raise ValueError(f"{field_name} must not be empty.")
+        return normalized
+
+    @staticmethod
+    def _normalize_positional_text_list(values: Any, field_name: str) -> list[str]:
+        if not isinstance(values, list):
+            raise ValueError(f"{field_name} must be a list.")
+        normalized = [str(value or "").strip() for value in values]
+        if not normalized or any(not value for value in normalized):
             raise ValueError(f"{field_name} must not be empty.")
         return normalized
 

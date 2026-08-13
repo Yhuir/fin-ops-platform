@@ -725,6 +725,12 @@ sudo /usr/local/sbin/finops-deploy-control candidate-status "$release" --json
 不要用运行时账号代替 migrator 账号，也不要让旧 `/opt/fin-ops/fin-ops.env` 或 `/opt/fin-ops/current`
 参与 release 运行时。
 
+首次切换到 Workbench direct canonical API 时，runtime gate 会在 API、dispatcher 和 workers 全部停止后，
+按固定顺序完成 migration/env sync、一次显式 legacy typed-identity 事务修复、立即第二次幂等校验，
+再以 `default_transaction_read_only=on` 完整构造并关闭 candidate Application。修复报告、幂等报告和
+只读 bootstrap 报告均以 root-only `0600` evidence 保存；任一步失败都不会启动 candidate 服务，
+而是进入既有 rollback。普通 Gunicorn/worker 启动不执行这项数据修复，也不维护兼容 fallback。
+
 首次退役 Workbench page worker 时，PRE 通过后且停止服务前，gate 会把 exact live worker env 复制到
 `/opt/fin-ops/runtime-smoke/release-gates/<candidate>/workbench-page-worker-runtime/`。目录为 root-only `0700`，
 env backup 与 owner/mode/SHA-256 metadata 为 root-only `0600`，内容不会打印到 terminal 或普通 evidence。

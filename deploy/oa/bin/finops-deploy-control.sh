@@ -1527,6 +1527,87 @@ run_with_runtime_env() {
   (cd "$src" && "$API_PYTHON" "$@")
 }
 
+run_workbench_direct_compatibility_preflight() {
+  local src="$1"
+  local evidence_dir="$2"
+  local first_path="$evidence_dir/workbench-legacy-typed-identity-repair.json"
+  local second_path="$evidence_dir/workbench-legacy-typed-identity-repair-idempotency.json"
+  local bootstrap_path="$evidence_dir/workbench-direct-application-bootstrap.json"
+  local temporary
+
+  release_has_workbench_page_read_model "$src" \
+    && die "direct Workbench compatibility preflight requires a direct-only release"
+  install -d -m 0700 "$evidence_dir"
+
+  temporary="${first_path}.tmp"
+  run_with_runtime_env "$src" \
+    -m fin_ops_platform.tools.repair_workbench_legacy_typed_identities \
+    >"$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$first_path"
+
+  temporary="${second_path}.tmp"
+  run_with_runtime_env "$src" \
+    -m fin_ops_platform.tools.repair_workbench_legacy_typed_identities \
+    >"$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$second_path"
+
+  "$API_PYTHON" - "$first_path" "$second_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+first = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+second = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+required_keys = {
+    "override_repaired",
+    "override_unresolved_missing_source",
+    "exception_repaired",
+}
+for label, report in (("first", first), ("second", second)):
+    if report.get("status") != "completed":
+        raise SystemExit(f"{label} Workbench compatibility repair did not complete")
+    if report.get("contract_schema") != "workbench_typed_identity":
+        raise SystemExit(f"{label} Workbench compatibility repair contract is invalid")
+    counts = report.get("counts")
+    if not isinstance(counts, dict) or set(counts) != required_keys:
+        raise SystemExit(f"{label} Workbench compatibility repair counts are invalid")
+    if any(not isinstance(counts[key], int) or counts[key] < 0 for key in required_keys):
+        raise SystemExit(f"{label} Workbench compatibility repair counts are invalid")
+
+if second.get("changed") is not False:
+    raise SystemExit("Workbench compatibility repair is not idempotent")
+if second["counts"]["override_repaired"] != 0 or second["counts"]["exception_repaired"] != 0:
+    raise SystemExit("Workbench compatibility repair changed typed rows on its second pass")
+if (
+    first["counts"]["override_unresolved_missing_source"]
+    != second["counts"]["override_unresolved_missing_source"]
+):
+    raise SystemExit("Workbench compatibility repair unresolved count is unstable")
+PY
+
+  temporary="${bootstrap_path}.tmp"
+  run_with_runtime_env "$src" \
+    -m fin_ops_platform.tools.workbench_direct_application_bootstrap_probe \
+    >"$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$bootstrap_path"
+  "$API_PYTHON" - "$bootstrap_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if report != {
+    "read_only": True,
+    "status": "passed",
+    "tool": "workbench_direct_application_bootstrap_probe",
+}:
+    raise SystemExit("candidate Workbench application bootstrap proof is invalid")
+PY
+}
+
 assert_retired_page_runtime_quiesced() {
   local src="$1"
   local evidence_path="${2:-}"
@@ -3017,7 +3098,7 @@ with connection.transaction() as transaction:
                 %s, clock_timestamp(), %s, %s
             )
             on conflict (tenant_id, scope_type, scope_key)
-            where status in (%s, %s)
+            where status in ('pending', 'processing')
             do update set
                 reason = excluded.reason,
                 source_version = job.read_model_dirty_scopes.source_version + 1,
@@ -3037,7 +3118,7 @@ with connection.transaction() as transaction:
                 "direct_only_release_rollback_rehydrate",
                 "default", "workbench", scope_key,
                 "pending", jsonb(marker), jsonb(marker),
-                "pending", "processing", "pending", "pending",
+                "pending", "pending",
             ),
         )
         if row is None:
@@ -3998,6 +4079,10 @@ activate_release() {
   run_schema_migrations "$src"
   assert_settings_access_control_database_guard "$src"
   sync_python_envs "$src"
+  if [[ "$rollback_page_runtime_mode" == "direct-only" ]]; then
+    run_workbench_direct_compatibility_preflight \
+      "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release"
+  fi
   install_runtime_worker_helper "$runtime_worker_helper_src"
   retire_unregistered_worker_services "$src"
   retire_workbench_page_runtime_assets "$src"

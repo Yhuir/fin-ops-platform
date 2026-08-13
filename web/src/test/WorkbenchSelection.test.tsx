@@ -1383,7 +1383,12 @@ describe("Workbench row selection and detail drawer", () => {
   test("a late group-detail response cannot replace a newer canonical group", async () => {
     const user = userEvent.setup();
     const staleDetail = deferredResponse();
+    let releaseCanonicalRefresh!: () => void;
+    const canonicalRefreshGate = new Promise<void>((resolve) => {
+      releaseCanonicalRefresh = resolve;
+    });
     let staleDetailSignal: AbortSignal | null = null;
+    let initialReadCount = 0;
     let canonicalAmount = "111.00";
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: (payload) => withCollapsedPairedGroup(
@@ -1412,6 +1417,12 @@ describe("Workbench row selection and detail drawer", () => {
     const defaultFetch = fetchMock.getMockImplementation();
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(fetchPath(input), "http://localhost");
+      if (isWorkbenchInitialRequest(input)) {
+        initialReadCount += 1;
+        if (initialReadCount > 1) {
+          return canonicalRefreshGate.then(() => defaultFetch!(input, init));
+        }
+      }
       if (url.pathname === "/api/workbench/groups/detail" && !staleDetailSignal) {
         staleDetailSignal = init?.signal ?? null;
         const stalePayload = defaultFetch!(input, init);
@@ -1428,8 +1439,9 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await within(pairedZone).findByRole("button", { name: "展开折叠明细，2 条" }));
     await waitFor(() => expect(staleDetailSignal).not.toBeNull());
     canonicalAmount = "222.00";
+    releaseCanonicalRefresh();
     await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true), { timeout: 4_500 });
-    expect(within(pairedZone).getAllByText("222.00")).toHaveLength(1);
+    await waitFor(() => expect(within(pairedZone).getAllByText("222.00")).toHaveLength(1));
 
     staleDetail.resolve(jsonResponse({}));
     await act(async () => Promise.resolve());

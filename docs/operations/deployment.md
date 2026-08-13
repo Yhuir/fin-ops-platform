@@ -55,6 +55,11 @@ root-owned 的 `/usr/local/sbin/finops-ensure-runtime-workers`，幂等安装 ru
 worker env、并 `enable/restart` 最小生产正确性必须长期运行的 worker 矩阵。最后脚本会检查 live 前端 `index.html` 与 release 内
 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
 
+Workbench page runtime 首次由 generation read model 切换为 direct canonical API 时，激活在服务停止、
+migration 和 Python env 同步完成后，先运行一次显式 typed-identity 兼容修复并立即验证第二次执行零变更，
+随后在数据库默认只读事务下完整构造并关闭 candidate Application。三份 root-only evidence 均通过后才安装/
+启动 candidate workers、dispatcher 和 API；普通 Application 构造保持只读，不隐式修历史数据。
+
 `git push main` 不是部署动作。标准顺序是：本地验证、提交、推送、执行 release 发布、发布后 smoke check。默认脚本会拒绝 dirty worktree；生产发布必须能追溯到具体 commit。
 
 生产 browser route-shell smoke 的 Playwright bundle 是独立 runner 输入，不属于 release archive。生成命令：

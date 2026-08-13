@@ -31,10 +31,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
-from fin_ops_platform.services.workbench_override_service import (
-    WorkbenchOverrideService,
-    is_legacy_workbench_exception_override,
-)
+from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_query_service import (
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     WorkbenchQueryService,
@@ -588,11 +585,7 @@ class WorkbenchCanonicalRowsBuilder:
         for identity in identities:
             row = rows_by_typed_id.get(identity)
             payload = resolved_overrides.get(identity)
-            if (
-                row is None
-                or not isinstance(payload, dict)
-                or is_legacy_workbench_exception_override(payload)
-            ):
+            if row is None or not isinstance(payload, dict):
                 continue
             rows_by_typed_id[identity] = WorkbenchOverrideService.from_snapshot(
                 {
@@ -1303,7 +1296,6 @@ class WorkbenchCanonicalRowsBuilder:
                 row_id
                 and row_type in {"oa", "bank", "invoice"}
                 and isinstance(payload, dict)
-                and not is_legacy_workbench_exception_override(payload)
             ):
                 result[workbench_row_identity_key(row_type, row_id)] = {
                     **payload,

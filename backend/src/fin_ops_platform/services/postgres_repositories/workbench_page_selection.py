@@ -78,6 +78,31 @@ class PostgresWorkbenchPageSelectionRepository:
             )
         )
 
+    def resolve_canonical_identity_type_candidates_in_current_transaction(
+        self,
+        row_ids: list[str],
+    ) -> dict[str, list[str]]:
+        """Resolve raw IDs through the same source arbitration used by direct selection.
+
+        The caller owns the transaction. Candidate multiplicity is preserved so legacy
+        identity repair can fail closed for both cross-pane and same-pane ambiguity.
+        """
+        requested = self._selection_identities(row_ids=row_ids, row_types=None)
+        requested_ids = [row_id for _row_type, row_id in requested]
+        rows = self._resolve_source_descriptors(
+            row_ids=requested_ids,
+            row_types=None,
+            scope_key="all",
+            require_exact=False,
+        )
+        candidates = {row_id: [] for row_id in requested_ids}
+        for row in rows:
+            row_id = str(row.get("row_id") or "").strip()
+            row_type = self._row_type(row.get("row_type"))
+            if row_id in candidates and row_type:
+                candidates[row_id].append(row_type)
+        return candidates
+
     def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
         return self._in_snapshot(
             lambda repository: repository._ignored_rows(scope_key=scope_key)
@@ -649,6 +674,7 @@ class PostgresWorkbenchPageSelectionRepository:
         row_ids: list[str],
         row_types: list[str] | None,
         scope_key: str,
+        require_exact: bool = True,
     ) -> list[dict[str, Any]]:
         requested = self._selection_identities(row_ids=row_ids, row_types=row_types)
         requested_types = [row_type for row_type, _row_id in requested]
@@ -918,23 +944,10 @@ class PostgresWorkbenchPageSelectionRepository:
                 join etc_summary_keys summary on summary.row_id = requested.row_id
                 where (requested.row_type is null or requested.row_type = 'invoice')
                   and (%s::text = 'all' or summary.scope_month = %s::date)
-            ),
-            oa_duplicate_positions as materialized (
-                select candidate.position
-                from source_candidates candidate
-                where candidate.row_type = 'oa'
-                group by candidate.position
-                having count(*) > 1
-            ),
-            oa_integrity_guard as materialized (
-                select 1 / case when count(*) = 0 then 1 else 0 end as guard
-                from oa_duplicate_positions
             )
             select position, row_type, row_id, source_kind,
                    external_etc_batch_id, scope_month, updated_at
             from source_candidates
-            cross join oa_integrity_guard guard
-            where guard.guard = 1
             order by position, row_type
             """,
             (
@@ -942,8 +955,8 @@ class PostgresWorkbenchPageSelectionRepository:
                 requested_ids,
                 normalized_scope,
                 scope_month,
-                normalized_scope,
                 self._tenant_id,
+                normalized_scope,
                 normalized_scope,
                 normalized_scope,
                 scope_month,
@@ -953,6 +966,8 @@ class PostgresWorkbenchPageSelectionRepository:
                 scope_month,
             ),
         )
+        if not require_exact:
+            return rows
         counts = Counter(int(row.get("position") or 0) for row in rows)
         if any(counts.get(position, 0) == 0 for position in range(1, len(requested) + 1)):
             raise ValueError("Canonical Workbench row selection is missing.")
