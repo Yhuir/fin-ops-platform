@@ -121,8 +121,6 @@ class PostgresBankImportWithdrawalRepository:
         *,
         transaction_uuids: list[str],
         row_ids: list[str],
-        actor_id: str,
-        reason: str,
     ) -> dict[str, int]:
         counts: dict[str, int] = {}
         counts["category_events"] = self._connection.execute(
@@ -148,17 +146,6 @@ class PostgresBankImportWithdrawalRepository:
         counts["row_overrides"] = self._connection.execute(
             "delete from app.workbench_row_overrides where row_id = any(%s::text[])",
             (row_ids,),
-        )
-        counts["released_workbench_claims"] = self._connection.execute(
-            """
-            update app.bank_transaction_relation_claims
-            set status = 'released', released_by = %s, released_at = now(), release_reason = %s,
-                updated_at = now()
-            where status = 'active'
-              and owner_type = 'workbench_relation'
-              and bank_transaction_id = any(%s::text[])
-            """,
-            (actor_id, reason, row_ids),
         )
         return counts
 

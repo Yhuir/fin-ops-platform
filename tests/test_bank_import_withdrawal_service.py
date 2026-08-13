@@ -141,6 +141,16 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
         self.assertNotIn("delete", [name for name, _ in repository.calls])
         self.assertEqual(repository.calls[-1], ("transaction", "rollback"))
 
+    def test_repository_does_not_write_retired_relation_claim_storage(self) -> None:
+        from inspect import getsource
+
+        from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
+            PostgresBankImportWithdrawalRepository,
+        )
+
+        source = getsource(PostgresBankImportWithdrawalRepository.cleanup_removable_state)
+        self.assertNotIn("bank_transaction_relation_claims", source)
+
     def test_rejects_updated_or_partially_owned_batch_and_supports_idempotent_replay(self) -> None:
         repository = FakeWithdrawalRepository()
         service, _, _ = self.build_service(repository)

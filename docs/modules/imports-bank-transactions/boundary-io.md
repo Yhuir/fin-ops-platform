@@ -79,6 +79,8 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | `POST /api/imports/bank-transaction-batches/{batch_id}/withdraw` | 系统状态导入历史抽屉 | admin + mutate；同事务清理普通 Workbench active relation、分类/候选/本行 override，再删除 batch 独占创建的流水；OA、发票、导入历史和 append-only 审计保留。已核销、updated import 或其它 active business owner 返回 `409`。重复撤回幂等返回 `idempotent_replay=true`。 |
 | `withdrawn` lifecycle | 导入历史与重复文件判断 | batch/file 保留并显示“已撤回”；已撤回 file 不再作为 confirmed duplicate owner，因此允许用正确银行重导原文件。 |
 
+`bank_transaction_relation_claims` 已由迁移 `0136` 收敛为只读历史证明。撤回链路不得更新或删除该旧表，也不得为此恢复生产写权限；当前 Workbench relation 的解除只走 `WorkbenchRelationCommandService`。
+
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。复核表按服务端分页读取银行专属字段，不一次性映射全部结果。 |

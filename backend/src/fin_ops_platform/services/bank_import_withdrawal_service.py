@@ -113,8 +113,6 @@ class BankImportWithdrawalService:
             cleanup_counts = repository.cleanup_removable_state(
                 transaction_uuids=transaction_uuids,
                 row_ids=row_ids,
-                actor_id=normalized_actor_id,
-                reason=normalized_reason,
             ) if row_ids else {}
             deleted_count = repository.delete_transactions(
                 transaction_uuids=transaction_uuids,
