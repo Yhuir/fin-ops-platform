@@ -423,7 +423,9 @@ active 只代表进程存在，不代表 API 已经加载正确 release identity
   激活前把尚未部署的新 worker 误报为旧 runtime 故障
 - `runtime`/`acl` 候选激活后 T+0 运行只读 `stability`：连接真实 PostgreSQL 与 RabbitMQ，检查 exact worker inventory、
   queue/dirty/dead-letter 收敛、真实页面 canonical proof、隔离事务写入能力、domain/page canonical
-  audit 及 API/health 性能。自动发布门禁不 enqueue synthetic read-model refresh，并证明 Workbench page event、Redis cache、projection I/O 为零
+  audit 及 API/health 性能。自动发布门禁不 enqueue synthetic read-model refresh，并证明 Workbench page event、Redis cache、projection I/O 为零。
+  `stability` 会审计窗口内已有的真实 write-operation 样本；生产空闲窗口没有样本时记录为 idle，不以制造业务写入作为激活前提；
+  一旦存在样本，缺失 expectation 或超出 SLO 仍 fail closed。显式 `full` closure 仍要求非空真实写入证据
 - `runtime`/`acl` 在 T+60s、T+300s 继续运行只读 `stability`：重跑性能、domain audit 和 runtime 收敛检查，
   不 enqueue read-model smoke，也不执行 confirm/withdraw；单个无错误、合同完整、p99
   合格但 p95 超标的三样本窗口只允许重采样一次，第二个窗口仍超标即失败。最终证据以 T+300 证明异步拓扑持续稳定

@@ -250,6 +250,7 @@ def run_closure_gate(
                     target_ms=write_target_ms,
                     lookback_hours=write_audit_lookback_hours,
                     limit=limit,
+                    require_samples=profile == "full",
                 ),
             ]
         )
@@ -807,6 +808,7 @@ def _write_operation_audit_check(
     lookback_hours: float,
     limit: int,
     operations: Sequence[str] | None = None,
+    require_samples: bool = True,
 ) -> ClosureCheck:
     report = write_operation_slo_audit.audit_write_operation_slo(
         connection,
@@ -819,6 +821,17 @@ def _write_operation_audit_check(
     event_sample_count = _safe_int(report.get("event_sample_count"))
     expectation_count = _safe_int(report.get("expectation_count"))
     if report.get("status") == PASS and (event_sample_count <= 0 or expectation_count <= 0):
+        if not require_samples:
+            return ClosureCheck(
+                "write_operation_audit",
+                PASS,
+                "No recent write-operation samples were present in this idle stability window.",
+                {
+                    **_compact_report(report),
+                    "empty_sample_window": True,
+                    "sample_requirement": "not_required_for_stability",
+                },
+            )
         return ClosureCheck(
             "write_operation_audit",
             FAIL,

@@ -556,6 +556,8 @@ audit；任何 profile 都不得 confirm、withdraw、recovery 或修改真实�
 RabbitMQ dead letter、domain audit、真实页面 canonical proof 和 API/health 性能；自动发布门禁不 enqueue
 synthetic read-model refresh，且要证明 Workbench page event、cache和 projection I/O 为零。HTTP 三样本窗口仅在所有请求成功、合同完整、p99
 合格而 p95 单窗超标时允许一次重采样，连续两窗超标仍 fail closed。
+`stability` 对审计窗口内已有的真实 write-operation 样本继续执行完整 SLO 校验；若窗口内没有任何业务写入，
+则以 idle window 通过而不制造生产业务数据。显式 `full` closure 仍要求非空 event/expectation 样本。
 最终 evidence 复用只读页面 canonical audit，并以 T+300 runtime 采样证明 queue 持续稳定。
 `preflight` 由候选 gate 代码执行，但 worker readiness 的 required instance 集合必须显式取自当前 stable
 release；候选新增 worker 只能在 `activate_release` 的 ensure 阶段安装，并在 T+0 以后按候选 registry 验证。

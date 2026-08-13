@@ -861,6 +861,65 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["status"], gate.PASS)
         self.assertNotIn("read_model_direct_smoke", [check["name"] for check in report["checks"]])
 
+    def test_stability_gate_accepts_idle_write_audit_window(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            FakeRuntimeMonitoringRepository,
+        ), patch.object(
+            gate.http_slo_probe,
+            "collect_http_slo",
+            return_value=http_pass_report(),
+        ), patch.object(
+            gate.write_operation_slo_audit,
+            "audit_write_operation_slo",
+            return_value={
+                "status": "pass",
+                "event_sample_count": 0,
+                "expectation_count": 0,
+                "results": [],
+            },
+        ):
+            report = gate.run_closure_gate(
+                object(),
+                base_url="https://example.test",
+                headers={"Authorization": "Bearer token"},
+                profile="stability",
+            )
+
+        self.assertEqual(report["status"], gate.PASS)
+        audit = next(
+            check for check in report["checks"] if check["name"] == "write_operation_audit"
+        )
+        self.assertIs(audit["payload"]["empty_sample_window"], True)
+        self.assertEqual(
+            audit["payload"]["sample_requirement"],
+            "not_required_for_stability",
+        )
+
+    def test_stability_gate_rejects_failed_write_audit_samples(self) -> None:
+        with patch.object(
+            gate.write_operation_slo_audit,
+            "audit_write_operation_slo",
+            return_value={
+                "status": "fail",
+                "event_sample_count": 1,
+                "expectation_count": 1,
+                "failed_expectation_count": 1,
+                "results": [{"status": "fail"}],
+            },
+        ):
+            check = gate._write_operation_audit_check(
+                object(),
+                tenant_id="default",
+                target_ms=1_000,
+                lookback_hours=24,
+                limit=2_000,
+                require_samples=False,
+            )
+
+        self.assertEqual(check.status, gate.FAIL)
+
     def test_gate_fails_without_authenticated_read_only_evidence(self) -> None:
         with patch.object(
             gate,
