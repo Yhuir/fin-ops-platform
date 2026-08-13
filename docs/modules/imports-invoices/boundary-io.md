@@ -122,6 +122,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - 当前 revision 的新导入严格证明 file object/hash/session/batch/row/canonical invoice 与 source link；税率按语义归一化比较，例如 `1% == 0.01`。
 - revision 为 NULL 的 pre-contract 历史保留明确 warning，不伪造来源证据；canonical 发票、展示字段和 relation 完整性由对应业务页面 Audit 阻断证明。
 - 当前 revision 发票可能同时保留已登记 strict batch 与已存在 pre-contract invoice batch 的 `manual_invoice_import` source-link。严格双向 equality 只比较当前 revision batch/row 对应的边；已存在 legacy invoice batch 的边继续由 provenance warning 标记为未证明，不伪报 strict orphan。引用不存在的 batch 或非发票 batch 仍必须阻断。
+- canonical invoice 可以同时拥有正式 `manual_invoice_import` 与附加 `etc_invoice_import` provenance。Audit 校验 `source_batch_id` 时接受它精确命中的 manual batch 或 ETC source-link batch；没有任何精确 source-link 支撑的 owner 仍阻断。新的 ETC metadata merge 不得再覆盖既有正式 import owner。
 - 税务平台标准多 sheet 导出的一张发票可以包含多条商品/服务/折扣明细。唯一 `发票基础信息` 行直接提供整票金额、税额和价税合计；`信息汇总表` 的不同明细仅保存在 `invoice_line_items` 来源证据中，不重算或覆盖表头事实。仅对不含 `发票基础信息` 的历史单 sheet 模板保留原有同票明细聚合合同。
 - 当前严格合同 Audit 必须按导入时记录的 sheet role 选择事实口径：header-driven 导入比较 `发票基础信息`，历史 detail-only 导入才按同一 batch + canonical invoice 重算合计；两者都不得把第一条物理商品明细误当整票金额。
 - 本次 11 张历史表头事实恢复只更新批准号码的 canonical 发票金额、税额、价税合计、空表头税率和 provenance；保留 invoice ID、关系、source link 与明细证据，并由工作簿 hash、精确计数、repeatable-read dry-run fingerprint、serializable transaction、CAS 和 rollback manifest 约束。运行时导入链不调用修复工具。

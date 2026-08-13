@@ -7,8 +7,8 @@
 
 - 当前状态：
   - `draft/.../imported/oa_draft_failed/not_submitted`：业务批次属于“未提交”。
-  - `oa_draft_creating`：内部短暂操作态，仍显示在未提交；prepare 已持久化，OA I/O 在业务锁外执行。超过 15 分钟由 Audit 报 recovery required，不自动重试。
-  - `oa_confirmation_pending`：OA 草稿 ID/URL 已持久化，唯一“暂存”状态，等待用户人工确认。
+  - `oa_draft_creating`：用户已发起草稿创建，属于“暂存”；prepare 已持久化，OA I/O 在业务锁外执行，等待用户按 OA 实际操作确认。
+  - `oa_confirmation_pending`：OA 草稿 ID/URL 已持久化，同样属于“暂存”，等待用户人工确认。
   - `oa_submitted/manually_marked_submitted/closed`：用户确认 OA 已提交，业务批次进入“已提交”，绑定的 ETC 对账任务同步闭环。
   - `not_submitted`：用户确认 OA 未提交，释放本地 ETC 发票占用并回到未提交链路。
   - `deleted`：用户可见业务批次被删除。页面只从业务批次行发起删除；后端绑定 task 删除 API 仍作为正式 workflow/运维合同。已绑定正式 `oa_row_id` 的 submitted 批次禁止进入该状态；历史错误 reset 只能按原 tombstone 成员恢复。
@@ -17,8 +17,8 @@
   - 导入确认后创建或更新同一个业务批次，不在前端拆成“导入任务”和“对账任务”两个用户可见任务。
   - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
   - 未提交业务批次允许通过 `PATCH /api/etc/business-batches/{id}` 修改 `title`，必须带 `expectedVersion` 防并发覆盖；标题更新写入业务批次审计，并同步 linked reconciliation task title。
-  - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。明确失败进入 `oa_draft_failed`；结果未知保持 creating 并禁止盲重试，管理员核实 OA 后才能恢复。
-  - 历史 `oa_draft_creating` 若缺 prepared submission/attempt，不允许采纳任何草稿 ID/URL；只有管理员提供权威 OA 主事实查询为零的 reason/evidence 后，才可将目标批次 CAS 为 `oa_draft_failed` 并回到未提交 bucket。不得补造 submission 或根据本地空字段自动恢复。
+  - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。点击后 UI 立即进入暂存，附件在 adapter 边界以有界并发上传并保持稳定顺序。明确失败回到未提交；结果未知保持 creating 并禁止盲重试。
+  - 普通页面不查询 OA、不要求草稿 ID/URL，也不展示 recovery 表单。`oa_draft_creating` 与 `oa_confirmation_pending` 都允许用户直接声明已在 OA 提交或已在 OA 删除草稿；决定由用户负责，App 只做版本 CAS、状态持久化和审计。管理员 recovery 仅用于历史/技术修复。
   - prepare/finalize/recovery 的 durable write 必须以目标 business batch 当前 version 为 CAS 前置条件，并只写当前 attempt 拥有的 business batch、submission batch 及确实发生变化的 invoice/import rows；不能回写全量旧 snapshot。business batch 已进入 `oa_confirmation_pending`、但 linked task OA 元数据写入失败时，相同 idempotency key 或相同 recovery 证据只执行修复写，禁止第二次调用 OA。
   - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
@@ -67,6 +67,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-13 | 点击创建草稿即进入暂存；creating/pending 均展示两个既有人工决定，App 不检测 OA 草稿；附件改为有界并发上传 | ETC bucket、manual-status 状态机、紧凑既有 HeroUI 操作区与 OA adapter；不新增状态、API、worker、read model 或数据库结构 | `tests/test_etc_backend.py`；`tests/test_audit_etc_tickets_read_model_tool.py`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-08-03 | 已提交批次附件恢复支持对严格限定的历史 `canonical_invoice` 后补成员建立可信 PDF/XML 事实并纠正 ETC 元数据；保留已有 hash 的严格校验 | ETC 附件恢复 service、单页 PDF 校验复用、提交批次汇总和审计；不改成员/OA/relation/状态/read model/worker | `tests/test_etc_invoice_pdf_bundle_service.py` 68 张/4 张 bootstrap、身份拒绝、回滚、幂等与 68 页下载 |
 | 2026-08-01 | ETC 页面改为左侧批次 rail + 右侧连续工作面，删除车牌/关键词页面查询链路，并新增基于既有 batch/task 状态的四阶段只读进度 | 仅 ETC 前端页面结构、展示投影与页面请求参数；后端 API/状态机/read model/worker/权限/跨页 I/O 不变 | `web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；`web/e2e/etc-tickets-flow.spec.ts`；production build |
 | 2026-07-19 | 固定 OA 草稿金额来自对账任务，业务批次发票汇总恢复为实际发票事实；结果弹窗收敛为两个明确决定并删除旧 batch DTO/伪金额映射 | ETC 页面与 business batch payload；无共享 read model/worker/跨页面 I/O 变化 | `tests.test_etc_backend.EtcApiTests.test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total`；`tests.test_audit_etc_tickets_read_model_tool`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |

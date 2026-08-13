@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
@@ -32,10 +32,9 @@ ACTIVE_BATCH_STATUSES = frozenset(
     }
 )
 SUBMITTED_BATCH_STATUSES = frozenset({"oa_submitted", "manually_marked_submitted", "closed"})
-STAGED_BATCH_STATUSES = frozenset({"oa_confirmation_pending"})
+STAGED_BATCH_STATUSES = frozenset({"oa_draft_creating", "oa_confirmation_pending"})
 UNSUBMITTED_BATCH_STATUSES = ACTIVE_BATCH_STATUSES - STAGED_BATCH_STATUSES
 VISIBLE_BATCH_STATUSES = ACTIVE_BATCH_STATUSES | SUBMITTED_BATCH_STATUSES
-OA_DRAFT_CREATING_STALE_AFTER = timedelta(minutes=15)
 ACTIVE_IMPORT_JOB_STATUSES = frozenset({"pending", "processing"})
 COVERED_IMPORT_TASK_STATUSES = frozenset({"imported", "closed"})
 TERMINAL_IMPORT_JOB_STATUSES = frozenset({"failed", "dead_lettered"})
@@ -271,10 +270,10 @@ def _etc_page_statistics(
             1
             for row in page_batches
             if _text(row.get("status"))
-            not in {"oa_confirmation_pending", "oa_submitted", "manually_marked_submitted", "closed"}
+            not in {"oa_draft_creating", "oa_confirmation_pending", "oa_submitted", "manually_marked_submitted", "closed"}
         ),
         "draft_batch_count": sum(
-            1 for row in page_batches if _text(row.get("status")) == "oa_confirmation_pending"
+            1 for row in page_batches if _text(row.get("status")) in STAGED_BATCH_STATUSES
         ),
         "submitted_batch_count": sum(
             1
@@ -808,13 +807,6 @@ def _business_batch_lifecycle_issues(
             for event in audit_events or []
             if isinstance(event, dict)
         }
-        attempt_event_times = [
-            event_at
-            for event in audit_events or []
-            if isinstance(event, dict)
-            and _text(event.get("event_type")) in {"oa_draft_prepared", "oa_draft_outcome_unknown"}
-            and (event_at := _datetime(event.get("created_at"))) is not None
-        ]
         missing_fields = []
         if not submission_id or submission is None:
             missing_fields.append("submission_batch_id")
@@ -830,19 +822,6 @@ def _business_batch_lifecycle_issues(
                     {"missing": missing_fields},
                 )
             )
-        attempt_at = max(attempt_event_times, default=None) or _datetime(payload.get("updated_at"))
-        if attempt_at is None or datetime.now(UTC) - attempt_at > OA_DRAFT_CREATING_STALE_AFTER:
-            issues.append(
-                _issue(
-                    "etc_oa_draft_creating_stale",
-                    subject,
-                    {
-                        "attempt_at": attempt_at.isoformat() if attempt_at else None,
-                        "stale_after_minutes": int(OA_DRAFT_CREATING_STALE_AFTER.total_seconds() // 60),
-                    },
-                )
-            )
-
     if status == "oa_confirmation_pending":
         submission_payload = _payload(submission) if submission is not None else {}
         missing_fields = []

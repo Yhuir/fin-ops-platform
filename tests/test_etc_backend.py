@@ -9,7 +9,7 @@ import json
 import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 import time
 from types import SimpleNamespace
 import unittest
@@ -283,6 +283,7 @@ class MemoryEtcStateStore:
         self.data_dir = data_dir
         self.saved_snapshot: dict[str, object] | None = None
         self.files: dict[str, bytes] = {}
+        self.fail_next_oa_draft_completion_save = False
 
     def load_etc_state(self) -> dict[str, object]:
         return deepcopy(self.saved_snapshot or {})
@@ -297,6 +298,18 @@ class MemoryEtcStateStore:
         business_batch_id: str,
         expected_version: int,
     ) -> bool:
+        target_batch = dict(snapshot.get("business_batches") or {}).get(business_batch_id)
+        target_status = (
+            target_batch.get("status")
+            if isinstance(target_batch, dict)
+            else getattr(target_batch, "status", None)
+        )
+        if (
+            self.fail_next_oa_draft_completion_save
+            and target_status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
+        ):
+            self.fail_next_oa_draft_completion_save = False
+            raise RuntimeError("synthetic OA draft persistence failure")
         current = dict(self.saved_snapshot or {})
         current_batch = dict(current.get("business_batches") or {}).get(business_batch_id)
         current_version = (
@@ -375,6 +388,86 @@ class PostgresLikeReconciliationStateStore(ApplicationStateStore):
 
 
 class EtcServiceTests(unittest.TestCase):
+    def test_http_oa_client_uploads_bounded_parallel_batch_in_input_order(self) -> None:
+        started = Event()
+        release = Event()
+        active = 0
+        peak = 0
+        lock = Lock()
+
+        def fake_urlopen(request: object, *, timeout: float) -> FakeHTTPResponse:
+            del timeout
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if peak == 2:
+                    started.set()
+            if not release.wait(timeout=2):
+                raise AssertionError("parallel upload did not release")
+            with lock:
+                active -= 1
+            name = str(getattr(request, "data", b"")).split('filename="', 1)[-1].split('"', 1)[0]
+            return FakeHTTPResponse({"code": 200, "data": {"id": f"file:{name}"}})
+
+        with TemporaryDirectory() as temp_dir:
+            paths = []
+            for name in ("first.pdf", "second.pdf", "third.pdf"):
+                path = Path(temp_dir) / name
+                path.write_bytes(b"%PDF-1.4\n")
+                paths.append(path)
+            client = HttpEtcOAClient(
+                token="oa-token",
+                settings=EtcOAHttpClientSettings(
+                    base_url="https://oa.example.test/prod-api",
+                    attachment_upload_concurrency=2,
+                ),
+            )
+            with patch("fin_ops_platform.services.etc_service.urlopen", fake_urlopen):
+                worker = Thread(target=lambda: started.wait(timeout=2) and release.set())
+                worker.start()
+                uploaded = client.upload_attachments(paths)
+                worker.join(timeout=2)
+
+        self.assertEqual(peak, 2)
+        self.assertEqual(uploaded, ["file:first.pdf", "file:second.pdf", "file:third.pdf"])
+
+    def test_oa_draft_completion_persist_failure_requires_recovery_without_second_oa_call(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = MemoryEtcStateStore(Path(temp_dir))
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), state_store=store, oa_client=fake_oa)
+            batch = service.create_business_batch(task_id="ETC-TASK-COMPLETION-FAIL")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            store.fail_next_oa_draft_completion_save = True
+
+            with self.assertRaises(EtcOADraftOutcomeUnknownError):
+                service.create_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    idempotency_key="completion-failure",
+                    expected_version=batch.version,
+                )
+
+            current = service.get_business_batch(batch.business_batch_id)
+            self.assertEqual(current.status, EtcBusinessBatchStatus.OA_DRAFT_CREATING.value)
+            self.assertEqual(len(fake_oa.draft_payloads), 1)
+            with self.assertRaises(EtcOADraftOutcomeUnknownError):
+                service.create_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    idempotency_key="completion-failure",
+                    expected_version=current.version,
+                )
+            self.assertEqual(len(fake_oa.draft_payloads), 1)
+
     def test_oa_draft_action_fails_closed_when_reconciliation_task_is_missing(self) -> None:
         batch = EtcBusinessBatch(
             business_batch_id="batch-missing-task",
@@ -831,6 +924,8 @@ class EtcServiceTests(unittest.TestCase):
             unknown = service.get_business_batch(batch.business_batch_id)
             submission_batch_id = unknown.submission_batch_id
             self.assertEqual(unknown.status, EtcBusinessBatchStatus.OA_DRAFT_CREATING.value)
+            staged = service.list_business_batch_summaries(bucket="staged", can_admin_access=True)
+            self.assertEqual(staged["total"], 1)
             with self.assertRaises(EtcOADraftOutcomeUnknownError):
                 service.create_business_batch_oa_draft(
                     batch.business_batch_id,
@@ -855,6 +950,38 @@ class EtcServiceTests(unittest.TestCase):
             )
             self.assertEqual(completed.submission_batch_id, submission_batch_id)
             self.assertEqual(len(service.list_batches()), 1)
+
+    def test_creating_batch_accepts_manual_decision_without_oa_detection(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=UnknownOutcomeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-MANUAL-CREATING")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC-MANUAL-CREATING"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            with self.assertRaises(EtcOADraftOutcomeUnknownError):
+                service.create_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    idempotency_key="manual-creating-intent",
+                    expected_version=batch.version,
+                )
+            creating = service.get_business_batch(batch.business_batch_id)
+
+            submitted = service.manual_business_batch_oa_status(
+                batch.business_batch_id,
+                decision="submitted",
+                reason="用户确认已在 OA 提交。",
+                expected_version=creating.version,
+            )
+
+            self.assertEqual(submitted.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
+            self.assertEqual(submitted.audit_events[-1]["event_type"], "manual_oa_status_submitted")
 
     def test_legacy_creating_batch_without_attempt_can_only_recover_as_not_created(self) -> None:
         with TemporaryDirectory() as temp_dir:

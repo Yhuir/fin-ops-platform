@@ -124,7 +124,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         self.assertEqual(report["summary"]["staged_business_batch_count"], 0)
         self.assertEqual(connection.executed, [])
 
-    def test_stale_creating_attempt_is_blocking_but_recent_complete_attempt_is_not(self) -> None:
+    def test_creating_attempt_is_staged_without_an_external_oa_timeout_check(self) -> None:
         connection = FakeConnection()
         connection.batches[0].update(
             {
@@ -158,17 +158,11 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
 
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
 
-        self.assertIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
-        self.assertNotIn("etc_oa_draft_attempt_missing", report["summary"]["issue_sample_counts_by_code"])
-
-        connection.batches[0]["updated_at"] = datetime.now(UTC) + timedelta(minutes=1)
-        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
-        self.assertIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
-
-        connection.batches[0]["audit_events"][0]["created_at"] = datetime.now(UTC)
-        payload["updated_at"] = datetime.now(UTC)
-        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+        self.assertEqual(report["overall_status"], "pass")
         self.assertNotIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn("etc_oa_draft_attempt_missing", report["summary"]["issue_sample_counts_by_code"])
+        self.assertEqual(report["summary"]["unsubmitted_business_batch_count"], 0)
+        self.assertEqual(report["summary"]["staged_business_batch_count"], 1)
 
     def test_creating_without_durable_attempt_is_blocking(self) -> None:
         connection = FakeConnection()

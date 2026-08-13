@@ -274,7 +274,7 @@ function businessBatchListBucket(status: EtcBusinessBatchStatus): EtcBusinessBat
   if (isSubmittedBusinessStatus(status)) {
     return "submitted";
   }
-  if (status === "oa_confirmation_pending") {
+  if (status === "oa_draft_creating" || status === "oa_confirmation_pending") {
     return "staged";
   }
   if (status === "deleted" || status === "superseded") {
@@ -283,8 +283,8 @@ function businessBatchListBucket(status: EtcBusinessBatchStatus): EtcBusinessBat
   return "unsubmitted";
 }
 
-function isOaConfirmationPendingStatus(status: EtcBusinessBatchStatus) {
-  return status === "oa_confirmation_pending";
+function isOaDecisionPendingStatus(status: EtcBusinessBatchStatus) {
+  return status === "oa_draft_creating" || status === "oa_confirmation_pending";
 }
 
 function batchDisplayTitle(
@@ -698,7 +698,7 @@ export default function EtcTicketManagementPage() {
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
   const [invoicePdfDownloadingBatchId, setInvoicePdfDownloadingBatchId] = useState("");
-  const [draftResult, setDraftResult] = useState<EtcBusinessBatchDetail | null>(null);
+  const [draftResult, setDraftResult] = useState<EtcBusinessBatchDetail | EtcBusinessBatchSummary | null>(null);
   const [draftOaAmount, setDraftOaAmount] = useState("0.00");
   const [oaActionDecision, setOaActionDecision] = useState<"submitted" | "not_submitted" | null>(null);
   const oaActionLoading = oaActionDecision !== null;
@@ -1528,6 +1528,33 @@ export default function EtcTicketManagementPage() {
     setActionError(null);
     setDraftCreating(true);
     setDraftOaAmount(oaDraftAmount);
+    activeBatchListRequestRef.current?.controller.abort();
+    activeBatchListRequestRef.current = null;
+    const currentBusinessBatchDetail = businessBatchDetail?.businessBatchId === currentBusinessBatch.businessBatchId
+      ? businessBatchDetail
+      : null;
+    const pendingDraft: EtcBusinessBatchDetail | EtcBusinessBatchSummary = {
+      ...currentBusinessBatch,
+      status: "oa_draft_creating",
+      version: currentBusinessBatch.version + 1,
+    };
+    setDraftResult(pendingDraft);
+    setBusinessBatchDetail(currentBusinessBatchDetail ? {
+      ...currentBusinessBatchDetail,
+      status: "oa_draft_creating",
+      version: currentBusinessBatchDetail.version + 1,
+    } : null);
+    activeStatusRef.current = "staged";
+    batchPageRef.current = 1;
+    setActiveStatus("staged");
+    setBatchPage(1);
+    setBusinessBatches([pendingDraft]);
+    setBatchPagination({ page: 1, pageSize: BUSINESS_BATCH_PAGE_SIZE, total: 1 });
+    setCounts((current) => ({
+      ...current,
+      unsubmitted: Math.max(0, current.unsubmitted - 1),
+      staged: current.staged + 1,
+    }));
     const intent = oaDraftIntentRef.current?.businessBatchId === currentOaDraftBatchId
       ? oaDraftIntentRef.current
       : { businessBatchId: currentOaDraftBatchId, idempotencyKey: crypto.randomUUID() };
@@ -1539,13 +1566,36 @@ export default function EtcTicketManagementPage() {
       });
       oaDraftIntentRef.current = null;
       setDraftResult(result);
-      const payload = await loadBatches({ clearActionError: false });
+      const payload = await changeBatchQuery("staged", 1, result.businessBatchId);
       if (!payload) {
         setActionError(POST_MUTATION_RELOAD_WARNING);
       }
     } catch (caught) {
-      if (caught instanceof EtcApiError && caught.code !== "oa_draft_outcome_unknown") {
-        oaDraftIntentRef.current = null;
+      const failureMessage = caught instanceof Error ? caught.message : "";
+      const outcomeUnknown = (caught instanceof EtcApiError && caught.code === "oa_draft_outcome_unknown")
+        || caught instanceof TypeError
+        || /超时|结果未知/.test(failureMessage);
+      if (!outcomeUnknown) {
+        if (caught instanceof EtcApiError) {
+          oaDraftIntentRef.current = null;
+        }
+        setDraftResult(null);
+        setBusinessBatchDetail(currentBusinessBatchDetail);
+        activeStatusRef.current = "unsubmitted";
+        batchPageRef.current = 1;
+        setActiveStatus("unsubmitted");
+        setBatchPage(1);
+        setBusinessBatches([currentBusinessBatch]);
+        setBatchPagination({ page: 1, pageSize: BUSINESS_BATCH_PAGE_SIZE, total: 1 });
+        setCounts((current) => ({
+          ...current,
+          unsubmitted: current.unsubmitted + 1,
+          staged: Math.max(0, current.staged - 1),
+        }));
+      } else {
+        await changeBatchQuery("staged", 1, currentOaDraftBatchId);
+        setDraftResult(null);
+        setCreateDialogOpen(false);
       }
       setActionError(formatEtcUiErrorMessage(caught, "审批草稿创建失败。"));
     } finally {
@@ -1628,7 +1678,7 @@ export default function EtcTicketManagementPage() {
         className="etc-oa-decision-button etc-oa-decision-button--submitted"
         aria-label="我已在 OA 系统上完成 OA 草稿的提交"
         aria-busy={oaActionDecision === "submitted"}
-        disabled={!canMutateData || oaActionLoading}
+        disabled={!canMutateData || oaActionLoading || draftCreating}
         onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
       >
         <CheckCircle2 aria-hidden="true" size={20} />
@@ -1642,7 +1692,7 @@ export default function EtcTicketManagementPage() {
         className="etc-oa-decision-button"
         aria-label="我已在 OA 系统上删除该 OA 草稿"
         aria-busy={oaActionDecision === "not_submitted"}
-        disabled={!canMutateData || oaActionLoading}
+        disabled={!canMutateData || oaActionLoading || draftCreating}
         onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
       >
         <XCircle aria-hidden="true" size={20} />
@@ -1658,8 +1708,8 @@ export default function EtcTicketManagementPage() {
     <section className="etc-oa-status-panel" aria-label="审批提交确认">
       <div className="etc-oa-status-header">
         <div>
-          <strong>审批草稿已创建，等待提交确认。</strong>
-          <p>请选择审批草稿的实际提交状态。</p>
+          <strong>{batch.status === "oa_draft_creating" ? "已发起审批草稿创建，等待确认。" : "审批草稿已创建，等待提交确认。"}</strong>
+          <p>App 不检测 OA 草稿状态，请按你在 OA 系统中的实际操作选择。</p>
         </div>
         <div className="etc-oa-status-utilities">
           {batch.oaDraftUrl ? (
@@ -2142,7 +2192,7 @@ export default function EtcTicketManagementPage() {
                 </section>
               ) : null}
 
-              {selectedBusinessBatch && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
+              {selectedBusinessBatch && isOaDecisionPendingStatus(selectedBusinessBatch.status)
                 ? renderOaStatusPanel(selectedBusinessBatch)
                 : null}
 
@@ -2732,7 +2782,9 @@ export default function EtcTicketManagementPage() {
         >
           {draftResult ? (
             <div className="etc-oa-result-summary">
-              <p>OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。</p>
+              <p>{draftResult.status === "oa_draft_creating"
+                ? "已发起 OA 草稿创建；请求完成后，请根据你在 OA 系统中的实际操作选择结果。"
+                : "OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。"}</p>
               <p>批次：{currentOaActionBatch ? batchDisplayTitle(currentOaActionBatch) : currentOaDraftBatchLabel || "-"}</p>
               <p>OA 草稿金额：<strong>{formatMoney(displayedOaDraftAmount)} 元</strong></p>
             </div>

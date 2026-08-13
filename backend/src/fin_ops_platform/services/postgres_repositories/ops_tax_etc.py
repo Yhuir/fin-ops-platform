@@ -1087,7 +1087,7 @@ class PostgresOpsTaxEtcRepository:
                 select canonical.*,
                     case
                         when status in ('oa_submitted', 'manually_marked_submitted', 'closed') then 'submitted'
-                        when status = 'oa_confirmation_pending' then 'staged'
+                        when status in ('oa_draft_creating', 'oa_confirmation_pending') then 'staged'
                         else 'unsubmitted'
                     end as bucket
                 from canonical
@@ -1200,10 +1200,10 @@ class PostgresOpsTaxEtcRepository:
                             count(*)::integer as business_batch_count,
                             count(*) filter (
                                 where status not in (
-                                    'oa_confirmation_pending', 'oa_submitted', 'manually_marked_submitted', 'closed'
+                                    'oa_draft_creating', 'oa_confirmation_pending', 'oa_submitted', 'manually_marked_submitted', 'closed'
                                 )
                             )::integer as unsubmitted_batch_count,
-                            count(*) filter (where status = 'oa_confirmation_pending')::integer as draft_batch_count,
+                            count(*) filter (where status in ('oa_draft_creating', 'oa_confirmation_pending'))::integer as draft_batch_count,
                             count(*) filter (
                                 where status in ('oa_submitted', 'manually_marked_submitted', 'closed')
                             )::integer as submitted_batch_count,

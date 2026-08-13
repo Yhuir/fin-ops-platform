@@ -440,6 +440,40 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
             report["summary"]["issue_sample_counts_by_code"],
         )
 
+    def test_formal_invoice_may_retain_exact_etc_import_source_owner(self) -> None:
+        connection = FakeConnection()
+        connection.invoices[0]["source_batch_id"] = "etc_import_batch_0018"
+        etc_source_link = {
+            "source_type": "etc_invoice_import",
+            "source_id": "etc_invoice_0018",
+            "batch_id": "etc_import_batch_0018",
+            "created_at": "2026-07-01T10:02:00+00:00",
+        }
+        connection.invoices[0]["source_links"].append(etc_source_link)
+        connection.invoices[0]["raw_payload"]["normalized_payload"]["source_links"].append(
+            deepcopy(etc_source_link)
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass", report)
+        self.assertNotIn(
+            "invoice_import_source_batch_not_in_manual_links",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_formal_invoice_unknown_source_owner_still_fails_closed(self) -> None:
+        connection = FakeConnection()
+        connection.invoices[0]["source_batch_id"] = "unregistered-owner"
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertIn(
+            "invoice_import_source_batch_not_in_manual_links",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_formal_invoice_source_link_to_non_invoice_batch_still_fails_closed(self) -> None:
         connection = FakeConnection()
         non_invoice_batch = deepcopy(connection.batches[0])

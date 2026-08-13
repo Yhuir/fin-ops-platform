@@ -1945,7 +1945,9 @@ class ImportNormalizationService:
         invoice.etc_submission_batch_id = normalized.get("etc_submission_batch_id") or invoice.etc_submission_batch_id
         invoice.etc_submission_status = normalized.get("etc_submission_status") or invoice.etc_submission_status
         invoice.workbench_visibility = normalized.get("workbench_visibility") or invoice.workbench_visibility or "visible"
-        invoice.source_batch_id = normalized.get("source_batch_id") or invoice.source_batch_id
+        # ETC is an additional metadata/source-link owner. It must not replace
+        # the canonical invoice's formal import owner when one already exists.
+        invoice.source_batch_id = invoice.source_batch_id or normalized.get("source_batch_id")
         for field_name in (
             "digital_invoice_no",
             "invoice_date",

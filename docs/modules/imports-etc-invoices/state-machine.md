@@ -47,6 +47,7 @@
 ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主要由 ETC 票据管理页面维护，但导入模块必须知道其回归影响：
 
 - `draft` / `imported`：本地 ETC 发票已导入，尚未创建 OA 草稿。
+- `oa_draft_creating`：用户已发起 OA 草稿创建，属于暂存并直接等待两个 manual-status 决定；导入页或后台任务不得检测 OA 或自动重试。
 - `oa_confirmation_pending`：已创建 OA 草稿，等待用户人工确认。
 - `manually_marked_submitted` / submitted：生成 folded `etc_invoice_summary`，散票隐藏，等待关联台普通配对。
 - `not_submitted`：释放本地 ETC 发票占用，回到未提交链路。
@@ -100,6 +101,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-13 | 补充导入后 OA creating 暂存边界；导入模块不检测 OA、不自动重试或改变批次 | 仅明确 ETC 导入到票据管理页面的下游状态合同 | `tests/test_etc_backend.py`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-16 | 补齐 ETC 导入 confirm job 的 App Status metadata contract | `etc_invoice_import` job source 保留 task/domain/route，导入页和 ETC 票据页都能被全局状态标记为受影响域 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/read model 状态边界 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |
 | 2026-07-05 | 移除 runtime canonical cleanup surface | 删除/重导链路只清理 ETC 自有事实，历史 canonical 污染改走 invoice-pool cleanup 运维链路 | `tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_paths_do_not_call_legacy_canonical_sync_helpers` |

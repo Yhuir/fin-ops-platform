@@ -4,12 +4,12 @@
 
 ## 发布前检查
 
-- 已备份 PostgreSQL、对象存储、部署环境变量、后端版本、前端构建产物和 Nginx 配置。
+- 按发布风险决定是否备份；本次状态/UI/SQL owner 修复不创建数据库备份，不删除或重建主数据库。
 - `business-batches` 功能开关默认关闭，迁移和索引检查通过后再打开。
 - PostgreSQL `app.etc_business_batches` 已迁移，并存在同一非撤回 `task_id` 只能绑定一个业务批次的 partial unique index。
 - 生产部署必须使用 PostgreSQL runtime；历史 App Mongo、GridFS 或本地 state 文件不得作为 ETC 批次事实源或回滚路径。
 - ETC 专用 OA 自动检测链路已移除；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
-- OA 草稿创建请求必须携带稳定 idempotency key；外部 OA I/O 不得持 ETC 业务锁。发布前确认管理员 recovery route 受权限保护，禁止对未知结果直接重试或手工 SQL 改状态。
+- OA 草稿创建请求必须携带稳定 idempotency key；外部 OA I/O 不得持 ETC 业务锁。附件使用默认 4、允许 1..8 路的有界并发并保持顺序。creating/pending 都属于暂存并接受人工决定；禁止对未知结果直接重试或手工 SQL 改状态。
 - 后端不得提供 ETC `oa-status/refresh` 入口，不得注册 ETC OA 检测 worker，不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
 - 如果旧生产环境曾启用 `fin-ops-worker@etc-business-oa-detection.service`，发布后必须一次性 `disable --now` 该 unit；仓库部署样例不再包含 `etc-business-oa-detection` worker 或 `etc_business.oa_detection.refresh` dispatcher 事件。
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
@@ -56,7 +56,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
 - 旧 `/api/etc/batches` 和 `/api/etc/invoices/revoke-submitted` 已删除；任何探针、脚本或前端回滚都不得依赖这些兼容/回退入口。
 - 生产日志可按 `requestId`、`businessBatchId`、`taskId`、`externalEtcBatchId` 和 `oaRowId` 检索。
-- 运行 ETC Page Audit：超过 15 分钟的 `oa_draft_creating`、缺 submission/idempotency/prepared audit、pending 缺 draft ID/URL/submission、bucket 错配或 not-submitted 仍占用提交资源时必须失败；Audit 只证明 PostgreSQL 内部事实，不证明 OA 外部真实状态。
+- 运行 ETC Page Audit：creating 缺 submission/idempotency/prepared audit、pending 缺 draft ID/URL/submission、bucket 错配或 not-submitted 仍占用提交资源时必须失败；creating 的等待时长不是错误。Audit 只证明 PostgreSQL 内部事实，不证明 OA 外部真实状态。
 
 可用 curl 检查响应类型：
 
@@ -87,11 +87,7 @@ JSON API 响应 `Content-Type` 必须是 JSON 类型；`invoice-pdf` 必须是 `
 
 运维排查时优先按 `businessBatchId` 查业务批次状态、审计事件、提交批次和 manual status API `requestId`。
 
-若批次长期停在 `oa_draft_creating`，先在 OA 侧按业务标识人工核实，禁止重新点击创建或直接改回 imported：
-
-- 已存在唯一草稿：管理员调用 `POST /api/etc/business-batches/{id}/oa-draft/recover`，提供当前版本、原因、核实证据、完整 draft ID/URL。
-- 已确认未创建：同一管理员入口提供当前版本、原因、核实证据和 `confirmedNotCreated=true`，批次进入明确失败后才允许新的用户 intent。
-- 无法确认：保持 creating，Audit 继续失败并升级给 OA owner；不得用猜测结果换取绿色状态。
+若批次停在 `oa_draft_creating`，它应继续显示在暂存。普通用户不需要调用 recovery：已在 OA 提交则选择“已提交”，已在 OA 删除草稿则选择“未提交”；无法确认时保持暂存，不要重新点击创建。管理员 recovery 只用于需要补录草稿 ID/URL或修复历史损坏 attempt 的技术场景。
 
 ## 历史 ETC OA 附件引用修复
 

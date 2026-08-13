@@ -442,6 +442,60 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIs(replay_result.invoice, first_invoice)
         self.assertFalse(replay_result.changed)
 
+    def test_upsert_etc_invoice_does_not_replace_formal_invoice_source_owner(self) -> None:
+        existing = Invoice(
+            id="inv_formal_owner",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="26537911470300077680",
+            digital_invoice_no="26537911470300077680",
+            counterparty=Counterparty(
+                id="cp_formal_owner",
+                name="昆明高速有限公司",
+                normalized_name="昆明高速有限公司",
+                counterparty_type="vendor",
+            ),
+            amount=Decimal("9.22"),
+            signed_amount=Decimal("9.22"),
+            invoice_date="2026-03-31",
+            source_unique_key="26537911470300077680",
+            source_batch_id="batch_import_0068",
+        )
+        service = ImportNormalizationService(existing_invoices=[existing])
+        etc_invoice = type(
+            "EtcInvoice",
+            (),
+            {
+                "id": "etc_invoice_0442",
+                "invoice_number": "26537911470300077680",
+                "issue_date": "2026-03-31",
+                "seller_name": "昆明高速有限公司",
+                "seller_tax_no": "",
+                "buyer_name": "云南溯源科技有限公司",
+                "buyer_tax_no": "",
+                "total_amount": Decimal("9.22"),
+                "tax_amount": Decimal("0.27"),
+                "tax_rate": "3%",
+                "import_batch_id": "etc_import_batch_0018",
+                "current_batch_id": None,
+                "last_batch_id": None,
+                "status": "unsubmitted",
+            },
+        )()
+
+        result = service.upsert_etc_invoice(etc_invoice)
+
+        self.assertIs(result.invoice, existing)
+        self.assertEqual(existing.source_batch_id, "batch_import_0068")
+        self.assertIn(
+            {
+                "source_type": "etc_invoice_import",
+                "source_id": "etc_invoice_0442",
+                "batch_id": "etc_import_batch_0018",
+                "created_at": existing.source_links[-1]["created_at"],
+            },
+            existing.source_links,
+        )
+
     def test_existing_canonical_invoice_drops_weak_fingerprint_on_load(self) -> None:
         stale = Invoice(
             id="inv_existing_etc_stale",

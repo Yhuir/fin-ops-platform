@@ -52,7 +52,7 @@ def evaluate_etc_oa_draft_action(
         return {"enabled": False, "code": "read_only", "message": "当前账号仅支持查看和导出，不能提交审批。"}
     status = str(getattr(batch, "status", "") or "")
     if status == EtcBusinessBatchStatus.OA_DRAFT_CREATING.value:
-        return {"enabled": False, "code": "oa_draft_creating", "message": "审批草稿正在创建，请勿重复提交。"}
+        return {"enabled": False, "code": "oa_draft_creating", "message": "草稿创建已发起，请确认 OA 中的实际处理结果。"}
     if status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value:
         return {"enabled": False, "code": "oa_confirmation_pending", "message": "审批草稿已创建，请先确认是否已在 OA 提交。"}
     if status not in {
@@ -447,7 +447,7 @@ class EtcBusinessBatchApplicationService:
         current = self._scoped_batch(business_batch_id, actor)
         if str(getattr(current, "status", "")) not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
             raise EtcBusinessBatchInvalidTransitionError(
-                "manual OA status is allowed only after an OA draft is created and waiting for confirmation.",
+                "manual OA status is allowed only after OA draft creation has started.",
                 code="invalid_manual_status",
             )
         batch = self._etc_service.manual_business_batch_oa_status(

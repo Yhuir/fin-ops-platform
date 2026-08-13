@@ -48,7 +48,7 @@
 当前事实边界：
 
 - 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
-- ETC 票据管理页不提供月份、车牌或关键词搜索框；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，并分为互斥的“未提交 / 暂存 / 已提交”三个 bucket。后端 `month`、`plate`、`keyword` 参数继续作为兼容/运维查询合同保留。`oa_confirmation_pending` 是唯一暂存事实；短时 `oa_draft_creating` 仍属于未提交操作态。
+- ETC 票据管理页不提供月份、车牌或关键词搜索框；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，并分为互斥的“未提交 / 暂存 / 已提交”三个 bucket。后端 `month`、`plate`、`keyword` 参数继续作为兼容/运维查询合同保留。用户点击创建草稿后，`oa_draft_creating` 与 `oa_confirmation_pending` 都属于暂存。
 - 页面使用左侧批次 rail 和右侧连续工作面；四阶段 `准备核对资料 → 确认核对结果 → 导入 ETC 发票 → 提交 OA 审批` 只从当前 business batch 与绑定 task 投影。该 UI 投影不发请求、不保存状态、不改变 API/read model/worker；失败、部分失败、回退和人工确认均保留非完成语义。
 - “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
 - 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
@@ -58,7 +58,7 @@
 - OA 草稿金额只取已完成对账任务的 `oaTotalAmount`；业务批次 `invoiceSummary` 只表示当前实际导入的 ETC 发票数量与含税金额。两者不一致时页面必须同时如实显示差额，但不得改写 OA 草稿金额或阻断提交；该对比只做前端纯计算，不增加 API/read model/worker I/O。
 - 已选中的同一业务批次重复点击必须保持当前 detail/task，不清空发票明细，也不重复请求；只有切换到另一个批次才失效旧详情并并发读取新 detail/task。
 - OA 草稿创建后的结果弹窗只提供两个状态决定：“我已在 OA 系统上完成 OA 草稿的提交”进入已提交，“我已在 OA 系统上删除该 OA 草稿”回到未提交。打开草稿与下载发票 PDF 只保留在暂存批次的常驻操作区，不混入结果决定弹窗。
-- OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。结果未知时保持 `oa_draft_creating` 并禁止盲重试，由管理员在核实 OA 后走显式 recovery command。确认“未创建/需修改”只把批次退回未提交并释放 OA 占用，保留业务批次、发票、上传文件和核对结果。
+- OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。附件通过 OA adapter 以默认 4、最多 8 路有界并发上传并保持顺序。点击创建后前端立即把目标批次放入暂存；同页请求仍在执行时禁用决定按钮，避免与 finalize 竞态；请求结束或重新进入页面后，`oa_draft_creating` 与 `oa_confirmation_pending` 都直接显示既有两个决定。App 不检测 OA 是否已生成草稿，也不自动重试；用户按 OA 中的实际操作声明“已提交”或“已删除草稿”。管理员 recovery 只保留给历史/技术修复，不进入普通页面。
 - OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
@@ -69,7 +69,7 @@
 - source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
 - 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。
 - ETC 导入确认只在 existing canonical metadata 真变更时推进 canonical source version；关联台、税金、成本等消费者各自在访问/重新激活时按 owner 合同读取。业务批次 manual submitted/not-submitted 同样只提交 owner facts/version/audit，OA draft create 不改变下游事实；删除与显式历史迁移按各自 owner 合同处理。所有流程都不允许旧 ETC 模块创建新的 canonical invoice。
-- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue，并阻断超过 15 分钟的 creating、缺失 durable attempt、无 draft 的 pending、bucket 错配和退回后占用未释放。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
+- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue，并阻断 creating 缺失 durable attempt、无 draft 的 pending、bucket 错配和退回后占用未释放。creating 等待时长不是错误，因为 App 不拥有 OA 外部状态。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
 
 ## 维护触发器
 

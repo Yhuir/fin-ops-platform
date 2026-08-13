@@ -139,7 +139,7 @@ export function deriveEtcBatchProgress(
     );
   } else if (batch.status === "oa_draft_creating") {
     completeThrough(steps, 2);
-    setCurrent(steps, 3, "processing", "OA 草稿创建中，请勿重复提交");
+    setCurrent(steps, 3, "manual", "已发起 OA 草稿创建，等待人工确认");
   } else if (batch.status === "oa_confirmation_pending") {
     completeThrough(steps, 2);
     setCurrent(steps, 3, "manual", "OA 草稿已创建，等待人工确认");

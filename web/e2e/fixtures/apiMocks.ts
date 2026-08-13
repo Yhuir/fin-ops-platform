@@ -146,7 +146,7 @@ type WorkbenchZone = "paired" | "unpaired";
 type BatchAccountingBucket = "unsubmitted" | "submitted";
 type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
-type EtcBusinessBatchStatus = "imported" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
+type EtcBusinessBatchStatus = "imported" | "oa_draft_creating" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
 type BankFlowRuleBrowserBatchStatus = "draft" | "submitted" | "withdrawn";
 type BankFlowRuleBatchMockScenario = "single" | "ordinaryDraftMatrix" | "internalTransferPairs";
 type CostBrowserProjectRow = {
@@ -2505,10 +2505,13 @@ function etcBusinessBatchVersion(status: EtcBusinessBatchStatus) {
   if (status === "imported") {
     return 7;
   }
-  if (status === "oa_confirmation_pending") {
+  if (status === "oa_draft_creating") {
     return 8;
   }
-  return 9;
+  if (status === "oa_confirmation_pending") {
+    return 9;
+  }
+  return 10;
 }
 
 function etcBusinessBatchInvoiceItems() {
@@ -2549,12 +2552,13 @@ function etcBusinessBatchInvoiceItems() {
 }
 
 function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = false) {
-  const draftCreated = status !== "imported" && status !== "not_submitted";
+  const draftAttemptStarted = status === "oa_draft_creating" || status === "oa_confirmation_pending" || status === "manually_marked_submitted";
+  const draftCreated = status === "oa_confirmation_pending" || status === "manually_marked_submitted";
   const submitted = status === "manually_marked_submitted";
   const createOaDraftAction = status === "imported" || status === "not_submitted"
     ? { enabled: true, code: "ready", message: "可以提交审批。" }
-    : status === "oa_confirmation_pending"
-      ? { enabled: false, code: "oa_confirmation_pending", message: "审批草稿已创建，请先确认是否已在 OA 提交。" }
+    : status === "oa_draft_creating" || status === "oa_confirmation_pending"
+      ? { enabled: false, code: status, message: "草稿创建已发起，请确认 OA 中的实际处理结果。" }
       : { enabled: false, code: "invalid_batch_status", message: "当前批次状态不能创建审批草稿。" };
   return {
     business_batch_id: "etc-business-e2e-001",
@@ -2564,7 +2568,7 @@ function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = 
     owner_user_id: "web_finance_user",
     owner_org_id: "finance",
     import_batch_ids: ["etc-import-e2e-001"],
-    submission_batch_id: draftCreated ? "etc-submission-e2e-001" : "",
+    submission_batch_id: draftAttemptStarted ? "etc-submission-e2e-001" : "",
     external_etc_batch_id: "ETC-E2E-2026-03",
     oa_draft_id: draftCreated ? "oa-draft-etc-e2e-001" : "",
     oa_draft_url: draftCreated ? "https://oa.example.test/draft/etc-e2e" : "",
@@ -2619,7 +2623,7 @@ function etcBusinessBatchListPayload(
   }
   const batchBucket = batchStatus === "manually_marked_submitted"
     ? "submitted"
-    : batchStatus === "oa_confirmation_pending"
+    : batchStatus === "oa_draft_creating" || batchStatus === "oa_confirmation_pending"
       ? "staged"
       : "unsubmitted";
   const requestedBucket = bucket ?? "unsubmitted";

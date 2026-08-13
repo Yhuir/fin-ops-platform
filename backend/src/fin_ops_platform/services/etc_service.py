@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import MISSING, dataclass, field, fields, replace
 from datetime import UTC, date, datetime, timedelta
@@ -107,10 +108,12 @@ ETC_BUSINESS_BATCH_IMPORT_ALLOWED_STATUSES = {
 }
 
 ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES = {
+    EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
     EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
 }
 
 ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES = {
+    EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
     EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
 }
 
@@ -232,8 +235,11 @@ class EtcOAHttpClientSettings:
     form_draft_path_template: str = "/forms/form/{form_id}/records/record"
     draft_url_template: str = "https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}"
     request_timeout_ms: int = 20000
+    attachment_upload_concurrency: int = 4
 
     def __post_init__(self) -> None:
+        if not 1 <= int(self.attachment_upload_concurrency) <= 8:
+            raise ValueError("ETC OA attachment upload concurrency must be between 1 and 8.")
         if self.base_url is None:
             return
         trimmed = self.base_url.strip().rstrip("/")
@@ -258,6 +264,7 @@ class EtcOAHttpClientSettings:
                 or "https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}"
             ),
             request_timeout_ms=int(os.getenv("FIN_OPS_ETC_OA_REQUEST_TIMEOUT_MS", os.getenv("FIN_OPS_OA_REQUEST_TIMEOUT_MS", "20000"))),
+            attachment_upload_concurrency=int(os.getenv("FIN_OPS_ETC_OA_ATTACHMENT_UPLOAD_CONCURRENCY", "4")),
         )
 
 
@@ -302,6 +309,16 @@ class HttpEtcOAClient:
         if isinstance(data, str) and data.strip():
             return self._normalize_uploaded_attachment_reference(data, is_path=True)
         raise EtcOAClientError("OA attachment upload response did not include a file id or URL.")
+
+    def upload_attachments(self, paths: list[Path]) -> list[str]:
+        """Upload one bounded batch while preserving the caller's invoice order."""
+        if not paths:
+            return []
+        worker_count = min(len(paths), int(self._settings.attachment_upload_concurrency))
+        if worker_count == 1:
+            return [self.upload_attachment(path) for path in paths]
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="etc-oa-upload") as executor:
+            return list(executor.map(self.upload_attachment, paths))
 
     def _normalize_uploaded_attachment_reference(self, value: str, *, is_path: bool) -> str:
         reference = value.strip()
@@ -1179,7 +1196,22 @@ class EtcService:
             if isinstance(exc, EtcDraftRequestError):
                 raise
             raise EtcDraftRequestError(str(exc)) from exc
-        return self.complete_business_batch_oa_draft(attempt, draft)
+        try:
+            return self.complete_business_batch_oa_draft(attempt, draft)
+        except Exception as exc:
+            try:
+                self.mark_business_batch_oa_draft_outcome_unknown(
+                    attempt,
+                    reason="OA 已返回草稿编号，但本地完成状态保存失败，必须先核实 OA 后恢复。",
+                )
+            except Exception:
+                # The original completion failure is authoritative. A durable stale-attempt
+                # audit will still expose an interrupted creating state for explicit recovery.
+                pass
+            raise EtcOADraftOutcomeUnknownError(
+                "OA 已返回草稿编号，但本地状态未能确认；请先在 OA 核实，禁止直接重试。",
+                business_batch_id=attempt.business_batch_id,
+            ) from exc
 
     def prepare_business_batch_oa_draft(
         self,
@@ -1573,7 +1605,7 @@ class EtcService:
                 before_status = batch.status
                 if before_status not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
                     raise EtcBusinessBatchInvalidTransitionError(
-                        "manual submitted decision is allowed only after an OA draft is created and waiting for confirmation.",
+                        "manual submitted decision is allowed only after OA draft creation has started.",
                         code="invalid_manual_status",
                     )
                 now = datetime.now(UTC)
@@ -3450,11 +3482,15 @@ class EtcService:
                 for import_batch_id in batch.import_batch_ids
                 if import_batch_id in self._import_batches
             }
-        saved = self._state_store.save_etc_oa_draft_attempt(
-            snapshot,
-            business_batch_id=batch.business_batch_id,
-            expected_version=expected_version,
-        )
+        try:
+            saved = self._state_store.save_etc_oa_draft_attempt(
+                snapshot,
+                business_batch_id=batch.business_batch_id,
+                expected_version=expected_version,
+            )
+        except Exception:
+            self._hydrate(self._load_snapshot())
+            raise
         if saved:
             return
         self._hydrate(self._load_snapshot())
@@ -4165,7 +4201,7 @@ class EtcService:
         *,
         reconciliation_task: object | None = None,
     ) -> list[EtcUploadedAttachment]:
-        attachments: list[EtcUploadedAttachment] = []
+        attachment_inputs: list[tuple[str, Path, int]] = []
         with TemporaryDirectory(prefix="fin-ops-etc-oa-") as temp_dir:
             temp_root = Path(temp_dir)
             for invoice in invoices:
@@ -4177,27 +4213,29 @@ class EtcService:
                     pdf_path.write_bytes(content)
                 else:
                     pdf_path = Path(invoice.pdf_file_path)
-                attachment_url = oa_client.upload_attachment(pdf_path)
-                attachments.append(
-                    EtcUploadedAttachment(
-                        name=attachment_name,
-                        url=attachment_url,
-                        size=pdf_path.stat().st_size,
-                    )
-                )
+                attachment_inputs.append((attachment_name, pdf_path, pdf_path.stat().st_size))
             for supplement in list(getattr(reconciliation_task, "submission_supplement_attachments", []) or []):
                 stored_path = Path(str(getattr(supplement, "stored_path", "") or ""))
                 if not stored_path.exists() or not stored_path.is_file():
                     raise EtcOAClientError(f"ETC supplement attachment file is missing: {stored_path.name or stored_path}")
-                attachment_url = oa_client.upload_attachment(stored_path)
-                attachments.append(
-                    EtcUploadedAttachment(
-                        name=str(getattr(supplement, "original_name", "") or stored_path.name),
-                        url=attachment_url,
-                        size=stored_path.stat().st_size,
+                attachment_inputs.append(
+                    (
+                        str(getattr(supplement, "original_name", "") or stored_path.name),
+                        stored_path,
+                        stored_path.stat().st_size,
                     )
                 )
-        return attachments
+            upload_many = getattr(oa_client, "upload_attachments", None)
+            if callable(upload_many):
+                attachment_urls = list(upload_many([item[1] for item in attachment_inputs]))
+            else:
+                attachment_urls = [oa_client.upload_attachment(item[1]) for item in attachment_inputs]
+            if len(attachment_urls) != len(attachment_inputs):
+                raise EtcOAClientError("OA attachment upload returned an incomplete result set.")
+            return [
+                EtcUploadedAttachment(name=name, url=str(url), size=size)
+                for (name, _path, size), url in zip(attachment_inputs, attachment_urls, strict=True)
+            ]
 
     def _build_oa_draft_payload(
         self,

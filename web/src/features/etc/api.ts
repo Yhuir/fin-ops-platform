@@ -1490,6 +1490,8 @@ export async function createEtcBusinessBatchOaDraft(
         ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
         idempotencyKey: payload.idempotencyKey,
       }),
+      timeoutMs: ETC_FILE_UPLOAD_TIMEOUT_MS,
+      timeoutMessage: "审批草稿创建超时，批次已保留在暂存。请按你在 OA 系统中的实际操作选择结果，禁止直接重复创建。",
     },
   );
   return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));

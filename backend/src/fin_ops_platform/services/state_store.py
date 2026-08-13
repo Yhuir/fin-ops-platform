@@ -62,7 +62,7 @@ class _LocalSettingsAccessControlCriticalSection:
 def _etc_business_batch_bucket(status: str) -> str | None:
     if status in {"oa_submitted", "manually_marked_submitted", "closed"}:
         return "submitted"
-    if status == "oa_confirmation_pending":
+    if status in {"oa_draft_creating", "oa_confirmation_pending"}:
         return "staged"
     if status in {"deleted", "superseded"}:
         return None

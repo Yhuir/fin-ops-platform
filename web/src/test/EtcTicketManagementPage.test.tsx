@@ -231,6 +231,7 @@ describe("ETC ticket management page", () => {
     ["ready_for_import", "ready_for_import", ["complete", "complete", "current", "pending"]],
     ["importing", "importing", ["complete", "complete", "processing", "pending"]],
     ["imported", "imported", ["complete", "complete", "complete", "current"]],
+    ["oa_draft_creating", "imported", ["complete", "complete", "complete", "manual"]],
     ["oa_confirmation_pending", "imported", ["complete", "complete", "complete", "manual"]],
     ["import_failed", "ready_for_import", ["complete", "complete", "problem", "pending"]],
     ["oa_draft_failed", "imported", ["complete", "complete", "complete", "problem"]],
@@ -3643,14 +3644,18 @@ describe("ETC ticket management page", () => {
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
-    const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
+    const completedDraft = {
       ...businessBatch,
       status: "oa_confirmation_pending",
       version: 8,
       submissionBatchId: "etc_batch_0027",
       oaDraftId: "oa_draft_001",
       oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
-    } as never);
+    };
+    let resolveDraft!: (value: unknown) => void;
+    const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockImplementation(() => new Promise((resolvePromise) => {
+      resolveDraft = resolvePromise;
+    }) as never);
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -3670,16 +3675,57 @@ describe("ETC ticket management page", () => {
       expectedVersion: 7,
       idempotencyKey: expect.any(String),
     }));
+    const startingDialog = await screen.findByRole("dialog", { name: "确认 OA 草稿处理结果" });
+    expect(startingDialog).toHaveTextContent("已发起 OA 草稿创建");
+    expect(screen.getByText("暂存 1")).toBeInTheDocument();
+    expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeDisabled();
+    expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeDisabled();
+    await act(async () => {
+      resolveDraft(completedDraft);
+    });
     expect(openMock).not.toHaveBeenCalled();
 
     const resultDialog = await screen.findByRole("dialog", { name: "确认 OA 草稿处理结果" });
-    expect(resultDialog).toHaveTextContent("OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。");
+    await waitFor(() => expect(resultDialog).toHaveTextContent("OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。"));
     expect(resultDialog).toHaveTextContent("OA 草稿金额：3740.82 元");
     expect(within(resultDialog).queryByRole("button", { name: "打开草稿" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
     expect(within(resultDialog).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
     expect(within(resultDialog).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
+  });
+
+  test("shows an interrupted OA draft directly in staged with both manual confirmation choices", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const creatingBatch = businessBatchFixture({
+      businessBatchId: "etc-business-recovery-001",
+      taskId: "etc-recon-recovery-001",
+      status: "oa_draft_creating",
+      version: 3,
+      submissionBatchId: "etc-submission-recovery-001",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { unsubmitted: 0, staged: 1, submitted: 0 },
+      items: query.bucket === "staged" ? [creatingBatch] : [],
+      pagination: { page: 1, pageSize: 50, total: query.bucket === "staged" ? 1 : 0 },
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+      ...creatingBatch,
+      invoiceItems: [],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    expect(await within(page).findByText("已发起审批草稿创建，等待确认。")).toBeInTheDocument();
+    expect(within(page).getByText("App 不检测 OA 草稿状态，请按你在 OA 系统中的实际操作选择。")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
+    expect(within(page).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
+    expect(within(page).queryByRole("button", { name: "核实草稿状态" })).not.toBeInTheDocument();
   });
 
   test("uses the explicitly selected staged row instead of an older transient draft target", async () => {
@@ -3865,7 +3911,10 @@ describe("ETC ticket management page", () => {
     expect(screen.getByRole("dialog", { name: "创建审批草稿" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "确认 OA 草稿处理结果" })).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
+    const retryDialog = await screen.findByRole("dialog", { name: "创建审批草稿" });
+    const retryButton = within(retryDialog).getByRole("button", { name: "创建草稿" });
+    await waitFor(() => expect(retryButton).toBeEnabled());
+    await user.click(retryButton);
 
     await waitFor(() => expect(createDraft).toHaveBeenCalledTimes(2));
     expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", {

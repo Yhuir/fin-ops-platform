@@ -1449,7 +1449,6 @@ class PostgresCoreRepository:
             """
             update app.invoices
             set etc_invoice_id = %s,
-                legacy_source_batch_id = coalesce(%s, legacy_source_batch_id),
                 workbench_visibility = %s,
                 status = %s,
                 tags = %s,
@@ -1465,7 +1464,6 @@ class PostgresCoreRepository:
             """,
             (
                 self._text(invoice.get("etc_invoice_id")),
-                self._text(invoice.get("source_batch_id") or invoice.get("legacy_source_batch_id")),
                 self._text(invoice.get("workbench_visibility")) or "visible",
                 self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
                 self._text_list(invoice.get("tags")),

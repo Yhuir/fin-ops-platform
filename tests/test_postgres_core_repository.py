@@ -92,6 +92,29 @@ class PostgresCoreRepositoryTests(unittest.TestCase):
         sql, _params = connection.calls[0]
         self.assertIn("on conflict (legacy_mongo_id)", sql)
 
+    def test_etc_metadata_update_does_not_replace_formal_source_owner(self) -> None:
+        connection = _CaptureConnection()
+
+        PostgresCoreRepository(connection)._update_invoice_etc_metadata(
+            connection,
+            {
+                "id": "invoice-1",
+                "etc_invoice_id": "etc-invoice-1",
+                "source_batch_id": "etc_import_batch_0018",
+                "source_links": [
+                    {
+                        "source_type": "etc_invoice_import",
+                        "source_id": "etc-invoice-1",
+                        "batch_id": "etc_import_batch_0018",
+                    }
+                ],
+            },
+        )
+
+        sql, params = connection.calls[0]
+        self.assertNotIn("legacy_source_batch_id =", sql)
+        self.assertNotIn("etc_import_batch_0018", params)
+
     def test_invoice_read_restores_all_merge_fields_from_normalized_payload(self) -> None:
         invoice = PostgresCoreRepository(_CaptureConnection())._invoice_from_row(
             {

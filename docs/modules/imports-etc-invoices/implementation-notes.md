@@ -57,6 +57,7 @@
 - ETC 发票导入不是通用发票导入的一种 batch type；它走 `/api/etc/import/preview`、`/api/etc/import/confirm`、reconciliation task 和 `etc_invoice_import.confirm` processor。
 - ETC zip preview 的事实源是 confirmed reconciliation task 的版本和 `confirmed_item_set_hash`。task 或 canonical invoice 变化后必须重新预览，不能复用旧 session。
 - ETC import confirm 后的事实源是 ETC business batch + ETC invoice metadata/PDF/XML 附件关系 + `etc_import_confirmed` lifecycle，不是 confirm API 或 background job 的返回值；该链路默认只关联已存在 canonical invoice，不创建新的统一发票池事实。
+- ETC link 只追加 `etc_invoice_import` provenance 与 ETC metadata，不覆盖 canonical invoice 已有的正式发票导入 owner；历史精确 ETC owner 由 source-link 证明，未知 owner 继续由 Page Canonical Audit 阻断。
 - 本模块首轮闭环状态为 `documented-risk`：自动化测试已覆盖核心 contract 和历史 bug，但真实大 zip、对象存储、真实 OA 草稿和真实 worker drain 仍需发布前验证。
 
 ## 记录模板

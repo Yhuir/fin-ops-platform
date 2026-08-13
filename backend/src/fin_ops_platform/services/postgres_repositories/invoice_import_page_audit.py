@@ -496,9 +496,16 @@ def _canonical_invoice_issues(
         invoice_id = _text(invoice.get("invoice_id"))
         issues.extend(_invoice_formal_payload_issues(invoice))
         manual_batch_ids: set[str] = set()
+        etc_batch_ids: set[str] = set()
         for link in _list(invoice.get("source_links")):
             source_link = _dict(link)
-            if _text(source_link.get("source_type")) != "manual_invoice_import":
+            source_type = _text(source_link.get("source_type"))
+            if source_type == "etc_invoice_import":
+                etc_batch_id = _text(source_link.get("batch_id"))
+                if etc_batch_id:
+                    etc_batch_ids.add(etc_batch_id)
+                continue
+            if source_type != "manual_invoice_import":
                 continue
             batch_id = _text(source_link.get("batch_id"))
             source_id = _text(source_link.get("source_id"))
@@ -519,12 +526,16 @@ def _canonical_invoice_issues(
             actual_edges.add(edge)
             manual_batch_ids.add(batch_id)
         source_batch_id = _text(invoice.get("source_batch_id"))
-        if manual_batch_ids and source_batch_id not in manual_batch_ids:
+        if manual_batch_ids and source_batch_id not in manual_batch_ids | etc_batch_ids:
             issues.append(
                 _issue(
                     "invoice_import_source_batch_not_in_manual_links",
                     invoice_id,
-                    {"source_batch_id": source_batch_id, "manual_batch_ids": sorted(manual_batch_ids)},
+                    {
+                        "source_batch_id": source_batch_id,
+                        "manual_batch_ids": sorted(manual_batch_ids),
+                        "etc_batch_ids": sorted(etc_batch_ids),
+                    },
                 )
             )
 

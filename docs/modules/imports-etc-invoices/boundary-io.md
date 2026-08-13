@@ -47,6 +47,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复；missing requirement 返回需求 ID、缺票数、金额、车牌、通行时间和处理提示，非法 ZIP 明确阻止确认 |
 | ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；import worker 必须用与 API 相同的对象存储环境配置构造 state store，才能跨进程重载 `minio://` / S3 archive ref |
 | Worker 完成后的 ETC 查询 | PostgreSQL state store -> reconciliation/business batch/invoice query services | 独立 worker 持久化 task、business batch 和 invoice 后，常驻 API 的只读查询入口必须先重载 PostgreSQL snapshot；不得继续返回进程启动时的旧内存状态，也不得依赖重启 API 才可见 |
+| OA 草稿后续状态 | ETC 票据管理页面 | 导入模块只产出 imported business batch；不得创建、检测、重试或恢复 OA 草稿。用户发起创建后 creating/pending 都由 ETC 票据页作为暂存，并只接受两个 manual-status 决定 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
@@ -98,6 +99,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 
 - Owned facts: `app.etc_invoices`、ETC 导入 session/batch facts、与 ETC 发票导入直接相关的 `app.import_*` facts。
 - Shared facts: `app.invoices` 仍由 canonical invoice pool owner 管理；ETC 只能通过受控 existing-link/promotion port 关联，不创建第二发票池。
+- ETC metadata link 是附加 provenance，不得覆盖 canonical invoice 已有的正式 input/output invoice import `source_batch_id` owner。历史上已经被写成 ETC import batch 的 owner，只有当同一 canonical invoice 存在精确一致的 `etc_invoice_import(batch_id)` source-link 时才允许继续读取；未知 owner 仍 fail closed。
 - Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
 - Downstream outputs: ETC tickets canonical facts，以及 workbench、workbench_relation、tax/cost 可比较的 source-version 变化；保留 read model 的页面访问 gateway 自行创建精确 dirty scope，direct-canonical 页面直接读取 facts。

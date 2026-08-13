@@ -317,7 +317,7 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
     if (["oa_submitted", "manually_marked_submitted", "closed"].includes(status)) {
       return "submitted";
     }
-    return status === "oa_confirmation_pending" ? "staged" : "unsubmitted";
+    return ["oa_draft_creating", "oa_confirmation_pending"].includes(status) ? "staged" : "unsubmitted";
   };
 
   const batchBusinessIds = (batch: (typeof batches)[number]) => {
@@ -472,8 +472,8 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
       },
       create_oa_draft_action: {
         enabled: canCreateDraft,
-        code: canCreateDraft ? "ready" : batchStatus === "oa_confirmation_pending" ? "oa_confirmation_pending" : "invalid_batch_status",
-        message: canCreateDraft ? "可以提交审批。" : batchStatus === "oa_confirmation_pending" ? "审批草稿已创建，请先确认是否已在 OA 提交。" : "当前批次状态不能创建审批草稿。",
+        code: canCreateDraft ? "ready" : ["oa_draft_creating", "oa_confirmation_pending"].includes(batchStatus) ? batchStatus : "invalid_batch_status",
+        message: canCreateDraft ? "可以提交审批。" : ["oa_draft_creating", "oa_confirmation_pending"].includes(batchStatus) ? "草稿创建已发起，请确认 OA 中的实际处理结果。" : "当前批次状态不能创建审批草稿。",
       },
       scope_month: scopeMonth,
       amount_breakdown: {

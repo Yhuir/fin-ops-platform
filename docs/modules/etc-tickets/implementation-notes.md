@@ -29,6 +29,16 @@
 
 ## 历史记录
 
+## 2026-08-13 - OA 草稿创建即暂存
+
+- 目标：修复用户点击“创建草稿”后批次长期停在 `oa_draft_creating`，既不进入暂存也无法选择“已提交 / 已删除草稿”的断链。
+- 真实证据：生产批次 `ETC-RECON-241138` 已持久化 `oa_draft_prepared`，但没有 `oa_draft_created`、失败或 outcome-unknown 完成事件；49 个 PDF 原实现逐个串行上传且整个外部 OA 操作处于一个 HTTP 请求中。App 数据只能证明本地 finalize 未完成，不能据此判断 OA 是否已创建。
+- 关键决策：点击创建后立即把本地批次投影为 `oa_draft_creating` 暂存态，并复用现有紧凑 HeroUI 两按钮决定区；App 不查询 OA、不要求草稿 ID/URL、不新增恢复表单。creating 与 pending 都接受 manual-status。OA adapter 以默认 4、最多 8 路有界并发上传并保持附件顺序；OA 成功但 finalize 持久化失败保持 outcome unknown。
+- 边界：不新增状态、route、表、worker、read model、缓存或第二套 UI；普通页面不调用现有管理员 `/oa-draft/recover`。同页请求执行期间按钮禁用，请求结束或重载后由当前 version CAS 保护人工决定。
+- 测试覆盖：有界并发峰值与稳定顺序、finalize 持久化失败不重复调用 OA、creating staged bucket、creating manual decision、点击后立即进入暂存、两个决定、正常创建与人工确认 E2E。
+- 数据安全：无数据库 migration、无数据库备份、无主库删除或重建；生产验证不创建、提交或删除真实 OA 草稿。现有结果未知批次仍须用户依据 OA 事实完成一次恢复。
+- 未测风险：App 有意不证明 OA 外部系统是否已经存在草稿；该事实由用户声明。极端情况下附件上传仍可能超过代理上限，但本地批次会留在暂存，不会因超时消失或盲重试。
+
 ## 2026-07-19 - OA 状态链路与跨页面 I/O 隔离
 
 - 目标：消除 OA 状态请求中的整批 canonical relink 和 `all`/Cost/repair 队列风暴，同时保持关联台 summary/散票可见性正确。
@@ -70,7 +80,7 @@
 
 - 目标：移除 ETC 页面 full task/重复 detail 热路径，解决提交按钮无解释禁用和永久 creating，形成“未提交 -> 暂存 -> 已提交/退回未提交”的高性能闭环。
 - 影响范围：ETC business batch state store/repository/application service、页面/API mapper、OA draft command、ETC Page Audit、模块/API/运维文档和定向测试；不新增 read model、cache、worker、migration 或跨页面 I/O。
-- 关键决策：summary list 直接走 PostgreSQL 窄查询，选中 batch 后只读一次精确 detail/task；`oa_confirmation_pending` 是唯一暂存事实；OA command 使用 durable prepare、锁外 HTTP、CAS finalize 和管理员 evidence recovery；not-submitted 保留业务成员与核对数据但释放 OA 占用。
+- 历史决策（已被 2026-08-13 当前合同替代）：summary list 直接走 PostgreSQL 窄查询，选中 batch 后只读一次精确 detail/task；当时只有 `oa_confirmation_pending` 进入暂存。当前 creating 也进入暂存并接受人工决定。
 - 暂存确认闭环：创建 OA 草稿成功后，页面在确认窗口内保留完整的服务端 batch detail/version 作为后续 `manual-oa-status` target；即使该批次已从未提交集合移入暂存集合，也不能因当前列表 selection 被清空而让“已提交/未提交”按钮静默失效。
 - 旧链删除：删除页面 full task list、双 selection owner、duplicate detail effect、task-row/task-delete 私有 UI/CSS 和旧 mocks；保留正式 reconciliation/import/source-file 后端 API。static guard 禁止旧首屏 consumer、task delete UI和全量 hydrate/object-store probe 回到热路径。
 - Audit：新增 15 分钟 creating stale、attempt 缺失、pending draft 缺失、三 bucket/active-key 错配、submitted/not-submitted 占用闭合检查；仍只承诺只读 PostgreSQL snapshot，不伪装 OA 外部状态已被证明。

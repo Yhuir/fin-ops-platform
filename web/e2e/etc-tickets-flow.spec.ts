@@ -181,6 +181,24 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("keeps an in-progress OA draft in staged with both manual decisions", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      etcTicketInitialBusinessBatchStatus: "oa_draft_creating",
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/etc-tickets");
+    await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0" })).toBeVisible();
+    await page.getByRole("radio", { name: "暂存 1" }).click();
+    await expect(page.getByRole("region", { name: "审批提交确认" })).toContainText("已发起审批草稿创建，等待确认。");
+    await expect(page.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "核实草稿状态" })).toHaveCount(0);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("recovers business batches after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
@@ -386,7 +404,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     expect(api.count("DELETE /api/etc/business-batches/etc-business-e2e-001")).toBe(1);
     expect(api.lastBody("DELETE /api/etc/business-batches/etc-business-e2e-001")).toMatchObject({
-      expectedVersion: 9,
+      expectedVersion: 10,
       reason: "用户在 ETC 页面删除已提交业务批次并释放发票。",
     });
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible();
@@ -734,8 +752,8 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible();
     await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
     await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
-    await expect(page.getByRole("radio", { name: "未提交 0" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 1" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "暂存 1" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
 
     await recordLatency({
