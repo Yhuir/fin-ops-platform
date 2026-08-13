@@ -120,6 +120,48 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertFalse(paired & unpaired)
         self.assertEqual(paired | unpaired, canonical)
 
+    def test_group_payload_keeps_nested_input_and_output_ownership_isolated(self) -> None:
+        rows = {
+            "oa-a": {
+                "id": "oa-a",
+                "type": "oa",
+                "object_identity_key": "oa-a",
+                "detail_fields": {"项目名称": "原项目"},
+            },
+            "bank-a": {
+                "id": "bank-a",
+                "type": "bank",
+                "object_identity_key": "bank-a",
+                "tags": ["原标签"],
+            },
+        }
+        relation = {
+            "case_id": "case:ownership-isolation",
+            "row_ids": ["oa-a", "bank-a"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "special_metadata": {"requires_invoice": False},
+            "amount_check": {"status": "matched", "difference": "0.00"},
+        }
+        original_rows = deepcopy(rows)
+        original_relation = deepcopy(relation)
+
+        payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[relation],
+        )
+
+        self.assertEqual(rows, original_rows)
+        self.assertEqual(relation, original_relation)
+        group = payload["paired"]["groups"][0]
+        group["oa_rows"][0]["detail_fields"]["项目名称"] = "已修改"
+        group["bank_rows"][0]["tags"].append("新标签")
+        group["special_metadata"]["requires_invoice"] = True
+        group["amount_check"]["difference"] = "1.00"
+        self.assertEqual(rows, original_rows)
+        self.assertEqual(relation, original_relation)
+
     def test_unpaired_row_does_not_leak_legacy_candidate_ownership(self) -> None:
         payload = self.service.group_payload(
             "2026-01",

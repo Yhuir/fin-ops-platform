@@ -105,7 +105,10 @@ class WorkbenchRelationGroupingService:
         for raw_row_id, raw_row in rows_by_id.items():
             if not isinstance(raw_row, dict):
                 raise ValueError("Workbench rows must be dictionaries.")
-            row = deepcopy(raw_row)
+            # Relation and unpaired output builders take the owning deep copy
+            # before any nested value can be mutated. A second deep copy here
+            # only duplicated the complete page payload on every request.
+            row = dict(raw_row)
             row_id = str(row.get("id") or raw_row_id or "").strip()
             row_type = str(row.get("type") or "").strip().lower()
             if not row_id or row_type not in ROW_TYPES:
@@ -141,7 +144,9 @@ class WorkbenchRelationGroupingService:
         for raw_relation in active_relations:
             if not isinstance(raw_relation, dict):
                 raise ValueError("Active Workbench relations must be dictionaries.")
-            relation = deepcopy(raw_relation)
+            # Only normalized top-level fields are replaced below. Nested
+            # relation metadata is copied when it enters a response group.
+            relation = dict(raw_relation)
             case_id = str(relation.get("case_id") or "").strip()
             status = str(relation.get("status") or "active").strip()
             if status != "active":
