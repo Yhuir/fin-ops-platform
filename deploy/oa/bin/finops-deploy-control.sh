@@ -4390,6 +4390,56 @@ Path(sys.argv[1]).write_text(
 )
 PY
   ) || true
+  # A healthy dispatcher can legitimately own one short-lived publishing row
+  # while the authenticated probe is still generating runtime traffic.  Give
+  # only that transient state a bounded drain window; failed/dead-lettered work
+  # and dirty scopes remain immediate checkpoint failures.
+  if [[ "$profile" == "stability" ]]; then
+    local drain_attempt
+    for drain_attempt in 1 2 3 4 5; do
+      if RUNTIME_REPORT="$runtime_report" "$API_PYTHON" - <<'PY'
+import json
+import os
+
+payload = json.load(open(os.environ["RUNTIME_REPORT"], encoding="utf-8"))
+queue = payload.get("queue_backlog") or {}
+publish = payload.get("rabbitmq_publish_status") or {}
+dirty = payload.get("dirty_scopes") or {}
+failed_or_dead = sum(int(queue.get(key) or 0) for key in ("failed", "dead_lettered"))
+active = sum(int(queue.get(key) or 0) for key in ("pending", "processing"))
+active += int(publish.get("publishing") or 0)
+raise SystemExit(0 if active == 0 or failed_or_dead > 0 or sum(int(value or 0) for value in dirty.values()) > 0 else 1)
+PY
+      then
+        break
+      fi
+      sleep 1
+      (
+        set -a
+        # shellcheck disable=SC1090
+        source "$COMMON_ENV"
+        # shellcheck disable=SC1090
+        source "$SECRETS_ENV"
+        set +a
+        export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+        "$API_PYTHON" - "$runtime_report" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+
+connection = PostgresConnection(PostgresSettings.from_env())
+summary = RuntimeMonitoringRepository(connection).ready_health_summary()
+Path(sys.argv[1]).write_text(
+    json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+    encoding="utf-8",
+)
+PY
+      ) || true
+    done
+  fi
   RELEASE_NAME="$release" \
   CHECKPOINT_LABEL="$label" \
   CHECKPOINT_PROFILE="$profile" \

@@ -1506,6 +1506,11 @@ ensure_worker_env workbench
         self.assertNotIn("reconcile_completed_publish_states", checkpoint)
         self.assertIn("terminal_publish_reconciliation_count", checkpoint)
         self.assertIn("terminal_publish_reconciliation_stable", checkpoint)
+        self.assertIn('if [[ "$profile" == "stability" ]]', checkpoint)
+        self.assertIn("for drain_attempt in 1 2 3 4 5", checkpoint)
+        self.assertIn('sleep 1', checkpoint)
+        self.assertIn('failed_or_dead > 0', checkpoint)
+        self.assertIn('sum(int(value or 0) for value in dirty.values()) > 0', checkpoint)
 
     def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
         env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
