@@ -3098,7 +3098,7 @@ with connection.transaction() as transaction:
                 %s, clock_timestamp(), %s, %s
             )
             on conflict (tenant_id, scope_type, scope_key)
-            where status in ('pending', 'processing')
+            where status in ($$pending$$, $$processing$$)
             do update set
                 reason = excluded.reason,
                 source_version = job.read_model_dirty_scopes.source_version + 1,

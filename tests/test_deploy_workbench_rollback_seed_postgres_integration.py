@@ -85,7 +85,7 @@ class DeployWorkbenchRollbackSeedSourceTests(unittest.TestCase):
 
         self.assertIn(
             "on conflict (tenant_id, scope_type, scope_key) "
-            "where status in ('pending', 'processing') do update set",
+            "where status in ($$pending$$, $$processing$$) do update set",
             normalized_sql,
         )
         self.assertNotIn("where status in (%s, %s)", normalized_sql)

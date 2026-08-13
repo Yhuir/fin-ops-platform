@@ -1429,6 +1429,13 @@ class PostgresWorkbenchPageQueryRepository:
                 transaction.execute(
                     f"set local statement_timeout = '{WORKBENCH_DIRECT_QUERY_TIMEOUT_SECONDS}s'"
                 )
+                # The canonical page spine intentionally materializes bounded fact sets
+                # before it computes exact totals.  PostgreSQL materially overestimates
+                # several CTE cardinalities and otherwise chooses correlated nested
+                # loops over the relation/member arrays.  Production EXPLAIN and
+                # pg_stat_statements evidence show the hash/merge plan is both stable
+                # and an order of magnitude faster for this repository's query shape.
+                transaction.execute("set local enable_nestloop = off")
                 return operation(
                     PostgresWorkbenchPageQueryRepository(
                         transaction,

@@ -909,6 +909,22 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 
+    def test_direct_page_snapshot_uses_hash_merge_plan_for_canonical_spine(self) -> None:
+        self.connection.statements.clear()
+
+        self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            page_size=50,
+        )
+
+        executed_sql = [
+            str(statement.get("raw_sql") or "").strip().lower()
+            for statement in self.connection.statements
+            if statement["operation"] == "execute"
+        ]
+        self.assertIn("set local enable_nestloop = off", executed_sql)
+
 
 if __name__ == "__main__":
     unittest.main()
