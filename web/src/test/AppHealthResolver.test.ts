@@ -100,13 +100,13 @@ describe("resolveAppHealthStatus", () => {
     });
   });
 
-  it("uses matching running months before OA synced details", () => {
+  it("does not surface matching worker progress as global page generation", () => {
     expect(resolveAppHealthStatus({ ...baseSources, workbench: "stale" }, {
       matchingRunningMonths: ["2026-03"],
       fallbackReason: "OA 已同步",
     })).toMatchObject({
       level: "busy",
-      reason: "正在生成正式配对关系：2026-03",
+      reason: "关联台待刷新",
     });
   });
 

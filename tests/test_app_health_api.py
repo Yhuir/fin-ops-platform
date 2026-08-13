@@ -663,12 +663,12 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["background_jobs"]["attention"], 2)
+        self.assertEqual(payload["background_jobs"]["attention"], 1)
         self.assertEqual(payload["background_jobs"]["active"], 0)
         self.assertEqual(payload["background_jobs"]["active_jobs"], [])
         self.assertEqual(
             [job["job_id"] for job in payload["background_jobs"]["attention_jobs"]],
-            [partial_job.job_id, failed_job.job_id],
+            [failed_job.job_id],
         )
         self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], failed_job.job_id)
         self.assertEqual(payload["background_jobs"]["primary_attention"]["type"], "file_import")
@@ -679,7 +679,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertIsNone(payload["background_jobs"]["primary_running"])
         self.assertEqual(
             [job["job_id"] for job in payload["background_jobs"]["jobs"]],
-            [partial_job.job_id, failed_job.job_id],
+            [failed_job.job_id],
         )
 
     def test_app_health_excludes_acknowledged_failed_job_from_active_and_attention(self) -> None:
@@ -702,7 +702,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["background_jobs"]["attention"], 0)
         self.assertIsNone(payload["background_jobs"]["primary_attention"])
 
-    def test_app_health_marks_workbench_matching_attention_retryable_when_months_exist(self) -> None:
+    def test_app_health_hides_retired_matching_attention_job(self) -> None:
         app = build_application()
         job = app._background_job_service.create_job(
             job_type="workbench_matching",
@@ -716,10 +716,9 @@ class AppHealthApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], job.job_id)
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["status"], "partial_success")
-        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
-        self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["background_jobs"]["attention"], 0)
+        self.assertIsNone(payload["background_jobs"]["primary_attention"])
 
     def test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable(self) -> None:
         app = build_application()

@@ -229,18 +229,18 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["background_jobs"]["active"], 1)
         self.assertEqual(snapshot["background_jobs"]["running"], 1)
         self.assertEqual(snapshot["background_jobs"]["queued"], 0)
-        self.assertEqual(snapshot["background_jobs"]["attention"], 2)
+        self.assertEqual(snapshot["background_jobs"]["attention"], 1)
         self.assertEqual([job["job_id"] for job in snapshot["background_jobs"]["active_jobs"]], ["job_running"])
         self.assertEqual(
             [job["job_id"] for job in snapshot["background_jobs"]["attention_jobs"]],
-            ["job_failed", "job_partial"],
+            ["job_failed"],
         )
         self.assertEqual(
             [job["job_id"] for job in snapshot["background_jobs"]["jobs"]],
-            ["job_running", "job_failed", "job_partial"],
+            ["job_running", "job_failed"],
         )
         self.assertEqual(snapshot["metrics"]["background_jobs_active_count"], 1)
-        self.assertEqual(snapshot["metrics"]["background_jobs_attention_count"], 2)
+        self.assertEqual(snapshot["metrics"]["background_jobs_attention_count"], 1)
 
     def test_dependency_error_marks_blocked(self) -> None:
         service = AppHealthService()

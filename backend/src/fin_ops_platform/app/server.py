@@ -1069,7 +1069,7 @@ class Application:
             etc_reconciliation_task_service=self._etc_reconciliation_task_service,
             background_job_service=self._background_job_service,
             serialize_value=self._serialize_value,
-            enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
+            schedule_workbench_matching_scopes=self._schedule_workbench_matching_scopes,
             persist_confirmed_import_delta=self._persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
@@ -4470,23 +4470,16 @@ class Application:
         confirmed_files = [file for file in selected_files if str(getattr(file, "status", "")) == "confirmed"]
         if confirmed_files:
             scope_months = self._workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
-            retry_job = self._enqueue_workbench_auto_matching_for_scopes(
+            queued_matching_months = self._schedule_workbench_matching_scopes(
                 scope_months,
                 reason="file_import_retry_after_confirm",
-                owner_user_id=owner_user_id,
-                source={
-                    "session_id": session_id,
-                    "selected_file_ids": selected_file_ids,
-                    "retry_of_job_id": job.job_id,
-                },
-                triggered_by=f"background_job_retry:{job.job_id}",
             )
             self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
             return self._json_response(
                 HTTPStatus.ACCEPTED,
                 {
-                    "job": self._serialize_background_job(retry_job) if retry_job is not None else None,
                     "retry_mode": "workbench_matching",
+                    "queued_matching_months": queued_matching_months,
                 },
             )
 
@@ -8399,103 +8392,13 @@ class Application:
             arguments["debounce_seconds"] = debounce_seconds
         return list(mark_dirty_expanded(normalized_months, **arguments))
 
-    def _schedule_or_run_workbench_auto_matching_for_scopes(
+    def _schedule_workbench_matching_scopes(
         self,
         scope_months: list[str],
         *,
         reason: str,
-        request_id: str | None = None,
-        progress_callback=None,
-    ) -> dict[str, object] | None:
-        _ = request_id, progress_callback
-        queued_months = self._mark_workbench_matching_dirty_scopes(scope_months, reason=reason)
-        return {
-            "queued_months": queued_months,
-            "processed_months": [],
-            "planned_relation_count": 0,
-            "created_relation_count": 0,
-            "extended_relation_count": 0,
-            "blocked_count": 0,
-            "reason": reason,
-        }
-
-    def _enqueue_workbench_auto_matching_for_scopes(
-        self,
-        scope_months: list[str],
-        *,
-        reason: str,
-        owner_user_id: str,
-        source: dict[str, object] | None = None,
-        triggered_by: str | None = None,
-    ):
-        normalized_months = [
-            str(month).strip()
-            for month in list(scope_months or [])
-            if MONTH_SCOPE_RE.match(str(month).strip())
-        ]
-        normalized_months = sorted(dict.fromkeys(normalized_months))
-        if not normalized_months:
-            return None
-
-        label = "生成正式配对关系"
-        job = self._background_job_service.create_job(
-            job_type="workbench_matching",
-            label=label,
-            owner_user_id=owner_user_id,
-            phase="queued",
-            current=0,
-            total=len(normalized_months),
-            message=f"{label}任务已创建。",
-            result_summary={
-                "processed_months": [],
-                "affected_months": normalized_months,
-                "planned_relation_count": 0,
-                "created_relation_count": 0,
-            },
-            source={
-                **(source or {}),
-                "reason": reason,
-                "scope_months": normalized_months,
-            },
-            affected_scopes=["workbench"],
-            affected_months=normalized_months,
-        )
-
-        try:
-            summary = self._schedule_or_run_workbench_auto_matching_for_scopes(
-                normalized_months,
-                reason=reason,
-                request_id=f"workbench-match-job-{job.job_id}",
-            ) or {}
-        except Exception as exc:
-            self._background_job_service.fail_job(job.job_id, "关联台匹配排队失败。", str(exc))
-            raise
-        queued_months = list(summary.get("queued_months") or [])
-        return self._background_job_service.succeed_job(
-            job.job_id,
-            f"关联台匹配已排队：{', '.join(queued_months)}。",
-            {
-                **summary,
-                "processed_months": [],
-                "affected_months": normalized_months,
-            },
-        )
-
-    def _run_workbench_auto_matching_for_scopes(
-        self,
-        scope_months: list[str],
-        *,
-        reason: str,
-        request_id: str | None = None,
-        progress_callback=None,
-        requeue_on_error: bool = True,
-        raise_on_error: bool = False,
-    ) -> dict[str, object] | None:
-        _ = request_id, progress_callback, requeue_on_error, raise_on_error
-        return self._schedule_or_run_workbench_auto_matching_for_scopes(
-            scope_months,
-            reason=reason,
-        )
+    ) -> list[str]:
+        return self._mark_workbench_matching_dirty_scopes(scope_months, reason=reason)
 
     def _workbench_matching_source_versions(self) -> dict[str, object]:
         parser_version = self._current_oa_attachment_invoice_parser_version()

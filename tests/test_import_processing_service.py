@@ -39,6 +39,10 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         if fail_persist:
             raise RuntimeError("persist failed")
 
+    def schedule_workbench_matching_scopes(*_args: object, **_kwargs: object) -> list[str]:
+        events.append("matching")
+        return ["2026-06"]
+
     service = ImportProcessingService(
         file_import_service=SimpleNamespace(
             get_session=lambda _session_id: confirmed_session,
@@ -50,7 +54,7 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         etc_reconciliation_task_service=SimpleNamespace(),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: events.append("matching"),
+        schedule_workbench_matching_scopes=schedule_workbench_matching_scopes,
         persist_confirmed_import_delta=persist_confirmed_import_delta,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
@@ -66,7 +70,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
             service.execute_file_import_confirm_job(
                 session_id="session-1",
                 selected_file_ids=["file-bank"],
-                owner_user_id="user",
                 background_job_id="",
             )
         except RuntimeError as exc:
@@ -79,12 +82,12 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
     result = service.execute_file_import_confirm_job(
         session_id="session-1",
         selected_file_ids=["file-bank"],
-        owner_user_id="user",
         background_job_id="",
     )
 
     assert events == ["persist", "matching"]
     assert result["affected_months"] == ["2026-06"]
+    assert result["queued_matching_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
     assert result["affected_scope_keys"] == ["2026-06"]
 
@@ -114,7 +117,7 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         ),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
+        schedule_workbench_matching_scopes=lambda *args, **kwargs: [],
         persist_confirmed_import_delta=lambda **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],

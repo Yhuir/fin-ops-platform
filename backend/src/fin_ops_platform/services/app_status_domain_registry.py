@@ -21,7 +21,6 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="关联台",
         route="/",
         worker_instances=("workbench-matching",),
-        job_types=("workbench_matching",),
         dependencies=("oa_sync",),
     ),
     AppStatusDomainDefinition(

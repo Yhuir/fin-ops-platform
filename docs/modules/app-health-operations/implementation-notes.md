@@ -600,3 +600,9 @@
 
 - 审计指标和运行概览改为连续分区带，正常项降低视觉重量，异常色和既有诊断顺序保持不变。
 - 只调整页面样式，不改变 `/api/app-health`、readiness、worker blocker、权限或诊断字段。
+## 2026-08-14 - 退役虚假的关联台匹配全局进度
+
+- 根因：导入链已经把实际工作写入 `job.workbench_matching_dirty_scopes`，但旧代码又创建 `job.background_jobs.type='workbench_matching'`；dirty-scope worker 不更新这条重复记录，因此它永久停在 `0/N`，被全局 Provider 和 App Status 当成页面生成进度。
+- 修复：导入/API 重试只标记 matching dirty months 并返回 `queued_matching_months`；删除两处 BackgroundJob 创建链和 job registry 映射。App Health、App Status 与前端 active-job mapper 均排除该退休类型；迁移 `0148` 只把历史 active 假任务更新为 `superseded`，保留审计记录，不删除业务数据。
+- 边界：关联台页面继续通过 direct canonical API 读取；真实 `workbench-matching` worker、dirty/retry/processing/failed scope 和错误诊断继续保留。其他导入/重置/维护后台任务的全局进度不变。
+- 测试：覆盖导入仅调度 dirty scope、历史匹配 job 不进入 active/attention/App Status、全局顶部不渲染旧文案、其他导入进度仍显示，以及迁移无 delete/drop。

@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-13
+日期：2026-08-14
 
 ## 职责
 
@@ -116,6 +116,8 @@ requested tenant/scope
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
+
+- `workbench-matching` 的运行事实仅来自 `job.workbench_matching_dirty_scopes`、worker heartbeat 和错误字段；它不是 Workbench 页面 read model，也不创建 `workbench_matching` BackgroundJob 或全局页面进度。
 
 ## 写入与一致性
 

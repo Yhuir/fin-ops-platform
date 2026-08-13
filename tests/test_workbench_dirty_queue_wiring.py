@@ -353,23 +353,21 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         queue = RecordingDirtyQueue()
         app._workbench_reconciliation_dirty_queue = queue
 
-        with patch.object(app, "_run_workbench_auto_matching_for_scopes") as run_matching:
-            result = app._schedule_or_run_workbench_auto_matching_for_scopes(
-                ["2026-05"],
-                reason="import_confirm",
-            )
+        result = app._schedule_workbench_matching_scopes(
+            ["2026-05"],
+            reason="import_confirm",
+        )
 
-        run_matching.assert_not_called()
         self.assertEqual(queue.mark_calls[0]["months"], ["2026-05"])
         self.assertEqual(queue.mark_calls[0]["reason"], "import_confirm")
-        self.assertEqual(result["queued_months"], ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"])
+        self.assertEqual(result, ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"])
 
     def test_db_dirty_queue_mark_failure_does_not_fall_back_to_in_memory_state(self) -> None:
         app = build_application()
         app._workbench_reconciliation_dirty_queue = FailingMarkDirtyQueue()
 
         with self.assertRaisesRegex(RuntimeError, "db queue unavailable"):
-            app._schedule_or_run_workbench_auto_matching_for_scopes(["2026-05"], reason="import_confirm")
+            app._schedule_workbench_matching_scopes(["2026-05"], reason="import_confirm")
 
         self.assertFalse(hasattr(app, "_workbench_matching_dirty_scope_service"))
 

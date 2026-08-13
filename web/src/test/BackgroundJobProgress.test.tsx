@@ -24,27 +24,28 @@ const runningEtcJob = {
   finished_at: null,
 };
 
-const failedWorkbenchMatchingJob = {
-  job_id: "job_workbench_matching_failed",
-  type: "workbench_matching",
-  label: "关联台匹配",
-  short_label: "关联台匹配失败",
+const failedImportJob = {
+  job_id: "job_file_import_failed",
+  type: "file_import",
+  label: "导入银行流水",
+  short_label: "导入银行流水失败",
   status: "failed",
   phase: "failed",
   current: 2,
   total: 4,
   percent: 50,
-  message: "关联台匹配失败。",
+  message: "导入银行流水失败。",
   result_summary: {
     warmed: 2,
     failed: 2,
     total: 4,
   },
   retryable: true,
-  retry_mode: "failed_scopes",
+  retry_mode: "file_import",
   acknowledgeable: true,
   attention: true,
   error: "warmup_failed",
+  source: { session_id: "session-1", selected_file_ids: ["file-1"] },
   created_at: "2026-05-03T18:30:00+08:00",
   updated_at: "2026-05-03T18:30:02+08:00",
   finished_at: "2026-05-03T18:30:02+08:00",
@@ -87,21 +88,38 @@ describe("global background job page header", () => {
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
   });
 
+  test("never renders retired workbench matching progress", async () => {
+    installMockApiFetch({
+      backgroundJobs: [{
+        ...runningEtcJob,
+        job_id: "job_workbench_matching_queued",
+        type: "workbench_matching",
+        short_label: "正在生成正式配对关系 0/11",
+      }],
+    });
+    renderAppAt("/");
+
+    await waitFor(() => {
+      expect(screen.queryByText(/正在生成正式配对关系/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
+    });
+  });
+
   test("renders a retry action for retryable attention jobs", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
-        failedWorkbenchMatchingJob,
+        failedImportJob,
       ],
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
 
     await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_workbench_matching_failed/retry"),
+        expect.stringContaining("/api/background-jobs/job_file_import_failed/retry"),
         expect.objectContaining({ method: "POST" }),
       );
     });
@@ -109,13 +127,13 @@ describe("global background job page header", () => {
 
   test("shows operation feedback when retry fails instead of appearing unresponsive", async () => {
     installMockApiFetch({
-      backgroundJobs: [failedWorkbenchMatchingJob],
+      backgroundJobs: [failedImportJob],
       backgroundJobRetryStatus: 409,
       backgroundJobRetryBody: { message: "关联台匹配任务缺少重新执行所需的范围。" },
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
 
     await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
 
@@ -125,17 +143,17 @@ describe("global background job page header", () => {
 
   test("acknowledges known attention jobs from the global progress header", async () => {
     const fetchMock = installMockApiFetch({
-      backgroundJobs: [failedWorkbenchMatchingJob],
+      backgroundJobs: [failedImportJob],
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
 
     await userEvent.click(screen.getByRole("button", { name: "确认已知" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_workbench_matching_failed/acknowledge"),
+        expect.stringContaining("/api/background-jobs/job_file_import_failed/acknowledge"),
         expect.objectContaining({ method: "POST" }),
       );
     });

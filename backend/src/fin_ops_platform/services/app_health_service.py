@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_DEPENDENCY_REGISTRY
+from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 
 
 APP_HEALTH_SCHEMA_VERSION = 1
@@ -28,8 +29,17 @@ class AppHealthService:
         generated_at: datetime | None = None,
     ) -> dict[str, Any]:
         now = generated_at or datetime.now(UTC)
+        active_jobs = [
+            job
+            for job in active_jobs
+            if str(getattr(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
+        ]
         resolved_attention_jobs = (
-            list(attention_jobs)
+            [
+                job
+                for job in attention_jobs
+                if str(getattr(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
+            ]
             if attention_jobs is not None
             else [
                 job
@@ -342,17 +352,6 @@ class AppHealthService:
             source = {}
         if job_type == "file_import":
             return bool(source.get("session_id")) and cls._has_values(source.get("selected_file_ids"))
-        if job_type == "workbench_matching":
-            return any(
-                cls._has_values(value)
-                for value in (
-                    getattr(job, "affected_months", []),
-                    source.get("affected_months"),
-                    source.get("months"),
-                    source.get("scope_months"),
-                    source.get("scope_month"),
-                )
-            )
         return False
 
     @staticmethod

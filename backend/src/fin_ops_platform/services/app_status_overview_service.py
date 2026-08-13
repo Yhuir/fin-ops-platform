@@ -12,6 +12,7 @@ from fin_ops_platform.services.app_status_dependency_registry import (
     APP_STATUS_DEPENDENCY_REGISTRY,
     AppStatusDependencyDefinition,
 )
+from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 
 
 APP_STATUS_VERSION = 1
@@ -68,7 +69,11 @@ class AppStatusOverviewService:
         resolved_workers = worker_statuses or {}
         resolved_outbox = outbox_statuses or {}
         dependencies = app_health_snapshot.get("dependencies") if isinstance(app_health_snapshot.get("dependencies"), dict) else {}
-        all_jobs = self._combine_jobs(active_jobs, attention_jobs)
+        all_jobs = [
+            job
+            for job in self._combine_jobs(active_jobs, attention_jobs)
+            if str(self._job_payload(job).get("type") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
+        ]
         tasks = [self._task_payload(job) for job in all_jobs]
         domains = [
             self._domain_payload(

@@ -23,16 +23,6 @@ function jobDisplayLabel(job: AppHealthJobSummary | null | undefined) {
   return String(job?.shortLabel || job?.label || job?.message || "").trim();
 }
 
-function isWorkbenchMatchingJob(job: AppHealthJobSummary | null | undefined) {
-  const type = String(job?.type ?? "").trim();
-  return type === "workbench_matching";
-}
-
-function matchingMonthsFromJob(job: AppHealthJobSummary | null | undefined) {
-  const months = formatMonths(job?.affectedMonths);
-  return months || jobDisplayLabel(job).replace(/^正在生成正式配对关系[:：]?/, "").trim();
-}
-
 function attentionReason(details: AppHealthResolveDetails) {
   const count = details.attentionCount ?? 0;
   const job = details.primaryAttention;
@@ -55,7 +45,6 @@ export function resolveAppHealthStatus(
   const detail = normalizeDetails(detailReason);
   const fallbackReason = detail.fallbackReason ?? "";
   const detailList = limitDetails(detail.details ?? withDetails(fallbackReason));
-  const matchingRunningMonths = formatMonths(detail.matchingRunningMonths);
   const matchingDirtyMonths = formatMonths(detail.matchingDirtyMonths);
 
   if (sources.session === "expired") {
@@ -78,16 +67,6 @@ export function resolveAppHealthStatus(
     return { level: "busy", reason: "正在校验登录状态", details: detailList, blocksMutations: false, sources };
   }
   if (sources.backgroundJobs === "running") {
-    if (isWorkbenchMatchingJob(detail.primaryRunning)) {
-      const months = matchingMonthsFromJob(detail.primaryRunning);
-      return {
-        level: "busy",
-        reason: months ? `正在生成正式配对关系：${months}` : "正在生成正式配对关系",
-        details: detailList,
-        blocksMutations: false,
-        sources,
-      };
-    }
     const label = jobDisplayLabel(detail.primaryRunning);
     return {
       level: "busy",
@@ -102,9 +81,6 @@ export function resolveAppHealthStatus(
   }
   if (sources.importProgress === "running") {
     return { level: "busy", reason: "导入处理中", details: detailList, blocksMutations: false, sources };
-  }
-  if (matchingRunningMonths) {
-    return { level: "busy", reason: `正在生成正式配对关系：${matchingRunningMonths}`, details: detailList, blocksMutations: false, sources };
   }
   if (sources.oaSync === "refreshing") {
     return { level: "busy", reason: "OA 正在同步", details: detailList, blocksMutations: false, sources };

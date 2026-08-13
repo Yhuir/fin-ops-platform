@@ -188,7 +188,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
 
         self.assertEqual(active_jobs, [])
 
-    def test_failed_and_partial_success_jobs_are_attention_until_acknowledged(self) -> None:
+    def test_retired_workbench_matching_jobs_are_not_visible_as_progress_or_attention(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
             failed_job = service.create_job(
@@ -221,8 +221,8 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(failed.status, "failed")
         self.assertEqual(partial.status, "partial_success")
         self.assertEqual(active_before_ack, [])
-        self.assertEqual([item.job_id for item in attention_before_ack], [partial_job.job_id, failed_job.job_id])
-        self.assertEqual(attention_before_ack[1].error, "boom")
+        self.assertEqual([item.job_id for item in attention_before_ack], [failed_job.job_id])
+        self.assertEqual(attention_before_ack[0].error, "boom")
         self.assertEqual(active_after_ack, [])
         self.assertEqual(attention_after_ack, [])
 
@@ -297,7 +297,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(superseded.status, "superseded")
         self.assertEqual(superseded.superseded_by_job_id, new_job.job_id)
         self.assertIsNotNone(superseded.superseded_at)
-        self.assertEqual([item.job_id for item in active_jobs], [new_job.job_id])
+        self.assertEqual(active_jobs, [])
         self.assertEqual(attention_jobs, [])
 
     def test_old_snapshot_without_superseded_fields_still_loads(self) -> None:
@@ -517,7 +517,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(second_ack_payload["job"]["acknowledged_at"], ack_payload["job"]["acknowledged_at"])
         self.assertEqual(active_after_ack["jobs"], [])
 
-    def test_background_job_api_includes_retry_and_acknowledge_policy_for_failed_matching(self) -> None:
+    def test_background_job_api_hides_retired_matching_progress_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             job = app._background_job_service.create_job(
@@ -540,14 +540,12 @@ class BackgroundJobServiceTests(unittest.TestCase):
             get_payload = json.loads(get_response.body)
 
         self.assertEqual(active_response.status_code, 200)
-        self.assertTrue(active_payload["jobs"][0]["acknowledgeable"])
-        self.assertTrue(active_payload["jobs"][0]["retryable"])
+        self.assertEqual(active_payload["jobs"], [])
         self.assertEqual(active_payload["active_jobs"], [])
-        self.assertEqual(active_payload["attention_jobs"][0]["job_id"], job.job_id)
-        self.assertTrue(active_payload["attention_jobs"][0]["attention"])
+        self.assertEqual(active_payload["attention_jobs"], [])
+        self.assertFalse(get_payload["job"]["retryable"])
         self.assertEqual(get_response.status_code, 200)
         self.assertTrue(get_payload["job"]["acknowledgeable"])
-        self.assertTrue(get_payload["job"]["retryable"])
         self.assertTrue(get_payload["job"]["attention"])
 
 

@@ -104,14 +104,8 @@ class ImportFormalizationApiTests(unittest.TestCase):
             import_queue.process_all()
             job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
-            matching_job_id = job_payload["result_summary"]["enqueued_matching_job_id"]
-            self.assertTrue(matching_job_id)
-            matching_job_payload = self._wait_for_background_job(app, matching_job_id)
-            self.assertEqual(matching_job_payload["status"], "succeeded")
-            self.assertIn("planned_relation_count", matching_job_payload["result_summary"])
-            self.assertNotIn("candidate_count", matching_job_payload["result_summary"])
-            self.assertIn("2026-01", matching_job_payload["result_summary"]["affected_months"])
-            self.assertNotIn("matching_results", matching_job_payload["result_summary"])
+            self.assertIn("2026-01", job_payload["result_summary"]["queued_matching_months"])
+            self.assertNotIn("enqueued_matching_job_id", job_payload["result_summary"])
 
             restarted = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
             session_response = restarted.handle_request(
@@ -170,10 +164,8 @@ class ImportFormalizationApiTests(unittest.TestCase):
             import_queue.process_all()
             job_payload = self._wait_for_background_job(worker_api, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
-            matching_job_id = job_payload["result_summary"].get("enqueued_matching_job_id")
-            if matching_job_id:
-                matching_job_payload = self._wait_for_background_job(worker_api, matching_job_id)
-                self.assertEqual(matching_job_payload["status"], "succeeded")
+            self.assertIn("2026-01", job_payload["result_summary"]["queued_matching_months"])
+            self.assertNotIn("enqueued_matching_job_id", job_payload["result_summary"])
 
             bank_body, bank_headers = build_multipart_payload(
                 imported_by="user_finance_01",

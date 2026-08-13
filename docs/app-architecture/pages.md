@@ -110,7 +110,7 @@ freshness gate。
 - 普通写入不发送 finance domain event、window 自定义刷新事件或业务 `BroadcastChannel`。
 - 当前页面可在命令成功后用自己的 normal GET 更新；其他页面不自动读取。
 - route 进入/重进、页面查询变化、浏览器手动刷新和明确的页面重试是普通业务页面 load 入口。
-- App Health、后台任务、导入/reapply/repair 进度属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。Workbench page refresh-status 已退役。
+- App Health、后台任务、导入/reapply/repair 进度属于运维/任务状态通道，保留各自明确 owner，不得被业务页面当成跨页刷新总线。Workbench page refresh-status 已退役；`workbench-matching` 只通过 durable dirty scope/worker 暴露运维状态，不创建或展示页面生成 BackgroundJob。
 
 ## 共享 Read Model 与后台任务
 

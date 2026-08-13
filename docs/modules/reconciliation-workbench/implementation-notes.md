@@ -1600,3 +1600,7 @@
 - 现金票据输入改用现有 `AppDialog` 与 HeroUI `Input`/`Textarea`；异常和操作历史详情抽屉统一到 720px 阶梯。
 - 删除手写 `.detail-modal*` 的渐变、重阴影、24px 圆角和全屏 blur，不保留隐藏 fallback。
 - 关联台查询、active generation、freshness/status/enqueue、自刷新和 canonical 写链均未改变。
+## 2026-08-14 - 匹配运行事实与页面进度解耦
+
+- 关联台页面早已 direct-read canonical facts；匹配后台工作仍由 `job.workbench_matching_dirty_scopes` 和独立 `workbench-matching` worker 承担。
+- 删除无执行 owner 的 `workbench_matching` BackgroundJob 创建路径。它不是页面 read model，也不能作为“正在生成正式配对关系”的全局页面进度。真实 dirty/running/failure 运维事实仍由 App Health 诊断，不隐藏匹配故障。

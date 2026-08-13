@@ -16,7 +16,7 @@ class ImportProcessingService:
         etc_reconciliation_task_service: Any,
         background_job_service: Any,
         serialize_value: Callable[[Any], Any],
-        enqueue_workbench_auto_matching_for_scopes: Callable[..., Any],
+        schedule_workbench_matching_scopes: Callable[..., list[str]],
         persist_confirmed_import_delta: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -33,7 +33,7 @@ class ImportProcessingService:
         self._etc_reconciliation_task_service = etc_reconciliation_task_service
         self._background_job_service = background_job_service
         self._serialize_value = serialize_value
-        self._enqueue_workbench_auto_matching_for_scopes = enqueue_workbench_auto_matching_for_scopes
+        self._schedule_workbench_matching_scopes = schedule_workbench_matching_scopes
         self._persist_confirmed_import_delta = persist_confirmed_import_delta
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
@@ -70,7 +70,6 @@ class ImportProcessingService:
         return self.execute_file_import_confirm_job(
             session_id=session_id,
             selected_file_ids=[str(item) for item in selected_file_ids],
-            owner_user_id=str(import_job.payload.get("owner_user_id") or import_job.created_by or "system"),
             background_job_id=str(import_job.payload.get("background_job_id") or "").strip(),
         )
 
@@ -98,7 +97,6 @@ class ImportProcessingService:
         *,
         session_id: str,
         selected_file_ids: list[str],
-        owner_user_id: str,
         background_job_id: str,
     ) -> dict[str, object]:
         session = self._file_import_service.get_session(session_id)
@@ -158,25 +156,17 @@ class ImportProcessingService:
             self._persist_confirmed_import_delta(
                 import_state_payload=import_state_payload,
             )
-            matching_job_id = None
+            queued_matching_months: list[str] = []
             if any(file.status == "confirmed" for file in confirmed_session.files):
-                matching_job = self._enqueue_workbench_auto_matching_for_scopes(
+                queued_matching_months = list(self._schedule_workbench_matching_scopes(
                     scope_months,
                     reason="import_file_confirm",
-                    owner_user_id=owner_user_id,
-                    source={
-                        "session_id": confirmed_session.id,
-                        "selected_file_ids": selected_file_ids,
-                        "trigger_job_id": background_job_id,
-                    },
-                    triggered_by=f"import_session:{confirmed_session.id}",
-                )
-                matching_job_id = matching_job.job_id if matching_job is not None else None
+                ))
             result_summary = {
                 "confirmed": confirmed_count,
                 "selected": total,
                 "affected_months": scope_months,
-                "enqueued_matching_job_id": matching_job_id,
+                "queued_matching_months": queued_matching_months,
                 **self._write_result_envelope(
                     tax_offset_scope_keys=tax_offset_scope_keys,
                     bank_scope_keys=bank_scope_keys,

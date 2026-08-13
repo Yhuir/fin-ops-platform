@@ -286,7 +286,7 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("reports workbench matching running months without being overwritten by OA synced", async () => {
+  it("keeps matching worker activity out of the global page progress message", async () => {
     mocked.appHealth = {
       status: "busy",
       session: { status: "authenticated" },
@@ -301,7 +301,7 @@ describe("AppHealthStatusProvider", () => {
     renderProbe();
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在生成正式配对关系：2026-03");
+      expect(screen.getByLabelText("health").getAttribute("data-reason")).not.toContain("正式配对关系");
     });
   });
 

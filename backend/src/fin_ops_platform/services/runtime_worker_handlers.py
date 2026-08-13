@@ -251,7 +251,7 @@ class ImportRuntimeProcessorFactory:
             etc_reconciliation_task_service=etc_reconciliation_task_service,
             background_job_service=background_job_service,
             serialize_value=_serialize_value,
-            enqueue_workbench_auto_matching_for_scopes=import_support.enqueue_workbench_matching_job,
+            schedule_workbench_matching_scopes=import_support.schedule_workbench_matching_scopes,
             persist_confirmed_import_delta=import_support.persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
@@ -570,34 +570,13 @@ class _RuntimeWorkerImportSupport:
         self._state_store = state_store
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
-    def enqueue_workbench_matching_job(
+    def schedule_workbench_matching_scopes(
         self,
         scope_months: list[str],
         *,
         reason: str,
-        owner_user_id: str,
-        source: dict[str, object] | None = None,
-        triggered_by: str | None = None,
-    ) -> Any | None:
-        months = self._mark_workbench_matching_months(scope_months, reason=reason)
-        if not months:
-            return None
-        create_job = getattr(BackgroundJobService(self._state_store), "create_job", None)
-        if not callable(create_job):
-            return None
-        return create_job(
-            job_type="workbench_matching",
-            label="生成正式配对关系",
-            owner_user_id=owner_user_id,
-            phase="queued",
-            current=0,
-            total=len(months),
-            message="生成正式配对关系任务已创建。",
-            result_summary={"processed_months": [], "affected_months": months, "planned_relation_count": 0},
-            source={**(source or {}), "reason": reason, "scope_months": months, "triggered_by": triggered_by},
-            affected_scopes=["workbench"],
-            affected_months=months,
-        )
+    ) -> list[str]:
+        return self._mark_workbench_matching_months(scope_months, reason=reason)
 
     def persist_confirmed_import_delta(
         self,

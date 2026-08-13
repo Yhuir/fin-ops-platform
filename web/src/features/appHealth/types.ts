@@ -40,7 +40,6 @@ export type AppHealthResolveDetails = {
   primaryRunning?: AppHealthJobSummary | null;
   primaryAttention?: AppHealthJobSummary | null;
   attentionCount?: number;
-  matchingRunningMonths?: string[];
   matchingDirtyMonths?: string[];
   matchingError?: string | null;
 };

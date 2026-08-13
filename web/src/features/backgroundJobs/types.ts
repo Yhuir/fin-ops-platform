@@ -13,7 +13,6 @@ export type BackgroundJobType =
   | "file_import"
   | "settings_data_reset"
   | "oa_attachment_invoice_parse"
-  | "workbench_matching"
   | "workbench_rebuild"
   | "tax_certified_import"
   | "etc_oa_draft";

@@ -109,7 +109,9 @@ export async function fetchActiveBackgroundJobs(signal?: AbortSignal): Promise<B
     signal,
   });
   return {
-    jobs: (payload.jobs ?? []).map(mapBackgroundJob).filter((job) => job.jobId),
+    jobs: (payload.jobs ?? [])
+      .map(mapBackgroundJob)
+      .filter((job) => job.jobId && job.type !== "workbench_matching"),
   };
 }
 

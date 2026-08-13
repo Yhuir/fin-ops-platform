@@ -38,7 +38,7 @@ class PostgresTestUtilsTests(unittest.TestCase):
     def test_discover_stage06_migrations_is_pinned_to_current_set(self) -> None:
         migrations = discover_stage06_migrations()
 
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 148)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 149)])
 
     def test_reset_test_database_requires_visibly_disposable_database_name_even_with_override(self) -> None:
         database_url = "postgresql://user:secret@127.0.0.1/fin_ops_stage"

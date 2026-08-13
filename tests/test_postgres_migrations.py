@@ -160,6 +160,7 @@ EXPECTED_MIGRATIONS = [
     "0145_bank_relation_requirement_recalculation.sql",
     "0146_bank_relation_requirement_rollout_retry.sql",
     "0147_bank_relation_requirement_scope_retry.sql",
+    "0148_retire_workbench_matching_progress_jobs.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -318,7 +319,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 148)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 149)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1534,6 +1535,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             bank_requirement_scope_retry_sql,
             "approved_bank_relation_requirement_scope_retry;",
         )
+        retired_matching_progress_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0148_retire_workbench_matching_progress_jobs.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(retired_matching_progress_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            retired_matching_progress_sql,
+            "approved_retired_matching_progress_jobs;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1619,6 +1631,21 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
         self.assertNotIn("delete from", sql)
         self.assertNotIn("update app.workbench_pair_relations", sql)
+
+    def test_retired_workbench_matching_progress_jobs_only_reach_terminal_status(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0148_retire_workbench_matching_progress_jobs.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+
+        self.assertIn("job_type = 'workbench_matching'", sql)
+        self.assertIn("status in ('queued', 'running')", sql)
+        self.assertIn("status = 'superseded'", sql)
+        self.assertIn("for update", sql)
+        self.assertNotIn("delete from", sql)
+        self.assertNotIn("drop table", sql)
 
     def test_oa_attachment_invoice_cache_sources_is_indexed_lookup_table(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

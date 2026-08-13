@@ -270,7 +270,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
     def test_import_preview_confirm_persists_to_postgres_formal_tables(self) -> None:
         app = self._build_app()
-        with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None):
+        with patch.object(app, "_schedule_workbench_matching_scopes", return_value=[]):
             preview, confirmed_batch = seed_confirmed_import(
                 app,
                 batch_type=BatchType.INPUT_INVOICE,

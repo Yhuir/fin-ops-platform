@@ -7,7 +7,6 @@ from fin_ops_platform.services.runtime_state_policy import (
     BLOCKED_UNKNOWN,
     CLEANUP_CANDIDATE,
     MIRROR_WRITE_REQUIRED,
-    REBUILDABLE,
     RETENTION_ONLY,
     classify_app_health_alert,
     classify_background_job,
@@ -60,7 +59,7 @@ class RuntimeStatePolicyTests(unittest.TestCase):
         self.assertEqual(decision.classification, CLEANUP_CANDIDATE)
         self.assertFalse(decision.cutover_blocking)
 
-    def test_terminal_derived_background_job_with_scope_is_rebuildable(self) -> None:
+    def test_retired_matching_background_job_is_retention_only(self) -> None:
         decision = classify_background_job(
             {
                 "type": "workbench_matching",
@@ -70,7 +69,7 @@ class RuntimeStatePolicyTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(decision.classification, REBUILDABLE)
+        self.assertEqual(decision.classification, RETENTION_ONLY)
 
     def test_unknown_background_job_status_or_type_blocks(self) -> None:
         for payload in (

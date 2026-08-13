@@ -21,13 +21,14 @@ BACKGROUND_JOB_TERMINAL_STATUSES = {
     "superseded",
 }
 BACKGROUND_JOB_KNOWN_STATUSES = BACKGROUND_JOB_ACTIVE_STATUSES | BACKGROUND_JOB_TERMINAL_STATUSES
+RETIRED_BACKGROUND_JOB_TYPES = frozenset({"workbench_matching"})
 BACKGROUND_JOB_REBUILDABLE_TYPES = {
-    "workbench_matching",
     "workbench_rebuild",
     "oa_sync_workbench_rebuild",
     "historical_etc_reconcile",
 }
 BACKGROUND_JOB_KNOWN_TYPES = BACKGROUND_JOB_REBUILDABLE_TYPES | {
+    "workbench_matching",
     "etc_invoice_import",
     "file_import",
     "settings_data_reset",
@@ -35,7 +36,6 @@ BACKGROUND_JOB_KNOWN_TYPES = BACKGROUND_JOB_REBUILDABLE_TYPES | {
 }
 BACKGROUND_JOB_RETRYABLE_TYPES = {
     "file_import",
-    "workbench_matching",
 }
 
 APP_HEALTH_ALERT_KNOWN_STATUSES = {"active", "recovered"}

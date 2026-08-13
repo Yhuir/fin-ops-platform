@@ -9,6 +9,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from fin_ops_platform.services.app_status_job_registry import APP_STATUS_BACKGROUND_JOB_REGISTRY
+from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
 
@@ -497,7 +498,9 @@ class BackgroundJobService:
         active_jobs = [
             job
             for job in jobs
-            if self._can_view(job, owner, include_system=include_system) and self._is_active(job, now)
+            if job.type not in RETIRED_BACKGROUND_JOB_TYPES
+            and self._can_view(job, owner, include_system=include_system)
+            and self._is_active(job, now)
         ]
         return sorted(active_jobs, key=lambda item: item.updated_at, reverse=True)
 
@@ -526,7 +529,9 @@ class BackgroundJobService:
         attention_jobs = [
             job
             for job in jobs
-            if self._can_view(job, owner, include_system=include_system) and self._is_attention(job)
+            if job.type not in RETIRED_BACKGROUND_JOB_TYPES
+            and self._can_view(job, owner, include_system=include_system)
+            and self._is_attention(job)
         ]
         return sorted(attention_jobs, key=lambda item: item.updated_at, reverse=True)
 
@@ -544,7 +549,8 @@ class BackgroundJobService:
         visible_jobs = [
             job
             for job in jobs
-            if self._can_view(job, owner, include_system=include_system)
+            if job.type not in RETIRED_BACKGROUND_JOB_TYPES
+            and self._can_view(job, owner, include_system=include_system)
         ]
         active_jobs = sorted(
             (job for job in visible_jobs if self._is_active(job, now)),

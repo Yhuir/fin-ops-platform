@@ -8063,9 +8063,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           job: {
             job_id: `retry_${jobId}`,
-            type: "workbench_matching",
+            type: "file_import",
             status: "queued",
-            label: "生成正式配对关系",
+            label: "重新执行文件导入",
           },
         },
       });

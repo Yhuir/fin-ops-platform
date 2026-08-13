@@ -877,19 +877,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ) as mark_dirty,
             patch.object(app._matching_service, "run", return_value=SimpleNamespace(result_count=99)) as run_legacy,
         ):
-            job = app._enqueue_workbench_auto_matching_for_scopes(
+            queued_months = app._schedule_workbench_matching_scopes(
                 ["2026-05"],
                 reason="unit",
-                owner_user_id="system",
             )
 
-        self.assertIsNotNone(job)
+        self.assertEqual(queued_months, ["2026-05"])
         mark_dirty.assert_called_once_with(["2026-05"], reason="unit")
         run_legacy.assert_not_called()
-        job_payload = app._background_job_service.get_job(job.job_id, "system").to_payload()
-        self.assertEqual(job_payload["result_summary"]["queued_months"], ["2026-05"])
-        self.assertEqual(job_payload["result_summary"]["affected_months"], ["2026-05"])
-        self.assertNotIn("matching_results", job_payload["result_summary"])
 
     def test_workbench_auto_matching_surfaces_durable_queue_failure(self) -> None:
         app = build_application()
@@ -901,7 +896,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "durable queue unavailable"),
         ):
-            app._run_workbench_auto_matching_for_scopes(["2026-05"], reason="unit_failure")
+            app._schedule_workbench_matching_scopes(["2026-05"], reason="unit_failure")
 
     def test_current_oa_attachment_invoice_parser_version_includes_source_schema_version(self) -> None:
         app = build_application()
