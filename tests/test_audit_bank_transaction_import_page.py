@@ -245,6 +245,57 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
             ],
         )
 
+    def test_withdrawn_batch_is_valid_history_without_live_transaction(self) -> None:
+        connection = FakeConnection()
+        connection.files[0]["status"] = "withdrawn"
+        connection.files[0]["raw_payload"]["normalized_payload"]["status"] = "withdrawn"
+        connection.batches[0]["status"] = "withdrawn"
+        connection.batches[0]["raw_payload"]["normalized_payload"]["status"] = "withdrawn"
+        connection.transactions = []
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertNotIn(
+            "bank_import_batch_status_invalid",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertNotIn(
+            "bank_import_row_transaction_orphan",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_reverted_preview_batch_is_a_known_non_committed_state(self) -> None:
+        connection = FakeConnection()
+        connection.files[0]["status"] = "reverted"
+        connection.files[0]["raw_payload"]["normalized_payload"]["status"] = "reverted"
+        connection.batches[0]["status"] = "reverted"
+        connection.batches[0]["raw_payload"]["normalized_payload"]["status"] = "reverted"
+        connection.transactions = []
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertNotIn(
+            "bank_import_batch_status_invalid",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertNotIn(
+            "bank_import_row_transaction_orphan",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_unknown_batch_status_remains_blocking(self) -> None:
+        connection = FakeConnection()
+        connection.batches[0]["status"] = "unexpected"
+        connection.batches[0]["raw_payload"]["normalized_payload"]["status"] = "unexpected"
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertIn(
+            "bank_import_batch_status_invalid",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_legacy_file_is_non_blocking_but_explicitly_unproven(self) -> None:
         connection = FakeConnection()
         connection.files[0]["audit_contract_revision"] = None

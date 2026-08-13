@@ -21,6 +21,7 @@
 | App Status/App Health | imports bank domain route、import worker/job、file import explicit affected domain、generic import job fallback 不误指发票页、global status plane | `tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 边界/旧代码 guard | 银行流水前端只走 `/imports/files/*`；`server.py` 不重新持有 import confirm processor wrapper | `tests/test_platform_runtime_boundary_guards.py` |
 | Page Audit 时间点一致性 | 无时区中国本地交易时间与等价 UTC `timestamptz` 必须视为同一时刻；真实时间漂移必须阻断 | `tests/test_audit_bank_transaction_import_page.py::BankTransactionImportPageAuditPostgresTests::test_naive_china_trade_time_is_compared_as_the_same_instant_and_real_drift_blocks` |
+| Page Audit 撤回生命周期 | `withdrawn` 是正式历史状态；该批次独占流水已删除后不得误报非法状态或 canonical transaction orphan，未知状态仍必须阻断 | `tests/test_audit_bank_transaction_import_page.py::BankTransactionImportPageAuditTests::test_withdrawn_batch_is_valid_history_without_live_transaction`、`test_unknown_batch_status_remains_blocking` |
 | Page Audit 可恢复失败诊断 | retryable failed import job 返回正式重试所需的 session/file 坐标和有限错误信息，不要求直接数据库修复 | `tests/test_audit_bank_transaction_import_page.py::BankTransactionImportPageAuditTests::test_retryable_failed_job_exposes_admin_safe_retry_coordinates` |
 
 ## 关键场景覆盖
@@ -77,6 +78,7 @@
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
 | 2026-08-14 误选银行覆盖账户 | 冲突预览不得继续确认；后端二次拒绝；账户 identity/尾号优先真实完整账号且展示行优先一致 metadata；旧强制导入弹窗和样式已删除。 | fixed by `tests/test_import_file_service.py`、`tests/test_bank_account_balance_canonical_rows.py`、Browser tests |
 | 2026-08-14 导入批次撤回 | 只删除本批次独占创建流水，保留 OA/发票/import provenance/audit；普通 Workbench relation 走正式 command，生效业务引用 fail closed。 | fixed by `tests/test_bank_import_withdrawal_service.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
+| 2026-08-14 撤回后发布门禁误阻断 | 银行导入 Page Audit 必须承认正式 `withdrawn` 历史状态；撤回已删除其 `created` 流水时不得要求已不存在的 canonical transaction，同时任意未知状态继续 fail closed。 | fixed by `tests/test_audit_bank_transaction_import_page.py` |
 | 2026-06-19 Browser e2e | 损坏银行流水文件与正常文件混合上传时，页面必须保留正常文件 preview，不整批失败，确认时不得提交损坏文件 ID。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水预览耗时较长时，用户不能重复点击预览、清空文件或提前确认，避免多个 `/imports/files/preview` 请求或半状态。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-08-14 OA-first 成本隔离 | 银行流水导入后，流水可进入成本统计银行事实视图，但没有完成 OA 正式关系时不得进入按项目/银行/OA 费用类型。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
