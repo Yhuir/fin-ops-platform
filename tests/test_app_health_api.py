@@ -173,6 +173,20 @@ class FakeRuntimeQueueRepository:
         return False
 
 
+class FakeBankImportWithdrawalService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def withdraw(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(dict(kwargs))
+        return {
+            "status": "withdrawn",
+            "batch_id": kwargs["batch_id"],
+            "withdrawn_count": 2,
+            "idempotent_replay": False,
+        }
+
+
 class FakeOperationHistoryRepository:
     EVENT_ID = "10000000-0000-4000-8000-000000000001"
     OPERATION_KEY = "request:request-1"
@@ -833,6 +847,51 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 1, "total_pages": 1})
         self.assertEqual(payload["rows"][0]["status"], "succeeded")
+
+    def test_admin_can_withdraw_bank_import_batch_through_module_owned_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = self._build_admin_application(data_dir=Path(temp_dir))
+            service = FakeBankImportWithdrawalService()
+            app._bank_import_withdrawal_service_override = service
+
+            response = app.handle_request(
+                "POST",
+                "/api/imports/bank-transaction-batches/batch-bank-1/withdraw",
+                body=json.dumps({"reason": "选错银行"}),
+                request_id="request-withdraw-1",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["withdrawn_count"], 2)
+        self.assertEqual(service.calls[0]["batch_id"], "batch-bank-1")
+        self.assertEqual(service.calls[0]["reason"], "选错银行")
+        self.assertEqual(service.calls[0]["request_id"], "request-withdraw-1")
+
+    def test_non_admin_cannot_withdraw_bank_import_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, full_access=["YNSYLP006"])
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="006",
+                username="YNSYLP006",
+                nickname="普通用户",
+                display_name="普通用户",
+                roles=["finance", "finops_full_access"],
+                permissions=["finops:app:view", "finops:data:mutate"],
+            )
+            service = FakeBankImportWithdrawalService()
+            app._bank_import_withdrawal_service_override = service
+
+            response = app.handle_request(
+                "POST",
+                "/api/imports/bank-transaction-batches/batch-bank-1/withdraw",
+                body=json.dumps({"reason": "选错银行"}),
+                headers={"Authorization": "Bearer full-token"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(service.calls, [])
 
     def test_operation_history_is_visible_to_protected_admin_and_supports_detail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

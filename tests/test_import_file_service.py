@@ -589,6 +589,13 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertIn("建设银行", preview_file.conflict_message)
         self.assertIn("0093", preview_file.conflict_message)
 
+        with self.assertRaisesRegex(ValueError, "bank account selection conflicts"):
+            service.confirm_session(
+                session_id=session.id,
+                selected_file_ids=[preview_file.id],
+            )
+        self.assertEqual(import_service.list_transactions(), [])
+
     def test_preview_does_not_mark_bank_name_alias_as_conflict_when_last4_matches(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)

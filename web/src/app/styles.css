@@ -9266,6 +9266,60 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.app-health-import-history-table .finance-table__scroll {
+  overflow-x: hidden;
+}
+
+.app-health-import-history-table .finance-table__content {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.app-health-import-history-table th:nth-child(2),
+.app-health-import-history-table td:nth-child(2) {
+  width: 34%;
+}
+
+.app-health-import-history-table td {
+  overflow-wrap: anywhere;
+}
+
+.app-health-import-withdrawal-confirmation {
+  display: grid;
+  gap: var(--fp-space-3);
+}
+
+.app-health-import-withdrawal-confirmation > p {
+  margin: 0;
+  color: var(--fp-text-primary);
+  line-height: 1.6;
+}
+
+.app-health-import-withdrawal-confirmation dl {
+  display: grid;
+  gap: var(--fp-space-2);
+  margin: 0;
+}
+
+.app-health-import-withdrawal-confirmation dl > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: var(--fp-space-2);
+  border-bottom: 1px solid var(--fp-border-subtle);
+  padding-bottom: var(--fp-space-2);
+}
+
+.app-health-import-withdrawal-confirmation dt {
+  color: var(--fp-text-muted);
+}
+
+.app-health-import-withdrawal-confirmation dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--fp-text-primary);
+  overflow-wrap: anywhere;
+}
+
 .app-health-audit-card {
   display: grid;
   gap: var(--fp-space-2);
@@ -9842,15 +9896,13 @@ textarea {
   gap: var(--fp-space-2);
 }
 
-.import-workflow-file-row,
-.import-workflow-conflict-row {
+.import-workflow-file-row {
   min-width: 0;
   border-bottom: 1px solid var(--fp-border-subtle);
   padding: var(--fp-space-2) 0;
 }
 
-.import-workflow-file-row:last-child,
-.import-workflow-conflict-row:last-child {
+.import-workflow-file-row:last-child {
   border-bottom: 0;
 }
 
@@ -9858,8 +9910,7 @@ textarea {
   min-width: 0;
 }
 
-.import-workflow-file-row__name,
-.import-workflow-conflict-row__title {
+.import-workflow-file-row__name {
   overflow: hidden;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
@@ -10006,13 +10057,6 @@ textarea {
   min-width: 0;
   border-top: 1px solid color-mix(in srgb, var(--fp-warning) 28%, var(--fp-border));
   padding-top: var(--fp-space-2);
-}
-
-.import-workflow-conflict-row__message {
-  margin: var(--fp-space-1) 0 0;
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-data);
-  line-height: 1.45;
 }
 
 @media (max-width: 1100px) {

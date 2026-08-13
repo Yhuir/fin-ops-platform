@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
-import { ClipboardCheck, History, RefreshCw } from "lucide-react";
+import { ClipboardCheck, History, RefreshCw, Undo2 } from "lucide-react";
 
+import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
 import {
   FinanceStatusTag,
@@ -16,7 +17,7 @@ import {
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard, fetchImportHistory, fetchPageAudit } from "../features/appHealth/api";
+import { fetchAppHealthDashboard, fetchImportHistory, fetchPageAudit, withdrawBankTransactionImport } from "../features/appHealth/api";
 import type {
   AppHealthSystemAuditPayload,
   OperationsDashboardEndpointPerformance,
@@ -219,6 +220,7 @@ function importEventState(row: OperationsDashboardImportEvent) {
     queued: { label: "排队中", tone: "warning" as const },
     processing: { label: "导入中", tone: "warning" as const },
     succeeded: { label: "已完成", tone: "success" as const },
+    withdrawn: { label: "已撤回", tone: "neutral" as const },
     failed: { label: "导入失败", tone: "danger" as const },
     discarded: { label: "已放弃", tone: "neutral" as const },
     preview_failed: { label: "预览失败", tone: "danger" as const },
@@ -506,24 +508,39 @@ function OaInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
   );
 }
 
-function ImportEventsTable({ ariaLabel, rows }: { ariaLabel: string; rows: OperationsDashboardImportEvent[] }) {
+function ImportEventsTable({
+  ariaLabel,
+  rows,
+  onWithdraw,
+  withdrawingBatchId,
+}: {
+  ariaLabel: string;
+  rows: OperationsDashboardImportEvent[];
+  onWithdraw?: (row: OperationsDashboardImportEvent) => void;
+  withdrawingBatchId?: string | null;
+}) {
+  const showActions = Boolean(onWithdraw);
   return (
-    <FinanceTable ariaLabel={ariaLabel} minWidth={760}>
+    <FinanceTable ariaLabel={ariaLabel} className={showActions ? "app-health-import-history-table" : undefined} minWidth={showActions ? "100%" : 760}>
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" isRowHeader>类型</FinanceTableColumn>
         <FinanceTableColumn columnRole="description">文件/来源</FinanceTableColumn>
+        {showActions ? <FinanceTableColumn columnRole="account">账户核对</FinanceTableColumn> : null}
         <FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn>
         <FinanceTableColumn columnRole="date">时间</FinanceTableColumn>
         <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
+        {showActions ? <FinanceTableColumn columnRole="action">操作</FinanceTableColumn> : null}
       </FinanceTableHeader>
       <FinanceTableBody>
           {rows.length === 0 ? (
             <FinanceTableRow id="empty-import-events">
               <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
               <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
+              {showActions ? <FinanceTableCell columnRole="account">{EMPTY_VALUE}</FinanceTableCell> : null}
               <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
               <FinanceTableCell columnRole="date">{EMPTY_VALUE}</FinanceTableCell>
               <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
+              {showActions ? <FinanceTableCell columnRole="action">{EMPTY_VALUE}</FinanceTableCell> : null}
             </FinanceTableRow>
           ) : (
             rows.map((row, index) => {
@@ -535,11 +552,37 @@ function ImportEventsTable({ ariaLabel, rows }: { ariaLabel: string; rows: Opera
                   <FinanceTableCell columnRole="description" textValue={row.source_name}>
                     <TableCellStack primary={row.source_name || EMPTY_VALUE} secondary={row.imported_by || undefined} />
                   </FinanceTableCell>
+                  {showActions ? (
+                    <FinanceTableCell columnRole="account">
+                      <TableCellStack
+                        primary={[row.selected_bank_name, row.selected_bank_last4].filter(Boolean).join(" ") || EMPTY_VALUE}
+                        secondary={row.detected_bank_name || row.detected_last4
+                          ? `识别 ${[row.detected_bank_name, row.detected_last4].filter(Boolean).join(" ")}`
+                          : undefined}
+                      />
+                    </FinanceTableCell>
+                  ) : null}
                   <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(row.count, row.supplementary_count)}</FinanceTableCell>
                   <FinanceTableCell columnRole="date">{formatTimestamp(row.imported_at)}</FinanceTableCell>
                   <FinanceTableCell columnRole="status">
                     <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
                   </FinanceTableCell>
+                  {showActions ? (
+                    <FinanceTableCell columnRole="action">
+                      {row.withdrawal_allowed ? (
+                        <Button
+                          aria-label={`撤回 ${row.source_name}`}
+                          isDisabled={Boolean(withdrawingBatchId)}
+                          onPress={() => onWithdraw?.(row)}
+                          size="sm"
+                          variant="danger"
+                        >
+                          <Undo2 aria-hidden="true" size={14} />
+                          撤回
+                        </Button>
+                      ) : EMPTY_VALUE}
+                    </FinanceTableCell>
+                  ) : null}
                 </FinanceTableRow>
               );
             })
@@ -789,6 +832,9 @@ export default function AppHealthOperationsPage() {
   const [importHistory, setImportHistory] = useState<OperationsImportHistoryPayload | null>(null);
   const [importHistoryError, setImportHistoryError] = useState<string | null>(null);
   const [isImportHistoryLoading, setImportHistoryLoading] = useState(false);
+  const [withdrawTarget, setWithdrawTarget] = useState<OperationsDashboardImportEvent | null>(null);
+  const [withdrawingBatchId, setWithdrawingBatchId] = useState<string | null>(null);
+  const [withdrawFeedback, setWithdrawFeedback] = useState<string | null>(null);
   const inFlightRef = useRef<AbortController | null>(null);
   const auditInFlightRef = useRef<AbortController | null>(null);
   const importHistoryInFlightRef = useRef<AbortController | null>(null);
@@ -865,6 +911,26 @@ export default function AppHealthOperationsPage() {
       }
     }
   }, [permissions.canAdminAccess]);
+
+  const confirmWithdrawal = useCallback(async () => {
+    if (!withdrawTarget?.batch_id || withdrawingBatchId) return;
+    setWithdrawingBatchId(withdrawTarget.batch_id);
+    setImportHistoryError(null);
+    setWithdrawFeedback(null);
+    try {
+      const result = await withdrawBankTransactionImport(withdrawTarget.batch_id, "从导入历史撤回误导入的银行流水");
+      setWithdrawFeedback(`已撤回 ${result.withdrawn_count} 条银行流水；OA、发票和导入审计记录已保留。`);
+      setWithdrawTarget(null);
+      await Promise.all([
+        loadImportHistory(importHistory?.pagination.page ?? 1),
+        loadDashboard(),
+      ]);
+    } catch (error) {
+      setImportHistoryError(error instanceof Error && error.message.trim() ? error.message : "撤回失败，请稍后重试。");
+    } finally {
+      setWithdrawingBatchId(null);
+    }
+  }, [importHistory?.pagination.page, loadDashboard, loadImportHistory, withdrawTarget, withdrawingBatchId]);
 
   useEffect(() => {
     if (!permissions.canAdminAccess || !active) {
@@ -951,13 +1017,19 @@ export default function AppHealthOperationsPage() {
               setImportHistoryOpen(false);
             }}
             title="导入历史"
-            width={720}
+            width="min(1440px, calc(100vw - 32px))"
           >
             {isImportHistoryLoading && !importHistory ? <Spinner aria-label="正在加载导入历史" /> : null}
             {importHistoryError ? <AppHealthNotice status="danger">{importHistoryError}</AppHealthNotice> : null}
+            {withdrawFeedback ? <AppHealthNotice status="accent">{withdrawFeedback}</AppHealthNotice> : null}
             {importHistory ? (
               <>
-                <ImportEventsTable ariaLabel="全部导入历史" rows={importHistory.rows} />
+                <ImportEventsTable
+                  ariaLabel="全部导入历史"
+                  onWithdraw={setWithdrawTarget}
+                  rows={importHistory.rows}
+                  withdrawingBatchId={withdrawingBatchId}
+                />
                 <div className="app-health-import-history-drawer__pagination">
                   <Button
                     isDisabled={isImportHistoryLoading || importHistory.pagination.page <= 1}
@@ -976,6 +1048,31 @@ export default function AppHealthOperationsPage() {
               </>
             ) : null}
           </AppDrawer>
+          <AppDialog
+            actions={(
+              <>
+                <Button isDisabled={Boolean(withdrawingBatchId)} onPress={() => setWithdrawTarget(null)} variant="secondary">取消</Button>
+                <Button isDisabled={Boolean(withdrawingBatchId)} onPress={() => void confirmWithdrawal()} variant="danger">
+                  {withdrawingBatchId ? "正在撤回..." : "确认撤回"}
+                </Button>
+              </>
+            )}
+            disableEscapeClose={Boolean(withdrawingBatchId)}
+            isDismissable={!withdrawingBatchId}
+            onClose={() => setWithdrawTarget(null)}
+            open={Boolean(withdrawTarget)}
+            title="撤回流水导入"
+          >
+            <div className="app-health-import-withdrawal-confirmation">
+              <p>将从本 APP 数据库移除这次导入独占创建的银行流水，并解除其工作台关联。</p>
+              <dl>
+                <div><dt>文件</dt><dd>{withdrawTarget?.source_name || EMPTY_VALUE}</dd></div>
+                <div><dt>导入时间</dt><dd>{formatTimestamp(withdrawTarget?.imported_at)}</dd></div>
+                <div><dt>流水数量</dt><dd>{formatNumber(withdrawTarget?.count)}</dd></div>
+              </dl>
+              <AppHealthNotice status="warning">OA、发票及导入/操作审计记录不会删除；撤回后的流水不可在页面内恢复，需要重新选择正确银行后导入原文件。</AppHealthNotice>
+            </div>
+          </AppDialog>
         </>
       ) : !loadError ? (
         <AppHealthNotice status="accent">正在加载。</AppHealthNotice>

@@ -56,6 +56,7 @@
 - Dashboard 发票 inventory 按两个互斥维度展示：`进项发票 + 销项发票 = 发票总数`，以及 `手工导入 + OA 解析仅新增入池 = 发票总数`。统计事实源是统一发票池 `app.invoices`：类型维度按 `invoice_type`；导入方式维度的手工导入统计 `source_links[].source_type='manual_invoice_import'`，OA 解析使用带 OA 来源但不带手工导入来源的 `oa_attachment.supplementary_count`，不能使用会与手工导入重叠的 OA 总关联数。已知数量不闭合时页面显示差异，不补造“其他”分类；未知数量显示 `--`。`普通导入`、`ETC` 和 OA 附件 OCR cache 不进入该展示口径。
 - Dashboard OA 页面只展示 `已完成 OA` 和 `进行中 OA` 两个状态。API 仍保留 `oa_records` / `oa_items` 供 audit 和系统合同使用，但页面不展示“单据”“明细”或含义不同的 OA 总数；`已完成 OA` 按 canonical OA projection 完成态合同统计唯一 OA 单据，空/历史完成态别名归入已完成；`进行中 OA` 按 `app.oa_pending_payment_admissions` 的唯一 OA ID 统计，不读取已退役页面 projection，也不只按 `app.oa_applications.workflow_status` 推导。
 - Dashboard 导入历史只展示手工导入的银行流水和发票批次；OA 解析和 OA 单据同步只属于发票/OA inventory 与运行状态，不进入最近导入记录。主页面只显示最新 5 条，右侧抽屉展示所有历史记录。
+- 导入历史抽屉是银行批次撤回的 UI host，但不拥有撤回业务：写请求委托 `BankImportWithdrawalService`，抽屉只负责 admin 权限下的二次确认、反馈和刷新。发票导入与非可撤回状态不显示操作按钮。
 
 ## 运行事实源
 

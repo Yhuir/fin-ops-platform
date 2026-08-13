@@ -4755,6 +4755,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     bank_account_mappings: [
       {
+        id: "bank_mapping_4080",
+        last4: "4080",
+        bank_name: "工商银行",
+        short_name: "工行",
+      },
+      {
+        id: "bank_mapping_0093",
+        last4: "0093",
+        bank_name: "平安银行",
+        short_name: "平安",
+      },
+      {
         id: "bank_mapping_8826",
         last4: "8826",
         bank_name: "建设银行",
@@ -5337,6 +5349,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       body: {
         rows: [{
           key: "bank-6",
+          batch_id: "bank-6",
+          batch_type: "bank_transaction",
           source_key: "bank_transactions",
           label: "流水导入",
           source_name: "bank-6.xlsx",
@@ -5345,8 +5359,17 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           supplementary_count: null,
           imported_at: "2026-05-23T09:20:00+08:00",
           status: "succeeded",
+          withdrawal_allowed: true,
         }],
         pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
+      },
+    }),
+    "/api/imports/bank-transaction-batches/bank-6/withdraw": () => ({
+      body: {
+        status: "withdrawn",
+        batch_id: "bank-6",
+        withdrawn_count: 8,
+        idempotent_replay: false,
       },
     }),
     "/api/operations/history/actors": () => ({

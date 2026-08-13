@@ -18,6 +18,8 @@ class PostgresImportLifecycleRepository:
             f"""
             select
               coalesce(batch.legacy_mongo_id, batch.id::text) as event_id,
+              coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
+              batch.batch_type,
               case when batch.batch_type = 'bank_transaction' then 'bank_transactions' else 'manual' end as source_key,
               case when batch.batch_type = 'bank_transaction' then '流水导入' else '手工导入' end as label,
               batch.source_name,
@@ -26,6 +28,9 @@ class PostgresImportLifecycleRepository:
               null::bigint as supplementary_count,
               coalesce(file.uploaded_at, batch.imported_at) as imported_at,
               batch.status as batch_status,
+              batch.updated_count,
+              batch.raw_payload,
+              coalesce(owned.created_count, 0)::bigint as created_count,
               file.file_id,
               file.session_id,
               file.file_status,
@@ -46,6 +51,10 @@ class PostgresImportLifecycleRepository:
                   import_file.uploaded_by
                 ) as imported_by,
                 import_file.raw_payload->'normalized_payload'->>'session_status' as session_status
+                ,import_file.raw_payload->'normalized_payload'->>'selected_bank_name' as selected_bank_name
+                ,import_file.raw_payload->'normalized_payload'->>'selected_bank_last4' as selected_bank_last4
+                ,import_file.raw_payload->'normalized_payload'->>'detected_bank_name' as detected_bank_name
+                ,import_file.raw_payload->'normalized_payload'->>'detected_last4' as detected_last4
               from app.import_files import_file
               where coalesce(
                 import_file.raw_payload->'normalized_payload'->>'batch_id',
@@ -54,6 +63,16 @@ class PostgresImportLifecycleRepository:
               order by import_file.uploaded_at desc, import_file.id desc
               limit 1
             ) file on true
+            left join lateral (
+              select count(distinct bank.id)::bigint as created_count
+              from app.import_batch_rows batch_row
+              join app.bank_transactions bank
+                on batch_row.linked_object_type = 'bank_transaction'
+               and batch_row.linked_object_id in (bank.legacy_mongo_id, bank.id::text)
+              where batch_row.decision = 'created'
+                and (batch_row.import_batch_id = batch.id or batch_row.legacy_batch_id = batch.legacy_mongo_id)
+                and (bank.source_batch_id = batch.id or bank.legacy_source_batch_id = batch.legacy_mongo_id)
+            ) owned on true
             left join lateral (
               select import_job.id::text as import_job_id, status, stage, last_error
               from job.import_jobs import_job
@@ -103,7 +122,7 @@ class PostgresImportLifecycleRepository:
                   '{{}}'::jsonb
                 ) as data
               ) payload
-              where import_file.status not in ('confirmed', 'skipped', 'reverted', 'deleted')
+              where import_file.status not in ('confirmed', 'skipped', 'reverted', 'withdrawn', 'deleted')
                 and coalesce(payload.data->>'imported_by', import_file.uploaded_by) = %s
                 {mode_clause}
               group by import_file.session_id
@@ -205,3 +224,14 @@ class PostgresImportLifecycleRepository:
                 (session_id,),
             )
             return len(rows)
+
+    @staticmethod
+    def withdrawal_payload(row: dict[str, Any]) -> dict[str, Any] | None:
+        raw_payload = row.get("raw_payload")
+        if not isinstance(raw_payload, dict):
+            return None
+        normalized = raw_payload.get("normalized_payload")
+        if not isinstance(normalized, dict):
+            return None
+        withdrawal = normalized.get("withdrawal")
+        return dict(withdrawal) if isinstance(withdrawal, dict) else None

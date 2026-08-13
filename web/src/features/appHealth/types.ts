@@ -140,6 +140,8 @@ export type OperationsDashboardInventoryBlock = {
 
 export type OperationsDashboardImportEvent = {
   key: string;
+  batch_id: string;
+  batch_type: string;
   source_key: string;
   label: string;
   source_name: string;
@@ -153,6 +155,24 @@ export type OperationsDashboardImportEvent = {
   job_id?: string | null;
   job_stage?: string | null;
   error?: string | null;
+  selected_bank_name?: string | null;
+  selected_bank_last4?: string | null;
+  detected_bank_name?: string | null;
+  detected_last4?: string | null;
+  withdrawal_allowed?: boolean;
+  withdrawal?: {
+    withdrawn_count?: number;
+    withdrawn_by?: string;
+    withdrawn_at?: string;
+    reason?: string;
+  } | null;
+};
+
+export type BankImportWithdrawalPayload = {
+  status: "withdrawn";
+  batch_id: string;
+  withdrawn_count: number;
+  idempotent_replay: boolean;
 };
 
 export type OperationsImportHistoryPayload = {

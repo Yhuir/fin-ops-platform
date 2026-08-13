@@ -48,13 +48,18 @@ account_fields as (
     ) as bank_name,
     right(
       coalesce(
+        normalized_account_no,
         nullif(normalized_payload->>'imported_bank_last4', ''),
         nullif(normalized_payload->>'account_last4', ''),
-        normalized_account_no,
         'unknown'
       ),
       4
     ) as account_last4,
+    case
+      when normalized_account_no is null or normalized_account_no = '' then true
+      when nullif(normalized_payload->>'imported_bank_last4', '') is null then true
+      else right(normalized_account_no, 4) = right(normalized_payload->>'imported_bank_last4', 4)
+    end as label_consistent,
     case
       when currency is null or btrim(currency::text) = '' then 'CNY'
       when upper(btrim(currency::text)) in ('CNY', 'RMB') then 'CNY'
@@ -91,7 +96,7 @@ account_base as (
     identity_confidence,
     normalized_currency as currency
   from identity_rows
-  order by account_identity, trade_time_sort desc nulls last, bank_serial_no desc nulls last, row_id desc
+  order by account_identity, label_consistent desc, trade_time_sort desc nulls last, bank_serial_no desc nulls last, row_id desc
 ),
 account_counts as (
   select account_identity, count(*)::bigint as transaction_total_count

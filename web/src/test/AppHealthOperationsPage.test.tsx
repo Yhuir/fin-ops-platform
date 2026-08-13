@@ -161,6 +161,18 @@ describe("AppHealthOperationsPage", () => {
     expect(drawer).toHaveTextContent("bank-6.xlsx");
     expect(drawer).not.toHaveTextContent("OA 同步");
     expect(drawer).not.toHaveTextContent("OA 附件解析");
+    const withdrawButton = within(drawer).getByRole("button", { name: "撤回 bank-6.xlsx" });
+    await userEvent.click(withdrawButton);
+    const confirmDialog = await screen.findByRole("dialog", { name: "撤回流水导入" });
+    expect(confirmDialog).toHaveTextContent("OA、发票及导入/操作审计记录不会删除");
+    await userEvent.click(within(confirmDialog).getByRole("button", { name: "确认撤回" }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) => (
+        String(url).includes("/api/imports/bank-transaction-batches/bank-6/withdraw")
+        && String(init?.method).toUpperCase() === "POST"
+      ))).toBe(true);
+    });
+    expect(await within(drawer).findByText("已撤回 8 条银行流水；OA、发票和导入审计记录已保留。")).toBeInTheDocument();
 
     expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
     expect(screen.queryByTestId("app-health-background-jobs")).not.toBeInTheDocument();

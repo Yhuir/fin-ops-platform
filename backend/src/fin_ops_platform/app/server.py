@@ -110,6 +110,10 @@ from fin_ops_platform.services.bank_flow_rule_batch_application_service import B
 from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
     PostgresBankRelationRequirementRecalculationRequestRepository,
 )
+from fin_ops_platform.services.bank_import_withdrawal_service import (
+    BankImportWithdrawalConflict,
+    BankImportWithdrawalService,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
     BankTransactionCategoryMutationWriter,
@@ -280,6 +284,9 @@ from fin_ops_platform.services.pending_invoice_service import (
     record_pending_invoice_audit,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection
+from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
+    PostgresBankImportWithdrawalRepository,
+)
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
@@ -1782,6 +1789,18 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/import-history":
             return self._handle_api_operations_import_history(query, headers)
+        if (
+            method == "POST"
+            and route_path.startswith("/api/imports/bank-transaction-batches/")
+            and route_path.endswith("/withdraw")
+        ):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_bank_import_withdrawal(
+                batch_id,
+                body,
+                headers,
+                request_id=request_id,
+            )
         if method == "GET" and route_path == "/api/operations/app-health/page-audit":
             return self._handle_api_operations_page_audit(query, headers)
         if method == "GET" and route_path == "/api/operations/history":
@@ -3377,6 +3396,81 @@ class Application:
             page_size=page_size,
         )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_bank_import_withdrawal(
+        self,
+        batch_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        request_id: str | None,
+    ) -> Response:
+        session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        payload, body_error = self._load_json_body(body)
+        if body_error is not None:
+            return body_error
+        raw_reason = payload.get("reason")
+        if raw_reason is not None and not isinstance(raw_reason, str):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_import_withdrawal", "message": "reason must be a string."},
+            )
+        assert session is not None
+        service = self._bank_import_withdrawal_service(tenant_id=tenant_id_for_session(session))
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "撤回银行流水导入需要 PostgreSQL。"},
+            )
+        try:
+            result = service.withdraw(
+                batch_id=batch_id,
+                actor_id=actor_id_for_session(session),
+                reason=str(raw_reason or "撤回误导入的银行流水"),
+                request_id=request_id,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "bank_import_batch_not_found", "message": "未找到该银行流水导入批次。"},
+            )
+        except BankImportWithdrawalConflict as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "bank_import_withdrawal_conflict",
+                    "message": str(error),
+                    "blockers": error.blockers,
+                },
+            )
+        except ValueError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_import_withdrawal", "message": str(error)},
+            )
+        with self._app_health_dashboard_cache_lock:
+            self._app_health_dashboard_cache = None
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _bank_import_withdrawal_service(self, *, tenant_id: str) -> BankImportWithdrawalService | Any | None:
+        override = getattr(self, "_bank_import_withdrawal_service_override", None)
+        if override is not None:
+            return override
+        connection = getattr(getattr(self, "_state_store", None), "_connection", None)
+        if connection is None:
+            return None
+        return BankImportWithdrawalService(
+            repository=PostgresBankImportWithdrawalRepository(connection),
+            relation_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+                require_fresh_relations=False,
+                tenant_id=tenant_id,
+            ),
+            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            tenant_id=tenant_id,
+        )
 
     def _operations_audit_service(self) -> OperationsAuditService | None:
         repository = getattr(getattr(self, "_runtime_repositories", None), "operations_audit_repository", None)
@@ -5012,6 +5106,7 @@ class Application:
             ("/api/oa-sync", "oa-pending-payments"),
             ("/api/operations/history", "operation-history"),
             ("/api/operations/app-health", "app-health-operations"),
+            ("/api/imports/bank-transaction-batches", "app-health-operations"),
             ("/api/app-health", "app-health-operations"),
             ("/imports/bank-transactions", "imports.bank-transactions"),
             ("/imports/invoices", "imports.invoices"),

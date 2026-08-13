@@ -54,7 +54,7 @@
 | previewing | 预览按钮 loading，禁用重复预览和确认。 |
 | preview_ready | 展示 audit counts、文件状态、重复组、跳过明细、银行选择冲突；只允许确认 `preview_ready` 文件。 |
 | mapping required | 在当前文件下展示 HeroUI 字段选择；保存只重试该文件，成功后回到 `preview_ready`，失败保留映射草稿和明确错误。 |
-| conflict dialog | 文件识别账号与用户选择账号冲突时，确认前弹出冲突确认。 |
+| account conflict blocked | 文件识别账号与用户选择账号冲突时显示明确警告并禁用确认；清空预览、改选正确账户、重新预览后才能进入 confirm。旧冲突确认弹窗已删除。 |
 | confirming | 确认按钮 loading；App Health `blocksMutations` 时禁止确认并提示重新进入。 |
 | job queued | 返回 `job` 时显示“已开始后台导入”，不立即宣称下游刷新完成。 |
 | success | inline 完成时提示导入完成；仅当响应声明 `operation_barrier_targets` 时等待这些 targets，禁止请求 Workbench 页面探测刷新。后台 job 由 App Status/Health 展示进度。 |
@@ -92,6 +92,8 @@
 5. 禁止通过前端本地状态手动标记下游页面 fresh。
 
 ## 变更记录
+
+- 2026-08-14：新增 `completed -> withdrawn` 管理员纠错流转；只允许纯新增且可证明 owner 的银行批次。撤回在同一事务内处理 relation/current state、canonical 流水、lifecycle 与审计，重复请求幂等。
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |

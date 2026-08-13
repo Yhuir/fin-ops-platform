@@ -42,6 +42,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `确认已支付` | OA pending payment |
 | `确认拆分` | workbench candidate split |
 | `确认撤回` | withdraw confirmation |
+| `撤回` | AppHealth 导入历史单批次撤回入口 |
 | `取消现金处理` | cash ticket/cost rollback |
 | `写回` | OA writeback |
 | `撤回批次` | no-OA batch withdraw |
@@ -114,6 +115,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | Feature API | Inventory modules | 说明 |
 | --- | --- | --- |
 | `backgroundJobs/api.ts` | `app-health-operations`, `settings` | 后台任务用于运维、数据重置和长任务轮询/控制。 |
+| `appHealth/api.ts` | `app-health-operations` | 管理员从导入历史撤回可证明为单批次独占创建的银行流水。 |
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
 | `cost-statistics/api.ts` | `cost-statistics` | 成本统计标签准入规则 PUT；导出仍为只读能力。 |
@@ -170,7 +172,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `imports-etc-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-etc-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `tax-offset` | read-export 下保存计划和已认证发票导入入口在页面首屏直接可判定，深层导入流程由 full-access Browser flow 覆盖。 | `permissions-role-matrix.spec.ts` 直接断言 read-export 下无保存计划/已认证发票导入入口；`tax-offset-flow.spec.ts` 覆盖 full-access 保存、导入、冲突和 read model 非 fresh。 |
 | `settings` | read-export、full-access、admin 的关键写入口在 role matrix 顶层测试中逐项断言，不通过动态 opener registry 执行。 | `permissions-role-matrix.spec.ts` 断言 read-export 保存禁用且 admin-only 区隐藏，full-access 普通保存 POST/200，admin 访问账户、OA 凭据保存/清空密码，并打开数据重置影响确认和 OA 密码复核弹窗但取消在创建 reset job 之前。 |
-| `app-health-operations` | AppHealth 是 admin-only 只读运维页面，本地 Browser 权限风险是 route gate 和 dashboard API 零误调用，不是页面写入口。 | `app-shell.spec.ts` 与 `permissions-role-matrix.spec.ts` 覆盖 admin dashboard、read-export/forbidden/expired gate 和 dashboard protected API 零调用。 |
+| `app-health-operations` | AppHealth 是 admin-only 运维页面；导入历史包含受二次确认保护的银行流水批次撤回入口，非管理员不能进入页面或调用接口。 | `app-shell.spec.ts` 与 `permissions-role-matrix.spec.ts` 覆盖 admin dashboard、read-export/forbidden/expired route gate；组件/API 测试覆盖撤回按钮、二次确认、管理员成功和非管理员 403。 |
 | `operation-history` | 操作历史是 005 管理员专用只读页面；页面没有业务 mutation。 | 组件/API 测试覆盖管理员可读、非管理员 403、侧栏隐藏和详情 Drawer；后端 route guard 是最终权限边界。 |
 
 ## 页面写入口矩阵
@@ -193,7 +195,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `cost-statistics` | 标签准入规则保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开标签规则抽屉，断言 `保存` disabled 且 tag-rules PUT 零调用；`web/src/test/CostStatisticsPage.test.tsx` 覆盖 writable canonical save→query-time reload 且零 barrier；`web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download | 真实 XLSX、代理 header 和生产 rule write audit 归 staging。 |
 | `etc-tickets` | OA 草稿、人工提交、delete/reset、source file/upload/import/manual reconciliation | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下提交 OA、新建批次、删除按钮、source file 上传、确认对账和人工核对动作禁用且零 mutation；`web/e2e/etc-tickets-flow.spec.ts` 覆盖 full_access OA 草稿和人工提交主链路；组件/API tests 覆盖 source file/upload/manual reconciliation guard | 新增 ETC 写入口时补同类 Browser 断言。 |
 | `settings` | 保存设置、访问账户、OA 凭据、数据重置 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 保存禁用、full-access 普通 settings 保存 POST/200 且 direct ACL 攻击被 generic 400/dedicated 403 拒绝、admin 通过独立 versioned access-control PUT 保存账户；普通 settings payload 无 ACL。OA 凭据与数据重置继续覆盖 admin-only 和 secret 不泄漏；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 admin data reset 主链路 | 真实 admin/OA 凭据登录有效性由 production evidence 验证。 |
-| `app-health-operations` | dashboard/admin runtime read、write-safety blockers | `covered-browser` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 systemd/RabbitMQ/Redis 归 staging。 |
+| `app-health-operations` | dashboard/admin runtime read、write-safety blockers、导入历史银行流水批次撤回 | `covered-browser` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` 覆盖 admin-only route；`web/src/test/AppHealthOperationsPage.test.tsx` 与 `tests/test_app_health_api.py` 覆盖撤回交互和 admin fail-closed | 发布后验证真实撤回事务、审计、账户纠正以及 systemd/RabbitMQ/Redis。 |
 | `operation-history` | 无业务写入口；只读筛选、游标翻页和详情 Drawer | `covered-browser` | `web/e2e/app-shell.spec.ts` 覆盖管理员页面/API、非管理员侧栏隐藏与 route gate；组件/API 测试覆盖详情和输入校验 | 发布后验证真实审计事件与数据库 append-only trigger。 |
 
 ## 本轮发现并修复的前端 gate

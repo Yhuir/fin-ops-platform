@@ -1146,6 +1146,8 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         actor_id: str,
         reason: str,
+        replace_history_operation_type: str = "remove_unavailable_oa_fact",
+        cancel_history_operation_type: str = "cancel_relation_for_unavailable_oa_fact",
     ) -> dict[str, Any]:
         """Remove unavailable canonical facts without leaving a half-valid active relation."""
 
@@ -1194,14 +1196,14 @@ class WorkbenchRelationCommandService:
                     ),
                     special_metadata=(dict(metadata) if isinstance(metadata, dict) else None),
                     before_relations=[before],
-                    operation_type="remove_unavailable_oa_fact",
+                    operation_type=replace_history_operation_type,
                     history_created_by=actor_id,
                     history_note=reason,
                 )
             else:
                 pair_service.cancel_relation(case_id)
                 history = pair_service.record_history(
-                    operation_type="cancel_relation_for_unavailable_oa_fact",
+                    operation_type=cancel_history_operation_type,
                     before_relations=[before],
                     after_relations=[],
                     affected_row_ids=list(before.get("row_ids") or []),

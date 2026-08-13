@@ -37,7 +37,8 @@
 - `/api/operations/app-health-dashboard` 是 admin-only 只读入口。
 - payload 状态：当前 payload（可含局部 unknown warning）、`stale_after_refresh_error`、`unavailable`。
 - 局部 inventory/runtime block 失败时返回本轮其它成功区块并只把失败区块标为 unknown，不能用上一份整页缓存冻结独立事实；只有 dashboard 整体构建抛出未处理异常时允许返回上一份 payload 并带 `dashboard_cache_stale_after_error` warning。权限失败和 PostgreSQL runtime 缺失不走缓存兜底。
-- 导入历史不再以 `app.import_batches.status` 直接显示。`ImportLifecycleService` 聚合 batch/file/session/job 后只输出 `awaiting_confirmation/queued/processing/succeeded/failed/discarded/inconsistent/unknown`；主页最新 5 条与 admin-only 分页抽屉共用该口径。
+- 导入历史不再以 `app.import_batches.status` 直接显示。`ImportLifecycleService` 聚合 batch/file/session/job 后输出 `awaiting_confirmation/queued/processing/succeeded/failed/discarded/withdrawn/inconsistent/unknown`；主页最新 5 条与 admin-only 分页抽屉共用该口径。
+- `succeeded -> withdrawing -> withdrawn` 只发生在银行批次撤回写请求；按钮进入二次确认，提交期间禁止重复操作和关闭，成功后刷新历史，失败回到可重试并展示明确原因。
 
 ### System Audit
 

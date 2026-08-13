@@ -131,7 +131,8 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         self.assertTrue(all("import_job.id::text as import_job_id" in sql for sql in job_queries))
         self.assertTrue(all("import_job.import_job_id" not in sql for sql in job_queries))
         history_query = job_queries[0]
-        self.assertEqual(history_query.count("left join lateral"), 2)
+        self.assertEqual(history_query.count("left join lateral"), 3)
+        self.assertIn("batch_row.decision = 'created'", history_query)
         self.assertIn("limit %s offset %s", history_query)
 
 

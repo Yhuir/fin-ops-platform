@@ -15,6 +15,7 @@
 
 - 为银行明细页面返回账户 identity、展示名、最新余额、最新流水、币种和流水数量。
 - 在 SQL 中完成账户级 latest-row 与 count 聚合。
+- 完整账号存在时，账户 identity 和尾号必须以规范化真实账号为准；选择银行 metadata 与真实尾号不一致的历史行不得覆盖同一账户的展示基准，优先采用 metadata 一致的最新行。
 - 保持日期筛选只影响 `transaction_count`，不影响 latest balance。
 
 ### 不负责

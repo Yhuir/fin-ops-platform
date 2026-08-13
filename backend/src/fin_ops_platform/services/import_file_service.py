@@ -519,6 +519,12 @@ class FileImportService:
         invalid_items = [item.id for item in selected_items if item.status not in {"preview_ready", "confirmed"}]
         if invalid_items:
             raise ValueError(f"selected files are not confirmable: {', '.join(sorted(invalid_items))}")
+        conflicting_items = [item.id for item in selected_items if item.bank_selection_conflict]
+        if conflicting_items:
+            raise ValueError(
+                "bank account selection conflicts must be resolved before confirmation: "
+                + ", ".join(sorted(conflicting_items))
+            )
         if any(item.status == "preview_ready" for item in selected_items):
             self.assert_session_preview_current(session_id=session_id)
         progress_total = len(selected_items)

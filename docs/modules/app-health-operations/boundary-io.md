@@ -49,6 +49,7 @@
 | Alert/status | shell/status page | 明确 stale/failed/degraded |
 | Dashboard payload | operations page | 只读聚合 canonical invoice、OA、bank、import、worker 与唯一保留的 `workbench_relation` runtime；不读取 Workbench page generation 或其它已退役 projection。`data_inventory.invoice.sources` 固定为 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`；OA completed/in-progress/items 均由 PostgreSQL canonical OA facts 和最近成功 sync run统计。RabbitMQ 管理指标默认以 unknown 输出，不能阻塞健康探针；任一局部 block 失败只降级该 block 并返回当前其它事实。 |
 | 分页导入历史 | `GET /api/operations/import-history?page&page_size` | admin-only、只读，`page_size<=100`；主页只取最新 5 条，抽屉独立分页，两者共用 `ImportLifecycleService`。 |
+| 银行导入撤回入口 | `POST /api/imports/bank-transaction-batches/{batch_id}/withdraw` | App Health 仅承载 HeroUI 抽屉/确认对话框；业务权限、owner、关联、删除、审计和事务由银行导入模块负责。成功后刷新 dashboard/history；失败保留抽屉并显示后端原因。 |
 | 进项使用审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`*_sample_count` 是有上限样本，不是全量问题总数 |
 | 销项收款审计报告 | admin/API consumer | `overall_status=pass`、`audit_status.integrity=pass` 且 `audit_status.freshness=fresh` 才能证明已登记 invariant 一致；`issues_found` 只报告有上限样本，不做自动修复 |
 | 页面业务审计报告 | 页面标题 Audit icon / admin API consumer | 只有 `proof_availability=ready`、非空 `contract_revision`、`audit_status.integrity=pass`、`freshness=fresh`、`queue=drained` 且 `database_snapshot=true` 才显示“此数据库快照内已登记 App 内部合同一致”。relation consumer 页面还要求 registered typed edge equality；非消费者明确 `not_applicable`。任何页面成功都不证明后续写入，也不能证明外部银行/OA/发票/ETC 来源没有遗漏。 |
@@ -68,7 +69,7 @@
 | Frontend page | `web/src/pages/AppHealthOperationsPage.tsx` |
 | Frontend feature/context | `web/src/features/appHealth/*`、`features/appStatus/*`、`contexts/AppHealthStatusContext.tsx` |
 | Shell | `web/src/components/shell/AppStatusIndicator.tsx` |
-| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/page-audit` in `server.py` |
+| Backend route | `/api/app-health*`、`/api/operations/app-health-dashboard`、`/api/operations/app-health/page-audit`、银行导入撤回 HTTP adapter in `server.py` |
 | Backend service | `app_health_service.py`、`app_health_alert_service.py`、`app_status_overview_service.py`、`runtime_monitoring.py`、`operations_audit_service.py`、`page_audit_registry.py`、`operations_dashboard.py`、`import_lifecycle_service.py` |
 | Import lifecycle query | `services/postgres_repositories/import_lifecycle.py`、`postgres/migrations/0143_import_lifecycle_hot_paths.sql`；只聚合现有 durable facts，使用 batch/session 索引读取最近 file/job，不创建 AppHealth 专用 read model。 |
 | Backend audit repository | `services/postgres_repositories/operations_audit.py`、`audit_report.py`、`app_health_system_audit.py`、`workbench_relation_audit.py`、`page_business_audit.py`、各 direct page audit repository、`external_control_evidence.py`、`external_control_evidence_audit.py` |
@@ -79,7 +80,7 @@
 
 - 允许依赖：status registries, runtime monitoring, app health services。
 - 必须通过：`server.py(page key) -> OperationsAuditService -> PostgresOperationsAuditRepository -> registry-selected finite proof owner`；registry 只含 metadata，不含 SQL/HTTP/refresh。direct 页面审计 canonical facts/relations，唯一保留的 `workbench_relation` 由自己的 proof owner 审计；`tools/audit_*.py` 只允许命令行参数与输出适配。
-- 禁止绕过：系统状态页面直接改业务/read model 表；隐藏 failed/stale worker；用行级 projection `synced_at` 或内存状态覆盖 durable OA sync run/outbox/worker facts。
+- 禁止绕过：系统状态页面直接改业务/read model 表；撤回必须委托银行导入 service；隐藏 failed/stale worker；用行级 projection `synced_at` 或内存状态覆盖 durable OA sync run/outbox/worker facts。
 
 ## 测试与验证
 

@@ -3,7 +3,6 @@ import { ArrowLeft, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
-import AppDialog from "../common/AppDialog";
 import {
   EmptyValue,
   FinanceDirectionTag,
@@ -841,7 +840,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [unavailableEtcTasks, setUnavailableEtcTasks] = useState<EtcUnavailableReconciliationTaskSummary[]>([]);
   const [readyEtcTasksLoading, setReadyEtcTasksLoading] = useState(mode === "etc_invoice");
   const [settingsLoading, setSettingsLoading] = useState(mode === "bank_transaction");
-  const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
   const [previewDetailOffset, setPreviewDetailOffset] = useState(0);
@@ -1077,7 +1075,15 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => missingEtcRequirementIssues.reduce((total, issue) => total + Number(issue.amount || 0), 0),
     [missingEtcRequirementIssues],
   );
-  const canConfirm = canMutateData && confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
+  const conflictingPreviewFiles = useMemo(
+    () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
+    [previewPayload],
+  );
+  const canConfirm = canMutateData
+    && confirmableFileIds.length > 0
+    && conflictingPreviewFiles.length === 0
+    && !isPreviewing
+    && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
     && canMutateData
     && Boolean(selectedEtcTaskId)
@@ -1093,22 +1099,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     || Object.keys(fileSelections).length > 0
     || Boolean(feedbackMessage)
     || Boolean(errorMessage);
-  const conflictingPreviewFiles = useMemo(
-    () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
-    [previewPayload],
-  );
   const mappingRequiredFiles = useMemo(
     () => previewPayload?.files.filter((file) => (
       file.status === "unrecognized_template" && file.mappingCandidates.length > 0 && file.mappingFields.length > 0
     )) ?? [],
     [previewPayload],
   );
-  const conflictConfirmLabel = useMemo(() => {
-    const selectedAccountLabel = formatSelectedBankAccountLabel(conflictingPreviewFiles[0] ?? {});
-    return selectedAccountLabel
-      ? `仍按所选账户 ${selectedAccountLabel} 导入`
-      : "仍按所选账户导入";
-  }, [conflictingPreviewFiles]);
   const previewAudit = useMemo(() => importSessionAudit(previewPayload), [previewPayload]);
   const etcPreviewAudit = useMemo(() => etcAudit(etcPreviewPayload), [etcPreviewPayload]);
   const confirmAuditMessage = useMemo(
@@ -1155,7 +1151,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setPreviewPayload(null);
     setEtcPreviewPayload(null);
     setEtcImported(false);
-    setConflictDialogOpen(false);
     setMappingDrafts({});
     setMappingRetryingFileId(null);
     setFeedbackMessage(null);
@@ -1368,7 +1363,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsPreviewing(true);
     setErrorMessage(null);
     setFeedbackMessage(null);
-    setConflictDialogOpen(false);
     try {
       const payload = await previewImportFiles(selectedFiles, "web_finance_user", buildPreviewOverrides());
       persistSessionId(payload.session.id);
@@ -1461,7 +1455,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setErrorMessage(null);
     try {
       const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds);
-      setConflictDialogOpen(false);
       if (payload.job) {
         resetDraft();
         if (payload.job.status === "succeeded" || payload.job.status === "partial_success") {
@@ -1484,7 +1477,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   async function handleConfirm() {
     if (conflictingPreviewFiles.length > 0) {
-      setConflictDialogOpen(true);
+      setErrorMessage("文件识别账户与所选账户不一致。请清空预览，选择识别到的正确账户后重新预览。");
       return;
     }
     await submitConfirm();
@@ -1557,6 +1550,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {feedbackMessage ? <ImportNotice tone="success">{feedbackMessage}</ImportNotice> : null}
           {errorMessage ? <ImportNotice tone="danger">{errorMessage}</ImportNotice> : null}
           {confirmAuditMessage ? <ImportNotice tone="accent">{confirmAuditMessage}</ImportNotice> : null}
+          {conflictingPreviewFiles.length > 0 ? (
+            <ImportNotice tone="warning">
+              已阻止确认导入：{conflictingPreviewFiles.map((file) => file.fileName).join("、")} 的识别账户与所选账户不一致。请清空预览并选择正确账户后重新预览。
+            </ImportNotice>
+          ) : null}
           {settingsLoading ? <ImportNotice tone="accent">正在加载银行账户映射...</ImportNotice> : null}
           {!settingsLoading && !canUseBankImport ? <ImportNotice tone="warning">设置里还没有银行账户映射，请先在设置中维护银行。</ImportNotice> : null}
           {mode === "etc_invoice" && readyEtcTasksLoading ? <ImportNotice tone="accent">正在加载可导入的 ETC 对账任务...</ImportNotice> : null}
@@ -1911,37 +1909,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         </div>
       </PageScaffold>
 
-      <AppDialog
-        maxWidth="sm"
-        onClose={() => setConflictDialogOpen(false)}
-        open={conflictDialogOpen}
-        title="银行账户冲突确认"
-        actions={(
-          <>
-            <Button isDisabled={isConfirming} onPress={() => setConflictDialogOpen(false)} type="button" variant="secondary">取消</Button>
-            <Button
-              isDisabled={isConfirming || healthStatus.blocksMutations}
-              onPress={() => { void submitConfirm(); }}
-              type="button"
-            >
-              {isConfirming ? "确认中..." : conflictConfirmLabel}
-            </Button>
-          </>
-        )}
-      >
-          <div className="import-workflow-dialog-stack">
-            <ImportNotice tone="warning">以下文件的系统识别结果与所选账户不一致，确认后仍会按你选择的账户导入。</ImportNotice>
-            {conflictingPreviewFiles.map((file) => (
-              <div key={file.id} className="import-workflow-conflict-row">
-                <div className="import-workflow-conflict-row__title">{file.fileName}</div>
-                <p className="import-workflow-muted-text">
-                  所选：{`${file.selectedBankName ?? "--"} ${file.selectedBankLast4 ?? "--"}`} / 识别：{`${file.detectedBankName ?? "--"} ${file.detectedLast4 ?? "--"}`}
-                </p>
-                {file.conflictMessage ? <p className="import-workflow-conflict-row__message">{file.conflictMessage}</p> : null}
-              </div>
-            ))}
-          </div>
-      </AppDialog>
     </div>
   );
 }

@@ -45,12 +45,14 @@
 
 - 前端入口 `ImportBankTransactionsPage` 只渲染 `<ImportWorkflowPage mode="bank_transaction" />`。
 - 页面必须先加载设置里的银行账户映射；每个文件都要选择对应账户后才能预览。
+- 文件识别银行/尾号与所选账户不一致时，预览可展示差异但确认必须 fail closed；前端和后端都不得提供“仍按所选账户导入”的绕过入口。
 - 预览使用 `/imports/files/preview`，通过 `file_overrides` 传递 `batch_type=bank_transaction`、`bank_mapping_id`、`bank_name`、`bank_short_name`、`last4`。
 - 后端只保留一个 `bank_statement` 语义解析器：在前 60 行内定位表头，将明确别名归一为交易时间、金额、方向、对方、摘要等 canonical 字段；账号和账户名可从文件元数据读取，不要求出现在交易表头。
 - 无法确定核心字段时必须 fail closed，并返回候选列和缺失字段；页面通过 `/imports/files/retry` 提交 `field_mapping` 重新解析。人工映射按标准化表头签名保存在既有 import file 审计 payload 中，同结构文件后续复用，不新增模板表或另一条导入链。
 - 确认使用 `/imports/files/confirm`，返回 `202 Accepted` 和 background `job`；RabbitMQ/import worker 开启时还会返回 `import_job` / `event_id`。
 - 旧 JSON 入口 `/imports/preview`、`/imports/confirm` 及其 `general_import.confirm` worker 链已删除；HTTP 只允许走 files/session API，测试造数可继续使用 service-level normalization ports。
 - 后端确认必须防重复、检查 preview stale、持久化原始文件/session/batch/row，并触发必要 owner job；Workbench matching、银行明细、账户余额、Workbench relation、invoice lifecycle、成本统计等消费者按各自边界读取。
+- 已完成且只新增 canonical 流水的批次可由管理员从系统状态导入历史撤回。撤回由 `BankImportWithdrawalService` 在一个数据库事务内核验独占 owner、清理可撤销状态、调用正式 Workbench relation command、删除流水并保留 batch/file/row 与操作审计；更新过既有流水、已核销或被其它生效业务占用时 fail closed。
 
 ## 当前边界
 
@@ -60,6 +62,7 @@
 - `import.process.requested` 是 import worker 的 durable queue 事件；RabbitMQ 只负责 transport/wakeup，不能作为导入事实源。
 - 导入成功后的跨页一致性必须通过后端 lifecycle、dirty scope、read model worker 和 App Status 收敛，不能只依赖前端刷新或本地缓存。
 - `preview_stale` 必须返回可识别错误；前端要提示重新预览后再确认。
+- 撤回后的 batch/file 状态为 `withdrawn`，原文件可以在选择正确账户后重新导入；不得删除导入历史、文件审计、财务纠错审计或主数据库。
 
 ## 影响面清单
 

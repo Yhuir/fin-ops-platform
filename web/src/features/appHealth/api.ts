@@ -6,6 +6,7 @@ import type {
   AppHealthOaSyncSource,
   AppHealthWorkbenchSource,
   OperationsDashboardPayload,
+  BankImportWithdrawalPayload,
   OperationsImportHistoryPayload,
   PageAuditPageKey,
   PageAuditPayload,
@@ -101,6 +102,34 @@ export async function fetchImportHistory(
     `/api/operations/import-history?page=${page}&page_size=${pageSize}`,
     signal,
   );
+}
+
+export async function withdrawBankTransactionImport(
+  batchId: string,
+  reason: string,
+): Promise<BankImportWithdrawalPayload> {
+  try {
+    return await apiRequestJson<BankImportWithdrawalPayload>(
+      `/api/imports/bank-transaction-batches/${encodeURIComponent(batchId)}/withdraw`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      let message = error.responseText.trim() || error.message || "撤回失败";
+      try {
+        const payload = JSON.parse(error.responseText) as { message?: string };
+        message = payload.message?.trim() || message;
+      } catch {
+        // The API may return plain text at the proxy boundary.
+      }
+      throw new Error(message);
+    }
+    throw error;
+  }
 }
 
 export async function fetchPageAudit<T extends PageAuditPayload = PageAuditPayload>(

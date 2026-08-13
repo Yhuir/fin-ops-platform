@@ -44,7 +44,8 @@
 | 旧 JSON HTTP route、`general_import.confirm` processor 和 server confirm wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_exposes_legacy_json_import_write_routes`、`test_server_no_longer_owns_import_confirm_processors` |
 | 银行导入确认返回空页面 freshness/barrier targets，当前页结束写命令 | covered | `test_file_import_confirm_job_returns_import_write_targets` |
 | bank import 写后零 direct-page refresh 事件；银行明细与关联台都通过下一次 canonical GET 收敛 | covered | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、各页面 canonical query/API tests |
-| Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/冲突取消零提交/冲突确认/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 已完成纯新增批次撤回、owner 数量一致、业务引用阻断、正式 relation 清理、审计和幂等 | covered | `tests/test_bank_import_withdrawal_service.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
+| Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/账户冲突阻断/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | read_export_only 不能上传/预览/确认导入 | covered | `web/e2e/permissions-role-matrix.spec.ts` |
 
 ## 七类测试适用性
@@ -52,19 +53,19 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_api.py`、`tests/test_import_file_service.py`、`tests/test_import_preview_audit.py` | 覆盖 canonical 表头归一、元数据提取、direction、金额、identity、重复/疑似重复、缺失秒级时间、账号维度唯一键、原始文本字段。 |
-| 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py` | 覆盖 session/file/batch 生命周期、人工映射保存与复用、preview stale、confirm 持久化、job idempotency、worker processor。 |
+| 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py`、`tests/test_bank_import_withdrawal_service.py` | 覆盖 session/file/batch 生命周期、人工映射保存与复用、preview stale、confirm 持久化、job idempotency、worker processor，以及撤回事务、业务引用阻断和幂等。 |
 | 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/imports/files/preview`、`confirm`、`retry`、`sessions`、legacy preview/confirm、错误 shape 和 mapper；boundary guard 锁定银行流水前端不调用旧 JSON API。 |
 | 4. Read model/cache/background job tests | cleanup 适用 | `tests/test_import_job_queue.py`、`tests/test_app_status_overview_service.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py` | 覆盖 import worker、退休银行明细/余额/Search/no-OA refresh 事件不再出现，以及关联台按正式 `workbench` 合同精确收敛；两个保留 read model 由各自模块测试负责。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖独立路由、上传/预览/字段映射 retry/确认、错误、session restore、job feedback、App Status popover；Browser e2e 覆盖导入后银行明细、成本统计银行事实视图和 OA 项目成本隔离。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import、stale preview 和错误回滚；confirm 后银行明细与成本统计“按时间”显示导入流水，“按项目”不伪造 OA 归集。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖旧 JSON import 兼容、文件导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败、旧 wrapper 删除防回归，以及冲突确认弹窗取消不提交、成功提交后不会继续挡住导航。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 files/session 导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败、旧 JSON/wrapper 删除防回归，以及账户冲突前后端双重阻断。 |
 
 ## 历史 Bug 回归库
 
 | 来源 | 回归点 | 当前状态 |
 | --- | --- | --- |
 | Preview stale | 预览后底层记录变化，确认必须拒绝并提示重新预览 | covered |
-| 银行账号映射冲突 | 用户选择银行与文件识别账号不一致时必须展示冲突，别名/简称/法定名称不能误报 | covered |
+| 银行账号映射冲突 | 用户选择银行与文件识别账号不一致时必须展示冲突并禁止确认；别名/简称/法定名称不能误报，后端不得接受绕过前端的 confirm | covered |
 | 损坏文件 | 单个损坏 Excel 不能中断整批预览；Browser 必须显示 file-level error，且 confirm 只提交正常文件 ID。 | covered |
 | 慢预览/大文件耗时 | 预览请求未完成时按钮必须显示“预览中...”，预览/清空/确认全部禁用，不能重复提交 preview 或中断成半状态。 | covered |
 | 原始文本列 | 银行流水导入必须保留摘要、备注、用途等原始文本列，不影响 identity | covered |
@@ -74,8 +75,8 @@
 | 2026-07-05 边界 close | 银行流水页面不得回退旧 `/imports/preview`、`/imports/confirm` JSON API；`server.py` 不得重新拥有 import confirm processor wrapper | fixed by `tests/test_platform_runtime_boundary_guards.py` |
 | 2026-07-22 stale preview lost update | 银行 preview/retry 只能写当前 session/preview batch，不能把其它已确认导入覆盖回 pending；PostgreSQL batch 与 file/session 同事务 | fixed by `tests/test_import_file_service.py`、`tests/test_import_formalization_api.py`、`tests/test_postgres_repositories_core.py` |
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
-| 2026-06-17 Browser e2e | 银行账户冲突弹窗里确认导入成功后未关闭，modal backdrop 阻塞用户导航到银行明细或其他页面。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
-| 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能调用 operation barrier 或 Workbench 页面 API、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 2026-08-14 误选银行覆盖账户 | 冲突预览不得继续确认；后端二次拒绝；账户 identity/尾号优先真实完整账号且展示行优先一致 metadata；旧强制导入弹窗和样式已删除。 | fixed by `tests/test_import_file_service.py`、`tests/test_bank_account_balance_canonical_rows.py`、Browser tests |
+| 2026-08-14 导入批次撤回 | 只删除本批次独占创建流水，保留 OA/发票/import provenance/audit；普通 Workbench relation 走正式 command，生效业务引用 fail closed。 | fixed by `tests/test_bank_import_withdrawal_service.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
 | 2026-06-19 Browser e2e | 损坏银行流水文件与正常文件混合上传时，页面必须保留正常文件 preview，不整批失败，确认时不得提交损坏文件 ID。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水预览耗时较长时，用户不能重复点击预览、清空文件或提前确认，避免多个 `/imports/files/preview` 请求或半状态。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-08-14 OA-first 成本隔离 | 银行流水导入后，流水可进入成本统计银行事实视图，但没有完成 OA 正式关系时不得进入按项目/银行/OA 费用类型。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |

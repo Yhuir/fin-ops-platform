@@ -195,10 +195,9 @@ describe("Import pages", () => {
       },
     ]);
 
-    await user.click(screen.getByRole("button", { name: "确认导入" }));
-    const dialog = await screen.findByRole("dialog", { name: "银行账户冲突确认" });
-    expect(dialog).toHaveClass("finance-dialog");
-    expect(dialog).not.toHaveClass("MuiDialog-root");
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    expect(screen.getByText(/已阻止确认导入/)).toHaveTextContent("识别账户与所选账户不一致");
+    expect(screen.queryByRole("dialog", { name: "银行账户冲突确认" })).not.toBeInTheDocument();
   });
 
   test("bank transaction import displays preview audit counts and confirm copy", async () => {

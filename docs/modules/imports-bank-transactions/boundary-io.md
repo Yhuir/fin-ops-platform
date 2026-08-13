@@ -14,6 +14,9 @@
 
 ### 负责
 
+- 管理已完成银行流水导入的撤回：只删除该 batch 的 `created` 且仍由该 batch 独占拥有的银行流水；保留 import batch/file/row provenance 并标记 `withdrawn`。
+- 账户选择冲突必须在 confirm 前后端双重阻断；识别结果只用于校验，不能让误选 mapping 覆盖文件中的真实完整账号。
+
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
@@ -70,6 +73,11 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 通用 `Application._persist_state()` 已从 import canonical/session 写链隔离，不得再包含 `imports`、`file_imports` 或调用其全量 snapshot。preview/retry 只通过 `_persist_import_preview_delta(session_id)` 写当前 session-scoped delta，confirm 只通过上述 selected-files delta 边界持久化正式事实；OA 附件发票晋升和 ETC metadata 关联分别使用 `save_invoices` 与 `save_invoice_etc_metadata` 窄端口。
 
 ## 输出 I/O
+
+| 输出 | 目标 | 合同 |
+| --- | --- | --- |
+| `POST /api/imports/bank-transaction-batches/{batch_id}/withdraw` | 系统状态导入历史抽屉 | admin + mutate；同事务清理普通 Workbench active relation、分类/候选/本行 override，再删除 batch 独占创建的流水；OA、发票、导入历史和 append-only 审计保留。已核销、updated import 或其它 active business owner 返回 `409`。重复撤回幂等返回 `idempotent_replay=true`。 |
+| `withdrawn` lifecycle | 导入历史与重复文件判断 | batch/file 保留并显示“已撤回”；已撤回 file 不再作为 confirmed duplicate owner，因此允许用正确银行重导原文件。 |
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |

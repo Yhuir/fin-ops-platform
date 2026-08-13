@@ -7,7 +7,7 @@
 | `IMPORT-BANK-E2E-001` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_platform_runtime_boundary_guards.py` | Browser 覆盖独立路由、文件选择后才可预览、每文件账户选择；boundary guard 锁定页面入口为 `mode="bank_transaction"`。 |
 | `IMPORT-BANK-E2E-002` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_api.py`、`tests/test_platform_runtime_boundary_guards.py` | Browser 覆盖真实 file input、账户 mapping override、preview API、audit counts、preview grid，以及慢预览期间进入“预览中...”状态，预览/清空/确认动作禁用且只提交一次 preview；boundary guard 防止前端回到旧 `/imports/preview`、`/imports/confirm` JSON API。 |
 | `IMPORT-BANK-E2E-003` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`tests/test_import_file_service.py` | Browser 覆盖重复项 tab、重复明细、损坏文件 file-level error、未导入项明细，以及 confirm 只提交正常可导入文件；后端覆盖 240 行合成重复组只允许一个 confirmable representative。 |
-| `IMPORT-BANK-E2E-004` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser 覆盖银行账户冲突确认弹窗、冲突文案、取消后零 confirm/零 operation barrier/零 Workbench 页面请求/保留 preview，以及再次确认后不阻塞导航。 |
+| `IMPORT-BANK-E2E-004` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_import_file_service.py` | Browser 覆盖冲突文案、确认按钮禁用、零 confirm/零 operation barrier；后端再次拒绝绕过页面直接确认，不再存在“强制继续导入”旧路径。 |
 | `IMPORT-BANK-E2E-005` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py` | Browser 覆盖 `preview_stale` 错误可见、无 success、零 operation barrier、零 Workbench 页面请求；API/mapper 覆盖固定“重新预览”文案。 |
 | `IMPORT-BANK-E2E-006` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts` | Browser 覆盖 confirm 失败错误可见、无 success、零 operation barrier、零 Workbench 页面请求。 |
 | `IMPORT-BANK-E2E-007` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_bank_details_canonical_query.py`、write-operation impact tests | Browser 覆盖 confirm 返回空 targets、零 operation barrier/零 Workbench 页面请求；随后银行明细看到导入事实，成本统计“按时间”看到真实流水，同时“按项目”明确不产生无 OA 成本。后端证明写后零页面 job。 |
@@ -16,7 +16,7 @@
 
 ## Operation latency baseline
 
-`web/e2e/imports-bank-transactions-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开银行流水导入页、选择银行流水文件、选择银行账户映射、开始预览、打开银行账户冲突确认、取消冲突确认、再次确认冲突导入、普通确认导入、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error、导入后进入银行明细，以及进入成本统计验证导入流水只进入银行事实视图、不污染 OA 项目成本。
+`web/e2e/imports-bank-transactions-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开银行流水导入页、选择银行流水文件、选择银行账户映射、开始预览、阻止账户冲突确认、普通确认导入、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error、导入后进入银行明细，以及进入成本统计验证导入流水只进入银行事实视图、不污染 OA 项目成本。
 
 ## 下一轮补测建议
 

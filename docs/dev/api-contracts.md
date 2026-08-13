@@ -1215,6 +1215,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `data_inventory.invoice.sources` 固定包含 `manual`、`input_invoice`、`output_invoice`、`oa_attachment`。`input_invoice` / `output_invoice` 按 active canonical 发票的 `invoice_type` 统计；`oa_attachment.supplementary_count` 表示 OA 解析来源且不在手工导入中的 active 发票数；unknown 时为 `null`。
 - `data_inventory.oa.sources` 固定包含 `oa_records`、`oa_records_completed`、`oa_records_in_progress`、`oa_items`。`oa_records` 是 `app.oa_applications` 申请主表总数，`oa_items` 是 `app.oa_application_items` 明细行总数；已完成/进行中按 OA projection 的 `workflow_status` 完成态合同拆分。
 - `data_inventory.import_events[*]` 是全量手工导入历史，只包含银行流水和发票导入批次。每条 `count` 必须来自 `app.import_batches.success_count`；OA 解析、OA 单据同步和其它 OA runtime facts 不进入该列表。前端主页面只显示最新 5 条，抽屉展示全量历史。
+- `GET /api/operations/import-history` 的 row 额外返回 `batch_id`、`batch_type`、`withdrawal_allowed`、可用的 selected/detected bank metadata 以及 `withdrawal` 摘要；`status=withdrawn` 显示“已撤回”。这些字段不把 App Health 变成业务 owner。
+- `POST /api/imports/bank-transaction-batches/{batch_id}/withdraw` 仅 admin + mutate 可用，请求为 `{ "reason": string }`。成功返回 `{status:"withdrawn", batch_id, withdrawn_count, idempotent_replay, withdrawal}`；找不到返回 `404 bank_import_batch_not_found`，updated/owner 不一致/已核销/被其它业务占用返回 `409 bank_import_withdrawal_conflict` 和有界 `blockers`。写入必须是单事务，保留 OA、发票、import provenance 和 append-only audit。
 - `request_performance.endpoints[*]` 包含 `duration_ms`、`database_duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_query_count` 的 p50/p95/p99。
 - `runtime_performance.queues[*]` 基于已知 RabbitMQ route 输出，即使 RabbitMQ Management API 不可用也保留行，数值为 `null`。
 - Dashboard API 可返回短 TTL 缓存 payload。缓存刷新失败但已有旧 payload 时，响应仍为 `200`，并在 `freshness.warnings` 中包含 `dashboard_cache_stale_after_error`。

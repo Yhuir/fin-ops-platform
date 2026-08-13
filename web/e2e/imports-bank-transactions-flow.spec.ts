@@ -105,7 +105,10 @@ async function previewBankStatementFiles(
   await expect(page.getByText(new RegExp(`将导入 ${expectedAudit.importable} 条唯一记录，跳过 ${expectedAudit.skipped} 条重复`))).toBeVisible();
 }
 
-async function stageBankStatementFilesForPreview(page: Page, recordLatency?: OperationLatencyRecorder) {
+async function stageBankStatementFilesForPreview(
+  page: Page,
+  recordLatency?: OperationLatencyRecorder,
+) {
   const openPage = async () => {
     await page.goto("/imports/bank-transactions");
     await expect(page.getByTestId("import-workflow-page")).toBeVisible();
@@ -169,7 +172,10 @@ async function stageBankStatementFilesForPreview(page: Page, recordLatency?: Ope
 test.describe("bank transaction import browser flow", () => {
   test("previews and confirms bank statement files, then reflects the imported row in bank details", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, {
+      bankImportNoAccountConflict: true,
+      sessionMode: "full_access",
+    });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
     await previewBankStatementFiles(page, { recordLatency });
@@ -178,25 +184,13 @@ test.describe("bank transaction import browser flow", () => {
     await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("导入浏览器测试客户");
     expect(api.count("POST /imports/files/preview")).toBe(1);
 
-    const conflictDialog = page.getByRole("dialog", { name: "银行账户冲突确认" });
     await recordLatency({
-      operationId: "imports-bank-transactions.open-account-conflict-dialog",
+      operationId: "imports-bank-transactions.confirm-import",
       visibleLabel: "确认导入",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "确认导入" }).click();
-      await mark("finalSettledLatencyMs", expect(conflictDialog).toBeVisible());
-    });
-    await expect(conflictDialog).toBeVisible();
-    await expect(conflictDialog.getByText("historydetail14080.xlsx")).toBeVisible();
-    await expect(conflictDialog.getByText("后四位选择为8826，系统识别为4080")).toBeVisible();
-    await recordLatency({
-      operationId: "imports-bank-transactions.confirm-account-conflict-import",
-      visibleLabel: "仍按所选账户 建设银行 8826 导入",
-      actionType: "click",
-    }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      await conflictDialog.getByRole("button", { name: "仍按所选账户 建设银行 8826 导入" }).click();
+      await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
@@ -310,61 +304,21 @@ test.describe("bank transaction import browser flow", () => {
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
-  test("cancels bank account conflict confirmation without submitting an import", async ({ page }, testInfo) => {
+  test("blocks confirmation when the selected bank account conflicts with the detected account", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
     await previewBankStatementFiles(page, { recordLatency });
 
-    const conflictDialog = page.getByRole("dialog", { name: "银行账户冲突确认" });
-    await recordLatency({
-      operationId: "imports-bank-transactions.open-account-conflict-dialog-for-cancel",
-      visibleLabel: "确认导入",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: "确认导入" }).click();
-      await mark("finalSettledLatencyMs", expect(conflictDialog).toBeVisible());
-    });
-    await expect(conflictDialog).toBeVisible();
-    await recordLatency({
-      operationId: "imports-bank-transactions.cancel-account-conflict",
-      visibleLabel: "取消",
-      actionType: "click",
-    }, async (mark) => {
-      await conflictDialog.getByRole("button", { name: "取消" }).click();
-      await mark("finalSettledLatencyMs", expect(conflictDialog).toHaveCount(0));
-    });
-
-    await expect(conflictDialog).toHaveCount(0);
+    await expect(page.getByText(/已阻止确认导入/)).toContainText("识别账户与所选账户不一致");
+    await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    await expect(page.getByRole("dialog", { name: "银行账户冲突确认" })).toHaveCount(0);
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "导入预览结果" })).toBeVisible();
     expect(api.count("POST /imports/files/confirm")).toBe(0);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-
-    await recordLatency({
-      operationId: "imports-bank-transactions.reopen-account-conflict-after-cancel",
-      visibleLabel: "确认导入",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: "确认导入" }).click();
-      await mark("finalSettledLatencyMs", expect(conflictDialog).toBeVisible());
-    });
-    await expect(conflictDialog).toBeVisible();
-    await recordLatency({
-      operationId: "imports-bank-transactions.confirm-account-conflict-after-cancel",
-      visibleLabel: "仍按所选账户 建设银行 8826 导入",
-      actionType: "click",
-    }, async (mark) => {
-      const confirmResponse = waitForImportConfirm(page);
-      await conflictDialog.getByRole("button", { name: "仍按所选账户 建设银行 8826 导入" }).click();
-      await mark("apiLatencyMs", confirmResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
-    });
-    await expect(page.getByText("已确认导入")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
-    expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
@@ -424,6 +378,7 @@ test.describe("bank transaction import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankImportPreviewDelayMs: 500,
+      bankImportNoAccountConflict: true,
       sessionMode: "full_access",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
