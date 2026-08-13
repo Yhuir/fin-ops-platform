@@ -232,3 +232,11 @@
 
 - ETC 导入沿用同一个连续汇总带和分隔行；ZIP 预览、任务 gate、确认、重复票和错误分离合同不变。
 - 删除旧卡片样式，不新增 ETC 解析器、API、worker、read model 或跨页面 I/O。
+
+## 2026-08-13 - ETC ZIP 通行时间匹配与阻塞说明闭环
+
+- 根因：旧 ZIP matcher 只保留通行日期，并用 `IssueDate`/`RequestTime` 参与同日同金额候选排序；票根 XML 的 17 位通行时间被截成日期，导致同日重复金额无法按真实行程唯一归属，并可能产生假重复阻塞。
+- 修复：XML parser 保留通行起止秒级时间；matcher 使用车牌、通行区间、金额、票数做有界全局一对一分配，删除顺序贪心 fallback；开票时间不再进入通行匹配。
+- ZIP I/O：一次 preview 只构建一次安全 manifest，解析结果复用于 matcher、allowlist、filtered/full audit；嵌套 ZIP 原始路径不变，展示路径兼容票根 GB18030 文件名。
+- UI：复用 HeroUI 原生 `Alert`/`Chip`，在原预览区紧凑展示缺失行程、缺票数、缺失金额和每条处理提示；未新增卡片、海报区或新交互层。
+- 安全边界：确认导入仍只创建 durable import job，不调用 OA 附件上传或 OA 草稿；本轮生产验证只允许 GET、preview contract 和性能探针，不提交真实导入或 OA 草稿。

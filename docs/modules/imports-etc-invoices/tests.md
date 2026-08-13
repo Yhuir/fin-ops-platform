@@ -39,6 +39,10 @@
 - ETC 导入页只接受 `.zip`，非 zip 文件在前端拒绝，后端也返回 `invalid_etc_import_request`。
 - 没有 ready reconciliation task 时不得预览；unavailable task 必须展示 blocker。
 - zip preview 必须根据 confirmed reconciliation task 过滤发票，展示 audit counts、missing requirements 和 filter status。
+- ZIP manifest 在一次 preview 内只能解析一次 XML；matcher、filtered import audit 和 full audit 必须复用该 manifest，解析次数不得随同一 preview 的消费阶段重复增长。
+- 发票需求匹配必须使用 XML 的通行起止时间，不得使用 `IssueDate`/`RequestTime` 代替通行事实；相同金额候选必须全局一对一分配，不能让一张发票重复满足两条需求。
+- 缺票阻塞必须返回精确缺失行程数、缺少发票数、金额和处理提示；非法 ZIP 必须阻止确认，单个 malformed XML 继续作为文件级失败项而不拖死其它有效票。
+- ETC preview/confirm/import worker 不得调用 OA attachment upload 或 OA draft create；OA 草稿仅由后续独立人工动作触发。
 - Browser e2e 必须覆盖 ready task selector、zip preview、audit/review copy、confirm job feedback、preview stale、stale task preview、confirm failure、ETC 票据/税金抵扣/成本统计下游 fresh read model，以及 ETC 导入不误走通用 files import API。
 - read_export_only 用户必须能打开 ETC 发票导入页但不能选择 zip、预览或确认导入。
 - 120 张合成 ETC 发票混合 zip preview 必须把有效发票、同包重复 XML、malformed XML file-level failure 分开计数，且 preview 不持久化发票记录。

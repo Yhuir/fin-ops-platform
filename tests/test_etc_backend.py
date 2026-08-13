@@ -1466,6 +1466,16 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(total, 0)
         self.assertEqual(invoices, [])
 
+    def test_preview_manifest_parses_each_xml_once(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            uploads = [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))]
+
+            with patch.object(etc_service_module, "parse_etc_xml", wraps=parse_etc_xml) as parser:
+                service.inspect_import_zips(uploads)
+
+        self.assertEqual(parser.call_count, 2)
+
     def test_preview_parses_ticket_root_invoice_package_with_root_xml_and_pdf(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -1580,7 +1590,8 @@ class EtcServiceTests(unittest.TestCase):
 
     def test_confirm_import_session_persists_records_and_is_idempotent(self) -> None:
         with TemporaryDirectory() as temp_dir:
-            service = EtcService(data_dir=Path(temp_dir))
+            oa_client = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=oa_client)
             preview = service.preview_import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))])
 
             confirmed = service.confirm_import_session(str(preview["sessionId"]))
@@ -1594,6 +1605,8 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual({invoice.invoice_number for invoice in invoices}, {"ETC001", "ETC002"})
         self.assertEqual(import_batch.source_session_id, preview["sessionId"])
         self.assertEqual({invoice.import_session_id for invoice in invoices}, {preview["sessionId"]})
+        self.assertEqual(oa_client.uploads, [])
+        self.assertEqual(oa_client.draft_payloads, [])
 
     def test_import_batch_tracks_invoice_ids_and_date_ranges(self) -> None:
         with TemporaryDirectory() as temp_dir:

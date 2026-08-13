@@ -7,7 +7,7 @@
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：ETC 发票导入通过 ETC parsers/import job/reconciliation services 进入 ETC 批次和发票附件识别链路。
-- 当前闭环：Web preview 把 task/version/hash、原始 ZIP file object、preview fingerprint/counts/match edges 持久化到 `app.etc_import_sessions` / `app.etc_import_session_files`；独立 worker 只按 durable session id 重载并处理。预览热路径以已验证的 MinIO/S3 object ref 作为附件存在性事实，不重复下载全部历史 ETC 附件；archive verified write 与 session repository commit 成功后直接返回已持久化 session，只有后续 validate/worker 重载才读取 ZIP bytes。对账需求的全局发票组合只接收已满足车牌与日期窗口的候选，避免无关发票进入组合搜索或被错误分配。页面统一 Audit 已登记为 direct-canonical、zero own read model、ETC internal-relation consumer。
+- 当前闭环：Web preview 把 task/version/hash、原始 ZIP file object、preview fingerprint/counts/match edges 持久化到 `app.etc_import_sessions` / `app.etc_import_session_files`；独立 worker 只按 durable session id 重载并处理。预览热路径只展开一次 ZIP manifest 并复用已解析 XML，安全限制、匹配、allowlist 裁剪和 import audit 共用同一事实；嵌套 ZIP 保留原始存储路径，并单独生成 GB18030/UTF-8 可读展示路径。对账需求按车牌、通行起止时间、金额和票数做全局一对一分配，禁止使用开票时间代替通行时间。页面统一 Audit 已登记为 direct-canonical、zero own read model、ETC internal-relation consumer。
 - 当前缺口：真实 confirm/worker drain、外部 ETC control total 和 OA 草稿仍是发布前 external smoke/evidence 风险，不由数据库 Audit 伪装为已证明；59 ZIP preview 的 PostgreSQL session commit 与 MinIO verified write 已有生产 smoke 证据。
 - 旧代码删除状态：进程内 `_import_sessions` / `_etc_reconciliation_import_previews`、inline confirm 和旧 `POST /api/etc/import` 410 runtime surface 已删除；历史污染清理由 `docs/operations/invoice-pool-cleanup.md` 和独立工具负责。
 
@@ -44,7 +44,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
+| ETC import preview/result | 前端页面 | 可审计、可失败恢复；missing requirement 返回需求 ID、缺票数、金额、车牌、通行时间和处理提示，非法 ZIP 明确阻止确认 |
 | ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；import worker 必须用与 API 相同的对象存储环境配置构造 state store，才能跨进程重载 `minio://` / S3 archive ref |
 | Worker 完成后的 ETC 查询 | PostgreSQL state store -> reconciliation/business batch/invoice query services | 独立 worker 持久化 task、business batch 和 invoice 后，常驻 API 的只读查询入口必须先重载 PostgreSQL snapshot；不得继续返回进程启动时的旧内存状态，也不得依赖重启 API 才可见 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
@@ -91,6 +91,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 ## 当前缺口和删除条件
 
 - ETC zip parser/filter 变更必须覆盖导入、票据管理和关联台候选回归。
+- ETC import preview/confirm 只保存 ETC 导入与批次事实；不得上传 OA 附件或调用 OA draft create。OA 草稿仍只能由 ETC 票据管理的独立人工动作触发。
 - 旧 ETC canonical 污染清理不再属于本模块 runtime I/O；如果生产历史数据仍有污染，只能按 `docs/operations/invoice-pool-cleanup.md` 在备份、dry-run 和用户确认后处理。
 
 ## Canonical facts ownership

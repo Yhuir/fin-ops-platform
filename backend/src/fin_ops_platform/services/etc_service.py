@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from fin_ops_platform.services.etc_import_session_store import (
     EtcImportSessionStorePort,
@@ -716,6 +716,8 @@ class ParsedEtcXml:
     issue_datetime: str | None
     passage_start_date: str | None
     passage_end_date: str | None
+    passage_start_at: str | None
+    passage_end_at: str | None
     plate_number: str | None
     vehicle_type: str | None
     seller_name: str | None
@@ -728,11 +730,26 @@ class ParsedEtcXml:
     tax_rate: str | None
 
 
-@dataclass(slots=True)
-class _ArchiveEntry:
+@dataclass(frozen=True, slots=True)
+class EtcArchiveEntry:
     source_name: str
     path: str
+    display_path: str
     content: bytes
+    parsed_invoice: ParsedEtcXml | None = None
+    parse_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EtcArchiveFileManifest:
+    source_name: str
+    entries: tuple[EtcArchiveEntry, ...]
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EtcArchiveManifest:
+    files: tuple[EtcArchiveFileManifest, ...]
 
 
 @dataclass(slots=True)
@@ -777,6 +794,45 @@ FIELD_ALIASES = {
     "total_amount": ("TotalAmount", "TotalTax-includedAmount", "TotaltaxIncludedAmount", "total_amount", "价税合计", "合计金额"),
     "tax_rate": ("TaxRate", "tax_rate", "税率"),
 }
+
+
+def build_etc_archive_manifest(uploads: list[UploadedEtcZipFile]) -> EtcArchiveManifest:
+    files: list[EtcArchiveFileManifest] = []
+    for upload in uploads:
+        try:
+            entries = EtcService._extract_archive_entries(upload.file_name, upload.content)
+        except BadZipFile as exc:
+            files.append(
+                EtcArchiveFileManifest(
+                    source_name=upload.file_name,
+                    entries=(),
+                    error=str(exc),
+                )
+            )
+            continue
+        files.append(
+            EtcArchiveFileManifest(
+                source_name=upload.file_name,
+                entries=tuple(entries),
+            )
+        )
+    return EtcArchiveManifest(files=tuple(files))
+
+
+def _archive_entry_display_name(info: ZipInfo) -> str:
+    name = str(info.filename)
+    if info.flag_bits & 0x800:
+        return name
+    try:
+        raw = name.encode("cp437")
+        decoded = raw.decode("gb18030")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+    if decoded.encode("gb18030") != raw:
+        return name
+    if not re.search(r"[\u3400-\u9fff]", decoded):
+        return name
+    return decoded
 
 
 class EtcService:
@@ -2023,9 +2079,12 @@ class EtcService:
     def inspect_import_zips(
         self,
         uploads: list[UploadedEtcZipFile],
+        *,
+        manifest: EtcArchiveManifest | None = None,
     ) -> tuple[EtcImportResult, EtcImportPreviewAudit, list[dict[str, object]]]:
-        result = self._process_import_zips(uploads, persist=False)
-        audit, file_audits = self._calculate_import_preview_audit(uploads)
+        resolved_manifest = manifest or build_etc_archive_manifest(uploads)
+        result = self._process_import_zips(uploads, persist=False, manifest=resolved_manifest)
+        audit, file_audits = self._calculate_import_preview_audit(uploads, manifest=resolved_manifest)
         return result, audit, file_audits
 
     def confirm_import_session(self, session_id: str) -> EtcImportResult:
@@ -2156,7 +2215,10 @@ class EtcService:
     def _calculate_import_preview_audit(
         self,
         uploads: list[UploadedEtcZipFile],
+        *,
+        manifest: EtcArchiveManifest | None = None,
     ) -> tuple[EtcImportPreviewAudit, list[dict[str, object]]]:
+        resolved_manifest = manifest or build_etc_archive_manifest(uploads)
         session_audit = EtcImportPreviewAudit()
         file_payloads: list[dict[str, object]] = []
         seen_invoice_numbers: dict[str, str] = {}
@@ -2168,16 +2230,15 @@ class EtcService:
             for invoice in self._invoices.values()
         }
 
-        for file_index, upload in enumerate(uploads, start=1):
+        for file_index, (upload, file_manifest) in enumerate(zip(uploads, resolved_manifest.files, strict=True), start=1):
             file_id = f"file_{file_index:04d}"
             file_audit = EtcImportPreviewAudit()
-            try:
-                entries = self._extract_archive_entries(upload.file_name, upload.content)
-            except BadZipFile:
+            if file_manifest.error:
                 self._record_audit_error(session_audit, file_audit)
                 file_payloads.append(self._etc_import_file_audit_payload(file_id, upload.file_name, file_audit))
                 continue
 
+            entries = list(file_manifest.entries)
             xml_entries = [entry for entry in entries if self._is_xml_entry(entry.path)]
             if not xml_entries:
                 self._record_audit_error(session_audit, file_audit)
@@ -2189,7 +2250,9 @@ class EtcService:
                 session_audit.original_count += 1
                 file_audit.original_count += 1
                 try:
-                    parsed = parse_etc_xml(xml_entry.content)
+                    if xml_entry.parse_error or xml_entry.parsed_invoice is None:
+                        raise ValueError(xml_entry.parse_error or "invalid ETC XML")
+                    parsed = xml_entry.parsed_invoice
                 except Exception:
                     session_audit.error_count += 1
                     file_audit.error_count += 1
@@ -2268,7 +2331,9 @@ class EtcService:
         persist: bool,
         import_session_id: str | None = None,
         progress_callback: Callable[[EtcImportResult], None] | None = None,
+        manifest: EtcArchiveManifest | None = None,
     ) -> EtcImportResult:
+        resolved_manifest = manifest or build_etc_archive_manifest(uploads)
         result = EtcImportResult()
         import_batch = self._create_import_batch(uploads, import_session_id=import_session_id) if persist else None
         file_exists = self._stored_invoice_file_exists if persist else self._preview_invoice_file_exists
@@ -2279,15 +2344,14 @@ class EtcService:
             )
             for invoice in self._invoices.values()
         }
-        for upload in uploads:
-            try:
-                entries = self._extract_archive_entries(upload.file_name, upload.content)
-            except BadZipFile as exc:
+        for upload, file_manifest in zip(uploads, resolved_manifest.files, strict=True):
+            if file_manifest.error:
                 result.failed += 1
-                result.items.append(EtcImportItem(upload.file_name, None, "failed", f"zip 解析失败: {exc}"))
+                result.items.append(EtcImportItem(upload.file_name, None, "failed", f"zip 解析失败: {file_manifest.error}"))
                 if progress_callback is not None:
                     progress_callback(result)
                 continue
+            entries = list(file_manifest.entries)
             xml_entries = [entry for entry in entries if self._is_xml_entry(entry.path)]
             if not xml_entries:
                 result.failed += 1
@@ -2298,7 +2362,9 @@ class EtcService:
             pdf_entries = [entry for entry in entries if self._is_pdf_entry(entry.path)]
             for xml_entry in xml_entries:
                 try:
-                    parsed = parse_etc_xml(xml_entry.content)
+                    if xml_entry.parse_error or xml_entry.parsed_invoice is None:
+                        raise ValueError(xml_entry.parse_error or "invalid ETC XML")
+                    parsed = xml_entry.parsed_invoice
                     pdf_entry = self._match_pdf_entry(parsed.invoice_number, xml_entry.path, pdf_entries)
                     if persist:
                         assert import_batch is not None
@@ -3563,24 +3629,26 @@ class EtcService:
             event["metadata"] = deepcopy(metadata)
         batch.audit_events.append(event)
 
+    @staticmethod
     def _extract_archive_entries(
-        self,
         source_name: str,
         content: bytes,
         *,
         depth: int = 0,
         path_prefix: str = "",
+        display_path_prefix: str = "",
         budget: _ArchiveBudget | None = None,
-    ) -> list[_ArchiveEntry]:
+    ) -> list[EtcArchiveEntry]:
         if depth > MAX_ARCHIVE_DEPTH:
             raise BadZipFile("nested zip depth exceeds limit")
         budget = budget or _ArchiveBudget()
-        entries: list[_ArchiveEntry] = []
+        entries: list[EtcArchiveEntry] = []
         with ZipFile(BytesIO(content)) as archive:
             for info in archive.infolist():
                 if info.is_dir():
                     continue
                 path = f"{path_prefix}{info.filename}"
+                display_path = f"{display_path_prefix}{_archive_entry_display_name(info)}"
                 normalized_parts = Path(info.filename.replace("\\", "/")).parts
                 if Path(info.filename).is_absolute() or ".." in normalized_parts:
                     raise BadZipFile(f"unsafe archive path: {path}")
@@ -3601,16 +3669,33 @@ class EtcService:
                 file_content = archive.read(info)
                 if path.lower().endswith(".zip"):
                     entries.extend(
-                        self._extract_archive_entries(
+                        EtcService._extract_archive_entries(
                             source_name,
                             file_content,
                             depth=depth + 1,
                             path_prefix=f"{path}/",
+                            display_path_prefix=f"{display_path}/",
                             budget=budget,
                         )
                     )
                 else:
-                    entries.append(_ArchiveEntry(source_name, path, file_content))
+                    parsed_invoice: ParsedEtcXml | None = None
+                    parse_error: str | None = None
+                    if EtcService._is_xml_entry(path):
+                        try:
+                            parsed_invoice = parse_etc_xml(file_content)
+                        except Exception as exc:
+                            parse_error = str(exc)
+                    entries.append(
+                        EtcArchiveEntry(
+                            source_name=source_name,
+                            path=path,
+                            display_path=display_path,
+                            content=file_content,
+                            parsed_invoice=parsed_invoice,
+                            parse_error=parse_error,
+                        )
+                    )
         return entries
 
     @staticmethod
@@ -3622,7 +3707,7 @@ class EtcService:
         return path.lower().endswith(".pdf") and not Path(path).name.startswith(".")
 
     @staticmethod
-    def _match_pdf_entry(invoice_number: str, xml_path: str, pdf_entries: list[_ArchiveEntry]) -> _ArchiveEntry | None:
+    def _match_pdf_entry(invoice_number: str, xml_path: str, pdf_entries: list[EtcArchiveEntry]) -> EtcArchiveEntry | None:
         xml_stem = Path(xml_path).stem.lower()
         invoice_key = invoice_number.lower()
         for entry in pdf_entries:
@@ -3634,7 +3719,7 @@ class EtcService:
     @staticmethod
     def _preview_invoice_import_status(
         parsed: ParsedEtcXml,
-        pdf_entry: _ArchiveEntry | None,
+        pdf_entry: EtcArchiveEntry | None,
         preview_state: dict[str, tuple[bool, bool]],
     ) -> str:
         has_pdf = pdf_entry is not None
@@ -3663,8 +3748,8 @@ class EtcService:
         self,
         zip_source_name: str,
         parsed: ParsedEtcXml,
-        xml_entry: _ArchiveEntry,
-        pdf_entry: _ArchiveEntry | None,
+        xml_entry: EtcArchiveEntry,
+        pdf_entry: EtcArchiveEntry | None,
         *,
         import_batch: EtcImportBatch,
     ) -> tuple[str, str | None]:
@@ -4528,12 +4613,16 @@ def parse_etc_xml(content: bytes) -> ParsedEtcXml:
     invoice_number = _required_text(values, "invoice_number")
     raw_issue_date = _required_text(values, "issue_date")
     issue_date = _normalize_date(raw_issue_date)
+    raw_passage_start = values.get("passage_start_date")
+    raw_passage_end = values.get("passage_end_date")
     return ParsedEtcXml(
         invoice_number=invoice_number,
         issue_date=issue_date,
         issue_datetime=_normalize_datetime(values.get("issue_datetime") or raw_issue_date),
-        passage_start_date=_normalize_date(values["passage_start_date"]) if values.get("passage_start_date") else None,
-        passage_end_date=_normalize_date(values["passage_end_date"]) if values.get("passage_end_date") else None,
+        passage_start_date=_normalize_date(raw_passage_start) if raw_passage_start else None,
+        passage_end_date=_normalize_date(raw_passage_end) if raw_passage_end else None,
+        passage_start_at=_normalize_datetime(raw_passage_start) if raw_passage_start else None,
+        passage_end_at=_normalize_datetime(raw_passage_end) if raw_passage_end else None,
         plate_number=values.get("plate_number"),
         vehicle_type=values.get("vehicle_type"),
         seller_name=values.get("seller_name"),
@@ -4693,7 +4782,7 @@ def _normalize_datetime(value: str) -> str | None:
         return normalized[:19].replace("T", " ")
     if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", normalized):
         return f"{normalized[:16].replace('T', ' ')}:00"
-    if re.match(r"^\d{14}$", normalized):
+    if re.match(r"^\d{14}(?:\d{1,6})?$", normalized):
         return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:8]} {normalized[8:10]}:{normalized[10:12]}:{normalized[12:14]}"
     return None
 

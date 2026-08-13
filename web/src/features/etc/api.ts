@@ -280,6 +280,12 @@ type ApiEtcReconciliationBlockingIssue = {
   error?: string;
   requirementId?: string;
   requirement_id?: string;
+  requirementIds?: string[];
+  requirement_ids?: string[];
+  invoiceNumbers?: string[];
+  invoice_numbers?: string[];
+  fileNames?: string[];
+  file_names?: string[];
   transactionAt?: string;
   transaction_at?: string;
   transactionDate?: string;
@@ -289,10 +295,16 @@ type ApiEtcReconciliationBlockingIssue = {
   vehicle_plate?: string | null;
   invoiceCount?: number | null;
   invoice_count?: number | null;
+  matchedInvoiceCount?: number | null;
+  matched_invoice_count?: number | null;
+  missingInvoiceCount?: number | null;
+  missing_invoice_count?: number | null;
   dateWindowStart?: string;
   date_window_start?: string;
   dateWindowEnd?: string;
   date_window_end?: string;
+  resolutionHint?: string;
+  resolution_hint?: string;
 };
 
 type ApiEtcImportAuditCounts = {
@@ -896,13 +908,19 @@ function mapEtcReconciliationBlockingIssue(issue: ApiEtcReconciliationBlockingIs
   return {
     error: issue.error ?? "",
     requirementId: issue.requirementId ?? issue.requirement_id ?? "",
+    requirementIds: issue.requirementIds ?? issue.requirement_ids ?? [],
+    invoiceNumbers: issue.invoiceNumbers ?? issue.invoice_numbers ?? [],
+    fileNames: issue.fileNames ?? issue.file_names ?? [],
     transactionAt: issue.transactionAt ?? issue.transaction_at ?? "",
     transactionDate: issue.transactionDate ?? issue.transaction_date ?? "",
     amount: stringOrEmpty(issue.amount),
     vehiclePlate: issue.vehiclePlate ?? issue.vehicle_plate ?? null,
     invoiceCount: issue.invoiceCount ?? issue.invoice_count ?? null,
+    matchedInvoiceCount: issue.matchedInvoiceCount ?? issue.matched_invoice_count ?? null,
+    missingInvoiceCount: issue.missingInvoiceCount ?? issue.missing_invoice_count ?? null,
     dateWindowStart: issue.dateWindowStart ?? issue.date_window_start ?? "",
     dateWindowEnd: issue.dateWindowEnd ?? issue.date_window_end ?? "",
+    resolutionHint: issue.resolutionHint ?? issue.resolution_hint ?? "",
   };
 }
 

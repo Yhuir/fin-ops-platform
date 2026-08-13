@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 import unittest
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fin_ops_platform.services.etc_document_parsers import (
     CcbCreditCardStatementParser,
@@ -36,6 +36,7 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     validate_etc_zip_confirm_for_task,
 )
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile
+from fin_ops_platform.services.etc_service import _archive_entry_display_name, parse_etc_xml
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.untrusted_document_policy import (
     ETC_DOCUMENT_LIMITS,
@@ -213,6 +214,8 @@ def etc_xml(
     *,
     issue_date: str = "2026-03-03",
     request_time: str | None = None,
+    passage_start_at: str | None = None,
+    passage_end_at: str | None = None,
     plate_number: str = "云ADA0381",
     total_amount: str = "25.00",
 ) -> bytes:
@@ -223,8 +226,8 @@ def etc_xml(
   <InvoiceNumber>{invoice_number}</InvoiceNumber>
   <IssueDate>{issue_date}</IssueDate>
   {request_time_xml}
-  <PassageStartDate>{issue_date}</PassageStartDate>
-  <PassageEndDate>{issue_date}</PassageEndDate>
+  <PassageStartDate>{passage_start_at or issue_date}</PassageStartDate>
+  <PassageEndDate>{passage_end_at or passage_start_at or issue_date}</PassageEndDate>
   <PlateNumber>{plate_number}</PlateNumber>
   <AmountWithoutTax>{amount_without_tax}</AmountWithoutTax>
   <TaxAmount>0.75</TaxAmount>
@@ -2339,6 +2342,68 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing_required_etc_invoice"):
             validate_etc_zip_confirm_for_task(task=confirmed, preview=missing)
 
+    def test_parse_etc_xml_preserves_millisecond_passage_timestamp(self) -> None:
+        parsed = parse_etc_xml(
+            etc_xml(
+                "ETC-TIME",
+                passage_start_at="20260715215348000",
+                passage_end_at="20260715215348000",
+            )
+        )
+
+        self.assertEqual(parsed.passage_start_date, "2026-07-15")
+        self.assertEqual(parsed.passage_start_at, "2026-07-15 21:53:48")
+        self.assertEqual(parsed.passage_end_at, "2026-07-15 21:53:48")
+
+    def test_zip_preview_does_not_use_issue_date_as_passage_evidence(self) -> None:
+        task = ready_task_with_requirement(
+            amount="25.00",
+            transaction_at="2026-07-15 21:53:48",
+            invoice_count=1,
+        )
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "etc.zip",
+                    zip_bytes(
+                        {
+                            "xml/ETC-WRONG-TRIP.xml": etc_xml(
+                                "ETC-WRONG-TRIP",
+                                issue_date="2026-07-15",
+                                passage_start_at="20260717192914000",
+                            )
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.allowed_invoice_numbers, [])
+        self.assertEqual([issue["error"] for issue in preview.blocking_issues], ["missing_required_etc_invoice"])
+
+    def test_archive_manifest_decodes_gb18030_display_path_without_changing_raw_path(self) -> None:
+        encoded_name = "6、7月发票.xml".encode("gb18030").decode("cp437")
+        info = ZipInfo(encoded_name)
+        info.flag_bits = 0
+
+        self.assertEqual(_archive_entry_display_name(info), "6、7月发票.xml")
+
+    def test_zip_preview_blocks_invalid_archive(self) -> None:
+        task = ready_task_with_requirement(
+            amount="25.00",
+            transaction_at="2026-07-15 21:53:48",
+            invoice_count=1,
+        )
+
+        invalid_archive = preview_etc_zip_for_task(
+            task=task,
+            uploads=[UploadedEtcZipFile("broken.zip", b"not-a-zip")],
+        )
+        self.assertEqual(invalid_archive.blocking_issues[0]["error"], "invalid_etc_archive")
+        with self.assertRaisesRegex(ValueError, "invalid_etc_archive"):
+            validate_etc_zip_confirm_for_task(task=task, preview=invalid_archive)
+
     def test_zip_preview_matches_requirement_to_two_invoice_amount_sum(self) -> None:
         task = ready_task_with_requirement(amount="71.25", transaction_at="2026-04-08 18:57:17", invoice_count=2)
 
@@ -2462,6 +2527,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
                         {
                             "package/xml/ETC-A.xml": etc_xml("ETC-A", issue_date="2026-03-03", total_amount="25.00"),
                             "package/xml/ETC-B.xml": etc_xml("ETC-B", issue_date="2026-03-03", total_amount="25.00"),
+                            "package/xml/EXTRA.xml": etc_xml("EXTRA", issue_date="2026-03-03", total_amount="99.00"),
                         }
                     ),
                 )
@@ -2472,8 +2538,14 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertTrue(any(issue["error"] == "ambiguous_etc_invoice_match" for issue in preview.blocking_issues))
         self.assertEqual(
             {item.invoice_number: item.filter_status for item in preview.items},
-            {"ETC-A": "ambiguous_zip_match", "ETC-B": "ambiguous_zip_match"},
+            {
+                "ETC-A": "ambiguous_zip_match",
+                "ETC-B": "ambiguous_zip_match",
+                "EXTRA": "excluded_extra_zip_invoice",
+            },
         )
+        issue = next(issue for issue in preview.blocking_issues if issue["error"] == "ambiguous_etc_invoice_match")
+        self.assertEqual(issue["invoiceNumbers"], ["ETC-A", "ETC-B"])
 
     def test_zip_preview_requires_combination_length_to_match_invoice_count(self) -> None:
         task = ready_task_with_requirement(amount="42.39", transaction_at="2026-04-03 18:14:27", invoice_count=4)
@@ -2718,7 +2790,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual({item.invoice_number for item in included}, {"ETC14638", "ETC0043"})
         self.assertEqual({item.requirement_id for item in included}, {"TASK-REQ-0001+TASK-REQ-0002"})
 
-    def test_zip_preview_disambiguates_same_day_duplicate_amount_by_invoice_request_time(self) -> None:
+    def test_zip_preview_disambiguates_same_day_duplicate_amount_by_passage_time(self) -> None:
         task = ready_task_with_requirement(
             amount="71.25",
             transaction_at="2026-04-08 18:57:17",
@@ -2750,24 +2822,28 @@ class EtcReconciliationServiceTests(unittest.TestCase):
                                 "ETC2950-A",
                                 issue_date="2026-04-08",
                                 request_time="2026-04-08 16:27:04",
+                                passage_start_at="20260408111341000",
                                 total_amount="29.50",
                             ),
                             "20260408_通行费电子发票_2张.zip/invoice.zip/xml/ETC4175-A.xml": etc_xml(
                                 "ETC4175-A",
                                 issue_date="2026-04-08",
                                 request_time="2026-04-08 16:27:04",
+                                passage_start_at="20260408111341000",
                                 total_amount="41.75",
                             ),
                             "20260410_通行费电子发票_2张.zip/invoice.zip/xml/ETC2935-B.xml": etc_xml(
                                 "ETC2935-B",
                                 issue_date="2026-04-08",
                                 request_time="2026-04-10 16:26:33",
+                                passage_start_at="20260408185717000",
                                 total_amount="29.35",
                             ),
                             "20260410_通行费电子发票_2张.zip/invoice.zip/xml/ETC4190-B.xml": etc_xml(
                                 "ETC4190-B",
                                 issue_date="2026-04-08",
                                 request_time="2026-04-10 16:26:32",
+                                passage_start_at="20260408185717000",
                                 total_amount="41.90",
                             ),
                         }
@@ -2788,63 +2864,95 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(included_by_requirement["TASK-REQ-0001"], {"ETC2935-B", "ETC4190-B"})
         self.assertEqual(included_by_requirement["TASK-REQ-0002"], {"ETC2950-A", "ETC4175-A"})
 
-    def test_zip_preview_blocks_single_invoice_allocated_to_multiple_requirements(self) -> None:
-        duplicate_ticket_text = TICKET_ROOT_TEXT + """
-车牌号 云ADA0381
-交易时间 2026-03-03 18:06:18
-入口站 昆明南站
-出口站 九龙池站
-金额 25.00
-发票张数 1
-"""
-        service, task_id = self._parsed_task()
-        service.apply_parse_result(
-            task_id=task_id,
-            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-2", text=duplicate_ticket_text),
-            actor="alice",
+    def test_zip_preview_assigns_exact_passage_invoice_once_and_reports_other_requirement_missing(self) -> None:
+        confirmed = ready_task_with_requirement(
+            amount="25.00",
+            transaction_at="2026-03-03 17:06:18",
+            invoice_count=1,
         )
-        task = service.refresh_matches(task_id=task_id)
-        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
-        matching_tickets = [ticket for ticket in task.ticket_root_items if ticket.amount == Decimal("25.00")]
-        for ticket in matching_tickets:
-            task = service.patch_item(
-                task_id=task_id,
-                item_id=card.item_id,
-                expected_version=task.version,
-                actor="alice",
-                payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        confirmed.expected_etc_invoice_requirements.append(
+            ExpectedEtcInvoiceRequirement(
+                requirement_id="TASK-REQ-0002",
+                task_id="TASK",
+                credit_card_item_id="CARD-2",
+                ticket_root_item_id="TICKET-2",
+                vehicle_plate="云ADA0381",
+                transaction_at="2026-03-03 18:06:18",
+                date_window_start="2026-03-03",
+                date_window_end="2026-03-03",
+                amount=Decimal("25.00"),
+                invoice_count=1,
             )
-        task = service.patch_item(
-            task_id=task_id,
-            item_id=card.item_id,
-            expected_version=task.version,
-            actor="alice",
-            payload={"action": "set_manual_resolution", "manualResolution": "included_etc"},
-        )
-        other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
-        task = service.patch_item(
-            task_id=task_id,
-            item_id=other_card.item_id,
-            expected_version=task.version,
-            actor="alice",
-            payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
-        )
-        confirmed = service.confirm_task(
-            task_id=task_id,
-            expected_version=task.version,
-            actor="alice",
-            approved_delta="-50.00",
-            approved_delta_note="测试重复requirement",
         )
 
         preview = preview_etc_zip_for_task(
             task=confirmed,
-            uploads=[UploadedEtcZipFile("etc.zip", etc_zip(["ETC001"], include_pdf=True))],
+            uploads=[
+                UploadedEtcZipFile(
+                    "etc.zip",
+                    zip_bytes(
+                        {
+                            "xml/ETC001.xml": etc_xml(
+                                "ETC001",
+                                passage_start_at="20260303170618000",
+                            ),
+                            "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                        }
+                    ),
+                )
+            ],
         )
 
-        self.assertTrue(any(issue["error"] == "duplicate_requirement_invoice_match" for issue in preview.blocking_issues))
-        with self.assertRaisesRegex(ValueError, "duplicate_requirement_invoice_match"):
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC001"])
+        self.assertEqual([issue["error"] for issue in preview.blocking_issues], ["missing_required_etc_invoice"])
+        self.assertEqual(preview.blocking_issues[0]["transactionAt"], "2026-03-03 18:06:18")
+        with self.assertRaisesRegex(ValueError, "missing_required_etc_invoice"):
             validate_etc_zip_confirm_for_task(task=confirmed, preview=preview)
+
+    def test_global_match_reports_ambiguity_when_identical_requirements_compete_for_one_invoice(self) -> None:
+        task = ready_task_with_requirement(
+            amount="25.00",
+            transaction_at="2026-03-03 17:06:18",
+            invoice_count=1,
+        )
+        task.expected_etc_invoice_requirements.append(
+            ExpectedEtcInvoiceRequirement(
+                requirement_id="TASK-REQ-0002",
+                task_id="TASK",
+                credit_card_item_id="CARD-2",
+                ticket_root_item_id="TICKET-2",
+                vehicle_plate="云ADA0381",
+                transaction_at="2026-03-03 17:06:18",
+                date_window_start="2026-03-03",
+                date_window_end="2026-03-03",
+                amount=Decimal("25.00"),
+                invoice_count=1,
+            )
+        )
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "etc.zip",
+                    zip_bytes(
+                        {
+                            "xml/ETC001.xml": etc_xml(
+                                "ETC001",
+                                passage_start_at="20260303170618000",
+                            ),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.allowed_invoice_numbers, [])
+        self.assertEqual(
+            {issue["requirementId"] for issue in preview.blocking_issues},
+            {"TASK-REQ-0001", "TASK-REQ-0002"},
+        )
+        self.assertEqual({issue["error"] for issue in preview.blocking_issues}, {"ambiguous_etc_invoice_match"})
 
     def test_uploaded_source_file_uses_state_store_file_storage_api_when_available(self) -> None:
         class FakeStateStore:

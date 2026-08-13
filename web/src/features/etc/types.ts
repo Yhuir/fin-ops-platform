@@ -227,13 +227,19 @@ export type EtcImportItem = {
 export type EtcReconciliationBlockingIssue = {
   error: string;
   requirementId: string;
+  requirementIds: string[];
+  invoiceNumbers: string[];
+  fileNames?: string[];
   transactionAt?: string;
   transactionDate?: string;
   amount?: string;
   vehiclePlate?: string | null;
   invoiceCount?: number | null;
+  matchedInvoiceCount?: number | null;
+  missingInvoiceCount?: number | null;
   dateWindowStart?: string;
   dateWindowEnd?: string;
+  resolutionHint?: string;
 };
 
 export type EtcReconciliationFilterPreview = {

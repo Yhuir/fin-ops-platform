@@ -729,6 +729,8 @@ describe("Import pages", () => {
           amount: "126.35",
           vehiclePlate: "云ADA0381",
           invoiceCount: 1,
+          missingInvoiceCount: 1,
+          resolutionHint: "请补齐该行程对应的 ETC 发票后重新预览。",
         },
       ],
     });
@@ -747,6 +749,10 @@ describe("Import pages", () => {
     expect(screen.getByText("2026-04-27 12:22:09")).toBeInTheDocument();
     expect(screen.getByText("126.35")).toBeInTheDocument();
     expect(screen.getByText("云ADA0381")).toBeInTheDocument();
+    expect(screen.getByText("缺失行程 1")).toBeInTheDocument();
+    expect(screen.getByText("缺少发票 1")).toBeInTheDocument();
+    expect(screen.getByText("缺失金额 126.35")).toBeInTheDocument();
+    expect(screen.getByText("请补齐该行程对应的 ETC 发票后重新预览。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
   });
 

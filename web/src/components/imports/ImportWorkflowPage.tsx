@@ -119,7 +119,6 @@ const ETC_FILTER_STATUS_LABELS: Record<string, string> = {
   included: "本次导入",
   excluded_extra_zip_invoice: "不在任务内",
   ambiguous_zip_match: "命中冲突",
-  duplicate_requirement_invoice_match: "重复命中",
   not_in_reconciliation_preview: "未筛选",
 };
 
@@ -1063,6 +1062,21 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => etcBlockingIssues.filter(isMissingEtcRequirementIssue),
     [etcBlockingIssues],
   );
+  const otherEtcBlockingIssues = useMemo(
+    () => etcBlockingIssues.filter((issue) => !isMissingEtcRequirementIssue(issue)),
+    [etcBlockingIssues],
+  );
+  const missingEtcInvoiceCount = useMemo(
+    () => missingEtcRequirementIssues.reduce(
+      (total, issue) => total + (issue.missingInvoiceCount ?? issue.invoiceCount ?? 0),
+      0,
+    ),
+    [missingEtcRequirementIssues],
+  );
+  const missingEtcAmount = useMemo(
+    () => missingEtcRequirementIssues.reduce((total, issue) => total + Number(issue.amount || 0), 0),
+    [missingEtcRequirementIssues],
+  );
   const canConfirm = canMutateData && confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
     && canMutateData
@@ -1752,6 +1766,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                       <ImportNotice ariaLabel="ETC对账任务缺失项" tone="warning">
                         <div className="import-workflow-notice-stack">
                           <p className="import-workflow-notice-strong">ETC对账任务缺失项</p>
+                          <div className="import-workflow-chip-row">
+                            <ImportChip color="warning">{`缺失行程 ${missingEtcRequirementIssues.length}`}</ImportChip>
+                            <ImportChip color="warning">{`缺少发票 ${missingEtcInvoiceCount}`}</ImportChip>
+                            <ImportChip color="warning">{`缺失金额 ${formatMoney(missingEtcAmount, "0.00")}`}</ImportChip>
+                          </div>
                           <div className="import-workflow-notice-stack import-workflow-notice-stack--compact">
                             {missingEtcRequirementIssues.map((issue) => (
                               <div
@@ -1764,14 +1783,24 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                                   <ImportChip>{displayValue(issue.vehiclePlate)}</ImportChip>
                                   {issue.invoiceCount ? <ImportChip>{`${issue.invoiceCount} 张`}</ImportChip> : null}
                                 </div>
+                                {issue.resolutionHint ? <p className="import-workflow-muted-text">{issue.resolutionHint}</p> : null}
                               </div>
                             ))}
                           </div>
                         </div>
                       </ImportNotice>
                     ) : null}
-                    {etcBlockingIssues.length > 0 && missingEtcRequirementIssues.length === 0 ? (
-                      <ImportNotice tone="warning">ETC 对账任务仍有 {etcBlockingIssues.length} 个阻塞项，请处理后重新预览。</ImportNotice>
+                    {otherEtcBlockingIssues.length > 0 ? (
+                      <ImportNotice tone="warning">
+                        <div className="import-workflow-notice-stack import-workflow-notice-stack--compact">
+                          <p className="import-workflow-notice-strong">{`另有 ${otherEtcBlockingIssues.length} 个文件或匹配阻塞项`}</p>
+                          {otherEtcBlockingIssues.map((issue, index) => (
+                            <p key={`${issue.error}:${issue.requirementId}:${index}`} className="import-workflow-muted-text">
+                              {issue.resolutionHint || "请检查文件与匹配结果后重新预览。"}
+                            </p>
+                          ))}
+                        </div>
+                      </ImportNotice>
                     ) : null}
                     <div className="import-workflow-grid-shell import-workflow-grid-shell--etc">
                       <EtcPreviewTable loading={isPreviewing} rows={etcRows} />

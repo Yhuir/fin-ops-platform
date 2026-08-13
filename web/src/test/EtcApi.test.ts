@@ -523,6 +523,26 @@ describe("etc api", () => {
           duplicatesSkipped: 2,
           attachmentsCompleted: 3,
           failed: 4,
+          reconciliationFilter: {
+            taskId: "etc_task_ready_001",
+            taskVersion: 9,
+            confirmedItemSetHash: "confirmed-hash",
+            allowedInvoiceNumbers: [],
+            blockingIssues: [
+              {
+                error: "missing_required_etc_invoice",
+                requirementId: "REQ-1",
+                requirementIds: ["REQ-1"],
+                invoiceNumbers: [],
+                transactionAt: "2026-07-15 21:53:48",
+                amount: "147.25",
+                invoiceCount: 1,
+                matchedInvoiceCount: 0,
+                missingInvoiceCount: 1,
+                resolutionHint: "请补齐该行程对应的 ETC 发票后重新预览。",
+              },
+            ],
+          },
           items: [
             {
               invoiceNumber: "ETC-2026-006",
@@ -562,6 +582,19 @@ describe("etc api", () => {
       duplicatesSkipped: 2,
       attachmentsCompleted: 3,
       failed: 4,
+      reconciliationFilter: {
+        taskId: "etc_task_ready_001",
+        taskVersion: 9,
+        confirmedItemSetHash: "confirmed-hash",
+        allowedInvoiceNumbers: [],
+        blockingIssues: [expect.objectContaining({
+          requirementId: "REQ-1",
+          requirementIds: ["REQ-1"],
+          invoiceNumbers: [],
+          missingInvoiceCount: 1,
+          resolutionHint: "请补齐该行程对应的 ETC 发票后重新预览。",
+        })],
+      },
       items: [
         {
           invoiceNumber: "ETC-2026-006",

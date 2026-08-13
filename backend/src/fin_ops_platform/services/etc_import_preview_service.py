@@ -14,11 +14,16 @@ from fin_ops_platform.services.etc_import_session_store import (
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     EtcZipFilterPreview,
     StaleReconciliationPreviewError,
+    filter_manifest_by_allowlist,
     filter_uploads_by_allowlist,
     preview_etc_zip_for_task,
     validate_etc_zip_confirm_for_task,
 )
-from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError, UploadedEtcZipFile
+from fin_ops_platform.services.etc_service import (
+    EtcImportPreviewStaleError,
+    UploadedEtcZipFile,
+    build_etc_archive_manifest,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,13 +142,25 @@ class EtcImportPreviewService:
         task: Any,
         uploads: list[UploadedEtcZipFile],
     ) -> tuple[dict[str, Any], EtcZipFilterPreview, list[UploadedEtcZipFile]]:
-        reconciliation_preview = preview_etc_zip_for_task(task=task, uploads=uploads)
+        manifest = build_etc_archive_manifest(uploads)
+        reconciliation_preview = preview_etc_zip_for_task(task=task, uploads=uploads, manifest=manifest)
         filtered_uploads = filter_uploads_by_allowlist(
             uploads=uploads,
             allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
+            manifest=manifest,
         )
-        import_result, import_audit, import_file_audits = self._etc_service.inspect_import_zips(filtered_uploads)
-        full_result, full_audit, full_file_audits = self._etc_service.inspect_import_zips(uploads)
+        filtered_manifest = filter_manifest_by_allowlist(
+            manifest=manifest,
+            allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
+        )
+        import_result, import_audit, import_file_audits = self._etc_service.inspect_import_zips(
+            filtered_uploads,
+            manifest=filtered_manifest,
+        )
+        full_result, full_audit, full_file_audits = self._etc_service.inspect_import_zips(
+            uploads,
+            manifest=manifest,
+        )
         payload: dict[str, Any] = {
             **import_result.to_payload(),
             "summary": import_result.summary_payload(),
@@ -182,7 +199,6 @@ def _filter_status_message(filter_status: str) -> str:
     labels = {
         "excluded_extra_zip_invoice": "zip 中存在，但不属于当前已确认 ETC 对账任务。",
         "ambiguous_zip_match": "zip 中有多张发票命中同一对账需求，需要人工处理后再导入。",
-        "duplicate_requirement_invoice_match": "同一张发票命中多个对账需求，需要人工处理后再导入。",
         "not_in_reconciliation_preview": "未进入本次 ETC 对账任务筛选结果。",
     }
     return labels.get(filter_status, "")
