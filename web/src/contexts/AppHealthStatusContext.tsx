@@ -71,11 +71,11 @@ type LocalHealthJob = {
 };
 
 function hasAttentionJob(jobs: LocalHealthJob[]) {
-  return jobs.some((job) => job.type !== "workbench_matching" && (job.status === "failed" || job.status === "partial_success"));
+  return jobs.some((job) => job.status === "failed" || job.status === "partial_success");
 }
 
 function hasRunningJob(jobs: LocalHealthJob[]) {
-  return jobs.some((job) => job.type !== "workbench_matching" && (job.status === "queued" || job.status === "running"));
+  return jobs.some((job) => job.status === "queued" || job.status === "running");
 }
 
 function sessionSourceFromLocal(sessionStatus: ReturnType<typeof useSession>["status"]): AppHealthSessionSource {
@@ -153,7 +153,7 @@ function isMonthScope(value: string) {
 }
 
 function mapApiJobSummary(job: ApiAppHealthJobSummary | null | undefined): AppHealthJobSummary | null {
-  if (!job || job.type === "workbench_matching") {
+  if (!job) {
     return null;
   }
   return {
@@ -196,13 +196,13 @@ function jobTime(job: LocalHealthJob) {
 
 function chooseLocalRunningJob(jobs: LocalHealthJob[]) {
   return [...jobs]
-    .filter((job) => job.type !== "workbench_matching" && (job.status === "queued" || job.status === "running"))
+    .filter((job) => job.status === "queued" || job.status === "running")
     .sort((left, right) => jobTime(right) - jobTime(left))[0];
 }
 
 function chooseLocalAttentionJob(jobs: LocalHealthJob[]) {
   return [...jobs]
-    .filter((job) => job.type !== "workbench_matching" && (job.status === "failed" || job.status === "partial_success"))
+    .filter((job) => job.status === "failed" || job.status === "partial_success")
     .sort((left, right) => {
       const statusDelta = (left.status === "failed" ? 0 : 1) - (right.status === "failed" ? 0 : 1);
       if (statusDelta !== 0) {
@@ -260,7 +260,7 @@ function detailFromPayload(
     primaryRunning: mapApiJobSummary(backgroundJobs?.primary_running ?? backgroundJobs?.primaryRunning) ?? mapLocalJobSummary(chooseLocalRunningJob(jobs)),
     primaryAttention: mapApiJobSummary(backgroundJobs?.primary_attention ?? backgroundJobs?.primaryAttention) ?? mapLocalJobSummary(chooseLocalAttentionJob(jobs)),
     attentionCount: backgroundJobs?.attention ?? jobs.filter(
-      (job) => job.type !== "workbench_matching" && (job.status === "failed" || job.status === "partial_success"),
+      (job) => job.status === "failed" || job.status === "partial_success",
     ).length,
     matchingDirtyMonths: matchingDirtyMonths.length > 0
       ? matchingDirtyMonths

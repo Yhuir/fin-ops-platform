@@ -228,9 +228,7 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
     return null;
   }
   const backgroundTasks = Array.isArray(raw.background_tasks)
-    ? raw.background_tasks
-      .filter((task) => stringValue(record(task).type) !== "workbench_matching")
-      .map(mapTask)
+    ? raw.background_tasks.map(mapTask)
     : [];
   if (backgroundTasks.some((task) => task === null)) {
     return null;

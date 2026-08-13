@@ -88,23 +88,6 @@ describe("global background job page header", () => {
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
   });
 
-  test("never renders retired workbench matching progress", async () => {
-    installMockApiFetch({
-      backgroundJobs: [{
-        ...runningEtcJob,
-        job_id: "job_workbench_matching_queued",
-        type: "workbench_matching",
-        short_label: "正在生成正式配对关系 0/11",
-      }],
-    });
-    renderAppAt("/");
-
-    await waitFor(() => {
-      expect(screen.queryByText(/正在生成正式配对关系/)).not.toBeInTheDocument();
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
-  });
-
   test("renders a retry action for retryable attention jobs", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
