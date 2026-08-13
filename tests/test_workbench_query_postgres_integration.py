@@ -145,28 +145,45 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         truncate_test_database(self.database_url)
 
     def _insert_canonical_fixtures(self) -> None:
+        settings_payload = {
+            "allowed_usernames": ["YNSYLP005"],
+            "readonly_export_usernames": [],
+            "admin_usernames": ["YNSYLP005"],
+            "full_access_usernames": [],
+            "access_control_version": 1,
+            "bank_transaction_tags": {
+                "version": 2,
+                "definitions": [
+                    {
+                        "code": "materials",
+                        "label": "材料采购",
+                        "path": ["货款", "材料采购"],
+                        "output_primary_label": "货款",
+                        "output_sub_label": "材料采购",
+                        "status": "active",
+                        "priority": 2,
+                        "sort_order": 1,
+                        "rules": {
+                            "match_fields": ["summary_text"],
+                            "contains_any": ["材料款"],
+                        },
+                    }
+                ],
+            },
+        }
         self.raw_connection.execute(
             """
             insert into app.app_settings(settings_key, settings_payload, raw_payload)
-            values (
-                'app_settings',
-                '{
-                    "allowed_usernames":["YNSYLP005"],
-                    "readonly_export_usernames":[],
-                    "admin_usernames":["YNSYLP005"],
-                    "full_access_usernames":[],
-                    "access_control_version":1
-                }'::jsonb,
-                '{"normalized_payload":{
-                    "allowed_usernames":["YNSYLP005"],
-                    "readonly_export_usernames":[],
-                    "admin_usernames":["YNSYLP005"],
-                    "full_access_usernames":[],
-                    "access_control_version":1
-                }}'::jsonb
-            )
+            values ('app_settings', %s::jsonb, %s::jsonb)
             on conflict (settings_key) do nothing
-            """
+            """,
+            (
+                json.dumps(settings_payload, ensure_ascii=False),
+                json.dumps(
+                    {"normalized_payload": settings_payload},
+                    ensure_ascii=False,
+                ),
+            ),
         )
         self.raw_connection.execute(
             """
@@ -280,6 +297,23 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(initial["summary"]["unpaired_count"], 4)
         self.assertEqual(initial["paired"]["total"], 1)
         self.assertEqual(initial["unpaired"]["total"], 4)
+        initial_bank_rows = [
+            row
+            for zone in ("paired", "unpaired")
+            for group in initial[zone]["groups"]
+            for row in list(group.get("bank_rows") or [])
+        ]
+        bank_direct = next(
+            row for row in initial_bank_rows if row.get("id") == "bank-direct-1"
+        )
+        self.assertEqual(bank_direct["category_code"], "materials")
+        self.assertEqual(bank_direct["category_label"], "材料采购")
+        self.assertEqual(bank_direct["category_label_path"], ["货款", "材料采购"])
+        self.assertEqual(bank_direct["category_resolution_status"], "auto_matched")
+        same_text_bank = next(
+            row for row in initial_bank_rows if row.get("id") == "same-text-id"
+        )
+        self.assertEqual(same_text_bank["category_resolution_status"], "unmatched")
         etc_groups = [
             group
             for group in initial["unpaired"]["groups"]
@@ -319,6 +353,25 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertFalse(
             any("read_model.workbench_" in str(statement["sql"]) for statement in self.connection.statements)
         )
+        classification_statements = [
+            statement
+            for statement in self.connection.statements
+            if "classified_with_semantics" in str(statement.get("raw_sql") or "")
+        ]
+        self.assertEqual(len(classification_statements), 1)
+        self.assertEqual(
+            classification_statements[0]["params"][-1],
+            ["bank-direct-1", "same-text-id"],
+        )
+
+        detail = self.repository.get_workbench_row_detail(
+            scope_key="2026-07",
+            row_id="bank-direct-1",
+            row_type="bank",
+        )
+        self.assertEqual(detail["row"]["category_code"], "materials")
+        self.assertEqual(detail["row"]["category_label"], "材料采购")
+        self.assertEqual(detail["row"]["category_resolution_status"], "auto_matched")
 
         self.connection.statements.clear()
         page = self.repository.get_workbench_groups_page(
@@ -370,7 +423,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            2,
+            3,
         )
         exception_sql = next(
             str(statement.get("raw_sql") or "")
@@ -452,7 +505,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            2,
+            3,
         )
 
     def test_page_etc_hydration_is_one_statement_and_matches_legacy_dto(self) -> None:
@@ -905,7 +958,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 all(float(statement["duration_ms"]) >= 0 for statement in self.connection.statements)
             )
         self.assertEqual(statement_counts[0], statement_counts[1])
-        self.assertEqual(statement_counts, [2, 2])
+        self.assertEqual(statement_counts, [3, 3])
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 

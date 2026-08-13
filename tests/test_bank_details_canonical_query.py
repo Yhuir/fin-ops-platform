@@ -574,6 +574,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             transaction,
             settings={"bank_transaction_tags": {"definitions": [definition]}},
             transaction_ids=["bank-legacy-1", "bank-legacy-1", ""],
+            tenant_id="tenant-workbench",
         )
 
         self.assertEqual(
@@ -596,6 +597,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertIn("from classified_with_semantics", normalized_sql)
         self.assertIn("row_id = any(%s::text[])", normalized_sql)
         self.assertEqual(params[-1], ["bank-legacy-1"])
+        self.assertIn("tenant-workbench", params)
         self.assertEqual(sql.count("%s"), len(params))
 
 

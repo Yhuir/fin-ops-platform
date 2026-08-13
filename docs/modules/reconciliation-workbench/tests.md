@@ -324,6 +324,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - Frontend/API/layout：`WorkbenchApi.test.ts` 保护 resolution status 映射；`WorkbenchColumns.test.tsx` 保护金额三层、待分类/待确认与旧 relation status chip 删除；`RelationGroupGrid.test.tsx` 保护 cell 使用内容驱动 `min-height`、多记录项不可收缩裁切。
 - Regression/performance：相关后端 404 条和前端 116 条回归通过；分类 enrich 是每 scope 一次 set-based query，不新增逐行 I/O、页面轮询、DOM 测量、worker、cache 或跨页写后 fan-out。
 
+## 2026-08-13 direct API 流水分类 Chip 回归
+
+- Repository/API：`test_workbench_query_postgres_integration.py` 保护 initial、groups 与 row detail 仅对当前可见 bank IDs 一次批量复用 Bank Details canonical classifier，输出 effective category 与 `category_resolution_status`；SQL 数量与 page size 无关，且不恢复页面 read model、cache、queue 或 worker。
+- Frontend：`WorkbenchColumns.test.tsx` 保护金额单元格第三行使用 HeroUI 原生 `Chip`；已分类显示分类名称，`unmatched`/`needs_confirmation` 分别显示“待分类”/“待确认”，不恢复手写伪 Chip 或大卡片式 UI。
+- Regression：Bank Details 仍拥有分类规则与页面组件；Workbench 只消费轻量 canonical projection，页面事实矩阵登记分类、确认和 settings facts。
+
 ## 2026-08-03 all-scope 成员筛选 SQL 回归
 
 - `tests/test_workbench_sql_runtime.py` 保护 `month=all` 的搜索成员 join 只从 `g` 读取 group 投影字段，禁止重新生成会与成员 join 的 `zone` 冲突的裸列选择。

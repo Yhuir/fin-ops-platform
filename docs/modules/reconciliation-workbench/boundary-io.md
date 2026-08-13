@@ -104,6 +104,8 @@ requested tenant/scope
 
 ## 输出 I/O
 
+- Workbench bank row DTO 对当前可见页银行流水输出 canonical `category_code`、`category_label`、path/source 字段与必有的 `category_resolution_status`；未命中分类时状态为 `unmatched`。分类投影只对分页后可见 bank typed IDs 在同一只读 snapshot 内批量执行一次，不读取 Bank Details 页面 payload、不复制分类规则、不逐行查询。
+
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |

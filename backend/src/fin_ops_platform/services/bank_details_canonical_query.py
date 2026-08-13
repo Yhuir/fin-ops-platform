@@ -163,6 +163,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         *,
         settings: dict[str, Any],
         transaction_ids: list[str],
+        tenant_id: str = "default",
     ) -> dict[str, dict[str, Any]]:
         normalized_ids = list(dict.fromkeys(text_list(transaction_ids)))
         if not normalized_ids:
@@ -180,6 +181,8 @@ class PostgresBankDetailsCanonicalQueryRepository:
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
+            defer_full_payload=True,
+            tenant_id=tenant_id,
         )
         rows = list(
             transaction.fetch_all(
@@ -998,6 +1001,7 @@ def bank_category_classification_cte(
     account_key: str | None = None,
     keyword: str | None = None,
     defer_full_payload: bool = False,
+    tenant_id: str = "default",
 ) -> tuple[str, list[Any]]:
     tag_definitions_json = json.dumps(
         definitions,
@@ -1076,7 +1080,7 @@ def bank_category_classification_cte(
         target_ids,
         target_ids,
         target_ids,
-        "default",
+        str(tenant_id or "").strip() or "default",
         list(INVALID_BANK_TRANSACTION_STATUSES),
         date_from,
         date_from,

@@ -13780,9 +13780,25 @@ body.column-layout-dragging {
   max-width: 100%;
 }
 
-.bank-category-tag.bank-category-pending {
-  background: #fff4e5;
-  color: #8a4b08;
+.workbench-bank-category-chip {
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  height: auto;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workbench-bank-category-chip-label {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
 }
 
 .record-warning-tooltip-wrap {

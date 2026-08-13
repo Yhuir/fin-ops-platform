@@ -28,6 +28,41 @@ class _Repository:
             "next_cursor": None,
         }
 
+    def get_workbench_initial_page(self, **_query: object) -> dict[str, object]:
+        bank_row = {
+            "id": "bank-visible-1",
+            "type": "bank",
+            "category_code": "materials",
+            "category_label": "材料采购",
+            "category_label_path": ["货款", "材料采购"],
+            "category_resolution_status": "auto_matched",
+        }
+        zone = {
+            "groups": [
+                {
+                    "group_id": "row:bank-visible-1",
+                    "group_type": "standalone",
+                    "oa_rows": [],
+                    "bank_rows": [bank_row],
+                    "invoice_rows": [],
+                }
+            ],
+            "total": 1,
+            "row_counts": {"oa": 0, "bank": 1, "invoice": 0, "rows": 1},
+            "page_size": 50,
+            "has_more": False,
+            "next_cursor": None,
+        }
+        return {
+            "month": "2026-07",
+            "scope_key": "2026-07",
+            "summary": {},
+            "statistics": {},
+            "invoice_inventory": {},
+            "paired": {**zone, "groups": []},
+            "unpaired": zone,
+        }
+
 
 class _SqlstateError(RuntimeError):
     def __init__(self, sqlstate: str) -> None:
@@ -66,6 +101,22 @@ def test_direct_facade_returns_only_business_payload_without_runtime_fields() ->
         "has_more",
         "next_cursor",
     }
+
+
+def test_direct_initial_api_preserves_visible_bank_category_projection() -> None:
+    result = WorkbenchQueryFacade(repository=_Repository()).initial_page("2026-07")
+
+    assert result.status_code == HTTPStatus.OK
+    bank_row = result.payload["unpaired"]["groups"][0]["bank_rows"][0]
+    assert bank_row == {
+        "id": "bank-visible-1",
+        "type": "bank",
+        "category_code": "materials",
+        "category_label": "材料采购",
+        "category_label_path": ["货款", "材料采购"],
+        "category_resolution_status": "auto_matched",
+    }
+    assert "read_model_status" not in result.payload
 
 
 def test_direct_facade_maps_known_query_unavailable_to_503_without_partial_payload() -> None:

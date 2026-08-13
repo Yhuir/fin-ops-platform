@@ -557,12 +557,18 @@ function renderBankMoneyValue(
       ) : null}
       {shouldShowCategory ? (
         <span className="money-cell-category-row">
-          <span
-            className={`inline-meta-tag bank-category-tag bank-chip-auto-size${pendingCategory ? " bank-category-pending" : ""}`}
+          <Chip
+            aria-label={`流水分类：${normalizedCategoryLabel}`}
+            className="workbench-bank-category-chip"
+            color={pendingCategory ? "warning" : "default"}
+            size="sm"
             title={normalizedCategoryLabel}
+            variant="soft"
           >
-            {highlightSearchText(normalizedCategoryLabel, searchQuery)}
-          </span>
+            <Chip.Label className="workbench-bank-category-chip-label">
+              {highlightSearchText(normalizedCategoryLabel, searchQuery)}
+            </Chip.Label>
+          </Chip>
         </span>
       ) : null}
     </span>

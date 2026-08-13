@@ -625,8 +625,11 @@ describe("Workbench columns and inline actions", () => {
     const categoryRow = categoryTag.closest(".money-cell-category-row");
     const metadataRow = accountTag?.closest(".money-cell-meta-row");
 
-    expect(categoryTag).toHaveClass("bank-category-tag");
-    expect(categoryTag).toHaveClass("bank-chip-auto-size");
+    expect(categoryTag.closest('[data-slot="chip"]')).toHaveClass("workbench-bank-category-chip");
+    expect(categoryTag.closest('[data-slot="chip"]')).toHaveAttribute(
+      "aria-label",
+      "流水分类：公司暂借款：待还款",
+    );
     expect(categoryRow).not.toBeNull();
     expect(metadataRow).not.toBeNull();
     expect(categoryTag.closest(".money-cell-meta-row")).toBeNull();
@@ -675,7 +678,7 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    expect(screen.getByText(label)).toHaveClass("bank-category-tag");
+    expect(screen.getByText(label).closest('[data-slot="chip"]')).toHaveClass("workbench-bank-category-chip");
     expect(screen.queryByText("完全关联")).not.toBeInTheDocument();
   });
 

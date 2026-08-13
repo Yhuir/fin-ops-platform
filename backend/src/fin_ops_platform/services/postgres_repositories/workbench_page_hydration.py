@@ -4,6 +4,11 @@ from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
+from fin_ops_platform.services.bank_settings import bank_accounts_from_settings_payload
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
     text_list,
@@ -18,6 +23,7 @@ from fin_ops_platform.services.workbench_canonical_rows import (
 # lookup, one set-based ETC summary read, overrides, and anomaly decisions.  The
 # budget is independent of page/member count; a higher count is a regression.
 WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 8
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 2
 
 
 class _BudgetedReadConnection:
@@ -80,11 +86,21 @@ class PostgresWorkbenchPageHydrationRepository:
         }
         if not expected_typed_ids:
             return {}
-        rows_by_typed_id = WorkbenchCanonicalRowsBuilder(
-            connection=connection
-        ).load_page_rows(
+        settings = (
+            self._settings_payload(connection) if normalized_ids["bank"] else {}
+        )
+        builder = WorkbenchCanonicalRowsBuilder(
+            connection=connection,
+            bank_account_resolver=self._bank_account_resolver(settings),
+        )
+        rows_by_typed_id = builder.load_page_rows(
             normalized_ids,
             etc_summary_external_ids=etc_summary_external_ids,
+        )
+        self._enrich_bank_category_projection(
+            rows_by_typed_id,
+            connection=connection,
+            settings=settings,
         )
         if require_exact and set(rows_by_typed_id) != expected_typed_ids:
             missing = sorted(expected_typed_ids - set(rows_by_typed_id))
@@ -154,10 +170,21 @@ class PostgresWorkbenchPageHydrationRepository:
                 if previous != external_batch_id:
                     raise ValueError("ETC summary row identity maps to multiple external batches.")
 
-        builder = WorkbenchCanonicalRowsBuilder(connection=connection)
+        settings = (
+            self._settings_payload(connection) if typed_row_ids["bank"] else {}
+        )
+        builder = WorkbenchCanonicalRowsBuilder(
+            connection=connection,
+            bank_account_resolver=self._bank_account_resolver(settings),
+        )
         rows_by_typed_id = builder.load_page_rows(
             typed_row_ids,
             etc_summary_external_ids=etc_summary_external_ids,
+        )
+        self._enrich_bank_category_projection(
+            rows_by_typed_id,
+            connection=connection,
+            settings=settings,
         )
         expected_typed_ids = {
             (row_type, row_id)
@@ -225,13 +252,14 @@ class PostgresWorkbenchPageHydrationRepository:
         scope_key: str,
         descriptors: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Hydrate one page into compact DTOs with one bounded set query.
+        """Hydrate one page into compact DTOs with bounded set queries.
 
         This path deliberately does not select source ``raw_payload`` or full
         ``detail_fields``/``source_links``.  The source facts, active relation
         decorations, row overrides, page-local amount-mismatch decisions, and
         ETC aggregates are returned by one statement whose cardinality is
-        bounded by the already-selected page descriptors.
+        bounded by the already-selected page descriptors. A second statement
+        classifies only bank transaction IDs present on that page.
         """
 
         member_types: list[str] = []
@@ -284,7 +312,11 @@ class PostgresWorkbenchPageHydrationRepository:
                                 "ETC summary external identity maps to multiple page rows."
                             )
 
-        rows = self._connection.fetch_all(
+        connection = _BudgetedReadConnection(
+            self._connection,
+            maximum_statements=WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET,
+        )
+        rows = connection.fetch_all(
             """
             with requested_members(row_type, row_id) as materialized (
                 select distinct requested.row_type, requested.row_id
@@ -478,6 +510,21 @@ class PostgresWorkbenchPageHydrationRepository:
                 select coalesce(settings.settings_payload, '{}'::jsonb) as payload
                 from (select 1) singleton
                 left join app.app_settings settings on settings.settings_key = 'app_settings'
+            ),
+            bank_settings_row as materialized (
+                select
+                    'settings'::text as record_kind,
+                    null::text as row_type,
+                    null::text as row_id,
+                    null::text as case_id,
+                    null::text as external_batch_id,
+                    selected_settings.payload
+                from selected_settings
+                where exists (
+                    select 1
+                    from requested_members
+                    where requested_members.row_type = 'bank'
+                )
             ),
             bank_rows as materialized (
                 select
@@ -985,6 +1032,7 @@ class PostgresWorkbenchPageHydrationRepository:
             union all select * from override_rows
             union all select * from selected_decisions
             union all select * from etc_summary_rows
+            union all select * from bank_settings_row
             order by record_kind, case_id, row_type, row_id
             """,
             (
@@ -1001,6 +1049,7 @@ class PostgresWorkbenchPageHydrationRepository:
         page_overrides: dict[tuple[str, str], dict[str, Any]] = {}
         decisions: dict[str, str] = {}
         page_etc_summaries: dict[str, dict[str, Any]] = {}
+        settings: dict[str, Any] | None = None
         for source in rows:
             record_kind = str(source.get("record_kind") or "")
             payload = row_payload(source, "payload")
@@ -1043,6 +1092,12 @@ class PostgresWorkbenchPageHydrationRepository:
                 page_etc_summaries[external_batch_id] = summary
                 if ("invoice", row_id) in set(zip(member_types, member_ids, strict=True)):
                     rows_by_typed_id[("invoice", row_id)] = summary
+            elif record_kind == "settings":
+                if settings is not None:
+                    raise ValueError(
+                        "Canonical Workbench compact hydration returned duplicate settings."
+                    )
+                settings = payload
 
         expected_typed_ids = set(zip(member_types, member_ids, strict=True))
         if set(rows_by_typed_id) != expected_typed_ids:
@@ -1051,8 +1106,18 @@ class PostgresWorkbenchPageHydrationRepository:
                 "Canonical Workbench compact page members changed during hydration: "
                 + ",".join(f"{row_type}:{row_id}" for row_type, row_id in missing)
             )
+        if any(row_type == "bank" for row_type, _row_id in expected_typed_ids):
+            if settings is None:
+                raise ValueError(
+                    "Canonical Workbench compact hydration did not return settings."
+                )
+            self._enrich_bank_category_projection(
+                rows_by_typed_id,
+                connection=connection,
+                settings=settings,
+            )
         grouped = WorkbenchCanonicalRowsBuilder(
-            connection=self._connection
+            connection=connection
         ).build_page_groups(
             scope_key=scope_key,
             rows_by_typed_id=rows_by_typed_id,
@@ -1097,6 +1162,57 @@ class PostgresWorkbenchPageHydrationRepository:
             result_payload["detail_key"] = str(descriptor.get("detail_key") or "")
             result.append(self._compact_group(result_payload))
         return result
+
+    @staticmethod
+    def _settings_payload(connection: Any) -> dict[str, Any]:
+        row = connection.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = 'app_settings'
+            limit 1
+            """
+        )
+        payload = row.get("settings_payload") if isinstance(row, dict) else None
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _bank_account_resolver(settings: dict[str, Any]) -> BankAccountResolver:
+        mappings: dict[str, str] = {}
+        for account in bank_accounts_from_settings_payload(settings):
+            last4 = str(account.get("account_last4") or "").strip()
+            bank_name = str(account.get("bank_name") or "").strip()
+            if last4 and bank_name:
+                mappings.setdefault(last4, bank_name)
+        return BankAccountResolver(lambda: dict(mappings))
+
+    def _enrich_bank_category_projection(
+        self,
+        rows_by_typed_id: dict[tuple[str, str], dict[str, Any]],
+        *,
+        connection: Any,
+        settings: dict[str, Any],
+    ) -> None:
+        transaction_ids = sorted(
+            row_id
+            for row_type, row_id in rows_by_typed_id
+            if row_type == "bank"
+        )
+        if not transaction_ids:
+            return
+        projections = (
+            PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+                connection,
+                settings=settings,
+                transaction_ids=transaction_ids,
+                tenant_id=self._tenant_id,
+            )
+        )
+        for transaction_id in transaction_ids:
+            projection = projections.get(transaction_id) or {
+                "category_resolution_status": "unmatched"
+            }
+            rows_by_typed_id[("bank", transaction_id)].update(projection)
 
     @staticmethod
     def _compact_etc_summary_row(
@@ -1276,4 +1392,5 @@ class PostgresWorkbenchPageHydrationRepository:
 __all__ = [
     "PostgresWorkbenchPageHydrationRepository",
     "WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET",
+    "WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET",
 ]

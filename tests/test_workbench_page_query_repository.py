@@ -276,7 +276,7 @@ def test_page_hydration_enforces_fixed_statement_budget(monkeypatch: pytest.Monk
             return None
 
     class _OverBudgetBuilder:
-        def __init__(self, *, connection: Any) -> None:
+        def __init__(self, *, connection: Any, **_kwargs: Any) -> None:
             self.connection = connection
 
         def load_page_rows(

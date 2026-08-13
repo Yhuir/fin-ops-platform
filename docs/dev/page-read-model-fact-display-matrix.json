@@ -8,7 +8,7 @@
       "route": "/",
       "read_model_keys": [],
       "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired", "workbench_groups_all_unpaired", "workbench_filter_options_all_paired"],
-      "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices"],
+      "fact_sources": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_confirmations", "app.app_settings", "app.oa_applications", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {

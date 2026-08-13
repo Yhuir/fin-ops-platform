@@ -50,6 +50,10 @@ test.describe("workbench read-export permission browser flow", () => {
     await page.goto("/");
 
     const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
+    await expect(
+      unpairedZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })
+        .getByLabel("流水分类：设备款"),
+    ).toBeVisible();
     await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
 
     await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
