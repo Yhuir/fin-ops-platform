@@ -4352,7 +4352,10 @@ release_gate_checkpoint() {
       --write-target-ms 5000
       --http-target-ms 1000
       --health-ready-target-ms 1000
-      --timeout-seconds 120
+      # Runtime queue claims use a 300-second lease.  A worker can be stopped
+      # immediately after claiming an event during cutover, so the stability
+      # gate must allow that exact lease to expire and be reclaimed.
+      --timeout-seconds 360
       --output "$closure_report"
     )
     if [[ "$profile" == "preflight" ]]; then
@@ -4420,6 +4423,10 @@ PY
         source "$COMMON_ENV"
         # shellcheck disable=SC1090
         source "$SECRETS_ENV"
+        [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
+          || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
+        # shellcheck disable=SC1090
+        source "$RABBITMQ_MONITORING_ENV"
         set +a
         export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
         "$API_PYTHON" - "$runtime_report" <<'PY'

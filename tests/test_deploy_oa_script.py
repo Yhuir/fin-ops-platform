@@ -1488,7 +1488,7 @@ ensure_worker_env workbench
         self.assertIn('RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-', script)
         self.assertIn('RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-', script)
         self.assertEqual(checkpoint.count('source "$RABBITMQ_TOPOLOGY_ENV"'), 1)
-        self.assertEqual(checkpoint.count('source "$RABBITMQ_MONITORING_ENV"'), 2)
+        self.assertEqual(checkpoint.count('source "$RABBITMQ_MONITORING_ENV"'), 3)
         self.assertIn("RabbitMQ topology env is missing or unreadable", checkpoint)
         self.assertIn("RabbitMQ monitoring env is missing or unreadable", checkpoint)
         self.assertNotIn("STANDARD_WRITE_E2E_APPROVAL_TICKET", checkpoint)
@@ -1499,6 +1499,7 @@ ensure_worker_env workbench
         self.assertNotIn("--apply-read-model-smoke", checkpoint)
         self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
         self.assertIn('required_worker_instances "$src"', checkpoint)
+        self.assertIn("--timeout-seconds 360", checkpoint)
         self.assertLess(
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
             checkpoint.index('"$API_PYTHON" - "$runtime_report"'),
