@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | 只传 `mode="etc_invoice"`，共享 `ImportWorkflowPage` 改动会影响银行流水和发票导入 |
 | 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | zip-only 上传、ready task selector、unavailable task reason、preview stale、job feedback、route unmount cleanup、read-only 导入门禁 |
-| Browser e2e | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 加载 ready task、选择 task、上传 zip、预览 audit/导入项、`preview_stale`、`stale_reconciliation_task_preview` 清空预览、confirm 失败、确认后展示 background job feedback、ETC 票据/税金抵扣/成本统计下游 fresh read model，并断言成功节点没有导入失败/后台导入失败/read model 失败可见残留且不走通用 `/imports/files/*`；read-only 用户不能上传/预览/确认导入 |
+| Browser e2e | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 覆盖 ready task、zip 预览/确认、失败恢复和权限；确认后验证 ETC 票据和税金结果，并证明单独 ETC 发票导入不产生 OA 项目成本。 |
 | 前端 ETC API mapper | `web/src/features/etc/api.ts` | `/api/etc/import/preview` multipart、长超时、`task_id`、snake_case/camelCase、background job payload、stale error 映射 |
 | HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、`/api/etc/reconciliation-tasks*`、`/api/etc/business-batches*` | task version/hash 校验、structured error、idempotent job、queue unavailable、legacy import route |
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
@@ -43,7 +43,7 @@
 - 发票需求匹配必须使用 XML 的通行起止时间，不得使用 `IssueDate`/`RequestTime` 代替通行事实；相同金额候选必须全局一对一分配，不能让一张发票重复满足两条需求。
 - 缺票阻塞必须返回精确缺失行程数、缺少发票数、金额和处理提示；非法 ZIP 必须阻止确认，单个 malformed XML 继续作为文件级失败项而不拖死其它有效票。
 - ETC preview/confirm/import worker 不得调用 OA attachment upload 或 OA draft create；OA 草稿仅由后续独立人工动作触发。
-- Browser e2e 必须覆盖 ready task selector、zip preview、audit/review copy、confirm job feedback、preview stale、stale task preview、confirm failure、ETC 票据/税金抵扣/成本统计下游 fresh read model，以及 ETC 导入不误走通用 files import API。
+- Browser e2e 必须覆盖 ready task selector、zip preview、audit/review copy、confirm job feedback、preview stale、stale task preview、confirm failure、ETC 票据/税金结果、OA 成本隔离，以及 ETC 导入不误走通用 files import API。
 - read_export_only 用户必须能打开 ETC 发票导入页但不能选择 zip、预览或确认导入。
 - 120 张合成 ETC 发票混合 zip preview 必须把有效发票、同包重复 XML、malformed XML file-level failure 分开计数，且 preview 不持久化发票记录。
 - task reopen、task version/hash 变化、已存在 canonical invoice 关系变化或 import session 变化后，confirm 必须返回 `stale_reconciliation_task_preview` 或 `preview_stale`；页面不能展示“已开始后台导入”，其中 stale task preview 必须清空旧 preview 并要求重新预览。
@@ -66,7 +66,7 @@
 | 3. API contract tests | 适用 | `tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts` | 覆盖 `/api/etc/import/*`、reconciliation task API、business batch API、structured errors、background job payload。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_tax_offset_api.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 mutation-sensitive existing link、精确 scope、`etc_import_confirmed`/`etc_business_batch_status_changed` lifecycle、Tax/Workbench 显式 import scope、Cost 页面访问时 exact Workbench+requested Cost登记与 worker dependency gate、App Status job/readiness；旧 write-operation profile 的 publish fan-out expectation 不是当前合同，由 Phase 27-06 删除门禁处理。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 ETC standalone route、preview/confirm/stale/unmount、API mapper、business batch UI、global job status，以及真实浏览器 ready task/zip/confirm job、preview stale、stale task preview、confirm failure、ETC 票据/税金/成本下游 fresh read model 交互、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 导入门禁。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_etc_backend.py`、`tests/test_workbench_v2_api.py`、`web/e2e/imports-etc-invoices-flow.spec.ts` | 覆盖 task-aware zip import -> business batch -> ETC metadata/附件 -> Workbench summary/open row -> submitted/delete recovery；Browser e2e 覆盖导入页 preview/confirm job、失败时不误报 job success，并在 deterministic mock 下覆盖 ETC 票据、税金抵扣、成本统计最终 fresh 展示和成功后无错误残留；真实 worker 完成仍需 staging。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_etc_backend.py`、`tests/test_workbench_v2_api.py`、`web/e2e/imports-etc-invoices-flow.spec.ts` | 覆盖 task-aware zip import -> business batch -> ETC metadata/附件 -> Workbench summary/open row -> submitted/delete recovery；Browser e2e 覆盖导入页 preview/confirm、ETC 票据和税金结果，并证明无 OA 关系时成本项目不受污染；真实 worker 完成仍需 staging。 |
 | 7. Existing feature regression tests | 适用 | 上述全部、`tests/test_platform_runtime_boundary_guards.py`、`docs/modules/etc-tickets/tests.md`、`docs/modules/tax-offset/tests.md`、`docs/modules/cost-statistics/tests.md`、`web/e2e/imports-etc-invoices-flow.spec.ts` | 每次改 ETC import、business batch、已存在 canonical invoice 关联、summary row 或 lifecycle 时，都必须回归下游页面旧行为，并保护 runtime worker 不恢复旧的 ETC canonical invoice 创建/cleanup 路径。 |
 
 ## 历史 bug 回归库
@@ -81,7 +81,7 @@
 | Browser 中 `preview_stale` 仍展示后台导入成功 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 preview stale Browser 回归，断言错误可见、无“已开始后台导入”、不走通用 files confirm |
 | Browser 中 stale reconciliation task preview 没清空旧预览 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 stale task Browser 回归，断言旧 preview 清空、preview 可重新执行、confirm 禁用 |
 | Browser 中 confirm 失败仍展示后台导入成功 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无“已开始后台导入”、不走通用 files confirm |
-| Browser 中 confirm 或下游 fresh 成功后仍残留导入失败/read model 失败提示 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 success visible-error guard，断言导入页、ETC 票据、税金抵扣和成本统计成功节点没有导入失败、后台导入失败或 read model 失败等可见错误残留 |
+| Browser 中 confirm 或下游成功后仍残留失败提示，或 ETC 发票被误算为 OA 成本 | `web/e2e/imports-etc-invoices-flow.spec.ts` 同时断言错误不残留和 OA 项目成本不被污染。 |
 | confirm 重复请求产生重复导入 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_repeated_session_returns_same_job_without_duplicate_import` |
 | 多 ZIP preview 对历史 MinIO 附件逐张重复下载并在 session 保存后重下载全部 ZIP，触发代理 504 | `tests/test_etc_backend.py::EtcServiceTests::test_preview_does_not_download_verified_object_attachments_for_existing_invoices`、`tests/test_etc_import_session_store.py::EtcImportSessionStoreTests::test_durable_save_does_not_redownload_archives_after_verified_write` |
 | 59 ZIP / 38 个需求的全局组合搜索把不符合车牌和日期窗口的发票也纳入金额组合，并反复复制/排序全部中间金额状态，导致 CPU 长时间不返回且可能跨上下文误配 | `tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_zip_preview_excludes_unrelated_context_before_global_amount_combinations`、`test_zip_preview_bounds_six_invoice_search_with_many_context_candidates`，并使用真实 59 ZIP + 生产 task payload 做本地 task-aware 性能回归 |
@@ -100,7 +100,7 @@
 ## 关键 smoke flows
 
 - ETC 对账任务创建 -> 上传信用卡账单/票根/补充凭证 -> 确认 task -> `/imports/etc-invoices` 选择 ready task -> 上传 zip -> preview -> confirm -> import worker/job 完成 -> task imported -> ETC business batch imported。
-- Browser e2e smoke：ready task 加载 -> 选择 ETC 对账任务 -> 上传两份 zip -> preview audit/新增/重复/附件补齐/异常项 -> confirm -> `etc_invoice_import` background job feedback -> ETC 票据/税金抵扣/成本统计 fresh read model 展示导入证据 -> 无导入失败/后台导入失败/read model 失败可见残留。
+- Browser e2e smoke：ready task -> zip preview/confirm -> `etc_invoice_import` background job -> ETC 票据/税金结果 -> 成本统计“按项目”不存在仅由 ETC 发票导入生成的成本 -> 无失败提示残留。
 - Browser negative smoke：ready task 加载 -> zip preview -> confirm 返回 `preview_stale`、`stale_reconciliation_task_preview` 或 500 -> 错误可见 -> 无“已开始后台导入” -> 不走通用 `/imports/files/confirm`。
 - 120 张合成 ETC 发票 + PDF + duplicate XML + malformed XML -> preview summary 分别报告 imported / duplicatesSkipped / failed，且 list invoices 仍为空。
 - ETC import confirm -> ETC metadata/已存在 canonical invoice 真变更 -> 精确月份 `etc_import_confirmed` -> Workbench/税金；之后访问 Cost 时先收敛 Workbench 精确月份，再读取 Cost。无变化重放停在 link boundary。

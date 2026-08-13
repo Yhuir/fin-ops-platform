@@ -20,7 +20,7 @@ import ExportCenterModal, {
 import CostStatisticsTable, {
   type CostStatisticsTableColumn,
 } from "../components/cost-statistics/CostStatisticsTable";
-import CostTransactionDetailDrawer from "../components/cost-statistics/CostTransactionDetailDrawer";
+import CostEntryDetailDrawer from "../components/cost-statistics/CostEntryDetailDrawer";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -31,7 +31,7 @@ import {
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsTagRules,
   fetchCostStatisticsExportPreview,
-  fetchCostTransactionDetail,
+  fetchCostEntryDetail,
   saveCostStatisticsTagRules,
   type CostExportParams,
   type PreviewCostExportParams,
@@ -50,12 +50,12 @@ import type {
   CostStatisticsExplorerPageRequest,
   CostStatisticsExportPreview,
   CostStatisticsTagRules,
-  CostTimeRow,
-  CostTransactionDetail,
+  CostExplorerEntryRow,
+  CostEntryDetail,
 } from "../features/cost-statistics/types";
 
 type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
-type CostTransactionDetailSource = CostViewMode;
+type CostEntryDetailSource = CostViewMode;
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
 type ExplorerScopeSelection = {
@@ -132,10 +132,10 @@ type CostStatisticsPageSession = {
   bankTagScopeMonth: string;
 };
 
-function getCostTimeRowRenderKey(row: CostTimeRow, index: number) {
+function getCostEntryRowRenderKey(row: CostExplorerEntryRow, index: number) {
   return [
-    row.transactionId || "transaction",
-    row.tradeTime,
+    row.entryId || "entry",
+    row.occurredAt,
     row.projectName,
     row.expenseType,
     row.expenseContent,
@@ -210,8 +210,8 @@ function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
   );
 }
 
-function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: string }) {
-  const formattedTradeTime = formatCostTradeTime(tradeTime);
+function EntryIdentity({ label, occurredAt }: { label: string; occurredAt: string }) {
+  const formattedTradeTime = formatCostTradeTime(occurredAt);
   return (
     <span className="cost-transaction-identity grid min-w-0 justify-items-start gap-1.5">
       <span className="max-w-full text-left font-extrabold leading-5 text-[var(--fp-text)] [overflow-wrap:anywhere]">
@@ -219,7 +219,7 @@ function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: s
       </span>
       <time
         className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-xs font-semibold leading-none text-[var(--fp-text-muted)] tabular-nums"
-        dateTime={tradeTime}
+        dateTime={occurredAt}
       >
         {formattedTradeTime || "--"}
       </time>
@@ -227,8 +227,9 @@ function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: s
   );
 }
 
-function costTransactionActionLabel(row: CostTimeRow) {
-  return `查看流水 ${row.counterpartyName || "未知对方"} ${formatCostTradeTime(row.tradeTime) || "时间未知"} ${formatCostAmount(row.amount)}`;
+function costEntryActionLabel(row: CostExplorerEntryRow) {
+  const target = row.rowKind === "oa_allocation" ? row.projectName || "未命名项目" : row.counterpartyName || "未知对方";
+  return `查看${row.rowKind === "oa_allocation" ? "OA 成本归集" : "银行流水"} ${target} ${formatCostTradeTime(row.occurredAt) || "时间未知"} ${formatCostAmount(row.amount)}`;
 }
 
 function buildMonthDateBounds(month: string) {
@@ -369,7 +370,7 @@ export default function CostStatisticsPage() {
   const [loadedExplorer, setLoadedExplorer] = useState<LoadedCostStatisticsExplorer | null>(null);
   const [pageStatistics, setPageStatistics] = useState<CostStatisticsExplorerPage["statistics"]>(undefined);
   const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExportReferenceData | null>(null);
-  const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
+  const [entryDetail, setEntryDetail] = useState<CostEntryDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -421,18 +422,18 @@ export default function CostStatisticsPage() {
   const bankTagScopeYear = costSession.bankTagScopeYear;
   const bankTagScopeMonth = costSession.bankTagScopeMonth;
 
-  const [selectedTimeTransactionId, setSelectedTimeTransactionId] = useState<string | null>(null);
+  const [selectedTimeEntryId, setSelectedTimeEntryId] = useState<string | null>(null);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
   const [selectedProjectExpenseType, setSelectedProjectExpenseType] = useState<string | null>(null);
-  const [selectedProjectTransactionId, setSelectedProjectTransactionId] = useState<string | null>(null);
+  const [selectedProjectEntryId, setSelectedProjectEntryId] = useState<string | null>(null);
   const [selectedBankAccountLabel, setSelectedBankAccountLabel] = useState<string | null>(null);
   const [selectedBankProjectName, setSelectedBankProjectName] = useState<string | null>(null);
-  const [selectedBankTransactionId, setSelectedBankTransactionId] = useState<string | null>(null);
+  const [selectedBankEntryId, setSelectedBankEntryId] = useState<string | null>(null);
   const [selectedExpenseType, setSelectedExpenseType] = useState<string | null>(null);
-  const [selectedExpenseTransactionId, setSelectedExpenseTransactionId] = useState<string | null>(null);
+  const [selectedExpenseEntryId, setSelectedExpenseEntryId] = useState<string | null>(null);
   const [selectedBankTagPrimaryLabel, setSelectedBankTagPrimaryLabel] = useState<string | null>(null);
   const [selectedBankTagSubLabel, setSelectedBankTagSubLabel] = useState<string | null>(null);
-  const [selectedBankTagTransactionId, setSelectedBankTagTransactionId] = useState<string | null>(null);
+  const [selectedBankTagEntryId, setSelectedBankTagEntryId] = useState<string | null>(null);
   const pageTitleRef = useRef<HTMLHeadingElement | null>(null);
   const headerControlsRef = useRef<HTMLDivElement | null>(null);
   const headerActionsRef = useRef<HTMLDivElement | null>(null);
@@ -534,12 +535,12 @@ export default function CostStatisticsPage() {
   const resetDetailSelection = useCallback(() => {
     detailRequestRef.current?.abort();
     detailRequestRef.current = null;
-    setTransactionDetail(null);
-    setSelectedTimeTransactionId(null);
-    setSelectedProjectTransactionId(null);
-    setSelectedBankTransactionId(null);
-    setSelectedExpenseTransactionId(null);
-    setSelectedBankTagTransactionId(null);
+    setEntryDetail(null);
+    setSelectedTimeEntryId(null);
+    setSelectedProjectEntryId(null);
+    setSelectedBankEntryId(null);
+    setSelectedExpenseEntryId(null);
+    setSelectedBankTagEntryId(null);
     setIsDetailLoading(false);
     setDetailError(null);
   }, []);
@@ -1037,11 +1038,11 @@ export default function CostStatisticsPage() {
     });
   }, [interactionLocked, invalidateExportReferenceData, resetDetailSelection]);
 
-  async function loadTransactionDetail(transactionId: string, source: CostTransactionDetailSource) {
+  async function loadEntryDetail(entryId: string, rowKind: CostExplorerEntryRow["rowKind"], source: CostEntryDetailSource) {
     detailRequestRef.current?.abort();
     const controller = new AbortController();
     detailRequestRef.current = controller;
-    setTransactionDetail(null);
+    setEntryDetail(null);
     setDetailError(null);
     setIsDetailLoading(true);
     try {
@@ -1051,19 +1052,19 @@ export default function CostStatisticsPage() {
           : source === "expenseType"
             ? "expense_type"
             : source;
-      const payload = await fetchCostTransactionDetail(
-        transactionId,
+      const payload = await fetchCostEntryDetail(
+        { entryId, rowKind },
         detailView,
         explorerScope,
         controller.signal,
         costProjectScope,
       );
       if (!controller.signal.aborted) {
-        setTransactionDetail(payload);
+        setEntryDetail(payload);
       }
     } catch (caught) {
       if (!controller.signal.aborted && !isAbortLikeError(caught)) {
-        setDetailError("流水详情加载失败，请稍后重试。");
+        setDetailError(`${rowKind === "oa_allocation" ? "OA 成本归集明细" : "银行流水详情"}加载失败，请稍后重试。`);
       }
     } finally {
       if (detailRequestRef.current === controller) {
@@ -1073,23 +1074,23 @@ export default function CostStatisticsPage() {
     }
   }
 
-  async function openTransactionDetail(row: CostTimeRow, source: CostTransactionDetailSource) {
+  async function openEntryDetail(row: CostExplorerEntryRow, source: CostEntryDetailSource) {
     if (source === "time") {
-      setSelectedTimeTransactionId(row.transactionId);
+      setSelectedTimeEntryId(row.entryId);
     }
     if (source === "project") {
-      setSelectedProjectTransactionId(row.transactionId);
+      setSelectedProjectEntryId(row.entryId);
     }
     if (source === "bank") {
-      setSelectedBankTransactionId(row.transactionId);
+      setSelectedBankEntryId(row.entryId);
     }
     if (source === "expenseType") {
-      setSelectedExpenseTransactionId(row.transactionId);
+      setSelectedExpenseEntryId(row.entryId);
     }
     if (source === "bankTag") {
-      setSelectedBankTagTransactionId(row.transactionId);
+      setSelectedBankTagEntryId(row.entryId);
     }
-    await loadTransactionDetail(row.transactionId, source);
+    await loadEntryDetail(row.entryId, row.rowKind, source);
   }
 
   function handleViewModeChange(nextViewMode: CostViewMode) {
@@ -1318,7 +1319,7 @@ export default function CostStatisticsPage() {
     if (!params) {
       return null;
     }
-    if (params.view === "transaction" || params.view === "month") {
+    if (params.view === "month") {
       return null;
     }
     return params;
@@ -1422,9 +1423,9 @@ export default function CostStatisticsPage() {
     await runExport(params);
   }
 
-  const timeColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
+  const timeColumns = useMemo<CostStatisticsTableColumn<CostExplorerEntryRow>[]>(
     () => [
-      { key: "tradeTime", header: "时间", width: 170, render: (row) => formatCostTradeTime(row.tradeTime) },
+      { key: "occurredAt", header: "时间", width: 170, render: (row) => formatCostTradeTime(row.occurredAt) },
       { key: "counterpartyName", header: "对方户名", flex: 1.1, render: (row) => row.counterpartyName || "--" },
       {
         key: "bankTag",
@@ -1450,26 +1451,26 @@ export default function CostStatisticsPage() {
     [],
   );
 
-  const transactionColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
+  const entryColumns = useMemo<CostStatisticsTableColumn<CostExplorerEntryRow>[]>(
     () => [
       viewMode === "expenseType"
         ? {
             key: "projectName",
             header: "项目名",
             flex: 1.15,
-            getTextValue: (row) => `${row.projectName} ${formatCostTradeTime(row.tradeTime)}`,
-            render: (row) => <TransactionIdentity label={row.projectName} tradeTime={row.tradeTime} />,
+            getTextValue: (row) => `${row.projectName} ${formatCostTradeTime(row.occurredAt)}`,
+            render: (row) => <EntryIdentity label={row.projectName} occurredAt={row.occurredAt} />,
           }
         : {
             key: "counterpartyName",
             header: "对方户名",
             flex: 1.15,
-            getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.tradeTime)}`,
-            render: (row) => <TransactionIdentity label={row.counterpartyName} tradeTime={row.tradeTime} />,
+            getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.occurredAt)}`,
+            render: (row) => <EntryIdentity label={row.counterpartyName} occurredAt={row.occurredAt} />,
           },
       {
         key: "amount",
-        header: "金额",
+        header: viewMode === "time" || viewMode === "bankTag" ? "金额" : "归集金额",
         width: 180,
         cellClassName: "cost-table-cell-money",
         render: (row) => ({
@@ -1484,12 +1485,15 @@ export default function CostStatisticsPage() {
     [viewMode],
   );
 
-  const activeTransactionId =
-    selectedTimeTransactionId
-    ?? selectedProjectTransactionId
-    ?? selectedBankTransactionId
-    ?? selectedExpenseTransactionId
-    ?? selectedBankTagTransactionId;
+  const activeEntryId =
+    selectedTimeEntryId
+    ?? selectedProjectEntryId
+    ?? selectedBankEntryId
+    ?? selectedExpenseEntryId
+    ?? selectedBankTagEntryId;
+  const activeRowKind: CostExplorerEntryRow["rowKind"] | null = activeEntryId
+    ? viewMode === "time" || viewMode === "bankTag" ? "bank_transaction" : "oa_allocation"
+    : null;
   const costViewSearch = (
     <QuerySearch
       ariaLabel="搜索当前成本统计表格"
@@ -1534,7 +1538,7 @@ export default function CostStatisticsPage() {
           { label: "项目", value: visibleStatistics?.projectCount, unit: "个" },
           { label: "费用类型", value: visibleStatistics?.expenseTypeCount, unit: "类" },
           { label: "银行标签", value: visibleStatistics?.bankTagCount, unit: "个" },
-          { label: "已进入成本统计流水", value: visibleStatistics?.costTransactionCount, unit: "笔" },
+          { label: "OA 成本归集单元", value: visibleStatistics?.costTransactionCount, unit: "条" },
         ]}
       />
       {canAdminAccess ? (
@@ -1670,6 +1674,11 @@ export default function CostStatisticsPage() {
             ) : null}
         {explorerData ? (
           <>
+            {viewMode !== "time" && viewMode !== "bankTag" && (explorerData.allocationQuality?.excludedAllocationCount ?? 0) > 0 ? (
+              <div className="action-feedback warning" role="status">
+                有 {explorerData.allocationQuality?.excludedAllocationCount} 条 OA 归集单元因项目、费用类型、金额或身份字段不完整而未计入；系统未用流水金额或 OA 表头兜底。
+              </div>
+            ) : null}
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout cost-time-workspace">
                 <aside className="cost-time-filter-rail">
@@ -1702,10 +1711,10 @@ export default function CostStatisticsPage() {
                       ariaLabel="按时间统计表"
                       columns={timeColumns}
                       rows={filteredTimeRows}
-                      getRowKey={getCostTimeRowRenderKey}
+                      getRowKey={getCostEntryRowRenderKey}
                       emptyLabel="当前时间范围没有收入或支出流水。"
-                      onRowClick={(row) => void openTransactionDetail(row, "time")}
-                      getRowActionLabel={costTransactionActionLabel}
+                      onRowClick={(row) => void openEntryDetail(row, "time")}
+                      getRowActionLabel={costEntryActionLabel}
                       {...autoLoadTableProps}
                     />
                   )}
@@ -1744,11 +1753,11 @@ export default function CostStatisticsPage() {
                     onSelect={(row) => {
                       setSelectedProjectName(row.projectName);
                       setSelectedProjectExpenseType(null);
-                      setSelectedProjectTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedProjectEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.expenseTypeCount} 类费用`}
+                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
@@ -1768,11 +1777,11 @@ export default function CostStatisticsPage() {
                     isActive={(row) => row.expenseType === selectedProjectExpenseType}
                     onSelect={(row) => {
                       setSelectedProjectExpenseType(row.expenseType);
-                      setSelectedProjectTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedProjectEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水`}
+                    renderSecondary={(row) => `${row.transactionCount} 条归集`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
@@ -1785,20 +1794,20 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>对应流水</h2>
+                      <h2>OA 成本归集明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedProjectName && selectedProjectExpenseType ? (
                       <CostStatisticsTable
-                        ariaLabel="项目对应流水表"
-                        columns={transactionColumns}
+                        ariaLabel="项目 OA 成本归集明细表"
+                        columns={entryColumns}
                         rows={selectedProjectTransactionRows}
-                        getRowKey={getCostTimeRowRenderKey}
-                        onRowClick={(row) => void openTransactionDetail(row, "project")}
-                        getRowActionLabel={costTransactionActionLabel}
-                        emptyLabel="该费用类型下暂无流水。"
+                        getRowKey={getCostEntryRowRenderKey}
+                        onRowClick={(row) => void openEntryDetail(row, "project")}
+                        getRowActionLabel={costEntryActionLabel}
+                        emptyLabel="该费用类型下暂无 OA 成本归集。"
                         {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择项目和费用类型</div>}
@@ -1839,11 +1848,11 @@ export default function CostStatisticsPage() {
                     onSelect={(row) => {
                       setSelectedBankAccountLabel(row.paymentAccountLabel);
                       setSelectedBankProjectName(null);
-                      setSelectedBankTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedBankEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.paymentAccountLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
@@ -1856,16 +1865,16 @@ export default function CostStatisticsPage() {
                     count={bankProjectRows.length}
                     items={bankProjectRows}
                     loading={isChildrenTransition}
-                    emptyLabel={selectedBankAccountLabel ? "该账户下暂无项目流水。" : "请先在左侧选择银行账户。"}
+                    emptyLabel={selectedBankAccountLabel ? "该账户下暂无项目归集。" : "请先在左侧选择银行账户。"}
                     getKey={(row) => row.projectName}
                     isActive={(row) => row.projectName === selectedBankProjectName}
                     onSelect={(row) => {
                       setSelectedBankProjectName(row.projectName);
-                      setSelectedBankTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedBankEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.expenseTypeCount} 类费用`}
+                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
@@ -1878,20 +1887,20 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>对应流水</h2>
+                      <h2>OA 成本归集明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedBankAccountLabel && selectedBankProjectName ? (
                       <CostStatisticsTable
-                        ariaLabel="银行对应流水表"
-                        columns={transactionColumns}
+                        ariaLabel="银行 OA 成本归集明细表"
+                        columns={entryColumns}
                         rows={selectedBankProjectRows}
-                        getRowKey={getCostTimeRowRenderKey}
-                        onRowClick={(row) => void openTransactionDetail(row, "bank")}
-                        getRowActionLabel={costTransactionActionLabel}
-                        emptyLabel="该项目下暂无流水。"
+                        getRowKey={getCostEntryRowRenderKey}
+                        onRowClick={(row) => void openEntryDetail(row, "bank")}
+                        getRowActionLabel={costEntryActionLabel}
+                        emptyLabel="该项目下暂无 OA 成本归集。"
                         {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
@@ -1931,11 +1940,11 @@ export default function CostStatisticsPage() {
                     isActive={(row) => row.expenseType === selectedExpenseType}
                     onSelect={(row) => {
                       setSelectedExpenseType(row.expenseType);
-                      setSelectedExpenseTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedExpenseEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
                         <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
@@ -1948,23 +1957,23 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>对应流水</h2>
+                      <h2>OA 成本归集明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedExpenseType ? (
                       <CostStatisticsTable
-                        ariaLabel="按费用类型流水表"
-                        columns={transactionColumns}
+                        ariaLabel="按费用类型 OA 成本归集明细表"
+                        columns={entryColumns}
                         rows={selectedExpenseTypeRows}
-                        getRowKey={getCostTimeRowRenderKey}
-                        onRowClick={(row) => void openTransactionDetail(row, "expenseType")}
-                        getRowActionLabel={costTransactionActionLabel}
-                        emptyLabel="该费用类型下暂无流水。"
+                        getRowKey={getCostEntryRowRenderKey}
+                        onRowClick={(row) => void openEntryDetail(row, "expenseType")}
+                        getRowActionLabel={costEntryActionLabel}
+                        emptyLabel="该费用类型下暂无 OA 成本归集。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty">选择费用类型查看流水</div>}
+                    ) : <div className="cost-explorer-empty">选择费用类型查看 OA 成本归集</div>}
                   </section>
                 </div>
                 )}
@@ -2005,8 +2014,8 @@ export default function CostStatisticsPage() {
                     onSelect={(row) => {
                       setSelectedBankTagPrimaryLabel(row.primaryLabel);
                       setSelectedBankTagSubLabel(null);
-                      setSelectedBankTagTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedBankTagEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.primaryLabel}
                     renderSecondary={(row) => (
@@ -2033,8 +2042,8 @@ export default function CostStatisticsPage() {
                     isActive={(row) => row.subLabel === selectedBankTagSubLabel}
                     onSelect={(row) => {
                       setSelectedBankTagSubLabel(row.subLabel);
-                      setSelectedBankTagTransactionId(null);
-                      setTransactionDetail(null);
+                      setSelectedBankTagEntryId(null);
+                      setEntryDetail(null);
                     }}
                     renderPrimary={(row) => row.subLabel}
                     renderSecondary={(row) => (
@@ -2063,11 +2072,11 @@ export default function CostStatisticsPage() {
                     ) : selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
                       <CostStatisticsTable
                         ariaLabel="流水标签对应流水表"
-                        columns={transactionColumns}
+                        columns={entryColumns}
                         rows={selectedBankTagSubRows}
-                        getRowKey={getCostTimeRowRenderKey}
-                        onRowClick={(row) => void openTransactionDetail(row, "bankTag")}
-                        getRowActionLabel={costTransactionActionLabel}
+                        getRowKey={getCostEntryRowRenderKey}
+                        onRowClick={(row) => void openEntryDetail(row, "bankTag")}
+                        getRowActionLabel={costEntryActionLabel}
                         emptyLabel="该流水标签下暂无流水。"
                         {...autoLoadTableProps}
                       />
@@ -2090,17 +2099,18 @@ export default function CostStatisticsPage() {
         </div>
       </div>
 
-      <CostTransactionDetailDrawer
-        detail={transactionDetail?.transaction ?? null}
+      <CostEntryDetailDrawer
+        detail={entryDetail}
         error={detailError}
         loading={isDetailLoading}
         onClose={resetDetailSelection}
         onRetry={() => {
-          if (activeTransactionId) {
-            void loadTransactionDetail(activeTransactionId, viewMode);
+          if (activeEntryId && activeRowKind) {
+            void loadEntryDetail(activeEntryId, activeRowKind, viewMode);
           }
         }}
-        open={Boolean(activeTransactionId)}
+        open={Boolean(activeEntryId)}
+        rowKind={activeRowKind}
       />
 
       <CostStatisticsTagRulesDrawer

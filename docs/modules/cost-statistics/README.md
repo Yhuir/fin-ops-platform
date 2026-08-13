@@ -17,12 +17,14 @@
 
 五个视图共用同一有界内容高度和表内滚动合同。`按项目`、`按银行`、`按 OA 费用类型`、`按标签`把范围选择和搜索放在同一行；`按时间`保留左侧常驻时间栏。空结果只由表格内容区呈现，不在表格上方增加会造成布局位移的第二个提示。
 
-OA 成本口径只消费完成态 OA；进行中 OA 不进入 `按项目`、`按银行`、`按 OA 费用类型`及其汇总、下钻与详情。点击流水立即打开复用全站 `AppDrawer` 的右侧抽屉，详情加载与失败只在抽屉内反馈，不锁定页面请求状态，也不显示文字 loading。
+OA 成本口径只消费有完成时间的明确完成态 OA；进行中 OA 不进入 `按项目`、`按银行`、`按 OA 费用类型`及其汇总、下钻与详情。三种 OA 视图按 OA 完成时间筛年/月：支付申请按整张 OA 当前金额归集，日常报销按每个子付款项的当前金额和项目归集。`按时间`、`按标签`继续按流水时间和流水金额统计。
+
+三种 OA 视图的右栏叫“OA 成本归集明细”，不是“对应流水”；点击后打开 OA 归集详情和关联付款流水证据。两个银行事实视图仍打开真实银行流水详情。两类详情复用全站 `AppDrawer`，加载与失败只在抽屉内反馈，不锁定页面请求状态。
 
 ## 入口
 
 - 页面：`/fin-ops/cost-statistics`
-- API：`/api/cost-statistics/explorer`、`export-preview`、`export`、`transactions/{id}`
+- API：`/api/cost-statistics/explorer`、`export-preview`、`export`、`bank-transactions/{id}`、`allocations/{id}`
 - 标签规则：`GET|PUT /api/cost-statistics/tag-rules`
 - Audit：`cost-statistics` 页面审计，直接验证 canonical relation 完整性
 

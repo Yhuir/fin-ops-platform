@@ -289,36 +289,9 @@ test.describe("ETC invoice import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("radio", { name: "按项目" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /ETC导入通行成本项目/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /ETC导入通行成本项目/ })).toHaveCount(0));
     });
-    const etcCostProject = page.getByRole("button", { name: /ETC导入通行成本项目/ });
-    await expect(etcCostProject).toBeVisible();
-    await expect(etcCostProject).toContainText("32.26");
-    await recordLatency({
-      route: "/cost-statistics",
-      pageKey: "cost-statistics",
-      module: "cost-statistics",
-      operationId: "cost-statistics.open-project-after-etc-import",
-      visibleLabel: "ETC导入通行成本项目",
-      actionType: "click",
-    }, async (mark) => {
-      await etcCostProject.click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /通行费/ })).toBeVisible());
-    });
-    await recordLatency({
-      route: "/cost-statistics",
-      pageKey: "cost-statistics",
-      module: "cost-statistics",
-      operationId: "cost-statistics.open-expense-type-after-etc-import",
-      visibleLabel: "通行费",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: /通行费/ }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "项目对应流水表" })).toContainText("ETC高速通行费"));
-    });
-    const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
-    await expect(projectRows).toContainText("ETC高速通行费");
-    await expect(projectRows).toContainText("ETC导入通行服务商");
+    await expect(page.getByText("ETC高速通行费")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);

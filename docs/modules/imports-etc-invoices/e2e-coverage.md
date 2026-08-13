@@ -18,7 +18,7 @@
 
 ## Operation latency baseline
 
-`web/e2e/imports-etc-invoices-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开 ETC 发票导入页、选择 ready ETC 对账任务、选择 zip 文件、开始预览、确认导入 background job、preview stale 确认错误、stale reconciliation task preview 清空、confirm server error，以及导入后进入 ETC 票据管理、税金抵扣和成本统计 fresh 页面；成本统计继续记录按项目、打开 ETC 成本项目和打开通行费费用类型的响应耗时。
+`web/e2e/imports-etc-invoices-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开 ETC 发票导入页、选择 ready ETC 对账任务、选择 zip 文件、开始预览、确认导入 background job、preview stale、stale task 和 confirm error，以及导入后进入 ETC 票据、税金和成本统计页面；成本统计验证单独 ETC 发票导入不会伪造 OA 项目成本。
 
 ## 下一轮补测建议
 

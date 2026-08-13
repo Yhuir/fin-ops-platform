@@ -1,6 +1,6 @@
 # 流水规则批量处理 E2E 覆盖映射
 
-状态：covered-partial。当前实现使用 `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖流水规则入口；后端用 canonical query repository/application/route/architecture tests 保护独立 route、同 snapshot、固定查询数、active relation、canonical persistence 和 tag-rule settings 边界。Browser deterministic fixture 已切到 `bank-flow-rule-e2e-*` / `bank-flow-rule-batch-e2e-*` / `流水规则手续费成本项目`。标签抽屉保存、提交和单批次撤回均覆盖旧状态字段缺失与当前页单次 normal GET。共享 Workbench confirm-preview fixture 仍因旧 preview DTO 被前端拒绝而显示“操作失败”，不属于本页面分支可修改的共享合同，需由主控合并任务修复后重跑 BRB-E2E-003。
+状态：covered-partial。当前实现使用 `web/e2e/bank-flow-rule-batches-flow.spec.ts` 覆盖流水规则入口；后端用 canonical query repository/application/route/architecture tests 保护独立 route、同 snapshot、固定查询数、active relation、canonical persistence 和 tag-rule settings 边界。成本统计跨页回归证明规则批次流水只进入银行事实视图；没有完成 OA 付款关系时，不得伪造项目成本。标签抽屉保存、提交和单批次撤回均覆盖旧状态字段缺失与当前页单次 normal GET。
 
 | Spec ID | 业务场景 | 当前覆盖 | 缺口 |
 | --- | --- | --- | --- |

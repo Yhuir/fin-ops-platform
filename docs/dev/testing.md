@@ -195,9 +195,9 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增成本统计导出 Browser 覆盖：`read_export_only` 用户可在 time-view 打开导出中心，export-preview 和 export 请求携带 `view=time`、`month=2026-03`、`project_scope=active` 且不带 `page`/`page_size`，真实 download event 产生 `成本统计_全部期间_按时间统计.xlsx`，下载内容包含流水 ID、项目、费用类型、费用内容、对方户名、支付账户和筛选字段；row-limit 错误反馈仍保留。
 
-本轮新增成本统计按银行/按费用类型 Browser baseline：`cost-statistics-flow` 在 fresh explorer 下从按时间切到按银行，选择银行账户和项目后打开银行对应流水详情；随后切到按费用类型，选择费用类型并打开流水详情。该测试覆盖 `COST-E2E-001` 中 bank/expense 真实浏览器基线，并收集 console/pageerror/requestfailed/dialog。
+成本统计按银行/按费用类型 Browser baseline：`cost-statistics-flow` 从按时间切到按银行，选择银行账户和项目后打开 OA 成本归集详情；随后切到按费用类型，选择费用类型并打开同一归集详情。按时间与按标签另外保护真实银行流水详情。该测试覆盖 `COST-E2E-001` 的 bank/expense 归集基线与两类详情边界，并收集 console/pageerror/requestfailed/dialog。
 
-本轮新增成本统计 detail/export non-fresh Browser 覆盖：`cost-statistics-flow` 在 explorer fresh 但 transaction detail、export-preview 和 export 返回 non-fresh 409 时，页面不打开旧流水详情、不展示旧导出预览、不触发 download，并展示刷新错误；预期 409 资源日志被单独允许，其他 console/page/request/dialog 错误仍会失败。该测试覆盖 `COST-E2E-006` 的 detail/export 子链路。
+成本统计现在直接读取 canonical snapshot，不再存在 Cost non-fresh 409。Browser 覆盖要求 bank transaction/allocation detail、export-preview 和 export 失败时不复用旧详情或旧预览、不触发伪下载，并将错误限制在对应抽屉/导出区；其他 console/page/request/dialog 错误仍会失败。
 
 本轮新增成本统计大数据窄屏 Browser 覆盖：`cost-statistics-flow` 在 390px Chromium 下启用 120+ 行长字段成本数据，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动，右侧列在 viewport 内，导出入口、长项目和费用类型选择器未被遮挡，且没有 console/page/request/dialog 错误。该测试覆盖 `COST-E2E-008` 的本地 Browser 布局与交互风险；真实生产超大数据查询/下载耗时和 worker drain 仍走 `infra-smoke` / staging gate。
 

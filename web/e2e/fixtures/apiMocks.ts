@@ -4685,29 +4685,6 @@ const workbenchRelationCostRow: CostBrowserProjectRow = {
   counterparty_name: "智能工厂设备商",
   payment_account_label: "建设银行 1138",
 };
-const invoiceImportCostProjectName = "发票导入成本项目";
-const invoiceImportCostRow: CostBrowserProjectRow = {
-  transaction_id: "invoice-import-cost-e2e-001",
-  trade_time: "2026-05-21 10:20",
-  direction: "支出",
-  expense_type: "设备货款及材料费",
-  expense_content: "发票导入进项成本",
-  amount: "18,320.00",
-  counterparty_name: "发票导入进项供应商",
-  payment_account_label: "建设银行 1138",
-};
-const etcImportCostProjectName = "ETC导入通行成本项目";
-const etcImportCostRow: CostBrowserProjectRow = {
-  transaction_id: "etc-import-cost-e2e-001",
-  trade_time: "2026-03-27 09:10",
-  direction: "支出",
-  expense_type: "通行费",
-  expense_content: "ETC高速通行费",
-  amount: "32.26",
-  counterparty_name: "ETC导入通行服务商",
-  payment_account_label: "建设银行 1138",
-};
-const bankImportCostProjectName = "银行导入成本项目";
 const bankImportCostRow: CostBrowserProjectRow = {
   transaction_id: "bank-import-cost-e2e-001",
   trade_time: "2026-03-25 14:22",
@@ -4718,7 +4695,6 @@ const bankImportCostRow: CostBrowserProjectRow = {
   counterparty_name: "导入浏览器测试客户",
   payment_account_label: "建设银行 8826",
 };
-const bankFlowRuleCostProjectName = "流水规则手续费成本项目";
 const bankFlowRuleCostRow: CostBrowserProjectRow = {
   transaction_id: "bank-flow-rule-e2e-001",
   trade_time: "2026-05-03 10:20:00",
@@ -4729,7 +4705,6 @@ const bankFlowRuleCostRow: CostBrowserProjectRow = {
   counterparty_name: "建设银行",
   payment_account_label: "建设银行 8106",
 };
-const turnoverCostProjectName = "外部往来闭环成本项目";
 const turnoverCostRow: CostBrowserProjectRow = {
   transaction_id: turnoverBankRows.expense,
   trade_time: "2026-05-03 10:00:00",
@@ -4761,11 +4736,6 @@ function costProjectRowsForMonth(
   month: string,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  includeInvoiceImportEvidence = false,
-  includeEtcImportEvidence = false,
-  includeBankImportEvidence = false,
-  includeBankFlowRuleCostEvidence = false,
-  includeTurnoverCostEvidence = false,
   includeLargeCostDataset = false,
 ) {
   const projectRowsForMonth = costProjectRows[month] ?? {};
@@ -4788,93 +4758,23 @@ function costProjectRowsForMonth(
       ],
     };
   }
-  if (month === "2026-05" && includeInvoiceImportEvidence) {
-    result = {
-      ...result,
-      [invoiceImportCostProjectName]: [
-        ...(result[invoiceImportCostProjectName] ?? []),
-        invoiceImportCostRow,
-      ],
-    };
-  }
-  if (month === "2026-03" && includeEtcImportEvidence) {
-    result = {
-      ...result,
-      [etcImportCostProjectName]: [
-        ...(result[etcImportCostProjectName] ?? []),
-        etcImportCostRow,
-      ],
-    };
-  }
-  if (month === "2026-03" && includeBankImportEvidence) {
-    result = {
-      ...result,
-      [bankImportCostProjectName]: [
-        ...(result[bankImportCostProjectName] ?? []),
-        bankImportCostRow,
-      ],
-    };
-  }
-  if (month === "2026-05" && includeBankFlowRuleCostEvidence) {
-    result = {
-      ...result,
-      [bankFlowRuleCostProjectName]: [
-        ...(result[bankFlowRuleCostProjectName] ?? []),
-        bankFlowRuleCostRow,
-      ],
-    };
-  }
-  if (month === "2026-05" && includeTurnoverCostEvidence) {
-    result = {
-      ...result,
-      [turnoverCostProjectName]: [
-        ...(result[turnoverCostProjectName] ?? []),
-        turnoverCostRow,
-      ],
-    };
-  }
   return result;
 }
 
 function allCostProjectRows(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  includeInvoiceImportEvidence = false,
-  includeEtcImportEvidence = false,
-  includeBankImportEvidence = false,
-  includeBankFlowRuleCostEvidence = false,
-  includeTurnoverCostEvidence = false,
   includeLargeCostDataset = false,
 ) {
   const months = new Set(Object.keys(costProjectRows));
   if (includeLargeCostDataset) {
     months.add("2026-03");
   }
-  if (includeInvoiceImportEvidence) {
-    months.add("2026-05");
-  }
-  if (includeEtcImportEvidence) {
-    months.add("2026-03");
-  }
-  if (includeBankImportEvidence) {
-    months.add("2026-03");
-  }
-  if (includeBankFlowRuleCostEvidence) {
-    months.add("2026-05");
-  }
-  if (includeTurnoverCostEvidence) {
-    months.add("2026-05");
-  }
   const projectMaps = Array.from(months)
     .map((month) => costProjectRowsForMonth(
       month,
       relationConfirmed,
       includeWorkbenchRelationEvidence,
-      includeInvoiceImportEvidence,
-      includeEtcImportEvidence,
-      includeBankImportEvidence,
-      includeBankFlowRuleCostEvidence,
-      includeTurnoverCostEvidence,
       includeLargeCostDataset,
     ));
   return projectMaps.reduce<Record<string, CostBrowserProjectRow[]>>((result, projectMap) => {
@@ -4890,17 +4790,12 @@ function costTimeRows(
   projectScope: string | null,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  includeInvoiceImportEvidence = false,
-  includeEtcImportEvidence = false,
-  includeBankImportEvidence = false,
-  includeBankFlowRuleCostEvidence = false,
-  includeTurnoverCostEvidence = false,
   completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
   const sourceProjectRowMap = month === "all"
-    ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset)
-    : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence, includeLargeCostDataset);
+    ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence, includeLargeCostDataset)
+    : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence, includeLargeCostDataset);
   return Object.entries(sourceProjectRowMap)
     .filter(([projectName]) => isCostProjectVisibleForScope(projectName, projectScope, completedProjectNames))
     .flatMap(([projectName, rows]) =>
@@ -4933,19 +4828,32 @@ function costBankFlowRows(
   completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
-  const expenseRows = costTimeRows(
+  const oaPaymentRows = costTimeRows(
     month,
     projectScope,
     relationConfirmed,
     includeWorkbenchRelationEvidence,
-    includeInvoiceImportEvidence,
-    includeEtcImportEvidence,
-    includeBankImportEvidence,
-    includeBankFlowRuleCostEvidence,
-    includeTurnoverCostEvidence,
     completedProjectNames,
     includeLargeCostDataset,
-  ).map((row) => ({
+  );
+  const standaloneBankImportRows = includeBankImportEvidence
+    && (month === "all" || month === "2026-03")
+    ? [{ ...bankImportCostRow, project_name: "" }]
+    : [];
+  const standaloneBankFlowRuleRows = includeBankFlowRuleCostEvidence
+    && (month === "all" || month === "2026-05")
+    ? [{ ...bankFlowRuleCostRow, project_name: "" }]
+    : [];
+  const standaloneTurnoverRows = includeTurnoverCostEvidence
+    && (month === "all" || month === "2026-05")
+    ? [{ ...turnoverCostRow, project_name: "" }]
+    : [];
+  const expenseRows = [
+    ...oaPaymentRows,
+    ...standaloneBankImportRows,
+    ...standaloneBankFlowRuleRows,
+    ...standaloneTurnoverRows,
+  ].map((row) => ({
     ...row,
     bank_tag_code: "expense_material",
     bank_tag_label: "支出 / 材料采购",
@@ -5011,11 +4919,6 @@ function costStatisticsExplorerPayload(
     projectScope,
     relationConfirmed,
     includeWorkbenchRelationEvidence,
-    includeInvoiceImportEvidence,
-    includeEtcImportEvidence,
-    includeBankImportEvidence,
-    includeBankFlowRuleCostEvidence,
-    includeTurnoverCostEvidence,
     completedProjectNames,
     includeLargeCostDataset,
   );
@@ -5245,7 +5148,24 @@ function costStatisticsExplorerPagePayload(
   const summaryRows = view === "time" || view === "bank_tag" ? bankFlowRows : costRows;
   const expenseRows = summaryRows.filter((row) => row.direction === "支出");
   const incomeRows = summaryRows.filter((row) => row.direction === "收入");
-  const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize);
+  const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize).map((row) => {
+    if (view === "time" || view === "bank_tag") {
+      return {
+        ...row,
+        entry_id: row.transaction_id,
+        row_kind: "bank_transaction",
+        occurred_at: row.trade_time,
+      };
+    }
+    const allocationId = `oa:${row.transaction_id}`;
+    return {
+      ...row,
+      entry_id: allocationId,
+      row_kind: "oa_allocation",
+      allocation_id: allocationId,
+      occurred_at: row.trade_time,
+    };
+  });
   const nextOffset = cursorOffset + rows.length;
   return {
     scope,
@@ -5274,7 +5194,7 @@ function costStatisticsExplorerPagePayload(
   };
 }
 
-function costTransactionPayload(
+function costBankTransactionPayload(
   transactionId: string,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
@@ -5288,31 +5208,66 @@ function costTransactionPayload(
     .find((item) => item.transaction_id === transactionId);
   return {
     month: transactionId.includes("101") ? "2026-04" : "2026-03",
-    transaction: {
+    kind: "bank_transaction",
+    bank_transaction: {
       id: transactionId,
-      project_name: row?.project_name ?? "云南溯源科技",
-      expense_type: row?.expense_type ?? "设备货款及材料费",
       expense_content: row?.expense_content ?? "PLC 模块采购",
       trade_time: row?.trade_time ?? "2026-03-10 21:27:55",
       direction: row?.direction ?? "支出",
       amount: row?.amount ?? "10,000.00",
       counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
       payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
-      oa_applicant: "浏览器成本申请人",
       remark: "浏览器成本统计明细",
-      summary_fields: {
-        资金方向: row?.direction ?? "支出",
-        交易时间: row?.trade_time ?? "2026-03-10 21:27:55",
-        对方户名: row?.counterparty_name ?? "浏览器设备供应商",
-      },
-      detail_fields: {
-        账号: "62220001",
-        账户名称: "云南溯源科技有限公司",
-        摘要: row?.expense_content ?? "PLC 模块采购",
-        备注: "浏览器成本统计明细",
-        费用类型: row?.expense_type ?? "设备货款及材料费",
-        费用内容: row?.expense_content ?? "PLC 模块采购",
-      },
+    },
+  };
+}
+
+function costAllocationPayload(
+  allocationId: string,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+  includeInvoiceImportEvidence = false,
+  includeEtcImportEvidence = false,
+  includeBankImportEvidence = false,
+  includeBankFlowRuleCostEvidence = false,
+  includeTurnoverCostEvidence = false,
+) {
+  const transactionId = allocationId.replace(/^oa:/, "");
+  const row = costTimeRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence)
+    .find((item) => item.transaction_id === transactionId);
+  const amount = row?.amount ?? "10,000.00";
+  return {
+    month: (row?.trade_time ?? "2026-03").slice(0, 7),
+    kind: "oa_allocation",
+    allocation: {
+      allocation_id: allocationId,
+      oa_id: `oa-${transactionId}`,
+      oa_apply_type: "支付申请",
+      expense_item_id: "",
+      oa_completed_at: row?.trade_time ?? "2026-03-10 21:27:55",
+      project_name: row?.project_name ?? "云南溯源科技",
+      project_id: `project-${row?.project_name ?? "云南溯源科技"}`,
+      expense_type: row?.expense_type ?? "设备货款及材料费",
+      expense_content: row?.expense_content ?? "PLC 模块采购",
+      amount,
+      counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
+      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
+      oa_applicant: "浏览器成本申请人",
+    },
+    payment_evidence: [{
+      transaction_id: transactionId,
+      trade_time: row?.trade_time ?? "2026-03-10 21:27:55",
+      amount,
+      counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
+      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
+      remark: "浏览器成本统计明细",
+    }],
+    reconciliation: {
+      relation_case_id: `relation-${transactionId}`,
+      oa_allocation_total: amount,
+      bank_outflow_total: amount,
+      difference: "0.00",
+      status: "balanced",
     },
   };
 }
@@ -5335,7 +5290,7 @@ function costStatisticsExportPreviewPayload(
   const isBankFlowView = view === "time" || view === "bank_tag";
   const rows = (isBankFlowView
     ? costBankFlowRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
-    : costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence))
+    : costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence))
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true));
   const fileName = view === "project"
@@ -9200,10 +9155,23 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }, 400);
     }
 
-    const costTransactionDetailMatch = path.match(/^\/api\/cost-statistics\/transactions\/([^/]+)$/);
-    if (costTransactionDetailMatch) {
-      return json(route, costTransactionPayload(
-        decodeURIComponent(costTransactionDetailMatch[1] ?? ""),
+    const costBankTransactionDetailMatch = path.match(/^\/api\/cost-statistics\/bank-transactions\/([^/]+)$/);
+    if (costBankTransactionDetailMatch) {
+      return json(route, costBankTransactionPayload(
+        decodeURIComponent(costBankTransactionDetailMatch[1] ?? ""),
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
+        invoiceImportDownstreamConfirmed,
+        etcImportDownstreamConfirmed,
+        bankImportDownstreamConfirmed,
+        bankFlowRuleCostConfirmed,
+        turnoverCostConfirmed,
+      ));
+    }
+    const costAllocationDetailMatch = path.match(/^\/api\/cost-statistics\/allocations\/([^/]+)$/);
+    if (costAllocationDetailMatch) {
+      return json(route, costAllocationPayload(
+        decodeURIComponent(costAllocationDetailMatch[1] ?? ""),
         relationConfirmed,
         Boolean(options.costStatisticsRelationFanout),
         invoiceImportDownstreamConfirmed,

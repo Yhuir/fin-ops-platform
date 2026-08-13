@@ -10,6 +10,12 @@ from fin_ops_platform.services.app_settings_service import AppSettingsValidation
 from fin_ops_platform.services.cost_statistics_query_service import (
     CostStatisticsExportLimitError,
 )
+from fin_ops_platform.services.cost_statistics_canonical_repository import (
+    CostStatisticsIntegrityError,
+)
+from fin_ops_platform.services.cost_statistics_policy import (
+    CostStatisticsAllocationConflictError,
+)
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 WriteSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -92,7 +98,6 @@ class CostStatisticsApiRoutes:
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
                 expense_types=query.get("expense_type", []),
-                transaction_id=query.get("transaction_id", [None])[0],
                 start_month=query.get("start_month", [None])[0],
                 end_month=query.get("end_month", [None])[0],
                 start_date=query.get("start_date", [None])[0],
@@ -108,10 +113,18 @@ class CostStatisticsApiRoutes:
                 sort_by=query.get("sort_by", [None])[0],
                 project_scope=query.get("project_scope", [None])[0],
             )
-        if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
+        if method == "GET" and route_path.startswith("/api/cost-statistics/bank-transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
-            return self.handle_transaction(
+            return self.handle_bank_transaction(
                 transaction_id,
+                query.get("project_scope", [None])[0],
+                query.get("view", [None])[0],
+                query.get("scope", [None])[0],
+            )
+        if method == "GET" and route_path.startswith("/api/cost-statistics/allocations/"):
+            allocation_id = route_path.rsplit("/", 1)[-1]
+            return self.handle_allocation(
+                allocation_id,
                 query.get("project_scope", [None])[0],
                 query.get("view", [None])[0],
                 query.get("scope", [None])[0],
@@ -194,6 +207,8 @@ class CostStatisticsApiRoutes:
                 page_size=int(page_size or 50),
                 include_statistics=self._optional_bool_parser(include_statistics),
             )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
+            return self._integrity_error_response(error)
         except ValueError as error:
             return self._page_query_error_response(error)
         if self._metric_emitter is not None:
@@ -216,7 +231,6 @@ class CostStatisticsApiRoutes:
         view: str | None,
         project_names: list[str] | None,
         expense_types: list[str] | None,
-        transaction_id: str | None,
         start_month: str | None = None,
         end_month: str | None = None,
         start_date: str | None = None,
@@ -231,12 +245,12 @@ class CostStatisticsApiRoutes:
         project_scope: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"month", "time", "bank_tag", "project", "expense_type", "transaction"}:
+        if view not in {"month", "time", "bank_tag", "project", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_request",
-                    "message": "view must be month, time, bank_tag, project, expense_type, or transaction.",
+                    "message": "view must be month, time, bank_tag, project, or expense_type.",
                 },
             )
         try:
@@ -246,7 +260,6 @@ class CostStatisticsApiRoutes:
                 view=view,
                 project_names=project_names,
                 expense_types=expense_types,
-                transaction_id=transaction_id,
                 start_month=start_month,
                 end_month=end_month,
                 start_date=start_date,
@@ -260,16 +273,13 @@ class CostStatisticsApiRoutes:
                 sort_by=sort_by or "time",
                 project_scope=normalized_project_scope,
             )
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
-            )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": error.error_code, "message": str(error), "details": dict(error.details)},
             )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
+            return self._integrity_error_response(error)
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
@@ -321,6 +331,8 @@ class CostStatisticsApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": error.error_code, "message": str(error), "details": dict(error.details)},
             )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
+            return self._integrity_error_response(error)
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
@@ -330,7 +342,7 @@ class CostStatisticsApiRoutes:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def handle_transaction(
+    def handle_bank_transaction(
         self,
         transaction_id: str,
         project_scope: str | None,
@@ -338,36 +350,77 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"time", "project", "bank", "expense_type", "bank_tag"}:
+        if normalized_view not in {"time", "bank_tag"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "invalid_cost_statistics_transaction_request",
-                    "message": "view must be time, project, bank, expense_type, or bank_tag.",
+                    "error": "invalid_cost_statistics_bank_transaction_request",
+                    "message": "view must be time or bank_tag.",
                 },
             )
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
-            payload = self._query_service.get_transaction_detail(
+            payload = self._query_service.get_bank_transaction_detail(
                 transaction_id,
                 project_scope=normalized_project_scope,
                 view=normalized_view,
                 scope=str(scope or ""),
             )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
+            return self._integrity_error_response(error)
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "invalid_cost_statistics_transaction_request",
+                    "error": "invalid_cost_statistics_bank_transaction_request",
                     "message": str(error),
                 },
             )
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
-                {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
+                {"error": "cost_statistics_bank_transaction_not_found", "transaction_id": transaction_id},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def handle_allocation(
+        self,
+        allocation_id: str,
+        project_scope: str | None,
+        view: str | None,
+        scope: str | None,
+    ) -> Any:
+        normalized_view = str(view or "").strip().lower()
+        if normalized_view not in {"project", "bank", "expense_type"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_cost_statistics_allocation_request",
+                    "message": "view must be project, bank, or expense_type.",
+                },
+            )
+        try:
+            payload = self._query_service.get_allocation_detail(
+                allocation_id,
+                project_scope=self._normalize_project_scope(project_scope),
+                view=normalized_view,
+                scope=str(scope or ""),
+            )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
+            return self._integrity_error_response(error)
+        except ValueError as error:
+            if str(error) == "project_scope must be active or all":
+                return self._project_scope_error_response(error)
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cost_statistics_allocation_request", "message": str(error)},
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "cost_statistics_allocation_not_found", "allocation_id": allocation_id},
             )
         return self._json_response(HTTPStatus.OK, payload)
 
@@ -413,6 +466,15 @@ class CostStatisticsApiRoutes:
             return self._project_scope_error_response(error)
         error_code = "invalid_cost_statistics_cursor" if "cursor" in message else "invalid_cost_statistics_query"
         return self._json_response(HTTPStatus.BAD_REQUEST, {"error": error_code, "message": message})
+
+    def _integrity_error_response(self, error: ValueError) -> Any:
+        return self._json_response(
+            HTTPStatus.CONFLICT,
+            {
+                "error": "cost_statistics_allocation_integrity_conflict",
+                "message": str(error),
+            },
+        )
 
 
 def _explorer_entry_count(payload: dict[str, Any]) -> int:

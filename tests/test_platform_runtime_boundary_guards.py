@@ -2608,7 +2608,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'route_path == "/api/cost-statistics/explorer"',
             'route_path == "/api/cost-statistics/export-preview"',
             'route_path == "/api/cost-statistics/export"',
-            'route_path.startswith("/api/cost-statistics/transactions/")',
+            'route_path.startswith("/api/cost-statistics/bank-transactions/")',
+            'route_path.startswith("/api/cost-statistics/allocations/")',
             "self._optional_bool_parser(",
         ):
             if snippet not in route_source:
@@ -2664,7 +2665,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             self.assertIn(table, repository_source)
         self.assertIn("normalized_payload", repository_source)
-        self.assertIn("COMPLETED_WORKFLOW_STATUS_SQL", repository_source)
+        self.assertIn("COMPLETED_WORKFLOW_STATUS_ALIASES", repository_source)
+        self.assertIn("approved_at", repository_source)
+        self.assertNotIn('/api/cost-statistics/transactions/', repository_source + query_source)
         self.assertIn("self._canonical_repository.load_snapshot(", query_source)
         self.assertIn("scope_kind=scope_kind", query_source)
         self.assertIn("include_statistics=False", query_source)

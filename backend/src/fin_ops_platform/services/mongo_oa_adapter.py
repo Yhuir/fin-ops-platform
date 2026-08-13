@@ -816,7 +816,7 @@ class MongoOAAdapter(OAAdapter):
                         "project_name": project_names.get(self._first_text(data, "projectName"), self._first_text(data, "projectName")),
                         "form_status": self._form_status(data),
                         "submitted_at": self._first_text(data, "applicationDate", "ApplicationDate"),
-                        "completed_at": self._datetime_string(document.get("modifiedTime")),
+                        "completed_at": self._completed_document_time(data, document),
                     }
                 )
             return documents
@@ -840,7 +840,7 @@ class MongoOAAdapter(OAAdapter):
                         "project_name": project_names.get(self._first_text(data, "projectName"), self._first_text(data, "projectName")),
                         "form_status": self._form_status(data),
                         "submitted_at": self._first_text(data, "ApplicationDate", "applicationDate"),
-                        "completed_at": self._datetime_string(document.get("modifiedTime")),
+                        "completed_at": self._completed_document_time(data, document),
                     }
                 )
             return documents
@@ -874,8 +874,8 @@ class MongoOAAdapter(OAAdapter):
         expense_type = self._resolve_expense_type(data, reason)
         expense_content = reason
         etc_metadata = detect_etc_batch_metadata(data)
-        completed_at = self._datetime_string(document.get("modifiedTime"))
         workflow_status = self.canonical_process_status(data)
+        completed_at = self._completed_document_time(data, document)
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
@@ -891,6 +891,7 @@ class MongoOAAdapter(OAAdapter):
             relation_label="待找流水与发票",
             relation_tone="warn",
             workflow_status=workflow_status or None,
+            completed_at=completed_at or None,
             expense_type=expense_type,
             expense_content=expense_content,
             source=etc_metadata.get("source"),
@@ -1098,6 +1099,8 @@ class MongoOAAdapter(OAAdapter):
         expense_content_summary = "；".join(expense_contents_summary) or self._first_text(data, "notes") or "—"
         reimbursement_date_range = self._date_range_text(reimbursement_dates)
 
+        workflow_status = self.canonical_process_status(data)
+        completed_at = self._completed_document_time(data, document)
         detail_fields = {
             "OA单号": self._expense_form_no(data, document),
             "表单ID": self._settings.expense_claim_form_id,
@@ -1105,7 +1108,7 @@ class MongoOAAdapter(OAAdapter):
             "流程请求ID": self._first_text(data, "flowRequestId"),
             "Mongo文档ID": self._document_id(document),
             "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
-            "审批完成时间": self._datetime_string(document.get("modifiedTime")) or "—",
+            "审批完成时间": completed_at or "—",
             "流程状态": self._form_status(data),
             "明细数量": str(len(expense_items)),
             "明细金额合计": self._format_decimal(detail_sum) or "—",
@@ -1147,7 +1150,8 @@ class MongoOAAdapter(OAAdapter):
                 relation_code="pending_match",
                 relation_label="待找流水与发票",
                 relation_tone="warn",
-                workflow_status=self.canonical_process_status(data) or None,
+                workflow_status=workflow_status or None,
+                completed_at=completed_at or None,
                 expense_type=expense_type_summary,
                 expense_content=expense_content_summary,
                 detail_fields=detail_fields,
@@ -3051,6 +3055,16 @@ class MongoOAAdapter(OAAdapter):
         if status == "进行中":
             return OA_IMPORT_STATUS_IN_PROGRESS
         return ""
+
+    @classmethod
+    def _completed_document_time(
+        cls,
+        data: dict[str, Any],
+        document: dict[str, Any],
+    ) -> str:
+        if cls.canonical_process_status(data) != OA_IMPORT_STATUS_COMPLETED:
+            return ""
+        return cls._datetime_string(document.get("modifiedTime"))
 
     @staticmethod
     def _canonical_apply_type(form_type: str) -> str:

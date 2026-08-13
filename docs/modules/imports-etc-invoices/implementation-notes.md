@@ -1,5 +1,10 @@
 # ETC发票导入 实施记录
 
+## 2026-08-14 - OA-first 成本隔离更正
+
+- 单独 ETC 发票导入只产生 ETC/发票事实，不构成 OA 与付款流水关系，因此不能进入 OA 项目成本。
+- Browser 回归已改为验证成本隔离。下文早期记录中“ETC 导入直接形成成本项目”的表述已被本节取代。
+
 ## 2026-07-23：Cost 改为访问时依赖收敛
 
 - 显式 ETC import 仍只为真实 canonical metadata changed months 输出其注册合同中的精确 Workbench/relation/matching/invoice lifecycle/tax/search scopes。

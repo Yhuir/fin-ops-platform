@@ -401,6 +401,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(payment.project_name, "云南溯源科技")
         self.assertEqual(payment.apply_type, "支付申请")
         self.assertEqual(payment.workflow_status, "completed")
+        self.assertEqual(payment.completed_at, "2026-03-27T09:00:00")
         self.assertEqual(payment.counterparty_name, "中国电信股份有限公司昆明分公司")
         self.assertEqual(payment.reason, "托收电话费及宽带")
         self.assertEqual(payment.detail_fields["流程实例ID"], "proc-2047")
@@ -414,6 +415,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.project_names, ["云南溯源科技", "玉烟维护项目"])
         self.assertEqual(reimbursement.apply_type, "日常报销")
         self.assertEqual(reimbursement.workflow_status, "completed")
+        self.assertEqual(reimbursement.completed_at, "2026-03-27T11:00:00")
         self.assertEqual(reimbursement.detail_fields["流程实例ID"], "exp-001")
         self.assertEqual(reimbursement.detail_fields["流程请求ID"], "")
         self.assertEqual(reimbursement.detail_fields["Mongo文档ID"], "expense-doc-1")
@@ -2389,6 +2391,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                     {
                         "_id": "payment-doc-in-progress",
                         "form_id": "2",
+                        "modifiedTime": "2026-03-17T09:00:00",
                         "data": {
                             "applicationDate": "2026-04-18",
                             "userName": "樊祖芳",
@@ -2441,6 +2444,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                     {
                         "_id": "expense-doc-in-progress",
                         "form_id": "32",
+                        "modifiedTime": "2026-03-19T09:00:00",
                         "data": {
                             "ApplicationDate": "2026-03-18",
                             "Reimbursement Personnel": "胡瑢",
@@ -2879,6 +2883,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                 "oa-exp-exp-progress-001": "in_progress",
             },
         )
+        self.assertTrue(all(record.completed_at is None for record in records))
 
     def test_list_application_records_uses_month_cache(self) -> None:
         adapter = CountingStubMongoOAAdapter(

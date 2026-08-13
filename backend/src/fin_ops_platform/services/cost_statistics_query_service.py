@@ -143,10 +143,15 @@ class CostStatisticsQueryService:
             "cost_statistics_tag_selection_version": int(
                 raw_page.get("tag_selection_version") or 1
             ),
+            "allocation_quality": (
+                dict(raw_page["allocation_quality"])
+                if isinstance(raw_page.get("allocation_quality"), dict)
+                else None
+            ),
         }
         return payload
 
-    def get_transaction_detail(
+    def get_bank_transaction_detail(
         self,
         transaction_id: str,
         *,
@@ -159,6 +164,8 @@ class CostStatisticsQueryService:
             scope
         )
         normalized_view, _filters = self._normalize_page_query(view, {})
+        if normalized_view not in {"time", "bank_tag"}:
+            raise ValueError("bank transaction detail requires time or bank_tag view")
         normalized_transaction_id = str(transaction_id or "").strip()
         if not normalized_transaction_id:
             raise KeyError(transaction_id)
@@ -170,77 +177,25 @@ class CostStatisticsQueryService:
                 include_statistics=False,
             ),
             project_scope=normalized_project_scope,
-        ).transaction(
+        ).bank_transaction(
             transaction_id=normalized_transaction_id,
-            bank_flow_view=normalized_view in {"time", "bank_tag"},
             scope_kind=scope_kind,
             scope_value=scope_value,
         )
         if not isinstance(row, dict):
             raise KeyError(transaction_id)
-        cost_allocations = [
-            {
-                "row_key": str(item.get("row_key") or ""),
-                "project_name": str(item.get("project_name") or "未归集项目"),
-                "project_id": str(item.get("project_id") or ""),
-                "expense_type": str(item.get("expense_type") or "未分类"),
-                "expense_content": str(item.get("expense_content") or ""),
-                "oa_applicant": str(item.get("oa_applicant") or "—"),
-                "amount": _plain_money(
-                    _decimal_from_value(item.get("amount"))
-                    or Decimal("0.00")
-                ),
-            }
-            for item in list(row.get("cost_allocations") or [])
-            if isinstance(item, dict)
-        ]
-        project_names = sorted(
-            {item["project_name"] for item in cost_allocations}
-        )
-        expense_types = sorted(
-            {item["expense_type"] for item in cost_allocations}
-        )
-        allocation_amount = sum(
-            (
-                _decimal_from_value(item["amount"]) or Decimal("0.00")
-                for item in cost_allocations
-            ),
-            start=Decimal("0.00"),
-        )
         label_path = row.get("bank_tag_label_path")
         month = str(row.get("month") or row.get("trade_time") or "")[:7] or "all"
         return {
             "month": month,
-            "transaction": {
+            "kind": "bank_transaction",
+            "bank_transaction": {
                 "id": normalized_transaction_id,
-                "project_name": (
-                    "、".join(project_names)
-                    if project_names
-                    else str(row.get("project_name") or "")
-                ),
-                "expense_type": (
-                    "、".join(expense_types)
-                    if expense_types
-                    else str(row.get("expense_type") or "")
-                ),
-                "expense_content": (
-                    "、".join(
-                        sorted(
-                            {
-                                item["expense_content"]
-                                for item in cost_allocations
-                                if item["expense_content"]
-                            }
-                        )
-                    )
-                    or str(row.get("expense_content") or "")
-                ),
+                "expense_content": str(row.get("expense_content") or ""),
                 "trade_time": str(row.get("trade_time") or ""),
                 "direction": str(row.get("direction") or ""),
                 "amount": _plain_money(
-                    allocation_amount
-                    if cost_allocations
-                    else _decimal_from_value(row.get("amount"))
+                    _decimal_from_value(row.get("amount"))
                     or Decimal("0.00")
                 ),
                 "counterparty_name": str(
@@ -250,29 +205,6 @@ class CostStatisticsQueryService:
                     row.get("payment_account_label") or ""
                 ),
                 "remark": str(row.get("remark") or ""),
-                "oa_applicant": (
-                    "、".join(
-                        sorted(
-                            {
-                                item["oa_applicant"]
-                                for item in cost_allocations
-                                if item["oa_applicant"]
-                            }
-                        )
-                    )
-                    or str(row.get("oa_applicant") or "")
-                ),
-                "cost_allocations": cost_allocations,
-                "summary_fields": {},
-                "detail_fields": {},
-                "relation_status": "canonical",
-                "relation_case_ids": [
-                    str(row.get("group_id"))
-                ]
-                if str(row.get("group_id") or "")
-                else [],
-                "linked_oa_count": int(row.get("linked_oa_count") or 0),
-                "linked_invoice_count": 0,
                 "bank_tag_code": str(row.get("bank_tag_code") or ""),
                 "bank_tag_label": str(row.get("bank_tag_label") or ""),
                 "bank_tag_primary_label": str(
@@ -285,20 +217,66 @@ class CostStatisticsQueryService:
                     list(label_path) if isinstance(label_path, list) else []
                 ),
             },
-            "relation_context": {
-                "row_id": normalized_transaction_id,
-                "row_type": "bank_transaction",
-                "relation_status": "canonical",
-                "group_ids": [
-                    str(row.get("group_id"))
-                ]
-                if str(row.get("group_id") or "")
-                else [],
-                "linked_oa": [],
-                "linked_bank_transactions": [],
-                "linked_input_invoices": [],
-                "linked_output_invoices": [],
+        }
+
+    def get_allocation_detail(
+        self,
+        allocation_id: str,
+        *,
+        project_scope: str,
+        view: str,
+        scope: str,
+    ) -> dict[str, Any]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
+        scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(scope)
+        normalized_view, _filters = self._normalize_page_query(view, {})
+        if normalized_view not in {"project", "bank", "expense_type"}:
+            raise ValueError("allocation detail requires project, bank, or expense_type view")
+        normalized_allocation_id = str(allocation_id or "").strip()
+        if not normalized_allocation_id:
+            raise KeyError(allocation_id)
+        row = CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(
+                scope_kind=scope_kind,
+                scope_value=scope_value,
+                view=normalized_view,
+                include_statistics=False,
+            ),
+            project_scope=normalized_project_scope,
+        ).allocation(
+            allocation_id=normalized_allocation_id,
+            scope_kind=scope_kind,
+            scope_value=scope_value,
+        )
+        if not isinstance(row, dict):
+            raise KeyError(allocation_id)
+        return {
+            "month": str(row.get("month") or "")[:7] or "all",
+            "kind": "oa_allocation",
+            "allocation": {
+                key: row.get(key)
+                for key in (
+                    "allocation_id",
+                    "oa_id",
+                    "oa_apply_type",
+                    "expense_item_id",
+                    "oa_completed_at",
+                    "project_name",
+                    "project_id",
+                    "expense_type",
+                    "expense_content",
+                    "amount",
+                    "counterparty_name",
+                    "payment_account_label",
+                    "oa_applicant",
+                )
             },
+            "payment_evidence": [
+                dict(item)
+                for item in list(row.get("payment_evidence") or [])
+                if isinstance(item, dict)
+            ],
+            "reconciliation": dict(row.get("reconciliation") or {}),
         }
 
     def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
@@ -385,7 +363,7 @@ class CostStatisticsQueryService:
         elif view == "project":
             project_name = sorted(project_names)[0]
             columns = [
-                "时间",
+                "OA完成时间",
                 "资金方向",
                 "费用类型",
                 "金额",
@@ -420,7 +398,7 @@ class CostStatisticsQueryService:
             extra = {}
         else:
             columns = [
-                "时间",
+                "OA完成时间",
                 "项目名称",
                 "资金方向",
                 "金额",
@@ -481,28 +459,6 @@ class CostStatisticsQueryService:
             kwargs.get("aggregate_by")
         )
         range_kwargs = self._range_kwargs(kwargs)
-        if view == "transaction":
-            transaction_id = str(kwargs.get("transaction_id") or "").strip()
-            if not transaction_id:
-                raise ValueError(
-                    "transaction_id is required for transaction export"
-                )
-            payload = self.get_transaction_detail(
-                transaction_id,
-                project_scope=project_scope,
-                view="project",
-                scope=month,
-            )
-            workbook = self._transaction_workbook(payload)
-            return (
-                self._build_filename(
-                    month=payload["month"],
-                    view=view,
-                    project_name=payload["transaction"]["project_name"],
-                    transaction_id=transaction_id,
-                ),
-                self._serialize_workbook(workbook),
-            )
         if view not in {
             "month",
             "time",
@@ -914,7 +870,8 @@ class CostStatisticsQueryService:
         raw_row: dict[str, Any],
     ) -> dict[str, Any]:
         trade_time = str(
-            raw_row.get("trade_time")
+            raw_row.get("occurred_at")
+            or raw_row.get("trade_time")
             or raw_row.get("trade_time_text")
             or ""
         )
@@ -947,8 +904,17 @@ class CostStatisticsQueryService:
                 [primary] if primary == sub else [primary, sub]
             )
         return {
-            "transaction_id": str(
-                raw_row.get("transaction_id") or ""
+            "entry_id": str(
+                raw_row.get("entry_id")
+                or raw_row.get("allocation_id")
+                or raw_row.get("transaction_id")
+                or ""
+            ).strip(),
+            "allocation_id": str(raw_row.get("allocation_id") or "").strip(),
+            "oa_id": str(raw_row.get("oa_id") or "").strip(),
+            "oa_apply_type": str(raw_row.get("oa_apply_type") or "").strip(),
+            "relation_case_id": str(
+                raw_row.get("relation_case_id") or raw_row.get("group_id") or ""
             ).strip(),
             "month": str(
                 raw_row.get("month") or raw_row.get("scope_month") or ""
@@ -1155,7 +1121,7 @@ class CostStatisticsQueryService:
         sheet_names = ["导出说明", "项目汇总", "按费用类型汇总"]
         if include_expense_content_summary:
             sheet_names.append("按费用内容汇总")
-        sheet_names.append("流水明细")
+        sheet_names.append("OA成本归集明细")
         if include_oa_details:
             sheet_names.append("OA关联明细")
         if include_invoice_details:
@@ -1201,7 +1167,7 @@ class CostStatisticsQueryService:
                 ("统计范围", scope_label),
                 ("月份列表", month),
                 ("数据口径", "统一事实源只读一致性快照"),
-                ("导出结构", "项目汇总、费用类型汇总、流水明细"),
+                ("导出结构", "项目汇总、费用类型汇总、OA成本归集明细"),
             ],
         )
         summary_sheet = workbook.create_sheet("项目汇总")
@@ -1211,14 +1177,14 @@ class CostStatisticsQueryService:
             if include_expense_content_summary
             else None
         )
-        detail_sheet = workbook.create_sheet("流水明细")
+        detail_sheet = workbook.create_sheet("OA成本归集明细")
         detail_headers = [
-            "时间",
-            "交易流水ID",
+            "OA完成时间",
+            "归集单元ID",
             "资金方向",
             "对方户名",
             "支付账户",
-            "金额",
+            "归集金额",
             "备注",
             "项目名称",
             "费用类型",
@@ -1306,7 +1272,7 @@ class CostStatisticsQueryService:
             detail_sheet.append(
                 [
                     entry["trade_time"],
-                    entry["transaction_id"],
+                    entry["entry_id"],
                     entry["direction"],
                     entry["counterparty_name"],
                     entry["payment_account_label"],
@@ -1315,8 +1281,8 @@ class CostStatisticsQueryService:
                     entry["project_name"],
                     entry["expense_type"],
                     entry["expense_content"],
-                    "—",
-                    "—",
+                    entry["oa_id"] or "—",
+                    entry["relation_case_id"] or "—",
                 ]
             )
         self._fill_key_value_sheet(
@@ -1325,9 +1291,9 @@ class CostStatisticsQueryService:
                 ("项目名称", project_name),
                 ("统计期间", scope_label),
                 ("总支出金额", _plain_money(total_amount)),
-                ("支出流水笔数", len(entries)),
+                ("OA归集单元数", len(entries)),
                 ("费用类型数", len(type_buckets)),
-                ("已关联OA笔数", 0),
+                ("已关联OA笔数", len({entry["oa_id"] for entry in entries if entry["oa_id"]})),
                 ("已关联发票笔数", 0),
                 ("已处理异常笔数", 0),
                 ("已忽略笔数", 0),
@@ -1381,32 +1347,6 @@ class CostStatisticsQueryService:
         return workbook
 
     @staticmethod
-    def _transaction_workbook(payload: dict[str, Any]) -> Workbook:
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "流水详情"
-        transaction = payload["transaction"]
-        sheet.append(["字段", "值"])
-        for key, value in [
-            ("交易ID", transaction["id"]),
-            ("月份", payload["month"]),
-            ("项目名称", transaction["project_name"]),
-            ("费用类型", transaction["expense_type"]),
-            ("费用内容", transaction["expense_content"]),
-            ("交易时间", transaction["trade_time"]),
-            ("资金方向", transaction["direction"]),
-            ("金额", transaction["amount"]),
-            ("对方户名", transaction["counterparty_name"]),
-            ("OA提交人", transaction["oa_applicant"]),
-            ("支付账户", transaction["payment_account_label"]),
-            ("备注", transaction["remark"]),
-        ]:
-            sheet.append([key, value])
-        sheet.column_dimensions["A"].width = 22
-        sheet.column_dimensions["B"].width = 52
-        return workbook
-
-    @staticmethod
     def _fill_key_value_sheet(
         sheet: Any,
         rows: list[tuple[str, Any]],
@@ -1444,7 +1384,6 @@ class CostStatisticsQueryService:
         project_names: list[str] | None = None,
         aggregate_by: str | None = None,
         expense_type: str | None = None,
-        transaction_id: str | None = None,
     ) -> str:
         month_segment = (
             "全部期间"
@@ -1480,11 +1419,7 @@ class CostStatisticsQueryService:
                 f"成本统计_{month_segment}_按费用类型统计_"
                 f"{_sanitize_filename(expense_type or '未命名费用类型')}.xlsx"
             )
-        return (
-            f"成本统计_{month_segment}_流水详情_"
-            f"{_sanitize_filename(project_name or '未命名项目')}_"
-            f"{_sanitize_filename(transaction_id or 'unknown')}.xlsx"
-        )
+        raise ValueError(f"unsupported export view: {view}")
 
 
 def _plain_money(value: Decimal) -> str:

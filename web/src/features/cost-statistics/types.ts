@@ -23,9 +23,12 @@ export type CostStatisticsPageStatistics = {
   costTransactionCount?: number;
 };
 
-export type CostTimeRow = {
-  transactionId: string;
-  tradeTime: string;
+export type CostExplorerEntryRow = {
+  entryId: string;
+  rowKind: "bank_transaction" | "oa_allocation";
+  transactionId?: string;
+  allocationId?: string;
+  occurredAt: string;
   direction: string;
   projectName: string;
   expenseType: string;
@@ -98,7 +101,11 @@ export type CostStatisticsExplorerPage = {
     bankTagPrimary: CostBankTagPrimaryExplorerRow[];
     bankTagSub: CostBankTagSubExplorerRow[];
   };
-  rows: CostTimeRow[];
+  rows: CostExplorerEntryRow[];
+  allocationQuality?: {
+    excludedAllocationCount: number;
+    excludedByReason: Array<{ reason: string; count: number }>;
+  };
   rowCount: number;
   nextCursor?: string;
 };
@@ -119,31 +126,18 @@ export type CostStatisticsExplorerPageRequest = {
   signal?: AbortSignal;
 };
 
-export type CostTransactionDetail = {
+export type CostBankTransactionDetail = {
   month: string;
-  transaction: {
+  kind: "bank_transaction";
+  bankTransaction: {
     id: string;
-    projectName: string;
-    expenseType: string;
     expenseContent: string;
     tradeTime: string;
     direction: string;
     amount: string;
     counterpartyName: string;
     paymentAccountLabel: string;
-    oaApplicant: string;
     remark: string;
-    summaryFields: Record<string, string>;
-    detailFields: Record<string, string>;
-    costAllocations: Array<{
-      rowKey: string;
-      projectName: string;
-      projectId: string;
-      expenseType: string;
-      expenseContent: string;
-      oaApplicant: string;
-      amount: string;
-    }>;
     bankTagCode?: string;
     bankTagLabel?: string;
     bankTagPrimaryLabel?: string;
@@ -151,6 +145,43 @@ export type CostTransactionDetail = {
     bankTagLabelPath?: string[];
   };
 };
+
+export type CostAllocationDetail = {
+  month: string;
+  kind: "oa_allocation";
+  allocation: {
+    allocationId: string;
+    oaId: string;
+    oaApplyType: string;
+    expenseItemId: string;
+    oaCompletedAt: string;
+    projectName: string;
+    projectId: string;
+    expenseType: string;
+    expenseContent: string;
+    amount: string;
+    counterpartyName: string;
+    paymentAccountLabel: string;
+    oaApplicant: string;
+  };
+  paymentEvidence: Array<{
+    transactionId: string;
+    tradeTime: string;
+    amount: string;
+    counterpartyName: string;
+    paymentAccountLabel: string;
+    remark: string;
+  }>;
+  reconciliation: {
+    relationCaseId: string;
+    oaAllocationTotal: string;
+    bankOutflowTotal: string;
+    difference: string;
+    status: "balanced" | "mismatch";
+  };
+};
+
+export type CostEntryDetail = CostBankTransactionDetail | CostAllocationDetail;
 
 export type CostStatisticsExportPreview = {
   view: "time" | "bank_tag" | "project" | "expense_type";

@@ -88,10 +88,14 @@
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
-`GET /api/cost-statistics/transactions/{transaction_id}`
+`GET /api/cost-statistics/bank-transactions/{transaction_id}`
 
-- 必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_transaction_request`，未找到返回 `404`。
-- 详情从同一 canonical snapshot 计算，并按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
+- 只服务 `time|bank_tag`，返回未拆分的 canonical 银行流水详情。必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
+
+`GET /api/cost-statistics/allocations/{allocation_id}`
+
+- 只服务 `project|bank|expense_type`，返回一个 OA 成本归集单元、同一正式关系组内的关联付款流水和关系组金额校验。支付申请单元金额取该 OA 当前金额；日常报销单元金额取对应子付款项当前金额。
+- 两个详情接口都从同一 canonical snapshot 计算，按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 

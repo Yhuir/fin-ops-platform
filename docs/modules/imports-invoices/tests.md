@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportInvoicesPage.tsx` | 只传 `mode="invoice"`，共享工作流改动会同时影响银行流水和 ETC 导入 |
 | 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | 每文件票据方向、preview stale、重复审计、session restore、route unmount cleanup、job feedback、read-only 导入门禁 |
-| Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 上传两份发票、选择销项/进项方向、慢预览动作锁定、预览 audit/重复明细/未导入项/需复核文案、损坏文件混合上传和有效文件确认；确认后只等待导入响应声明的 operation barrier targets、零 Workbench 页面请求并清空草稿；随后打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计并断言导入影响行，其中税金抵扣/成本统计直接 GET canonical facts 且不要求 `read_model_status`；`preview_stale` 和 confirm failure 必须错误可见、无 success、零 barrier/零 Workbench 页面请求；read-only 用户不能上传/预览/确认导入 |
+| Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 覆盖文件、方向、预览、确认、错误与权限；确认后打开各下游页面验证 canonical 结果，并证明单独发票导入不会形成 OA 项目成本。 |
 | 前端 API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、`batch_type`、snake_case/camelCase、`preview_stale` 错误映射、job/session shape |
 | HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | file/session API 是唯一 HTTP 写入合同；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
@@ -68,7 +68,7 @@
 | 发票导入路由重挂载丢失预览或选择 | `web/src/test/ImportCenterPage.test.tsx` 中 invoice import session restore / navigating away tests |
 | 发票慢预览期间用户重复触发 preview、清空或确认造成重复请求/半写状态 | `web/e2e/imports-invoices-flow.spec.ts` 的 slow preview Browser 回归，断言预览/清空/确认动作锁定且只提交一次 preview |
 | 损坏发票文件导致整个 preview 崩溃，或 confirm 误提交不可导入文件 | `web/e2e/imports-invoices-flow.spec.ts` 的 corrupt mixed Browser 回归，断言 file-level error、未导入项明细和 `selected_file_ids` 只包含正常文件 |
-| 发票导入确认后下游页面读取旧事实却显示导入成功 | `web/e2e/imports-invoices-flow.spec.ts` 的 downstream Browser 回归：read-model 页面断言 `read_model_status=fresh`，税金抵扣/成本统计断言 direct-canonical 成功且展示导入影响行 |
+| 发票导入后成本统计伪造项目成本 | `web/e2e/imports-invoices-flow.spec.ts` 断言 direct-canonical 成功，但“按项目”不存在仅由发票导入生成的成本。 |
 | 发票导入确认或下游 fresh 成功后页面仍残留导入失败/read model 失败提示 | `web/e2e/imports-invoices-flow.spec.ts` 的 success visible-error guard，断言导入页和六个下游成功节点没有导入失败、后台导入失败或 read model 失败等可见错误残留 |
 | 发票导入 `preview_stale` 仍显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 preview stale Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
 | 发票导入 confirm 失败后显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
@@ -83,13 +83,13 @@
 
 ## 关键 smoke flows
 
-- 发票 Excel 上传 -> 每文件选择进项/销项 -> 预览 -> 确认 -> import worker/job 完成 -> `invoice_import_confirmed` / `import_state_changed` / `invoice_file_import_confirm` -> invoice lifecycle -> 待找发票、税金抵扣、命中方向的进项发票使用或销项收款、OA 待付款、成本统计刷新。
+- 发票 Excel 上传 -> 每文件选择进项/销项 -> 预览 -> 确认 -> import worker/job 完成 -> invoice lifecycle -> 待找发票、税金抵扣及命中方向页面；成本统计访问可重读 canonical facts，但没有完成 OA 与付款流水关系时不得产生项目成本。
 - Staging write-flow audit：真实发票确认后运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit --json --operation invoice_import_confirmed --lookback-hours 24`，必须看到两个保留 read model 的 scope 与 direct-canonical 下游检查通过，并确认已退休 Search/no-OA event 为零。
 - Runtime queue drain smoke：真实发票确认后只读核对本次导入时间窗内 `job.outbox_events` 不存在 stuck `processing/pending/dead-lettered`，`job.read_model_dirty_scopes` 中本次发票导入涉及的 `import_state_changed` / `invoice_file_import_confirm` scope 均已 `done`；发票导入不应新增 `import_facts_changed` 旁路，且 pending invoice 使用 `:<YYYY-MM>` 月级 scope 而不是仅有 `expense:all/income:all` 全量 aggregate。
 - 标准多 sheet 发票 Excel 上传 -> 唯一 `发票基础信息` 生成一票一行 canonical preview -> `信息汇总表` 附着明细证据 -> 选择进项/销项 -> 重复审计和确认；历史单 sheet `信息汇总表` 继续走既有聚合合同。
 - 真实 PostgreSQL runtime smoke：5 个真实发票 Excel 上传 -> preview 返回 200 -> `preview_ready` 391 行 -> `app.import_batches`、`app.import_batch_rows`、`app.import_files` 和 `app.file_objects` 均成功写入；确认后通过真实 `*.read_model.refresh` 而不是 `import.fact.changed` 旁路收敛。
 - Browser e2e smoke：两份发票 XLSX 上传 -> 分别选择销项/进项 -> 预览 audit/重复明细/需复核文案 -> 确认导入 -> 等待响应声明的 operation barrier targets -> 草稿清空 -> 零 Workbench 页面请求 -> 无错误残留。
-- Browser downstream smoke：发票导入确认 -> 打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 -> read-model 页面返回 fresh，税金抵扣/成本统计 direct-canonical GET 返回 `200` 且无旧状态字段 -> 页面展示导入影响行 -> 无可见错误残留。
+- Browser downstream smoke：发票导入确认 -> 打开下游页面 -> 税金抵扣/成本统计 direct-canonical GET 返回 `200` 且无旧状态字段 -> 成本统计“按项目”不存在仅由本次发票导入生成的成本 -> 无可见错误残留。
 - Browser slow-preview smoke：两份发票 XLSX 上传 -> 分别选择销项/进项 -> preview request in-flight -> 预览/清空/确认按钮禁用 -> 请求完成后恢复，且只提交一次 preview。
 - Browser corrupt-file smoke：损坏发票文件 + 正常发票文件混合上传 -> 损坏文件作为 file-level error 进入未导入项 -> confirm 只提交正常文件 ID -> 等待显式 operation barrier targets，零 Workbench 页面请求。
 - Browser negative smoke：两份发票 XLSX 上传 -> 预览 -> confirm 返回 `preview_stale` 或 500 -> 错误可见 -> 无“已确认导入” -> 零 operation barrier、零 Workbench 页面请求。

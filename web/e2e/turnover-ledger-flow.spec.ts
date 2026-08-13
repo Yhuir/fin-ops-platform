@@ -492,6 +492,19 @@ test.describe("turnover ledger browser flow", () => {
     const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
     expect(costPayload).not.toHaveProperty("read_model_status");
     expect(costPayload).not.toHaveProperty("refresh_enqueued");
+    const allTimeResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && responsePathMatches(response.url(), "/api/cost-statistics/explorer")
+        && url.searchParams.get("scope") === "all"
+        && url.searchParams.get("view") === "time"
+        && response.status() === 200;
+    });
+    await page.getByRole("group", { name: "时间统计时间范围" })
+      .getByRole("button", { name: "全部" })
+      .click();
+    await allTimeResponse;
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toContainText("浏览器 e2e 归还借款");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
@@ -501,26 +514,9 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("radio", { name: "按项目" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /外部往来闭环成本项目/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /外部往来闭环成本项目/ })).toHaveCount(0));
     });
-    const turnoverCostProject = page.getByRole("button", { name: /外部往来闭环成本项目/ });
-    await expect(turnoverCostProject).toBeVisible();
-    await expect(turnoverCostProject).toContainText("1000.00");
-    const projectRows = page.getByRole("grid", { name: "项目对应流水表" });
-    await recordLatency({
-      route: "/cost-statistics",
-      pageKey: "cost-statistics",
-      module: "cost-statistics",
-      operationId: "cost-statistics.drilldown-turnover-cost",
-      visibleLabel: "外部往来闭环成本项目 / 外部往来款付款",
-      actionType: "click",
-    }, async (mark) => {
-      await turnoverCostProject.click();
-      await page.getByRole("button", { name: /外部往来款付款 1 条流水/ }).click();
-      await mark("finalSettledLatencyMs", expect(projectRows).toContainText("浏览器 e2e 归还借款"));
-    });
-    await expect(projectRows).toContainText("浏览器 e2e 归还借款");
-    await expect(projectRows).toContainText("建设银行");
+    await expect(page.getByText("浏览器 e2e 归还借款")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await recordLatency({

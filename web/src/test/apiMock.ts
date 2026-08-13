@@ -3510,7 +3510,7 @@ type CostProjectRow = {
   bank_tag_label_path?: string[];
 };
 
-type CostTransactionDetail = {
+type CostEntryFixture = {
   month: string;
   transaction: {
     id: string;
@@ -3619,7 +3619,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
   },
 };
 
-const costStatisticsTransactionDetails: Record<string, CostTransactionDetail> = {
+const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
   "cost-txn-001": {
     month: "2026-03",
     transaction: {
@@ -3896,7 +3896,7 @@ function buildCostStatisticsExplorerPayload(
         amount: row.amount,
         counterparty_name: row.counterparty_name,
         payment_account_label: row.payment_account_label,
-        remark: costStatisticsTransactionDetails[row.transaction_id]?.transaction.remark ?? "",
+        remark: costStatisticsEntryFixtures[row.transaction_id]?.transaction.remark ?? "",
         ...mockBankTagForCostRow(row),
       })),
     )
@@ -4190,6 +4190,24 @@ function buildCostStatisticsExplorerPagePayload(
   const expenseRows = summaryRows.filter((row) => row.direction === "支出");
   const incomeRows = summaryRows.filter((row) => row.direction === "收入");
   const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize);
+  const apiRows = rows.map((row) => {
+    if (view === "time" || view === "bank_tag") {
+      return {
+        ...row,
+        entry_id: row.transaction_id,
+        row_kind: "bank_transaction",
+        occurred_at: row.trade_time,
+      };
+    }
+    const allocationId = `${row.transaction_id}:allocation:${row.expense_content}`;
+    return {
+      ...row,
+      entry_id: allocationId,
+      row_kind: "oa_allocation",
+      allocation_id: allocationId,
+      occurred_at: row.trade_time,
+    };
+  });
   const nextOffset = cursorOffset + rows.length;
   return {
     scope,
@@ -4215,24 +4233,98 @@ function buildCostStatisticsExplorerPagePayload(
       bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
       bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
     },
-    rows,
+    rows: apiRows,
     row_count: matchedRows.length,
     next_cursor: nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
   };
 }
 
-function buildCostStatisticsTransactionPayload(transactionId: string) {
-  const detail = costStatisticsTransactionDetails[transactionId];
+function buildCostStatisticsBankTransactionPayload(transactionId: string) {
+  const detail = costStatisticsEntryFixtures[transactionId];
   if (!detail) {
     return {
       status: 404,
-      body: {
-        message: "transaction not found",
-      },
+      body: { message: "bank transaction not found" },
     } satisfies MockFetchResponse;
   }
+  const transaction = detail.transaction;
   return {
-    body: detail,
+    body: {
+      month: detail.month,
+      kind: "bank_transaction",
+      bank_transaction: {
+        id: transaction.id,
+        expense_content: transaction.expense_content,
+        trade_time: transaction.trade_time,
+        direction: transaction.direction ?? "支出",
+        amount: transaction.amount,
+        counterparty_name: transaction.counterparty_name,
+        payment_account_label: transaction.payment_account_label,
+        remark: transaction.remark,
+        ...mockBankTagForCostRow({
+          transaction_id: transaction.id,
+          trade_time: transaction.trade_time,
+          direction: transaction.direction ?? "支出",
+          expense_type: transaction.expense_type,
+          expense_content: transaction.expense_content,
+          amount: transaction.amount,
+          counterparty_name: transaction.counterparty_name,
+          payment_account_label: transaction.payment_account_label,
+        }),
+      },
+    },
+  } satisfies MockFetchResponse;
+}
+
+function buildCostStatisticsAllocationPayload(allocationId: string) {
+  const [transactionId] = allocationId.split(":allocation:", 1);
+  const detail = costStatisticsEntryFixtures[transactionId];
+  const sourceRow = Object.values(costStatisticsProjectRows)
+    .flatMap((projects) => Object.entries(projects))
+    .flatMap(([projectName, rows]) => rows.map((row) => ({ ...row, project_name: projectName })))
+    .find((row) => `${row.transaction_id}:allocation:${row.expense_content}` === allocationId);
+  if (!detail || !sourceRow) {
+    return {
+      status: 404,
+      body: { message: "cost allocation not found" },
+    } satisfies MockFetchResponse;
+  }
+  const transaction = detail.transaction;
+  return {
+    body: {
+      month: sourceRow.trade_time.slice(0, 7),
+      kind: "oa_allocation",
+      allocation: {
+        allocation_id: allocationId,
+        oa_id: `oa-${transactionId}`,
+        oa_apply_type: "支付申请",
+        expense_item_id: "",
+        oa_completed_at: sourceRow.trade_time,
+        project_name: sourceRow.project_name,
+        project_id: `project-${sourceRow.project_name}`,
+        expense_type: sourceRow.expense_type,
+        expense_content: sourceRow.expense_content,
+        amount: sourceRow.amount,
+        counterparty_name: sourceRow.counterparty_name,
+        payment_account_label: sourceRow.payment_account_label,
+        oa_applicant: transaction.oa_applicant ?? "测试申请人",
+      },
+      payment_evidence: [{
+        transaction_id: transactionId,
+        trade_time: transaction.trade_time,
+        amount: transaction.amount,
+        counterparty_name: transaction.counterparty_name,
+        payment_account_label: transaction.payment_account_label,
+        remark: transaction.remark,
+      }],
+      reconciliation: {
+        relation_case_id: `relation-${transactionId}`,
+        oa_allocation_total: sourceRow.amount,
+        bank_outflow_total: transaction.amount,
+        difference: "0.00",
+        status: "balanced",
+      },
+    },
   } satisfies MockFetchResponse;
 }
 
@@ -7663,7 +7755,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       });
     }
-    if (url.pathname.startsWith("/api/cost-statistics/transactions/")) {
+    if (
+      url.pathname.startsWith("/api/cost-statistics/bank-transactions/")
+      || url.pathname.startsWith("/api/cost-statistics/allocations/")
+    ) {
       if (costDetailFailuresRemaining > 0) {
         costDetailFailuresRemaining -= 1;
         return jsonResponse({
@@ -7674,8 +7769,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.costDetailDelayMs) {
         await new Promise((resolve) => window.setTimeout(resolve, options.costDetailDelayMs));
       }
-      const transactionId = url.pathname.split("/").pop() ?? "";
-      return jsonResponse(buildCostStatisticsTransactionPayload(transactionId));
+      const entryId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      return jsonResponse(
+        url.pathname.startsWith("/api/cost-statistics/bank-transactions/")
+          ? buildCostStatisticsBankTransactionPayload(entryId)
+          : buildCostStatisticsAllocationPayload(entryId),
+      );
     }
     if (url.pathname === "/imports/files/sessions") {
       const isActive = ["preview_ready", "preview_ready_with_errors"].includes(latestImportSession.session.status);

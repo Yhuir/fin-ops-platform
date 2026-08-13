@@ -20,7 +20,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
 )
 
 
-OA_PROJECTION_SYNC_VERSION = "2026-07-28-expense-item-display-fields-v3"
+OA_PROJECTION_SYNC_VERSION = "2026-08-14-approved-at-v4"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",
@@ -72,6 +72,22 @@ def _record_application_date(record: OAApplicationRecord) -> str | None:
     return None
 
 
+def _record_completed_at(record: OAApplicationRecord) -> str | None:
+    detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
+    for value in (
+        record.completed_at,
+        detail_fields.get("审批完成时间"),
+    ):
+        normalized = text(value)
+        if normalized and normalized not in {"—", "--", "None"}:
+            return normalized
+    return None
+
+
+def _first_present(*values: Any) -> Any:
+    return next((value for value in values if value is not None), None)
+
+
 class PostgresOAProjectionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -93,10 +109,10 @@ class PostgresOAProjectionRepository:
                     """
                     insert into app.oa_applications(
                         oa_source_id, form_id, row_id, form_type, workflow_no, status, workflow_status,
-                        applicant, application_date, project_name, amount, currency,
+                        applicant, application_date, approved_at, project_name, amount, currency,
                         scope_month, normalized_payload, raw_payload, synced_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s, %s, %s::date, %s, %s, now())
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::timestamptz, %s, %s, %s, %s::date, %s, %s, now())
                     on conflict (row_id) do update set
                         oa_source_id = excluded.oa_source_id,
                         form_id = excluded.form_id,
@@ -106,6 +122,7 @@ class PostgresOAProjectionRepository:
                         workflow_status = excluded.workflow_status,
                         applicant = excluded.applicant,
                         application_date = excluded.application_date,
+                        approved_at = excluded.approved_at,
                         project_name = excluded.project_name,
                         amount = excluded.amount,
                         currency = excluded.currency,
@@ -123,6 +140,7 @@ class PostgresOAProjectionRepository:
                         app.oa_applications.workflow_status,
                         app.oa_applications.applicant,
                         app.oa_applications.application_date,
+                        app.oa_applications.approved_at,
                         app.oa_applications.project_name,
                         app.oa_applications.amount,
                         app.oa_applications.currency,
@@ -138,6 +156,7 @@ class PostgresOAProjectionRepository:
                         excluded.workflow_status,
                         excluded.applicant,
                         excluded.application_date,
+                        excluded.approved_at,
                         excluded.project_name,
                         excluded.amount,
                         excluded.currency,
@@ -157,6 +176,7 @@ class PostgresOAProjectionRepository:
                         text(record.workflow_status),
                         record.applicant,
                         _record_application_date(record),
+                        _record_completed_at(record),
                         record.project_name,
                         decimal_text(record.amount),
                         "CNY",
@@ -494,7 +514,13 @@ class PostgresOAProjectionRepository:
                     row_id,
                     text(payload.get("item_type") or payload.get("expense_type") or record.expense_type),
                     text(payload.get("item_no") or payload.get("row_index") or str(index)),
-                    decimal_text(payload.get("settlement_amount") or payload.get("amount") or payload.get("total_with_tax")),
+                    decimal_text(
+                        _first_present(
+                            payload.get("settlement_amount"),
+                            payload.get("amount"),
+                            payload.get("total_with_tax"),
+                        )
+                    ),
                     decimal_text(payload.get("tax_amount")),
                     text(payload.get("project_id")),
                     text(payload.get("project_name") or record.project_name),

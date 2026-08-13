@@ -2171,7 +2171,8 @@ class Application:
                 "/api/cost-statistics/explorer",
                 "/api/cost-statistics/export-preview",
                 "/api/cost-statistics/export",
-                "/api/cost-statistics/transactions/{transaction_id}",
+                "/api/cost-statistics/bank-transactions/{transaction_id}",
+                "/api/cost-statistics/allocations/{allocation_id}",
                 "/reconciliation/cases",
             ],
             "capabilities": [

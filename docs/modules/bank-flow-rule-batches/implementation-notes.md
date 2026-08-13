@@ -1,5 +1,10 @@
 # 流水规则批量处理实施记录
 
+## 2026-08-14 - OA-first 成本隔离更正
+
+- 流水规则批次提交不会自行形成 OA 成本；对应银行流水只进入成本统计“按时间/按标签”。
+- Browser 回归已删除“流水规则手续费成本项目”旧链路。下文早期实施记录里的该项目名仅是历史记录，不再代表当前合同。
+
 ## 2026-08-12 - OA/发票要求按变化标签增量传播到 active relation
 
 - 业务口径：批次 submitted/withdrawn 历史 payload 继续冻结；active Workbench relation 的 `requires_oa/requires_invoice` 不再永久冻结。规则保存只比较这两个布尔值的语义差异，并只处理持久化 tag proof 命中变化标签的 active relation。

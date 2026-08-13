@@ -29,7 +29,8 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
         relation_label="待找流水与发票",
         relation_tone="warn",
         workflow_status="completed",
-        detail_fields={"申请日期": f"{month}-02"},
+        completed_at=f"{month}-05 16:30:00+08:00",
+        detail_fields={"申请日期": f"{month}-02", "审批完成时间": f"{month}-05 16:30:00+08:00"},
     )
 
 
@@ -234,6 +235,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = "\n".join(sql for sql, _params in connection.executed)
         self.assertIn("insert into app.oa_applications", executed_sql)
         self.assertIn("workflow_status", executed_sql)
+        self.assertIn("approved_at", executed_sql)
         self.assertIn("returning id::text as application_id", executed_sql)
         self.assertIn("delete from app.oa_application_items", executed_sql)
         self.assertIn("insert into app.oa_application_items", executed_sql)
@@ -255,6 +257,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(attachment_inserts), 2)
         app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
         self.assertEqual(app_insert[0][6], "completed")
+        self.assertEqual(app_insert[0][9], "2026-05-05 16:30:00+08:00")
 
     def test_postgres_oa_projection_repository_does_not_rewrite_identical_records(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

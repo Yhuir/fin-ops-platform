@@ -55,8 +55,8 @@
 | 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py` | 覆盖 session/file/batch 生命周期、人工映射保存与复用、preview stale、confirm 持久化、job idempotency、worker processor。 |
 | 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/imports/files/preview`、`confirm`、`retry`、`sessions`、legacy preview/confirm、错误 shape 和 mapper；boundary guard 锁定银行流水前端不调用旧 JSON API。 |
 | 4. Read model/cache/background job tests | cleanup 适用 | `tests/test_import_job_queue.py`、`tests/test_app_status_overview_service.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py` | 覆盖 import worker、退休银行明细/余额/Search/no-OA refresh 事件不再出现，以及关联台按正式 `workbench` 合同精确收敛；两个保留 read model 由各自模块测试负责。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖独立路由、上传/预览/字段映射 retry/确认、错误、session restore、job feedback、App Status popover；Browser e2e 覆盖导入后银行明细和成本统计 normal GET 结果，不等待页面 freshness 或 operation barrier。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import、stale preview 和错误回滚；confirm 返回空页面 targets，随后银行明细与成本统计 direct API 显示导入事实。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖独立路由、上传/预览/字段映射 retry/确认、错误、session restore、job feedback、App Status popover；Browser e2e 覆盖导入后银行明细、成本统计银行事实视图和 OA 项目成本隔离。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import、stale preview 和错误回滚；confirm 后银行明细与成本统计“按时间”显示导入流水，“按项目”不伪造 OA 归集。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖旧 JSON import 兼容、文件导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败、旧 wrapper 删除防回归，以及冲突确认弹窗取消不提交、成功提交后不会继续挡住导航。 |
 
 ## 历史 Bug 回归库
@@ -78,7 +78,7 @@
 | 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能调用 operation barrier 或 Workbench 页面 API、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 损坏银行流水文件与正常文件混合上传时，页面必须保留正常文件 preview，不整批失败，确认时不得提交损坏文件 ID。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水预览耗时较长时，用户不能重复点击预览、清空文件或提前确认，避免多个 `/imports/files/preview` 请求或半状态。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
-| 2026-06-19 Browser e2e | 银行流水导入确认后不能只证明银行明细刷新，还要证明成本统计以 fresh read model 显示导入流水成本证据。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 2026-08-14 OA-first 成本隔离 | 银行流水导入后，流水可进入成本统计银行事实视图，但没有完成 OA 正式关系时不得进入按项目/银行/OA 费用类型。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得调用 operation barrier 或 Workbench 页面 API、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | confirm 失败 Browser 回归 | 导入任务创建失败时，页面必须显示错误并保留 preview，不能误报“已确认导入”。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-08-11 生产重复删除授权漂移 | dry-run/execute 必须显式绑定精确重复删除数；候选数变化时在关系撤回、标签清理和流水删除前失败，并在 dry-run 输出官方参考号或余额/币种的逐对证据。 | fixed by `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
@@ -94,7 +94,7 @@
 2. 预览后底层数据变化 -> 确认返回 `preview_stale` -> 前端提示重新预览，不创建导入 job，不调用 operation barrier 或 Workbench 页面 API。
 3. 确认可导入银行流水文件 -> 创建 background `file_import` job，`affected_domains=["imports_bank_transactions"]`、`route="/imports/bank-transactions"` -> import worker event -> worker confirm -> 必要的 Workbench matching 领域任务；银行明细与关联台都在下一次 canonical GET 读取新事实，关联台不等待 page worker/generation。
 4. 损坏文件 + 正常文件混合上传 -> 损坏文件显示 file-level error 和未导入项明细 -> 正常文件仍可确认，confirm body 只包含正常文件 ID。
-5. 导入完成后进入银行明细和成本统计，确认 normal canonical GET 直接返回新账户余额、导入行和成本证据，响应不含页面 freshness/status/job 字段。
+5. 导入完成后进入银行明细和成本统计，确认 normal canonical GET 返回新账户余额及“按时间”导入流水；切换“按项目”后不得出现伪造的 OA 成本。
 6. Staging write-flow audit：真实银行流水确认后运行 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，必须证明退休页面 refresh/dirty delta 为零；随后对银行明细、账户余额、关联台和成本统计执行只读结果与延迟验证。
 
 ## 现有验证命令
@@ -154,7 +154,7 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 - 加密/损坏/超大 Excel、边界编码和完全无法定位表头的文件仍需 staging smoke；未知字段会要求人工映射而不会自动猜测。两份用户提供的建行 `.xls` 已纳入发布前/生产 preview smoke，分别应得到 6/24 行且文件级 `error_count=0`。
 - 本地已覆盖 240 行合成 ICBC 重复组；它不替代真实银行多模板、加密文件、异常编码、超大 Excel 内存/耗时和历史生产样本 smoke。
 - 真实 PostgreSQL + RabbitMQ + Redis + systemd import worker drain、job retry、worker crash/restart、幂等重复确认仍需环境验证；`write_operation_slo_audit --operation bank_import_confirmed` 已有本地契约测试，并要求真实银行确认样本产生 recent `bank_account_balance` outbox rows，但仍需要 staging 中真实 recent outbox rows 和账户余额 API fresh gate 证据。
-- 下游页面最终展示依赖银行明细、成本统计等模块自己的 canonical query，以及关联台 active-generation 回归；本模块 Browser e2e 已覆盖银行明细小样本导入行和成本统计证据，不覆盖真实生产大数据延迟或关联台完整分组。
+- 下游页面最终展示依赖银行明细、成本统计等模块自己的 canonical query，以及关联台 active-generation 回归；本模块 Browser e2e 已覆盖银行明细导入行、成本统计银行事实展示和 OA 成本隔离，不覆盖真实生产大数据延迟或关联台完整分组。
 
 ## 2026-07-15 import row owner 回归
 

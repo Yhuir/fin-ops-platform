@@ -34,6 +34,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             relation_label="待关联",
             relation_tone="warn",
             workflow_status="completed",
+            completed_at="2026-03-12 09:30:00",
             expense_type="设备货款及材料费",
             expense_content="PLC 模块采购",
             detail_fields={
@@ -135,15 +136,17 @@ class CostStatisticsApiTests(unittest.TestCase):
             "设备货款及材料费",
         )
 
+        allocation_id = page["rows"][0]["allocation_id"]
         status, detail = self._json(
-            f"/api/cost-statistics/transactions/{self.bank_id}"
+            f"/api/cost-statistics/allocations/{allocation_id}"
             "?scope=2026-03&view=project&project_scope=all"
         )
         self.assertEqual(status, 200)
-        transaction = detail["transaction"]
-        self.assertEqual(transaction["relation_status"], "canonical")
-        self.assertEqual(transaction["relation_case_ids"], ["CASE-COST-DIRECT-001"])
-        self.assertEqual(transaction["cost_allocations"][0]["project_name"], "云南溯源科技")
+        self.assertEqual(detail["kind"], "oa_allocation")
+        self.assertEqual(detail["allocation"]["project_name"], "云南溯源科技")
+        self.assertEqual(detail["allocation"]["amount"], "1250.00")
+        self.assertEqual(detail["payment_evidence"][0]["transaction_id"], self.bank_id)
+        self.assertEqual(detail["reconciliation"]["relation_case_id"], "CASE-COST-DIRECT-001")
 
     def test_transaction_detail_loads_only_the_requested_scope(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
@@ -157,7 +160,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         repository.load_snapshot = load_snapshot
 
         status, _detail = self._json(
-            f"/api/cost-statistics/transactions/{self.bank_id}"
+            f"/api/cost-statistics/bank-transactions/{self.bank_id}"
             "?scope=2026-03&view=time&project_scope=all"
         )
 
@@ -172,6 +175,47 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "include_statistics": False,
                 }
             ],
+        )
+
+    def test_detail_endpoints_are_explicit_and_old_route_stays_removed(self) -> None:
+        old_response = self._get(
+            f"/api/cost-statistics/transactions/{self.bank_id}"
+            "?scope=2026-03&view=time&project_scope=all"
+        )
+        self.assertEqual(old_response.status_code, 404)
+
+        status, payload = self._json(
+            f"/api/cost-statistics/bank-transactions/{self.bank_id}"
+            "?scope=2026-03&view=project&project_scope=all"
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            payload["error"],
+            "invalid_cost_statistics_bank_transaction_request",
+        )
+
+    def test_duplicate_oa_allocation_across_active_relations_returns_conflict(
+        self,
+    ) -> None:
+        repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
+        original_relations = repository._relations_provider()  # noqa: SLF001
+        duplicate = {
+            **original_relations[0],
+            "case_id": "CASE-COST-DIRECT-DUPLICATE",
+        }
+        repository._relations_provider = (  # noqa: SLF001
+            lambda: [*original_relations, duplicate]
+        )
+
+        status, payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_scope=all"
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            payload["error"],
+            "cost_statistics_allocation_integrity_conflict",
         )
 
     def test_oa_cost_views_exclude_in_progress_oa(self) -> None:
@@ -243,21 +287,15 @@ class CostStatisticsApiTests(unittest.TestCase):
             },
         )
 
+        allocation_id = project_page["rows"][0]["allocation_id"]
         status, detail = self._json(
-            f"/api/cost-statistics/transactions/{self.bank_id}"
+            f"/api/cost-statistics/allocations/{allocation_id}"
             "?scope=2026-03&view=project&project_scope=all"
         )
         self.assertEqual(status, 200)
-        transaction = detail["transaction"]
-        self.assertEqual(transaction["project_name"], "项目A、项目B")
-        self.assertEqual(transaction["linked_oa_count"], 1)
-        self.assertEqual(
-            {
-                (allocation["project_name"], allocation["amount"])
-                for allocation in transaction["cost_allocations"]
-            },
-            {("项目A", "500.00"), ("项目B", "750.00")},
-        )
+        self.assertEqual(detail["allocation"]["project_name"], "项目A")
+        self.assertEqual(detail["allocation"]["amount"], "500.00")
+        self.assertEqual(detail["payment_evidence"][0]["amount"], "1250.00")
 
         status, preview = self._json(
             "/api/cost-statistics/export-preview"
@@ -317,7 +355,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             response.headers["Content-Type"],
         )
         workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
-        self.assertIn("流水明细", workbook.sheetnames)
+        self.assertIn("OA成本归集明细", workbook.sheetnames)
 
     def test_each_api_request_loads_exactly_one_snapshot(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001

@@ -496,7 +496,10 @@ class WorkbenchQueryService:
             detail_fields.get("申请时间"),
             detail_fields.get("申请日期"),
         )
-        completed_at = self._first_oa_time_value(detail_fields.get("审批完成时间"))
+        completed_at = self._first_oa_time_value(
+            record.completed_at,
+            detail_fields.get("审批完成时间"),
+        )
         tags = self._oa_row_tags(
             existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),

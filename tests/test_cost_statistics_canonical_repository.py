@@ -44,6 +44,66 @@ class _Connection:
         yield self.snapshot_transaction
 
 
+class _PopulatedCostSnapshotTransaction(_SnapshotTransaction):
+    def fetch_all(self, sql: str, _params: tuple = ()):
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        if "select distinct extract(year from approved_at)" in normalized:
+            return [{"year": 2026}]
+        if "from app.oa_applications" in normalized:
+            return [
+                {
+                    "row_id": "oa-1",
+                    "form_type": "支付申请",
+                    "workflow_status": "completed",
+                    "approved_at": "2026-03-12 09:30:00",
+                    "normalized_payload": {
+                        "project_name": "性能项目",
+                        "expense_type": "材料费",
+                        "amount": "100.00",
+                    },
+                }
+            ]
+        if "from app.workbench_pair_relations" in normalized:
+            return [
+                {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                    "month_scope": "2026-03",
+                    "special_metadata": {},
+                    "raw_payload": {},
+                }
+            ]
+        if "from app.bank_transactions" in normalized:
+            return [
+                {
+                    "row_id": "bank-1",
+                    "account_no": "62220001",
+                    "account_name": "测试账户",
+                    "txn_direction": "outflow",
+                    "counterparty_name_raw": "供应商",
+                    "amount": "100.00",
+                    "signed_amount": "-100.00",
+                    "txn_date": "2026-04-01",
+                    "trade_time": "2026-04-01 10:00:00",
+                    "pay_receive_time": "2026-04-01 10:00:00",
+                    "summary": "材料款",
+                    "remark": "",
+                    "project_id": "",
+                    "bank_text_fields": {},
+                }
+            ]
+        return []
+
+
+class _PopulatedCostConnection(_Connection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_transaction = _PopulatedCostSnapshotTransaction()
+
+
 class _CategoryProvider:
     def bulk_get_for_rows(self, _rows):
         return {}
@@ -60,25 +120,20 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot()
 
         self.assertEqual(connection.transaction_count, 1)
-        self.assertEqual(resolver_class.call_count, 1)
+        self.assertEqual(resolver_class.call_count, 0)
         self.assertEqual(
             connection.snapshot_transaction.executed,
             ["set transaction isolation level repeatable read read only"],
         )
         sql = "\n".join(connection.snapshot_transaction.fetched)
         self.assertIn("from app.app_settings", sql)
-        self.assertIn("from app.bank_transactions", sql)
-        self.assertIn("from app.bank_transaction_categories", sql)
-        self.assertIn("from app.bank_transaction_category_confirmations", sql)
-        self.assertIn("from app.workbench_pair_relations", sql)
+        self.assertIn("from app.oa_applications", sql)
+        self.assertNotIn("from app.bank_transactions", sql)
+        self.assertNotIn("from app.bank_transaction_categories", sql)
+        self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("read_model.", sql)
         self.assertNotIn("job.", sql)
-        bank_sql = next(
-            query
-            for query in connection.snapshot_transaction.fetched
-            if "from app.bank_transactions" in query
-        )
-        self.assertNotIn("raw_payload", bank_sql)
         self.assertEqual(snapshot["bank_rows"], [])
         self.assertEqual(snapshot["cost_groups"], [])
 
@@ -97,6 +152,24 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("txn_month >= %s and txn_month < %s", sql)
         self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("from app.oa_applications", sql)
+
+    def test_scoped_oa_view_uses_bounded_six_query_snapshot(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="project",
+            include_statistics=False,
+        )
+
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertLessEqual(len(connection.snapshot_transaction.fetched), 6)
+        sql = "\n".join(connection.snapshot_transaction.fetched)
+        self.assertIn("approved_at >= %s::date and approved_at < %s::date", sql)
+        self.assertNotIn("from app.bank_transaction_categories", sql)
+        self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertEqual(len(snapshot["cost_groups"]), 1)
 
     def test_scoped_cost_view_keeps_cross_month_members_of_matching_relation(self) -> None:
         bank_rows = [
@@ -125,7 +198,9 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             oa_rows_by_ids_provider=lambda _ids: [
                 {
                     "id": "oa-1",
+                    "apply_type": "支付申请",
                     "workflow_status": "completed",
+                    "completed_at": "2026-03-15 10:00:00",
                     "project_name": "跨月项目",
                     "expense_type": "材料费",
                     "amount": "150.00",
@@ -175,6 +250,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             relation_label="待关联",
             relation_tone="warn",
             workflow_status="completed",
+            completed_at="2026-03-01 09:00:00",
             expense_items=expense_items,
         )
         repository = LocalCostStatisticsCanonicalRepository(

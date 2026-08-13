@@ -11,8 +11,8 @@ import type {
   CostStatisticsTagRules,
   CostStatisticsTagRuleTag,
   CostStatisticsView,
-  CostTimeRow,
-  CostTransactionDetail,
+  CostExplorerEntryRow,
+  CostEntryDetail,
   SaveCostStatisticsTagRulesRequest,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
@@ -27,9 +27,12 @@ type ApiCostSummary = {
   income_transaction_count?: number | null;
 };
 
-type ApiCostTimeRow = {
-  transaction_id: string;
-  trade_time: string;
+type ApiCostExplorerEntryRow = {
+  entry_id: string;
+  row_kind: "bank_transaction" | "oa_allocation";
+  transaction_id?: string | null;
+  allocation_id?: string | null;
+  occurred_at: string;
   direction: string;
   project_name: string;
   expense_type: string;
@@ -111,41 +114,67 @@ type ApiCostStatisticsExplorerPage = {
     bank_tag_primary?: ApiCostBankTagPrimaryExplorerRow[] | null;
     bank_tag_sub?: ApiCostBankTagSubExplorerRow[] | null;
   } | null;
-  rows?: ApiCostTimeRow[] | null;
+  rows?: ApiCostExplorerEntryRow[] | null;
   row_count: number;
   next_cursor?: string | null;
+  allocation_quality?: {
+    excluded_allocation_count: number;
+    excluded_by_reason?: Array<{ reason: string; count: number }> | null;
+  } | null;
 };
 
-type ApiCostTransactionDetail = {
+type ApiCostBankTransactionDetail = {
   month: string;
-  transaction: {
+  kind: "bank_transaction";
+  bank_transaction: {
     id: string;
-    project_name: string;
-    expense_type: string;
     expense_content: string;
     trade_time: string;
     direction: string;
     amount: string;
     counterparty_name: string;
     payment_account_label: string;
-    oa_applicant: string;
     remark: string;
-    summary_fields: Record<string, string>;
-    detail_fields: Record<string, string>;
-    cost_allocations?: Array<{
-      row_key: string;
-      project_name: string;
-      project_id: string;
-      expense_type: string;
-      expense_content: string;
-      oa_applicant: string;
-      amount: string;
-    }> | null;
     bank_tag_code?: string | null;
     bank_tag_label?: string | null;
     bank_tag_primary_label?: string | null;
     bank_tag_sub_label?: string | null;
     bank_tag_label_path?: string[] | null;
+  };
+};
+
+type ApiCostAllocationDetail = {
+  month: string;
+  kind: "oa_allocation";
+  allocation: {
+    allocation_id: string;
+    oa_id: string;
+    oa_apply_type: string;
+    expense_item_id: string;
+    oa_completed_at: string;
+    project_name: string;
+    project_id: string;
+    expense_type: string;
+    expense_content: string;
+    amount: string;
+    counterparty_name: string;
+    payment_account_label: string;
+    oa_applicant: string;
+  };
+  payment_evidence: Array<{
+    transaction_id: string;
+    trade_time: string;
+    amount: string;
+    counterparty_name: string;
+    payment_account_label: string;
+    remark: string;
+  }>;
+  reconciliation: {
+    relation_case_id: string;
+    oa_allocation_total: string;
+    bank_outflow_total: string;
+    difference: string;
+    status: "balanced" | "mismatch";
   };
 };
 
@@ -233,10 +262,13 @@ function bankTagFields(row: {
   };
 }
 
-function mapCostTimeRow(row: ApiCostTimeRow): CostTimeRow {
+function mapCostExplorerEntryRow(row: ApiCostExplorerEntryRow): CostExplorerEntryRow {
   return {
-    transactionId: row.transaction_id,
-    tradeTime: row.trade_time,
+    entryId: row.entry_id,
+    rowKind: row.row_kind,
+    transactionId: optionalString(row.transaction_id),
+    allocationId: optionalString(row.allocation_id),
+    occurredAt: row.occurred_at,
     direction: row.direction,
     projectName: row.project_name,
     expenseType: row.expense_type,
@@ -370,7 +402,14 @@ export async function fetchCostStatisticsExplorerPage(
         incomeTransactionCount: row.income_transaction_count,
       })),
     },
-    rows: (payload.rows ?? []).map(mapCostTimeRow),
+    rows: (payload.rows ?? []).map(mapCostExplorerEntryRow),
+    allocationQuality: payload.allocation_quality ? {
+      excludedAllocationCount: payload.allocation_quality.excluded_allocation_count,
+      excludedByReason: (payload.allocation_quality.excluded_by_reason ?? []).map((item) => ({
+        reason: item.reason,
+        count: item.count,
+      })),
+    } : undefined,
     rowCount: payload.row_count,
     nextCursor: optionalString(payload.next_cursor),
   };
@@ -398,15 +437,18 @@ export async function saveCostStatisticsTagRules(
   return mapTagRules(payload);
 }
 
-export async function fetchCostTransactionDetail(
-  transactionId: string,
+export async function fetchCostEntryDetail(
+  row: Pick<CostExplorerEntryRow, "entryId" | "rowKind">,
   view: CostStatisticsView,
   scope: string,
   signal?: AbortSignal,
   projectScope: CostProjectScope = "active",
-): Promise<CostTransactionDetail> {
-  const payload = await requestJson<ApiCostTransactionDetail>(
-    buildScopedUrl(`/api/cost-statistics/transactions/${encodeURIComponent(transactionId)}`, {
+): Promise<CostEntryDetail> {
+  const path = row.rowKind === "bank_transaction"
+    ? `/api/cost-statistics/bank-transactions/${encodeURIComponent(row.entryId)}`
+    : `/api/cost-statistics/allocations/${encodeURIComponent(row.entryId)}`;
+  const payload = await requestJson<ApiCostBankTransactionDetail | ApiCostAllocationDetail>(
+    buildScopedUrl(path, {
       project_scope: projectScope,
       view,
       scope,
@@ -417,32 +459,56 @@ export async function fetchCostTransactionDetail(
     },
   );
 
+  if (payload.kind === "bank_transaction") {
+    return {
+      month: payload.month,
+      kind: payload.kind,
+      bankTransaction: {
+        id: payload.bank_transaction.id,
+        expenseContent: payload.bank_transaction.expense_content,
+        tradeTime: payload.bank_transaction.trade_time,
+        direction: payload.bank_transaction.direction,
+        amount: payload.bank_transaction.amount,
+        counterpartyName: payload.bank_transaction.counterparty_name,
+        paymentAccountLabel: payload.bank_transaction.payment_account_label,
+        remark: payload.bank_transaction.remark,
+        ...bankTagFields(payload.bank_transaction),
+      },
+    };
+  }
+  const allocation = payload.allocation;
   return {
     month: payload.month,
-    transaction: {
-      id: payload.transaction.id,
-      projectName: payload.transaction.project_name,
-      expenseType: payload.transaction.expense_type,
-      expenseContent: payload.transaction.expense_content,
-      tradeTime: payload.transaction.trade_time,
-      direction: payload.transaction.direction,
-      amount: payload.transaction.amount,
-      counterpartyName: payload.transaction.counterparty_name,
-      paymentAccountLabel: payload.transaction.payment_account_label,
-      oaApplicant: payload.transaction.oa_applicant,
-      remark: payload.transaction.remark,
-      summaryFields: payload.transaction.summary_fields,
-      detailFields: payload.transaction.detail_fields,
-      costAllocations: (payload.transaction.cost_allocations ?? []).map((allocation) => ({
-        rowKey: allocation.row_key,
-        projectName: allocation.project_name,
-        projectId: allocation.project_id,
-        expenseType: allocation.expense_type,
-        expenseContent: allocation.expense_content,
-        oaApplicant: allocation.oa_applicant,
-        amount: allocation.amount,
-      })),
-      ...bankTagFields(payload.transaction),
+    kind: payload.kind,
+    allocation: {
+      allocationId: allocation.allocation_id,
+      oaId: allocation.oa_id,
+      oaApplyType: allocation.oa_apply_type,
+      expenseItemId: allocation.expense_item_id,
+      oaCompletedAt: allocation.oa_completed_at,
+      projectName: allocation.project_name,
+      projectId: allocation.project_id,
+      expenseType: allocation.expense_type,
+      expenseContent: allocation.expense_content,
+      amount: allocation.amount,
+      counterpartyName: allocation.counterparty_name,
+      paymentAccountLabel: allocation.payment_account_label,
+      oaApplicant: allocation.oa_applicant,
+    },
+    paymentEvidence: payload.payment_evidence.map((item) => ({
+      transactionId: item.transaction_id,
+      tradeTime: item.trade_time,
+      amount: item.amount,
+      counterpartyName: item.counterparty_name,
+      paymentAccountLabel: item.payment_account_label,
+      remark: item.remark,
+    })),
+    reconciliation: {
+      relationCaseId: payload.reconciliation.relation_case_id,
+      oaAllocationTotal: payload.reconciliation.oa_allocation_total,
+      bankOutflowTotal: payload.reconciliation.bank_outflow_total,
+      difference: payload.reconciliation.difference,
+      status: payload.reconciliation.status,
     },
   };
 }
@@ -488,13 +554,7 @@ export type CostExportParams =
       startDate?: string;
       endDate?: string;
     }
-  | {
-      month: string;
-      view: "transaction";
-      projectScope?: CostProjectScope;
-      transactionId: string;
-      projectName?: string;
-    };
+  ;
 
 function parseContentDispositionFileName(contentDisposition: string | null) {
   if (!contentDisposition) {
@@ -544,9 +604,6 @@ function buildFallbackExportFileName(params: CostExportParams) {
     const expenseTypeLabel =
       params.expenseTypes.length === 1 ? params.expenseTypes[0] : `${params.expenseTypes[0]}等${params.expenseTypes.length}类`;
     return `成本统计_${scopeLabel}_按费用类型统计_${expenseTypeLabel}.xlsx`;
-  }
-  if (params.view === "transaction") {
-    return `成本统计_${params.month}_流水详情_${params.projectName ?? "未命名项目"}_${params.transactionId}.xlsx`;
   }
   throw new Error(`unsupported cost statistics export view: ${params.view}`);
 }
@@ -598,13 +655,6 @@ function buildCostStatisticsQuery(
   if (params.view === "expense_type") {
     for (const expenseType of params.expenseTypes) {
       query.append("expense_type", expenseType);
-    }
-  }
-
-  if (params.view === "transaction") {
-    query.set("transaction_id", params.transactionId);
-    if (params.projectName) {
-      query.set("project_name", params.projectName);
     }
   }
 
