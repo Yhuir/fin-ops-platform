@@ -300,7 +300,6 @@ class OperationsDashboardService:
         return {
             "outbox": self._safe_metric("outbox_metrics_unavailable", warnings, self._runtime_repository.dashboard_outbox_metric),
             "queues": self._runtime_rows("rabbitmq_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
-            "read_models": self._runtime_rows("read_model_metrics_unavailable", warnings, self._runtime_repository.dashboard_read_model_metrics),
             "workers": self._runtime_rows("worker_metrics_unavailable", warnings, self._runtime_repository.dashboard_worker_metrics),
         }
 

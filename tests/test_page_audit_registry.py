@@ -45,42 +45,19 @@ class PageAuditRegistryTests(unittest.TestCase):
         self.assertEqual(PAGE_AUDIT_REGISTRY["tax-offset"].executor, "tax_offset")
         self.assertFalse(PAGE_AUDIT_REGISTRY["tax-offset"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["etc-tickets"].executor, "etc_tickets")
-        self.assertEqual(PAGE_AUDIT_REGISTRY["etc-tickets"].read_model_keys, ())
         self.assertTrue(PAGE_AUDIT_REGISTRY["etc-tickets"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["settings"].executor, "settings")
-        self.assertEqual(PAGE_AUDIT_REGISTRY["settings"].read_model_keys, ())
         self.assertFalse(PAGE_AUDIT_REGISTRY["settings"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.bank-transactions"].executor, "bank_transaction_import")
-        self.assertEqual(PAGE_AUDIT_REGISTRY["imports.bank-transactions"].read_model_keys, ())
         self.assertFalse(PAGE_AUDIT_REGISTRY["imports.bank-transactions"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.invoices"].executor, "invoice_import")
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.etc-invoices"].executor, "etc_import")
-        self.assertEqual(PAGE_AUDIT_REGISTRY["imports.etc-invoices"].read_model_keys, ())
-        self.assertEqual(PAGE_AUDIT_REGISTRY["imports.invoices"].read_model_keys, ())
         self.assertFalse(PAGE_AUDIT_REGISTRY["imports.invoices"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].executor, "system")
-        self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].read_model_keys, ())
         self.assertFalse(PAGE_AUDIT_REGISTRY["app-health-operations"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["app-health-operations"].external_evidence_keys, ())
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].executor, "operation_history")
         self.assertEqual(PAGE_AUDIT_REGISTRY["operation-history"].external_evidence_keys, ())
-        direct_page_keys = {
-            "reconciliation-workbench",
-            "cost-statistics",
-            "bank-details",
-            "oa-pending-payments",
-            "bank-flow-rule-batches",
-            "batch-accounting",
-            "turnover-ledger",
-            "etc-tickets",
-            "tax-offset",
-            "pending-invoices",
-            "input-invoice-usage",
-            "output-invoice-collections",
-        }
-        self.assertTrue(
-            all(PAGE_AUDIT_REGISTRY[page_key].read_model_keys == () for page_key in direct_page_keys)
-        )
         self.assertTrue(PAGE_AUDIT_REGISTRY["reconciliation-workbench"].relation_proof_required)
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.bank-transactions"].external_evidence_keys, ("bank",))
         self.assertEqual(PAGE_AUDIT_REGISTRY["imports.invoices"].external_evidence_keys, ("invoice",))

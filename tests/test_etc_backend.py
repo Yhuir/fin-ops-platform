@@ -4548,38 +4548,12 @@ class EtcApiTests(unittest.TestCase):
 
             app._workbench_pair_relation_service.cancel_active_relations_for_row_ids = forbidden_direct_cancel
 
-            class FreshRelationFacade:
-                def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
-                    self.requested_row_ids = list(row_ids)
-                    return {
-                        "read_model_status": "fresh",
-                        "read_model_scope_keys": ["2026-02"],
-                        "stale_reasons": [],
-                        "refresh_enqueued": False,
-                        "rows": [
-                            {
-                                "row_id": summary_row_id,
-                                "group_ids": ["CASE-ETC-COMMAND"],
-                            }
-                        ],
-                        "groups": [
-                            {
-                                "group_id": "CASE-ETC-COMMAND",
-                                "scope_month": "2026-02",
-                                "payload": {
-                                    "relation_mode": "manual_confirmed",
-                                    "row_ids": ["oa-etc-command", "txn-etc-command", summary_row_id],
-                                    "row_types": ["oa", "bank", "invoice"],
-                                    "amount_check": {"external_etc_batch_id": "ETC-COMMAND-202602"},
-                                },
-                            }
-                        ],
-                        "source_versions": {},
-                    }
-
             class RecordingRelationCommandService:
                 def __init__(self) -> None:
                     self.cancel_calls: list[dict[str, object]] = []
+
+                def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+                    return app._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
 
                 def cancel_relation(self, **kwargs: object) -> dict[str, object]:
                     self.cancel_calls.append(dict(kwargs))
@@ -4589,15 +4563,10 @@ class EtcApiTests(unittest.TestCase):
                         "relation": relation,
                         "changed_case_ids": [str(kwargs["case_id"])],
                         "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
                     }
 
             command_service = RecordingRelationCommandService()
             persisted_case_ids: list[list[str]] = []
-            app._workbench_relation_read_facade = lambda: FreshRelationFacade()
             app._workbench_relation_command_service = lambda **_kwargs: command_service
             app._persist_workbench_pair_relations = lambda *, changed_case_ids: persisted_case_ids.append(list(changed_case_ids))
 
@@ -4611,7 +4580,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(command_service.cancel_calls[0]["history_operation_type"], "etc_summary_unmerged")
         self.assertEqual(persisted_case_ids, [["CASE-ETC-COMMAND"]])
 
-    def test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale(self) -> None:
+    def test_submitted_etc_business_batch_delete_uses_canonical_relation(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             batch = app._etc_service.create_business_batch(task_id="ETC-STALE-TASK")
@@ -4630,20 +4599,6 @@ class EtcApiTests(unittest.TestCase):
                 month_scope="2026-02",
                 note="ETC三栏配对",
             )
-
-            class StaleRelationFacade:
-                def get_by_row_ids(self, _row_ids: list[str], **_kwargs: object) -> dict[str, object]:
-                    return {
-                        "status": "stale",
-                        "read_model_status": "stale",
-                        "read_model_scope_keys": ["2026-02"],
-                        "stale_reasons": ["test_stale_relation_projection"],
-                        "refresh_enqueued": True,
-                        "rows": [],
-                        "groups": [],
-                    }
-
-            app._workbench_relation_read_facade = lambda: StaleRelationFacade()
 
             delete_response = app.handle_request(
                 "DELETE",

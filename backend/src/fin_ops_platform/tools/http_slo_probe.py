@@ -76,9 +76,6 @@ class HttpProbeSample:
     content_type: str
     ok: bool
     error: str | None = None
-    read_model_status: str | None = None
-    cache_status: str | None = None
-    refresh_enqueued: bool | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -94,9 +91,6 @@ class HttpProbeSample:
             "content_type": self.content_type,
             "ok": self.ok,
             **({"error": self.error} if self.error else {}),
-            **({"read_model_status": self.read_model_status} if self.read_model_status else {}),
-            **({"cache_status": self.cache_status} if self.cache_status else {}),
-            **({"refresh_enqueued": self.refresh_enqueued} if self.refresh_enqueued is not None else {}),
         }
 
 
@@ -630,7 +624,6 @@ def _collect_one(
         content_type = _header(response.headers, "content-type")
         raw_body = response.body or b""
         body = _decoded_response_body(raw_body, response.headers)
-        metadata = _extract_response_metadata(body, content_type)
         status_ok = response.status_code in probe.expected_statuses
         html_api_error = _html_response_error(probe, content_type, body) if status_ok else None
         ok = status_ok and html_api_error is None
@@ -647,9 +640,6 @@ def _collect_one(
             content_type=content_type,
             ok=ok,
             error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
-            read_model_status=metadata.get("read_model_status"),
-            cache_status=metadata.get("cache_status"),
-            refresh_enqueued=metadata.get("refresh_enqueued"),
         )
     except Exception as exc:
         elapsed_ms = (monotonic() - started) * 1000
@@ -696,9 +686,6 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
     status_counts: dict[str, int] = {}
     errors: list[str] = []
     error_counts: dict[str, int] = {}
-    read_model_statuses: dict[str, int] = {}
-    cache_statuses: dict[str, int] = {}
-    refresh_enqueued_count = 0
     for sample in probe_samples:
         status_key = str(sample.status_code) if sample.status_code is not None else "error"
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
@@ -706,26 +693,14 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
             errors.append(sample.error)
         if sample.error:
             error_counts[sample.error] = error_counts.get(sample.error, 0) + 1
-        if sample.read_model_status:
-            read_model_statuses[sample.read_model_status] = read_model_statuses.get(sample.read_model_status, 0) + 1
-        if sample.cache_status:
-            cache_statuses[sample.cache_status] = cache_statuses.get(sample.cache_status, 0) + 1
-        if sample.refresh_enqueued:
-            refresh_enqueued_count += 1
     success_count = sum(1 for sample in probe_samples if sample.ok)
     duration_percentiles = _percentiles(durations)
     p95 = duration_percentiles["p95"]
     p99 = duration_percentiles["p99"]
-    non_fresh_statuses = {
-        status: count
-        for status, count in read_model_statuses.items()
-        if status != "fresh"
-    }
     passes_status = success_count == len(probe_samples) and bool(probe_samples)
     passes_p95 = p95 is not None and p95 <= probe.target_ms
     passes_p99 = p99 is not None and p99 <= probe.p99_target_ms
     passes_slo = passes_p95 and passes_p99
-    passes_freshness = not non_fresh_statuses and refresh_enqueued_count == 0
     return {
         "name": probe.name,
         "kind": probe.kind,
@@ -744,14 +719,9 @@ def _summarize_probe(probe: HttpProbe, samples: Sequence[HttpProbeSample]) -> di
         "p95_pass": bool(passes_p95),
         "p99_pass": bool(passes_p99),
         "slo_pass": bool(passes_slo),
-        "freshness_pass": bool(passes_freshness),
-        "status": "pass" if passes_status and passes_slo and passes_freshness else "fail",
+        "status": "pass" if passes_status and passes_slo else "fail",
         "errors": errors,
         "error_counts": error_counts,
-        "read_model_statuses": read_model_statuses,
-        "non_fresh_read_model_statuses": non_fresh_statuses,
-        "cache_statuses": cache_statuses,
-        "refresh_enqueued_count": refresh_enqueued_count,
     }
 
 
@@ -888,34 +858,6 @@ def _decoded_response_body(body: bytes, headers: Mapping[str, str]) -> bytes:
         return body
 
 
-def _extract_response_metadata(body: bytes, content_type: str) -> dict[str, Any]:
-    if "json" not in content_type.lower():
-        return {}
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return {
-        key: value
-        for key, value in {
-            "read_model_status": _first_string(payload, ("read_model_status", "readModelStatus")),
-            "cache_status": _first_string(payload, ("cache_status", "cacheStatus")),
-            "refresh_enqueued": _first_bool(payload, ("refresh_enqueued", "refreshEnqueued")),
-        }.items()
-        if value is not None
-    }
-
-
-def _first_string(payload: Mapping[str, Any], keys: Sequence[str]) -> str | None:
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def _html_response_error(probe: HttpProbe, content_type: str, body: bytes) -> str | None:
     if str(probe.kind or "").lower() != "api":
         return None
@@ -925,14 +867,6 @@ def _html_response_error(probe: HttpProbe, content_type: str, body: bytes) -> st
     prefix = body.lstrip()[:128].lower()
     if prefix.startswith(b"<!doctype html") or prefix.startswith(b"<html"):
         return "html_response_for_api_probe"
-    return None
-
-
-def _first_bool(payload: Mapping[str, Any], keys: Sequence[str]) -> bool | None:
-    for key in keys:
-        value = payload.get(key)
-        if isinstance(value, bool):
-            return value
     return None
 
 

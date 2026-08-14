@@ -7,7 +7,6 @@ from fin_ops_platform.services.background_job_service import (
     TERMINAL_BACKGROUND_JOB_STATUSES,
     BackgroundJobService,
 )
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
@@ -186,22 +185,6 @@ class BankRelationRequirementRecalculationJobHandler:
                 },
             )
 
-        metadata = {
-            "source": "bank_relation_requirement_recalculation",
-            "job_id": job_id,
-            "rule_version": current_version,
-            "changed_tag_codes": changed_tag_codes,
-            "case_ids": sorted(changed_case_ids),
-            "force_refresh": True,
-        }
-        gateway = ReadModelRefreshGateway(queue_repository=self._queue)
-        gateway.enqueue_many(
-            "workbench_relation",
-            sorted(affected_months),
-            reason="bank_relation_requirement_recalculation",
-            priority="high",
-            metadata=metadata,
-        )
         dirty_months = (
             self._matching_dirty_marker(sorted(affected_months))
             if self._matching_dirty_marker is not None and affected_months

@@ -22,8 +22,6 @@ class RuntimeWorkerRegistration:
     rabbitmq_env_example: str | None = None
     heartbeat_stale_after_seconds: int = 300
     dependencies: tuple[str, ...] = ()
-    read_model_key: str | None = None
-    read_model_scope_type: str | None = None
 
     def claim_event_types(self, *, transport: RuntimeWorkerTransport = "postgres") -> tuple[str, ...]:
         if transport == "postgres" and self.postgres_claim_event_types:
@@ -52,18 +50,6 @@ RUNTIME_WORKER_REGISTRY: tuple[RuntimeWorkerRegistration, ...] = (
         env_example="fin-ops.worker.workbench-matching.env.example",
         heartbeat_stale_after_seconds=900,
         dependencies=("postgres", "workbench_matching_dirty_scopes"),
-    ),
-    RuntimeWorkerRegistration(
-        instance_name="workbench-relation",
-        worker_kind="workbench-relation-read-model",
-        handler_flags=("--enable-workbench-relation-read-model-refresh",),
-        event_types=("workbench_relation.read_model.refresh",),
-        required=True,
-        rabbitmq_eligible=True,
-        env_example="fin-ops.worker.workbench-relation.env.example",
-        rabbitmq_env_example="fin-ops.worker.workbench-relation-rabbitmq.env.example",
-        read_model_key="workbench_relation",
-        read_model_scope_type="workbench_relation",
     ),
     RuntimeWorkerRegistration(
         instance_name="import",
@@ -116,20 +102,6 @@ def required_worker_kinds() -> tuple[str, ...]:
 
 def rabbitmq_dispatch_event_types() -> tuple[str, ...]:
     return _unique_event_types(worker_registrations(rabbitmq_eligible_only=True))
-
-
-def read_model_event_types() -> dict[str, tuple[str, str]]:
-    event_types: dict[str, tuple[str, str]] = {}
-    for registration in worker_registrations():
-        if not registration.read_model_key or not registration.read_model_scope_type:
-            continue
-        for event_type in registration.event_types:
-            if not event_type.endswith(".read_model.refresh"):
-                continue
-            key = _read_model_key_for_event(registration, event_type)
-            scope_type = _scope_type_for_event(registration, event_type)
-            event_types[event_type] = (key, scope_type)
-    return event_types
 
 
 def registration_by_worker_kind() -> dict[str, RuntimeWorkerRegistration]:
@@ -195,13 +167,3 @@ def _unique_event_types(registrations: tuple[RuntimeWorkerRegistration, ...]) ->
             seen.add(event_type)
             event_types.append(event_type)
     return tuple(event_types)
-
-
-def _read_model_key_for_event(registration: RuntimeWorkerRegistration, event_type: str) -> str:
-    prefix = event_type.removesuffix(".read_model.refresh")
-    return registration.read_model_key or prefix
-
-
-def _scope_type_for_event(registration: RuntimeWorkerRegistration, event_type: str) -> str:
-    prefix = event_type.removesuffix(".read_model.refresh")
-    return registration.read_model_scope_type or prefix

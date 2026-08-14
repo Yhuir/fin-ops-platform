@@ -188,7 +188,7 @@ class AmountMismatchHandlerHarness:
     def _load_json_body(self, _body: str | None) -> tuple[dict[str, object], None]:
         return {"group_id": "case:CASE-1"}, None
 
-    def _workbench_write_freshness_guard(self, _payload: dict[str, object]) -> None:
+    def _workbench_oa_sync_safety_guard(self, _payload: dict[str, object]) -> None:
         return None
 
     def _workbench_write_auth_context(self, _headers: object, *, session: object) -> tuple[str, str]:

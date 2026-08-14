@@ -80,7 +80,6 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         row_assembler = InputInvoiceUsageQueryService(
             import_service=ImportNormalizationService(),
             payment_rules_provider=legacy_provider,
-            require_fresh_relations=False,
         )
 
         payload = InputInvoiceUsageCanonicalQueryService(
@@ -177,7 +176,6 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             repository=repository,
             row_assembler=OutputInvoiceCollectionQueryService(
                 import_service=ImportNormalizationService(),
-                require_fresh_relations=False,
             ),
         )
         rows = query_service.list_rows(page=1, page_size=20, month="2026-07")["rows"]

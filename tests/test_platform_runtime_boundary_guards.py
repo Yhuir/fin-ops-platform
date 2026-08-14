@@ -1726,7 +1726,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py exception apply wrapper does not inject the authenticated tenant")
         if "_workbench_write_auth_context(headers, session=access_session)" not in handler_source:
             violations.append("server.py exception apply wrapper does not enforce the authenticated write boundary")
-        if "_workbench_write_freshness_guard(payload)" not in handler_source:
+        if "_workbench_oa_sync_safety_guard(payload)" not in handler_source:
             violations.append("server.py exception apply wrapper no longer preserves the freshness guard")
         if "_workbench_write_response(result)" not in handler_source:
             violations.append("server.py exception apply wrapper no longer preserves write response mapping")
@@ -1799,7 +1799,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_confirm_link")
         for marker in (
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_write_auth_context(headers, session=access_session)",
             "_handle_live_workbench_confirm_link(",
             "request_id=request_id",
@@ -1838,7 +1838,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_mark_exception")
         for marker in (
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_handle_live_workbench_mark_exception(payload)",
         ):
             if marker not in wrapper_source:
@@ -1876,7 +1876,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_link")
         for marker in (
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_write_auth_context(headers, session=access_session)",
             "_handle_live_workbench_cancel_link(",
             "request_id=request_id",
@@ -1918,7 +1918,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_withdraw_link")
         for marker in (
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_write_auth_context(headers, session=access_session)",
             "_workbench_action_api_routes.withdraw_link(",
             "request_id=request_id",
@@ -2003,7 +2003,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             handler_source = _function_source(server_tree, server_source, handler_name)
             for marker in (
                 "_load_json_body(body)",
-                "_workbench_write_freshness_guard(payload)",
+                "_workbench_oa_sync_safety_guard(payload)",
                 f"_workbench_action_api_routes.{route_method}(payload, request_id=request_id)",
                 "_workbench_write_response(result)",
             ):
@@ -2034,7 +2034,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_update_bank_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_action_api_routes.update_bank_exception(payload)",
             "_workbench_write_response(result)",
         ):
@@ -2073,7 +2073,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_oa_bank_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_action_api_routes.oa_bank_exception(payload)",
             "_workbench_write_response(result)",
         ):
@@ -2117,7 +2117,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         )
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)",
             "_workbench_write_response(result)",
         ):
@@ -2156,7 +2156,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_handle_live_workbench_cancel_exception(payload)",
         ):
             if marker not in wrapper_source:
@@ -2196,7 +2196,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_ignore_row")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_handle_workbench_ignore_row_payload(payload)",
         ):
             if marker not in wrapper_source:
@@ -2234,7 +2234,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_unignore_row")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard(payload)",
+            "_workbench_oa_sync_safety_guard(payload)",
             "_handle_workbench_unignore_row_payload(payload)",
         ):
             if marker not in wrapper_source:
@@ -2544,34 +2544,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_relation_derived_lifecycle_uses_explicit_executor_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        executor_path = SERVICES_ROOT / "workbench_relation_derived_lifecycle_executor.py"
-        executor_source = executor_path.read_text(encoding="utf-8") if executor_path.exists() else ""
-        violations: list[str] = []
-
-        removed_helper = "_derived_lifecycle_workbench_relation_read_model_executor"
-        if _function_source(server_tree, server_source, removed_helper):
-            violations.append(f"server.py still owns removed workbench relation lifecycle executor {removed_helper}")
-        if "WorkbenchRelationDerivedLifecycleExecutor(" not in server_source:
-            violations.append("server.py does not build the explicit workbench relation lifecycle executor")
-        if '"workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute' not in server_source:
-            violations.append("derived lifecycle registry does not use the explicit workbench relation executor")
-        if "class WorkbenchRelationDerivedLifecycleExecutor" not in executor_source:
-            violations.append("workbench relation lifecycle executor service is missing")
-        for snippet in (
-            "def execute(",
-            'reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_relation")',
-            '"deleted_counts": {"workbench_relation_read_models": 0}',
-            '"enqueued_jobs": ["workbench_relation.read_model.refresh"] if enqueued else []',
-        ):
-            if snippet not in executor_source:
-                violations.append(f"workbench relation lifecycle executor is missing behavior {snippet}")
-
-        self.assertEqual(violations, [])
-
     def test_invoice_lifecycle_derived_lifecycle_runtime_is_retired(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2649,10 +2621,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             for path in (
                 APP_ROOT / "worker.py",
                 SERVICES_ROOT / "runtime_worker_registry.py",
-                SERVICES_ROOT / "read_model_manifest.py",
-                SERVICES_ROOT / "read_model_scope_policy.py",
             )
         )
+        self.assertFalse((SERVICES_ROOT / "read_model_manifest.py").exists())
+        self.assertFalse((SERVICES_ROOT / "read_model_scope_policy.py").exists())
 
         self.assertIn("set transaction isolation level repeatable read read only", repository_source)
         for table in (
@@ -4389,987 +4361,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_operation_barrier_uses_target_scoped_runtime_snapshot(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        handler_source = _function_source(server_tree, server_source, "_handle_api_operation_barrier_status")
-        snapshot_source = _function_source(server_tree, server_source, "_operation_barrier_runtime_snapshot")
-        monitoring_source = (SERVICES_ROOT / "runtime_monitoring.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "self._operation_barrier_runtime_snapshot(targets)" not in handler_source:
-            violations.append("operation barrier handler does not pass the requested targets to the runtime boundary")
-        if 'getattr(state_store, "operation_barrier_runtime_snapshot", None)' not in snapshot_source:
-            violations.append("operation barrier does not use the target-scoped state-store contract")
-        if "app_status_runtime_snapshot" in snapshot_source:
-            violations.append("operation barrier still falls back to the full App Status runtime snapshot")
-        if "def operation_barrier_runtime_snapshot(" not in monitoring_source:
-            violations.append("runtime monitoring does not expose the target-scoped barrier query")
-        if "_app_status_read_model_statuses(normalized_targets)" not in monitoring_source:
-            violations.append("target-scoped barrier query does not bound read-model status I/O")
-        if "_operation_barrier_outbox_status_rows(targets)" not in monitoring_source:
-            violations.append("target-scoped barrier does not use the bounded latest-event outbox query")
-        target_outbox_source = _function_source(
-            _parse(SERVICES_ROOT / "runtime_monitoring.py"),
-            monitoring_source,
-            "_operation_barrier_outbox_status_rows",
-        )
-        for required in (
-            "cross join lateral",
-            "limit 1",
-            "event.created_at desc, event.id desc",
-            "event.publish_status",
-        ):
-            if required not in target_outbox_source:
-                violations.append(f"target-scoped barrier outbox query is missing {required}")
-        if "_current_effective_outbox_attention_predicate_sql" in target_outbox_source:
-            violations.append("target-scoped barrier still rescans full outbox history")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_matching_uses_formal_relation_uow_not_broad_pair_service(self) -> None:
-        checks = {
-            "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py": (
-                "WorkbenchMatchingOrchestrator",
-                "WorkbenchFormalRelationCommand",
-            ),
-        }
-        violations: list[str] = []
-        for rel_path, (class_name, required_port) in checks.items():
-            path = REPO_ROOT / rel_path
-            source = path.read_text(encoding="utf-8")
-            tree = _parse(path)
-            class_source = _class_source(tree, source, class_name)
-            if required_port not in source:
-                violations.append(f"{rel_path} does not expose/use {required_port}")
-            for forbidden in (
-                "WorkbenchPairRelationService",
-                "pair_relation_service:",
-                "pair_relation_service=",
-                "self._pair_relation_service",
-                "_pair_relation_service.",
-            ):
-                if forbidden in class_source:
-                    violations.append(f"{class_name} keeps broad pair relation dependency {forbidden}")
-
-        runtime_path = SERVICES_ROOT / "runtime_worker_handlers.py"
-        runtime_source = runtime_path.read_text(encoding="utf-8")
-        runtime_tree = _parse(runtime_path)
-        factory_source = _class_source(runtime_tree, runtime_source, "WorkbenchMatchingWorkerFactory")
-        if "matching_orchestrator=WorkbenchMatchingOrchestrator(" not in factory_source:
-            violations.append("WorkbenchMatchingWorkerFactory no longer constructs WorkbenchMatchingOrchestrator")
-        else:
-            orchestrator_call = factory_source.split("matching_orchestrator=WorkbenchMatchingOrchestrator(", 1)[1]
-            orchestrator_call = orchestrator_call.split("),\n            source_versions_provider", 1)[0]
-            if "pair_relation_service=" in orchestrator_call:
-                violations.append("WorkbenchMatchingWorkerFactory passes stale pair_relation_service keyword to orchestrator")
-
-        self.assertEqual(violations, [])
-
-    def test_server_workbench_live_row_resolver_uses_direct_canonical_query(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        resolver_source = _function_source(tree, source, "_resolve_live_rows_direct")
-        violations: list[str] = []
-        if "_resolve_rows_from_workbench_canonical_selection(" not in resolver_source:
-            violations.append("_resolve_live_rows_direct does not use the canonical query boundary")
-        for forbidden in (
-            "_workbench_pair_relation_service",
-            "_workbench_payload_relation_read_port",
-            "workbench_read_model",
-            "active_generation",
-        ):
-            if forbidden in resolver_source:
-                violations.append(f"_resolve_live_rows_direct retains legacy dependency {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_server_source_versions_use_relation_source_version_provider(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        provider_source = (SERVICES_ROOT / "workbench_relation_source_version_provider.py").read_text(encoding="utf-8")
-        checked_sources = {
-            method_name: _function_source(tree, source, method_name)
-            for method_name in ("_bank_batch_workbench_source_versions",)
-        }
-
-        violations: list[str] = []
-        if "class WorkbenchRelationSourceVersionProvider" not in provider_source:
-            violations.append("Workbench relation source version provider is missing")
-        if "from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider" not in source:
-            violations.append("Application does not import WorkbenchRelationSourceVersionProvider")
-        if "def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider" not in source:
-            violations.append("Application does not expose Workbench relation source version provider")
-        for method_name, method_source in checked_sources.items():
-            if "_workbench_pair_relation_service.snapshot" in method_source:
-                violations.append(f"{method_name} still reads pair relation snapshot directly")
-            if "pair_relation_snapshot_version()" not in method_source:
-                violations.append(f"{method_name} does not use relation source version provider")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback(self) -> None:
-        path = SERVICES_ROOT / "workbench_write_facade.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        checked_sources = {
-            method_name: _function_source(tree, source, method_name)
-            for method_name in (
-                "confirm_link",
-                "_confirm_link_with_uow",
-                "cancel_link",
-                "_cancel_link_with_uow",
-            )
-        }
-
-        violations: list[str] = []
-        for method_name, method_source in checked_sources.items():
-            if (
-                "_relation_command_unavailable_result" not in method_source
-                and "workbench_relation_command_unavailable" not in method_source
-            ):
-                violations.append(f"{method_name} does not fail fast when relation command service is unavailable")
-            for forbidden in (
-                "replace_with_confirmed_relation",
-                "cancel_relation_for_row_id",
-                "_persist_pair_relations_in_transaction(",
-            ):
-                if forbidden in method_source:
-                    violations.append(f"{method_name} keeps direct pair relation fallback {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_confirm_uow_does_not_use_legacy_snapshot_rollback_io(self) -> None:
-        path = SERVICES_ROOT / "workbench_write_facade.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_confirm_link_with_uow")
-
-        self.assertNotIn("_relation_read_snapshot_port.snapshot", method_source)
-        self.assertNotIn("_restore_pair_relation_snapshot", method_source)
-
-    def test_workbench_write_facade_relation_reads_and_cash_special_mutations_use_ports(self) -> None:
-        path = SERVICES_ROOT / "workbench_write_facade.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        facade_source = _class_source(tree, source, "WorkbenchWriteFacade")
-        read_port_source = _class_source(tree, source, "WorkbenchWriteRelationReadSnapshotPort")
-        metadata_port_source = _class_source(tree, source, "WorkbenchWriteRelationSpecialMetadataMutationPort")
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        factory_source = _function_source(server_tree, server_source, "_workbench_write_facade")
-
-        violations: list[str] = []
-        if "WorkbenchWriteRelationReadSnapshotPort" not in source:
-            violations.append("WorkbenchWriteFacade module lacks explicit relation read/snapshot port")
-        if "_relation_read_snapshot_port" not in facade_source:
-            violations.append("WorkbenchWriteFacade does not store relation read/snapshot port")
-        if "pair_relation_service:" in facade_source or "pair_relation_service=" in factory_source:
-            violations.append("WorkbenchWriteFacade still accepts broad pair_relation_service instead of required ports")
-        for forbidden in (
-            "_pair_relation_service.active_relations_for_row_ids",
-            "_pair_relation_service.get_active_relation_by_row_id",
-            "_pair_relation_service.preview_withdraw_for_row_ids",
-            "_pair_relation_service.snapshot",
-        ):
-            if forbidden in facade_source:
-                violations.append(f"WorkbenchWriteFacade keeps direct pair read/snapshot call {forbidden}")
-        for required in (
-            "active_relations_for_row_ids",
-            "get_active_relation_by_row_id",
-            "preview_withdraw_for_row_ids",
-            "snapshot",
-        ):
-            if required not in read_port_source:
-                violations.append(f"WorkbenchWriteRelationReadSnapshotPort is missing {required}")
-        if "relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(" not in factory_source:
-            violations.append("Application does not inject WorkbenchWriteRelationReadSnapshotPort")
-        if "WorkbenchWriteRelationSpecialMetadataMutationPort" not in source:
-            violations.append("WorkbenchWriteFacade module lacks explicit special metadata mutation port")
-        if "_relation_special_metadata_mutation_port" not in facade_source:
-            violations.append("WorkbenchWriteFacade does not store special metadata mutation port")
-        for forbidden in (
-            "_pair_relation_service.update_special_metadata_for_row_ids",
-            "_pair_relation_service.clear_special_metadata_for_row_ids",
-        ):
-            if forbidden in facade_source:
-                violations.append(f"WorkbenchWriteFacade keeps direct pair special metadata mutation {forbidden}")
-        for required in (
-            "update_special_metadata_for_row_ids",
-            "clear_special_metadata_for_row_ids",
-        ):
-            if required not in metadata_port_source:
-                violations.append(f"WorkbenchWriteRelationSpecialMetadataMutationPort is missing {required}")
-        if "relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(" not in factory_source:
-            violations.append("Application does not inject WorkbenchWriteRelationSpecialMetadataMutationPort")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_personal_advance_repayment_uses_relation_command_boundary(self) -> None:
-        path = SERVICES_ROOT / "workbench_write_facade.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "confirm_personal_advance_repayment")
-
-        violations: list[str] = []
-        if "confirm_relation" not in method_source:
-            violations.append("confirm_personal_advance_repayment does not delegate relation creation to command service")
-        if "_relation_command_unavailable_result" not in method_source:
-            violations.append("confirm_personal_advance_repayment does not fail fast when relation command service is unavailable")
-        for forbidden in (
-            "replace_with_confirmed_relation",
-            "create_active_relation",
-            "_persist_pair_relations_in_transaction(",
-        ):
-            if forbidden in method_source:
-                violations.append(f"confirm_personal_advance_repayment keeps direct pair relation fallback {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_exception_application_uses_relation_command_boundary(self) -> None:
-        service_path = SERVICES_ROOT / "workbench_exception_application_service.py"
-        service_source = service_path.read_text(encoding="utf-8")
-        service_tree = _parse(service_path)
-        apply_source = _function_source(service_tree, service_source, "apply")
-        create_relation_source = _function_source(service_tree, service_source, "_create_pair_relation")
-
-        app_path = APP_ROOT / "server.py"
-        app_source = app_path.read_text(encoding="utf-8")
-        app_tree = _parse(app_path)
-        factory_source = _function_source(app_tree, app_source, "_configure_workbench_exception_application_service")
-
-        violations: list[str] = []
-        if "_require_relation_command_service()" not in apply_source:
-            violations.append("Workbench exception apply does not fail fast when relation command service is unavailable")
-        if "assert_write_precondition" not in apply_source:
-            violations.append("Workbench exception apply lacks relation freshness preflight before local case creation")
-        for forbidden in (
-            "WorkbenchPairRelationService",
-            "pair_relation_service:",
-            "_pair_relation_service",
-        ):
-            if forbidden in service_source:
-                violations.append(f"Workbench exception application keeps legacy pair relation dependency {forbidden}")
-        if "confirm_relation" not in create_relation_source:
-            violations.append("Workbench exception relation creation does not delegate writes to command service")
-        for forbidden in (
-            "create_active_relation",
-            "replace_with_confirmed_relation",
-            "_pair_relation_service.",
-        ):
-            if forbidden in create_relation_source:
-                violations.append(f"Workbench exception relation creation keeps direct pair write fallback {forbidden}")
-        if "relation_command_service=self._workbench_relation_command_service()" not in factory_source:
-            violations.append("Application does not inject WorkbenchRelationCommandService into WorkbenchExceptionApplicationService")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_attachment_context_row_index_extraction_stays_canonical(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        index_source = (SERVICES_ROOT / "workbench_oa_attachment_context_row_index.py").read_text(encoding="utf-8")
-        context_source = _function_source(
-            server_tree,
-            server_source,
-            "_canonical_oa_attachment_context_row_ids",
-        )
-        factory_source = _function_source(server_tree, server_source, "_workbench_oa_attachment_context_row_index")
-        violations: list[str] = []
-
-        for marker in (
-            "_workbench_oa_attachment_context_row_index()",
-            "selection.payload",
-            "attachment_row_ids_by_oa_id(rows_by_id)",
-            "invoice_row_is_attachment_context",
-        ):
-            if marker not in context_source:
-                violations.append(f"Confirm-link OA attachment context lookup missing marker: {marker}")
-        for marker in (
-            "class WorkbenchOaAttachmentContextRowIndex",
-            "def grouped_payload_rows_by_id(",
-            "def attachment_row_ids_by_oa_id(",
-            "def invoice_row_is_attachment_context(",
-            "def oa_id_from_attachment_invoice_id(",
-            "attachment_parent_oa_id",
-            "attachment_matches_oa",
-            "attachment_row_id_matches_oa",
-            "oa_source_ids",
-            "source_kind",
-            "oa_attachment_invoice",
-            "derived_from_oa_id",
-        ):
-            if marker not in index_source:
-                violations.append(f"WorkbenchOaAttachmentContextRowIndex missing marker: {marker}")
-        for forbidden in (
-            "def raw_payload_rows_by_id(",
-            "def raw_payload_row_ids(",
-            "def _raw_payload_sections(",
-        ):
-            if forbidden in index_source:
-                violations.append(f"WorkbenchOaAttachmentContextRowIndex retains raw payload surface: {forbidden}")
-        for marker in (
-            "WorkbenchOaAttachmentContextRowIndex(",
-            "attachment_parent_oa_id=oa_attachment_parent_oa_id",
-            "attachment_matches_oa=oa_attachment_matches_oa",
-            "attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa",
-            "oa_source_ids=oa_row_source_ids",
-        ):
-            if marker not in factory_source:
-                violations.append(f"Application row index factory missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in index_source:
-                violations.append(f"WorkbenchOaAttachmentContextRowIndex gained forbidden dependency: {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_server_confirm_link_context_uses_relation_read_port(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_expand_confirm_link_row_ids_for_existing_context")
-        port_source = (SERVICES_ROOT / "workbench_confirm_link_context_relation_read_port.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchConfirmLinkContextRelationReadPort" not in port_source:
-            violations.append("Workbench confirm-link context relation read port is missing")
-        if "def active_relations_for_row_ids" not in port_source:
-            violations.append("WorkbenchConfirmLinkContextRelationReadPort does not expose active_relations_for_row_ids")
-        if "_workbench_pair_relation_service.active_relations_for_row_ids" in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context still reads broad pair service directly")
-        if "_workbench_confirm_link_context_relation_read_port()" not in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context does not use confirm-link context relation read port")
-        if "_normalize_row_ids(row_ids)" not in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer normalizes selected row ids")
-        if "_canonical_existing_context_groups_for_row_ids" not in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves canonical existing context expansion")
-        if "_confirm_link_context_row_ids_to_preserve" not in method_source:
-            violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves context row-id filter")
-
-        self.assertEqual(violations, [])
-
-    def test_server_case_id_allocation_uses_allocator(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_next_workbench_relation_case_id")
-        allocator_source = (SERVICES_ROOT / "workbench_relation_case_id_allocator.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchRelationCaseIdAllocator" not in allocator_source:
-            violations.append("Workbench relation case-id allocator is missing")
-        if "def next_case_id" not in allocator_source:
-            violations.append("WorkbenchRelationCaseIdAllocator does not expose next_case_id")
-        if "pair_relations" in method_source:
-            violations.append("_next_workbench_relation_case_id still parses pair relation snapshot shape")
-        if "_workbench_pair_relation_service.snapshot()" in method_source:
-            violations.append("_next_workbench_relation_case_id still reads relation snapshot directly")
-        if "WorkbenchRelationCaseIdAllocator(" not in method_source:
-            violations.append("_next_workbench_relation_case_id does not use WorkbenchRelationCaseIdAllocator")
-        if "relation_snapshot_provider=self._workbench_pair_relation_service.snapshot" not in method_source:
-            violations.append("_next_workbench_relation_case_id does not pass relation snapshot provider")
-        if "next_case_id=self._workbench_override_service._next_case_id" not in method_source:
-            violations.append("_next_workbench_relation_case_id does not preserve override case-id source")
-        if "pair_relations" not in allocator_source:
-            violations.append("WorkbenchRelationCaseIdAllocator does not inspect relation case ids")
-
-        self.assertEqual(violations, [])
-
-    def test_transaction_pair_relation_persist_uses_relation_repository_owner(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_persist_workbench_pair_relations_in_transaction")
-
-        violations: list[str] = []
-        if "PostgresWorkbenchRelationRepository(transaction).save_workbench_pair_relations(" not in method_source:
-            violations.append("transaction pair relation persist does not use PostgresWorkbenchRelationRepository")
-        if "PostgresWorkbenchRepository(transaction).save_workbench_pair_relations(" in method_source:
-            violations.append("transaction pair relation persist still uses broad PostgresWorkbenchRepository")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_uow_pair_relation_repository_disables_repository_fanout(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_workbench_uow_repository_factory")
-        repository_source = (
-            SERVICES_ROOT / "postgres_repositories" / "workbench_relation.py"
-        ).read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "PostgresWorkbenchRelationRepository(transaction)" not in method_source:
-            violations.append("Workbench UoW repository factory no longer uses the narrow relation repository")
-        for forbidden in (
-            "enqueue_refreshes",
-            "enqueue_read_model_refresh",
-            "job.outbox_events",
-            "job.read_model_dirty_scopes",
-        ):
-            if forbidden in repository_source:
-                violations.append(f"relation repository retains removed read-model fan-out I/O {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_broad_persist_state_does_not_serialize_pair_relations(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_persist_state")
-
-        violations: list[str] = []
-        if '"workbench_pair_relations"' in method_source:
-            violations.append("_persist_state still serializes Workbench pair relation facts")
-        if "_workbench_pair_relation_service.snapshot()" in method_source:
-            violations.append("_persist_state still snapshots Workbench pair relation service")
-        if "save_workbench_pair_relations(" in method_source:
-            violations.append("_persist_state still writes Workbench pair relations directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_relation_command_repository_uses_explicit_snapshot_adapter(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        factory_source = _function_source(server_tree, server_source, "_workbench_relation_command_repository")
-        adapter_path = SERVICES_ROOT / "workbench_relation_command_repository_adapter.py"
-        adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
-        command_path = SERVICES_ROOT / "workbench_relation_command_service.py"
-        command_source = command_path.read_text(encoding="utf-8") if command_path.exists() else ""
-        command_tree = _parse(command_path)
-        prepare_confirm_source = _function_source(
-            command_tree,
-            command_source,
-            "prepare_confirm_relation",
-        )
-        confirm_source = _function_source(command_tree, command_source, "confirm_relation")
-        save_changed_source = _function_source(command_tree, command_source, "_save_changed_cases")
-        domain_path = SERVICES_ROOT / "workbench_pair_relation_service.py"
-        domain_source = domain_path.read_text(encoding="utf-8") if domain_path.exists() else ""
-        violations: list[str] = []
-
-        for removed_helper in (
-            "_save_workbench_relation_command_snapshot",
-            "_apply_workbench_relation_command_snapshot",
-            "_relation_history_touches_cases",
-        ):
-            if _function_source(server_tree, server_source, removed_helper):
-                violations.append(f"server.py still owns removed relation command repository helper {removed_helper}")
-        if "WorkbenchRelationCommandRepositoryAdapter(" not in factory_source:
-            violations.append("relation command repository factory does not build explicit adapter")
-        if "CallbackWorkbenchRelationRepository(" in factory_source:
-            violations.append("relation command repository factory still builds callback repository inline")
-        for snippet in (
-            "class WorkbenchRelationCommandRepositoryAdapter",
-            "def load_workbench_pair_relations(",
-            "def load_active_workbench_pair_relation_by_case_id(",
-            "def load_active_workbench_pair_relations_for_row_ids(",
-            "def save_workbench_pair_relations(",
-            "def save_workbench_pair_relation_delta(",
-            "self._pair_relation_service.apply_snapshot_delta(",
-        ):
-            if snippet not in adapter_source:
-                violations.append(f"relation command repository adapter missing behavior {snippet}")
-        if "def apply_snapshot_delta(" not in domain_source:
-            violations.append("relation domain service missing explicit changed-case snapshot delta boundary")
-        for required in (
-            "self._active_pair_service_for_row_ids(",
-            'getattr(self._relation_repository, "save_workbench_pair_relation_delta", None)',
-            "include_history=False",
-        ):
-            if required not in command_source:
-                violations.append(f"relation command hot path missing delta contract {required}")
-        if "self._pair_service_for_row_ids(" in prepare_confirm_source:
-            violations.append("confirm preparation still loads relation history through the generic scoped reader")
-        if "self._pair_service_for_row_ids(" in confirm_source:
-            violations.append("confirm command still loads relation history through the generic scoped reader")
-        if "save_workbench_pair_relations" in save_changed_source:
-            violations.append("online relation command still invokes full relation/history replacement")
-        if "include_history=False" not in save_changed_source:
-            violations.append("online relation command delta still snapshots historical events")
-        for private_write in (
-            "self._pair_relation_service._pair_relations",
-            "self._pair_relation_service._pair_relation_history",
-        ):
-            if private_write in adapter_source:
-                violations.append(f"relation command repository adapter writes domain private state: {private_write}")
-        if "after_apply" in adapter_source or "after_apply=" in factory_source:
-            violations.append("relation command repository adapter still owns obsolete after-apply reconfiguration")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_pair_relation_persist_uses_explicit_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "workbench_pair_relation_persist_service.py"
-        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
-        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_persist_service")
-        persist_source = _function_source(server_tree, server_source, "_persist_workbench_pair_relations")
-        schedule_source = _function_source(server_tree, server_source, "_schedule_workbench_pair_relation_persist")
-        violations: list[str] = []
-
-        if "WorkbenchPairRelationPersistService(" not in factory_source:
-            violations.append("server.py does not build explicit pair relation persist service")
-        if ".persist(changed_case_ids=changed_case_ids)" not in persist_source:
-            violations.append("pair relation persist wrapper does not delegate to service.persist")
-        if ".schedule(" not in schedule_source:
-            violations.append("pair relation schedule wrapper does not delegate to service.schedule")
-        for forbidden in (
-            "save_workbench_pair_relations(",
-            "_pending_workbench_pair_relation_case_ids.update",
-            "Thread(",
-            "_emit_workbench_action_timing(",
-        ):
-            if forbidden in persist_source or forbidden in schedule_source:
-                violations.append(f"server.py pair relation persist wrapper still owns behavior {forbidden}")
-        for snippet in (
-            "class WorkbenchPairRelationPersistService",
-            "def persist(",
-            "def schedule(",
-            "def persist_pending(",
-            "phase=\"persist_pair_relations\"",
-        ):
-            if snippet not in service_source:
-                violations.append(f"pair relation persist service missing behavior {snippet}")
-        for forbidden in ("Thread", "async_enabled", "FIN_OPS_WORKBENCH_PAIR_RELATION_PERSIST_ASYNC"):
-            if forbidden in service_source or forbidden in factory_source:
-                violations.append(f"pair relation persistence restored process-local async path {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_pair_relation_restore_uses_explicit_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "workbench_pair_relation_rollback_restore_service.py"
-        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
-        wrapper_source = _function_source(server_tree, server_source, "_restore_workbench_pair_relation_snapshot")
-        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_rollback_restore_service")
-        replace_source = _function_source(server_tree, server_source, "_replace_workbench_pair_relation_service")
-        violations: list[str] = []
-
-        if "WorkbenchPairRelationRollbackRestoreService(" not in factory_source:
-            violations.append("server.py does not build explicit pair relation rollback restore service")
-        if ".restore(" not in wrapper_source:
-            violations.append("pair relation rollback wrapper does not delegate to service.restore")
-        for forbidden in (
-            "WorkbenchPairRelationService.from_snapshot",
-            "save_workbench_pair_relations(",
-            "_configure_workbench_exception_application_service()",
-        ):
-            if forbidden in wrapper_source:
-                violations.append(f"server.py pair relation restore wrapper still owns behavior {forbidden}")
-        if 'delattr(self, "_workbench_pair_relation_persist_service_instance")' not in replace_source:
-            violations.append("pair relation service replacement does not clear cached persist service")
-        for snippet in (
-            "class WorkbenchPairRelationRollbackRestoreService",
-            "def restore(",
-            "WorkbenchPairRelationService.from_snapshot(snapshot)",
-            "self._replace_pair_relation_service(restored_service)",
-            "self._configure_exception_application_service()",
-            "save_workbench_pair_relations(",
-        ):
-            if snippet not in service_source:
-                violations.append(f"pair relation rollback restore service missing behavior {snippet}")
-
-        self.assertEqual(violations, [])
-
-    def test_batch_accounting_pair_relation_restore_uses_shared_pair_relation_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        wrapper_source = _function_source(server_tree, server_source, "_restore_workbench_pair_relation_snapshot")
-        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_rollback_restore_service")
-        facade_source = _function_source(server_tree, server_source, "_workbench_write_facade")
-        violations: list[str] = []
-
-        if "_restore_batch_accounting_pair_relation_snapshot" in server_source:
-            violations.append("batch accounting still has a dedicated pair relation restore wrapper")
-        if "_batch_accounting_pair_relation_rollback_restore_service" in server_source:
-            violations.append("batch accounting still has a dedicated pair relation restore service factory")
-        if "restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot" not in facade_source:
-            violations.append("Workbench facade does not inject the shared pair relation restore boundary")
-        if "_workbench_pair_relation_rollback_restore_service().restore(" not in wrapper_source:
-            violations.append("shared pair relation restore wrapper does not delegate to service.restore")
-        for forbidden in (
-            "WorkbenchPairRelationService.from_snapshot",
-            "_configure_workbench_exception_application_service()",
-            "save_workbench_pair_relations(",
-        ):
-            if forbidden in wrapper_source:
-                violations.append(f"shared pair relation restore wrapper still owns behavior {forbidden}")
-        if "WorkbenchPairRelationRollbackRestoreService(" not in factory_source:
-            violations.append("server.py does not build shared pair relation rollback restore service")
-        if "state_store=self._state_store" not in factory_source:
-            violations.append("shared pair relation rollback restore service no longer uses the canonical state store")
-        if "replace_pair_relation_service=self._replace_workbench_pair_relation_service" not in factory_source:
-            violations.append("shared pair relation rollback restore service does not use shared pair service replacement")
-        if (
-            "configure_exception_application_service=self._configure_workbench_exception_application_service"
-            not in factory_source
-        ):
-            violations.append("shared pair relation rollback restore service does not reconfigure exception application service")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_exception_restore_uses_explicit_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "workbench_exception_rollback_restore_service.py"
-        service_source = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
-        factory_source = _function_source(server_tree, server_source, "_workbench_exception_rollback_restore_service")
-        wrapper_sources = [
-            _function_source(server_tree, server_source, name)
-            for name in (
-                "_restore_workbench_exception_write_snapshots",
-                "_restore_workbench_exception_pair_snapshots",
-                "_restore_workbench_exception_override_snapshots",
-            )
-        ]
-        violations: list[str] = []
-
-        if "WorkbenchExceptionRollbackRestoreService(" not in factory_source:
-            violations.append("server.py does not build explicit exception rollback restore service")
-        for source in wrapper_sources:
-            if "restore_" not in source:
-                violations.append("exception restore wrapper does not delegate to service restore method")
-            for forbidden in (
-                "WorkbenchExceptionCaseService.from_snapshot",
-                "WorkbenchOverrideService.from_snapshot",
-                "save_workbench_exception_cases(",
-            ):
-                if forbidden in source:
-                    violations.append(f"server.py exception restore wrapper still owns behavior {forbidden}")
-        for removed_name in (
-            "_apply_workbench_exception_application",
-            "_persist_workbench_exception_and_override_change",
-        ):
-            if f"def {removed_name}(" in server_source:
-                violations.append(f"server.py retains dead exception write path {removed_name}")
-        for snippet in (
-            "class WorkbenchExceptionRollbackRestoreService",
-            "def restore_write_snapshots(",
-            "def restore_pair_snapshots(",
-            "def restore_override_snapshots(",
-            "WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)",
-            "WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)",
-            "WorkbenchOverrideService.from_snapshot(previous_override_snapshot)",
-            "save_workbench_exception_cases(",
-        ):
-            if snippet not in service_source:
-                violations.append(f"exception rollback restore service missing behavior {snippet}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_mutation_persistence_requires_atomic_boundary(self) -> None:
-        path = SERVICES_ROOT / "no_oa_bank_batch_application_service.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        persist_source = _function_source(tree, source, "persist_mutation")
-
-        violations: list[str] = []
-        if "save_no_oa_bank_batch_mutation" not in persist_source:
-            violations.append("No-OA mutation persistence must call the explicit atomic mutation boundary")
-        for forbidden in (
-            "save_workbench_pair_relations",
-            "save_no_oa_bank_batches",
-            "save_workbench_read_models",
-        ):
-            if forbidden in persist_source:
-                violations.append(f"No-OA mutation persistence still falls back to broad state-store write {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_search_and_no_oa_read_model_runtime_stays_retired(self) -> None:
-        retired_files = (
-            "search_service.py",
-            "search_sql_projection.py",
-            "search_read_model_refresh.py",
-            "search_read_model_refresh_producer.py",
-            "search_read_model_repository.py",
-            "search_query_freshness_service.py",
-            "no_oa_bank_batch_read_model_refresh.py",
-            "no_oa_bank_batch_read_model_refresh_producer.py",
-            "no_oa_bank_batch_read_model_repository.py",
-            "no_oa_bank_batch_derived_lifecycle_executor.py",
-        )
-        self.assertFalse(any((SERVICES_ROOT / name).exists() for name in retired_files))
-
-        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
-        no_oa_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
-        self.assertNotIn('"/api/search"', server_source)
-        self.assertNotIn("_no_oa_bank_batch_read_model_repository", no_oa_source)
-        self.assertIn("self.refresh_batches(", no_oa_source)
-        self.assertIn("self._no_oa_bank_batch_service.list_batches", no_oa_source)
-
-    def test_bank_account_balance_derived_lifecycle_runtime_is_retired(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-
-        violations: list[str] = []
-        for removed_helper in (
-            "_derived_lifecycle_bank_account_balance_executor",
-            "_bank_account_balance_derived_lifecycle_executor",
-        ):
-            if _function_source(server_tree, server_source, removed_helper):
-                violations.append(f"server.py still owns retired bank account balance executor {removed_helper}")
-        for retired_snippet in (
-            "BankAccountBalanceDerivedLifecycleExecutor(",
-            '"bank_account_balance_read_model":',
-            "bank_account_balance.read_model.refresh",
-        ):
-            if retired_snippet in server_source:
-                violations.append(f"server.py still assembles retired bank account balance runtime {retired_snippet}")
-
-        self.assertEqual(violations, [])
-
-    def test_bank_account_balance_accounts_path_does_not_fallback_to_bank_detail_port(self) -> None:
-        retired_bank_detail_port = SERVICES_ROOT / "bank_detail_read_model_repository.py"
-        service_path = SERVICES_ROOT / "bank_details_application_service.py"
-        service_source = service_path.read_text(encoding="utf-8")
-        service_tree = _parse(service_path)
-        accounts_source = _function_source(service_tree, service_source, "accounts_payload")
-
-        violations: list[str] = []
-        if retired_bank_detail_port.exists():
-            violations.append("retired Bank Detail read model repository still exists")
-        if "self._canonical_query_service().accounts_payload(" not in accounts_source:
-            violations.append("Bank Details accounts path does not use the canonical query service")
-        for retired_reference in (
-            "_accounts_from_sql_read_model",
-            "_bank_account_balance_read_model_repository",
-            "_bank_detail_sql_read_repository",
-        ):
-            if retired_reference in accounts_source:
-                violations.append(f"Bank Details accounts path still references {retired_reference}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_bank_batch_workbench_payload_decoration_uses_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        service_path = SERVICES_ROOT / "no_oa_bank_batch_workbench_payload_decorator.py"
-        service_source = service_path.read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        for removed_helper in (
-            "_relation_with_no_oa_bank_batch_metadata",
-            "_apply_no_oa_bank_batch_pair_metadata",
-            "_apply_no_oa_bank_batch_available_actions",
-        ):
-            if _function_source(server_tree, server_source, removed_helper):
-                violations.append(f"server.py still owns no-OA Workbench payload helper {removed_helper}")
-
-        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_workbench_payload_decorator")
-        if "NoOaBankBatchWorkbenchPayloadDecorator" not in app_factory_source:
-            violations.append("Application no longer assembles NoOaBankBatchWorkbenchPayloadDecorator")
-        for expected_delegate in (
-            ".relation_with_batch_metadata(relation)",
-            ".apply_pair_metadata(payload, relation_payload)",
-            ".apply_available_actions(payload)",
-        ):
-            if expected_delegate not in server_source:
-                violations.append(f"server.py does not delegate no-OA payload behavior through {expected_delegate}")
-
-        for service_marker in (
-            "class NoOaBankBatchWorkbenchPayloadDecorator",
-            "def relation_with_batch_metadata(",
-            "def apply_pair_metadata(",
-            "def apply_available_actions(",
-            "withdraw_no_oa_batch",
-            "免OA批次",
-        ):
-            if service_marker not in service_source:
-                violations.append(f"NoOaBankBatchWorkbenchPayloadDecorator missing {service_marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_bank_batch_workbench_display_policy_uses_service_boundary(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        display_policy_path = SERVICES_ROOT / "no_oa_bank_batch_workbench_display_policy.py"
-        display_policy_source = display_policy_path.read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        derive_tags_source = _function_source(server_tree, server_source, "_derive_workbench_row_tags")
-        display_payload_source = _function_source(server_tree, server_source, "_pair_relation_display_payload")
-        if "NO_OA_MANAGED_LABELS" in derive_tags_source:
-            violations.append("Application still owns no-OA managed-label filtering for Workbench row tags")
-        if "relation.get(\"display_tags\")" in derive_tags_source or "special_metadata.get(\"display_tags\")" in derive_tags_source:
-            violations.append("Application still owns no-OA display tag source selection")
-        if "已匹配：免OA流水" in display_payload_source or "已匹配：{batch_label}" in display_payload_source:
-            violations.append("Application still owns no-OA relation display payload labels")
-
-        app_factory_source = _function_source(server_tree, server_source, "_no_oa_bank_batch_workbench_display_policy")
-        if "NoOaBankBatchWorkbenchDisplayPolicy" not in app_factory_source:
-            violations.append("Application no longer assembles NoOaBankBatchWorkbenchDisplayPolicy")
-        for expected_delegate in (
-            ".row_tags(",
-            "_no_oa_bank_batch_workbench_display_policy().relation_display_payload",
-        ):
-            if expected_delegate not in server_source:
-                violations.append(f"server.py does not delegate no-OA display policy through {expected_delegate}")
-
-        for service_marker in (
-            "class NoOaBankBatchWorkbenchDisplayPolicy",
-            "def relation_display_payload(",
-            "def row_tags(",
-            "NO_OA_MANAGED_LABELS",
-            "已匹配：免OA流水",
-        ):
-            if service_marker not in display_policy_source:
-                violations.append(f"NoOaBankBatchWorkbenchDisplayPolicy missing {service_marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_pair_relation_display_policy_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        policy_source = (SERVICES_ROOT / "workbench_pair_relation_display_policy.py").read_text(encoding="utf-8")
-        display_source = _function_source(server_tree, server_source, "_pair_relation_display_payload")
-        factory_source = _function_source(server_tree, server_source, "_workbench_pair_relation_display_policy")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-pair-relation-display-policy-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        if "_workbench_pair_relation_display_policy().display_payload(" not in display_source:
-            violations.append("Application pair relation display helper does not delegate to display policy")
-        for forbidden in (
-            "internal_transfer_pair",
-            "salary_personal_auto_match",
-            "turnover_manual_closure",
-            "OA_INVOICE_OFFSET_AUTO_MATCH_MODE",
-            "PERSONAL_ADVANCE_REPAYMENT_MODE",
-            "fully_linked",
-            "已匹配：",
-            "完全关联",
-        ):
-            if forbidden in display_source:
-                violations.append(f"Application still owns pair relation display detail: {forbidden}")
-        for marker in (
-            "class WorkbenchPairRelationDisplayPolicy",
-            "def display_payload(",
-            "no_oa_relation_display_payload",
-            "bank_transaction_tag_label",
-            "internal_transfer_pair",
-            "salary_personal_auto_match",
-            "turnover_manual_closure",
-            "oa_invoice_offset_auto_match_mode",
-            "fully_linked",
-        ):
-            if marker not in policy_source:
-                violations.append(f"WorkbenchPairRelationDisplayPolicy missing marker: {marker}")
-        for marker in (
-            "WorkbenchPairRelationDisplayPolicy(",
-            "no_oa_relation_display_payload=self._no_oa_bank_batch_workbench_display_policy().relation_display_payload",
-            "bank_transaction_tag_label=self._bank_transaction_tag_label_current",
-            "no_oa_bank_batch_relation_mode=NO_OA_BANK_BATCH_RELATION_MODE",
-            "personal_advance_repayment_mode=PERSONAL_ADVANCE_REPAYMENT_MODE",
-            "oa_invoice_offset_auto_match_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE",
-        ):
-            if marker not in factory_source:
-                violations.append(f"Application display policy factory missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in policy_source:
-                violations.append(f"WorkbenchPairRelationDisplayPolicy gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-pair-relation-display-policy-extraction",
-            "WorkbenchPairRelationDisplayPolicy",
-            "relation display payload mapping",
-            "mode-specific metadata mutation remains deferred",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench pair relation display policy analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_no_oa_bank_batch_routes_delegate_to_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        route_path = APP_ROOT / "routes_no_oa_bank_batches.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "NoOaBankBatchApiRoutes")
-        for marker in (
-            "def route(",
-            "/api/no-oa-bank-batches",
-            "/api/no-oa-bank-batches/tag-selection",
-            "/submit-selection",
-            "/withdraw",
-            "resolve_mutation_session",
-            "load_json_body",
-            "json_response",
-            "bulk_submit(payload, session=session)",
-            "submit_selection(payload, session=session)",
-        ):
-            if marker not in route_class:
-                violations.append(f"no-OA bank batch route owner is missing marker {marker}")
-
-        if "_no_oa_bank_batch_routes().route(method, route_path, query, body, headers)" not in server_source:
-            violations.append("server.py does not delegate no-OA bank batch dispatch to the route owner")
-        for removed_handler in (
-            "_handle_api_no_oa_bank_batches",
-            "_handle_api_no_oa_bank_batch_tag_selection",
-            "_handle_api_no_oa_bank_batch_tag_selection_update",
-            "_handle_api_no_oa_bank_batch_detail",
-            "_handle_api_no_oa_bank_batch_submit",
-            "_handle_api_no_oa_bank_batch_withdraw",
-            "_handle_api_no_oa_bank_batches_bulk_submit",
-            "_handle_api_no_oa_bank_batches_submit_selection",
-        ):
-            if f"def {removed_handler}(" in server_source:
-                violations.append(f"server.py still defines migrated no-OA route callback {removed_handler}")
-
-        for forbidden in (
-            "save_no_oa_bank_batch_mutation",
-            "enqueue_many(",
-            "job.outbox_events",
-            "job.read_model_dirty_scopes",
-        ):
-            if forbidden in route_source:
-                violations.append(f"no-OA route owner owns side effect boundary {forbidden}")
-
-        self.assertEqual(violations, [])
-
     def test_bank_flow_rule_batch_runtime_has_no_no_oa_compatibility_path(self) -> None:
         paths = (
             APP_ROOT / "routes_bank_flow_rule_batches.py",
@@ -6076,7 +5067,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_workbench_api_full_payload_assembler_stays_deleted(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
-        repository_source = (SERVICES_ROOT / "postgres_repositories" / "read_models.py").read_text(encoding="utf-8")
+        retired_repository_path = SERVICES_ROOT / "postgres_repositories" / "read_models.py"
         deleted_service_modules = (
             "workbench_api_payload_assembler.py",
             "workbench_cache_read_payload_helper.py",
@@ -6146,12 +5137,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_is_workbench_read_model_rebuild_job",
         ):
             self.assertNotIn(forbidden, server_source)
-        for forbidden in (
-            "def get_workbench_view(",
-            "def _load_all_workbench_view(",
-            "def _load_workbench_rows_page(",
-        ):
-            self.assertNotIn(forbidden, repository_source)
+        self.assertFalse(retired_repository_path.exists())
 
     def test_workbench_oa_retention_parser_remains_narrow(self) -> None:
         server_path = APP_ROOT / "server.py"
@@ -6531,7 +5517,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_bank_details_relation_tags_only_read_relation_distribution_facade(self) -> None:
+    def test_bank_details_relation_tags_read_only_canonical_relations(self) -> None:
         path = SERVICES_ROOT / "bank_details_relation_tag_projection_service.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
@@ -6546,7 +5532,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "WorkbenchPairRelationService",
             "load_workbench_pair_relations",
             "list_active_relations",
-            "active_relations_for_row_ids",
             "get_active_relation_by_row_id",
             "get_active_relation_by_case_id",
             "list_by_month(",
@@ -6558,9 +5543,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "_bank_details_relation_tag_workbench_read_model" in server_source:
             violations.append("backend/src/fin_ops_platform/app/server.py keeps removed BankDetails raw workbench relation tag fallback")
 
-        facade_method = _function_source(tree, source, "_relation_tags_from_distribution")
-        if "get_by_row_ids" not in facade_method:
-            violations.append(f"{_relative(path)} does not read relation tags through WorkbenchRelationReadFacade.get_by_row_ids")
+        canonical_method = _function_source(tree, source, "_relation_tags_from_canonical_relations")
+        if "active_relations_for_row_ids" not in canonical_method:
+            violations.append(f"{_relative(path)} does not read canonical relations by requested row ids")
 
         self.assertEqual(violations, [])
 
@@ -7310,7 +6295,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_operations_audit_cli_files_do_not_own_sql_or_database_reads(self) -> None:
         for file_name in (
-            "audit_page_business_read_model.py",
+            "audit_page_canonical_data.py",
         ):
             path = TOOLS_ROOT / file_name
             source = path.read_text(encoding="utf-8")

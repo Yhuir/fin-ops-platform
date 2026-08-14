@@ -731,7 +731,7 @@ def build_bank_import_dedup_repair_plan(snapshot: dict[str, Any]) -> dict[str, A
         "batch_updates": batch_updates,
         "affected_months": sorted(
             {
-                _read_model_month_scope(pair.get("transaction_month"))
+                _transaction_month_scope(pair.get("transaction_month"))
                 for pair in duplicate_pairs
                 if _text(pair.get("transaction_month"))
             }
@@ -750,7 +750,6 @@ def public_bank_import_dedup_repair_report(
     idempotence_replay_results: list[dict[str, Any]] | None = None,
     apply_result: dict[str, Any] | None = None,
     withdraw_results: list[dict[str, Any]] | None = None,
-    refresh_scopes: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     return {
         "tool": "import_audit_repair_ops",
@@ -789,7 +788,6 @@ def public_bank_import_dedup_repair_report(
         "idempotence_replay_results": idempotence_replay_results,
         "apply_result": apply_result,
         "withdraw_results": withdraw_results,
-        "refresh_scopes": refresh_scopes,
         "authorized_write_scope": [
             "app.import_batch_rows",
             "app.import_batches",
@@ -800,7 +798,6 @@ def public_bank_import_dedup_repair_report(
             "app.workbench_pair_relation_history (append-only withdraw audit)",
             "app.bank_transactions",
             "new recovery import sessions/batches/rows",
-            "derived read-model scopes",
         ],
     }
 
@@ -821,7 +818,6 @@ def withdraw_bank_import_dedup_workbench_relations(
     )
     command_service = WorkbenchRelationCommandService(
         relation_repository=adapter,
-        require_fresh_relations=False,
     )
     results: list[dict[str, Any]] = []
     for action in actions:
@@ -1042,7 +1038,6 @@ def _workbench_withdraw_action(
     )
     command_service = WorkbenchRelationCommandService(
         relation_repository=adapter,
-        require_fresh_relations=False,
     )
     preview = command_service.preview_withdraw_relation(
         row_ids=row_ids,
@@ -1405,7 +1400,7 @@ def _decimal_text(value: Any) -> str | None:
         return None
 
 
-def _read_model_month_scope(value: Any) -> str:
+def _transaction_month_scope(value: Any) -> str:
     normalized = _text(value)
     if re.fullmatch(r"\d{4}-\d{2}", normalized):
         return normalized

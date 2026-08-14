@@ -1544,10 +1544,6 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 }
             },
         ]
-        refresh_gateway = Mock()
-        refresh_gateway.enqueue_many.side_effect = lambda scope_type, scopes, **_kwargs: list(
-            scopes
-        )
         arguments = [
             "--execute",
             "--expected-fingerprint",
@@ -1604,10 +1600,6 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 return_value={"transaction_delete_count": 674},
             ) as apply_repair,
             patch.object(import_audit_repair_ops, "AuditTrailService") as audit_service,
-            patch(
-                "fin_ops_platform.services.read_model_refresh_gateway.ReadModelRefreshGateway",
-                return_value=refresh_gateway,
-            ),
             patch("fin_ops_platform.services.runtime_queue.RuntimeQueueRepository"),
             patch(
                 "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory",
@@ -1644,8 +1636,6 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             RuntimeQueueRepository(transaction_connection)._json_param({"scope": "2026-02"}),
             Jsonb,
         )
-        refresh_gateway.enqueue_many.assert_called_once()
-        self.assertEqual(refresh_gateway.enqueue_many.call_args.args[0], "workbench_relation")
         self.assertEqual(runtime.replay_confirmed_file_import_session.call_count, 2)
         report = json.loads(output.getvalue())
         self.assertEqual(report["apply_result"]["transaction_delete_count"], 674)

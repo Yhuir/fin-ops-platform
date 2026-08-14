@@ -89,8 +89,8 @@ scripts/with-production-admin-token.sh \
 
 ## 发布判定
 
-- T0、T+60、T+300 均验证 exact release、5 required workers、1 retained read model、queue/dirty scope
-  收敛、System Audit 和核心 API SLO。
+- T0 与 T+30 验证 exact release、4 个 required workers、0 个 read model、通用 outbox 与领域队列
+  收敛、System Audit 和核心 API SLO；发布后持续监控沿用同一合同，不恢复 projection 或 freshness worker。
 - 单次最快样本、public shell、未认证 401/403、HTML fallback、零样本或旧 release 指标都不能作为通过。
 - rollback 锚点保留上一 release；若正确性、错误率、p95/p99、连接获取或 queue 任一项退化，停止扩量并
   回滚，不用缓存/fallback 隐藏失败。

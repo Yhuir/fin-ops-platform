@@ -692,7 +692,6 @@ class BankTransactionCategoryService:
         tag_dictionary: dict[str, Any] | None,
         *,
         can_save: bool = True,
-        read_model_status: str | None = None,
     ) -> dict[str, Any]:
         normalized = cls._normalize_tag_dictionary_payload(tag_dictionary)
         definitions = [
@@ -728,8 +727,6 @@ class BankTransactionCategoryService:
             "turnover_action_type_options": [dict(option) for option in TURNOVER_ACTION_TYPE_OPTIONS],
             "permissions": {"can_save": bool(can_save)},
         }
-        if read_model_status:
-            payload["read_model_status"] = str(read_model_status)
         return payload
 
     @classmethod

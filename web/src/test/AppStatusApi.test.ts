@@ -112,72 +112,6 @@ describe("app status API mapper", () => {
     });
   });
 
-  test("maps read model scope diagnostics for app status domains", () => {
-    const mapped = mapAppStatusOverview({
-      version: 1,
-      generated_at: "2026-06-04T10:00:00+08:00",
-      overall: {
-        level: "busy",
-        color: "yellow",
-        reason: "关联关系局部分片需要重试",
-        blocks_mutations: false,
-      },
-      domains: [
-        {
-          key: "workbench",
-          label: "关联台",
-          route: "/",
-          level: "busy",
-          status: "failed",
-          reason: "关联关系局部分片需要重试",
-          details: ["2026-05: projection failed"],
-          read_models: ["workbench_relation"],
-          read_model_scopes: [
-            {
-              read_model_key: "workbench_relation",
-              scope_type: "workbench_relation",
-              scope_key: "all",
-              status: "fresh",
-              updated_at: "2026-06-04T10:03:00+08:00",
-            },
-            {
-              read_model_key: "workbench_relation",
-              scope_type: "workbench_relation",
-              scope_key: "2026-05",
-              status: "failed",
-              last_error: "projection failed",
-              updated_at: "2026-06-04T10:05:00+08:00",
-            },
-          ],
-          workers: ["workbench-relation"],
-          job_ids: [],
-          updated_at: "2026-06-04T10:05:00+08:00",
-        },
-      ],
-      background_tasks: [],
-      alerts: [],
-    });
-
-    expect(mapped?.domains[0].readModelScopes).toEqual([
-      {
-        readModelKey: "workbench_relation",
-        scopeType: "workbench_relation",
-        scopeKey: "all",
-        status: "fresh",
-        lastError: "",
-        updatedAt: "2026-06-04T10:03:00+08:00",
-      },
-      {
-        readModelKey: "workbench_relation",
-        scopeType: "workbench_relation",
-        scopeKey: "2026-05",
-        status: "failed",
-        lastError: "projection failed",
-        updatedAt: "2026-06-04T10:05:00+08:00",
-      },
-    ]);
-  });
-
   test("maps runtime summary counts from snake_case app status payload", () => {
     const mapped = mapAppStatusOverview({
       version: 1,
@@ -185,21 +119,10 @@ describe("app status API mapper", () => {
       overall: {
         level: "busy",
         color: "yellow",
-        reason: "Read model 正在刷新",
+        reason: "后台任务处理中",
         blocks_mutations: false,
       },
       runtime_summary: {
-        read_models: {
-          total: 4,
-          fresh: 1,
-          refreshing: 1,
-          stale: 0,
-          missing: 1,
-          failed: 1,
-          unavailable: 0,
-          issue_count: 3,
-          scope_issue_count: 1,
-        },
         workers: {
           total: 4,
           required: 3,
@@ -225,22 +148,6 @@ describe("app status API mapper", () => {
       alerts: [],
     });
 
-    expect(mapped?.runtimeSummary.readModels).toEqual({
-      total: 4,
-      fresh: 1,
-      ready: 0,
-      idle: 0,
-      working: 0,
-      refreshing: 1,
-      stale: 0,
-      missing: 1,
-      failed: 1,
-      unavailable: 0,
-      mismatched: 0,
-      required: 0,
-      issueCount: 3,
-      scopeIssueCount: 1,
-    });
     expect(mapped?.runtimeSummary.workers).toMatchObject({
       total: 4,
       required: 3,

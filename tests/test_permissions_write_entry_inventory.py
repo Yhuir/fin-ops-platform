@@ -11,7 +11,6 @@ import unittest
 
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.app_settings_service import AppSettingsService
-from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 from fin_ops_platform.services.runtime_worker_registry import RUNTIME_WORKER_REGISTRY
 
 
@@ -613,13 +612,11 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, evaluator_source + acl_save_source)
 
-        self.assertEqual(tuple(READ_MODEL_MANIFEST), ("workbench_relation",))
         self.assertEqual(
             tuple(registration.instance_name for registration in RUNTIME_WORKER_REGISTRY),
             (
                 "oa-sync",
                 "workbench-matching",
-                "workbench-relation",
                 "import",
                 "settings-maintenance",
             ),

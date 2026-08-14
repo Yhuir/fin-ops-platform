@@ -7,9 +7,6 @@ from typing import Any, Callable
 from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
     PostgresBankImportWithdrawalRepository,
 )
-from fin_ops_platform.services.read_model_scope_policy import (
-    DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
-)
 
 
 class BankImportWithdrawalConflict(ValueError):
@@ -24,13 +21,9 @@ class BankImportWithdrawalService:
         *,
         repository: PostgresBankImportWithdrawalRepository,
         relation_service_for_transaction: Callable[[Any], Any],
-        queue_repository: Any | None = None,
-        tenant_id: str = "default",
     ) -> None:
         self._repository = repository
         self._relation_service_for_transaction = relation_service_for_transaction
-        self._queue_repository = queue_repository
-        self._tenant_id = str(tenant_id or "default").strip() or "default"
 
     def withdraw(
         self,
@@ -140,26 +133,6 @@ class BankImportWithdrawalService:
                 request_id=request_id,
                 summary=summary,
             )
-
-            affected_months = list(relation_result.get("affected_months") or [])
-            if affected_months and self._queue_repository is not None:
-                scope_keys = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(
-                    "workbench_relation",
-                    affected_months,
-                )
-                self._queue_repository.enqueue_read_model_refreshes_in_transaction(
-                    transaction=repository.transaction_connection,
-                    tenant_id=self._tenant_id,
-                    refreshes=[
-                        {
-                            "scope_type": "workbench_relation",
-                            "scope_key": scope_key,
-                            "reason": "bank_import_withdrawn",
-                            "metadata": {"batch_id": normalized_batch_id},
-                        }
-                        for scope_key in scope_keys
-                    ],
-                )
 
             return {
                 "status": "withdrawn",

@@ -113,14 +113,6 @@ class _TransactionalOverlapConnection(_OverlapConnection):
         yield self
 
 
-class _QueueRepository:
-    def __init__(self) -> None:
-        self.enqueued: list[dict[str, object]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.enqueued.append(dict(kwargs))
-
-
 class _MatchingDirtyRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -153,9 +145,8 @@ class RepairSubmittedEtcInvoiceOverlapsToolTests(unittest.TestCase):
         self.assertEqual(report["manual_review_candidates"], [])
         self.assertEqual(report["no_action_candidates"], [])
 
-    def test_apply_updates_only_auto_candidates_and_refreshes_relation_and_matching(self) -> None:
+    def test_apply_updates_only_auto_candidates_and_marks_matching_dirty(self) -> None:
         connection = _TransactionalOverlapConnection()
-        queue = _QueueRepository()
         matching = _MatchingDirtyRepository()
         report = audit_submitted_etc_invoice_overlaps(connection=connection)
 
@@ -164,19 +155,13 @@ class RepairSubmittedEtcInvoiceOverlapsToolTests(unittest.TestCase):
             auto_fix_candidates=report["auto_fix_candidates"],
             reason="unit_test_repair",
             operator="tester",
-            queue_repository=queue,
             matching_dirty_repository=matching,
         )
 
         self.assertEqual(result["updated_count"], 1)
         self.assertEqual(result["affected_months"], ["2026-02"])
-        self.assertEqual(result["workbench_relation_scopes"], ["2026-02"])
         self.assertEqual(len(connection.executed), 1)
         self.assertEqual(connection.executed[0][1][-1], "a6181d79-c3eb-4e20-bbd2-719215ed161d")
-        self.assertEqual(
-            [(item["scope_type"], item["scope_key"], item["priority"]) for item in queue.enqueued],
-            [("workbench_relation", "2026-02", "high")],
-        )
         self.assertEqual(
             matching.calls,
             [

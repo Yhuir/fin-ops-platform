@@ -22,7 +22,7 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
-from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
+from tests.test_pending_invoice_service import FakeCanonicalRelationReader
 
 
 class StaticOAProjection:
@@ -825,7 +825,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         query_service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(existing_invoices=invoices),
-            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+            relation_reader=FakeCanonicalRelationReader.from_pair_service(
                 pair_service=pair_service or WorkbenchPairRelationService(),
                 transactions=[],
                 invoices=invoices,

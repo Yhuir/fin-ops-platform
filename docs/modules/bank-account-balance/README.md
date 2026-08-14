@@ -29,11 +29,11 @@
 - 保留有余额/无余额账户、总余额和按币种汇总语义。
 - 不把全量流水搬回 Python 或浏览器聚合。
 
-旧 `bank_account_balance` manifest、worker、readiness、repository/projection、derived lifecycle 和 backfill 已删除。历史 projection migration/表暂留作回滚证据，没有运行时 reader/writer。
+旧 `bank_account_balance` manifest、worker、readiness、repository/projection、derived lifecycle 和 backfill 已删除；migration `0149` 删除遗留 projection schema，没有运行时或物理 projection owner。
 
 ## 本目录文件
 
 - `boundary-io.md`：当前 direct accounts I/O 和旧链删除状态。
-- `state-machine.md`：历史 read-model 状态记录，不再描述 Bank Details 页面状态。
+- `state-machine.md`：当前 canonical GET 的页面状态和旧链禁止状态。
 - `tests.md`：direct query 与删除守卫的测试责任。
 - `implementation-notes.md`：历史记录和本次迁移决策。

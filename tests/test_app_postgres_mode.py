@@ -170,19 +170,11 @@ class AppPostgresModeTests(unittest.TestCase):
     def test_ready_endpoint_exposes_runtime_infrastructure_contract(self) -> None:
         runtime_infrastructure = {
             "queue_backlog": {"dead_lettered": 3},
-            "dirty_scopes": {"done": 10, "pending": 2},
             "failed_jobs": 3,
-            "stale_dirty_scope_count": 2,
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 1,
             "critical_failed_outbox_count": 1,
-            "critical_failed_dirty_scope_count": 0,
-            "critical_stale_dirty_scope_count": 0,
-            "critical_read_models": {
-                "workbench": {"status": "fresh"},
-                "workbench_relation": {"status": "fresh"},
-            },
             "worker_metrics": [
                 {"worker_instance": "workbench", "worker_kind": "workbench", "status": "available", "required": True},
                 {
@@ -194,12 +186,8 @@ class AppPostgresModeTests(unittest.TestCase):
                     "current_effective": False,
                 },
             ],
-            "dirty_scopes_by_scope": [
-                {"scope_type": "workbench_relation", "scope_key": "all", "status": "pending", "count": 1},
-                {"scope_type": "workbench_relation", "scope_key": "all", "status": "pending", "count": 1},
-            ],
             "pending_outbox_events_by_scope": [
-                {"event_type": "workbench_relation.read_model.refresh", "scope_key": "all", "status": "dead_lettered"}
+                {"event_type": "oa.sync", "scope_key": "all", "status": "dead_lettered"}
             ],
         }
         store = FakeStore(runtime_infrastructure=runtime_infrastructure)
@@ -229,7 +217,6 @@ class AppPostgresModeTests(unittest.TestCase):
             payload["runtime_infrastructure"]["worker_problem_samples"][0]["warning_code"],
             "worker_event_type_mismatch",
         )
-        self.assertEqual(payload["runtime_infrastructure"]["dirty_scopes_by_scope_summary"]["count"], 2)
         self.assertEqual(payload["runtime_infrastructure"]["pending_outbox_events_by_scope_summary"]["count"], 1)
 
     def test_ready_endpoint_returns_503_when_postgres_is_unavailable_but_health_stays_live(self) -> None:
@@ -248,51 +235,6 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertEqual(ready_payload["status"], "not_ready")
         self.assertEqual(ready_payload["readiness_blockers"], {"postgres_unavailable": "error"})
         self.assertEqual(health_response.status_code, 200)
-
-    def test_health_endpoint_exposes_workbench_relation_distribution_status(self) -> None:
-        runtime_infrastructure = {
-            "missing_required_worker_count": 0,
-            "stale_required_worker_count": 0,
-            "mismatched_required_worker_count": 0,
-            "worker_metrics": [],
-            "dirty_scopes_by_scope": [
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-01",
-                    "status": "pending",
-                    "count": 2,
-                    "oldest_age_seconds": 15.0,
-                },
-                {
-                    "scope_type": "pending_invoice",
-                    "scope_key": "expense:2026-01",
-                    "status": "pending",
-                    "count": 9,
-                },
-            ],
-            "pending_outbox_events_by_scope": [
-                {
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "status": "dead_lettered",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-01",
-                    "last_error": "boom",
-                }
-            ],
-        }
-        with TemporaryDirectory() as temp_dir, patch(
-            "fin_ops_platform.app.server.build_state_store",
-            return_value=FakeStore(runtime_infrastructure=runtime_infrastructure),
-        ):
-            app = build_application(data_dir=Path(temp_dir))
-
-        payload = app.readiness_summary()["workbench_relation_read_model"]
-
-        self.assertEqual(payload["status"], "failed")
-        self.assertEqual(payload["dirty_backlog"], 2)
-        self.assertEqual(payload["stale_scopes"][0]["scope_key"], "2026-01")
-        self.assertEqual(payload["last_failure_reason"], "boom")
-        self.assertIn("workbench_relation_schema_version", payload["source_versions"])
 
     def test_postgres_runtime_bootstrap_loads_pair_relations_without_full_snapshot(self) -> None:
         pair_snapshot = {

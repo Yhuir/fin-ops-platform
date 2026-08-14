@@ -364,34 +364,6 @@ describe("Import pages", () => {
     expect(requestedPaths).not.toContain("/api/workbench");
   });
 
-  test("invoice import ignores legacy declared page targets without reading Workbench or a barrier", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
-      importConfirmOperationBarrierTargets: [
-        { read_model_key: "workbench_relation", scope_key: "2026-01" },
-      ],
-    });
-
-    renderAppAt("/imports/invoices");
-
-    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
-      new File(["invoice-output"], "一月发票.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        lastModified: 1,
-      }),
-    ]);
-    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
-    await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "确认导入" }));
-    expect(await screen.findByText("已确认导入")).toBeInTheDocument();
-    const requestedPaths = fetchMock.mock.calls.map(([input]) => String(input).split("?")[0]);
-    expect(requestedPaths).not.toContain("/api/operation-barrier/status");
-    expect(requestedPaths).not.toContain("/api/workbench");
-  });
-
   test("invoice import exposes the unified Audit only to administrators", async () => {
     installMockApiFetch({ sessionAccessTier: "admin" });
 

@@ -19,7 +19,7 @@
 - 不持久化自动候选、matching decision 或 `open/proposed` 关系状态。
 - 不根据金额、旧 `case_id`、UI metadata 或来源前缀在 route/前端本地推断正式关系。
 - 不直接写 relation SQL、matching dirty-scope SQL 或 outbox SQL；写入必须进入对应 command/UoW。
-- 不拥有其他页面消费的 `workbench_relation` shared read model，也不拥有 `workbench-matching` worker。
+- 不拥有其它页面的读取副本；`workbench-matching` 是独立领域 worker。
 
 ## 读取链路
 
@@ -142,13 +142,12 @@ requested tenant/scope
 
 必须保留：
 
-- `workbench_relation` manifest/worker/repository/read facade，以及其真实跨页面 consumers。
 - `workbench-matching` dirty scopes、worker、orchestrator 和正式 relation command。
 - canonical identity、active formal relation、history、异常 decision、preview/UoW、审计和幂等。
 - 独立 no-OA API/service；Workbench confirm 不恢复内部转账到 no-OA batch 的旧分流。
-- 其他页面自己的 direct APIs、read models、workers、Redis keys、RabbitMQ events 和 App Status entries。
+- 其他页面自己的 direct APIs、领域 workers、integration cache、RabbitMQ events 和 App Status entries。
 
-Workbench direct repository 不得被其他页面当通用 fact gateway。其他页面在下一次自身 API 读取中观察 canonical write，或继续按其已声明的 shared relation/read-model 合同收敛。
+Workbench direct repository 不得被其他页面当通用 fact gateway。其他页面在下一次自身 API 读取中，通过自己的 query repository 观察相同 canonical write。
 
 ## 页面 read model 退役合同
 
@@ -161,7 +160,7 @@ Workbench direct repository 不得被其他页面当通用 fact gateway。其他
 - generation rehydrate/convergence/prune active tooling和 prune timer。
 - SLO probe、deploy gate、tests 和长期文档中的 page-generation 当前事实。
 
-本 release 不物理删除已应用 migration 或 `read_model.workbench_*` 派生表。它们只作为上一 immutable release 的短期离线回滚材料，新 runtime 对它们必须为零 I/O。稳定窗口关闭后，物理 drop 由独立 forward migration 决策；禁止删除 `workbench_relation` 表或主数据库。
+Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 allowlist 对象后，forward-only 删除整个 `read_model` schema 与 dirty-scope 表，并终止旧 refresh 事件。它不删除 `app.workbench_pair_relations` 或主数据库；迁移后不能回滚到依赖 projection 的旧 release，只能向前修复。
 
 ## 性能合同
 

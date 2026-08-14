@@ -13,7 +13,6 @@ from fin_ops_platform.services.workbench_etc_batch_link import (
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 
-FRESH_WORKBENCH_RELATION_STATUS = "fresh"
 IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE = "无法撤回：OA 附件发票必须和来源 OA 保持绑定。"
 
 
@@ -106,7 +105,6 @@ class WorkbenchRelationConfirmPreparation:
     row_types: tuple[str, ...]
     tenant_id: str
     month_scope: str
-    freshness: dict[str, Any]
     pair_service: WorkbenchPairRelationService
     active_relations: tuple[dict[str, Any], ...]
 
@@ -117,7 +115,6 @@ class WorkbenchRelationWithdrawPreparation:
     case_id: str
     pair_service: WorkbenchPairRelationService
     before_relation: dict[str, Any]
-    freshness: dict[str, Any]
     current_preview: dict[str, Any]
     row_id_aliases: dict[str, str]
 
@@ -269,16 +266,12 @@ class WorkbenchRelationCommandService:
         *,
         relation_repository: Any,
         etc_batch_link_repository: Any | None = None,
-        relation_facade: Any | None = None,
         idempotency_store: Any | None = None,
-        require_fresh_relations: bool = False,
         tenant_id: str | None = None,
     ) -> None:
         self._relation_repository = relation_repository
         self._etc_batch_link_repository = etc_batch_link_repository
-        self._relation_facade = relation_facade
         self._idempotency_store = idempotency_store or _InMemoryIdempotencyStore()
-        self._require_fresh_relations = bool(require_fresh_relations)
         self._tenant_id = str(tenant_id or "").strip()
         self._confirm_preparation_owner = object()
         self._withdraw_preparation_owner = object()
@@ -294,11 +287,6 @@ class WorkbenchRelationCommandService:
     ) -> WorkbenchRelationConfirmPreparation:
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         normalized_row_types = [str(row_type).strip() for row_type in list(row_types or [])]
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=normalized_row_ids,
-            month_scope=month_scope,
-            scope_keys_hint=scope_keys_hint,
-        )
         self._assert_canonical_relation_members_available(
             normalized_row_ids,
             row_types=normalized_row_types,
@@ -322,7 +310,6 @@ class WorkbenchRelationCommandService:
             row_types=tuple(normalized_row_types),
             tenant_id=self._canonical_tenant_id(tenant_id),
             month_scope=str(month_scope or "all").strip() or "all",
-            freshness=deepcopy(freshness),
             pair_service=pair_service,
             active_relations=tuple(deepcopy(active_relations)),
         )
@@ -386,10 +373,6 @@ class WorkbenchRelationCommandService:
             return replay
 
         if preparation is None:
-            freshness = self._assert_relation_read_model_fresh(
-                row_ids=list(row_ids or []),
-                month_scope=month_scope,
-            )
             self._assert_canonical_relation_members_available(
                 list(row_ids or []),
                 row_types=list(row_types or []),
@@ -415,7 +398,6 @@ class WorkbenchRelationCommandService:
                 month_scope=month_scope,
                 tenant_id=tenant_id,
             )
-            freshness = deepcopy(preparation.freshness)
             pair_service = preparation.pair_service
             prepared_members = set(zip(preparation.row_ids, preparation.row_types, strict=False))
             additional_row_ids: list[str] = []
@@ -532,7 +514,6 @@ class WorkbenchRelationCommandService:
             history=history,
             changed_case_ids=changed_case_ids,
             affected_months=self._affected_months(month_scope),
-            freshness=freshness,
             idempotent_replay=False,
         )
         self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -564,15 +545,9 @@ class WorkbenchRelationCommandService:
             for row_id in list(before_relation.get("row_ids") or [])
             if str(row_id).strip()
         ]
-        before_month_scope = str(before_relation.get("month_scope") or "all")
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=before_row_ids,
-            month_scope=before_month_scope,
-        )
         pair_service, before_relation, current_preview = self._lock_and_revalidate_withdraw_topology(
             pair_service=pair_service,
             before_relation=before_relation,
-            freshness=freshness,
             row_id_aliases=row_id_aliases,
         )
         return WorkbenchRelationWithdrawPreparation(
@@ -580,7 +555,6 @@ class WorkbenchRelationCommandService:
             case_id=resolved_case_id,
             pair_service=pair_service,
             before_relation=deepcopy(before_relation),
-            freshness=deepcopy(freshness),
             current_preview=deepcopy(current_preview),
             row_id_aliases=dict(row_id_aliases or {}),
         )
@@ -1032,10 +1006,6 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"case_id": resolved_case_id},
             )
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=list(before_relation.get("row_ids") or []),
-            month_scope=str(before_relation.get("month_scope") or "all"),
-        )
         cancelled = pair_service.cancel_relation(resolved_case_id, cancelled_at=occurred_at)
         if not isinstance(cancelled, dict):
             raise WorkbenchRelationCommandError(
@@ -1061,7 +1031,6 @@ class WorkbenchRelationCommandService:
             history=history,
             changed_case_ids=changed_case_ids,
             affected_months=self._affected_months(str(before_relation.get("month_scope") or "all")),
-            freshness=freshness,
             idempotent_replay=False,
         )
         self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -1101,10 +1070,6 @@ class WorkbenchRelationCommandService:
         self._acquire_relation_member_locks(normalized_row_ids)
         pair_service = self._pair_service_for_row_ids(normalized_row_ids)
         before_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=normalized_row_ids,
-            month_scope=self._combined_month_scope(before_relations),
-        )
         if not before_relations:
             result = {
                 "status": "noop",
@@ -1112,7 +1077,6 @@ class WorkbenchRelationCommandService:
                 "history": None,
                 "changed_case_ids": [],
                 "affected_months": [],
-                **self._success_freshness_payload(freshness, fallback_months=[]),
                 "idempotent_replay": False,
             }
             self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -1134,7 +1098,6 @@ class WorkbenchRelationCommandService:
             "history": deepcopy(history),
             "changed_case_ids": changed_case_ids,
             "affected_months": affected_months,
-            **self._success_freshness_payload(freshness, fallback_months=affected_months),
             "idempotent_replay": False,
         }
         self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -1283,10 +1246,6 @@ class WorkbenchRelationCommandService:
                 if str(row_id).strip()
             )
         )
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=all_row_ids,
-            month_scope=self._combined_month_scope(before_relations),
-        )
         if not before_relations:
             result = {
                 "status": "noop",
@@ -1294,7 +1253,6 @@ class WorkbenchRelationCommandService:
                 "history": None,
                 "changed_case_ids": [],
                 "affected_months": [],
-                **self._success_freshness_payload(freshness, fallback_months=[]),
                 "idempotent_replay": False,
             }
             self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -1324,7 +1282,6 @@ class WorkbenchRelationCommandService:
             "history": deepcopy(history),
             "changed_case_ids": changed_case_ids,
             "affected_months": affected_months,
-            **self._success_freshness_payload(freshness, fallback_months=affected_months),
             "idempotent_replay": False,
         }
         self._save_idempotency_result(idempotency_key, fingerprint, result)
@@ -1377,10 +1334,6 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"case_id": resolved_case_id},
             )
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=list(before_relation.get("row_ids") or []),
-            month_scope=str(before_relation.get("month_scope") or "all"),
-        )
         relation, history = pair_service.update_relation_metadata_for_case_id(
             resolved_case_id,
             relation_mode=normalized_relation_mode,
@@ -1401,24 +1354,10 @@ class WorkbenchRelationCommandService:
             history=history,
             changed_case_ids=changed_case_ids,
             affected_months=self._affected_months(str(relation.get("month_scope") or "all")),
-            freshness=freshness,
             idempotent_replay=False,
         )
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
-
-    def assert_write_precondition(
-        self,
-        *,
-        row_ids: list[str],
-        month_scope: str = "all",
-        scope_keys_hint: list[str] | None = None,
-    ) -> dict[str, Any]:
-        return self._assert_relation_read_model_fresh(
-            row_ids=list(row_ids or []),
-            month_scope=month_scope,
-            scope_keys_hint=scope_keys_hint,
-        )
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         normalized_row_ids = list(row_ids or [])
@@ -1495,7 +1434,6 @@ class WorkbenchRelationCommandService:
         row_ids: list[str],
         row_types: list[str] | None = None,
         month_scope: str = "all",
-        freshness: dict[str, Any] | None = None,
         row_id_aliases: dict[str, str] | None = None,
         active_relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1532,12 +1470,6 @@ class WorkbenchRelationCommandService:
             active_relation=active_relation,
             row_id_aliases=row_id_aliases,
         )
-        active_row_ids = [
-            str(row_id)
-            for row_id in list(active_relation.get("row_ids") or [])
-            if str(row_id).strip()
-        ]
-        resolved_month_scope = str(active_relation.get("month_scope") or month_scope or "all")
         if pair_service.is_immutable_oa_attachment_binding_relation(
             active_relation,
             row_id_aliases=row_id_aliases,
@@ -1562,10 +1494,6 @@ class WorkbenchRelationCommandService:
                 "after_relations": after_relations,
                 "submit_expected_versions": expected_versions,
             }
-        resolved_freshness = freshness or self._assert_relation_read_model_fresh(
-            row_ids=active_row_ids,
-            month_scope=resolved_month_scope,
-        )
         try:
             preview = pair_service.preview_withdraw_for_active_relation(
                 active_relation,
@@ -1575,7 +1503,7 @@ class WorkbenchRelationCommandService:
             raise WorkbenchRelationCommandError(
                 "workbench_relation_not_found",
                 "Workbench relation is not active or does not exist.",
-                payload={"row_ids": active_row_ids},
+                payload={"row_ids": list(active_relation.get("row_ids") or [])},
             ) from exc
         active_relation = deepcopy(preview["active_relation"])
         after_relations = [
@@ -1669,7 +1597,6 @@ class WorkbenchRelationCommandService:
             resolved_case_id = preparation.case_id
             pair_service = preparation.pair_service
             before_relation = deepcopy(preparation.before_relation)
-            freshness = deepcopy(preparation.freshness)
             current_preview = deepcopy(preparation.current_preview)
         else:
             if resolved_case_id:
@@ -1716,7 +1643,6 @@ class WorkbenchRelationCommandService:
                 active_relation=before_relation,
                 row_id_aliases=row_id_aliases,
             )
-        before_month_scope = str(before_relation.get("month_scope") or "all")
         if pair_service.is_immutable_oa_attachment_binding_relation(
             before_relation,
             row_id_aliases=row_id_aliases,
@@ -1727,14 +1653,9 @@ class WorkbenchRelationCommandService:
                 payload={"case_id": resolved_case_id, "row_ids": before_row_ids},
             )
         if preparation is None:
-            freshness = self._assert_relation_read_model_fresh(
-                row_ids=before_row_ids,
-                month_scope=before_month_scope,
-            )
             pair_service, before_relation, current_preview = self._lock_and_revalidate_withdraw_topology(
                 pair_service=pair_service,
                 before_relation=before_relation,
-                freshness=freshness,
                 row_id_aliases=row_id_aliases,
             )
         before_row_ids = [
@@ -1790,7 +1711,6 @@ class WorkbenchRelationCommandService:
                 history=history,
                 changed_case_ids=changed_case_ids,
                 affected_months=self._affected_months(str(before_relation.get("month_scope") or "all")),
-                freshness=freshness,
                 idempotent_replay=False,
             ),
             "restored_relations": deepcopy(restored_relations),
@@ -2075,7 +1995,6 @@ class WorkbenchRelationCommandService:
         *,
         pair_service: WorkbenchPairRelationService,
         before_relation: dict[str, Any],
-        freshness: dict[str, Any],
         row_id_aliases: dict[str, str] | None,
     ) -> tuple[WorkbenchPairRelationService, dict[str, Any], dict[str, Any]]:
         before_case_id = str(before_relation.get("case_id") or "").strip()
@@ -2137,7 +2056,6 @@ class WorkbenchRelationCommandService:
             locked_pair_service,
             row_ids=list(locked_before.get("row_ids") or []),
             month_scope=str(locked_before.get("month_scope") or "all"),
-            freshness=freshness,
             row_id_aliases=row_id_aliases,
             active_relation=locked_before,
         )
@@ -2417,91 +2335,6 @@ class WorkbenchRelationCommandService:
             months.extend(self._affected_months(str(relation.get("month_scope") or "all")))
         return list(dict.fromkeys(months))
 
-    def _assert_relation_read_model_fresh(
-        self,
-        *,
-        row_ids: list[str],
-        month_scope: str,
-        scope_keys_hint: list[str] | None = None,
-    ) -> dict[str, Any]:
-        if not self._require_fresh_relations:
-            return {
-                "status": FRESH_WORKBENCH_RELATION_STATUS,
-                "read_model_scope_keys": self._affected_months(month_scope),
-                "stale_reasons": [],
-                "refresh_enqueued": False,
-            }
-        if self._relation_facade is None:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_unavailable",
-                "Workbench relation read facade is not configured.",
-                payload={
-                    "read_model_status": "unavailable",
-                    "read_model_stale_reasons": ["relation_facade_unavailable"],
-                    "read_model_scope_keys": self._affected_months(month_scope),
-                    "refresh_enqueued": False,
-                },
-            )
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_unavailable",
-                "Workbench relation read facade does not expose get_by_row_ids.",
-                payload={
-                    "read_model_status": "unavailable",
-                    "read_model_stale_reasons": ["relation_facade_get_by_row_ids_unavailable"],
-                    "read_model_scope_keys": self._affected_months(month_scope),
-                    "refresh_enqueued": False,
-                },
-            )
-        normalized_scope_keys = list(
-            dict.fromkeys(
-                str(scope_key).strip()
-                for scope_key in list(scope_keys_hint or [])
-                if str(scope_key).strip()
-            )
-        )
-        payload = reader(
-            [str(row_id) for row_id in list(row_ids or [])],
-            require_fresh=True,
-            reason="workbench_relation_write_precondition",
-            month_hint=month_scope,
-            scope_keys_hint=normalized_scope_keys or self._affected_months(month_scope),
-        )
-        if not isinstance(payload, dict):
-            payload = {"status": "unavailable"}
-        status = str(payload.get("status") or payload.get("read_model_status") or "missing")
-        if status != FRESH_WORKBENCH_RELATION_STATUS:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_not_fresh",
-                "Workbench relation read model is not fresh. Refresh and retry the mutation.",
-                payload=self._freshness_error_payload(payload, fallback_month_scope=month_scope),
-            )
-        return payload
-
-    def _freshness_error_payload(self, payload: dict[str, Any], *, fallback_month_scope: str) -> dict[str, Any]:
-        status = str(payload.get("status") or payload.get("read_model_status") or "missing")
-        stale_reasons = payload.get("stale_reasons")
-        if not isinstance(stale_reasons, list):
-            stale_reasons = payload.get("read_model_stale_reasons")
-        scope_keys = payload.get("read_model_scope_keys")
-        if not isinstance(scope_keys, list):
-            scope_keys = self._affected_months(fallback_month_scope)
-        return {
-            "read_model_status": status,
-            "read_model_stale_reasons": [
-                str(reason)
-                for reason in list(stale_reasons or [])
-                if str(reason).strip()
-            ],
-            "read_model_scope_keys": [
-                str(scope_key)
-                for scope_key in list(scope_keys or [])
-                if str(scope_key).strip()
-            ],
-            "refresh_enqueued": bool(payload.get("refresh_enqueued")),
-        }
-
     def _validated_relation_mode(self, relation_mode: str) -> str:
         mode = str(relation_mode or "").strip()
         if mode not in VALID_WORKBENCH_RELATION_MODES:
@@ -2520,10 +2353,8 @@ class WorkbenchRelationCommandService:
         history: dict[str, Any],
         changed_case_ids: list[str],
         affected_months: list[str],
-        freshness: dict[str, Any],
         idempotent_replay: bool,
     ) -> dict[str, Any]:
-        freshness_payload = self._success_freshness_payload(freshness, fallback_months=affected_months)
         return {
             "status": status,
             "relation": deepcopy(relation),
@@ -2535,33 +2366,7 @@ class WorkbenchRelationCommandService:
             ],
             "affected_months": list(affected_months or []),
             "version": int(relation.get("version") or 1),
-            "read_model_status": freshness_payload["read_model_status"],
-            "read_model_stale_reasons": freshness_payload["read_model_stale_reasons"],
-            "read_model_scope_keys": freshness_payload["read_model_scope_keys"],
-            "refresh_enqueued": freshness_payload["refresh_enqueued"],
             "idempotent_replay": idempotent_replay,
-        }
-
-    def _success_freshness_payload(self, payload: dict[str, Any], *, fallback_months: list[str]) -> dict[str, Any]:
-        scope_keys = payload.get("read_model_scope_keys")
-        if not isinstance(scope_keys, list):
-            scope_keys = fallback_months
-        stale_reasons = payload.get("stale_reasons")
-        if not isinstance(stale_reasons, list):
-            stale_reasons = payload.get("read_model_stale_reasons")
-        return {
-            "read_model_status": str(payload.get("status") or payload.get("read_model_status") or FRESH_WORKBENCH_RELATION_STATUS),
-            "read_model_stale_reasons": [
-                str(reason)
-                for reason in list(stale_reasons or [])
-                if str(reason).strip()
-            ],
-            "read_model_scope_keys": [
-                str(scope_key)
-                for scope_key in list(scope_keys or [])
-                if str(scope_key).strip()
-            ],
-            "refresh_enqueued": bool(payload.get("refresh_enqueued")),
         }
 
     def _idempotency_replay(self, idempotency_key: str | None, fingerprint: str) -> dict[str, Any] | None:

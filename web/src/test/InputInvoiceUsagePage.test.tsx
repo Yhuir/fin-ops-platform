@@ -214,7 +214,6 @@ function installInputInvoiceUsageFetch(
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
-          registered_read_model_keys: [],
         },
         summary: {
           blocking_issue_sample_count: 0,

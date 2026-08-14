@@ -112,7 +112,7 @@
 - PostgreSQL canonical snapshot：`tests/test_turnover_ledger_postgres_integration.py`
 - 精确选择 SQL/GET→POST CAS 一致性：`tests/test_bank_details_canonical_query.py`、`tests/test_turnover_ledger_postgres_integration.py`
 - API/write regression：`tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`
-- Audit/architecture：`tests/test_audit_page_business_read_model_tool.py`、`tests/test_platform_runtime_boundary_guards.py`
+- Audit/architecture：`tests/test_audit_page_canonical_data_tool.py`、`tests/test_platform_runtime_boundary_guards.py`
 - Frontend：`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`；Playwright：`web/e2e/turnover-ledger-flow.spec.ts`，以 121 组数据证明第 2/3 页和第 121 组可达。
 - 生产：使用 test-owned 可恢复 fixture 验证 confirm → 两页面手动刷新一致 → withdraw 恢复；同时验证 Audit、零 Turnover refresh outbox/dirty scope、接口耗时和 worker registry 无 Turnover 实例。
 

@@ -288,7 +288,6 @@ class NoOaBankBatchApiRoutes:
             if error_code
             in {
                 "no_oa_bank_batch_version_conflict",
-                "no_oa_bank_batch_relation_read_model_not_fresh",
                 "no_oa_bank_batch_relation_active_row_conflict",
             }
             else HTTPStatus.BAD_REQUEST
@@ -302,10 +301,6 @@ class NoOaBankBatchApiRoutes:
                     for key, value in details.items()
                     if str(key)
                     in {
-                        "read_model_status",
-                        "read_model_stale_reasons",
-                        "read_model_scope_keys",
-                        "refresh_enqueued",
                         "conflicting_case_ids",
                         "row_ids",
                         "case_id",

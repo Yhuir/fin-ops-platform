@@ -8,9 +8,9 @@ from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 
 
@@ -145,14 +145,12 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
             )
         except ValueError as exc:
             parser.error(str(exc))
-        queue_repository = RuntimeQueueRepository(connection)
         report["apply"] = apply_etc_batch_invoice_link_backfill(
             connection=connection,
             auto_backfill_candidates=list(report["auto_backfill_candidates"]),
             reason=str(args.reason).strip(),
             operator=str(args.operator).strip(),
-            queue_repository=queue_repository,
-            matching_dirty_repository=PostgresReadModelRepository(connection),
+            matching_dirty_repository=PostgresWorkbenchMatchingQueueRepository(connection),
         )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0 if report["summary"]["manual_review_count"] == 0 else 1
@@ -226,7 +224,6 @@ def apply_etc_batch_invoice_link_backfill(
     auto_backfill_candidates: list[dict[str, Any]],
     reason: str,
     operator: str,
-    queue_repository: Any | None = None,
     matching_dirty_repository: Any | None = None,
 ) -> dict[str, Any]:
     normalized_reason = str(reason or "").strip()
@@ -255,16 +252,6 @@ def apply_etc_batch_invoice_link_backfill(
             linked.append(link)
 
     affected_months = _affected_months(auto_backfill_candidates)
-    relation_scopes: list[str] = []
-    if queue_repository is not None and affected_months:
-        gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        relation_scopes = gateway.enqueue_many(
-            "workbench_relation",
-            affected_months,
-            reason="etc_batch_invoice_link_backfill",
-            priority="high",
-            metadata={"reason": normalized_reason, "operator": normalized_operator},
-        )
     matching_dirty_scopes = (
         WorkbenchReconciliationDirtyQueue(repository=matching_dirty_repository).mark_dirty_expanded(
             affected_months,
@@ -280,7 +267,6 @@ def apply_etc_batch_invoice_link_backfill(
         "requested_count": len(auto_backfill_candidates),
         "linked_count": len(linked),
         "affected_months": affected_months,
-        "workbench_relation_scopes": relation_scopes,
         "matching_dirty_scopes": matching_dirty_scopes,
         "rollback_plan": _rollback_plan(auto_backfill_candidates, link_ids=[str(item.get("id") or "") for item in linked]),
     }

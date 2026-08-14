@@ -1339,7 +1339,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
-            relation_facade=FreshRelationFacade(),
         )
 
         relation = port.withdraw_turnover_manual_closure(
@@ -1407,7 +1406,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
-            relation_facade=FreshRelationFacade(),
         )
 
         relation = port.withdraw_turnover_manual_closure(
@@ -1457,9 +1455,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     "read_model_scope_keys": ["2026-02"],
                 }
 
-        port = module.TurnoverLedgerWorkbenchPairPort(
-            relation_facade=FreshRelationFacade(),
-        )
+        port = module.TurnoverLedgerWorkbenchPairPort()
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.withdraw_turnover_manual_closure(

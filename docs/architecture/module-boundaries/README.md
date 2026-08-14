@@ -1,6 +1,6 @@
 # 模块边界与 I/O 文档入口
 
-本目录是仓库级模块边界、I/O、文件范围和维护规则的长期事实源。它把 `docs/modules/` 的日常模块文档、`docs/app-architecture/` 的运行时事实、后端 read model manifest 和 worker registry 统一到一个可执行的架构入口。
+本目录是仓库级模块边界、I/O、文件范围和维护规则的长期事实源。它把 `docs/modules/` 的日常模块文档、`docs/app-architecture/` 的运行时事实、canonical read 合同和 worker registry 统一到一个可执行的架构入口。
 
 `.planning/` 和 `.planning/refactors/` 只作为 GSD 执行工作区、历史计划和分析参考；其中仍然有效的结论必须提炼到本目录、`docs/modules/`、`docs/app-architecture/`、`docs/dev/` 或 `docs/operations/` 后，才可以作为当前开发依据。
 
@@ -26,7 +26,7 @@
 | 产品和业务口径 | `docs/product-specs/` |
 | API、测试、本地开发 | `docs/dev/`、`backend/README.md`、`web/README.md` |
 | 部署、worker、生产验证 | `docs/operations/`、`deploy/oa/README.md` |
-| Read model manifest 合同 | `read-model-contracts.md` + `backend/src/fin_ops_platform/services/read_model_manifest.py` |
+| Read model 退役合同 | `read-model-contracts.md` + `tests/test_read_model_runtime_removal.py` |
 | Runtime worker 合同 | `docs/operations/runtime-worker-governance.md` + `backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
 
 如果代码与文档冲突，先以代码和运行时 manifest/registry 为核验依据，再同步修正文档；不能让文档继续陈旧。
@@ -37,9 +37,9 @@
 
 - 模块负责什么业务能力、页面能力或资源能力。
 - 模块不负责什么，哪些逻辑必须通过其他模块的公开接口进入。
-- 输入 I/O：HTTP/API 入参、service 方法入参、repository 查询条件、read model scope、worker event、前端页面状态或用户操作。
-- 输出 I/O：API 响应、read model payload、domain event、dirty scope、audit record、worker job、页面刷新信号。
-- 持久化归属：哪些表、read model、索引、缓存或状态由该模块拥有或投影。
+- 输入 I/O：HTTP/API 入参、service 方法入参、repository 查询条件、worker event、前端页面状态或用户操作。
+- 输出 I/O：API 响应、domain event、领域 dirty scope、audit record、worker job、页面重读信号。
+- 持久化归属：哪些 canonical 表、索引、integration cache 或领域任务状态由该模块拥有。
 - 依赖方向：允许调用哪些服务、repository、gateway、adapter；禁止绕过哪些边界。
 - 文件范围：后端 route/service/repository/worker、前端 page/feature/api/test/e2e、脚本和运维文件。
 - 测试与验证入口：七类测试适用性、回归测试、生产验证方式和风险。
@@ -48,15 +48,8 @@
 
 ## Read Model 目标态
 
-所有仍登记的 read model 的目标态是 Partitioned + Scoped + Incremental Projection：
-
-- Partitioned：按业务可失效维度分区，常见分区是月份、方向、来源、账号、页面 scope 或父聚合 scope。刷新不得默认重建全量数据，除非 manifest 明确允许 all 作为 fan-out 或父聚合语义。
-- Scoped：所有刷新、dirty scope、freshness gate 和查询状态必须有可验证 scope。页面不能读取旧 read model 却伪装 fresh。
-- Incremental Projection：普通写操作只提交 canonical facts/version/audit；被访问页面比较 source proof 后只让当前精确 scope 变 dirty，并由 worker 增量重算或重放投影。显式维护/repair 才可主动入队；禁止为单个普通写触发跨页面或无界全量重建。
-
-canonical direct-read 页面不进入 manifest，也不套用 projection freshness 合同。关联台已是
-direct canonical consumer；当前 manifest 只保留共享 `workbench_relation`。任何例外必须写入
-`read-model-contracts.md`，不能靠口头约定。
+当前运行时集合为空。所有页面都使用 bounded canonical query。任何重新引入 projection 的提议必须作为新的
+架构决策，并先提供 direct SQL、索引、分页和 HTTP cache 无法满足实测目标的证据；不得复活旧模块。
 
 ## GSD 使用规则
 
@@ -76,7 +69,7 @@ GSD 输出可以保留在 `.planning/`，但 `.planning/` 不是长期事实源�
 - 定位目标模块和所有受影响模块。
 - 阅读本目录、模块 README、相关状态机/测试文档。
 - 如果涉及 PostgreSQL canonical facts，核对 `canonical-facts.md` 和事实 owner 模块的 `boundary-io.md`。
-- 如果涉及 read model/worker，核对 `read-model-contracts.md`、manifest、registry 和运维文档。
+- 如果涉及 worker 或发现 read model 回归，核对 `read-model-contracts.md`、删除面 guard、worker registry 和运维文档。
 - 明确当前变更是否改变边界、I/O、文件范围、状态机、测试矩阵或生产验证。
 
 每次变更后：
@@ -84,6 +77,6 @@ GSD 输出可以保留在 `.planning/`，但 `.planning/` 不是长期事实源�
 - 更新受影响模块文档。
 - 如果新增或移除模块，更新 `inventory.md` 和 `docs/modules/README.md`。
 - 如果新增、移除或改变 canonical fact family、owner、允许写入口、跨模块读写路径或旧生产 source-of-truth 删除状态，更新 `canonical-facts.md` 和对应 owner 模块 `boundary-io.md`。
-- 如果新增、移除或改变 read model，更新 `read-model-contracts.md`、manifest/registry、测试和运维文档。
+- 如果扫描到 read model runtime，更新 `read-model-contracts.md`、删除面 guard、测试和运维文档；禁止恢复 manifest/registry。
 - 如果改变模块边界或 I/O，更新对应模块 README 和 `boundary-io.md`。
 - 运行相关文档、测试或验证命令，并在最终说明中写清未覆盖风险。

@@ -69,7 +69,6 @@ class ImportRuntimeProcessorFactoryTests(unittest.TestCase):
 class WorkbenchMatchingWorkerFactoryTests(unittest.TestCase):
     def test_build_reads_only_settings_instead_of_full_import_snapshot(self) -> None:
         state_store = SimpleNamespace(
-            read_model_repository=Mock(),
             load_app_settings=Mock(return_value={}),
             load_bank_transaction_categories=Mock(return_value={}),
             load_imports_snapshot=Mock(
@@ -107,11 +106,6 @@ class FakeQueue:
         self.failed_events: list[tuple[str, str, str, bool, int, int]] = []
         self.released_events: list[tuple[str, str, str]] = []
         self.deferred_events: list[tuple[str, str, str, int]] = []
-        self.enqueued_read_model_refreshes: list[dict[str, object]] = []
-        self.active_read_model_refreshes: set[tuple[str, str, str]] = set()
-        self.active_read_model_refresh_checks: list[tuple[str, str, str]] = []
-        self.fresh_read_model_refreshes: set[tuple[str, str, str]] = set()
-        self.fresh_read_model_refresh_checks: list[tuple[str, str, str]] = []
         self.heartbeats: list[tuple[str, str, str, object]] = []
         self.statement_timeouts: list[int | None] = []
 
@@ -166,34 +160,6 @@ class FakeQueue:
         self.deferred_events.append((event_id, worker_id, reason, delay_seconds))
         return True
 
-    def enqueue_read_model_refresh(self, **kwargs: object) -> RuntimeQueueEvent:
-        self.enqueued_read_model_refreshes.append(dict(kwargs))
-        return RuntimeQueueEvent(
-            event_id=f"dep-{len(self.enqueued_read_model_refreshes)}",
-            tenant_id=str(kwargs.get("tenant_id") or "default"),
-            event_type=f"{kwargs.get('scope_type')}.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id=str(kwargs.get("scope_key") or ""),
-            scope_type=str(kwargs.get("scope_type") or ""),
-            scope_key=str(kwargs.get("scope_key") or ""),
-            dedupe_key=None,
-            payload={},
-            attempts=0,
-            status="pending",
-            priority=str(kwargs.get("priority") or "normal"),
-            trace_id=str(kwargs.get("trace_id") or "") or None,
-        )
-
-    def read_model_refresh_is_active(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
-        identity = (tenant_id, scope_type, scope_key)
-        self.active_read_model_refresh_checks.append(identity)
-        return identity in self.active_read_model_refreshes
-
-    def read_model_refresh_is_fresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
-        identity = (tenant_id, scope_type, scope_key)
-        self.fresh_read_model_refresh_checks.append(identity)
-        return identity in self.fresh_read_model_refreshes
-
     def record_worker_heartbeat(self, worker_id: str, worker_kind: str, status: str, payload=None) -> None:
         self.heartbeats.append((worker_id, worker_kind, status, payload))
 
@@ -213,7 +179,7 @@ class FakeSequenceQueue(FakeQueue):
 
 
 class RuntimeWorkerTests(unittest.TestCase):
-    def test_default_poll_interval_is_fast_enough_for_read_model_slo(self) -> None:
+    def test_default_poll_interval_is_fast_enough_for_runtime_slo(self) -> None:
         self.assertEqual(DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS, 0.05)
         self.assertEqual(RuntimeWorkerConfig().poll_interval_seconds, 0.05)
         self.assertEqual(RuntimeWorkerConfig().heartbeat_min_interval_seconds, 1.0)
@@ -254,163 +220,6 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
-
-    def test_stale_relation_read_model_event_enqueues_successor_before_ack(self) -> None:
-        claimed = RuntimeQueueEvent(
-            **{
-                **event("workbench_relation.read_model.refresh").__dict__,
-                "scope_type": "workbench_relation",
-                "scope_key": "2026-07",
-                "source_version": 7,
-            }
-        )
-        queue = FakeQueue(claimed)
-        worker = RuntimeWorker(
-            queue_repository=queue,
-            config=RuntimeWorkerConfig(
-                worker_id="worker-1",
-                event_types=["workbench_relation.read_model.refresh"],
-            ),
-            handlers={
-                "workbench_relation.read_model.refresh": lambda _event: {
-                    "skipped": True,
-                    "skip_reason": "stale_source_version",
-                }
-            },
-        )
-
-        result = worker.run_once()
-
-        self.assertEqual(result, RuntimeWorkerResult.PROCESSED)
-        self.assertEqual(queue.acked[0][0:2], ("event-1", "worker-1"))
-        self.assertEqual(
-            queue.enqueued_read_model_refreshes,
-            [
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-07",
-                    "reason": "stale_source_version_successor",
-                    "metadata": {"action_name": "stale_source_version"},
-                }
-            ],
-        )
-
-    def test_stale_read_model_event_is_not_acked_when_successor_enqueue_fails(self) -> None:
-        claimed = RuntimeQueueEvent(
-            **{
-                **event("workbench_relation.read_model.refresh").__dict__,
-                "scope_type": "workbench_relation",
-                "scope_key": "2026-07",
-            }
-        )
-        queue = FakeQueue(claimed)
-
-        def fail_enqueue(**_kwargs: object) -> RuntimeQueueEvent:
-            raise RuntimeError("successor queue unavailable")
-
-        queue.enqueue_read_model_refresh = fail_enqueue  # type: ignore[method-assign]
-        worker = RuntimeWorker(
-            queue_repository=queue,
-            config=RuntimeWorkerConfig(
-                worker_id="worker-1",
-                event_types=["workbench_relation.read_model.refresh"],
-            ),
-            handlers={
-                "workbench_relation.read_model.refresh": lambda _event: {
-                    "skipped": True,
-                    "skip_reason": "stale_source_version_after_publish",
-                }
-            },
-        )
-
-        result = worker.run_once()
-
-        self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
-        self.assertEqual(queue.acked, [])
-        self.assertEqual(
-            queue.failed_events,
-            [("event-1", "worker-1", "successor queue unavailable", True, 60, 5)],
-        )
-
-    def test_run_once_defers_dependency_not_fresh_without_marking_failed(self) -> None:
-        queue = FakeQueue(event())
-
-        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
-            raise RuntimeError("workbench_relation_read_model_not_fresh: status=refreshing")
-
-        worker = RuntimeWorker(
-            queue_repository=queue,
-            config=RuntimeWorkerConfig(
-                worker_id="worker-1",
-                event_types=["runtime.test"],
-                dependency_not_fresh_delay_seconds=0.25,
-            ),
-            handlers={"runtime.test": fail_not_fresh},
-        )
-
-        result = worker.run_once()
-
-        self.assertEqual(result, RuntimeWorkerResult.DEFERRED)
-        self.assertEqual(queue.failed_events, [])
-        self.assertEqual(queue.deferred_events, [("event-1", "worker-1", "workbench_relation_read_model_not_fresh: status=refreshing", 0.25)])
-        self.assertEqual(queue.enqueued_read_model_refreshes, [])
-        self.assertTrue(any(status == "deferred" for _worker_id, _kind, status, _payload in queue.heartbeats))
-
-    def test_run_once_does_not_enqueue_undeclared_retired_page_dependency(self) -> None:
-        claimed = RuntimeQueueEvent(
-            **{
-                **event("search.read_model.refresh").__dict__,
-                "scope_type": "search",
-                "scope_key": "2026-04",
-            }
-        )
-        queue = FakeQueue(claimed)
-
-        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
-            raise RuntimeError("bank_detail_read_model_not_fresh")
-
-        worker = RuntimeWorker(
-            queue_repository=queue,
-            config=RuntimeWorkerConfig(
-                worker_id="worker-1",
-                event_types=["search.read_model.refresh"],
-                dependency_not_fresh_delay_seconds=4,
-            ),
-            handlers={"search.read_model.refresh": fail_not_fresh},
-        )
-
-        result = worker.run_once()
-
-        self.assertEqual(result, RuntimeWorkerResult.DEFERRED)
-        self.assertEqual(
-            queue.deferred_events,
-            [("event-1", "worker-1", "bank_detail_read_model_not_fresh", 4)],
-        )
-        self.assertEqual(queue.enqueued_read_model_refreshes, [])
-        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
-        self.assertNotIn("dependency_refreshes", deferred_payloads[0])
-
-    def test_run_once_does_not_requeue_dependency_for_retired_event_outside_manifest(self) -> None:
-        claimed = RuntimeQueueEvent(
-            **{
-                **event("retired_projection.refresh").__dict__,
-                "scope_type": "retired_projection",
-                "scope_key": "2026-04",
-            }
-        )
-        queue = FakeQueue(claimed)
-
-        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
-            raise RuntimeError("retired_projection_not_fresh")
-
-        worker = RuntimeWorker(
-            queue_repository=queue,
-            config=RuntimeWorkerConfig(event_types=["retired_projection.refresh"]),
-            handlers={"retired_projection.refresh": fail_not_fresh},
-        )
-
-        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_RETRYABLE)
-        self.assertEqual(queue.enqueued_read_model_refreshes, [])
 
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
         claimed = event()
@@ -461,9 +270,9 @@ class RuntimeWorkerTests(unittest.TestCase):
         worker = RuntimeWorker(
             queue_repository=queue,
             config=RuntimeWorkerConfig(
-                worker_id="host-workbench",
-                worker_kind="workbench-read-model",
-                worker_instance="workbench",
+                worker_id="host-import",
+                worker_kind="import-job",
+                worker_instance="import",
                 event_types=["runtime.test"],
             ),
             handlers={"runtime.test": lambda claimed: {"handled": claimed.event_id}},
@@ -474,7 +283,7 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(result, RuntimeWorkerResult.IDLE)
         self.assertTrue(queue.heartbeats)
         for _worker_id, _kind, _status, payload in queue.heartbeats:
-            self.assertEqual(payload["worker_instance"], "workbench")
+            self.assertEqual(payload["worker_instance"], "import")
 
     def test_fast_empty_polls_throttle_idle_heartbeat_writes(self) -> None:
         queue = FakeQueue(None)
@@ -502,12 +311,12 @@ class RuntimeWorkerTests(unittest.TestCase):
             queue_repository=queue,
             config=RuntimeWorkerConfig(
                 worker_id="worker-1",
-                event_types=["workbench_relation.read_model.refresh"],
+                event_types=["runtime.test"],
                 claim_scope_keys=["all"],
                 exclude_claim_scope_keys=["2026-02"],
             ),
             handlers={
-                "workbench_relation.read_model.refresh": lambda claimed: {
+                "runtime.test": lambda claimed: {
                     "handled": claimed.event_id
                 }
             },

@@ -124,30 +124,8 @@ function domainStatusLabel(status: string) {
   return status || "状态";
 }
 
-function scopeDiagnostics(domain: AppStatusDomain) {
-  if (domain.level === "ok") {
-    return [];
-  }
-  return domain.readModelScopes
-    .filter((scope) => scope.status !== "ready" && scope.status !== "fresh")
-    .slice(0, 3);
-}
-
 function domainDebugTitle(domain: AppStatusDomain) {
   return [domain.label, domain.reason, ...domain.details].filter(Boolean).join(" · ");
-}
-
-function readModelSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
-  if (!summary || summary.total === 0) {
-    return "暂无 read model 事实";
-  }
-  if ((summary.failed ?? 0) > 0 || (summary.unavailable ?? 0) > 0) {
-    return `${summary.failed ?? 0} 失败 / ${summary.unavailable ?? 0} 不可用`;
-  }
-  if ((summary.refreshing ?? 0) > 0 || (summary.stale ?? 0) > 0 || (summary.missing ?? 0) > 0) {
-    return `${summary.refreshing ?? 0} 刷新中 / ${summary.stale ?? 0} 过期 / ${summary.missing ?? 0} 缺失`;
-  }
-  return `全部 fresh ${summary.fresh ?? 0}/${summary.total}`;
 }
 
 function workerSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
@@ -198,9 +176,6 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
   const runtimeSummary = appStatus?.runtimeSummary;
   const busyDomainCount = domains.filter((domain) => domain.level === "busy").length;
   const blockedDomainCount = domains.filter((domain) => domain.level === "blocked").length;
-  const readModelIssues = runtimeSummary
-    ? (runtimeSummary.readModels.issueCount ?? 0) + (runtimeSummary.readModels.scopeIssueCount ?? 0)
-    : 0;
   const workerIssues = runtimeSummary?.workers.issueCount ?? 0;
   const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog : 0;
 
@@ -259,12 +234,6 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 <h3>运行摘要</h3>
                 <div className="app-status-runtime-summary" data-testid="app-status-runtime-summary">
                   <div className="app-status-summary-row">
-                    <span>Read model</span>
-                    <Chip size="sm" color={summaryTone(readModelIssues)} variant="soft">
-                      {readModelSummaryLabel(runtimeSummary?.readModels)}
-                    </Chip>
-                  </div>
-                  <div className="app-status-summary-row">
                     <span>Worker</span>
                     <Chip size="sm" color={summaryTone(workerIssues)} variant="soft">
                       {workerSummaryLabel(runtimeSummary?.workers)}
@@ -292,7 +261,6 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 </div>
                 <div className="app-status-domain-grid">
                   {domains.map((domain) => {
-                    const scopes = scopeDiagnostics(domain);
                     return (
                       <RouterLink
                         key={domain.key}
@@ -307,20 +275,6 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                             {domainStatusLabel(domain.status)}
                           </Chip>
                         </span>
-                          {scopes.length > 0 ? (
-                            <span className="app-status-scope-list">
-                              {scopes.map((scope) => (
-                                <span
-                                  key={`${scope.readModelKey}:${scope.scopeType}:${scope.scopeKey}:${scope.status}`}
-                                  className="app-status-scope-row"
-                                >
-                                  <strong>{scope.scopeKey || scope.scopeType}</strong>
-                                  {" · "}
-                                  <span>{scope.lastError || domainStatusLabel(scope.status)}</span>
-                                </span>
-                              ))}
-                            </span>
-                          ) : null}
                       </RouterLink>
                     );
                   })}

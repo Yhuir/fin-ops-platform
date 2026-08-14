@@ -27,7 +27,7 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit 
 from fin_ops_platform.services.postgres_repositories.etc_import_page_audit import audit_etc_import_page
 from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit import audit_etc_tickets_page
 from fin_ops_platform.services.postgres_repositories.invoice_import_page_audit import audit_invoice_import_page
-from fin_ops_platform.services.postgres_repositories.page_business_audit import audit_page_business_read_model
+from fin_ops_platform.services.postgres_repositories.page_business_audit import audit_page_canonical_data
 from fin_ops_platform.services.postgres_repositories.settings_page_audit import audit_settings_page
 from fin_ops_platform.services.postgres_repositories.tax_offset_page_audit import audit_tax_offset_page
 from fin_ops_platform.services.postgres_repositories.workbench_page_audit import audit_workbench_relation_display
@@ -334,7 +334,7 @@ class PostgresOperationsAuditRepository:
                 audit_snapshot=audit_snapshot,
             )
         elif registration.executor == "page_business":
-            payload = audit_page_business_read_model(
+            payload = audit_page_canonical_data(
                 self._connection,
                 domain_key=str(registration.executor_domain_key),
                 tenant_id=tenant_id,
@@ -410,7 +410,6 @@ class PostgresOperationsAuditRepository:
             {
                 "contract_revision": registration.contract_revision,
                 "proof_availability": registration.availability,
-                "registered_read_model_keys": list(registration.read_model_keys),
                 "relation_proof_required": registration.relation_proof_required,
                 **(
                     {"system_snapshot_identity": system_snapshot_identity}
@@ -496,7 +495,7 @@ def audit_operation_history_page(
                     "app.financial_fact_corrections",
                     "app.workbench_pair_relation_history",
                 ],
-                "read_model_tables": [],
+                "derived_tables": [],
                 "canonical_expected_set": "post-coverage append-only operation and financial correction events",
                 "key_display_fields": [
                     "operator and time",

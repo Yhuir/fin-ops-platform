@@ -63,7 +63,7 @@ def audit_tax_offset_page(
                     "app.tax_certified_import_records",
                     "app.tax_offset_plans",
                 ],
-                "read_model_tables": [],
+                "derived_tables": [],
                 "relation_tables": [],
                 "scope_types": [],
                 "event_types": [],

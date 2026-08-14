@@ -100,7 +100,6 @@ class WorkbenchPendingOaRelationLockPostgresIntegrationTests(unittest.TestCase):
                 pair_relation_service=WorkbenchPairRelationService(),
                 repository=PostgresWorkbenchRelationRepository(transaction),
             ),
-            require_fresh_relations=False,
         )
 
     def _confirm(self, *, case_id: str, oa_row_id: str, bank_row_id: str, tenant_id: str) -> dict[str, Any]:

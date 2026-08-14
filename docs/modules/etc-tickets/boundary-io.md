@@ -22,7 +22,7 @@
 
 - ETC 票据管理页面、ETC 发票/批次、识别、对账、OA 草稿后批次发票 PDF 合并下载、历史批次修复。
 - ETC 与发票附件、关联台候选之间的业务转换。
-- 返回精确 affected scopes；保留的 workbench/relation read model 在 route 进入/重进、查询变化、浏览器手动刷新或明确重试时通过各自 owner 刷新，direct-canonical 页面直接读取已提交 facts。
+- 返回精确 affected scopes；所有受影响页面在 route 进入/重进、查询变化或用户手动刷新时，通过各自 canonical query API 直接读取已提交 facts。
 
 ### 不负责
 
@@ -70,7 +70,7 @@
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整、pending draft/submission 完整、submitted/not-submitted 占用闭合；creating 的停留时长不参与判定。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
+- 页面 Audit：`etc-tickets` 是直接 canonical 页面；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整、pending draft/submission 完整、submitted/not-submitted 占用闭合；creating 的停留时长不参与判定。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。
 - 影响消费者：关联台 direct canonical API、`workbench_relation` 以及 invoice lifecycle、税金、成本等 direct-canonical 页面；关联台页面自身没有 refresh consumer。
 - ETC 导入逻辑上影响 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等页面，但普通完成结果不携带这些 barrier targets；页面访问时自行收敛。
 - Worker：import/runtime handler 只负责 durable 领域任务；ETC 页面没有 read model

@@ -191,7 +191,7 @@ def _etc_tickets_audit_contract(*, snapshot_consistency: str, database_snapshot:
                 "app.invoices",
                 "job.import_jobs",
             ],
-            "read_model_tables": [],
+            "derived_tables": [],
             "canonical_expected_set": (
                 "all non-deleted business batches, reconciliation tasks/files, ETC invoice metadata, import and "
                 "submission batches reconstructed from normalized columns and registered payload members"

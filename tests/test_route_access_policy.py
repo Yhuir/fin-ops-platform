@@ -13,7 +13,6 @@ class RouteAccessPolicyTests(unittest.TestCase):
             ("GET", "/api/workbench/settings/data-reset/jobs/active"),
             ("HEAD", "/api/workbench"),
             ("OPTIONS", "/api/workbench/actions/ignore-row"),
-            ("POST", "/api/operation-barrier/status"),
             ("POST", "/api/workbench/exception/preview"),
             ("POST", "/api/workbench/actions/confirm-link/preview"),
             ("POST", "/api/workbench/actions/withdraw-link/preview"),

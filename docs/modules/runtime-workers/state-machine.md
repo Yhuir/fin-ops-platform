@@ -1,24 +1,18 @@
 # Runtime Worker 状态机
 
-> 本文件描述当前 worker runtime。已退役页面 projector/refresh worker 不属于当前状态机。
-
-## Worker Instance 状态
+## Worker Instance
 
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
-| `starting` | registration/env 已校验，尚未开始 claim | `idle` / `failed` |
-| `idle` | 正常轮询，没有可 claim work | `processing` / `stopping` |
-| `processing` | 已从 PostgreSQL durable queue claim event/job | `idle` / `deferred` / `failed` |
-| `deferred` | 已知依赖或重试条件暂未满足，重新设置 available time | `idle` |
-| `failed` | 当前 item 已记录错误/retry/dead-letter | worker 继续处理其它 item；instance fatal 才退出 |
-| `stopping` | 收到 stop，停止 claim 新 work | `stopped` |
+| `starting` | registration/env 已校验 | `idle` / `failed` |
+| `idle` | 正常轮询，无可 claim work | `processing` / `stopping` |
+| `processing` | 处理已 claim 的领域/integration item | `idle` / `deferred` / `failed` |
+| `deferred` | 有界退避后重试 | `idle` |
+| `failed` | item 已记录 retry/dead-letter | instance 可继续处理其它 item |
+| `stopping` | 停止 claim 并释放当前 item | `stopped` |
 | `stopped` | 已释放资源并写 heartbeat | 无 |
 
-Worker 不依赖 `Application`、Flask/session/header 或 HTTP response。每个 registration 的
-event types、claim scope filter、handler flags 和 statement timeout 都由
-`RUNTIME_WORKER_REGISTRY` 派生。
-
-## Durable Queue Item 状态
+## Durable Item
 
 ```text
 pending -> processing -> done
@@ -26,63 +20,19 @@ pending -> processing -> done
                     \-> failed/dead-lettered
 ```
 
-- `job.outbox_events` 与 `job.read_model_dirty_scopes` 是 `workbench` 和 `workbench_relation` refresh 的
-  唯一状态事实源。
-- RabbitMQ 只发送 wakeup/envelope；consumer 必须回 PostgreSQL claim、ack 和记录失败。
-- stale/superseded processing 只能通过受控 queue ops 恢复，不能伪造 done/readiness。
-- current-effective pending/processing 覆盖同 scope 历史 failure；未覆盖 failure 保持 blocker。
-
-## 当前 Read Model Worker 集合
-
-带 `read_model_key` 的 registration 必须精确覆盖：
-
-- `workbench`
-- `workbench_relation`
-
-二者只接受 `YYYY-MM` 或 `all` scope；`all` 是 fan-out command，不发布可查询 parent
-projection。query miss/stale 必须经 `ReadModelRefreshGateway` normalize、validate、
-dedupe 后入队。
-
-已退役页面 event/scope/handler/env 不得重新登记。历史 outbox、dirty scope、readiness
-和表只作上一版本回滚证据，当前 worker 不 claim。
-
-## 非 Read-Model Worker
-
-- import processing：读取 durable import session/file facts，只写本次 canonical delta。
-- OA sync：原子提交 completed/admission/payment-status/watermark canonical snapshot，不
-  fan-out 已退役页面 refresh。
-- Workbench matching：产生 canonical formal relation plan/facts，不发布页面 projection。
-- BankFlow 未提交候选没有 runtime worker；请求内 live derive 直接读取 canonical facts，
-  正式 batch/event 只由业务 command 写入。
-
-这些 worker 可被 App Status 观测，但不能出现在 read-model manifest/scope policy 中。
+- 通用 runtime event 以 `job.outbox_events` 为事实源；import 与 matching 使用各自 PostgreSQL durable queue/table。
+- RabbitMQ publish success 不等于 job done；consumer 必须回 PostgreSQL claim/complete。
+- stale processing 只能通过受控 queue ops 释放；不能伪造 done。
+- App 页面 GET 不 enqueue、不等待这些状态，也不从它们推导财务 payload。
 
 ## 非法状态
 
-- registration claim 未登记 event type，或不同 registry 手工复制第二份 event matrix。
-- retired page worker/env/systemd instance 仍 enabled/running/failed crash-loop。
-- worker 直接 import `Application`/`app.server`/`app.auth`。
-- handler 写不属于自身 owner 的 projection、canonical table 或 readiness。
-- RabbitMQ publish success 被解释为 job/read-model done。
-- import worker 回写全量 state snapshot，或 OA sync 半提交后标记 succeeded。
-- `all` fan-out command 被写成 fresh parent readiness。
+- required instance 集合不是精确 4 个，或未知旧 worker/env/timer 仍 enabled/running。
+- registration/handler claim 未登记 event type，或不同 registry 维护第二份 event matrix。
+- worker import HTTP/Application 层，或跨 owner 写 canonical facts。
+- 新 `%.read_model.refresh` event、`read_model_key` registration、projection/readiness/dirty-scope runtime 出现。
+- import/OA worker 回写全量旧 snapshot，或半提交后标记 succeeded。
 
 ## 发布与恢复
 
-- deploy preflight 先 stop/disable 当前 registry 未登记的旧 worker instance，再确认 retired
-  event/dirty scope 没有 `processing`。
-- 门禁失败时保留 import、matching、OA、settings maintenance 和两个保留 read-model worker 运行，
-  不进入“全部 worker 已停”的半发布状态。
-- queue retry、dead-letter repair、history prune 和 worker instance convergence 只通过
-  `finops-deploy-control`/登记运维工具执行；prune 只删除 `done` 历史。
-- migration `0127_direct_canonical_page_runtime_retirement.sql` 不删除 runtime 状态或历史表。
-
-## 验证入口
-
-- `tests/test_runtime_worker_registry.py`
-- `tests/test_runtime_worker.py`
-- `tests/test_runtime_queue.py`
-- `tests/test_runtime_worker_read_model_refresh_scopes.py`
-- `tests/test_rabbitmq_runtime.py`
-- `tests/test_deploy_runtime_examples.py`
-- `tests/test_platform_runtime_boundary_guards.py`
+Deploy 先停止/禁用 registry 外实例，再确认 4 个 required workers heartbeat、通用 outbox/领域队列、RabbitMQ/DLQ 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope；生效后不回滚到依赖旧 schema 的 release，只能向前修复。

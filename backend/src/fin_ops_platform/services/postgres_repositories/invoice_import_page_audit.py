@@ -169,7 +169,7 @@ def _audit_snapshot(
                 "job.import_jobs",
                 "job.outbox_events",
             ],
-            "read_model_tables": [],
+            "derived_tables": [],
             "canonical_expected_set": (
                 "all version-registered input/output invoice file sessions, their preview/confirmed batches and rows, "
                 "and the exact canonical invoice/manual_invoice_import source-link closure of terminal row decisions"

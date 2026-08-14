@@ -137,20 +137,14 @@ describe("AppHealthOperationsPage", () => {
     expectProjectSection(runtime);
     expect(runtime).toHaveTextContent("后台");
     const runtimeOverview = within(runtime).getByTestId("app-health-runtime-overview");
-    expect(runtimeOverview).toHaveTextContent("Read model");
-    expect(runtimeOverview).toHaveTextContent("1 refreshing");
     expect(runtimeOverview).toHaveTextContent("Worker");
     expect(runtimeOverview).toHaveTextContent("active 1");
     expect(runtimeOverview).toHaveTextContent("Queue");
     expect(runtimeOverview).toHaveTextContent("4 backlog");
     expect(within(runtime).getByRole("grid", { name: "Outbox 状态" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "RabbitMQ 队列" })).toBeInTheDocument();
-    expect(within(runtime).getByRole("grid", { name: "Read Model 状态" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "Worker 状态" })).toBeInTheDocument();
     expect(runtime).toHaveTextContent("pending");
-    expect(runtime).toHaveTextContent("finops.workbench_relation.read_model.refresh");
-    expect(runtime).toHaveTextContent("workbench_relation");
-    expect(runtime).toHaveTextContent("refreshing");
     expect(runtime).toHaveTextContent("runtime-worker");
     expect(runtime).toHaveTextContent("active");
     expect(runtime).toHaveTextContent("required");
@@ -337,23 +331,14 @@ describe("AppHealthOperationsPage", () => {
           },
           queues: [
             {
-              event_type: "workbench_relation.read_model.refresh",
-              queue: "finops.workbench_relation.read_model.refresh",
+              event_type: "oa.sync",
+              queue: "finops.oa.sync",
               messages: null,
               unacked: null,
               consumers: null,
               dlq_messages: null,
               status: "unknown",
               warning_code: "rabbitmq_metrics_unavailable",
-            },
-          ],
-          read_models: [
-            {
-              key: "workbench_relation",
-              refresh_duration_ms: { p50: null, p95: null, p99: null },
-              stale_count: null,
-              unavailable_count: null,
-              status: "unknown",
             },
           ],
           workers: [{ worker_kind: "runtime-worker", heartbeat_lag_seconds: null, status: "unknown" }],
@@ -415,7 +400,6 @@ describe("AppHealthOperationsPage", () => {
             runtime_performance: {
               outbox: { pending_count: 3, publishing_count: 0, failed_count: 0, publish_failed_count: 0, oldest_pending_age_seconds: 42, status: "available" },
               queues: [],
-              read_models: [],
               workers: [],
             },
             freshness: { warnings: [] },

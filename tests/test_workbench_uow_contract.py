@@ -469,61 +469,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         except TypeError as exc:
             self.fail(f"WorkbenchWriteUnitOfWork.run must accept command and handler. Got: {exc}")
 
-    def test_read_model_refresh_writer_uses_supplied_transaction_without_opening_nested_transaction(self) -> None:
-        enqueue = self._transaction_bound_writer()
-        transaction = _RecordingTransaction()
-
-        event = enqueue(
-            transaction=transaction,
-            scope_type="workbench",
-            scope_key="2026-05",
-            reason="confirm_link",
-            tenant_id="default",
-            trace_id="trace-1",
-        )
-
-        self.assertEqual(getattr(event, "source_version", None) or event["source_version"], 7)
-
-    def test_read_model_refresh_writer_bumps_source_version_and_writes_matching_outbox_payload(self) -> None:
-        enqueue = self._transaction_bound_writer()
-        transaction = _RecordingTransaction(dirty_source_version=8)
-
-        event = enqueue(
-            transaction=transaction,
-            scope_type="workbench",
-            scope_key="2026-05",
-            reason="exception_apply",
-            tenant_id="default",
-            trace_id="trace-1",
-        )
-
-        event_payload = getattr(event, "payload", None) or event["payload"]
-        self.assertEqual(event_payload["source_version"], 8)
-        self.assertEqual(getattr(event, "source_version", None) or event["source_version"], 8)
-        self.assertEqual(event_payload["scope_type"], "workbench")
-        self.assertEqual(event_payload["scope_key"], "2026-05")
-
     def test_workbench_uow_no_longer_owns_runtime_queue_refresh_writer(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
         self.assertFalse(hasattr(module, "RuntimeQueueReadModelRefreshWriter"))
-
-    def test_read_model_refresh_writer_failure_rolls_back_transaction(self) -> None:
-        connection = _RecordingConnection(_RecordingTransaction(fail_on_outbox=True))
-        enqueue = self._transaction_bound_writer()
-
-        with self.assertRaises(RuntimeError):
-            with connection.transaction() as transaction:
-                enqueue(
-                    transaction=transaction,
-                    scope_type="workbench",
-                    scope_key="2026-05",
-                    reason="confirm_link",
-                    tenant_id="default",
-                    trace_id="trace-1",
-                )
-
-        self.assertEqual(connection.commits, 0)
-        self.assertEqual(connection.rollbacks, 1)
 
     def test_confirm_link_commits_pair_relation_history_without_downstream_jobs(self) -> None:
         connection = _RecordingConnection()
@@ -1096,39 +1044,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(idempotency.bound_transactions, [])
         self.assertEqual(writer.calls, [])
         self.assertEqual(connection.opened, 0)
-
-    def test_outbox_payload_contains_source_version_for_each_dirty_scope(self) -> None:
-        connection = _RecordingConnection(_RecordingTransaction(dirty_source_version=9))
-        repository = RuntimeQueueRepository(connection)  # type: ignore[arg-type]
-
-        event = repository.enqueue_read_model_refresh(
-            scope_type="workbench",
-            scope_key="2026-05",
-            reason="confirm_link",
-            tenant_id="default",
-            trace_id="trace-1",
-        )
-
-        self.assertEqual(event.source_version, 9)
-        self.assertEqual(event.payload["source_version"], 9)
-        self.assertEqual(event.payload["scope_type"], "workbench")
-        self.assertEqual(event.payload["scope_key"], "2026-05")
-
-    def test_worker_completion_cannot_mark_newer_dirty_scope_done_from_older_event(self) -> None:
-        transaction = _RecordingTransaction()
-        connection = _RecordingConnection(transaction)
-        repository = RuntimeQueueRepository(connection)  # type: ignore[arg-type]
-
-        result = repository.complete_read_model_refresh(
-            tenant_id="default",
-            scope_type="workbench",
-            scope_key="2026-05",
-            source_version=2,
-        )
-
-        self.assertFalse(result)
-        self.assertEqual(connection.commits, 1)
-        self.assertTrue(any("source_version <= %s" in sql for _, sql, _ in transaction.calls))
 
 
 if __name__ == "__main__":

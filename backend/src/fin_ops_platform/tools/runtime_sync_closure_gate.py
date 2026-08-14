@@ -22,7 +22,6 @@ from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
     write_operation_e2e_smoke,
-    write_operation_slo_audit,
 )
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
@@ -34,12 +33,10 @@ GATE_PROFILES = ("preflight", "full", "stability")
 STANDALONE_WRITE_E2E_REQUIRED_ARGS = ("--scenario", "--apply", "--approval-ticket")
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
-    "dirty_scopes",
     "failed_jobs",
     "rabbitmq_unpublished_backlog",
     "rabbitmq_publishing_backlog",
     "rabbitmq_publish_failed_backlog",
-    "stale_dirty_scope_count",
     "missing_required_worker_count",
     "stale_required_worker_count",
     "mismatched_required_worker_count",
@@ -74,7 +71,7 @@ class ClosureCheck:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the production runtime sync closure gate for all-page true freshness SLO.",
+        description="Run the production runtime closure gate for canonical page API SLO and worker health.",
     )
     parser.add_argument("--base-url", default=os.getenv("FIN_OPS_HTTP_SLO_BASE_URL", "http://127.0.0.1:18001"))
     parser.add_argument(
@@ -89,18 +86,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cookie", default=os.getenv("FIN_OPS_HTTP_SLO_COOKIE", ""))
     parser.add_argument("--allow-unauthenticated-http", action="store_true")
     parser.add_argument("--profile", choices=GATE_PROFILES, default="full")
-    # ponytail: accept the retired flag until the pinned production helper is replaced.
-    parser.add_argument("--apply-read-model-smoke", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--read-model-target-ms", type=float, default=1_000.0)
     parser.add_argument("--write-target-ms", type=float, default=1_000.0)
     parser.add_argument("--http-target-ms", type=float, default=1_000.0)
     parser.add_argument("--health-ready-target-ms", type=float, default=health_ready_payload_probe.DEFAULT_TARGET_MS)
     parser.add_argument("--health-ready-max-response-bytes", type=int, default=health_ready_payload_probe.DEFAULT_MAX_RESPONSE_BYTES)
     parser.add_argument("--health-ready-max-api-performance-endpoints", type=int, default=health_ready_payload_probe.DEFAULT_MAX_API_PERFORMANCE_ENDPOINTS)
-    parser.add_argument("--write-audit-lookback-hours", type=float, default=24.0)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=0.5)
-    parser.add_argument("--limit", type=int, default=2_000)
     parser.add_argument(
         "--required-worker-instance",
         action="append",
@@ -141,16 +133,13 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         admin_headers=admin_headers,
         allow_unauthenticated_http=bool(args.allow_unauthenticated_http),
         profile=str(args.profile),
-        read_model_target_ms=max(1.0, float(args.read_model_target_ms)),
         write_target_ms=max(1.0, float(args.write_target_ms)),
         http_target_ms=max(1.0, float(args.http_target_ms)),
         health_ready_target_ms=max(1.0, float(args.health_ready_target_ms)),
         health_ready_max_response_bytes=max(1, int(args.health_ready_max_response_bytes)),
         health_ready_max_api_performance_endpoints=max(0, int(args.health_ready_max_api_performance_endpoints)),
-        write_audit_lookback_hours=max(0.1, float(args.write_audit_lookback_hours)),
         timeout_seconds=max(1.0, float(args.timeout_seconds)),
         poll_interval_seconds=max(0.05, float(args.poll_interval_seconds)),
-        limit=max(1, int(args.limit)),
         required_worker_instances={
             str(instance).strip()
             for instance in args.required_worker_instance
@@ -176,16 +165,13 @@ def run_closure_gate(
     admin_headers: Mapping[str, str] | None = None,
     allow_unauthenticated_http: bool = False,
     profile: str = "full",
-    read_model_target_ms: float = 1_000.0,
     write_target_ms: float = 1_000.0,
     http_target_ms: float = 1_000.0,
     health_ready_target_ms: float = health_ready_payload_probe.DEFAULT_TARGET_MS,
     health_ready_max_response_bytes: int = health_ready_payload_probe.DEFAULT_MAX_RESPONSE_BYTES,
     health_ready_max_api_performance_endpoints: int = health_ready_payload_probe.DEFAULT_MAX_API_PERFORMANCE_ENDPOINTS,
-    write_audit_lookback_hours: float = 24.0,
     timeout_seconds: float = 90.0,
     poll_interval_seconds: float = 0.5,
-    limit: int = 2_000,
     required_worker_instances: set[str] | None = None,
 ) -> dict[str, Any]:
     if profile not in GATE_PROFILES:
@@ -244,14 +230,6 @@ def run_closure_gate(
                     max_response_bytes=health_ready_max_response_bytes,
                     max_api_performance_endpoints=health_ready_max_api_performance_endpoints,
                 ),
-                _write_operation_audit_check(
-                    connection,
-                    tenant_id=tenant_id,
-                    target_ms=write_target_ms,
-                    lookback_hours=write_audit_lookback_hours,
-                    limit=limit,
-                    require_samples=profile == "full",
-                ),
             ]
         )
         if profile == "full":
@@ -298,12 +276,7 @@ def run_closure_gate(
             "health_ready_payload_ms": health_ready_target_ms,
             "health_ready_max_response_bytes": health_ready_max_response_bytes,
             "health_ready_max_api_performance_endpoints": health_ready_max_api_performance_endpoints,
-            "read_model_enqueue_to_fresh_ms": read_model_target_ms,
-            "write_operation_enqueue_to_done_ms": write_target_ms,
-            "write_operation_enqueue_to_done_p99_ms": write_operation_slo_audit.effective_p99_target_ms_for(
-                write_target_ms,
-                None,
-            ),
+            "database_reversible_write_ms": min(write_target_ms, 1_000.0),
         },
         "auth_configured": _auth_configured(normalized_headers) or _auth_configured(normalized_admin_headers),
         "checks": [check.to_payload() for check in checks],
@@ -389,7 +362,7 @@ def _runtime_health_check(
             return ClosureCheck(
                 name,
                 PASS if not blockers else FAIL,
-                "Runtime queue, worker, RabbitMQ and dirty-scope blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
+                "Runtime queue, worker and RabbitMQ blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
                 {
                     "blockers": blockers,
                     "reconciled_completed_publish_states": reconciled_completed_publish_states,
@@ -404,13 +377,11 @@ def _runtime_health_check(
                         key: summary.get(key)
                         for key in (
                             "queue_backlog",
-                            "dirty_scopes",
                             "failed_jobs",
                             "rabbitmq_unpublished_backlog",
                             "rabbitmq_publishing_backlog",
                             "rabbitmq_publish_failed_backlog",
                             "max_pending_age_seconds",
-                            "stale_dirty_scope_count",
                             "missing_required_worker_count",
                             "stale_required_worker_count",
                             "mismatched_required_worker_count",
@@ -471,9 +442,8 @@ def _http_slo_check(
             require_auth=require_auth,
             probes=probes,
         )
-        retryable_freshness = _http_slo_has_only_transient_freshness_failures(report)
         retryable_latency = attempts == 1 and _http_slo_has_only_single_window_latency_miss(report)
-        if report.get("status") == PASS or not (retryable_freshness or retryable_latency):
+        if report.get("status") == PASS or not retryable_latency:
             break
         remaining = deadline - monotonic()
         if remaining <= 0:
@@ -512,28 +482,6 @@ def _http_slo_check(
     )
 
 
-def _http_slo_has_only_transient_freshness_failures(report: Mapping[str, Any]) -> bool:
-    probes = report.get("probes")
-    if report.get("status") != FAIL or not isinstance(probes, list):
-        return False
-    failed_probes = [
-        probe
-        for probe in probes
-        if isinstance(probe, Mapping) and probe.get("status") != PASS
-    ]
-    return bool(failed_probes) and all(
-        _safe_int(probe.get("failure_count")) == 0
-        and not probe.get("errors")
-        and probe.get("slo_pass") is True
-        and probe.get("freshness_pass") is False
-        and (
-            bool(probe.get("non_fresh_read_model_statuses"))
-            or _safe_int(probe.get("refresh_enqueued_count")) > 0
-        )
-        for probe in failed_probes
-    )
-
-
 def _http_slo_has_only_single_window_latency_miss(report: Mapping[str, Any]) -> bool:
     probes = report.get("probes")
     if report.get("status") != FAIL or not isinstance(probes, list):
@@ -546,7 +494,6 @@ def _http_slo_has_only_single_window_latency_miss(report: Mapping[str, Any]) -> 
     return bool(failed_probes) and all(
         _safe_int(probe.get("failure_count")) == 0
         and not probe.get("errors")
-        and probe.get("freshness_pass") is True
         and probe.get("p95_pass") is False
         and probe.get("p99_pass") is True
         for probe in failed_probes
@@ -800,59 +747,6 @@ def _candidate_system_audit(
     return candidate_audit
 
 
-def _write_operation_audit_check(
-    connection: Any,
-    *,
-    tenant_id: str,
-    target_ms: float,
-    lookback_hours: float,
-    limit: int,
-    operations: Sequence[str] | None = None,
-    require_samples: bool = True,
-) -> ClosureCheck:
-    report = write_operation_slo_audit.audit_write_operation_slo(
-        connection,
-        tenant_id=tenant_id,
-        lookback_hours=lookback_hours,
-        target_ms=target_ms,
-        limit=limit,
-        operations=operations,
-    )
-    event_sample_count = _safe_int(report.get("event_sample_count"))
-    expectation_count = _safe_int(report.get("expectation_count"))
-    if report.get("status") == PASS and (event_sample_count <= 0 or expectation_count <= 0):
-        if not require_samples:
-            return ClosureCheck(
-                "write_operation_audit",
-                PASS,
-                "No recent write-operation samples were present in this idle stability window.",
-                {
-                    **_compact_report(report),
-                    "empty_sample_window": True,
-                    "sample_requirement": "not_required_for_stability",
-                },
-            )
-        return ClosureCheck(
-            "write_operation_audit",
-            FAIL,
-            "Write-operation audit produced no event or expectation samples; final closure requires non-empty durable write evidence.",
-            {
-                **_compact_report(report),
-                "error": "write_operation_audit_empty_samples",
-            },
-        )
-    return ClosureCheck(
-        "write_operation_audit",
-        PASS if report.get("status") == PASS else FAIL,
-        (
-            "Recent real write-operation outbox samples satisfy the SLO."
-            if report.get("status") == PASS
-            else "Recent real write-operation outbox samples are missing or outside SLO."
-        ),
-        _compact_report(report),
-    )
-
-
 def _runtime_blockers(
     summary: Mapping[str, Any],
     *,
@@ -880,7 +774,6 @@ def _runtime_blockers(
         "rabbitmq_unpublished_backlog",
         "rabbitmq_publishing_backlog",
         "rabbitmq_publish_failed_backlog",
-        "stale_dirty_scope_count",
         "failed_jobs",
     ):
         if int(summary.get(key) or 0) > 0:
@@ -888,9 +781,6 @@ def _runtime_blockers(
     queue_backlog = summary.get("queue_backlog")
     if isinstance(queue_backlog, dict) and any(int(value or 0) > 0 for value in queue_backlog.values()):
         blockers["queue_backlog"] = queue_backlog
-    dirty_scopes = summary.get("dirty_scopes")
-    if isinstance(dirty_scopes, dict) and any(int(value or 0) > 0 for value in dirty_scopes.values()):
-        blockers["dirty_scopes"] = dirty_scopes
     rabbitmq_queues = summary.get("rabbitmq_queues")
     if isinstance(rabbitmq_queues, Mapping):
         expected_event_types = rabbitmq_dispatch_event_types()
@@ -1036,8 +926,7 @@ def _slowest_results(results: Sequence[Any]) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         value = (
-            item.get("enqueue_to_fresh_ms")
-            or item.get("p99_enqueue_to_done_ms")
+            item.get("p99_enqueue_to_done_ms")
             or item.get("p95_enqueue_to_done_ms")
             or item.get("max_enqueue_to_done_ms")
         )
@@ -1049,7 +938,6 @@ def _slowest_results(results: Sequence[Any]) -> list[dict[str, Any]]:
         sortable.append(
             {
                 "operation": item.get("operation"),
-                "read_model_key": item.get("read_model_key"),
                 "scope_type": item.get("scope_type"),
                 "scope_key": item.get("scope_key") or item.get("latest_scope_key"),
                 "status": item.get("status"),

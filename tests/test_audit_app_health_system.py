@@ -11,7 +11,6 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
-from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.app_health_system_audit import (
     _expected_inventory,
@@ -25,7 +24,6 @@ from fin_ops_platform.services.postgres_repositories.operations_audit import Pos
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
@@ -120,15 +118,6 @@ def _dashboard_payload() -> dict[str, object]:
                 "publish_failed_count": 0,
             },
             "queues": [{"status": "unknown", "warning_code": "rabbitmq_metrics_unavailable"}],
-            "read_models": [
-                {
-                    "key": key,
-                    "stale_count": 0,
-                    "unavailable_count": 0,
-                    "status": "available",
-                }
-                for key in APP_STATUS_READ_MODEL_REGISTRY
-            ],
             "workers": [
                 {
                     "worker_instance": registration.instance_name,
@@ -427,22 +416,10 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
                     json.dumps({"normalized_payload": payload}),
                 ),
             )
-        read_models = PostgresReadModelRepository(self.connection)
-
-        for relation_scope in ("all", "2026-01"):
-            read_models.mark_workbench_relation_scope_empty(
-                scope_key=relation_scope,
-                tenant_id="default",
-                source_versions=read_models.workbench_relation_source_summary_from_source(
-                    scope_key=relation_scope,
-                ),
-            )
-
         PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
             relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                require_fresh_relations=False,
             ),
         ).commit_authoritative_snapshot(
             scope_key="2026-01",

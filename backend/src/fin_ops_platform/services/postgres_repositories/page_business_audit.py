@@ -204,7 +204,7 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
 }
 
 
-def audit_page_business_read_model(
+def audit_page_canonical_data(
     connection: Any,
     *,
     domain_key: str,
@@ -219,7 +219,7 @@ def audit_page_business_read_model(
     normalized_tenant_id = str(tenant_id or "default").strip() or "default"
     limit = max(int(example_limit or 50), 1)
     with use_audit_snapshot(connection, audit_snapshot) as snapshot:
-        return _audit_page_business_read_model_snapshot(
+        return _audit_page_canonical_data_snapshot(
             snapshot.connection,
             contract=contract,
             tenant_id=normalized_tenant_id,
@@ -229,7 +229,7 @@ def audit_page_business_read_model(
         )
 
 
-def _audit_page_business_read_model_snapshot(
+def _audit_page_canonical_data_snapshot(
     connection: Any,
     *,
     contract: PageAuditContract,
@@ -274,7 +274,7 @@ def _audit_page_business_read_model_snapshot(
         "issues": evaluation.issue_samples,
         "audit_contract": {
             "source_tables": list(contract.source_tables),
-            "read_model_tables": [],
+            "derived_tables": [],
             "relation_tables": list(contract.relation_tables),
             "scope_types": list(contract.scope_types),
             "event_types": list(contract.event_types),

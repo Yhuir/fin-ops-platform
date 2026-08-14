@@ -24,7 +24,6 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -111,7 +110,6 @@ class NoOaBankBatchApplicationService:
         tag_selection_service: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
-        relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._import_service = import_service
@@ -126,7 +124,6 @@ class NoOaBankBatchApplicationService:
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
         )
-        self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
 
     def list_batches_payload(
@@ -203,7 +200,7 @@ class NoOaBankBatchApplicationService:
                 categories_by_transaction_id,
                 public_batch,
             ),
-            "workbench_relation_source_versions": self._workbench_relation_source_versions(),
+            "canonical_relation_snapshot_version": self._pair_relation_snapshot_port.snapshot_version(),
         }
 
     def submit_batch(
@@ -430,12 +427,6 @@ class NoOaBankBatchApplicationService:
 
     @staticmethod
     def _relation_command_error(exc: WorkbenchRelationCommandError) -> NoOaBankBatchRelationMutationError:
-        if exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
-            return NoOaBankBatchRelationMutationError(
-                "no_oa_bank_batch_relation_read_model_not_fresh",
-                "no_oa_bank_batch_relation_read_model_not_fresh",
-                payload=exc.payload,
-            )
         if exc.error_code == "workbench_relation_active_row_conflict":
             return NoOaBankBatchRelationMutationError(
                 "no_oa_bank_batch_relation_active_row_conflict",
@@ -851,9 +842,7 @@ class NoOaBankBatchApplicationService:
                 else self._import_service.list_transactions(month="all")
             )
         )
-        workbench_relation_source_versions = self._workbench_relation_source_versions()
-        if workbench_relation_source_versions:
-            source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
+        source_versions["canonical_relation_snapshot_version"] = self._pair_relation_snapshot_port.snapshot_version()
         return source_versions
 
     def _no_oa_bank_batch_base_source_versions(self) -> dict[str, object]:
@@ -868,10 +857,6 @@ class NoOaBankBatchApplicationService:
             ),
         }
 
-    def _workbench_relation_source_versions(self) -> dict[str, object]:
-        source_versions = getattr(self._relation_facade, "last_source_versions", None)
-        return dict(source_versions) if isinstance(source_versions, dict) else {}
-
     def _workbench_relation_rows_by_id(self, row_ids: list[str]) -> dict[str, dict[str, object]]:
         normalized_ids: list[str] = []
         seen: set[str] = set()
@@ -880,49 +865,56 @@ class NoOaBankBatchApplicationService:
             if text and text not in seen:
                 seen.add(text)
                 normalized_ids.append(text)
-        if not normalized_ids or self._relation_facade is None:
+        if not normalized_ids or self._relation_command_service is None:
             return {}
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
         if not callable(reader):
             return {}
-        try:
-            payload = reader(normalized_ids, require_fresh=False, reason="no_oa_bank_batch_detail_relations")
-        except TypeError:
-            payload = reader(normalized_ids)
-        if not isinstance(payload, dict):
-            return {}
-        rows_by_id: dict[str, dict[str, object]] = {}
-        for row in list(payload.get("rows") or []):
-            if not isinstance(row, dict):
+        normalized_id_set = set(normalized_ids)
+        rows_by_id: dict[str, dict[str, object]] = {
+            row_id: {
+                "row_id": row_id,
+                "relation_status": "unlinked",
+                "group_ids": [],
+                "linked_oa": [],
+                "linked_input_invoices": [],
+                "linked_output_invoices": [],
+            }
+            for row_id in normalized_ids
+        }
+        for relation in list(reader(normalized_ids) or []):
+            if not isinstance(relation, dict) or str(relation.get("status") or "active") != "active":
                 continue
-            row_id = str(row.get("row_id") or "").strip()
-            if row_id:
-                rows_by_id[row_id] = row
+            case_id = str(relation.get("case_id") or "").strip()
+            member_ids = [str(value or "").strip() for value in list(relation.get("row_ids") or [])]
+            member_types = [str(value or "").strip() for value in list(relation.get("row_types") or [])]
+            selected_bank_ids = normalized_id_set.intersection(member_ids)
+            for bank_id in selected_bank_ids:
+                row = rows_by_id[bank_id]
+                row["relation_status"] = "linked"
+                group_ids = row["group_ids"]
+                if case_id and isinstance(group_ids, list) and case_id not in group_ids:
+                    group_ids.append(case_id)
+                for index, member_id in enumerate(member_ids):
+                    member_type = member_types[index] if index < len(member_types) else ""
+                    if member_type == "oa":
+                        row["linked_oa"].append({"id": member_id, "relation_case_id": case_id})
+                    elif member_type == "invoice":
+                        row["linked_input_invoices"].append({"id": member_id, "relation_case_id": case_id})
         return rows_by_id
 
     def _workbench_relation_active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        if self._relation_facade is None:
+        if self._relation_command_service is None:
             return []
-        list_by_month = getattr(self._relation_facade, "list_by_month", None)
-        if not callable(list_by_month):
+        reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
+        if not callable(reader):
             return []
-        months = self._months_for_bank_rows(bank_rows)
-        relations_by_case_id: dict[str, dict[str, object]] = {}
-        for month in months:
-            try:
-                payload = list_by_month(
-                    month,
-                    row_types=["bank_transaction"],
-                    require_fresh=False,
-                    reason="no_oa_bank_batch_build_relations",
-                )
-            except TypeError:
-                payload = list_by_month(month)
-            for relation in relation_dicts_from_distribution_payload(payload if isinstance(payload, dict) else {}):
-                case_id = str(relation.get("case_id") or "").strip()
-                if case_id:
-                    relations_by_case_id[case_id] = relation
-        return list(relations_by_case_id.values())
+        row_ids = [str(row.get("id") or "").strip() for row in bank_rows if str(row.get("id") or "").strip()]
+        return [
+            dict(relation)
+            for relation in list(reader(row_ids) or [])
+            if isinstance(relation, dict) and str(relation.get("status") or "active") == "active"
+        ]
 
     @classmethod
     def _months_for_bank_rows(cls, bank_rows: list[dict[str, object]]) -> list[str]:

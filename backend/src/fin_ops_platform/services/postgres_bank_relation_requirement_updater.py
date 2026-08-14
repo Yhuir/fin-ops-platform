@@ -31,5 +31,4 @@ class PostgresBankRelationRequirementUpdater:
             )
             return WorkbenchRelationCommandService(
                 relation_repository=repository,
-                require_fresh_relations=False,
             ).update_relation_metadata_for_case_id(**kwargs)

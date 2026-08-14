@@ -31,7 +31,6 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     pending_invoice_relation_identity,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -170,7 +169,7 @@ class PendingInvoiceQueryService:
         effective_category_provider: Any | None = None,
         oa_projection: Any | None = None,
         income_status_override_provider: Callable[[str], dict[str, Any] | None] | None = None,
-        relation_facade: Any | None = None,
+        relation_reader: Any | None = None,
         lifecycle_policy: Any | None = None,
     ) -> None:
         self._import_service = import_service
@@ -179,7 +178,7 @@ class PendingInvoiceQueryService:
         self._effective_category_provider = effective_category_provider
         self._oa_projection = oa_projection
         self._income_status_override_provider = income_status_override_provider
-        self._relation_facade = relation_facade
+        self._relation_reader = relation_reader
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy()
 
     def clear_cache(self) -> None:
@@ -345,8 +344,8 @@ class PendingInvoiceQueryService:
         tag_groups: dict[str, set[str]],
     ) -> dict[str, Any]:
         target_invoice_type = InvoiceType.INPUT if direction == "expense" else InvoiceType.OUTPUT
-        relation_row = self._relation_distribution_row(transaction.id, reason="pending_invoice_row_payload")
-        invoices = self._invoice_payloads_from_distribution(relation_row, direction=direction) if relation_row is not None else []
+        relation_row = self._canonical_relation_context_row(transaction.id)
+        invoices = self._invoice_payloads_from_relation_context(relation_row, direction=direction) if relation_row is not None else []
         linked_invoices = [invoice for invoice in invoices if _distribution_item_is_linked(invoice)]
         effective_category = pending_invoice_effective_category_payload(category)
         category_code = effective_category.get("category_code")
@@ -358,11 +357,11 @@ class PendingInvoiceQueryService:
             and group != PENDING_INVOICE_NO_INVOICE_GROUP
         )
         payment_summary = (
-            self._payment_summary_from_distribution(relation_row, linked_invoices)
+            self._payment_summary_from_relation_context(relation_row, linked_invoices)
             if relation_row is not None
             else self._empty_payment_summary(linked_invoices)
         )
-        oa_summaries = self._oa_summaries_from_distribution(relation_row) if relation_row is not None else []
+        oa_summaries = self._oa_summaries_from_relation_context(relation_row) if relation_row is not None else []
         oa_payload = self._oa_payload_from_summaries(oa_summaries)
         status_payload = self._lifecycle_policy.evaluate_pending_invoice_acquisition(
             direction=direction,
@@ -421,7 +420,7 @@ class PendingInvoiceQueryService:
             "effective_tag_sub_label": effective_category.get("category_sub_label"),
             "effective_tag_label_path": list(effective_category.get("category_label_path") or []),
         }
-        bank_transactions = self._bank_transactions_payload_from_distribution(
+        bank_transactions = self._bank_transactions_payload_from_relation_context(
             relation_row,
             fallback=bank_transaction,
             direction=direction,
@@ -458,7 +457,7 @@ class PendingInvoiceQueryService:
         invoice_total = sum((self._invoice_total(invoice) for _, invoice in invoice_relations), start=Decimal("0.00"))
         paid_transaction_ids: set[str] = set()
         for invoice_id in invoice_ids:
-            relation_row = self._relation_distribution_row(invoice_id, reason="pending_invoice_payment_summary")
+            relation_row = self._canonical_relation_context_row(invoice_id)
             if relation_row is None:
                 continue
             for item in list(relation_row.get("linked_bank_transactions") or []):
@@ -497,34 +496,129 @@ class PendingInvoiceQueryService:
             "payment_transaction_count": 0,
         }
 
-    def _relation_distribution_row(self, row_id: str, *, reason: str) -> dict[str, Any] | None:
+    def _active_relation_dicts_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        normalized_row_ids = [
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ]
+        reader = getattr(self._relation_reader, "active_relations_for_row_ids", None)
+        if not normalized_row_ids or not callable(reader):
+            return []
+        return [
+            dict(relation)
+            for relation in list(reader(normalized_row_ids) or [])
+            if isinstance(relation, dict)
+            and str(relation.get("status") or "active") == "active"
+        ]
+
+    def _canonical_relation_context_row(self, row_id: str) -> dict[str, Any] | None:
         normalized_row_id = str(row_id or "").strip()
-        if not normalized_row_id or self._relation_facade is None:
+        relations = self._active_relation_dicts_for_row_ids([normalized_row_id])
+        if not normalized_row_id or not relations:
             return None
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return None
-        try:
-            payload = reader([normalized_row_id], require_fresh=False, reason=reason)
-        except TypeError:
-            payload = reader([normalized_row_id])
-        if not isinstance(payload, dict):
-            return None
-        groups_by_id = {
-            str(group.get("group_id") or "").strip(): group
-            for group in list(payload.get("groups") or [])
-            if isinstance(group, dict) and str(group.get("group_id") or "").strip()
+        identity = pending_invoice_relation_identity(relations)
+        oa_records = self._oa_records_by_id(identity.oa_row_ids)
+        context: dict[str, Any] = {
+            "row_id": normalized_row_id,
+            "relation_status": "linked",
+            "group_ids": [],
+            "linked_oa": [],
+            "linked_bank_transactions": [],
+            "linked_input_invoices": [],
+            "linked_output_invoices": [],
+            "_relation_groups": [],
         }
-        for row in list(payload.get("rows") or []):
-            if isinstance(row, dict) and str(row.get("row_id") or "").strip() == normalized_row_id:
-                group_ids = [str(group_id).strip() for group_id in list(row.get("group_ids") or []) if str(group_id).strip()]
-                row = dict(row)
-                row["_relation_groups"] = [groups_by_id[group_id] for group_id in group_ids if group_id in groups_by_id]
-                return row
-        return None
+        seen_members: set[tuple[str, str]] = set()
+        for relation in relations:
+            case_id = str(relation.get("case_id") or "").strip()
+            relation_mode = str(relation.get("relation_mode") or "").strip()
+            if case_id and case_id not in context["group_ids"]:
+                context["group_ids"].append(case_id)
+                context["_relation_groups"].append(
+                    {
+                        "group_id": case_id,
+                        "relation_status": "linked",
+                        "relation_source": relation_mode,
+                        "payload": deepcopy(relation),
+                    }
+                )
+            member_ids = [str(value or "").strip() for value in list(relation.get("row_ids") or [])]
+            member_types = [str(value or "").strip() for value in list(relation.get("row_types") or [])]
+            for index, member_id in enumerate(member_ids):
+                if not member_id:
+                    continue
+                member_type = (
+                    member_types[index]
+                    if index < len(member_types) and member_types[index]
+                    else infer_pending_invoice_relation_row_type(member_id)
+                )
+                identity_key = (member_type, member_id)
+                if identity_key in seen_members:
+                    continue
+                seen_members.add(identity_key)
+                common = {
+                    "id": member_id,
+                    "relation_case_id": case_id,
+                    "relation_status": "linked",
+                    "relation_source": relation_mode,
+                }
+                if member_type == "bank":
+                    try:
+                        transaction = self._import_service.get_transaction(member_id)
+                    except KeyError:
+                        transaction = None
+                    context["linked_bank_transactions"].append(
+                        {
+                            **common,
+                            "transaction_id": member_id,
+                            "amount": _decimal_to_str(transaction.amount) if transaction is not None else "0.00",
+                            "trade_time": (transaction.trade_time or transaction.txn_date) if transaction is not None else "",
+                            "counterparty_name": transaction.counterparty_name_raw if transaction is not None else "",
+                        }
+                    )
+                elif member_type == "invoice":
+                    try:
+                        invoice = self._import_service.get_invoice(member_id)
+                    except KeyError:
+                        invoice = None
+                    if invoice is None:
+                        continue
+                    target = (
+                        "linked_input_invoices"
+                        if invoice.invoice_type == InvoiceType.INPUT
+                        else "linked_output_invoices"
+                    )
+                    context[target].append(
+                        {
+                            **common,
+                            "invoice_id": member_id,
+                            "invoice_no": invoice.invoice_no,
+                            "digital_invoice_no": invoice.digital_invoice_no,
+                            "invoice_date": invoice.invoice_date,
+                            "total_with_tax": _decimal_to_str(_invoice_total(invoice)),
+                            "seller_name": invoice.seller_name,
+                            "buyer_name": invoice.buyer_name,
+                        }
+                    )
+                elif member_type == "oa":
+                    record = oa_records.get(member_id)
+                    metadata = self._first_relation_metadata(relation)
+                    context["linked_oa"].append(
+                        {
+                            **common,
+                            "oa_id": member_id,
+                            "applicant": record.applicant if record is not None else self._metadata_text(metadata, "oa_applicant", "applicant", "applicant_name"),
+                            "application_type": record.apply_type if record is not None else self._metadata_text(metadata, "application_type", "apply_type"),
+                            "project_name": (record.project_name_display or record.project_name) if record is not None else self._metadata_text(metadata, "project_name", "project"),
+                            "workflow_status": str(getattr(record, "workflow_status", "") or "completed") if record is not None else self._metadata_text(metadata, "workflow_status") or "completed",
+                            "detail_available": record is not None,
+                        }
+                    )
+        return context
 
     @staticmethod
-    def _relation_case_ids_from_distribution(row: dict[str, Any]) -> list[str]:
+    def _relation_case_ids_from_relation_context(row: dict[str, Any]) -> list[str]:
         relation_status = str(row.get("relation_status") or "linked").strip() or "linked"
         if relation_status != "linked":
             return []
@@ -542,7 +636,7 @@ class PendingInvoiceQueryService:
                     values.append(text)
         return values
 
-    def _invoice_payloads_from_distribution(self, row: dict[str, Any], *, direction: str) -> list[dict[str, Any]]:
+    def _invoice_payloads_from_relation_context(self, row: dict[str, Any], *, direction: str) -> list[dict[str, Any]]:
         key = "linked_input_invoices" if direction == "expense" else "linked_output_invoices"
         invoice_type = InvoiceType.INPUT if direction == "expense" else InvoiceType.OUTPUT
         payloads: list[dict[str, Any]] = []
@@ -589,7 +683,7 @@ class PendingInvoiceQueryService:
         return payloads
 
     @staticmethod
-    def _oa_summaries_from_distribution(row: dict[str, Any]) -> list[dict[str, Any]]:
+    def _oa_summaries_from_relation_context(row: dict[str, Any]) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in list(row.get("linked_oa") or []):
@@ -642,7 +736,7 @@ class PendingInvoiceQueryService:
                     break
         return summaries
 
-    def _payment_rows_from_distribution(self, row: dict[str, Any]) -> list[dict[str, Any]]:
+    def _payment_rows_from_relation_context(self, row: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in list(row.get("linked_bank_transactions") or []):
@@ -671,7 +765,7 @@ class PendingInvoiceQueryService:
             )
         return rows
 
-    def _bank_transactions_payload_from_distribution(
+    def _bank_transactions_payload_from_relation_context(
         self,
         row: dict[str, Any] | None,
         *,
@@ -733,7 +827,7 @@ class PendingInvoiceQueryService:
         }
 
     @staticmethod
-    def _payment_summary_from_distribution(row: dict[str, Any], invoices: list[dict[str, Any]]) -> dict[str, Any]:
+    def _payment_summary_from_relation_context(row: dict[str, Any], invoices: list[dict[str, Any]]) -> dict[str, Any]:
         invoice_total = sum((_decimal_from_text(invoice.get("total_with_tax")) for invoice in invoices), start=Decimal("0.00"))
         paid_transaction_ids: set[str] = set()
         paid_total = Decimal("0.00")
@@ -999,9 +1093,9 @@ class PendingInvoiceQueryService:
             haystack = " ".join(str(part or "") for part in (invoice.invoice_no, invoice.digital_invoice_no, invoice.seller_name, invoice.remark)).lower()
             if keyword and str(keyword).strip().lower() not in haystack:
                 continue
-            relation_row = self._relation_distribution_row(invoice.id, reason="pending_invoice_candidate_payment_summary")
+            relation_row = self._canonical_relation_context_row(invoice.id)
             paid_summary = (
-                self._payment_summary_from_distribution(relation_row, [self._invoice_payload(invoice, direction="expense")])
+                self._payment_summary_from_relation_context(relation_row, [self._invoice_payload(invoice, direction="expense")])
                 if relation_row is not None
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
@@ -1085,9 +1179,9 @@ class PendingInvoiceQueryService:
             haystack = " ".join(str(part or "") for part in (invoice.invoice_no, invoice.digital_invoice_no, invoice.seller_name, invoice.remark)).lower()
             if keyword and str(keyword).strip().lower() not in haystack:
                 continue
-            relation_row = self._relation_distribution_row(invoice.id, reason="pending_invoice_batch_candidate_payment_summary")
+            relation_row = self._canonical_relation_context_row(invoice.id)
             paid_summary = (
-                self._payment_summary_from_distribution(relation_row, [self._invoice_payload(invoice, direction="expense")])
+                self._payment_summary_from_relation_context(relation_row, [self._invoice_payload(invoice, direction="expense")])
                 if relation_row is not None
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
@@ -1205,13 +1299,13 @@ class PendingInvoiceQueryService:
             ],
             "relation_case_ids": list(row.get("relation_case_ids") or []),
         }
-        relation_row = self._relation_distribution_row(transaction_id, reason="pending_invoice_relation_detail")
+        relation_row = self._canonical_relation_context_row(transaction_id)
         if relation_row is None:
             return self._filter_relation_detail_payload(payload, kind=kind)
-        invoices = self._invoice_payloads_from_distribution(relation_row, direction=normalized_direction)
-        oa_summaries = self._oa_summaries_from_distribution(relation_row)
-        payment_summary = self._payment_summary_from_distribution(relation_row, invoices)
-        payment_rows = self._payment_rows_from_distribution(relation_row)
+        invoices = self._invoice_payloads_from_relation_context(relation_row, direction=normalized_direction)
+        oa_summaries = self._oa_summaries_from_relation_context(relation_row)
+        payment_summary = self._payment_summary_from_relation_context(relation_row, invoices)
+        payment_rows = self._payment_rows_from_relation_context(relation_row)
         payload.update(
             {
                 "related_invoices": invoices,
@@ -1255,11 +1349,11 @@ class PendingInvoiceQueryService:
                 case_ids.append(case_id)
         if case_ids:
             return case_ids
-        return PendingInvoiceQueryService._relation_case_ids_from_distribution(relation_row) if relation_row is not None else []
+        return PendingInvoiceQueryService._relation_case_ids_from_relation_context(relation_row) if relation_row is not None else []
 
     def _payment_rows_for_transaction(self, transaction_id: str) -> list[dict[str, Any]]:
-        relation_row = self._relation_distribution_row(transaction_id, reason="pending_invoice_payment_rows")
-        return self._payment_rows_from_distribution(relation_row) if relation_row is not None else []
+        relation_row = self._canonical_relation_context_row(transaction_id)
+        return self._payment_rows_from_relation_context(relation_row) if relation_row is not None else []
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
         transaction = self._get_transaction(bank_transaction_id)
@@ -1324,15 +1418,15 @@ class PendingInvoiceQueryService:
                 status_code=HTTPStatus.BAD_REQUEST,
                 details={"oa_id": normalized_oa_id},
             )
-        relation_row = self._relation_distribution_row(normalized_oa_id, reason="pending_invoice_oa_detail")
-        relation_case_ids = self._relation_case_ids_from_distribution(relation_row) if relation_row is not None else []
+        relation_row = self._canonical_relation_context_row(normalized_oa_id)
+        relation_case_ids = self._relation_case_ids_from_relation_context(relation_row) if relation_row is not None else []
         records = self._oa_records_by_id([normalized_oa_id])
         record = records.get(normalized_oa_id)
         if record is not None:
             relation_case_id = relation_case_ids[0] if relation_case_ids else ""
             return self._oa_detail_from_record(record, relation_case_id=relation_case_id)
         if relation_row is not None:
-            summaries = self._oa_summaries_from_distribution(relation_row)
+            summaries = self._oa_summaries_from_relation_context(relation_row)
             metadata = summaries[0] if summaries else {}
             return {
                 "title": normalized_oa_id,
@@ -1532,7 +1626,7 @@ class PendingInvoiceQueryService:
 
     def _candidate_status(self, transaction_id: str, invoice_id: str) -> str:
         expected = {transaction_id, invoice_id}
-        relation_row = self._relation_distribution_row(invoice_id, reason="pending_invoice_candidate_status")
+        relation_row = self._canonical_relation_context_row(invoice_id)
         if relation_row is None:
             return "available"
         linked_bank_ids = {
@@ -1542,9 +1636,9 @@ class PendingInvoiceQueryService:
         }
         if expected.issubset({invoice_id, *linked_bank_ids}):
             return "already_related"
-        if not linked_bank_ids and self._distribution_row_has_attach_existing_linkable_group(relation_row, invoice_id):
+        if not linked_bank_ids and self._relation_context_has_attach_existing_linkable_group(relation_row, invoice_id):
             return "available"
-        return "available" if linked_bank_ids else ("conflict" if _linked_group_ids_from_distribution_row(relation_row) else "available")
+        return "available" if linked_bank_ids else ("conflict" if _linked_group_ids_from_relation_context(relation_row) else "available")
 
     def _batch_candidate_status(self, transaction_ids: list[str], invoice_id: str) -> str:
         statuses = [self._candidate_status(transaction_id, invoice_id) for transaction_id in transaction_ids]
@@ -1555,7 +1649,7 @@ class PendingInvoiceQueryService:
         return "available"
 
     @staticmethod
-    def _linked_bank_transaction_ids_from_distribution_row(relation_row: dict[str, Any] | None) -> set[str]:
+    def _linked_bank_transaction_ids_from_relation_context(relation_row: dict[str, Any] | None) -> set[str]:
         if relation_row is None:
             return set()
         return {
@@ -1567,7 +1661,7 @@ class PendingInvoiceQueryService:
         }
 
     @staticmethod
-    def _distribution_row_has_attach_existing_linkable_group(relation_row: dict[str, Any] | None, invoice_id: str) -> bool:
+    def _relation_context_has_attach_existing_linkable_group(relation_row: dict[str, Any] | None, invoice_id: str) -> bool:
         if relation_row is None:
             return False
         for group in list(relation_row.get("_relation_groups") or []):
@@ -1599,7 +1693,7 @@ class PendingInvoiceQueryService:
         selected_transaction_ids: list[str],
         candidate_status: str,
     ) -> dict[str, Any]:
-        linked_bank_ids = self._linked_bank_transaction_ids_from_distribution_row(relation_row)
+        linked_bank_ids = self._linked_bank_transaction_ids_from_relation_context(relation_row)
         selected_ids = {str(transaction_id).strip() for transaction_id in list(selected_transaction_ids or []) if str(transaction_id).strip()}
         if candidate_status == "conflict":
             status = BANK_RELATION_STATUS_CONFLICT
@@ -1660,12 +1754,10 @@ class PendingInvoiceApplicationService:
         command_repository: Any | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
         row_provider: Callable[[str, str], dict[str, Any]] | None = None,
-        relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
         fault_injector: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._import_service = import_service
-        self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
         self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)
         self._audit_recorder = audit_recorder
@@ -1839,9 +1931,6 @@ class PendingInvoiceApplicationService:
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
-        except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
-            raise
         except Exception as exc:
             command["error"] = str(exc)
             command["last_successful_status"] = self._last_successful_status(command)
@@ -2009,9 +2098,6 @@ class PendingInvoiceApplicationService:
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
-        except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
-            raise
         except Exception as exc:
             command["error"] = str(exc)
             command["last_successful_status"] = self._last_successful_status(command)
@@ -2333,13 +2419,6 @@ class PendingInvoiceApplicationService:
 
     @staticmethod
     def _command_error(exc: WorkbenchRelationCommandError) -> PendingInvoiceError:
-        if exc.error_code == "workbench_relation_read_model_not_fresh":
-            return PendingInvoiceError(
-                exc.error_code,
-                "关联台关系读模型不是 fresh，请刷新后再处理。",
-                status_code=HTTPStatus.CONFLICT,
-                details=dict(exc.payload),
-            )
         if exc.error_code == "workbench_relation_active_row_conflict":
             return PendingInvoiceError(
                 "active_relation_conflict",
@@ -2351,10 +2430,7 @@ class PendingInvoiceApplicationService:
 
     def _create_attach_existing_relation(self, *, transaction_id: str, invoice_id: str, request_key: str, actor_id: str) -> str:
         expected_rows = {transaction_id, invoice_id}
-        for relation in self._active_relation_dicts_for_row_ids(
-            [transaction_id, invoice_id],
-            reason="pending_invoice_attach_existing_confirm",
-        ):
+        for relation in self._active_relation_dicts_for_row_ids([transaction_id, invoice_id]):
             row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
             if expected_rows.issubset(row_ids):
                 return str(relation.get("case_id"))
@@ -2422,10 +2498,7 @@ class PendingInvoiceApplicationService:
         actor_id: str,
     ) -> str:
         expected_rows = set(transaction_ids) | set(invoice_ids)
-        existing_relations = self._active_relation_dicts_for_row_ids(
-            [*transaction_ids, *invoice_ids],
-            reason="pending_invoice_attach_existing_batch_confirm",
-        )
+        existing_relations = self._active_relation_dicts_for_row_ids([*transaction_ids, *invoice_ids])
         for relation in existing_relations:
             relation_row_ids = {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
             if expected_rows.issubset(relation_row_ids):
@@ -2478,90 +2551,37 @@ class PendingInvoiceApplicationService:
             month_scope="all",
         )
 
-    def _active_relation_dicts_for_row_ids(self, row_ids: list[str], *, reason: str) -> list[dict[str, Any]]:
+    def _active_relation_dicts_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         if not normalized_row_ids:
             return []
-        if self._relation_facade is None:
-            return []
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        reader = getattr(self._relation_command_service, "active_relations_for_row_ids", None)
         if not callable(reader):
             return []
-        try:
-            payload = reader(normalized_row_ids, require_fresh=False, reason=reason)
-        except TypeError:
-            payload = reader(normalized_row_ids)
         return [
-            relation
-            for relation in relation_dicts_from_distribution_payload(payload if isinstance(payload, dict) else {})
-            if _relation_dict_is_linked(relation)
+            dict(relation)
+            for relation in list(reader(normalized_row_ids) or [])
+            if isinstance(relation, dict)
+            and str(relation.get("status") or "active") == "active"
         ]
 
     def _attach_existing_conflicts(self, *, transaction_id: str, invoice_id: str) -> list[dict[str, Any]]:
         conflicts: list[dict[str, Any]] = []
-        relation_row = self._relation_distribution_row(invoice_id, reason="pending_invoice_attach_existing_conflicts")
-        if relation_row is not None:
-            linked_bank_ids = {
-                str(item.get("id") or item.get("transaction_id") or "").strip()
-                for item in list(relation_row.get("linked_bank_transactions") or [])
-                if isinstance(item, dict)
-                and _distribution_item_is_linked(item)
-                and str(item.get("id") or item.get("transaction_id") or "").strip()
-            }
-            if transaction_id in linked_bank_ids:
+        for relation in self._active_relation_dicts_for_row_ids([invoice_id]):
+            row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+            if invoice_id not in row_ids:
+                continue
+            if transaction_id in row_ids:
                 return []
-            saw_existing_linkable_group = False
-            for group in list(relation_row.get("_relation_groups") or []):
-                if not isinstance(group, dict):
-                    continue
-                if not _distribution_group_is_linked(group):
-                    continue
-                payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
-                row_ids = [str(row_id).strip() for row_id in list(payload.get("row_ids") or []) if str(row_id).strip()]
-                if invoice_id not in row_ids:
-                    row_ids = [
-                        *[str(row_id).strip() for row_id in list(group.get("bank_transaction_ids") or []) if str(row_id).strip()],
-                        *[str(row_id).strip() for row_id in list(group.get("input_invoice_ids") or []) if str(row_id).strip()],
-                        *[str(row_id).strip() for row_id in list(group.get("output_invoice_ids") or []) if str(row_id).strip()],
-                        *[str(row_id).strip() for row_id in list(group.get("oa_row_ids") or []) if str(row_id).strip()],
-                    ]
-                relation_mode = str(payload.get("relation_mode") or group.get("relation_source") or "")
-                row_types = [
-                    str(row_type).strip()
-                    for row_type in list(payload.get("row_types") or [])
-                    if str(row_type).strip()
-                ]
-                row_type_set = {row_type for row_type in row_types if row_type}
-                if (
-                    invoice_id in row_ids
-                    and transaction_id not in row_ids
-                    and "invoice" in row_type_set
-                    and row_type_set.issubset({"bank", "invoice", "oa"})
-                ):
-                    saw_existing_linkable_group = True
-                    continue
-                if invoice_id in row_ids and transaction_id not in row_ids:
-                    conflicts.append(
-                        {
-                            "relation_case_id": str(group.get("group_id") or payload.get("group_id") or ""),
-                            "relation_mode": relation_mode,
-                            "row_ids": sorted(set(row_ids)),
-                        }
-                    )
-            if conflicts:
-                return conflicts
-            if saw_existing_linkable_group:
-                return []
-            group_ids = _linked_group_ids_from_distribution_row(relation_row)
-            if linked_bank_ids or group_ids:
-                return [
-                    {
-                        "relation_case_id": group_ids[0] if group_ids else "",
-                        "relation_mode": "",
-                        "row_ids": sorted({invoice_id, *linked_bank_ids}),
-                    }
-                ]
-            return []
+            if _relation_can_absorb_attach_existing_invoice(relation, invoice_id):
+                continue
+            conflicts.append(
+                {
+                    "relation_case_id": str(relation.get("case_id") or ""),
+                    "relation_mode": str(relation.get("relation_mode") or ""),
+                    "row_ids": sorted(set(row_ids)),
+                }
+            )
         return conflicts
 
     def _attach_existing_batch_conflicts(self, *, transaction_ids: list[str], invoice_ids: list[str]) -> list[dict[str, Any]]:
@@ -2578,125 +2598,21 @@ class PendingInvoiceApplicationService:
         return conflicts
 
     def _paid_total_for_invoice(self, invoice_id: str) -> Decimal:
-        relation_row = self._relation_distribution_row(invoice_id, reason="pending_invoice_attach_existing_paid_total")
-        if relation_row is not None:
-            paid_total = Decimal("0.00")
-            seen_transaction_ids: set[str] = set()
-            for item in list(relation_row.get("linked_bank_transactions") or []):
-                if not isinstance(item, dict):
+        paid_total = Decimal("0.00")
+        seen_transaction_ids: set[str] = set()
+        for relation in self._active_relation_dicts_for_row_ids([invoice_id]):
+            row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
+            for index, row_id in enumerate(row_ids):
+                row_type = row_types[index] if index < len(row_types) and row_types[index] else _row_type_for_relation_row_id(row_id)
+                if row_type != "bank" or not row_id or row_id in seen_transaction_ids:
                     continue
-                if not _distribution_item_is_linked(item):
+                seen_transaction_ids.add(row_id)
+                try:
+                    paid_total += self._import_service.get_transaction(row_id).amount
+                except KeyError:
                     continue
-                transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
-                if transaction_id and transaction_id in seen_transaction_ids:
-                    continue
-                if transaction_id:
-                    seen_transaction_ids.add(transaction_id)
-                    try:
-                        paid_total += self._import_service.get_transaction(transaction_id).amount
-                        continue
-                    except KeyError:
-                        pass
-                paid_total += _decimal_from_text(item.get("amount"))
-            return paid_total.quantize(Decimal("0.01"))
-        return Decimal("0.00")
-
-    def _relation_distribution_row(self, row_id: str, *, reason: str) -> dict[str, Any] | None:
-        normalized_row_id = str(row_id or "").strip()
-        if not normalized_row_id or self._relation_facade is None:
-            return None
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return None
-        try:
-            payload = reader([normalized_row_id], require_fresh=False, reason=reason)
-        except TypeError:
-            payload = reader([normalized_row_id])
-        if not isinstance(payload, dict):
-            return None
-        groups_by_id = {
-            str(group.get("group_id") or "").strip(): group
-            for group in list(payload.get("groups") or [])
-            if isinstance(group, dict) and str(group.get("group_id") or "").strip()
-        }
-        for row in list(payload.get("rows") or []):
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("row_id") or "").strip() != normalized_row_id:
-                continue
-            group_ids = [str(group_id).strip() for group_id in list(row.get("group_ids") or []) if str(group_id).strip()]
-            result = dict(row)
-            result["_relation_groups"] = [groups_by_id[group_id] for group_id in group_ids if group_id in groups_by_id]
-            return result
-        return None
-
-    def _result_payload(
-        self,
-        *,
-        transaction_id: str,
-        invoice_id: str,
-        relation_case_id: str,
-        affected_months: list[str],
-        direction: str,
-    ) -> dict[str, Any]:
-        result = {
-            "invoice_id": invoice_id,
-            "relation_case_id": relation_case_id,
-            "affected_transaction_ids": [transaction_id],
-            "affected_invoice_ids": [invoice_id],
-            "affected_months": affected_months,
-        }
-        if self._row_provider is not None:
-            result["row"] = self._row_provider(transaction_id, direction)
-            self._overlay_command_invoice_on_row(
-                result["row"],
-                invoice_id=invoice_id,
-                direction=direction,
-                relation_case_id=relation_case_id,
-            )
-        return result
-
-    def _overlay_command_invoice_on_row(
-        self,
-        row: dict[str, Any],
-        *,
-        invoice_id: str,
-        direction: str,
-        relation_case_id: str,
-    ) -> None:
-        """Keep the write response immediately useful while relation read models refresh asynchronously."""
-        if not isinstance(row, dict):
-            return
-        try:
-            invoice = self._import_service.get_invoice(invoice_id)
-        except KeyError:
-            return
-        invoice_payload = PendingInvoiceQueryService._invoice_payload(invoice, direction=direction)
-        invoice_payload["relation_case_id"] = relation_case_id
-        existing = [item for item in list(row.get("invoices") or []) if isinstance(item, dict)]
-        if not any(str(item.get("id") or "") == invoice_id for item in existing):
-            existing.append(invoice_payload)
-        row["invoices"] = existing
-        invoice_group = row.get("input_invoices")
-        if not isinstance(invoice_group, dict):
-            invoice_group = {}
-            row["input_invoices"] = invoice_group
-        summaries = [item for item in list(invoice_group.get("summaries") or []) if isinstance(item, dict)]
-        if not any(str(item.get("id") or "") == invoice_id for item in summaries):
-            summaries.append(invoice_payload)
-        invoice_group["summaries"] = summaries
-        invoice_group["primary"] = summaries[0] if summaries else None
-        invoice_group["relation_count"] = len(summaries)
-        invoice_group["has_multiple"] = len(summaries) > 1
-        invoice_group["payment_summary"] = PendingInvoiceQueryService._empty_payment_summary(summaries)
-        relation_case_ids = [
-            str(item).strip()
-            for item in list(row.get("relation_case_ids") or [])
-            if str(item).strip()
-        ]
-        if relation_case_id and relation_case_id not in relation_case_ids:
-            relation_case_ids.append(relation_case_id)
-        row["relation_case_ids"] = relation_case_ids
+        return paid_total.quantize(Decimal("0.01"))
 
     def _record_attach_existing_audit(
         self,
@@ -2809,14 +2725,6 @@ class PendingInvoiceApplicationService:
     def _inject_fault(self, phase: str, command: dict[str, Any]) -> None:
         if self._fault_injector is not None:
             self._fault_injector(phase, command)
-
-    def _mark_relation_precondition_error(self, command: dict[str, Any], exc: PendingInvoiceError) -> None:
-        if exc.error_code != "workbench_relation_read_model_not_fresh":
-            return
-        command["error"] = str(exc)
-        command["error_code"] = exc.error_code
-        command["last_successful_status"] = self._last_successful_status(command)
-        self._mark_command(command, "failed_recoverable")
 
     def _mark_command(self, command: dict[str, Any], status: str, *, error_code: str | None = None) -> None:
         if status not in COMMAND_STATUSES:
@@ -2961,7 +2869,7 @@ def _distribution_group_is_linked(group: dict[str, Any] | None) -> bool:
     return _distribution_group_relation_status(group) == "linked"
 
 
-def _linked_group_ids_from_distribution_row(row: dict[str, Any]) -> list[str]:
+def _linked_group_ids_from_relation_context(row: dict[str, Any]) -> list[str]:
     linked_group_ids: list[str] = []
     for group in list(row.get("_relation_groups") or []):
         if not isinstance(group, dict) or not _distribution_group_is_linked(group):
@@ -2970,15 +2878,6 @@ def _linked_group_ids_from_distribution_row(row: dict[str, Any]) -> list[str]:
         if group_id and group_id not in linked_group_ids:
             linked_group_ids.append(group_id)
     return linked_group_ids
-
-
-def _relation_dict_is_linked(relation: dict[str, Any] | None) -> bool:
-    if not isinstance(relation, dict):
-        return False
-    status = str(relation.get("relation_status") or relation.get("relationStatus") or "").strip()
-    if not status and str(relation.get("status") or "").strip() == "active":
-        status = "linked"
-    return (status or "linked") == "linked"
 
 
 def _row_type_for_relation_row_id(row_id: str) -> str:

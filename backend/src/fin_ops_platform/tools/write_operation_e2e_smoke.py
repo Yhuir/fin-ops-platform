@@ -21,7 +21,7 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresSettings,
 )
 from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
-from fin_ops_platform.tools import http_slo_probe, write_operation_slo_audit
+from fin_ops_platform.tools import http_slo_probe, retired_projection_event_audit
 from fin_ops_platform.tools.cli_reports import (
     input_file_error_report,
     postgres_configuration_missing_report,
@@ -38,7 +38,6 @@ DEFAULT_LIMIT = 2_000
 DEFAULT_RELATION_PREVIEW_SAMPLES = 1
 MAX_RELATION_PREVIEW_SAMPLES = 20
 RELATION_PREVIEW_TARGET_MS = 3_000.0
-MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 MAX_TEST_OWNED_RELATION_ROW_IDS = 20
 MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 3
 MAX_PARALLEL_CONSUMER_PROBES = 16
@@ -459,7 +458,6 @@ def load_scenarios(path: Path, *, http_target_ms: float) -> list[WriteScenario]:
             operations = (operation,) if operation else ()
         if not operations:
             raise ValueError(f"scenario {name!r} must include operation or operations.")
-        write_operation_slo_audit.selected_expectations_for_operations(operations)
         steps = _load_steps(raw.get("steps"), scenario_name=name)
         post_api_probes = _load_post_api_probes(raw.get("post_api_probes"), default_target_ms=http_target_ms)
         scenarios.append(
@@ -1096,7 +1094,7 @@ def _run_checkpoint(
     if idempotency_key:
         if not response_receipt_present:
             try:
-                durable_event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
+                durable_event_ids = retired_projection_event_audit.committed_workbench_outbox_event_ids(
                     connection,
                     tenant_id=tenant_id,
                     idempotency_key=idempotency_key,
@@ -1417,7 +1415,7 @@ def _reconcile_ambiguous_mutation(
     variables: dict[str, Any],
 ) -> tuple[bool, bool]:
     try:
-        evidence = write_operation_slo_audit.workbench_idempotency_evidence(
+        evidence = retired_projection_event_audit.workbench_idempotency_evidence(
             connection,
             tenant_id=tenant_id,
             idempotency_key=idempotency_key,
@@ -1490,100 +1488,39 @@ def _wait_for_write_slo(
     limit: int,
     event_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    expectations = write_operation_slo_audit.selected_expectations_for_operations(operations)
-    p99_target_ms = write_operation_slo_audit.effective_p99_target_ms_for(target_ms, None)
-    effective_limit = _effective_write_slo_event_sample_limit(limit, expectation_count=len(expectations))
-    deadline = monotonic() + max(1.0, timeout_seconds)
-    last_results: list[Any] = []
-    last_rows: list[dict[str, Any]] = []
-    last_unexpected_events: list[dict[str, Any]] = []
-    expected_event_ids = set(event_ids or []) if event_ids is not None else None
-    receipt_bound = event_ids is not None
-    last_matched_event_ids: set[str] = set()
-    while True:
-        rows = write_operation_slo_audit.recent_read_model_refresh_events_since(
-            connection,
-            tenant_id=tenant_id,
-            started_at=started_at,
-            limit=effective_limit,
-            expectations=None if receipt_bound else expectations,
-            event_ids=event_ids,
-        )
-        results = write_operation_slo_audit.evaluate_operation_expectations(
-            rows,
-            expectations=expectations,
-            target_ms=target_ms,
-            p99_target_ms=p99_target_ms,
-            match_metadata=not receipt_bound,
-        )
-        last_results = results
-        last_rows = rows
-        last_matched_event_ids = {
-            str(row.get("event_id") or "").strip() for row in rows if str(row.get("event_id") or "").strip()
-        }
-        last_unexpected_events = [
-            _event_contract_summary(row)
+    del operations, timeout_seconds, poll_interval_seconds
+    rows = retired_projection_event_audit.recent_retired_projection_events_since(
+        connection,
+        tenant_id=tenant_id,
+        started_at=started_at,
+        limit=max(1, int(limit)),
+        event_ids=event_ids,
+    )
+    retired_events = [_event_contract_summary(row) for row in rows]
+    return {
+        "status": "fail" if retired_events else "pass",
+        "target_ms": target_ms,
+        "p99_target_ms": retired_projection_event_audit.effective_p99_target_ms_for(
+            target_ms,
+            None,
+        ),
+        "requested_event_sample_limit": max(1, int(limit)),
+        "effective_event_sample_limit": max(1, int(limit)),
+        "event_sample_count": len(rows),
+        "matched_event_ids": sorted(
+            str(row.get("event_id") or "")
             for row in rows
-            if not any(
-                write_operation_slo_audit.event_matches_expectation(
-                    row,
-                    expectation,
-                    match_metadata=not receipt_bound,
-                )
-                for expectation in expectations
-            )
-        ]
-        exact_event_set_matches = expected_event_ids is None or last_matched_event_ids == expected_event_ids
-        forbidden_fan_out_detected = any(
-            bool(result.forbidden) and result.status == "fail" and result.sample_count > 0
-            for result in results
-        )
-        if exact_event_set_matches and not last_unexpected_events and forbidden_fan_out_detected:
-            return {
-                "status": "fail",
-                "target_ms": target_ms,
-                "p99_target_ms": p99_target_ms,
-                "requested_event_sample_limit": max(1, int(limit)),
-                "effective_event_sample_limit": effective_limit,
-                "event_sample_count": len(rows),
-                "matched_event_ids": sorted(last_matched_event_ids),
-                "unexpected_event_contracts": [],
-                "error": "forbidden_write_time_read_model_fan_out_detected",
-                "results": [asdict(result) for result in results],
-            }
-        if exact_event_set_matches and not last_unexpected_events and all(result.status == "pass" for result in results):
-            return {
-                "status": "pass",
-                "target_ms": target_ms,
-                "p99_target_ms": p99_target_ms,
-                "requested_event_sample_limit": max(1, int(limit)),
-                "effective_event_sample_limit": effective_limit,
-                "event_sample_count": len(rows),
-                "matched_event_ids": sorted(last_matched_event_ids),
-                "unexpected_event_contracts": [],
-                "results": [asdict(result) for result in results],
-            }
-        if monotonic() >= deadline:
-            return {
-                "status": "fail",
-                "target_ms": target_ms,
-                "p99_target_ms": p99_target_ms,
-                "requested_event_sample_limit": max(1, int(limit)),
-                "effective_event_sample_limit": effective_limit,
-                "event_sample_count": len(last_rows),
-                "matched_event_ids": sorted(last_matched_event_ids),
-                "missing_or_unmatched_event_ids": sorted((expected_event_ids or set()) - last_matched_event_ids),
-                "unexpected_event_contracts": last_unexpected_events,
-                "error": (
-                    "exact_checkpoint_event_set_mismatch"
-                    if not exact_event_set_matches
-                    else "unexpected_checkpoint_event_contract"
-                    if last_unexpected_events
-                    else "timeout_waiting_for_write_operation_refresh_slo"
-                ),
-                "results": [asdict(result) for result in last_results],
-            }
-        sleep(max(0.05, poll_interval_seconds))
+            if str(row.get("event_id") or "")
+        ),
+        "unexpected_event_contracts": retired_events,
+        **(
+            {"error": "forbidden_retired_projection_event_detected"}
+            if retired_events
+            else {}
+        ),
+        "results": [],
+    }
+
 
 
 def _event_contract_summary(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -1691,7 +1628,7 @@ def _collect_checkpoint_consumer(
             "error": "consumer_assertion_required",
         }
     try:
-        path, payload, read_model_status = _request_fresh_consumer_payload(
+        path, payload = _request_consumer_payload(
             consumer,
             base_url=base_url,
             api_prefix=api_prefix,
@@ -1727,7 +1664,6 @@ def _collect_checkpoint_consumer(
             "role": consumer.role,
             "path": path,
             "status": "fail" if failed or visibility_slo_miss else "pass",
-            "read_model_status": read_model_status,
             "assertions": assertions,
             **(
                 {
@@ -1786,7 +1722,6 @@ def _collect_checkpoint_consumer(
 
 
 _RETRYABLE_CONSUMER_ERRORS = {
-    "consumer_read_model_not_fresh",
     "unexpected_status:202",
     "unexpected_status:503",
 }
@@ -1899,7 +1834,7 @@ def _capture_isolation_baseline(
     values: dict[str, Any] = {}
     try:
         for consumer in isolation_consumers:
-            _path, payload, _read_model_status = _wait_for_fresh_consumer_payload(
+            _path, payload = _wait_for_consumer_payload(
                 consumer,
                 base_url=base_url,
                 api_prefix=api_prefix,
@@ -1920,7 +1855,7 @@ def _capture_isolation_baseline(
     return {"status": "pass", "values": values}
 
 
-def _request_fresh_consumer_payload(
+def _request_consumer_payload(
     consumer: ConsumerProbe,
     *,
     base_url: str,
@@ -1930,7 +1865,7 @@ def _request_fresh_consumer_payload(
     request_fn: RequestFn,
     variables: Mapping[str, Any],
     enforce_slo: bool = True,
-) -> tuple[str, Any, Any]:
+) -> tuple[str, Any]:
     path = str(_resolve_value(consumer.probe.path, variables))
     url = http_slo_probe.resolve_probe_url(base_url, path, api_prefix=api_prefix)
     started = monotonic()
@@ -1944,24 +1879,10 @@ def _request_fresh_consumer_payload(
     if enforce_slo and elapsed_ms > consumer.probe.target_ms:
         raise ValueError(f"consumer_slo_miss:{round(elapsed_ms, 3)}>{round(consumer.probe.target_ms, 3)}")
     payload = json.loads((response.body or b"").decode("utf-8"))
-    metadata = http_slo_probe._extract_response_metadata(response.body or b"", content_type)
-    read_model_status = str(metadata.get("read_model_status") or "").strip().lower()
-    statistics_status = (
-        str(payload.get("statistics_status") or "").strip().lower()
-        if isinstance(payload, dict)
-        else ""
-    )
-    if (
-        (read_model_status and read_model_status != "fresh")
-        or metadata.get("refresh_enqueued") is True
-        or (statistics_status and statistics_status != "fresh")
-        or (isinstance(payload, dict) and payload.get("statistics_refresh_enqueued") is True)
-    ):
-        raise ValueError("consumer_read_model_not_fresh")
-    return path, payload, read_model_status or None
+    return path, payload
 
 
-def _wait_for_fresh_consumer_payload(
+def _wait_for_consumer_payload(
     consumer: ConsumerProbe,
     *,
     base_url: str,
@@ -1972,11 +1893,11 @@ def _wait_for_fresh_consumer_payload(
     request_fn: RequestFn,
     variables: Mapping[str, Any],
     enforce_slo: bool = True,
-) -> tuple[str, Any, Any]:
+) -> tuple[str, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
     while True:
         try:
-            return _request_fresh_consumer_payload(
+            return _request_consumer_payload(
                 consumer,
                 base_url=base_url,
                 api_prefix=api_prefix,
@@ -2285,15 +2206,6 @@ def _wait_for_system_audit(
         if error not in _RETRYABLE_SYSTEM_AUDIT_ERRORS or monotonic() >= deadline:
             return last_result
         sleep(max(0.05, poll_interval_seconds))
-
-
-def _effective_write_slo_event_sample_limit(limit: int, *, expectation_count: int) -> int:
-    return max(
-        1,
-        int(limit),
-        MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT,
-        int(expectation_count) * 4,
-    )
 
 
 def _database_timestamp(connection: Any) -> Any:
@@ -2957,7 +2869,6 @@ def _load_checkpoint(
         operations = (operation,) if operation else ()
     if not operations:
         raise ValueError(f"checkpoint {name!r} must include operation or operations.")
-    write_operation_slo_audit.selected_expectations_for_operations(operations)
     steps = tuple(_load_steps(raw.get("steps"), scenario_name=f"{scenario_name}/{name}"))
     mutations = [step for step in steps if step.mutation]
     if strict and len(mutations) != 1:

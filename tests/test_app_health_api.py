@@ -344,554 +344,6 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(service.calls, 1)
 
-    def test_operation_barrier_status_returns_runtime_readiness_contract(self) -> None:
-        app = build_application()
-        requested_targets: list[list[dict[str, str]]] = []
-
-        def operation_barrier_runtime_snapshot(targets: list[dict[str, str]]) -> dict[str, object]:
-            requested_targets.append(targets)
-            return {
-                "read_model_statuses": {
-                    "workbench_relation": {
-                        "status": "refreshing",
-                        "scopes": [
-                            {
-                                "scope_type": "workbench_relation",
-                                "scope_key": "2026-02",
-                                "status": "refreshing",
-                                "updated_at": "2026-06-14T10:00:00+00:00",
-                            }
-                        ],
-                    }
-                },
-                "outbox_statuses": {},
-                "worker_statuses": {"workbench-relation": {"status": "ready"}},
-            }
-
-        app._state_store = SimpleNamespace(
-            operation_barrier_runtime_snapshot=operation_barrier_runtime_snapshot,
-        )
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": [{"read_model_key": "workbench_relation", "scope_key": "2026-02"}]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "refreshing")
-        self.assertFalse(payload["fresh"])
-        self.assertEqual(payload["targets"][0]["read_model_key"], "workbench_relation")
-        self.assertEqual(payload["targets"][0]["scope_key"], "2026-02")
-        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
-        self.assertEqual(
-            requested_targets,
-            [[{"read_model_key": "workbench_relation", "scope_type": "workbench_relation", "scope_key": "2026-02"}]],
-        )
-
-    def test_operation_barrier_fails_closed_without_target_scoped_runtime_provider(self) -> None:
-        app = build_application()
-        app._state_store = SimpleNamespace(app_status_runtime_snapshot=lambda: {})
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": [{"read_model_key": "workbench_relation", "scope_key": "2026-02"}]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["targets"][0]["reason"], "runtime_unavailable")
-
-    def test_operation_barrier_rejects_invalid_target_contract(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": [{"scope_key": "all"}]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
-
-    def test_operation_barrier_rejects_non_object_target_entries(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/operation-barrier/status",
-            body=json.dumps({"targets": ["workbench_relation"]}),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
-
-    def test_app_health_reports_dirty_oa_scopes_as_busy_and_stale(self) -> None:
-        app = build_application()
-        inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["oa_sync"]["status"], "refreshing")
-        self.assertEqual(payload["oa_sync"]["dirty_scopes"], ["all"])
-        self.assertEqual(payload["workbench_matching"]["status"], "stale")
-        self.assertEqual(payload["workbench_matching"]["dirty_scopes"], ["all"])
-
-    def test_app_health_caches_runtime_snapshot_briefly(self) -> None:
-        app = build_application()
-        calls = 0
-
-        def runtime_snapshot() -> dict[str, object]:
-            nonlocal calls
-            calls += 1
-            return {
-                "read_model_statuses": {},
-                "worker_statuses": {},
-                "outbox_statuses": {},
-            }
-
-        app._state_store = SimpleNamespace(
-            storage_mode="postgres",
-            storage_backend="postgres",
-            app_status_runtime_snapshot=runtime_snapshot,
-            save_app_health_alerts=lambda _snapshot: None,
-        )
-
-        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="30"):
-            app.handle_request("GET", "/api/app-health")
-            app.handle_request("GET", "/api/app-health")
-
-        self.assertEqual(calls, 1)
-
-    def test_app_health_runtime_snapshot_cache_is_single_flight(self) -> None:
-        app = build_application()
-        calls = 0
-        calls_lock = Lock()
-
-        def runtime_snapshot() -> dict[str, object]:
-            nonlocal calls
-            with calls_lock:
-                calls += 1
-            sleep(0.03)
-            return {
-                "read_model_statuses": {},
-                "worker_statuses": {},
-                "outbox_statuses": {},
-            }
-
-        app._state_store = SimpleNamespace(app_status_runtime_snapshot=runtime_snapshot)
-        app._app_status_runtime_snapshot_cache = None
-
-        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="30"):
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                snapshots = list(executor.map(lambda _index: app._app_status_runtime_statuses(), range(4)))
-
-        self.assertEqual(calls, 1)
-        self.assertTrue(all(snapshot["outbox_statuses"] == {} for snapshot in snapshots))
-
-    def test_app_health_ignores_completed_workbench_matching_history(self) -> None:
-        app = build_application()
-        app._workbench_reconciliation_dirty_queue = SimpleNamespace(
-            list_dirty_scopes=lambda: [
-                {
-                    "scope_month": "2026-05",
-                    "status": "completed",
-                    "updated_at": "2026-05-01T00:00:00+00:00",
-                }
-            ]
-        )
-
-        oa_sync = app._app_health_oa_sync_payload()
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertNotIn("workbench_matching_dirty_scopes", oa_sync)
-        self.assertEqual(payload["workbench_matching"]["dirty_scopes"], [])
-        self.assertEqual(payload["workbench_matching"]["status"], "ready")
-
-    def test_app_health_keeps_failed_workbench_matching_scope_visible(self) -> None:
-        app = build_application()
-        app._workbench_reconciliation_dirty_queue = SimpleNamespace(
-            list_dirty_scopes=lambda: [
-                {
-                    "scope_month": "2026-05",
-                    "status": "failed",
-                    "last_error": "matching failed",
-                    "updated_at": "2026-05-01T00:00:00+00:00",
-                }
-            ]
-        )
-
-        oa_sync = app._app_health_oa_sync_payload()
-
-        self.assertEqual(oa_sync["workbench_matching_dirty_scopes"][0]["status"], "failed")
-
-    def test_app_health_does_not_persist_unchanged_empty_alert_snapshot(self) -> None:
-        app = build_application()
-        saved_alerts: list[dict[str, object]] = []
-        app._state_store = SimpleNamespace(
-            storage_mode="postgres",
-            storage_backend="postgres",
-            app_status_runtime_snapshot=lambda: {
-                "read_model_statuses": {},
-                "worker_statuses": {},
-                "outbox_statuses": {},
-            },
-            save_app_health_alerts=lambda snapshot: saved_alerts.append(snapshot),
-        )
-
-        response = app.handle_request("GET", "/api/app-health")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(saved_alerts, [])
-
-    def test_app_health_reuses_one_runtime_snapshot_with_cache_disabled(self) -> None:
-        app = build_application()
-        calls = 0
-
-        def runtime_snapshot() -> dict[str, object]:
-            nonlocal calls
-            calls += 1
-            return {
-                "read_model_statuses": {},
-                "worker_statuses": {},
-                "outbox_statuses": {},
-            }
-
-        app._state_store = SimpleNamespace(
-            storage_mode="postgres",
-            storage_backend="postgres",
-            app_status_runtime_snapshot=runtime_snapshot,
-            save_app_health_alerts=lambda _snapshot: None,
-        )
-
-        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="0"):
-            response = app.handle_request("GET", "/api/app-health")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(calls, 1)
-
-    def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
-        app = build_application()
-        inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
-
-        response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            body=json.dumps(
-                {
-                    "month": "all",
-                    "row_ids": ["oa-missing"],
-                }
-            ),
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(payload["error"], "workbench_stale")
-        self.assertEqual(payload["dirty_scopes"], ["all"])
-
-    def test_app_health_reports_running_background_job_as_busy(self) -> None:
-        app = build_application()
-        job = app._background_job_service.create_job(
-            job_type="etc_invoice_import",
-            label="导入 ETC发票",
-            owner_user_id="test_finops_user",
-            total=2,
-        )
-        app._background_job_service.start_job(job.job_id)
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["background_jobs"]["running"], 1)
-        self.assertEqual(payload["background_jobs"]["active"], 1)
-        self.assertEqual(payload["background_jobs"]["primary_running"]["job_id"], job.job_id)
-        self.assertEqual(payload["background_jobs"]["primary_running"]["status"], "running")
-
-    def test_app_health_reports_workbench_rebuild_job_as_rebuilding(self) -> None:
-        app = build_application()
-        job = app._background_job_service.create_job(
-            job_type="workbench_rebuild",
-            label="重建关联台",
-            owner_user_id="test_finops_user",
-            total=1,
-        )
-        app._background_job_service.start_job(job.job_id)
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["workbench_matching"]["status"], "rebuilding")
-        self.assertEqual(payload["workbench_matching"]["rebuild_job_ids"], [job.job_id])
-
-    def test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention(self) -> None:
-        app = build_application()
-        failed_job = app._background_job_service.create_job(
-            job_type="file_import",
-            label="导入 银行流水",
-            owner_user_id="test_finops_user",
-            source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
-        )
-        partial_job = app._background_job_service.create_job(
-            job_type="workbench_matching",
-            label="生成正式配对关系",
-            owner_user_id="test_finops_user",
-            affected_months=["2026-05"],
-        )
-        app._background_job_service.fail_job(failed_job.job_id, "银行流水导入失败。", "boom")
-        app._background_job_service.succeed_job(
-            partial_job.job_id,
-            "正式配对关系部分完成。",
-            status="partial_success",
-        )
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "busy")
-        self.assertEqual(payload["background_jobs"]["attention"], 1)
-        self.assertEqual(payload["background_jobs"]["active"], 0)
-        self.assertEqual(payload["background_jobs"]["active_jobs"], [])
-        self.assertEqual(
-            [job["job_id"] for job in payload["background_jobs"]["attention_jobs"]],
-            [failed_job.job_id],
-        )
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], failed_job.job_id)
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["type"], "file_import")
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["message"], "银行流水导入失败。")
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["error"], "boom")
-        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
-        self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
-        self.assertIsNone(payload["background_jobs"]["primary_running"])
-        self.assertEqual(
-            [job["job_id"] for job in payload["background_jobs"]["jobs"]],
-            [failed_job.job_id],
-        )
-
-    def test_app_health_excludes_acknowledged_failed_job_from_active_and_attention(self) -> None:
-        app = build_application()
-        job = app._background_job_service.create_job(
-            job_type="file_import",
-            label="导入 银行流水",
-            owner_user_id="test_finops_user",
-            source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
-        )
-        app._background_job_service.fail_job(job.job_id, "银行流水导入失败。", "boom")
-        app._background_job_service.acknowledge_job(job.job_id, "test_finops_user")
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["background_jobs"]["active"], 0)
-        self.assertEqual(payload["background_jobs"]["attention"], 0)
-        self.assertIsNone(payload["background_jobs"]["primary_attention"])
-
-    def test_app_health_hides_retired_matching_attention_job(self) -> None:
-        app = build_application()
-        job = app._background_job_service.create_job(
-            job_type="workbench_matching",
-            label="生成正式配对关系",
-            owner_user_id="test_finops_user",
-            affected_months=["2026-05"],
-        )
-        app._background_job_service.succeed_job(job.job_id, "正式配对关系部分完成。", status="partial_success")
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["background_jobs"]["attention"], 0)
-        self.assertIsNone(payload["background_jobs"]["primary_attention"])
-
-    def test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable(self) -> None:
-        app = build_application()
-        job = app._background_job_service.create_job(
-            job_type="settings_data_reset",
-            label="重置 OA 数据",
-            owner_user_id="test_finops_user",
-        )
-        app._background_job_service.fail_job(job.job_id, "服务重启，任务已中断，请重新执行。", "interrupted_by_restart")
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], job.job_id)
-        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
-        self.assertFalse(payload["background_jobs"]["primary_attention"]["retryable"])
-
-    def test_app_health_excludes_succeeded_job_after_recent_success_window(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            job = app._background_job_service.create_job(
-                job_type="file_import",
-                label="导入 银行流水",
-                owner_user_id="test_finops_user",
-                source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
-            )
-            app._background_job_service.succeed_job(job.job_id, "银行流水导入完成。")
-            jobs = app._state_store.load_background_jobs()
-            old_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
-            jobs[job.job_id]["finished_at"] = old_time
-            jobs[job.job_id]["updated_at"] = old_time
-            app._state_store.save_background_job(jobs[job.job_id])
-
-            response = app.handle_request("GET", "/api/app-health")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["background_jobs"]["active"], 0)
-        self.assertEqual(payload["background_jobs"]["jobs"], [])
-
-    def test_app_health_reports_dependency_error_as_blocked(self) -> None:
-        app = build_application()
-        inject_oa_sync_runtime_status(app, outbox_status="failed", scope_key="all", last_error="OA 同步失败")
-
-        response = app.handle_request("GET", "/api/app-health")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["status"], "blocked")
-        self.assertEqual(payload["workbench_matching"]["status"], "error")
-        self.assertEqual(payload["dependencies"]["oa_sync"]["status"], "unavailable")
-        self.assertEqual(payload["alerts"]["active"][0]["kind"], "dependency_unavailable")
-
-    def test_app_health_uses_existing_auth_guard_when_session_is_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-
-            response = app.handle_request("GET", "/api/app-health")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(payload["error"], "invalid_oa_session")
-
-    def test_operations_app_health_dashboard_is_admin_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["YNSYLP006"])
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="006",
-                username="YNSYLP006",
-                nickname="普通用户",
-                display_name="普通用户",
-                roles=["finance", "finops_full_access"],
-                permissions=["finops:app:view"],
-            )
-
-            response = app.handle_request(
-                "GET",
-                "/api/operations/app-health-dashboard",
-                headers={"Authorization": "Bearer full-token"},
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "admin_only")
-
-    def test_operations_app_health_dashboard_returns_read_only_payload_for_admin(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = self._build_admin_application(data_dir=Path(temp_dir))
-            setattr(app._state_store, "_connection", FakeOperationsDashboardConnection())
-
-            response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("data_inventory", payload)
-        self.assertIn("request_performance", payload)
-        self.assertIn("runtime_performance", payload)
-        self.assertNotIn("status", payload)
-        self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
-        invoice_sources = {row["key"]: row for row in payload["data_inventory"]["invoice"]["sources"]}
-        self.assertEqual(set(invoice_sources), {"manual", "input_invoice", "output_invoice", "oa_attachment"})
-        self.assertEqual(invoice_sources["input_invoice"]["count"], 1)
-        self.assertEqual(invoice_sources["output_invoice"]["count"], 1)
-        self.assertEqual(invoice_sources["oa_attachment"]["supplementary_count"], 1)
-        oa_sources = {row["key"]: row for row in payload["data_inventory"]["oa"]["sources"]}
-        self.assertEqual(set(oa_sources), {"oa_records", "oa_records_completed", "oa_records_in_progress", "oa_items"})
-        self.assertEqual(oa_sources["oa_records_completed"]["count"], 2)
-        self.assertEqual(oa_sources["oa_records_in_progress"]["count"], 1)
-        import_source_keys = [row["source_key"] for row in payload["data_inventory"]["import_events"]]
-        self.assertEqual(import_source_keys, ["bank_transactions"])
-        self.assertNotIn("oa_attachment", import_source_keys)
-        self.assertNotIn("oa_records", import_source_keys)
-
-    def test_operations_import_history_returns_paginated_lifecycle_for_admin(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = self._build_admin_application(data_dir=Path(temp_dir))
-            setattr(app._state_store, "_connection", FakeOperationsDashboardConnection())
-
-            response = app.handle_request("GET", "/api/operations/import-history?page=1&page_size=50")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 1, "total_pages": 1})
-        self.assertEqual(payload["rows"][0]["status"], "succeeded")
-
-    def test_admin_can_withdraw_bank_import_batch_through_module_owned_service(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = self._build_admin_application(data_dir=Path(temp_dir))
-            service = FakeBankImportWithdrawalService()
-            app._bank_import_withdrawal_service_override = service
-
-            response = app.handle_request(
-                "POST",
-                "/api/imports/bank-transaction-batches/batch-bank-1/withdraw",
-                body=json.dumps({"reason": "选错银行"}),
-                request_id="request-withdraw-1",
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["withdrawn_count"], 2)
-        self.assertEqual(service.calls[0]["batch_id"], "batch-bank-1")
-        self.assertEqual(service.calls[0]["reason"], "选错银行")
-        self.assertEqual(service.calls[0]["request_id"], "request-withdraw-1")
-
-    def test_non_admin_cannot_withdraw_bank_import_batch(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["YNSYLP006"])
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="006",
-                username="YNSYLP006",
-                nickname="普通用户",
-                display_name="普通用户",
-                roles=["finance", "finops_full_access"],
-                permissions=["finops:app:view", "finops:data:mutate"],
-            )
-            service = FakeBankImportWithdrawalService()
-            app._bank_import_withdrawal_service_override = service
-
-            response = app.handle_request(
-                "POST",
-                "/api/imports/bank-transaction-batches/batch-bank-1/withdraw",
-                body=json.dumps({"reason": "选错银行"}),
-                headers={"Authorization": "Bearer full-token"},
-            )
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(service.calls, [])
-
     def test_operation_history_is_visible_to_protected_admin_and_supports_detail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self._build_admin_application(data_dir=Path(temp_dir))
@@ -1033,7 +485,6 @@ class AppHealthApiTests(unittest.TestCase):
             first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
             first_payload = json.loads(first_response.body)
             connection.import_status = "completed"
-            connection.fail_read_model_metrics = True
             current_time["value"] = 140.0
             second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
             second_payload = json.loads(second_response.body)
@@ -1041,8 +492,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(first_payload["data_inventory"]["import_events"][0]["status"], "awaiting_confirmation")
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_payload["data_inventory"]["import_events"][0]["status"], "succeeded")
-        self.assertEqual(second_payload["runtime_performance"]["read_models"], [])
-        self.assertIn("read_model_metrics_unavailable", second_payload["freshness"]["warnings"])
+        self.assertNotIn("read_models", second_payload["runtime_performance"])
         self.assertNotIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
 
     def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
@@ -1064,7 +514,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
-        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(payload["audit_contract"]["derived_tables"], [])
         self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["relation_tables"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
@@ -1089,7 +539,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["blocking_issue_sample_count"], 0)
         self.assertEqual(payload["audit_contract"]["write_policy"], "read_only")
         self.assertIn("app.invoices", payload["audit_contract"]["source_tables"])
-        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(payload["audit_contract"]["derived_tables"], [])
         self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["relation_tables"])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
@@ -1156,8 +606,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
         self.assertEqual(payload["audit_contract"]["contract_revision"], "page-audit-contract.v28")
         self.assertIn("app.bank_transactions", payload["audit_contract"]["source_tables"])
-        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
-        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        self.assertEqual(payload["audit_contract"]["derived_tables"], [])
         self.assertEqual(connection.executed, [])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertIn("app.bank_transactions", queried_sql)
@@ -1224,7 +673,6 @@ class AppHealthApiTests(unittest.TestCase):
             self.assertEqual(payload["page_key"], page_key)
             self.assertEqual(payload["domain_key"], domain_key)
             self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
-            self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
             queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
             self.assertIn("app.invoices", queried_sql)
             self.assertNotIn("job.outbox_events", queried_sql)
@@ -1245,7 +693,6 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["page_key"], "etc-tickets")
         self.assertEqual(payload["mode"], "etc-tickets-page-audit")
-        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
         self.assertTrue(payload["audit_contract"]["relation_proof_required"])
         self.assertEqual(payload["audit_contract"]["proof_availability"], "ready")
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
@@ -1270,7 +717,6 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["page_key"], "settings")
         self.assertEqual(payload["mode"], "settings-page-audit")
-        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
         self.assertFalse(payload["audit_contract"]["relation_proof_required"])
         self.assertIn("not selected", payload["audit_contract"]["secret_policy"])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
@@ -1336,8 +782,7 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["page_key"], "reconciliation-workbench")
         self.assertEqual(payload["mode"], "workbench-canonical-page-audit")
         self.assertIn("app.workbench_pair_relations", payload["audit_contract"]["source_tables"])
-        self.assertEqual(payload["audit_contract"]["read_model_tables"], [])
-        self.assertEqual(payload["audit_contract"]["registered_read_model_keys"], [])
+        self.assertEqual(payload["audit_contract"]["derived_tables"], [])
         self.assertTrue(payload["audit_contract"]["relation_proof_required"])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
         self.assertNotIn("read_model.", queried_sql)

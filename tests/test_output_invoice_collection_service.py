@@ -19,79 +19,20 @@ from fin_ops_platform.services.workbench_relation_modes import (
 )
 
 
-class FakeOutputRelationFacade:
+class FakeOutputCanonicalRelationReader:
     def __init__(self, relations: list[dict[str, Any]]) -> None:
         self._relations = relations
 
-    def get_by_row_ids(
+    def active_relations_for_row_ids(
         self,
         row_ids: list[str],
-        **_kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         wanted = set(row_ids)
-        return self._payload(
-            [
-                relation
-                for relation in self._relations
-                if wanted.intersection(relation["row_ids"])
-            ]
-        )
-
-    def list_by_month(self, _month: str, **_kwargs: Any) -> dict[str, Any]:
-        return self._payload(self._relations)
-
-    @staticmethod
-    def _payload(relations: list[dict[str, Any]]) -> dict[str, Any]:
-        groups: list[dict[str, Any]] = []
-        rows: list[dict[str, Any]] = []
-        for relation in relations:
-            case_id = relation["case_id"]
-            row_ids = list(relation["row_ids"])
-            row_types = list(relation["row_types"])
-            payload = {
-                "case_id": case_id,
-                "row_ids": row_ids,
-                "row_types": row_types,
-                "relation_status": "linked",
-                "relation_mode": relation.get("relation_mode", "manual_confirmed"),
-                "amount_check": dict(relation.get("amount_check") or {}),
-                "special_metadata": dict(relation.get("special_metadata") or {}),
-            }
-            groups.append(
-                {
-                    "group_id": case_id,
-                    "scope_month": "2026-05",
-                    "oa_row_ids": [],
-                    "bank_transaction_ids": [
-                        row_id
-                        for row_id, row_type in zip(row_ids, row_types)
-                        if row_type == "bank"
-                    ],
-                    "input_invoice_ids": [],
-                    "output_invoice_ids": [
-                        row_id
-                        for row_id, row_type in zip(row_ids, row_types)
-                        if row_type == "invoice"
-                    ],
-                    "payload": payload,
-                }
-            )
-            rows.extend(
-                {
-                    "row_id": row_id,
-                    "row_type": row_type,
-                    "relation_status": "linked",
-                    "group_ids": [case_id],
-                }
-                for row_id, row_type in zip(row_ids, row_types)
-            )
-        return {
-            "status": "fresh",
-            "rows": rows,
-            "groups": groups,
-            "source_versions": {},
-            "read_model_scope_keys": [],
-        }
+        return [
+            {**dict(relation), "status": "active"}
+            for relation in self._relations
+            if wanted.intersection(relation["row_ids"])
+        ]
 
 
 class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
@@ -275,7 +216,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],
             ),
-            relation_facade=FakeOutputRelationFacade(relations or []),
+            relation_reader=FakeOutputCanonicalRelationReader(relations or []),
         )
 
     @staticmethod

@@ -29,7 +29,7 @@ def _json_response(response) -> dict[str, object]:
 class WorkbenchStaleWriteContractTests(unittest.TestCase):
     def test_write_gate_requires_explicit_synced_status_even_without_dirty_scopes(self) -> None:
         class GateHarness:
-            _workbench_write_freshness_guard = Application._workbench_write_freshness_guard
+            _workbench_oa_sync_safety_guard = Application._workbench_oa_sync_safety_guard
 
             def __init__(self, status: str, *, dirty_scopes: list[str] | None = None) -> None:
                 self.status = status
@@ -51,14 +51,14 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
 
         for blocked_status in ("error", "refreshing", "unknown", ""):
             with self.subTest(status=blocked_status):
-                response = GateHarness(blocked_status)._workbench_write_freshness_guard({})
+                response = GateHarness(blocked_status)._workbench_oa_sync_safety_guard({})
                 self.assertIsNotNone(response)
                 status_code, payload = response
                 self.assertEqual(status_code, HTTPStatus.CONFLICT)
                 self.assertEqual(payload["error"], "workbench_stale")
-        self.assertIsNone(GateHarness("ready")._workbench_write_freshness_guard({}))
-        self.assertIsNone(GateHarness("synced")._workbench_write_freshness_guard({}))
-        response = GateHarness("ready", dirty_scopes=["2026-03"])._workbench_write_freshness_guard({})
+        self.assertIsNone(GateHarness("ready")._workbench_oa_sync_safety_guard({}))
+        self.assertIsNone(GateHarness("synced")._workbench_oa_sync_safety_guard({}))
+        response = GateHarness("ready", dirty_scopes=["2026-03"])._workbench_oa_sync_safety_guard({})
         self.assertIsNotNone(response)
 
     def _build_app(self) -> Application:

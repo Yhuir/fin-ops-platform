@@ -4,15 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
-import { waitForOperationFreshness } from "../features/operationBarrier/api";
-
-vi.mock("../features/operationBarrier/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../features/operationBarrier/api")>();
-  return {
-    ...actual,
-    waitForOperationFreshness: vi.fn(),
-  };
-});
 
 function pendingInvoiceRow(direction: "expense" | "income") {
   const isIncome = direction === "income";
@@ -162,7 +153,7 @@ afterEach(() => {
 });
 
 describe("pending invoice rule save convergence", () => {
-  test("saves expense and income rules without a write-time freshness barrier", async () => {
+  test("saves expense and income rules and directly reloads canonical rows", async () => {
     const fetchMock = installPendingInvoiceRulesSaveFetch();
     renderAppAt("/pending-invoices");
 
@@ -170,12 +161,10 @@ describe("pending invoice rule save convergence", () => {
     await waitFor(() => {
       expect(pendingInvoiceRulesPutRequests(fetchMock)).toHaveLength(1);
     });
-    expect(waitForOperationFreshness).not.toHaveBeenCalled();
 
     await saveRules("收入待找发票规则设置", "收入待找发票规则设置");
     await waitFor(() => {
       expect(pendingInvoiceRulesPutRequests(fetchMock)).toHaveLength(2);
     });
-    expect(waitForOperationFreshness).not.toHaveBeenCalled();
   }, 30_000);
 });

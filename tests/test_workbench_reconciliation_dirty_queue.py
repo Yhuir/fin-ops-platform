@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import PostgresWorkbenchMatchingQueueRepository
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import (
     WorkbenchReconciliationDirtyQueue,
     WorkbenchReconciliationDirtyQueueOptions,
@@ -320,9 +320,9 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
     def test_repository_claim_wraps_scope_claim_and_run_audit_in_one_transaction(self) -> None:
         connection = RepositoryRecordingConnection()
-        repository = PostgresReadModelRepository(connection)
+        repository = PostgresWorkbenchMatchingQueueRepository(connection)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             claimed = repository.claim_workbench_matching_dirty_scopes(
                 tenant_id="tenant-a",
                 worker_id="worker-a",
@@ -345,9 +345,9 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
     def test_repository_marks_stale_completed_matching_scopes_dirty_atomically(self) -> None:
         connection = RepositoryRecordingConnection()
-        repository = PostgresReadModelRepository(connection)
+        repository = PostgresWorkbenchMatchingQueueRepository(connection)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             marked = repository.mark_stale_workbench_matching_completed_scopes(
                 tenant_id="tenant-a",
                 source_versions={"rules": "v2"},
@@ -376,9 +376,9 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
     def test_repository_urgent_upsert_uses_earlier_time_and_preserves_processing_lease(self) -> None:
         connection = RepositoryRecordingConnection()
-        repository = PostgresReadModelRepository(connection)
+        repository = PostgresWorkbenchMatchingQueueRepository(connection)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             repository.mark_workbench_matching_dirty_scopes(
                 tenant_id="tenant-a",
                 scope_months=["2026-05"],
@@ -395,9 +395,9 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
     def test_repository_failed_scope_retry_uses_atomic_expected_state_guard(self) -> None:
         connection = RepositoryRecordingConnection()
-        repository = PostgresReadModelRepository(connection)
+        repository = PostgresWorkbenchMatchingQueueRepository(connection)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             retried = repository.retry_failed_workbench_matching_scope(
                 tenant_id="tenant-a",
                 scope_month="2025-10",
@@ -426,9 +426,9 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
     def test_repository_complete_and_fail_require_active_lease_identity(self) -> None:
         connection = RepositoryRecordingConnection()
-        repository = PostgresReadModelRepository(connection)
+        repository = PostgresWorkbenchMatchingQueueRepository(connection)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             repository.complete_workbench_matching_dirty_scope(
                 tenant_id="tenant-a",
                 scope_month="2026-03",
@@ -449,7 +449,7 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("request-1:2026-03", complete_scope_params)
         self.assertIn("tenant-a", complete_run_params)
 
-        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+        with patch("fin_ops_platform.services.postgres_repositories.workbench_matching_queue.jsonb", side_effect=lambda value: value):
             repository.fail_workbench_matching_dirty_scope(
                 tenant_id="tenant-a",
                 scope_month="2026-03",

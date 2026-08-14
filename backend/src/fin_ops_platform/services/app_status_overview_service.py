@@ -18,21 +18,9 @@ from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JO
 APP_STATUS_VERSION = 1
 ATTENTION_JOB_STATUSES = {"failed", "partial_success"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
-BUSY_READ_MODEL_STATUSES = {
-    "loading",
-    "pending",
-    "processing",
-    "refreshing",
-    "stale",
-    "missing",
-    "schema_mismatch",
-    "source_mismatch",
-}
-BLOCKED_READ_MODEL_STATUSES = {"failed", "unavailable"}
 BUSY_WORKER_STATUSES = {"stale"}
 BLOCKED_WORKER_STATUSES = {"missing", "mismatch", "unavailable"}
 FRESH_STATUSES = {"ready", "fresh", "available"}
-REFRESHING_STATUSES = {"loading", "pending", "processing", "publishing", "refreshing"}
 FAILED_STATUSES = {"failed", "unavailable", "mismatch"}
 WORKING_WORKER_STATUSES = {"working", "running", "processing"}
 
@@ -56,16 +44,10 @@ class AppStatusOverviewService:
         active_jobs: list[object],
         attention_jobs: list[object],
         app_health_snapshot: dict[str, Any],
-        read_model_statuses: dict[str, dict[str, Any]] | None = None,
         worker_statuses: dict[str, dict[str, Any]] | None = None,
         outbox_statuses: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         generated_at = self._generated_at(app_health_snapshot)
-        resolved_read_models = (
-            read_model_statuses
-            if read_model_statuses is not None
-            else self._read_model_statuses_from_snapshot(app_health_snapshot)
-        )
         resolved_workers = worker_statuses or {}
         resolved_outbox = outbox_statuses or {}
         dependencies = app_health_snapshot.get("dependencies") if isinstance(app_health_snapshot.get("dependencies"), dict) else {}
@@ -79,7 +61,6 @@ class AppStatusOverviewService:
             self._domain_payload(
                 domain,
                 generated_at=generated_at,
-                read_model_statuses=resolved_read_models,
                 worker_statuses=resolved_workers,
                 outbox_statuses=resolved_outbox,
                 dependencies=dependencies,
@@ -94,7 +75,6 @@ class AppStatusOverviewService:
             dependencies=dependencies,
             alerts=app_health_snapshot.get("alerts"),
             runtime_unavailable_reason=self._runtime_unavailable_reason(
-                resolved_read_models,
                 resolved_workers,
                 resolved_outbox,
             ),
@@ -104,7 +84,6 @@ class AppStatusOverviewService:
             "generated_at": generated_at,
             "overall": overall,
             "runtime_summary": self._runtime_summary_payload(
-                read_model_statuses=resolved_read_models,
                 worker_statuses=resolved_workers,
                 outbox_statuses=resolved_outbox,
             ),
@@ -116,51 +95,13 @@ class AppStatusOverviewService:
     def _runtime_summary_payload(
         self,
         *,
-        read_model_statuses: dict[str, dict[str, Any]],
         worker_statuses: dict[str, dict[str, Any]],
         outbox_statuses: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
         return {
-            "read_models": self._read_model_summary_payload(read_model_statuses),
             "workers": self._worker_summary_payload(worker_statuses),
             "queue": self._queue_summary_payload(outbox_statuses),
         }
-
-    def _read_model_summary_payload(self, read_model_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        counts = {
-            "total": 0,
-            "fresh": 0,
-            "refreshing": 0,
-            "stale": 0,
-            "missing": 0,
-            "failed": 0,
-            "unavailable": 0,
-            "issue_count": 0,
-            "scope_issue_count": 0,
-        }
-        for key, payload in read_model_statuses.items():
-            if key == "__runtime__" or not isinstance(payload, dict):
-                continue
-            counts["total"] += 1
-            status = self._normalize_status(payload)
-            if status in FRESH_STATUSES:
-                counts["fresh"] += 1
-            elif status in REFRESHING_STATUSES:
-                counts["refreshing"] += 1
-            elif status == "missing":
-                counts["missing"] += 1
-            elif status in {"failed", "unavailable"}:
-                counts[status] += 1
-            else:
-                counts["stale"] += 1
-            if status not in FRESH_STATUSES:
-                counts["issue_count"] += 1
-            raw_scopes = payload.get("scopes")
-            if isinstance(raw_scopes, list):
-                for scope in raw_scopes:
-                    if isinstance(scope, dict) and self._normalize_status(scope) not in FRESH_STATUSES:
-                        counts["scope_issue_count"] += 1
-        return counts
 
     def _worker_summary_payload(self, worker_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
         counts = {
@@ -229,7 +170,6 @@ class AppStatusOverviewService:
         domain: AppStatusDomainDefinition,
         *,
         generated_at: str,
-        read_model_statuses: dict[str, dict[str, Any]],
         worker_statuses: dict[str, dict[str, Any]],
         outbox_statuses: dict[str, dict[str, Any]],
         dependencies: dict[str, Any],
@@ -241,18 +181,6 @@ class AppStatusOverviewService:
             for task in tasks
             if domain.key in set(task.get("affected_domains") or [])
         ]
-        read_model_values = [
-            self._normalize_status(read_model_statuses.get(key))
-            for key in domain.read_model_keys
-        ]
-        read_model_scopes = self._read_model_scope_payloads(
-            read_model_statuses=read_model_statuses,
-            domain=domain,
-        )
-        historical_read_model_scopes = self._historical_read_model_scope_payloads(
-            read_model_statuses=read_model_statuses,
-            domain=domain,
-        )
         worker_values = [
             self._normalize_status(worker_statuses.get(key))
             for key in domain.worker_instances
@@ -265,18 +193,6 @@ class AppStatusOverviewService:
             self._normalize_dependency_status(key, dependencies.get(key))
             for key in domain.dependencies
         ]
-        for key in domain.read_model_keys:
-            status_payload = read_model_statuses.get(key) or {}
-            if not isinstance(status_payload, dict):
-                continue
-            reason = str(status_payload.get("last_error") or status_payload.get("reason") or "").strip()
-            if reason:
-                details.append(reason)
-        for scope in read_model_scopes:
-            reason = str(scope.get("last_error") or "").strip()
-            if reason:
-                scope_key = str(scope.get("scope_key") or "").strip()
-                details.append(f"{scope_key}: {reason}" if scope_key else reason)
         for key in domain.dependencies:
             dependency = dependencies.get(key)
             if isinstance(dependency, dict):
@@ -293,28 +209,23 @@ class AppStatusOverviewService:
             if warning_code:
                 details.append(warning_code)
 
-        read_model_blocked = any(status in BLOCKED_READ_MODEL_STATUSES for status in read_model_values)
-        has_blocked = read_model_blocked
-        has_blocked = has_blocked or any(status in BLOCKED_WORKER_STATUSES for status in worker_values)
+        has_blocked = any(status in BLOCKED_WORKER_STATUSES for status in worker_values)
         has_blocked = has_blocked or any(status == "unavailable" for status in dependency_values)
         has_busy = bool(domain_task_ids)
-        has_busy = has_busy or any(status in BUSY_READ_MODEL_STATUSES for status in read_model_values)
         has_busy = has_busy or any(status in BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES) for status in worker_values)
         has_busy = has_busy or any(status in {"pending", "publishing", "failed"} for status in outbox_values)
 
         if has_blocked and domain.critical:
             level = "blocked"
             status = (
-                self._first_status(read_model_values, BLOCKED_READ_MODEL_STATUSES)
-                or self._first_status(worker_values, BLOCKED_WORKER_STATUSES)
+                self._first_status(worker_values, BLOCKED_WORKER_STATUSES)
                 or "unavailable"
             )
             reason = f"{domain.label}不可用"
         elif has_busy:
             level = "busy"
             status = (
-                self._first_status(read_model_values, BUSY_READ_MODEL_STATUSES)
-                or self._first_status(worker_values, BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES))
+                self._first_status(worker_values, BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES))
                 or "refreshing"
             )
             reason = f"{domain.label}正在同步"
@@ -331,73 +242,10 @@ class AppStatusOverviewService:
             "status": status,
             "reason": reason,
             "details": self._unique(details),
-            "read_models": list(domain.read_model_keys),
-            "read_model_scopes": read_model_scopes,
-            "historical_read_model_scopes": historical_read_model_scopes,
             "workers": list(domain.worker_instances),
             "job_ids": [job_id for job_id in domain_task_ids if job_id],
             "updated_at": generated_at,
         }
-
-    def _read_model_scope_payloads(
-        self,
-        *,
-        read_model_statuses: dict[str, dict[str, Any]],
-        domain: AppStatusDomainDefinition,
-    ) -> list[dict[str, str]]:
-        payloads: list[dict[str, str]] = []
-        for key in domain.read_model_keys:
-            status_payload = read_model_statuses.get(key) or {}
-            if not isinstance(status_payload, dict):
-                continue
-            raw_scopes = status_payload.get("scopes")
-            if not isinstance(raw_scopes, list):
-                continue
-            for raw_scope in raw_scopes:
-                if not isinstance(raw_scope, dict):
-                    continue
-                payloads.append(
-                    {
-                        "read_model_key": str(raw_scope.get("read_model_key") or key).strip(),
-                        "scope_type": str(raw_scope.get("scope_type") or status_payload.get("scope_type") or "").strip(),
-                        "scope_key": str(raw_scope.get("scope_key") or "").strip(),
-                        "status": self._normalize_status(raw_scope),
-                        "last_error": str(raw_scope.get("last_error") or "").strip(),
-                        "updated_at": str(raw_scope.get("updated_at") or "").strip(),
-                    }
-                )
-        return payloads
-
-    def _historical_read_model_scope_payloads(
-        self,
-        *,
-        read_model_statuses: dict[str, dict[str, Any]],
-        domain: AppStatusDomainDefinition,
-    ) -> list[dict[str, str]]:
-        payloads: list[dict[str, str]] = []
-        for key in domain.read_model_keys:
-            status_payload = read_model_statuses.get(key) or {}
-            if not isinstance(status_payload, dict):
-                continue
-            raw_scopes = status_payload.get("historical_scopes")
-            if not isinstance(raw_scopes, list):
-                continue
-            for raw_scope in raw_scopes:
-                if not isinstance(raw_scope, dict):
-                    continue
-                payloads.append(
-                    {
-                        "read_model_key": str(raw_scope.get("read_model_key") or key).strip(),
-                        "scope_type": str(raw_scope.get("scope_type") or status_payload.get("scope_type") or "").strip(),
-                        "scope_key": str(raw_scope.get("scope_key") or "").strip(),
-                        "status": self._normalize_status(raw_scope),
-                        "last_error": str(raw_scope.get("last_error") or "").strip(),
-                        "updated_at": str(raw_scope.get("updated_at") or "").strip(),
-                        "current_effective": str(raw_scope.get("current_effective") is not False).lower(),
-                        "history_reason": str(raw_scope.get("history_reason") or "").strip(),
-                    }
-                )
-        return payloads
 
     def _task_payload(self, job: object) -> dict[str, Any]:
         raw = self._job_payload(job)
@@ -591,33 +439,9 @@ class AppStatusOverviewService:
         return combined
 
     @staticmethod
-    def _read_model_statuses_from_snapshot(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        statuses: dict[str, dict[str, Any]] = {}
-        relation = snapshot.get("workbench_relation_read_model")
-        if isinstance(relation, dict):
-            statuses["workbench_relation"] = {
-                "status": AppStatusOverviewService._workbench_status(str(relation.get("status") or "")),
-                "last_error": relation.get("last_failure_reason"),
-            }
-        return statuses
-
-    @staticmethod
-    def _workbench_status(status: str) -> str:
-        normalized = status.strip().lower()
-        if normalized == "ready":
-            return "ready"
-        if normalized == "rebuilding":
-            return "refreshing"
-        if normalized in {"error", "failed", "unavailable"}:
-            return "failed"
-        if normalized in {"stale", "refreshing", "missing"}:
-            return normalized
-        return "ready"
-
-    @staticmethod
     def _normalize_status(payload: object) -> str:
         if isinstance(payload, dict):
-            value = payload.get("status") or payload.get("read_model_status")
+            value = payload.get("status")
         else:
             value = payload
         return str(value or "ready").strip().lower() or "ready"

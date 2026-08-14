@@ -8,7 +8,6 @@ import unittest
 from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
@@ -114,125 +113,8 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
             self.connection.fetch_one("select count(*)::integer as count from job.outbox_events")["count"],
             0,
         )
-        self.assertEqual(
-            self.connection.fetch_one("select count(*)::integer as count from job.read_model_dirty_scopes")["count"],
-            0,
-        )
-
-    def test_partial_relation_projection_removes_stale_members_from_replaced_group(self) -> None:
-        repository = PostgresReadModelRepository(self.connection)
-        repository.save_workbench_relation_distribution(
-            scope_key="2026-02",
-            groups=[
-                {
-                    "group_id": "turnover:target",
-                    "relation_source": "manual",
-                    "relation_kind": "turnover_manual_closure",
-                    "relation_status": "linked",
-                    "oa_row_ids": ["oa-stale"],
-                    "bank_transaction_ids": ["bank-target"],
-                },
-                {
-                    "group_id": "case:unrelated",
-                    "relation_source": "manual",
-                    "relation_kind": "bank_invoice",
-                    "relation_status": "linked",
-                    "input_invoice_ids": ["invoice-unrelated"],
-                },
-            ],
-            rows=[
-                {
-                    "row_id": "bank-target",
-                    "row_type": "bank_transaction",
-                    "relation_status": "linked",
-                    "group_ids": ["turnover:target"],
-                },
-                {
-                    "row_id": "oa-stale",
-                    "row_type": "oa",
-                    "relation_status": "linked",
-                    "group_ids": ["turnover:target"],
-                },
-                {
-                    "row_id": "invoice-unrelated",
-                    "row_type": "input_invoice",
-                    "relation_status": "linked",
-                    "group_ids": ["case:unrelated"],
-                },
-            ],
-            source_versions={"workbench_relation_source_version": 1},
-        )
-
-        repository.save_workbench_relation_distribution_rows(
-            scope_key="2026-02",
-            affected_row_ids=["bank-target"],
-            groups=[
-                {
-                    "group_id": "turnover:target",
-                    "relation_source": "manual",
-                    "relation_kind": "turnover_manual_closure",
-                    "relation_status": "linked",
-                    "bank_transaction_ids": ["bank-target"],
-                }
-            ],
-            rows=[
-                {
-                    "row_id": "bank-target",
-                    "row_type": "bank_transaction",
-                    "relation_status": "linked",
-                    "group_ids": ["turnover:target"],
-                },
-                {
-                    "row_id": "oa-stale",
-                    "row_type": "oa",
-                    "relation_status": "unlinked",
-                    "group_ids": [],
-                },
-            ],
-            source_versions={"workbench_relation_source_version": 2},
-        )
-
-        rows = self.connection.fetch_all(
-            """
-            select row_id, group_ids
-            from read_model.workbench_relation_rows
-            where tenant_id = 'default' and scope_key = '2026-02'
-            order by row_id
-            """
-        )
-        groups = self.connection.fetch_all(
-            """
-            select group_id, oa_row_ids, bank_transaction_ids, input_invoice_ids
-            from read_model.workbench_relation_groups
-            where tenant_id = 'default' and scope_key = '2026-02'
-            order by group_id
-            """
-        )
-
-        self.assertEqual(
-            rows,
-            [
-                {"row_id": "bank-target", "group_ids": ["turnover:target"]},
-                {"row_id": "invoice-unrelated", "group_ids": ["case:unrelated"]},
-                {"row_id": "oa-stale", "group_ids": []},
-            ],
-        )
-        self.assertEqual(
-            groups,
-            [
-                {
-                    "group_id": "case:unrelated",
-                    "oa_row_ids": [],
-                    "bank_transaction_ids": [],
-                    "input_invoice_ids": ["invoice-unrelated"],
-                },
-                {
-                    "group_id": "turnover:target",
-                    "oa_row_ids": [],
-                    "bank_transaction_ids": ["bank-target"],
-                    "input_invoice_ids": [],
-                },
-            ],
+        self.assertIsNone(
+            self.connection.fetch_one("select to_regclass('job.read_model_dirty_scopes') as relation")["relation"]
         )
 
     def test_relation_command_delta_appends_history_without_rewriting_existing_events(self) -> None:

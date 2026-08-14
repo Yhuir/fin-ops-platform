@@ -26,7 +26,6 @@ import type {
   OperationsDashboardPayload,
   OperationsImportHistoryPayload,
   OperationsDashboardPercentiles,
-  OperationsDashboardReadModelMetric,
 } from "../features/appHealth/types";
 
 const EMPTY_VALUE = "--";
@@ -162,49 +161,6 @@ function PercentileCells({ value }: { value: OperationsDashboardPercentiles }) {
       <PerformanceCell value={value.p99} kind="p99" />
     </>
   );
-}
-
-function sampleLabel(row: OperationsDashboardReadModelMetric) {
-  const sampleCount = row.refresh_duration_windows?.recent_15m?.sample_count;
-  if (sampleCount === null || sampleCount === undefined) {
-    return EMPTY_VALUE;
-  }
-  return formatNumber(sampleCount);
-}
-
-function latestScopeEvidence(row: OperationsDashboardReadModelMetric) {
-  return row.scope_evidence?.[0];
-}
-
-function scopeEvidenceTitle(row: OperationsDashboardReadModelMetric) {
-  const evidence = latestScopeEvidence(row);
-  if (!evidence) {
-    return "暂无 scope 运行证据";
-  }
-  return JSON.stringify({
-    expected_source_version: evidence.expected_source_version,
-    projection_status: evidence.projection_status,
-    projection_source_versions: evidence.projection_source_versions,
-    lag_seconds: evidence.lag_seconds,
-    queue_wait_ms: evidence.queue_wait_ms,
-    handler_duration_ms: evidence.handler_duration_ms,
-    retry_count: evidence.retry_count,
-    dedupe_reason: evidence.dedupe_reason,
-    last_error: evidence.last_error,
-  });
-}
-
-function readModelState(row: OperationsDashboardReadModelMetric) {
-  if ((row.unavailable_count ?? 0) > 0) {
-    return { label: "failed", tone: "danger" as const };
-  }
-  if ((row.stale_count ?? 0) > 0) {
-    return { label: "refreshing", tone: "warning" as const };
-  }
-  if (row.status === "unknown") {
-    return { label: "unknown", tone: "neutral" as const };
-  }
-  return { label: "fresh", tone: "success" as const };
 }
 
 function workerState(row: OperationsDashboardPayload["runtime_performance"]["workers"][number]) {
@@ -373,24 +329,11 @@ function AppHealthSystemAuditPanel({
 }
 
 function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
-  const readModels = payload.runtime_performance.read_models;
   const workers = payload.runtime_performance.workers;
-  const staleReadModels = readModels.reduce((total, row) => total + (row.stale_count ?? 0), 0);
-  const unavailableReadModels = readModels.reduce((total, row) => total + (row.unavailable_count ?? 0), 0);
   const workerIssues = workers.filter((row) => row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch").length;
   const outbox = payload.runtime_performance.outbox;
   const queueBacklog = (outbox.pending_count ?? 0) + (outbox.publishing_count ?? 0) + (outbox.failed_count ?? 0) + (outbox.publish_failed_count ?? 0);
   const rows = [
-    {
-      key: "read-models",
-      label: "Read model",
-      value: unavailableReadModels > 0
-        ? `${unavailableReadModels} failed`
-        : staleReadModels > 0
-          ? `${staleReadModels} refreshing`
-          : `fresh ${readModels.length}`,
-      tone: unavailableReadModels > 0 ? "danger" as const : staleReadModels > 0 ? "warning" as const : "success" as const,
-    },
     {
       key: "workers",
       label: "Worker",
@@ -706,58 +649,6 @@ function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
   );
 }
 
-function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }) {
-  return (
-    <FinanceTable ariaLabel="Read Model 状态" minWidth={1160}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>Read Model</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">15m p95</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">15m p99</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">历史 p95</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">15m 样本</FinanceTableColumn>
-        <FinanceTableColumn columnRole="date">最近完成</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">最近 scope</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">queue / handler / retry</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">stale</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">unavailable</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody>
-          {rows.map((row) => (
-            (() => {
-              const state = readModelState(row);
-              const evidence = latestScopeEvidence(row);
-              return (
-                <FinanceTableRow key={row.key} id={row.key}>
-                  <FinanceTableCell columnRole="identity" textValue={row.key}>{row.key}</FinanceTableCell>
-                  <FinanceTableCell columnRole="status"><FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag></FinanceTableCell>
-                  <PercentileCells value={row.refresh_duration_ms} />
-                  <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
-                  <FinanceTableCell columnRole="quantity">{sampleLabel(row)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="date">{formatTimestamp(row.refresh_duration_windows?.recent_15m?.last_completed_at)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="description" textValue={evidence?.scope_key ?? EMPTY_VALUE}>
-                    <span title={scopeEvidenceTitle(row)}>
-                      {evidence
-                        ? `${evidence.operation_class === "full_history_batch" ? "全量" : "当前"} ${evidence.scope_key}`
-                        : EMPTY_VALUE}
-                    </span>
-                  </FinanceTableCell>
-                  <FinanceTableCell columnRole="description">
-                    {evidence
-                      ? `${formatMs(evidence.queue_wait_ms)} / ${formatMs(evidence.handler_duration_ms)} / r${evidence.retry_count}`
-                      : EMPTY_VALUE}
-                  </FinanceTableCell>
-                  <FinanceTableCell columnRole="quantity">{formatNumber(row.stale_count)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="quantity">{formatNumber(row.unavailable_count)}</FinanceTableCell>
-                </FinanceTableRow>
-              );
-            })()
-          ))}
-      </FinanceTableBody>
-    </FinanceTable>
-  );
-}
-
 function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
     <FinanceTable ariaLabel="Worker 状态" minWidth={900}>
@@ -810,10 +701,7 @@ function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }
         <OutboxTable payload={payload} />
         <QueueTable payload={payload} />
       </div>
-      <div className="app-health-runtime-grid app-health-runtime-grid--secondary">
-        <ReadModelTable rows={payload.runtime_performance.read_models} />
-        <WorkerTable payload={payload} />
-      </div>
+      <WorkerTable payload={payload} />
     </Section>
   );
 }

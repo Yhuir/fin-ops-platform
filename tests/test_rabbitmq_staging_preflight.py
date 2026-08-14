@@ -68,7 +68,9 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertEqual(dispatcher_env["RABBITMQ_URL"], env["RABBITMQ_TEST_URL"])
         dispatcher_command = runner.calls[3][0]
         self.assertIn("--event-type", dispatcher_command)
-        self.assertIn("workbench_relation.read_model.refresh", dispatcher_command)
+        self.assertIn("oa.sync", dispatcher_command)
+        self.assertIn("import.process.requested", dispatcher_command)
+        self.assertFalse(any(str(value).endswith(".read_model.refresh") for value in dispatcher_command))
         self.assertNotIn("search.read_model.refresh", dispatcher_command)
         self.assertNotIn("no_oa_bank_batch.read_model.refresh", dispatcher_command)
         self.assertNotIn("bank_flow_rule_batch.read_model.refresh", dispatcher_command)

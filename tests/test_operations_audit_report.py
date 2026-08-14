@@ -29,10 +29,10 @@ class OperationsAuditReportTests(unittest.TestCase):
         )
         self.assertEqual(connection.transaction_count, 1)
 
-    def test_reports_samples_and_separates_freshness_from_integrity(self) -> None:
+    def test_reports_bounded_integrity_samples(self) -> None:
         evaluation = evaluate_audit_issues(
             [
-                AuditIssue("error", "read_model_scope_not_fresh", "scope pending"),
+                AuditIssue("error", "canonical_row_missing", "canonical row missing"),
                 AuditIssue("error", "row_mismatch", "row mismatch", subject_id="row-1"),
                 AuditIssue("error", "row_mismatch", "row mismatch", subject_id="row-2"),
             ],
@@ -42,12 +42,12 @@ class OperationsAuditReportTests(unittest.TestCase):
         self.assertEqual(evaluation.overall_status, "issues_found")
         self.assertEqual(
             evaluation.audit_status,
-            {"integrity": "issues_found", "freshness": "not_fresh", "queue": "drained"},
+            {"integrity": "issues_found", "freshness": "fresh", "queue": "drained"},
         )
         self.assertEqual(evaluation.summary["blocking_issue_sample_count"], 2)
         self.assertEqual(
             evaluation.summary["issue_sample_counts_by_code"],
-            {"read_model_scope_not_fresh": 1, "row_mismatch": 1},
+            {"canonical_row_missing": 1, "row_mismatch": 1},
         )
         self.assertTrue(evaluation.summary["issue_samples_truncated"])
 

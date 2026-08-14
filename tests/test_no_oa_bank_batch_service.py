@@ -50,8 +50,6 @@ def relation_command_service_for(pair_relation_service: WorkbenchPairRelationSer
             load_snapshot=pair_relation_service.snapshot,
             save_snapshot=save_snapshot,
         ),
-        relation_facade=FreshNoOaRelationFacade(),
-        require_fresh_relations=False,
     )
 
 

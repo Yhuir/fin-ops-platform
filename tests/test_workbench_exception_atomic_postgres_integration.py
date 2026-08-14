@@ -227,7 +227,6 @@ class WorkbenchExceptionAtomicPostgresIntegrationTests(unittest.TestCase):
                     pair_relation_service=pair_service,
                     repository=repository,
                 ),
-                require_fresh_relations=False,
             )
 
         exception_service = WorkbenchExceptionApplicationService(

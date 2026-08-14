@@ -27,7 +27,6 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -65,7 +64,7 @@ class InputInvoiceUsageQueryService:
     Source-of-truth boundaries:
     - input invoices and line items come from ImportNormalizationService Invoice facts;
     - bank summaries/details come from ImportNormalizationService BankTransaction facts;
-    - relation evidence comes only from WorkbenchRelationReadFacade distribution;
+    - relation evidence comes from canonical active pair relations;
     - OA summaries/details come from the injected OA projection when available. Without a
       stable projection, OA detail is represented as detailAvailable=false.
     """
@@ -74,14 +73,13 @@ class InputInvoiceUsageQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        relation_facade: WorkbenchRelationReadFacade | None = None,
+        relation_reader: Any | None = None,
         oa_projection: Any | None = None,
         payment_rules_provider: InputInvoiceUsagePaymentRulesProvider | None = None,
         lifecycle_policy: Any | None = None,
-        require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
-        self._relation_facade = relation_facade
+        self._relation_reader = relation_reader
         self._oa_projection = oa_projection
         if payment_rules_provider is None and lifecycle_policy is None:
             raise ValueError("payment_rules_provider is required for input invoice usage payment status rules.")
@@ -89,7 +87,6 @@ class InputInvoiceUsageQueryService:
         self._lifecycle_policy = lifecycle_policy or InvoiceLifecyclePolicy(
             input_payment_rules_provider=payment_rules_provider,
         )
-        self._require_fresh_relations = require_fresh_relations
 
     def list_rows(
         self,
@@ -214,10 +211,9 @@ class InputInvoiceUsageQueryService:
     def _query_context(self, *, month_hint: str | None = None) -> DistributedInvoiceRelationContext:
         return DistributedInvoiceRelationContext(
             import_service=self._import_service,
-            relation_facade=self._relation_facade,
+            relation_reader=self._relation_reader,
             oa_projection=self._oa_projection,
             month_hint=month_hint,
-            require_fresh_relations=self._require_fresh_relations,
         )
 
     def _filtered_sorted_rows(

@@ -422,7 +422,6 @@ class WorkbenchMatchingOrchestrator:
             relation_repository=context.pair_relations,
             etc_batch_link_repository=context.etc_batch_links,
             idempotency_store=context.idempotency_store,
-            require_fresh_relations=False,
         )
 
     def _source_versions(self) -> dict[str, object]:

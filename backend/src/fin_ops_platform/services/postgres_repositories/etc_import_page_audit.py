@@ -148,7 +148,7 @@ def _audit_etc_import_snapshot(
                 "job.import_jobs",
                 "job.outbox_events",
             ],
-            "read_model_tables": [],
+            "derived_tables": [],
             "canonical_expected_set": (
                 "every version-registered ETC import preview session and original ZIP file, all task-bound preview match edges, "
                 "all terminal session business/import-batch/ETC-invoice edges, and the complete ETC tickets canonical closure"

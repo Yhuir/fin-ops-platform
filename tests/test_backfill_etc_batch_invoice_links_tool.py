@@ -107,14 +107,6 @@ class _SchemaProbeConnection:
         return {"table_name": self.table_name}
 
 
-class _QueueRepository:
-    def __init__(self) -> None:
-        self.enqueued: list[dict[str, object]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.enqueued.append(dict(kwargs))
-
-
 class _MatchingDirtyRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -141,7 +133,6 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
 
     def test_apply_requires_reason_and_operator_and_only_applies_auto_candidates(self) -> None:
         connection = _BackfillConnection()
-        queue = _QueueRepository()
         matching = _MatchingDirtyRepository()
         report = audit_etc_batch_invoice_link_backfill(connection=connection, example_limit=10)
 
@@ -155,18 +146,12 @@ class BackfillEtcBatchInvoiceLinksToolTests(unittest.TestCase):
             auto_backfill_candidates=report["auto_backfill_candidates"],
             reason="unit",
             operator="tester",
-            queue_repository=queue,
             matching_dirty_repository=matching,
         )
 
         self.assertEqual(result["requested_count"], 1)
         self.assertEqual(result["linked_count"], 1)
         self.assertEqual(result["affected_months"], ["2026-02"])
-        self.assertEqual(result["workbench_relation_scopes"], ["2026-02"])
-        self.assertEqual(
-            [(item["scope_type"], item["scope_key"], item["priority"]) for item in queue.enqueued],
-            [("workbench_relation", "2026-02", "high")],
-        )
         self.assertEqual(
             matching.calls,
             [

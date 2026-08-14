@@ -92,7 +92,7 @@
 ## 生产验证
 
 - 发布入口:
-- Freshness/dirty scope 检查:
+- Canonical API / 领域队列检查:
 - 可控写操作样本:
 - 回滚方式:
 - 已知风险:

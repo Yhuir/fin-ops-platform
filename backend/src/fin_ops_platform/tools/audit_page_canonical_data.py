@@ -13,7 +13,7 @@ from fin_ops_platform.services.postgres_connection import (
 )
 from fin_ops_platform.services.postgres_repositories.page_business_audit import (
     PAGE_AUDIT_CONTRACTS,
-    audit_page_business_read_model,
+    audit_page_canonical_data,
 )
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import (
     COST_STATISTICS_AUDIT_DOMAIN_KEY,
@@ -23,7 +23,7 @@ from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_re
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only page business read-model audit.")
+    parser = argparse.ArgumentParser(description="Read-only canonical page-data audit.")
     parser.add_argument(
         "domain_key",
         choices=sorted((*PAGE_AUDIT_CONTRACTS, COST_STATISTICS_AUDIT_DOMAIN_KEY)),
@@ -47,7 +47,7 @@ def main(
         active_connection = connection or _connection_from_env()
     except PostgresConfigurationError as exc:
         report = postgres_configuration_missing_report(
-            tool="audit_page_business_read_model",
+            tool="audit_page_canonical_data",
             message=str(exc),
         )
         report["required_env"] = [
@@ -64,7 +64,7 @@ def main(
             example_limit=max(int(args.limit or 50), 1),
         )
     else:
-        report = audit_page_business_read_model(
+        report = audit_page_canonical_data(
             active_connection,
             domain_key=str(args.domain_key),
             tenant_id=str(args.tenant_id or "default"),

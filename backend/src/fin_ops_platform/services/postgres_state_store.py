@@ -28,9 +28,9 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresEtcImportSessionRepository,
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
-    PostgresReadModelRepository,
     PostgresSettingsDataResetRepository,
     PostgresWorkbenchRelationRepository,
+    PostgresWorkbenchMatchingQueueRepository,
     PostgresWorkbenchRepository,
 )
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
@@ -44,7 +44,6 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
 )
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.state_store_protocol import default_settings_access_control
-from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
 
 APP_SETTINGS_KEY = "app_settings"
 GRIDFS_REF_PREFIX = "gridfs://"
@@ -57,13 +56,6 @@ class _ReadyHealthRabbitMqMetricsUnavailable:
             "rabbitmq_management_configured": False,
             "rabbitmq_metric_error": "ready_health_rabbitmq_metrics_skipped",
         }
-
-
-def _base_read_model_scope_key(scope_key: object) -> str:
-    normalized = str(scope_key or "").strip()
-    if normalized.startswith("visibility:"):
-        return normalized.rsplit(":", 1)[-1].strip() or "all"
-    return normalized or "all"
 
 
 def _default_app_settings_payload() -> dict[str, Any]:
@@ -152,14 +144,12 @@ class PostgresStateStore:
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._etc_import_session_repository = PostgresEtcImportSessionRepository(connection)
-        self._read_model_repository = PostgresReadModelRepository(connection)
-        self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
+        self._workbench_matching_queue_repository = PostgresWorkbenchMatchingQueueRepository(connection)
         self._bank_flow_rule_batch_canonical_query_repository = (
             BankFlowRuleBatchCanonicalQueryRepository(self._sql_read_connection)
             if callable(getattr(self._sql_read_connection, "transaction", None))
             else None
         )
-        self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
@@ -226,45 +216,9 @@ class PostgresStateStore:
                 "last_error": str(exc) or exc.__class__.__name__,
             }
             return {
-                "read_model_statuses": {"__runtime__": dict(payload)},
                 "worker_statuses": {"__runtime__": dict(payload)},
                 "outbox_statuses": {"__runtime__": dict(payload)},
             }
-
-    def operation_barrier_runtime_snapshot(
-        self,
-        targets: list[dict[str, str]],
-    ) -> dict[str, dict[str, dict[str, Any]]]:
-        return RuntimeMonitoringRepository(self._connection).operation_barrier_runtime_snapshot(targets)
-
-    def record_read_model_readiness(
-        self,
-        *,
-        read_model_key: str,
-        scope_type: str,
-        scope_key: str,
-        status: str,
-        tenant_id: str = "default",
-        schema_version: str = "",
-        source_versions: dict[str, Any] | None = None,
-        row_count: int | None = None,
-        generated_at: object | None = None,
-        last_error: str | None = None,
-        raw_payload: dict[str, Any] | None = None,
-    ) -> None:
-        RuntimeMonitoringRepository(self._connection).record_read_model_readiness(
-            read_model_key=read_model_key,
-            scope_type=scope_type,
-            scope_key=scope_key,
-            status=status,
-            tenant_id=tenant_id,
-            schema_version=schema_version,
-            source_versions=source_versions,
-            row_count=row_count,
-            generated_at=generated_at,
-            last_error=last_error,
-            raw_payload=raw_payload,
-        )
 
     @property
     def oa_projection_repository(self) -> PostgresOAProjectionRepository:
@@ -1050,8 +1004,8 @@ class PostgresStateStore:
         return self._core_repository
 
     @property
-    def read_model_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+    def workbench_matching_queue_repository(self) -> PostgresWorkbenchMatchingQueueRepository:
+        return self._workbench_matching_queue_repository
 
     @property
     def bank_transaction_category_repository(self) -> PostgresBankTransactionCategoryRepository:
@@ -1060,10 +1014,6 @@ class PostgresStateStore:
     @property
     def workbench_relation_repository(self) -> PostgresWorkbenchRelationRepository:
         return self._workbench_relation_repository
-
-    @property
-    def workbench_relation_sql_read_repository(self) -> WorkbenchRelationReadModelRepositoryPort:
-        return self._workbench_relation_sql_read_repository
 
     @property
     def bank_flow_rule_batch_canonical_query_repository(

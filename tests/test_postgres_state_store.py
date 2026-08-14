@@ -317,7 +317,7 @@ class PostgresStateStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(PostgresConfigurationError, "requires FIN_OPS_POSTGRES_DATABASE_URL or DATABASE_URL"):
                 build_state_store(Path(temp_dir))
 
-    def test_read_model_repositories_use_optional_read_connection(self) -> None:
+    def test_matching_queue_uses_primary_write_connection(self) -> None:
         with TemporaryDirectory() as temp_dir:
             write_connection = FakePostgresConnection()
             read_connection = FakePostgresConnection()
@@ -327,14 +327,8 @@ class PostgresStateStoreTests(unittest.TestCase):
                 sql_read_connection=read_connection,
             )
 
-        self.assertIs(store.workbench_relation_sql_read_repository._repository._connection, read_connection)
-        self.assertFalse(hasattr(store, "search_sql_read_repository"))
-        self.assertFalse(hasattr(store, "cost_statistics_sql_read_repository"))
-        self.assertFalse(hasattr(store, "tax_offset_sql_read_repository"))
-        self.assertFalse(hasattr(store, "input_invoice_usage_sql_read_repository"))
-        self.assertFalse(hasattr(store, "output_invoice_collection_sql_read_repository"))
-        self.assertFalse(hasattr(store, "no_oa_bank_batch_sql_read_repository"))
-        self.assertIs(store._read_model_repository._connection, write_connection)
+        self.assertIs(store.workbench_matching_queue_repository._connection, write_connection)
+        self.assertIs(store._sql_read_connection, read_connection)
 
     def test_ready_health_summary_uses_lightweight_runtime_summary(self) -> None:
         with TemporaryDirectory() as temp_dir:

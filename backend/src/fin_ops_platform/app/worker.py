@@ -44,10 +44,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice impor
     PostgresOAAttachmentInvoiceRepository,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
-from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
-from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
@@ -73,12 +70,6 @@ from fin_ops_platform.services.runtime_worker_registry import (
     worker_claim_event_types,
     worker_registrations,
 )
-from fin_ops_platform.services.workbench_relation_read_model_refresh import (
-    WORKBENCH_RELATION_REFRESH_EVENT_TYPE,
-    WorkbenchRelationReadModelRefreshService,
-)
-from fin_ops_platform.services.workbench_relation_read_model_repository import WorkbenchRelationReadModelRepositoryPort
-from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
 
 APP_SETTINGS_KEY = "app_settings"
 OA_IMPORT_FORM_TYPES = {"payment_request", "expense_claim"}
@@ -100,13 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-interval-seconds", type=float, default=DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
-    parser.add_argument("--dependency-not-fresh-delay-seconds", type=float, default=2.0)
     parser.add_argument("--max-attempts", type=int, default=5)
     parser.add_argument("--task-timeout-seconds", type=int, default=None)
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
     parser.add_argument("--max-events-per-iteration", type=int, default=1, help="Maximum events to drain before an idle sleep.")
-    parser.add_argument("--enable-workbench-relation-read-model-refresh", action="store_true", help="Register workbench relation distribution read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--enable-settings-maintenance", action="store_true", help="Register durable settings maintenance handler.")
@@ -132,17 +121,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     registration = _apply_registration_args(args, queue_settings=queue_settings)
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
-    read_model_repository = PostgresReadModelRepository(connection) if connection is not None else None
-    workbench_relation_projection_builder = (
-        WorkbenchRelationSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=WorkbenchRelationReadModelRepositoryPort(
-                read_model_repository
-            ),
-        )
-        if read_model_repository is not None
-        else None
-    )
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
@@ -151,7 +129,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         poll_interval_seconds=args.poll_interval_seconds,
         lock_timeout_seconds=args.lock_timeout_seconds,
         retry_delay_seconds=args.retry_delay_seconds,
-        dependency_not_fresh_delay_seconds=args.dependency_not_fresh_delay_seconds,
         task_timeout_seconds=args.task_timeout_seconds,
         statement_timeout_seconds=args.statement_timeout_seconds,
         max_iterations=args.max_iterations,
@@ -162,15 +139,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         exclude_claim_scope_keys=list(args.exclude_claim_scope_key or []),
     )
     _apply_statement_timeout(queue, config.statement_timeout_seconds)
-    readiness_reporter = (
-        ReadModelReadinessReporter(readiness_repository=RuntimeMonitoringRepository(connection))
-        if connection is not None
-        else None
-    )
-
-    def _read_model_handler(handler: Any) -> Any:
-        return readiness_reporter.wrap_handler(handler) if readiness_reporter is not None else handler
-
     oa_payment_source_adapter: Any | None = None
 
     def _oa_payment_source_adapter() -> Any | None:
@@ -212,7 +180,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connection,
                 relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
                     relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                    require_fresh_relations=False,
                 ),
             )
             if payment_status_repository is not None
@@ -234,23 +201,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
-    if args.enable_workbench_relation_read_model_refresh:
-        projection_builder = (
-            workbench_relation_projection_builder
-            or WorkbenchRelationSqlProjectionBuilder(
-                connection=connection,
-                read_model_repository=WorkbenchRelationReadModelRepositoryPort(
-                    read_model_repository
-                ),
-            )
-        )
-        refresh_service = WorkbenchRelationReadModelRefreshService(
-            projection_builder=projection_builder,
-            queue_repository=queue,
-        )
-        handlers[WORKBENCH_RELATION_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
-        if WORKBENCH_RELATION_REFRESH_EVENT_TYPE not in config.event_types:
-            config.event_types.append(WORKBENCH_RELATION_REFRESH_EVENT_TYPE)
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()

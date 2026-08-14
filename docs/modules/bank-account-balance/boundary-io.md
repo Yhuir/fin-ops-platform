@@ -63,4 +63,4 @@
 - `bank_account_balance_read_model_repository.py`、refresh/producer、derived lifecycle、backfill 和旧 projection 已删除。
 - manifest、scope policy、worker registry/handler、App Status、deploy env 和 RabbitMQ 条目已删除。
 - `BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL` 位于 `bank_account_balance_canonical_rows.py`，是 direct query 的唯一余额算法。
-- 历史 projection migration/表暂留作回滚证据，没有运行时 reader/writer。
+- 历史 migration 文件保留为不可变迁移记录；migration `0149` 删除遗留 projection schema，没有运行时或物理 projection owner。

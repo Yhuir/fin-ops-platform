@@ -223,8 +223,6 @@ def public_invoice_header_fact_repair_report(
         "rollback_manifest": plan["rollback_manifest"],
         "authorized_write_scope": [
             "app.invoices",
-            "job.outbox_events",
-            "job.read_model_dirty_scopes",
             "ops.operation_events",
         ],
     }

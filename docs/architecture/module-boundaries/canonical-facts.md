@@ -7,10 +7,10 @@
 - 每类业务事实只有一个业务 owner。
 - 写入必须经过 owner 的 command service、application service、facade、UoW、repository port 或明确 adapter。
 - 非 owner 只能通过公开 read port/query service 读取；直接 SQL 读取必须在 owner 模块 `boundary-io.md` 登记。
-- 写入后必须明确输出 domain event、dirty scope、affected scopes/months、operation barrier target 或说明不适用。
+- 写入后必须明确输出 domain job、affected objects/scopes/months 或说明不适用。
 - 旧生产 source-of-truth 路径必须删除。migration、audit、rollback 工具如果暂时保留，必须隔离在生产 API/worker 主链路之外；保留状态不算 closure。
 
-不要把本文理解成一个新的运行时代码模块。`canonical-facts` 是治理边界和 ownership matrix，不是 `UnifiedFactSource` service。业务事实仍归属现有业务模块；`read-models` 继续只管理派生投影、freshness、refresh 和 operation barrier。
+不要把本文理解成一个新的运行时代码模块。`canonical-facts` 是治理边界和 ownership matrix，不是 `UnifiedFactSource` service。业务事实仍归属现有业务模块；`read-models` 仅保留退役防回归合同。
 
 ## 事实分层
 
@@ -18,8 +18,7 @@
 | --- | --- | --- | --- |
 | 外部事实 | OA Mongo、Excel/PDF/ZIP、银行导出文件 | 外部系统或导入文件 | app 只读接入或导入，不写外部原始库。 |
 | Canonical facts | `app.invoices`、`app.bank_transactions`、`app.workbench_pair_relations` | 现有业务模块 | 业务唯一真相，写入必须经过 owner 边界。 |
-| Runtime/audit facts | `job.outbox_events`、`job.read_model_dirty_scopes`、`job.background_jobs`、`audit.events`、`audit.external_control_evidence*` | runtime-workers / read-models / permissions-and-audit | 描述任务、刷新、审计和外部 complete-snapshot 对照证据，不替代业务事实；外部 manifest 不允许由 App canonical rows 反向生成后自证。 |
-| Read models | `read_model.*` 页面投影 | read-models + 各 query/projection owner | 派生投影，只能从 canonical facts 或上游 fresh read model 生成。 |
+| Runtime/audit facts | `job.outbox_events`、`job.background_jobs`、attempt/heartbeat、`audit.events`、`audit.external_control_evidence*` | runtime-workers / permissions-and-audit | 描述任务、审计和外部 complete-snapshot 对照证据，不替代业务事实；外部 manifest 不允许由 App canonical rows 反向生成后自证。 |
 | Cache / transport / UI hints | Redis、RabbitMQ、frontend event | runtime/UI | 只做缓存、唤醒、传输或刷新提示。 |
 
 ## 全局规则
@@ -31,7 +30,7 @@
 5. 其它模块需要读取时，优先使用 owner 暴露的 read facade、query service 或 repository port；直接 SQL 读取必须写入对应模块 `boundary-io.md` 的允许路径。
 6. 生产 API/worker 主路径不得把 legacy full snapshot、local pickle、`state:*` JSON、Mongo app snapshot 或 GridFS fallback 当作业务事实源。
 7. `read_model.*`、Redis cache、RabbitMQ message 和前端 domain event 不得反向成为业务事实源。
-8. 同事务 writer 可以写 dirty scope/outbox，但必须承担与 07 read model closure 等价的 scope contract。本文不重新设计 read model runtime。
+8. 同事务 writer 只为明确 domain job 写 outbox；页面 GET 和普通跨页刷新不得写任务。
 9. repair、migration、audit、rollback 工具可以读取或修复 facts，但必须有 dry-run、审计、回滚策略和明确 owner，且不得成为生产主链路。
 10. `app.bank_transactions` 与 `app.invoices` 的身份、金额、日期、账户等受保护事实不得静默覆盖或删除；修正必须在同一数据库事务设置 actor/reason，并追加 `app.financial_fact_corrections` 与 `audit.events`。缺少 reason 时数据库拒绝写入。
 11. `audit.events`、`app.financial_fact_corrections` 与 `app.workbench_pair_relation_history` 是追加型历史事实，生产角色不得更新或删除；当前态关系仍由 `app.workbench_pair_relations` 的正式 command/UoW 管理。
@@ -40,7 +39,7 @@
 
 | Canonical fact family | PostgreSQL facts | Owner module | 允许写入口 | 允许读入口 | 下游输出 | 禁止路径 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 导入批次和文件 | `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` | `imports-bank-transactions`、`imports-invoices`、`imports-etc-invoices` | import preview/confirm/job、PostgreSQL object storage write path | import fact repository、导入 API | import job、affected months、read model dirty/outbox | production bootstrap 读取 full snapshot；临时 SQL 直接写正式导入事实；恢复 legacy GridFS migration worker。 |
+| 导入批次和文件 | `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` | `imports-bank-transactions`、`imports-invoices`、`imports-etc-invoices` | import preview/confirm/job、PostgreSQL object storage write path | import fact repository、导入 API | import job、affected months、matching domain work | production bootstrap 读取 full snapshot；临时 SQL 直接写正式导入事实；恢复 legacy GridFS migration worker。 |
 | 统一发票池 | `app.invoices` | `imports-invoices` / canonical invoice pool | `ImportNormalizationService`、受控 OA 附件票 promotion、受控 ETC existing-link | invoice query/context ports、业务 owner API | workbench、pending invoice、invoice lifecycle、tax、cost、search refresh | ETC metadata 或 OA cache 绕过发票池 owner 创建第二发票池。 |
 | 银行流水 | `app.bank_transactions` | `imports-bank-transactions` + `bank-details` | 银行导入确认、import job、受控分类上下文更新 | bank transaction repository/query ports | bank detail、bank-flow、turnover、no-OA canonical query；Workbench matching/generation | 页面从 snapshot 加载全量流水后自行改写状态。 |
 | 银行分类和标签 | `app.bank_transaction_categories`、`app.bank_transaction_category_events`、`app.bank_transaction_category_confirmations` | `bank-details` | bank detail category/rule/confirmation services | bank detail read/query ports、tag read facade | bank detail、bank-flow、turnover、no-OA 与 Workbench direct canonical query；Workbench matching | turnover/no-OA/流水规则批量处理直接写银行分类表。 |
@@ -49,7 +48,7 @@
 | 流水规则批量处理 / Bank Transaction Paired Policy | 正式状态与历史：`app.bank_flow_rule_batches`、`app.bank_flow_rule_batch_events`；规则：`app_settings.bank_flow_rule_batch_tag_rules`；live candidate 输入：银行/分类事实和 `app.workbench_pair_relations` active rows | `bank-flow-rule-batches` | `BankFlowRuleBatchApplicationService`、Bank Transaction Paired Policy rule writer、requirement recalculation job、relation command、`save_bank_flow_rule_batch_mutation(...)` caller-owned UoW/delta writer | `BankFlowRuleBatchCanonicalQueryRepository` + shared live builder、policy payload | 页面在同一 repeatable-read snapshot 实时推导未提交 candidate，并读取 submitted/withdrawn/history；提交事务使用同一内核复核 identity/member/amount/occupancy；relation/history 与 batch/events 在一个 caller-owned PostgreSQL transaction 原子提交；跨月内部转账由最早成员月份唯一拥有；规则 semantic diff 只增量重算 tag proof 命中的 active relation | persisted draft 作为 expected set、draft event/owner/producer/worker/replay、`read_model.bank_flow_rule_batch_rows` 页面读取、Workbench relation projection、旧 `selected_tag_codes`、旧 case-id 手工 reapply、旧 no-OA fallback、全量关系扫描、shared broad snapshot、嵌套独立写 transaction 或调用方直接改 batch/relation 状态。 |
 | 免 OA 批次 | `app.no_oa_bank_batches`、`app.no_oa_bank_batch_events` | `no-oa-bank-batches` legacy owner | `NoOaBankBatchApplicationService`、明确 UoW、受控 legacy repair adapter | no-OA application/query ports | canonical no-OA API、Workbench relation/turnover consumers；无 Search/no-OA projection refresh | shared state-store broad snapshot 写入、调用方直接改 batch 状态、或把旧 `selected_tag_codes` 迁移为新规则事实。 |
 | OA 投影和附件缓存 | `app.oa_applications`、`app.oa_application_items`、`app.oa_attachments`、`app.oa_sync_*`、`app.oa_attachment_invoice_cache*`、`app.manual_oa_imports` | `oa-integration` | OA sync worker、manual OA import service、OA attachment repair tools | OA projection adapters/read ports | workbench、pending invoice、OA pending、invoice lifecycle、search refresh | API server 直接读 OA Mongo 或把 OA cache 当正式发票池。 |
-| OA 待付款准入/支付状态快照 | `app.oa_pending_payment_admissions`、`app.oa_pending_payment_status_snapshots`、`app.oa_sync_watermarks` 中 `oa_pending_payment_source:<tenant>:<scope>` | `oa-integration` / `oa-pending-payments` | OA sync 的 `commit_authoritative_snapshot` 权威 replace/delete；页面支付写回后的 `record_paid_statuses` 幂等增量 reconcile | OA PG-only projector、freshness source-version provider、Page Audit | 精确月份 `oa_pending_payment` dirty/outbox/read model refresh | 页面/worker直读Mongo/MySQL；外部读取失败仍删除snapshot；MySQL成功后只enqueue但不更新PG snapshot；其它模块直接写这些表。 |
+| OA 待付款准入/支付状态快照 | `app.oa_pending_payment_admissions`、`app.oa_pending_payment_status_snapshots`、`app.oa_sync_watermarks` 中 `oa_pending_payment_source:<tenant>:<scope>` | `oa-integration` / `oa-pending-payments` | OA sync 的 `commit_authoritative_snapshot` 权威 replace/delete；页面支付写回后的 `record_paid_statuses` 幂等增量 reconcile | OA PG-only projector、Page Audit | 页面下一次 canonical GET 直接读取 | 页面/worker直读Mongo/MySQL；外部读取失败仍删除snapshot；MySQL成功后不更新PG snapshot；其它模块直接写这些表。 |
 | 税金事实 | `app.tax_certified_import_*`、`app.tax_offset_plans` | `tax-offset` | certified import confirm、tax plan service | tax query/application service | tax_offset、cost_statistics、invoice_lifecycle refresh | 其它模块直接写认证抵扣或计划表。 |
 | ETC 事实 | `app.etc_invoices`、`app.etc_import_*`、`app.etc_submission_batches`、`app.etc_business_batches`、`app.etc_reconciliation_*`、`app.etc_batch_invoice_links`、`app.historical_etc_repair_*` | `etc-tickets` / `imports-etc-invoices` | ETC import、business batch service、受控 historical repair/backfill tools | ETC business batch API、ETC services、canonical invoice existing-link ports | workbench、workbench_relation、tax/cost/search as applicable | 把 `app.etc_invoices` 当 canonical invoice pool；绕过 batch/link owner 改 membership；runtime delete/reimport 调用通用 import service 清理 legacy ETC canonical invoice 污染。 |
 | 外部往来款 | `app.turnover_relations`、`app.turnover_relation_events`、`app.turnover_ledger_extras` | `turnover-ledger` | turnover write facade/UoW | turnover query service/read ports | turnover_ledger、workbench_relation、workbench、cost、search refresh | legacy fallback facade 进入 production normal write path。 |
@@ -57,7 +56,7 @@
 | 进项使用 OA 冲销 | `app.input_invoice_usage_oa_reverse_batches` | `input-invoice-usage` | input invoice usage OA reverse service | input invoice usage application/query services | input_invoice_usage、invoice_lifecycle、workbench_relation refresh | OA reverse 工具绕过 owner 状态机。 |
 | OA 待付款进行中准入 | `app.oa_pending_payment_admissions` | OA integration | OA source snapshot writer | `PostgresOAWorkflowRepository`、OA pending query repository | Workbench workflow gate、OA 待付款、待找发票、进项使用 | 页面或 relation service 自造进行中 OA、把 admission 当 relation owner。 |
 | 历史 OA 待付款关系审计 | `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims`、`app.oa_pending_payment_bank_relation_events` | 无运行时 owner；migration `0136` 后只读审计 | 仅 migration/受控审计 | 审计查询 | 无 read model refresh | 任何运行时 create/update/cancel/promote/claim、候选排除或 source proof。completed/in-progress OA 关系统一由 `app.workbench_pair_relations` 拥有。 |
-| 设置和凭证 | `app.app_settings`、`app.oa_applicant_credentials` | `settings` / `oa-integration` | settings service、credential service | settings/OA integration APIs | affected read model dirty scopes by setting family | `state:full_state` 或旧 snapshot 作为 production 业务事实 fallback。 |
+| 设置和凭证 | `app.app_settings`、`app.oa_applicant_credentials` | `settings` / `oa-integration` | settings service、credential service | settings/OA integration APIs | 精确 settings-maintenance/matching domain work | `state:full_state` 或旧 snapshot 作为 production 业务事实 fallback。 |
 | 操作审计与财务修正 | `audit.events`、`app.financial_fact_corrections` | `operation-history` / `permissions-and-audit` | durable audit service；财务事实数据库 guard | 005 管理员审计 API | 管理员操作历史页面；无 read model/worker | 内存审计作为生产事实源、审计表 UPDATE/DELETE、无 reason 修改受保护财务事实。 |
 
 ## 输入 I/O
@@ -75,8 +74,7 @@
 | --- | --- | --- |
 | Canonical write result | API/service caller | 返回业务状态、version、affected objects/months/scopes。 |
 | Domain event | Derived lifecycle / producer | 事件必须包含足够 scope 信息，不能靠下游猜测全量影响。 |
-| Dirty scope/outbox | runtime queue/read models | 通过 owner producer、`ReadModelRefreshGateway` 或同事务等价 writer。 |
-| Operation barrier targets | frontend/API response | 高影响写操作必须返回或透出目标 read model/scope；不适用时由模块说明。 |
+| Domain job/outbox | runtime queue/domain worker | 通过 owner service 或同事务 writer；payload、claim 与 retry 合同明确。 |
 | Audit record | audit service | 记录 actor、action、scope、before/after 或 repair manifest，不记录 secrets。 |
 
 ## 旧生产事实源移除规则

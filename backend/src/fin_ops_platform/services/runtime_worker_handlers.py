@@ -53,7 +53,6 @@ from fin_ops_platform.services.postgres_bank_relation_requirement_updater import
     PostgresBankRelationRequirementUpdater,
 )
 from fin_ops_platform.services.project_costing import ProjectCostingService
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.settings_data_reset_job import SettingsDataResetJobHandler
 from fin_ops_platform.services.settings_data_reset_service import (
@@ -319,7 +318,7 @@ class WorkbenchMatchingWorkerFactory:
         max_iterations: int | None,
     ) -> WorkbenchMatchingDirtyScopeWorker:
         state_store = self._state_store()
-        read_model_repository = getattr(state_store, "read_model_repository", None)
+        matching_queue_repository = getattr(state_store, "workbench_matching_queue_repository", None)
         app_settings_service = _WorkbenchMatchingSettingsReader(state_store)
         category_service = BankTransactionCategoryService.from_snapshot(
             state_store.load_bank_transaction_categories()
@@ -335,7 +334,7 @@ class WorkbenchMatchingWorkerFactory:
             repository_factory=self._workbench_uow_repository_factory,
             idempotency_store=PostgresWorkbenchIdempotencyRepository(self._connection),
         )
-        dirty_queue = WorkbenchReconciliationDirtyQueue(repository=read_model_repository)
+        dirty_queue = WorkbenchReconciliationDirtyQueue(repository=matching_queue_repository)
         source_versions_provider = lambda: _workbench_matching_source_versions(app_settings_service)
         if (os.environ.get("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED") or "").strip().lower() in {
             "1",
@@ -397,13 +396,11 @@ class _WorkbenchMatchingSettingsReader:
         self,
         *,
         can_save: bool = False,
-        read_model_status: str | None = None,
     ) -> dict[str, Any]:
         settings = self._settings()
         return BankTransactionCategoryService.auto_tag_rules_payload(
             settings["bank_transaction_tags"],
             can_save=can_save,
-            read_model_status=read_model_status,
         )
 
     def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, Any]:
@@ -451,7 +448,7 @@ class SettingsDataResetRuntimeFactory:
 
     def _mark_matching_dirty(self, months: list[str]) -> list[str]:
         state_store = self._state_store()
-        repository = getattr(state_store, "read_model_repository", None)
+        repository = getattr(state_store, "workbench_matching_queue_repository", None)
         if repository is None:
             raise RuntimeError("workbench matching dirty-scope repository is unavailable")
         return list(
@@ -505,18 +502,10 @@ class SettingsDataResetRuntimeFactory:
         reason = f"settings_data_reset:{action}"
         errors: list[dict[str, str]] = []
         invalidated_scopes: list[str] = []
-        enqueued_jobs: list[str] = []
-        gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        try:
-            gateway.enqueue_one("workbench_relation", "all", reason=reason, metadata={"action": action})
-            invalidated_scopes.append("workbench_relation:all")
-            enqueued_jobs.append("workbench_relation.read_model.refresh")
-        except Exception as exc:
-            errors.append({"domain": "workbench_relation_read_model", "error": str(exc)})
         try:
             dirty_months = (
                 WorkbenchReconciliationDirtyQueue(
-                    repository=getattr(state_store, "read_model_repository", None)
+                    repository=getattr(state_store, "workbench_matching_queue_repository", None)
                 ).mark_dirty_expanded(
                     months,
                     reason=reason,
@@ -534,7 +523,7 @@ class SettingsDataResetRuntimeFactory:
             "dry_run": False,
             "deleted_counts": {},
             "invalidated_scopes": invalidated_scopes,
-            "enqueued_jobs": enqueued_jobs,
+            "enqueued_jobs": [],
             "skipped": ["process_local_caches", "historical_etc_repair_explicit_maintenance"],
             "errors": errors,
         }
@@ -623,7 +612,7 @@ class _RuntimeWorkerImportSupport:
 
     def _mark_workbench_matching_months(self, scope_months: list[str], *, reason: str) -> list[str]:
         months = [month for month in _dedupe_text(scope_months) if MONTH_SCOPE_RE.match(month)]
-        repository = getattr(self._state_store, "read_model_repository", None)
+        repository = getattr(self._state_store, "workbench_matching_queue_repository", None)
         dirty_queue = WorkbenchReconciliationDirtyQueue(repository=repository)
         return list(
             dirty_queue.mark_dirty_expanded(

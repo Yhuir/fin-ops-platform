@@ -14,6 +14,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
+from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -1153,12 +1154,10 @@ class WorkbenchWriteFacade:
             "workbench_relation_canonical_member_missing",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_multiple_groups_selected",
-            "workbench_relation_read_model_not_fresh",
             "workbench_relation_restore_conflict",
         }
         unavailable_errors = {
             "workbench_relation_command_unavailable",
-            "workbench_relation_read_model_unavailable",
             "workbench_relation_repository_unavailable",
         }
         status_code = HTTPStatus.BAD_REQUEST
@@ -3952,7 +3951,10 @@ class WorkbenchWriteFacade:
         case_payload = result.get("case")
         if isinstance(case_payload, dict):
             if isinstance(relation, dict):
-                updated_rows = self._override_service.apply_relation_projection(
+                # Relation presentation is derived for this response only. The durable
+                # source of truth is app.workbench_pair_relations; do not persist a
+                # second relation projection in the row decision store.
+                updated_rows = WorkbenchOverrideService().apply_relation_projection(
                     relation,
                     rows,
                     case_payload=case_payload,

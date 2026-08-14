@@ -71,7 +71,6 @@ def _handler(
         jobs.fail_job(superseded.job_id, "旧任务失败。", "candidate relation")
         superseded_job_id = superseded.job_id
     writes: list[dict[str, object]] = []
-    refreshes: list[dict[str, object]] = []
     dirty_calls: list[list[str]] = []
     handler = BankRelationRequirementRecalculationJobHandler(
         state_store=SimpleNamespace(
@@ -85,9 +84,7 @@ def _handler(
             )
         ),
         relation_updater=lambda **kwargs: (writes.append(dict(kwargs)) or {}),
-        queue_repository=SimpleNamespace(
-            enqueue_read_model_refresh=lambda **kwargs: refreshes.append(dict(kwargs))
-        ),
+        queue_repository=SimpleNamespace(),
         background_jobs=jobs,
         matching_dirty_marker=lambda months: dirty_calls.append(list(months)) or list(months),
     )
@@ -105,7 +102,6 @@ def _handler(
         jobs,
         job.job_id,
         writes,
-        refreshes,
         dirty_calls,
         superseded_job_id,
     )
@@ -137,7 +133,7 @@ def test_handler_recomputes_full_tag_set_and_refreshes_only_exact_months() -> No
         ),
         _relation("case-2", month="2026-05"),
     ]
-    handler, event, jobs, job_id, writes, refreshes, dirty_calls, _ = _handler(relations)
+    handler, event, jobs, job_id, writes, dirty_calls, _ = _handler(relations)
 
     summary = handler.handle_runtime_event(event)
 
@@ -147,10 +143,6 @@ def test_handler_recomputes_full_tag_set_and_refreshes_only_exact_months() -> No
     assert writes[0]["special_metadata"]["requires_invoice"] is True
     assert writes[1]["special_metadata"]["requires_oa"] is False
     assert writes[1]["special_metadata"]["requires_invoice"] is True
-    assert {(row["scope_type"], row["scope_key"]) for row in refreshes} == {
-        ("workbench_relation", "2026-05"),
-        ("workbench_relation", "2026-07"),
-    }
     assert dirty_calls == [["2026-05", "2026-07"]]
     assert jobs.get_job(job_id, "finance-user").status == "succeeded"
 
@@ -162,14 +154,13 @@ def test_handler_skips_relation_when_aggregate_requirements_are_unchanged() -> N
         requires_invoice=True,
         rule_version=12,
     )
-    handler, event, jobs, job_id, writes, refreshes, dirty_calls, _ = _handler([relation])
+    handler, event, jobs, job_id, writes, dirty_calls, _ = _handler([relation])
 
     summary = handler.handle_runtime_event(event)
 
     assert summary["written_relation_count"] == 0
     assert summary["unchanged_relation_count"] == 1
     assert writes == []
-    assert refreshes == []
     assert dirty_calls == []
     assert jobs.get_job(job_id, "finance-user").status == "succeeded"
 
@@ -181,7 +172,7 @@ def test_handler_fails_closed_before_any_write_when_relation_proof_is_incomplete
         "requires_oa": True,
         "requires_invoice": True,
     }
-    handler, event, jobs, job_id, writes, refreshes, dirty_calls, _ = _handler(
+    handler, event, jobs, job_id, writes, dirty_calls, _ = _handler(
         [_relation("case-valid"), invalid]
     )
 
@@ -190,13 +181,12 @@ def test_handler_fails_closed_before_any_write_when_relation_proof_is_incomplete
     assert summary["status"] == "failed"
     assert summary["written_relation_count"] == 0
     assert writes == []
-    assert refreshes == []
     assert dirty_calls == []
     assert jobs.get_job(job_id, "finance-user").status == "failed"
 
 
 def test_handler_supersedes_failed_rollout_only_after_replacement_succeeds() -> None:
-    handler, event, jobs, job_id, writes, _refreshes, _dirty_calls, old_job_id = _handler(
+    handler, event, jobs, job_id, writes, _dirty_calls, old_job_id = _handler(
         [_relation("case-rollout")],
         supersedes_failed_job=True,
     )
@@ -214,7 +204,7 @@ def test_handler_keeps_failed_rollout_visible_when_replacement_fails_closed() ->
     invalid = _relation("case-invalid")
     invalid["month_scope"] = "all"
     invalid["_canonical_bank_months"] = []
-    handler, event, jobs, job_id, writes, _refreshes, _dirty_calls, old_job_id = _handler(
+    handler, event, jobs, job_id, writes, _dirty_calls, old_job_id = _handler(
         [invalid],
         supersedes_failed_job=True,
     )
@@ -233,7 +223,7 @@ def test_handler_derives_exact_scope_from_canonical_bank_month_for_legacy_relati
         month="",
         canonical_months=["2026-05"],
     )
-    handler, event, _jobs, _job_id, writes, refreshes, dirty_calls, _ = _handler(
+    handler, event, _jobs, _job_id, writes, dirty_calls, _ = _handler(
         [relation]
     )
 
@@ -241,9 +231,6 @@ def test_handler_derives_exact_scope_from_canonical_bank_month_for_legacy_relati
 
     assert len(writes) == 1
     assert summary["affected_months"] == ["2026-05"]
-    assert {(row["scope_type"], row["scope_key"]) for row in refreshes} == {
-        ("workbench_relation", "2026-05"),
-    }
     assert dirty_calls == [["2026-05"]]
 
 
@@ -253,7 +240,7 @@ def test_handler_refreshes_every_canonical_bank_month_for_cross_month_relation()
         month="",
         canonical_months=["2026-07", "2026-08"],
     )
-    handler, event, _jobs, _job_id, writes, _refreshes, dirty_calls, _ = _handler(
+    handler, event, _jobs, _job_id, writes, dirty_calls, _ = _handler(
         [relation]
     )
 
@@ -271,7 +258,7 @@ def test_handler_updates_rule_version_even_when_booleans_are_unchanged() -> None
         requires_invoice=True,
         rule_version=11,
     )
-    handler, event, _jobs, _job_id, writes, _refreshes, _dirty_calls, _ = _handler(
+    handler, event, _jobs, _job_id, writes, _dirty_calls, _ = _handler(
         [relation]
     )
 

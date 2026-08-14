@@ -64,8 +64,6 @@ fi
 
 echo "outbox_status_before"
 sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from job.outbox_events group by status order by status;" || true
-echo "dirty_scope_status_before"
-sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from job.read_model_dirty_scopes group by status order by status;" || true
 
 (cd "$active_src" && "$API_PYTHON" -m fin_ops_platform.tools.runtime_queue_ops prune-history \
   --execute \
@@ -75,8 +73,6 @@ sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from job
 
 echo "outbox_status_after"
 sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from job.outbox_events group by status order by status;" || true
-echo "dirty_scope_status_after"
-sudo -u postgres psql -d fin_ops -Atc "select status || ':' || count(*) from job.read_model_dirty_scopes group by status order by status;" || true
 echo "job_schema_size=$(sudo -u postgres psql -d fin_ops -Atc \"select pg_size_pretty(sum(pg_total_relation_size(c.oid))) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'job' and c.relkind in ('r','i','t');\" || true)"
 
 echo "disk_after=$(df -h / | awk 'NR==2 {print $0}')"

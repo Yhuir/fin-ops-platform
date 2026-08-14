@@ -8,9 +8,10 @@
 - `object-identity-dedup.md`：业务对象 identity/dedup 统一规则审计、blocking issue、人工 repair 原则。
 - `postgresql-runtime.md`：当前 PostgreSQL primary runtime、queue/read model、备份、回滚和验证边界。
 - `performance-contract.md`：核心读 API、写后可见性、并发、响应体和数据库资源的生产性能合同与证据规则。
-- `read-model-production-evidence-runbook.md`：Read Model 生产证据、业务写样本、operation barrier、性能证据、样本恢复和 bounded DB restore 门禁。
-- `runtime-worker-governance.md`：Worker + Read Model manifest、systemd、deploy readiness、App Health、durable queue、backfill、hardening 和运维修复边界。
-- `runtime-sync-baseline-2026-06-12.md`：2026-06-12 生产只读同步基线、SLO 差距、repair 优先级和后续阶段判断。
+- `read-model-production-evidence-runbook.md`：已退役 projection 的生产零残留验证与 canonical API 性能证据。
+- `runtime-worker-governance.md`：当前 4 个领域/integration worker、systemd、deploy readiness、App Health、durable queue 和旧 projection 防回归边界。
+- 下列 `runtime-sync-*` 文件是 2026-06-12/13 的历史基线与阶段证据，仅解释迁移前系统，不是当前运行命令、worker 清单或验收事实源。
+- `runtime-sync-baseline-2026-06-12.md`：2026-06-12 生产只读同步历史基线、SLO 差距、repair 优先级和后续阶段判断。
 - `runtime-sync-repair-2026-06-12.md`：2026-06-12 生产 scope repair 发布、dry-run/apply、audit、replacement scope 收敛和剩余风险。
 - `runtime-sync-slo-baseline-2026-06-13.md`：2026-06-13 全 app 同步 SLO 基线、read model/page 覆盖、组件取舍和下一阶段执行入口。
 - `runtime-sync-stage1-2026-06-13.md`：2026-06-13 Stage 1 生产 SLO 采集、PostgreSQL/RabbitMQ 观测、read model smoke 工具和下一阶段执行入口。

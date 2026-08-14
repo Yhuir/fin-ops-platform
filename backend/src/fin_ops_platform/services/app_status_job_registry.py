@@ -14,7 +14,6 @@ class AppStatusBackgroundJobDefinition:
 
 
 APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] = {
-    "workbench_relation.read_model.refresh": AppStatusBackgroundJobDefinition("workbench_relation.read_model.refresh", "刷新共享关联分布", (), "/operations/app-health"),
     "file_import": AppStatusBackgroundJobDefinition(
         "file_import",
         "文件导入",

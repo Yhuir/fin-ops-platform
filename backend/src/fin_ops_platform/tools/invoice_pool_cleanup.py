@@ -22,7 +22,6 @@ BACKUP_CONFIRMED_ENV = "FIN_OPS_INVOICE_POOL_BACKUP_CONFIRMED"
 CONFIRM_TOKEN = "DELETE_APP_INVOICES_AND_REIMPORT"
 EXECUTABLE_SQL_MARKER = "FIN_OPS_INVOICE_POOL_CLEANUP_EXECUTABLE_SQL"
 OA_REVERSE_BATCH_STRATEGIES = ("block", "archive_legacy_polluted_history")
-WORKBENCH_RELATION_STRATEGIES = ("block", "rebuild_after_reimport")
 REQUIRED_BACKUP_FILES = (
     "invoice_related_tables.dump",
     "invoice_related_schema.sql",
@@ -47,8 +46,6 @@ DRY_RUN_FILES = (
 )
 BLOCKING_SOFT_REFERENCES = {
     ("app", "input_invoice_usage_oa_reverse_batches", "invoice_ids"),
-    ("read_model", "workbench_relation_groups", "input_invoice_ids"),
-    ("read_model", "workbench_relation_groups", "output_invoice_ids"),
 }
 
 
@@ -84,12 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=OA_REVERSE_BATCH_STRATEGIES,
         default="block",
         help="How to handle app.input_invoice_usage_oa_reverse_batches invoice_id soft references.",
-    )
-    parser.add_argument(
-        "--workbench-relation-strategy",
-        choices=WORKBENCH_RELATION_STRATEGIES,
-        default="block",
-        help="How to handle read_model.workbench_relation_groups invoice_id soft references.",
     )
     parser.add_argument(
         "--verify-final",
@@ -159,7 +150,6 @@ def main(
             dry_run_dir=dry_run_dir,
             connection=connection,
             oa_reverse_batch_strategy=args.oa_reverse_batch_strategy,
-            workbench_relation_strategy=args.workbench_relation_strategy,
         )
         if args.verify_final:
             expected_source = build_expected_invoice_source(
@@ -225,7 +215,6 @@ def build_cleanup_preflight_plan(
     dry_run_dir: Path | None = None,
     connection: Any | None = None,
     oa_reverse_batch_strategy: str = "block",
-    workbench_relation_strategy: str = "block",
 ) -> dict[str, Any]:
     backup_dir = backup_dir.resolve()
     dry_run_dir = (dry_run_dir or (backup_dir / "cleanup_dry_run")).resolve()
@@ -236,7 +225,6 @@ def build_cleanup_preflight_plan(
     blockers, resolved_actions = soft_reference_strategy_status(
         soft_references,
         oa_reverse_batch_strategy=oa_reverse_batch_strategy,
-        workbench_relation_strategy=workbench_relation_strategy,
     )
     current_counts = live_counts(connection) if connection is not None else {}
     count_guard = count_guard_status(summary, current_counts)
@@ -258,7 +246,6 @@ def build_cleanup_preflight_plan(
         "count_guard": count_guard,
         "soft_reference_strategies": {
             "oa_reverse_batch_strategy": oa_reverse_batch_strategy,
-            "workbench_relation_strategy": workbench_relation_strategy,
         },
         "soft_reference_blockers": blockers,
         "resolved_soft_reference_actions": resolved_actions,
@@ -857,7 +844,6 @@ def soft_reference_blockers(rows: Sequence[dict[str, str]]) -> list[dict[str, An
     blockers, _resolved_actions = soft_reference_strategy_status(
         rows,
         oa_reverse_batch_strategy="block",
-        workbench_relation_strategy="block",
     )
     return blockers
 
@@ -866,7 +852,6 @@ def soft_reference_strategy_status(
     rows: Sequence[dict[str, str]],
     *,
     oa_reverse_batch_strategy: str,
-    workbench_relation_strategy: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     blockers: list[dict[str, Any]] = []
     resolved_actions: list[dict[str, Any]] = []
@@ -892,7 +877,6 @@ def soft_reference_strategy_status(
             key,
             count,
             oa_reverse_batch_strategy=oa_reverse_batch_strategy,
-            workbench_relation_strategy=workbench_relation_strategy,
         )
         if resolved is None:
             blockers.append(blocker)
@@ -997,10 +981,6 @@ def planned_actions(summary: dict[str, Any]) -> list[dict[str, Any]]:
             "legacy_match_rule": "invoice_source='ETC导入' and invoice_kind='ETC发票' without non-ETC source links",
         },
         {
-            "action": "refresh_workbench_relation_read_model",
-            "requires_worker_or_explicit_rebuild": True,
-        },
-        {
             "action": "verify_final_invariants",
             "expected_app_invoices": _int(summary.get("excel_unique_identity_keys"), 0),
             "expected_etc_only_canonical_rows": 0,
@@ -1015,8 +995,6 @@ def live_counts(connection: Any) -> dict[str, int]:
         select 'app.etc_invoices', count(*)::bigint from app.etc_invoices
         union all
         select 'app.input_invoice_usage_oa_reverse_batches', count(*)::bigint from app.input_invoice_usage_oa_reverse_batches
-        union all
-        select 'read_model.workbench_relation_groups', count(*)::bigint from read_model.workbench_relation_groups
     """
     rows = connection.fetch_all(query)
     return {str(row.get("table_name")): _int(row.get("row_count"), 0) for row in rows}
@@ -1033,8 +1011,6 @@ def _database_configured() -> bool:
 def _soft_reference_required_decision(key: tuple[str, str, str]) -> str:
     if key == ("app", "input_invoice_usage_oa_reverse_batches", "invoice_ids"):
         return "archive_or_rebuild_oa_reverse_batches_before_canonical_pool_reset"
-    if key[0] == "read_model" and key[1] == "workbench_relation_groups":
-        return "refresh_workbench_relation_after_reimport"
     return "explicit_cleanup_strategy_required"
 
 
@@ -1043,7 +1019,6 @@ def _resolved_soft_reference_action(
     count: int,
     *,
     oa_reverse_batch_strategy: str,
-    workbench_relation_strategy: str,
 ) -> dict[str, Any] | None:
     if key == ("app", "input_invoice_usage_oa_reverse_batches", "invoice_ids"):
         if oa_reverse_batch_strategy != "archive_legacy_polluted_history":
@@ -1056,18 +1031,6 @@ def _resolved_soft_reference_action(
             "matching_rows": count,
             "action": "archive_legacy_polluted_oa_reverse_batches_before_canonical_pool_reset",
             "reason": "OA reverse batches store historical selected invoice ids and display rows; polluted legacy ids must be preserved in backup/audit history rather than carried into the rebuilt canonical invoice pool.",
-        }
-    if key[0] == "read_model" and key[1] == "workbench_relation_groups":
-        if workbench_relation_strategy != "rebuild_after_reimport":
-            return None
-        return {
-            "strategy": workbench_relation_strategy,
-            "table_schema": key[0],
-            "table_name": key[1],
-            "column_name": key[2],
-            "matching_rows": count,
-            "action": "rebuild_workbench_relation_groups_after_canonical_invoice_reimport",
-            "reason": "Workbench relation groups are active-generation read model rows and must be refreshed from canonical sources after reimport.",
         }
     return None
 

@@ -118,7 +118,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
             report["audit_status"],
             {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
         )
-        self.assertEqual(report["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(report["audit_contract"]["derived_tables"], [])
         self.assertIn("bidirectional equality", report["audit_contract"]["relation_edge_equality"])
         self.assertEqual(report["summary"]["unsubmitted_business_batch_count"], 1)
         self.assertEqual(report["summary"]["staged_business_batch_count"], 0)

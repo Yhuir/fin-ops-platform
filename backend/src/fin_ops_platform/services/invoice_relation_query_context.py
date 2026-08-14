@@ -7,10 +7,6 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.workbench_relation_distribution_mapper import (
-    relation_dicts_by_row_id_from_distribution_payload,
-)
-from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
 
 
 class DistributedInvoiceRelationContext:
@@ -27,16 +23,14 @@ class DistributedInvoiceRelationContext:
         self,
         *,
         import_service: ImportNormalizationService,
-        relation_facade: WorkbenchRelationReadFacade | None = None,
+        relation_reader: Any | None = None,
         oa_projection: Any | None = None,
         month_hint: str | None = None,
-        require_fresh_relations: bool = True,
     ) -> None:
         self._import_service = import_service
-        self._relation_facade = relation_facade
+        self._relation_reader = relation_reader
         self._oa_projection = oa_projection
         self._month_hint = str(month_hint or "").strip() or None
-        self._require_fresh_relations = require_fresh_relations
         self._invoices_by_scope: dict[tuple[str, str], list[Invoice]] = {}
         self._invoice_maps_by_scope: dict[tuple[str, str], dict[str, Invoice]] = {}
         self._bank_transactions_by_id: dict[str, BankTransaction] | None = None
@@ -46,7 +40,6 @@ class DistributedInvoiceRelationContext:
             str,
             list[dict[str, Any]],
         ] = {}
-        self._distributed_loaded_all_for_month = False
         self._distributed_row_lookup_attempted: set[str] = set()
         self._oa_records_by_id: dict[str, OAApplicationRecord] = {}
         self._oa_loaded_all = False
@@ -234,20 +227,11 @@ class DistributedInvoiceRelationContext:
         return [deepcopy(relation) for relation in relations_by_case_id.values()]
 
     def _load_distributed_relations(self, row_ids: list[str]) -> None:
-        if self._relation_facade is None:
+        if self._relation_reader is None:
             return
         normalized_ids = _dedupe_preserve_order(str(row_id).strip() for row_id in list(row_ids or []))
         if not normalized_ids:
             return
-        if self._month_hint and self._month_hint != "all" and not self._distributed_loaded_all_for_month:
-            result = self._relation_facade.list_by_month(
-                self._month_hint,
-                require_fresh=self._require_fresh_relations,
-                reason="invoice_relation_query_context_month_read",
-            )
-            self._assert_fresh_distribution(result)
-            self._merge_distributed_result(result)
-            self._distributed_loaded_all_for_month = True
         missing_ids = [
             row_id
             for row_id in normalized_ids
@@ -260,14 +244,13 @@ class DistributedInvoiceRelationContext:
         if not missing_ids:
             return
         self._distributed_row_lookup_attempted.update(missing_ids)
-        result = self._relation_facade.get_by_row_ids(
-            missing_ids,
-            require_fresh=self._require_fresh_relations,
-            reason="invoice_relation_query_context_row_read",
-            month_hint=self._month_hint,
+        reader = getattr(self._relation_reader, "active_relations_for_row_ids", None)
+        if not callable(reader):
+            raise RuntimeError("relation_reader must expose active_relations_for_row_ids")
+        relations = reader(missing_ids)
+        self.add_distributed_relations(
+            [dict(item) for item in list(relations or []) if isinstance(item, dict)]
         )
-        self._assert_fresh_distribution(result)
-        self._merge_distributed_result(result)
         for row_id in missing_ids:
             self._distributed_relations_by_row_id.setdefault(row_id, [])
 
@@ -291,34 +274,6 @@ class DistributedInvoiceRelationContext:
             if isinstance(transaction, BankTransaction):
                 self._bank_transactions_by_id[bank_id] = transaction
                 self._bank_transactions_by_id[transaction.id] = transaction
-
-    def _assert_fresh_distribution(self, result: dict[str, Any]) -> None:
-        if not self._require_fresh_relations:
-            return
-        if str(result.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS:
-            reasons = ",".join(str(item) for item in list(result.get("stale_reasons") or []))
-            scope_keys = ",".join(str(item) for item in list(result.get("read_model_scope_keys") or []))
-            raise RuntimeError(
-                "workbench_relation_read_model_not_fresh"
-                f": status={result.get('status')}, scope_keys={scope_keys}, reasons={reasons}"
-            )
-
-    def _merge_distributed_result(self, result: dict[str, Any]) -> None:
-        relations_by_row_id = relation_dicts_by_row_id_from_distribution_payload(result)
-        for row_id, relations in relations_by_row_id.items():
-            self._distributed_relations_by_row_id.setdefault(row_id, [])
-            existing_case_ids = {str(relation.get("case_id") or "") for relation in self._distributed_relations_by_row_id[row_id]}
-            for group in relations:
-                case_id = str(group.get("case_id") or "")
-                if case_id and case_id not in existing_case_ids:
-                    self._distributed_relations_by_row_id[row_id].append(group)
-                    existing_case_ids.add(case_id)
-        for row in list(result.get("rows") or []):
-            if not isinstance(row, dict):
-                continue
-            row_id = str(row.get("row_id") or "").strip()
-            if row_id:
-                self._distributed_relations_by_row_id.setdefault(row_id, [])
 
     def _load_oa_records(self, oa_ids: list[str]) -> None:
         list_by_ids = getattr(self._oa_projection, "list_application_records_by_row_ids", None)

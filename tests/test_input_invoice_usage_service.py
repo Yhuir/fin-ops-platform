@@ -14,7 +14,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
-from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
+from tests.test_pending_invoice_service import FakeCanonicalRelationReader
 
 
 class StaticOAProjection:
@@ -92,7 +92,7 @@ class RepositoryOnlyInvoiceFacts:
         return None
 
 
-class CrossMonthWorkbenchRelationFacade:
+class CrossMonthCanonicalRelationReader:
     def __init__(
         self,
         *,
@@ -105,85 +105,26 @@ class CrossMonthWorkbenchRelationFacade:
         self.bank_ids = list(bank_ids)
         self.oa_ids = list(oa_ids)
         self.case_id = case_id
-        self.month_calls: list[str] = []
         self.row_id_calls: list[list[str]] = []
-        self._last_source_versions: dict[str, object] = {}
 
-    @property
-    def last_source_versions(self) -> dict[str, object]:
-        return dict(self._last_source_versions)
-
-    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
-        self.month_calls.append(str(month))
-        self._last_source_versions = {"source_version": f"workbench_relation:{month}"}
-        return {
-            "status": "fresh",
-            "rows": [
-                {
-                    "row_id": self.invoice_id,
-                    "row_type": "input_invoice",
-                    "relation_status": "unlinked",
-                    "group_ids": [],
-                }
-            ],
-            "groups": [],
-            "source_versions": dict(self._last_source_versions),
-            "read_model_scope_keys": [str(month)],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-        }
-
-    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         normalized = [str(row_id).strip() for row_id in row_ids if str(row_id).strip()]
         self.row_id_calls.append(normalized)
-        self._last_source_versions = {"source_version": "workbench_relation:2026-04"}
         if self.invoice_id not in normalized:
-            return {
-                "status": "fresh",
-                "rows": [],
-                "groups": [],
-                "source_versions": dict(self._last_source_versions),
-                "read_model_scope_keys": ["2026-04"],
-                "refresh_enqueued": False,
-                "stale_reasons": [],
-            }
+            return []
         row_ids_payload = [*self.oa_ids, *self.bank_ids, self.invoice_id]
         row_types_payload = [*(["oa"] * len(self.oa_ids)), *(["bank"] * len(self.bank_ids)), "invoice"]
-        return {
-            "status": "fresh",
-            "rows": [
-                {
-                    "row_id": self.invoice_id,
-                    "row_type": "input_invoice",
-                    "relation_status": "linked",
-                    "group_ids": [self.case_id],
-                }
-            ],
-            "groups": [
-                {
-                    "group_id": self.case_id,
-                    "scope_month": "2026-04",
-                    "relation_source": "manual_confirmed",
-                    "relation_status": "linked",
-                    "oa_row_ids": list(self.oa_ids),
-                    "bank_transaction_ids": list(self.bank_ids),
-                    "input_invoice_ids": [self.invoice_id],
-                    "output_invoice_ids": [],
-                    "payload": {
-                        "group_id": self.case_id,
-                        "row_ids": row_ids_payload,
-                        "row_types": row_types_payload,
-                        "relation_mode": "manual_confirmed",
-                        "relation_status": "linked",
-                        "amount_check": {"matched": True},
-                    },
-                }
-            ],
-            "source_versions": dict(self._last_source_versions),
-            "read_model_scope_keys": ["2026-04"],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-        }
+        return [{
+            "case_id": self.case_id,
+            "month_scope": "2026-04",
+            "relation_source": "manual_confirmed",
+            "relation_status": "linked",
+            "status": "active",
+            "row_ids": row_ids_payload,
+            "row_types": row_types_payload,
+            "relation_mode": "manual_confirmed",
+            "amount_check": {"matched": True},
+        }]
 
 
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
@@ -217,7 +158,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
-            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+            relation_reader=FakeCanonicalRelationReader.from_pair_service(
                 pair_service=pair_service,
                 transactions=[bank],
                 invoices=invoices,
@@ -480,7 +421,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
         second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
         oa_records = [self._oa("oa-zhou", "周洁莹", "800.00", project_name="云南溯源科技")]
-        relation_facade = FakeWorkbenchRelationFacade(
+        relation_reader = FakeCanonicalRelationReader(
             [
                 {"row_id": first.id, "row_type": "input_invoice", "relation_status": "linked", "group_ids": ["case-zhou-600"]},
                 {"row_id": second.id, "row_type": "input_invoice", "relation_status": "linked", "group_ids": ["case-zhou-200"]},
@@ -525,7 +466,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(existing_invoices=[first, second]),
-            relation_facade=relation_facade,
+            relation_reader=relation_reader,
             oa_projection=StaticOAProjection(oa_records),
         )
 
@@ -630,7 +571,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         invoice = self._invoice("inv-candidate", "9202", vendor, total_with_tax="100.00")
         bank = self._bank_transaction("bank-candidate", "100.00")
         oa_projection = StaticOAProjection([self._oa("oa-candidate", "李四", "100.00")])
-        relation_facade = FakeWorkbenchRelationFacade(
+        relation_reader = FakeCanonicalRelationReader(
             [
                 {
                     "row_id": invoice.id,
@@ -670,7 +611,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 existing_invoices=[invoice],
                 existing_transactions=[bank],
             ),
-            relation_facade=relation_facade,
+            relation_reader=relation_reader,
             oa_projection=oa_projection,
         )
 
@@ -699,7 +640,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         oa_2 = self._oa("oa-lianggu-53059", "杨丽萍", "53059.30", project_name="大理卷烟厂余热综合利用项目")
         oa_1.month = "2026-04"
         oa_2.month = "2026-04"
-        relation_facade = CrossMonthWorkbenchRelationFacade(
+        relation_reader = CrossMonthCanonicalRelationReader(
             invoice_id=invoice.id,
             bank_ids=[bank_1.id, bank_2.id],
             oa_ids=[oa_1.id, oa_2.id],
@@ -710,14 +651,13 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 existing_invoices=[invoice],
                 existing_transactions=[bank_1, bank_2],
             ),
-            relation_facade=relation_facade,
+            relation_reader=relation_reader,
             oa_projection=StaticOAProjection([oa_1, oa_2]),
         )
 
         row = service.list_rows(month="2026-05", keyword="良固阀门集团")["rows"][0]
 
-        self.assertEqual(relation_facade.month_calls, ["2026-05"])
-        self.assertEqual(relation_facade.row_id_calls, [[invoice.id]])
+        self.assertEqual(relation_reader.row_id_calls, [[invoice.id]])
         self.assertEqual(row["invoice"]["totalWithTax"], "75799.00")
         self.assertEqual(row["oa"]["relationCount"], 2)
         self.assertEqual(row["bankTransactions"]["relationCount"], 2)
@@ -742,7 +682,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         oa_record = self._oa("oa-lianggu-repo", "杨丽萍", "75799.00", project_name="大理卷烟厂余热综合利用项目")
         oa_record.month = "2026-04"
         repository = RepositoryOnlyInvoiceFacts([invoice], transactions=[april_bank, may_unrelated_bank])
-        relation_facade = CrossMonthWorkbenchRelationFacade(
+        relation_reader = CrossMonthCanonicalRelationReader(
             invoice_id=invoice.id,
             bank_ids=[april_bank.id],
             oa_ids=[oa_record.id],
@@ -750,7 +690,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=ImportNormalizationService(fact_repository=repository),
-            relation_facade=relation_facade,
+            relation_reader=relation_reader,
             oa_projection=StaticOAProjection([oa_record]),
         )
 
@@ -780,7 +720,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         ]
         bank = self._bank_transaction("bank-deyizhilai", "423.80")
         oa_projection = StaticOAProjection([self._oa("oa-deyizhilai", "樊相芳", "423.80")])
-        relation_facade = FakeWorkbenchRelationFacade(
+        relation_reader = FakeCanonicalRelationReader(
             [
                 {
                     "row_id": "oa-att-inv-deyizhilai",
@@ -820,7 +760,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 existing_invoices=[invoice],
                 existing_transactions=[bank],
             ),
-            relation_facade=relation_facade,
+            relation_reader=relation_reader,
             oa_projection=oa_projection,
         )
 
@@ -1079,7 +1019,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 existing_invoices=invoices,
                 existing_transactions=transactions or [],
             ),
-            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+            relation_reader=FakeCanonicalRelationReader.from_pair_service(
                 pair_service=pair_service or WorkbenchPairRelationService(),
                 transactions=list(transactions or []),
                 invoices=list(invoices),

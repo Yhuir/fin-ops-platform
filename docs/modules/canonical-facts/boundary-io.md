@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | Business result | API/service caller | 返回业务对象、version、affected months/scopes 或明确不适用。 |
 | Domain event | Derived lifecycle | 包含足够 scope 信息，不让下游猜测全量影响。 |
-| Dirty scope/outbox | runtime queue / read model worker | 经 owner producer、`ReadModelRefreshGateway` 或同事务等价 writer。 |
+| Durable domain job/outbox | runtime queue / domain worker | 经 owner service 或同事务 writer；页面读取不产生任务。 |
 | Operation barrier target | 前端操作闭环 | 高影响写操作必须返回或透出 freshness target。 |
 | Audit | `audit.*` | 记录 actor、action、scope、before/after 或 repair manifest。 |
 
@@ -66,7 +66,7 @@
 | Schema 来源 | `backend/src/fin_ops_platform/postgres/migrations/` |
 | Repository | `backend/src/fin_ops_platform/services/postgres_repositories/` |
 | Business owner | 各 `*_service.py`、`*_application_service.py`、`*_command_service.py`、`*_write_*.py` |
-| Downstream refresh | `derived_data_lifecycle_service.py`、module-specific refresh producers、`ReadModelRefreshGateway` 边界 |
+| Downstream domain work | 明确的 OA sync、import、settings maintenance 或 matching owner |
 | Tool runtime I/O | `backend/src/fin_ops_platform/tools/runtime_application.py`，只允许 retained owner-runbook 工具通过 lightweight app bootstrap 和 public app tool ports 访问所需 I/O。 |
 | Tests | owner 模块 API/service/read model tests、architecture guards、runtime queue/read model tests |
 

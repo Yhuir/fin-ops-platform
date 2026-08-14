@@ -178,7 +178,7 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
-  it("does not block mutations when app status is blocked only by read freshness", async () => {
+  it("does not block mutations when only a non-write runtime domain is blocked", async () => {
     mocked.appHealth = {
       status: "blocked",
       session: { status: "authenticated" },
@@ -208,10 +208,8 @@ describe("AppHealthStatusProvider", () => {
             level: "blocked",
             status: "failed",
             reason: "关联关系不可用",
-            details: ["projection failed"],
-            read_models: ["workbench_relation"],
-            read_model_scopes: [],
-            workers: ["workbench-relation"],
+            details: ["matching failed"],
+            workers: ["workbench-matching"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
           },
@@ -262,9 +260,7 @@ describe("AppHealthStatusProvider", () => {
             status: "ready",
             reason: "关联台已同步",
             details: [],
-            read_models: ["workbench_relation"],
-            read_model_scopes: [],
-            workers: ["workbench-relation"],
+            workers: ["workbench-matching"],
             job_ids: [],
             updated_at: "2026-06-13T17:30:00+08:00",
           },

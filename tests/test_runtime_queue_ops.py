@@ -6,7 +6,6 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 from fin_ops_platform.tools import runtime_queue_ops
 
 
@@ -55,7 +54,6 @@ class FakeRuntimeQueueRepository:
         self.preview_retention_calls: list[dict[str, object]] = []
         self.prune_retention_calls: list[dict[str, object]] = []
         self.enqueue_calls: list[dict[str, object]] = []
-        self.enqueue_read_model_refresh_calls: list[dict[str, object]] = []
 
     def enqueue(self, **kwargs):
         self.enqueue_calls.append(dict(kwargs))
@@ -64,18 +62,6 @@ class FakeRuntimeQueueRepository:
             (),
             {
                 "event_id": "00000000-0000-0000-0000-000000000099",
-                "status": "pending",
-            },
-        )()
-
-    def enqueue_read_model_refresh(self, **kwargs):
-        self.enqueue_read_model_refresh_calls.append(dict(kwargs))
-        event_number = len(self.enqueue_read_model_refresh_calls)
-        return type(
-            "Event",
-            (),
-            {
-                "event_id": f"00000000-0000-0000-0000-{event_number:012d}",
                 "status": "pending",
             },
         )()
@@ -334,88 +320,6 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         )
         self.assertIn('"event_type": "oa.sync"', stdout.getvalue())
 
-    def test_read_model_refresh_dry_run_validates_and_expands_registered_scopes(self) -> None:
-        connection = FakeConnection()
-        repository = FakeRuntimeQueueRepository()
-        stdout = StringIO()
-
-        with (
-            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
-            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
-            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
-        ):
-            exit_code = runtime_queue_ops.main(
-                [
-                    "enqueue-read-model-refresh",
-                    "--scope",
-                    "workbench_relation=all",
-                    "--dry-run",
-                ],
-                stdout=stdout,
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["mode"], "dry-run")
-        self.assertEqual(
-            payload["targets"],
-            [
-                {"scope_key": "all", "scope_type": "workbench_relation"},
-            ],
-        )
-        self.assertEqual(repository.enqueue_read_model_refresh_calls, [])
-
-    def test_read_model_refresh_rejects_retired_workbench_page_scope(self) -> None:
-        with self.assertRaisesRegex(ReadModelScopeError, "Retired read model refresh scope_type"):
-            runtime_queue_ops._normalize_read_model_refresh_targets(["workbench=all"])
-
-    def test_read_model_refresh_execute_uses_gateway_and_durable_queue_repository(self) -> None:
-        connection = FakeConnection()
-        repository = FakeRuntimeQueueRepository()
-        stdout = StringIO()
-
-        with (
-            patch.object(runtime_queue_ops.PostgresSettings, "from_env", return_value=object()),
-            patch.object(runtime_queue_ops, "PostgresConnection", return_value=connection),
-            patch.object(runtime_queue_ops, "RuntimeQueueRepository", return_value=repository),
-        ):
-            exit_code = runtime_queue_ops.main(
-                [
-                    "enqueue-read-model-refresh",
-                    "--scope",
-                    "turnover_ledger=all",
-                    "--reason",
-                    "phase19_audit_rebuild",
-                    "--trace-id",
-                    "phase19-production",
-                    "--force-refresh",
-                    "--execute",
-                ],
-                stdout=stdout,
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["mode"], "execute")
-        self.assertEqual(payload["enqueued_count"], 1)
-        self.assertEqual(
-            repository.enqueue_read_model_refresh_calls,
-            [
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_key": "all",
-                    "reason": "phase19_audit_rebuild",
-                    "priority": "high",
-                    "trace_id": "phase19-production",
-                    "metadata": {
-                        "action_name": "production_audit_contract_rebuild",
-                        "force_refresh": True,
-                    },
-                }
-            ],
-        )
-        self.assertTrue(payload["force_refresh"])
-
     def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
         connection = FakeConnection(
             fetch_all_rows=[
@@ -577,203 +481,6 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertIn("on conflict (settings_key) do update", normalized_sql)
         self.assertEqual(params[0], "runtime:rabbitmq_control")
         self.assertEqual(params[1], {"dispatcher_paused": True})
-
-    def test_resolve_dead_letter_requires_fresh_readiness_and_no_active_dirty_scope(self) -> None:
-        connection = FakeConnection(
-            fetch_one_rows=[
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000001",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "all",
-                    "status": "dead_lettered",
-                },
-                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 0},
-            ]
-        )
-        repository = FakeRuntimeQueueRepository()
-
-        result = runtime_queue_ops._resolve_dead_letter(
-            connection,
-            repository,  # type: ignore[arg-type]
-            event_id="00000000-0000-0000-0000-000000000001",
-            reason="readiness_converged_obsolete_invalid_scope",
-        )
-
-        self.assertTrue(result["resolved"])
-        self.assertEqual(result["read_model_key"], "workbench_relation")
-        self.assertEqual(
-            repository.resolve_calls,
-            [("00000000-0000-0000-0000-000000000001", "readiness_converged_obsolete_invalid_scope")],
-        )
-        readiness_sql, readiness_params = connection.fetch_one_calls[1]
-        later_done_sql, later_done_params = connection.fetch_one_calls[2]
-        dirty_sql, dirty_params = connection.fetch_one_calls[3]
-        self.assertIn("read_model.app_status_readiness", " ".join(readiness_sql.lower().split()))
-        self.assertIn("scope_key = %s", " ".join(readiness_sql.lower().split()))
-        self.assertEqual(readiness_params, ("default", "workbench_relation", "workbench_relation", "all"))
-        self.assertIn("status = 'done'", " ".join(later_done_sql.lower().split()))
-        self.assertEqual(
-            later_done_params,
-            ("default", "workbench_relation.read_model.refresh", "workbench_relation", "all", "00000000-0000-0000-0000-000000000001", None),
-        )
-        self.assertIn("job.read_model_dirty_scopes", " ".join(dirty_sql.lower().split()))
-        self.assertEqual(dirty_params, ("default", "workbench_relation", "all"))
-
-    def test_resolve_dead_letter_refuses_when_dirty_scope_is_active(self) -> None:
-        connection = FakeConnection(
-            fetch_one_rows=[
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000001",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "all",
-                    "status": "dead_lettered",
-                },
-                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 2},
-            ]
-        )
-        repository = FakeRuntimeQueueRepository()
-
-        result = runtime_queue_ops._resolve_dead_letter(
-            connection,
-            repository,  # type: ignore[arg-type]
-            event_id="00000000-0000-0000-0000-000000000001",
-            reason="readiness_converged_obsolete_invalid_scope",
-        )
-
-        self.assertFalse(result["resolved"])
-        self.assertEqual(result["reason"], "active_dirty_scope_exists")
-        self.assertEqual(result["active_dirty_count"], 2)
-        self.assertEqual(repository.resolve_calls, [])
-
-    def test_resolve_dead_letter_refuses_when_exact_scope_is_not_covered(self) -> None:
-        connection = FakeConnection(
-            fetch_one_rows=[
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000001",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-03",
-                    "status": "dead_lettered",
-                },
-                {"fresh_count": 0, "latest_fresh_at": None},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 0},
-            ]
-        )
-        repository = FakeRuntimeQueueRepository()
-
-        result = runtime_queue_ops._resolve_dead_letter(
-            connection,
-            repository,  # type: ignore[arg-type]
-            event_id="00000000-0000-0000-0000-000000000001",
-            reason="readiness_converged_obsolete_invalid_scope",
-        )
-
-        self.assertFalse(result["resolved"])
-        self.assertEqual(result["reason"], "coverage_not_proven")
-        self.assertEqual(result["scope_key"], "2026-03")
-        self.assertEqual(repository.resolve_calls, [])
-
-    def test_resolve_covered_dead_letters_dry_run_lists_exact_scope_proof_without_update(self) -> None:
-        connection = FakeConnection(
-            fetch_all_rows=[
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000001",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-03",
-                    "status": "dead_lettered",
-                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
-                }
-            ],
-            fetch_one_rows=[
-                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 0},
-            ],
-        )
-        repository = FakeRuntimeQueueRepository()
-
-        result = runtime_queue_ops._resolve_covered_dead_letters(
-            connection,
-            repository,  # type: ignore[arg-type]
-            limit=25,
-            reason="readiness_converged_obsolete_dead_letter",
-            execute=False,
-        )
-
-        self.assertEqual(result["mode"], "dry-run")
-        self.assertEqual(result["candidate_count"], 1)
-        self.assertEqual(result["eligible_count"], 1)
-        self.assertEqual(result["resolved_count"], 0)
-        self.assertEqual(result["events"][0]["proof"]["covered_by"], ["fresh_readiness"])
-        self.assertEqual(repository.resolve_calls, [])
-        sql, params = connection.fetch_all_calls[0]
-        self.assertIn("status = 'dead_lettered'", " ".join(sql.lower().split()))
-        self.assertEqual(params, (25,))
-
-    def test_resolve_covered_dead_letters_execute_resolves_only_eligible_events(self) -> None:
-        connection = FakeConnection(
-            fetch_all_rows=[
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000001",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-03",
-                    "status": "dead_lettered",
-                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
-                },
-                {
-                    "event_id": "00000000-0000-0000-0000-000000000002",
-                    "tenant_id": "default",
-                    "event_type": "workbench_relation.read_model.refresh",
-                    "scope_type": "workbench_relation",
-                    "scope_key": "all",
-                    "status": "dead_lettered",
-                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
-                },
-            ],
-            fetch_one_rows=[
-                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 0},
-                {"fresh_count": 0, "latest_fresh_at": None},
-                {"done_count": 0, "latest_done_at": None},
-                {"active_count": 0},
-            ],
-        )
-        repository = FakeRuntimeQueueRepository()
-
-        result = runtime_queue_ops._resolve_covered_dead_letters(
-            connection,
-            repository,  # type: ignore[arg-type]
-            limit=100,
-            reason="readiness_converged_obsolete_dead_letter",
-            execute=True,
-        )
-
-        self.assertEqual(result["mode"], "execute")
-        self.assertEqual(result["candidate_count"], 2)
-        self.assertEqual(result["eligible_count"], 1)
-        self.assertEqual(result["resolved_count"], 1)
-        self.assertEqual(
-            repository.resolve_calls,
-            [("00000000-0000-0000-0000-000000000001", "readiness_converged_obsolete_dead_letter")],
-        )
-        self.assertTrue(result["events"][0]["resolved"])
-        self.assertFalse(result["events"][1]["resolved"])
-        self.assertEqual(result["events"][1]["reason"], "coverage_not_proven")
 
 
 if __name__ == "__main__":

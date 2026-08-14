@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.postgres import migrate
-from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 
 MIGRATIONS_DIR = Path("backend/src/fin_ops_platform/postgres/migrations")
 EXPECTED_MIGRATIONS = [
@@ -161,6 +160,7 @@ EXPECTED_MIGRATIONS = [
     "0146_bank_relation_requirement_rollout_retry.sql",
     "0147_bank_relation_requirement_scope_retry.sql",
     "0148_retire_workbench_matching_progress_jobs.sql",
+    "0149_remove_read_model_runtime.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -319,7 +319,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 149)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 150)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -961,20 +961,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         for table in EXPECTED_TABLES:
             self.assertIn(f"create table if not exists {table}", sql)
 
-    def test_app_status_read_model_storage_contracts_are_declared(self) -> None:
-        sql = migration_sql().lower()
-        expected_tables = set(EXPECTED_TABLES)
-
-        app_status_contracts = {
-            key: READ_MODEL_STORAGE_CONTRACTS[key]
-            for key in APP_STATUS_READ_MODEL_REGISTRY
-        }
-        for read_model_key, tables in app_status_contracts.items():
-            with self.subTest(read_model_key=read_model_key):
-                self.assertTrue(tables)
-                self.assertLessEqual(set(tables), expected_tables)
-                for table in tables:
-                    self.assertIn(f"create table if not exists {table}", sql)
+    def test_read_model_runtime_is_removed_by_latest_forward_migration(self) -> None:
+        sql = (MIGRATIONS_DIR / "0149_remove_read_model_runtime.sql").read_text().lower()
+        self.assertIn("drop schema if exists read_model cascade", sql)
+        self.assertIn("drop table if exists job.read_model_dirty_scopes cascade", sql)
+        self.assertIn("drop column if exists read_model_scope_key", sql)
+        self.assertIn("where event_type like '%.read_model.refresh'", sql)
 
     def test_sql_has_required_extensions_and_indexes(self) -> None:
         sql = migration_sql().lower()
@@ -1545,6 +1537,14 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             retired_matching_progress_sql,
             "approved_retired_matching_progress_jobs;",
+        )
+        read_model_removal_sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0149_remove_read_model_runtime.sql").read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(read_model_removal_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            read_model_removal_sql,
+            "approved_read_model_runtime_removal;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",

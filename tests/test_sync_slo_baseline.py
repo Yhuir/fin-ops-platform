@@ -14,34 +14,26 @@ class FakeRuntimeMonitoringRepository:
     def health_summary(self):
         return {
             "queue_backlog": {"done": 10},
-            "dirty_scopes": {"done": 9},
             "failed_jobs": 0,
         }
 
     def app_status_runtime_snapshot(self):
         return {
-            "read_model_statuses": {
-                "workbench_relation": {"status": "fresh"},
-                "search": {"status": "failed", "last_error": "projection failed"},
+            "outbox_statuses": {
+                "oa.sync": {"status": "ready"},
+                "import.process.requested": {"status": "failed", "last_error": "import failed"},
             },
-            "outbox_statuses": {"workbench_relation.read_model.refresh": {"status": "ready"}},
-            "worker_statuses": {"workbench-relation": {"status": "ready"}},
+            "worker_statuses": {
+                "oa-sync": {"status": "ready"},
+                "import": {"status": "unavailable"},
+            },
         }
 
-    def dashboard_read_model_metrics(self):
-        return [
-            {
-                "key": "workbench_relation",
-                "refresh_duration_ms": {"p95": 1200.0},
-                "historical_refresh_duration_ms": {"p95": 24000.0},
-            }
-        ]
-
     def dashboard_worker_metrics(self):
-        return [{"worker_instance": "workbench-relation", "status": "ready"}]
+        return [{"worker_instance": "oa-sync", "status": "ready"}]
 
     def dashboard_queue_metrics(self):
-        return [{"event_type": "workbench_relation.read_model.refresh", "messages": 0, "dlq_messages": 0}]
+        return [{"event_type": "oa.sync", "messages": 0, "dlq_messages": 0}]
 
     def dashboard_outbox_metric(self):
         return {"pending_count": 0, "failed_count": 0, "status": "available"}
@@ -167,11 +159,11 @@ class SyncSloBaselineTests(unittest.TestCase):
             payload["evidence_bands"]["target_scale"]["required_rows"],
             {"bank_transactions": 1_000_000, "invoices": 500_000, "oa": 1_000_000, "relations": 500_000},
         )
-        self.assertEqual(payload["slo_targets"]["retained_read_model_keys"], ["workbench_relation"])
+        self.assertEqual(payload["slo_targets"]["canonical_api_read_p99_ms"], 1000)
         self.assertNotIn("heavy_workbench_local_convergence_p95_ms", payload["slo_targets"])
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
-        self.assertIn("search", payload["runtime_snapshot"]["data"]["read_model_attention"])
-        self.assertNotIn("cost_statistics", payload["runtime_snapshot"]["data"]["read_model_attention"])
+        self.assertIn("import.process.requested", payload["runtime_snapshot"]["data"]["outbox_attention"])
+        self.assertIn("import", payload["runtime_snapshot"]["data"]["worker_attention"])
         self.assertEqual(payload["postgres_connections"]["data"]["max_connections"], 100)
         self.assertEqual(payload["postgres_table_sizes"]["data"][0]["schema_name"], "app")
         self.assertEqual(payload["postgres_table_sizes"]["data"][0]["table_name"], "workbench_pair_relations")

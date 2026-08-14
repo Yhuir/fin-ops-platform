@@ -102,7 +102,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 - ETC metadata link 是附加 provenance，不得覆盖 canonical invoice 已有的正式 input/output invoice import `source_batch_id` owner。历史上已经被写成 ETC import batch 的 owner，只有当同一 canonical invoice 存在精确一致的 `etc_invoice_import(batch_id)` source-link 时才允许继续读取；未知 owner 仍 fail closed。
 - Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
-- Downstream outputs: ETC tickets canonical facts，以及 workbench、workbench_relation、tax/cost 可比较的 source-version 变化；保留 read model 的页面访问 gateway 自行创建精确 dirty scope，direct-canonical 页面直接读取 facts。
+- Downstream outputs: ETC tickets canonical facts，以及 workbench、tax/cost 可比较的 canonical source-version 变化；所有页面直接读取已提交 facts，不创建 projection scope。
 - Forbidden paths: `app.etc_invoices` 不得被当作 canonical invoice pool；ETC metadata 不得绕过 invoice owner 直接写 `app.invoices`。
 - Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径、runtime canonical cleanup surface 已删除；historical repair / invoice-pool cleanup 工具保留不算页面/API closure 阻断。
 

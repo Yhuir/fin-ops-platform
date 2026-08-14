@@ -25,9 +25,6 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
 )
-from fin_ops_platform.services.workbench_relation_read_facade import (
-    WorkbenchRelationReadFacade,
-)
 
 
 ZERO = Decimal("0.00")
@@ -183,12 +180,10 @@ class OutputInvoiceCollectionQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
-        relation_facade: WorkbenchRelationReadFacade | None = None,
-        require_fresh_relations: bool = True,
+        relation_reader: Any | None = None,
     ) -> None:
         self._import_service = import_service
-        self._relation_facade = relation_facade
-        self._require_fresh_relations = require_fresh_relations
+        self._relation_reader = relation_reader
 
     def list_rows(
         self,
@@ -509,9 +504,8 @@ class OutputInvoiceCollectionQueryService:
     ) -> DistributedInvoiceRelationContext:
         return DistributedInvoiceRelationContext(
             import_service=self._import_service,
-            relation_facade=self._relation_facade,
+            relation_reader=self._relation_reader,
             month_hint=month_hint,
-            require_fresh_relations=self._require_fresh_relations,
         )
 
     def _export_rows(

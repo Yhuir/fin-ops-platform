@@ -12,7 +12,7 @@ describe("app health page business audit API", () => {
       const url = String(input);
       expect(url).toContain("/api/operations/app-health/page-audit?page=bank-details");
       return new Response(JSON.stringify({
-        mode: "page-business-read-model-audit",
+        mode: "page-canonical-data-audit",
         page_key: "bank-details",
         domain_key: "bank_details",
         overall_status: "pass",
@@ -33,7 +33,7 @@ describe("app health page business audit API", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(payload).toMatchObject({
-      mode: "page-business-read-model-audit",
+      mode: "page-canonical-data-audit",
       page_key: "bank-details",
       domain_key: "bank_details",
       overall_status: "pass",

@@ -57,7 +57,7 @@ def audit_cost_statistics_page(
                     "app.bank_transaction_category_confirmations",
                     "app.app_settings",
                 ],
-                "read_model_tables": [],
+                "derived_tables": [],
                 "relation_tables": ["app.workbench_pair_relations"],
                 "scope_types": [],
                 "event_types": [],

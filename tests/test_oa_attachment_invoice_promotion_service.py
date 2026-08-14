@@ -317,7 +317,7 @@ class PostgresOAAttachmentInvoiceRepositoryTests(unittest.TestCase):
             ) as core_repository,
             patch(
                 "fin_ops_platform.services.postgres_repositories.oa_attachment_invoice."
-                "PostgresReadModelRepository.mark_workbench_matching_dirty_scopes_in_transaction",
+                "PostgresWorkbenchMatchingQueueRepository.mark_workbench_matching_dirty_scopes_in_transaction",
                 return_value=["2026-06"],
             ) as mark_dirty,
         ):

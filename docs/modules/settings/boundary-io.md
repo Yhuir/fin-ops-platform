@@ -66,7 +66,7 @@
 
 - Own read model：无独立 manifest entry。
 - 页面 Audit：direct canonical，registry `read_model_keys=()` 且 relation proof 不适用；只证明 persisted singleton、非敏感 credential registration 与 reset job state。下游 read model 不属于本页 consumer。
-- 影响 read model：仅在 `workbench_relation` 明确登记的 maintenance/reset 合同中产生精确 scope；
+- 影响正式关系：只由 settings-maintenance 任务按变化标签重算精确关系要求并标记 matching domain scope；
   设置模块不广播“全部 read model”，关联台页面下一次 normal GET 直接读取设置与 canonical facts。
 - OA 手工导入只提交 canonical OA facts、audit 和信息性 affected scopes；管理员精确
   `refresh-attachments` 由 OA integration owner 在附件 promotion 边界补发 bounded matching scope，

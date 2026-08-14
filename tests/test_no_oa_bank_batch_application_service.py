@@ -32,12 +32,7 @@ class RecordingNoOaRelationCommandService:
 
     def assert_write_precondition(self, **kwargs: object) -> dict[str, object]:
         self.preflight_calls.append(dict(kwargs))
-        return {
-            "status": "fresh",
-            "read_model_scope_keys": [str(kwargs.get("month_scope") or "all")],
-            "stale_reasons": [],
-            "refresh_enqueued": False,
-        }
+        return {"status": "ready"}
 
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         self.confirm_calls.append(dict(kwargs))
@@ -60,10 +55,6 @@ class RecordingNoOaRelationCommandService:
             "changed_case_ids": [relation["case_id"]],
             "affected_months": [relation["month_scope"]],
             "version": 1,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": [relation["month_scope"]],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
@@ -81,56 +72,25 @@ class RecordingNoOaRelationCommandService:
             "changed_case_ids": [str(kwargs["case_id"])],
             "affected_months": ["2026-03"],
             "version": 2,
-            "read_model_status": "fresh",
-            "read_model_stale_reasons": [],
-            "read_model_scope_keys": ["2026-03"],
-            "refresh_enqueued": False,
             "idempotent_replay": False,
         }
 
     def list_active_relations(self) -> list[dict[str, object]]:
         return deepcopy(self.active_relations)
 
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        requested = {str(row_id) for row_id in row_ids}
+        return [
+            deepcopy(relation)
+            for relation in self.active_relations
+            if requested.intersection(str(row_id) for row_id in list(relation.get("row_ids") or []))
+        ]
+
     def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
         self.metadata_update_calls.append(dict(kwargs))
         return {
             "changed_case_ids": [str(kwargs["case_id"])],
             "affected_months": ["2026-03"],
-        }
-
-
-class EmptyWorkbenchRelationFacade:
-    def __init__(self) -> None:
-        self.last_source_versions: dict[str, object] = {}
-
-    def list_by_month(self, month: str, **_kwargs: object) -> dict[str, object]:
-        self.last_source_versions = {"schema_version": 52, "scope_key": month}
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [],
-            "source_versions": dict(self.last_source_versions),
-            "read_model_scope_keys": [month],
-        }
-
-    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
-        self.last_source_versions = {"schema_version": 52, "scope_key": "2026-03"}
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [],
-            "source_versions": dict(self.last_source_versions),
-            "read_model_scope_keys": ["2026-03"],
-        }
-
-    def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
-        self.last_source_versions = {"schema_version": 52, "scope_key": month}
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [],
-            "source_versions": dict(self.last_source_versions),
-            "read_model_scope_keys": [month],
         }
 
 
@@ -201,7 +161,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_command_service: object | None = None,
         no_oa_snapshot: dict[str, object] | None = None,
-        relation_facade: object | None = None,
     ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
         categories = no_oa_categories(rows)
         pair_service = pair_relation_service or WorkbenchPairRelationService()
@@ -247,7 +206,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             ),
             pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(pair_service),
             state_store=None,
-            relation_facade=relation_facade or EmptyWorkbenchRelationFacade(),
             relation_command_service=command_service,
         )
         return service, no_oa_service, command_service

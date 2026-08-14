@@ -153,8 +153,10 @@ class RuntimeStatePolicyTests(unittest.TestCase):
         self.assertFalse(retired_page_refresh.exists())
         production_worker_files = [
             repository_root / "backend/src/fin_ops_platform/app/worker.py",
-            repository_root / "backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py",
         ]
+        self.assertFalse(
+            (repository_root / "backend/src/fin_ops_platform/services/workbench_relation_read_model_refresh.py").exists()
+        )
         forbidden_tokens = (
             "build_application",
             ".load()",

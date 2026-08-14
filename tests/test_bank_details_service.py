@@ -62,21 +62,34 @@ class _BankAccountRepository:
         return list(self.rows)
 
 
-class _RelationDistributionFacade:
+class _CanonicalRelationReader:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
         self.calls: list[list[str]] = []
 
-    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         wanted = {str(row_id) for row_id in row_ids}
         self.calls.append(list(row_ids))
-        return {
-            "status": "fresh",
-            "rows": [dict(row) for row in self._rows if str(row.get("row_id") or "") in wanted],
-            "groups": [],
-            "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": ["2026-04"],
-        }
+        relations: list[dict[str, object]] = []
+        for row in self._rows:
+            row_id = str(row.get("row_id") or "")
+            group_ids = [str(value) for value in list(row.get("group_ids") or [])]
+            if row_id not in wanted or not group_ids or row.get("relation_status") == "candidate":
+                continue
+            row_types = ["bank"]
+            if row.get("linked_oa"):
+                row_types.append("oa")
+            if row.get("linked_input_invoices") or row.get("linked_output_invoices"):
+                row_types.append("invoice")
+            relations.append(
+                {
+                    "case_id": group_ids[0],
+                    "status": "active",
+                    "row_ids": [row_id],
+                    "row_types": row_types,
+                }
+            )
+        return relations
 
 
 class BankDetailsServiceTests(unittest.TestCase):
@@ -469,7 +482,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["relation_case_id"], "CASE-OA")
 
     def test_relation_tag_projection_uses_relation_distribution_row(self) -> None:
-        facade = _RelationDistributionFacade(
+        facade = _CanonicalRelationReader(
             [
                 {
                     "row_id": "txn-shared",
@@ -481,7 +494,7 @@ class BankDetailsServiceTests(unittest.TestCase):
                 }
             ]
         )
-        service = BankDetailsRelationTagProjectionService(relation_facade=facade)
+        service = BankDetailsRelationTagProjectionService(relation_reader=facade)
 
         self.assertEqual(
             service.relation_tag_for_transaction("txn-shared"),
@@ -494,7 +507,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls, [["txn-shared"]])
 
     def test_relation_tag_projection_ignores_nonformal_distribution_rows(self) -> None:
-        facade = _RelationDistributionFacade(
+        facade = _CanonicalRelationReader(
             [
                 {
                     "row_id": "txn-candidate",
@@ -507,13 +520,13 @@ class BankDetailsServiceTests(unittest.TestCase):
                 }
             ]
         )
-        service = BankDetailsRelationTagProjectionService(relation_facade=facade)
+        service = BankDetailsRelationTagProjectionService(relation_reader=facade)
 
         self.assertIsNone(service.relation_tag_for_transaction("txn-candidate"))
 
     def test_relation_tag_projection_returns_none_for_unlinked_distribution_row(self) -> None:
         service = BankDetailsRelationTagProjectionService(
-            relation_facade=_RelationDistributionFacade(
+            relation_reader=_CanonicalRelationReader(
                 [
                     {
                         "row_id": "txn-unlinked",

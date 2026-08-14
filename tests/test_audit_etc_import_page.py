@@ -276,7 +276,7 @@ class EtcImportPageAuditTests(unittest.TestCase):
             report["audit_status"],
             {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
         )
-        self.assertEqual(report["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(report["audit_contract"]["derived_tables"], [])
 
     def test_legacy_session_is_non_blocking_but_explicitly_unproven(self) -> None:
         connection = FakeConnection()

@@ -9,15 +9,12 @@ from typing import Any
 
 FRESHNESS_ISSUE_CODES = frozenset(
     {
-        "read_model_scope_not_fresh",
-        "read_model_outbox_not_drained",
         "page_runtime_queue_not_drained",
         "workbench_matching_scope_not_converged",
     }
 )
 QUEUE_ISSUE_CODES = frozenset(
     {
-        "read_model_outbox_not_drained",
         "page_runtime_queue_not_drained",
         "workbench_matching_scope_not_converged",
     }

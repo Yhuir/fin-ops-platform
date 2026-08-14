@@ -60,8 +60,6 @@ from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
@@ -326,24 +324,6 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     list(locked_plan["updates"]),
                     operator_id=args.operator_id,
                 )
-                completion["refresh_scopes"] = {}
-                if completion["written_invoice_count"]:
-                    refresh_gateway = ReadModelRefreshGateway(
-                        queue_repository=RuntimeQueueRepository(
-                            _ActiveTransactionConnection(transaction)
-                        )
-                    )
-                    completion["refresh_scopes"] = {
-                        "workbench_relation": refresh_gateway.enqueue_many(
-                            "workbench_relation",
-                            locked_plan["affected_months"],
-                            reason="invoice_header_fact_repair",
-                            metadata={
-                                "force_refresh": True,
-                                "source_fingerprint": locked_plan["source_fingerprint"],
-                            },
-                        )
-                    }
                 AuditTrailService(
                     PostgresOperationsAuditRepository(transaction)
                 ).record_action(
@@ -691,10 +671,8 @@ def _complete_bank_repair_transaction(
     expected_replay_create_count: int,
     expected_replay_repaired_duplicate_count: int,
 ) -> dict[str, Any]:
-    """Replay, verify, and enqueue refreshes in the repair write transaction."""
+    """Replay and verify the repair in the same write transaction."""
 
-    from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-    from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
     from fin_ops_platform.services.runtime_worker_handlers import ImportRuntimeProcessorFactory
 
     transaction_connection = _ActiveTransactionConnection(transaction)
@@ -832,20 +810,6 @@ def _complete_bank_repair_transaction(
             "Repeated bank recovery replay changed released canonical reference evidence."
         )
 
-    refresh_gateway = ReadModelRefreshGateway(
-        queue_repository=RuntimeQueueRepository(transaction_connection)
-    )
-    refresh_scopes = {
-        "workbench_relation": refresh_gateway.enqueue_many(
-            "workbench_relation",
-            locked_plan["affected_months"],
-            reason="bank_import_identity_v3_recovery",
-            metadata={
-                "force_refresh": True,
-                "source_fingerprint": locked_plan["source_fingerprint"],
-            },
-        )
-    }
     return public_bank_import_dedup_repair_report(
         locked_plan,
         mode="execute",
@@ -854,7 +818,6 @@ def _complete_bank_repair_transaction(
         idempotence_replay_results=idempotence_replay_results,
         apply_result=apply_result,
         withdraw_results=withdraw_results,
-        refresh_scopes=refresh_scopes,
     )
 
 

@@ -26,12 +26,10 @@ class FakeRuntimeMonitoringRepository:
     def ready_health_summary(self) -> dict[str, object]:
         return {
             "queue_backlog": {},
-            "dirty_scopes": {},
             "failed_jobs": 0,
             "rabbitmq_unpublished_backlog": 0,
             "rabbitmq_publishing_backlog": 0,
             "rabbitmq_publish_failed_backlog": 0,
-            "stale_dirty_scope_count": 0,
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 0,
@@ -71,8 +69,8 @@ class BackloggedRabbitMqRuntimeMonitoringRepository:
         queues = summary["rabbitmq_queues"]
         assert isinstance(queues, dict)
         summary["rabbitmq_queue_depth"] = 1
-        queues["no_oa_bank_batch.read_model.refresh"] = {
-            "queue": "finops.no_oa_bank_batch.read_model.refresh",
+        queues["oa.sync.requested"] = {
+            "queue": "finops.oa.sync.requested",
             "messages": 1,
             "unacked": 0,
             "consumers": 1,
@@ -206,28 +204,6 @@ def http_pass_report() -> dict[str, object]:
     }
 
 
-def http_freshness_fail_report() -> dict[str, object]:
-    return {
-        "status": "fail",
-        "auth_configured": True,
-        "summary": {"probe_count": 1, "sample_count": 3, "failed_probe_count": 1},
-        "probes": [
-            {
-                "name": "workbench_groups_all_paired",
-                "status": "fail",
-                "sample_count": 3,
-                "success_count": 3,
-                "failure_count": 0,
-                "slo_pass": True,
-                "freshness_pass": False,
-                "errors": [],
-                "non_fresh_read_model_statuses": {"refreshing": 3},
-                "refresh_enqueued_count": 0,
-            }
-        ],
-    }
-
-
 def http_latency_fail_report() -> dict[str, object]:
     return {
         "status": "fail",
@@ -243,10 +219,7 @@ def http_latency_fail_report() -> dict[str, object]:
                 "slo_pass": False,
                 "p95_pass": False,
                 "p99_pass": True,
-                "freshness_pass": True,
                 "errors": [],
-                "non_fresh_read_model_statuses": {},
-                "refresh_enqueued_count": 0,
             }
         ],
     }
@@ -263,17 +236,6 @@ def health_ready_pass_report() -> dict[str, object]:
         "api_performance_endpoint_count": 25,
         "api_performance_omitted_endpoint_count": 5,
         "errors": [],
-    }
-
-
-def write_audit_pass_report() -> dict[str, object]:
-    return {
-        "status": "pass",
-        "event_sample_count": 13,
-        "expectation_count": 13,
-        "failed_expectation_count": 0,
-        "missing_expectation_count": 0,
-        "results": [],
     }
 
 
@@ -535,22 +497,10 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_active_dirty_scope_prevents_runtime_closure(self) -> None:
-        blockers = gate._runtime_blockers(
-            {
-                "dirty_scopes": {"cost_statistics": 1},
-                "queue_backlog": {},
-                "rabbitmq_management_configured": True,
-            }
-        )
-
-        self.assertEqual(blockers, {"dirty_scopes": {"cost_statistics": 1}})
-
     def test_missing_rabbitmq_management_metrics_prevents_runtime_closure(self) -> None:
         blockers = gate._runtime_blockers(
             {
                 "queue_backlog": {},
-                "dirty_scopes": {},
                 "rabbitmq_management_configured": False,
             }
         )
@@ -604,9 +554,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
         ) as http_slo, patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-        ) as write_audit, patch.object(
             gate.write_operation_e2e_smoke,
             "run_write_operation_e2e_smoke",
         ) as business_write_e2e:
@@ -627,7 +574,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             ],
         )
         http_slo.assert_not_called()
-        write_audit.assert_not_called()
         business_write_e2e.assert_not_called()
 
     def test_preflight_allows_compatible_previous_page_registry(self) -> None:
@@ -745,7 +691,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(check.status, gate.FAIL)
         queue = check.payload["snapshot"]["rabbitmq_queues"]
         self.assertEqual(
-            queue["no_oa_bank_batch.read_model.refresh"]["messages"],
+            queue["oa.sync.requested"]["messages"],
             1,
         )
 
@@ -809,10 +755,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "collect_http_slo",
             return_value=http_pass_report(),
         ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value=write_audit_pass_report(),
-        ), patch.object(
             gate.write_operation_e2e_smoke,
             "run_write_operation_e2e_smoke",
         ) as business_write_e2e:
@@ -829,7 +771,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "postgres_reversible_write",
                 "authenticated_http_slo",
                 "health_ready_payload",
-                "write_operation_audit",
                 "runtime_health_before_final_convergence",
                 "runtime_health",
                 "page_canonical_audit",
@@ -846,10 +787,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
             return_value=http_pass_report(),
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value=write_audit_pass_report(),
         ):
             report = gate.run_closure_gate(
                 object(),
@@ -859,66 +796,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], gate.PASS)
-        self.assertNotIn("read_model_direct_smoke", [check["name"] for check in report["checks"]])
-
-    def test_stability_gate_accepts_idle_write_audit_window(self) -> None:
-        with patch.object(
-            gate,
-            "RuntimeMonitoringRepository",
-            FakeRuntimeMonitoringRepository,
-        ), patch.object(
-            gate.http_slo_probe,
-            "collect_http_slo",
-            return_value=http_pass_report(),
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value={
-                "status": "pass",
-                "event_sample_count": 0,
-                "expectation_count": 0,
-                "results": [],
-            },
-        ):
-            report = gate.run_closure_gate(
-                object(),
-                base_url="https://example.test",
-                headers={"Authorization": "Bearer token"},
-                profile="stability",
-            )
-
-        self.assertEqual(report["status"], gate.PASS)
-        audit = next(
-            check for check in report["checks"] if check["name"] == "write_operation_audit"
-        )
-        self.assertIs(audit["payload"]["empty_sample_window"], True)
-        self.assertEqual(
-            audit["payload"]["sample_requirement"],
-            "not_required_for_stability",
-        )
-
-    def test_stability_gate_rejects_failed_write_audit_samples(self) -> None:
-        with patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value={
-                "status": "fail",
-                "event_sample_count": 1,
-                "expectation_count": 1,
-                "failed_expectation_count": 1,
-                "results": [{"status": "fail"}],
-            },
-        ):
-            check = gate._write_operation_audit_check(
-                object(),
-                tenant_id="default",
-                target_ms=1_000,
-                lookback_hours=24,
-                limit=2_000,
-                require_samples=False,
-            )
-
-        self.assertEqual(check.status, gate.FAIL)
+        self.assertIn("page_canonical_audit", [check["name"] for check in report["checks"]])
 
     def test_gate_fails_without_authenticated_read_only_evidence(self) -> None:
         with patch.object(
@@ -942,10 +820,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "auth_configured": False,
                 "summary": {"probe_count": 0, "sample_count": 0},
             },
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value=write_audit_pass_report(),
         ):
             report = gate.run_closure_gate(
                 object(),
@@ -987,10 +861,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             gate.http_slo_probe,
             "collect_http_slo",
             side_effect=collect_http,
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value=write_audit_pass_report(),
         ):
             report = gate.run_closure_gate(
                 object(),
@@ -1003,7 +873,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(captured_http["admin_headers"], {"Cookie": "Admin-Token=admin"})
         self.assertEqual(captured_audit["headers"], {"Cookie": "Admin-Token=admin"})
 
-    def test_empty_probe_and_audit_samples_fail_closed(self) -> None:
+    def test_empty_http_probe_samples_fail_closed(self) -> None:
         with patch.object(
             gate,
             "RuntimeMonitoringRepository",
@@ -1016,15 +886,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
                 "summary": {"probe_count": 0, "sample_count": 0},
                 "probes": [],
             },
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            return_value={
-                "status": "pass",
-                "event_sample_count": 0,
-                "expectation_count": 0,
-                "results": [],
-            },
         ):
             report = gate.run_closure_gate(
                 object(),
@@ -1034,36 +895,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
 
         self.assertEqual(report["status"], gate.FAIL)
         self.assertIn("authenticated_http_slo", report["failed_checks"])
-        self.assertIn("write_operation_audit", report["failed_checks"])
-
-    def test_write_audit_uses_recent_real_operations_without_scenario_filter(self) -> None:
-        calls: list[dict[str, object]] = []
-
-        def audit_stub(_connection, **kwargs):
-            calls.append(dict(kwargs))
-            return write_audit_pass_report()
-
-        with patch.object(
-            gate,
-            "RuntimeMonitoringRepository",
-            FakeRuntimeMonitoringRepository,
-        ), patch.object(
-            gate.http_slo_probe,
-            "collect_http_slo",
-            return_value=http_pass_report(),
-        ), patch.object(
-            gate.write_operation_slo_audit,
-            "audit_write_operation_slo",
-            side_effect=audit_stub,
-        ):
-            report = gate.run_closure_gate(
-                object(),
-                base_url="https://example.test",
-                headers={"Authorization": "Bearer token"},
-            )
-
-        self.assertEqual(report["status"], gate.PASS)
-        self.assertIsNone(calls[0]["operations"])
 
     def test_health_ready_failure_prevents_closure(self) -> None:
         with patch.object(
@@ -1133,60 +964,6 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertTrue(
             all(probe.path.startswith("/api/") for probe in api_probes)
         )
-
-    def test_http_slo_waits_for_transient_freshness_then_requires_full_pass(self) -> None:
-        with patch.object(
-            gate.http_slo_probe,
-            "collect_http_slo",
-            side_effect=[http_freshness_fail_report(), http_pass_report()],
-        ) as collect, patch.object(
-            gate,
-            "monotonic",
-            side_effect=[0.0, 0.1, 0.2],
-        ), patch.object(gate, "sleep") as sleep:
-            check = gate._http_slo_check(
-                base_url="https://example.test",
-                page_base_url="https://example.test",
-                api_prefix="/fin-ops-api",
-                headers={"Authorization": "Bearer token"},
-                admin_headers={},
-                target_ms=1_000,
-                timeout_seconds=1,
-                poll_interval_seconds=0.05,
-                require_auth=True,
-            )
-
-        self.assertEqual(check.status, gate.PASS)
-        self.assertEqual(check.payload["retry_attempts"], 1)
-        self.assertEqual(collect.call_count, 2)
-        sleep.assert_called_once_with(0.05)
-
-    def test_http_slo_fails_when_freshness_does_not_converge_before_deadline(self) -> None:
-        with patch.object(
-            gate.http_slo_probe,
-            "collect_http_slo",
-            side_effect=[http_freshness_fail_report(), http_freshness_fail_report()],
-        ) as collect, patch.object(
-            gate,
-            "monotonic",
-            side_effect=[0.0, 0.5, 1.0, 1.0],
-        ), patch.object(gate, "sleep") as sleep:
-            check = gate._http_slo_check(
-                base_url="https://example.test",
-                page_base_url="https://example.test",
-                api_prefix="/fin-ops-api",
-                headers={"Authorization": "Bearer token"},
-                admin_headers={},
-                target_ms=1_000,
-                timeout_seconds=1,
-                poll_interval_seconds=0.5,
-                require_auth=True,
-            )
-
-        self.assertEqual(check.status, gate.FAIL)
-        self.assertEqual(check.payload["retry_attempts"], 1)
-        self.assertEqual(collect.call_count, 2)
-        sleep.assert_called_once_with(0.5)
 
     def test_http_slo_retries_one_clean_latency_window(self) -> None:
         with patch.object(

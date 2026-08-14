@@ -60,7 +60,7 @@ def audit_workbench_relation_display(
                     "app.etc_batch_invoice_links",
                     "app.workbench_pair_relations",
                 ],
-                "read_model_tables": [],
+                "derived_tables": [],
                 "canonical_expected_set": (
                     "eligible canonical OA, bank, and invoice facts composed at query time, "
                     "with active app.workbench_pair_relations read in the same snapshot"

@@ -23,30 +23,28 @@ CURRENT_PRODUCTION_CRITICAL_SECTIONS = (
 
 EXPLAIN_PROBES: tuple[tuple[str, str], ...] = (
     (
-        "active_read_model_dirty_scopes",
+        "active_workbench_matching_scopes",
         """
         select count(*)::bigint
-        from job.read_model_dirty_scopes
+        from job.workbench_matching_dirty_scopes
         where tenant_id = 'default'
           and status in ('pending', 'processing', 'failed')
         """,
     ),
     (
-        "active_read_model_outbox",
+        "active_runtime_outbox",
         """
         select count(*)::bigint
         from job.outbox_events
-        where event_type like '%%.read_model.refresh'
-          and status in ('pending', 'processing', 'failed', 'dead_lettered')
+        where status in ('pending', 'processing', 'failed', 'dead_lettered')
         """,
     ),
     (
-        "non_fresh_app_status_readiness",
+        "active_canonical_relations",
         """
         select count(*)::bigint
-        from read_model.app_status_readiness
-        where tenant_id = 'default'
-          and status <> 'fresh'
+        from app.workbench_pair_relations
+        where status = 'active'
         """,
     ),
 )
@@ -98,7 +96,6 @@ def collect_baseline(
     sections = {
         "runtime_health": _safe_section(lambda: runtime.health_summary()),
         "runtime_snapshot": _runtime_attention_snapshot(runtime),
-        "dashboard_read_models": _safe_section(runtime.dashboard_read_model_metrics),
         "dashboard_workers": _safe_section(runtime.dashboard_worker_metrics),
         "dashboard_queues": _safe_section(runtime.dashboard_queue_metrics),
         "dashboard_outbox": _safe_section(runtime.dashboard_outbox_metric),
@@ -154,8 +151,7 @@ def collect_baseline(
         "slo_targets": {
             "page_first_response_p95_ms": 1000,
             "page_first_response_p99_ms": 2000,
-            "write_operation_to_fresh_p99_ms": 3000,
-            "retained_read_model_keys": ["workbench_relation"],
+            "canonical_api_read_p99_ms": 1000,
         },
         **sections,
         "api_performance": {
@@ -180,7 +176,6 @@ def _runtime_attention_snapshot(runtime: RuntimeMonitoringRepository) -> dict[st
     return {
         "status": "available",
         "data": {
-            "read_model_attention": _attention_items(snapshot.get("read_model_statuses")),
             "outbox_attention": _attention_items(snapshot.get("outbox_statuses")),
             "worker_attention": _attention_items(snapshot.get("worker_statuses")),
         },
@@ -251,7 +246,7 @@ def _postgres_table_sizes(connection: Any, *, limit: int) -> list[dict[str, Any]
         from pg_class c
         join pg_namespace n on n.oid = c.relnamespace
         left join pg_stat_user_tables s on s.relid = c.oid
-        where n.nspname in ('read_model', 'job', 'app')
+        where n.nspname in ('job', 'app')
           and c.relkind in ('r', 'm', 'p')
         order by pg_total_relation_size(c.oid) desc, n.nspname, c.relname
         limit %s
@@ -273,7 +268,7 @@ def _postgres_index_usage(connection: Any, *, limit: int) -> list[dict[str, Any]
           idx_tup_read,
           idx_tup_fetch
         from pg_stat_user_indexes
-        where schemaname in ('read_model', 'job', 'app')
+        where schemaname in ('job', 'app')
         order by pg_relation_size(indexrelid) desc, schemaname, relname, indexrelname
         limit %s
         """,

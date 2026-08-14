@@ -1667,7 +1667,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         for name, source in sources.items():
             with self.subTest(source=name):
                 self.assertIn("relation_command_service_factory=self._turnover_workbench_relation_command_service", source)
-                self.assertIn("relation_facade=self._workbench_relation_read_facade()", source)
+                self.assertNotIn("relation_facade=", source)
         self.assertFalse(hasattr(Application, "_turnover_ledger_closure_legacy_fallback_facade"))
         self.assertFalse(hasattr(Application, "_turnover_ledger_withdraw_legacy_fallback_facade"))
 

@@ -176,7 +176,6 @@ from fin_ops_platform.services.manual_invoice_entry_service import (
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
 )
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
@@ -257,11 +256,6 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendin
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
-from fin_ops_platform.services.operation_freshness_barrier import (
-    OperationFreshnessBarrierService,
-    OperationFreshnessTarget,
-    targets_from_payload,
-)
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
@@ -439,20 +433,11 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
 )
-from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor import (
-    WorkbenchRelationDerivedLifecycleExecutor,
-)
-from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
     WorkbenchRelationPreviewGroupingService,
 )
-from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
-from fin_ops_platform.services.workbench_relation_sql_projection import (
-    WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
-    WorkbenchRelationSqlProjectionBuilder,
-)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_write_facade import (
@@ -559,7 +544,7 @@ class Application:
     def _runtime_bootstrap_state(self) -> dict[str, object]:
         return {}
 
-    def _requires_sql_read_model_runtime(self) -> bool:
+    def _requires_postgres_runtime(self) -> bool:
         if getattr(self, "_bootstrap_mode", None) not in {"production", "lightweight"}:
             return False
         return str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
@@ -572,55 +557,8 @@ class Application:
     def _bank_transaction_tag_reader(self) -> object:
         return self._bank_transaction_effective_category_provider
 
-    def _workbench_relation_read_facade(self) -> WorkbenchRelationReadFacade | None:
-        facade = getattr(self, "_workbench_relation_facade", None)
-        if isinstance(facade, WorkbenchRelationReadFacade):
-            return facade
-        if facade is not None and callable(getattr(facade, "get_by_row_ids", None)):
-            return facade
-        if not self._requires_sql_read_model_runtime():
-            return None
-        repository = getattr(self, "_workbench_relation_sql_read_repository", None)
-        required_methods = (
-            "get_workbench_relation_rows_by_ids",
-            "list_workbench_relation_rows",
-            "get_workbench_relation_groups_by_ids",
-            "workbench_relation_scope_summaries",
-        )
-        if repository is None or not all(callable(getattr(repository, method_name, None)) for method_name in required_methods):
-            return None
-        facade = WorkbenchRelationReadFacade(
-            read_model_repository=repository,
-            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            tenant_id=self._workbench_reconciliation_tenant_id(),
-            expected_source_versions=self._workbench_relation_expected_source_versions,
-            expected_source_versions_by_scope=self._workbench_relation_expected_source_versions_by_scope,
-        )
-        self._workbench_relation_facade = facade
-        return facade
-
-    def _workbench_relation_expected_source_versions(self, scope_key: str) -> dict[str, object]:
-        state_store = getattr(self, "_state_store", None)
-        connection = getattr(state_store, "_connection", None)
-        if connection is None or not callable(getattr(connection, "fetch_one", None)):
-            return {}
-        return WorkbenchRelationSqlProjectionBuilder(connection=connection).source_versions_for_scope(scope_key)
-
-    def _workbench_relation_expected_source_versions_by_scope(
-        self,
-        scope_keys: list[str],
-    ) -> dict[str, dict[str, object]]:
-        state_store = getattr(self, "_state_store", None)
-        connection = getattr(state_store, "_connection", None)
-        if connection is None or not callable(getattr(connection, "fetch_all", None)):
-            return {}
-        try:
-            return WorkbenchRelationSqlProjectionBuilder(connection=connection).source_versions_for_scopes(scope_keys)
-        except ValueError:
-            return {}
-
     def _workbench_reconciliation_dirty_queue_repository(self):
-        repository = getattr(self._state_store, "read_model_repository", None)
+        repository = getattr(self._state_store, "workbench_matching_queue_repository", None)
         required_methods = (
             "mark_workbench_matching_dirty_scopes",
             "claim_workbench_matching_dirty_scopes",
@@ -763,7 +701,6 @@ class Application:
             if postgres_connection is not None
             else None
         )
-        self._workbench_relation_sql_read_repository = getattr(self._state_store, "workbench_relation_sql_read_repository", None)
         self._workbench_amount_mismatch_exception_service = (
             WorkbenchAmountMismatchExceptionService(
                 group_repository=self._workbench_page_query_repository,
@@ -859,7 +796,7 @@ class Application:
                 "load_no_oa_bank_batches",
             ),
             pair_relation_service=self._workbench_pair_relation_service,
-            relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
+            relation_command_service=self._workbench_relation_command_service(),
         )
         bank_flow_relation_service = getattr(self, "_workbench_pair_relation" + "_service")
         self._bank_flow_rule_batch_service = BankBatchService.from_snapshot(
@@ -869,7 +806,7 @@ class Application:
                 "load_bank_flow_rule_batches",
             ),
             relation_read_port=BankBatchRelationRepairReadPort(bank_flow_relation_service),
-            relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
+            relation_command_service=self._workbench_relation_command_service(),
             schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
             batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
@@ -936,7 +873,7 @@ class Application:
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._workbench_query_service = WorkbenchQueryService(
             oa_adapter=oa_workflow_adapter,
-            seed_demo_rows=not self._requires_sql_read_model_runtime(),
+            seed_demo_rows=not self._requires_postgres_runtime(),
         )
         self._oa_manual_import_service = (
             OAManualImportService(
@@ -967,7 +904,7 @@ class Application:
             category_provider=self._bank_transaction_tag_reader(),
         )
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
-            relation_facade=self._workbench_relation_read_facade(),
+            relation_reader=self._workbench_relation_command_service(),
         )
         self._bank_details_service = BankDetailsService(
             self._import_service,
@@ -990,21 +927,19 @@ class Application:
             effective_category_provider=self._bank_transaction_tag_reader(),
             oa_projection=oa_workflow_adapter,
             income_status_override_provider=self._pending_invoice_command_repository.latest_income_status_override,
-            relation_facade=self._workbench_relation_read_facade(),
+            relation_reader=self._workbench_relation_command_service(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
         )
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
+            relation_reader=self._workbench_relation_command_service(),
             oa_projection=oa_workflow_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
-            require_fresh_relations=False,
         )
         self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
-            require_fresh_relations=False,
+            relation_reader=self._workbench_relation_command_service(),
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
@@ -1014,7 +949,6 @@ class Application:
                 transaction_id,
                 direction=direction,
             ),
-            relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(),
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
@@ -1787,8 +1721,6 @@ class Application:
             return self._handle_api_oa_sync_status()
         if method == "GET" and route_path == "/api/app-health":
             return self._handle_api_app_health(headers)
-        if method == "POST" and route_path == "/api/operation-barrier/status":
-            return self._handle_api_operation_barrier_status(body, headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/operations/import-history":
@@ -2055,7 +1987,6 @@ class Application:
         runtime_infrastructure = storage_summary.get("runtime_infrastructure")
         if not isinstance(runtime_infrastructure, dict):
             runtime_infrastructure = {}
-        workbench_relation_read_model = self._workbench_relation_readiness_payload(runtime_infrastructure)
         blockers = readiness_blockers(
             storage_backend=str(storage_summary.get("backend") or "") if check_dependencies else "",
             postgres_status=storage_summary.get("postgres_status"),
@@ -2228,55 +2159,7 @@ class Application:
             ],
             "storage": storage_summary,
             "runtime_infrastructure": runtime_infrastructure,
-            "workbench_relation_read_model": workbench_relation_read_model,
             "future_modules": [],
-        }
-
-    @staticmethod
-    def _workbench_relation_readiness_payload(runtime_infrastructure: dict[str, object]) -> dict[str, object]:
-        dirty_backlog = 0
-        stale_scopes: list[dict[str, object]] = []
-        for row in list(runtime_infrastructure.get("dirty_scopes_by_scope") or []):
-            if not isinstance(row, dict) or str(row.get("scope_type") or "") != "workbench_relation":
-                continue
-            row_status = str(row.get("status") or "")
-            count = int(row.get("count") or 0)
-            if row_status in {"pending", "processing"}:
-                dirty_backlog += count
-            if row_status != "done":
-                stale_scopes.append(
-                    {
-                        "scope_key": str(row.get("scope_key") or ""),
-                        "status": row_status,
-                        "count": count,
-                        "oldest_age_seconds": row.get("oldest_age_seconds"),
-                    }
-                )
-        last_failure_reason = None
-        for row in list(runtime_infrastructure.get("pending_outbox_events_by_scope") or []):
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("event_type") or "") != "workbench_relation.read_model.refresh":
-                continue
-            if str(row.get("status") or "") not in {"failed", "dead_lettered"}:
-                continue
-            last_failure_reason = str(row.get("last_error") or "").strip() or None
-            break
-        if last_failure_reason:
-            relation_status = "failed"
-        elif stale_scopes:
-            relation_status = "refreshing"
-        else:
-            relation_status = "ready"
-        return {
-            "status": relation_status,
-            "dirty_backlog": dirty_backlog,
-            "stale_scopes": stale_scopes,
-            "last_refresh_at": None,
-            "last_failure_reason": last_failure_reason,
-            "source_versions": {
-                "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
-            },
         }
 
     def _production_runtime_guard_summary(
@@ -2564,6 +2447,10 @@ class Application:
         repository: object | None = None,
         save_repository: bool = True,
     ) -> WorkbenchRelationCommandRepositoryAdapter:
+        if repository is None and str(getattr(self._state_store, "storage_backend", "") or "") == "postgres":
+            connection = getattr(self._state_store, "_connection", None)
+            if connection is not None:
+                repository = PostgresWorkbenchRelationRepository(connection)
         return WorkbenchRelationCommandRepositoryAdapter(
             pair_relation_service=self._workbench_pair_relation_service,
             repository=repository,
@@ -2574,23 +2461,19 @@ class Application:
         self,
         *,
         repository: object | None = None,
-        require_fresh_relations: bool | None = None,
         save_repository: bool = True,
     ) -> WorkbenchRelationCommandService:
-        relation_facade = self._workbench_relation_read_facade()
         return WorkbenchRelationCommandService(
             relation_repository=self._workbench_relation_command_repository(
                 repository=repository,
                 save_repository=save_repository,
             ),
-            relation_facade=relation_facade,
-            require_fresh_relations=False if require_fresh_relations is None else require_fresh_relations,
             tenant_id=self._workbench_reconciliation_tenant_id(),
         )
 
     def _workbench_payload_relation_read_port(self) -> WorkbenchPayloadRelationReadPort:
         return WorkbenchPayloadRelationReadPort(
-            self._workbench_relation_command_service(require_fresh_relations=False)
+            self._workbench_relation_command_service()
         )
 
     def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider:
@@ -2598,7 +2481,7 @@ class Application:
 
     def _workbench_confirm_link_context_relation_read_port(self) -> WorkbenchConfirmLinkContextRelationReadPort:
         return WorkbenchConfirmLinkContextRelationReadPort(
-            self._workbench_relation_command_service(require_fresh_relations=False)
+            self._workbench_relation_command_service()
         )
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
@@ -2611,9 +2494,7 @@ class Application:
         return self._workbench_relation_command_service(repository=repository)
 
     def _turnover_cash_closure_relation(self, case_id: str) -> dict[str, object]:
-        return self._workbench_relation_command_service(
-            require_fresh_relations=False
-        ).get_active_relation_by_case_id(case_id)
+        return self._workbench_relation_command_service().get_active_relation_by_case_id(case_id)
 
     def _workbench_confirm_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
         override = getattr(self, "_workbench_confirm_link_uow_override", None)
@@ -2787,7 +2668,6 @@ class Application:
                 save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
             ),
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
-            relation_facade=self._workbench_relation_read_facade(),
         ).build()
         if facade is not None:
             return facade
@@ -2827,7 +2707,6 @@ class Application:
                 save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
             ),
             relation_command_service_factory=self._turnover_workbench_relation_command_service,
-            relation_facade=self._workbench_relation_read_facade(),
         ).build()
         if facade is not None:
             return facade
@@ -3236,9 +3115,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
@@ -3265,14 +3144,6 @@ class Application:
             detail_key=detail_key,
         )
         return self._json_response(status_code, payload)
-
-    @staticmethod
-    def _is_missing_bank_account_balance_read_model_error(error: Exception) -> bool:
-        message = str(error).lower()
-        return (
-            "read_model.bank_account_balances" in message
-            and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
-        )
 
     @staticmethod
     def _app_health_workbench_status_cache_ttl_seconds() -> float:
@@ -3309,52 +3180,6 @@ class Application:
         assert session is not None
         snapshot = self._build_app_health_snapshot(session, started_at=started_at)
         return self._json_response(HTTPStatus.OK, snapshot)
-
-    def _handle_api_operation_barrier_status(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
-        session, error_response = self._resolve_app_health_session(headers)
-        if error_response is not None:
-            return error_response
-        assert session is not None
-        payload, body_error = self._load_json_body(body)
-        if body_error is not None:
-            return body_error
-        try:
-            targets = targets_from_payload(payload)
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_operation_barrier_request", "message": str(exc)},
-            )
-        service = OperationFreshnessBarrierService(
-            runtime_snapshot_provider=lambda: self._operation_barrier_runtime_snapshot(targets)
-        )
-        return self._json_response(HTTPStatus.OK, service.status_payload(targets))
-
-    def _operation_barrier_runtime_snapshot(self, targets: list[OperationFreshnessTarget]) -> dict[str, object]:
-        state_store = getattr(self, "_state_store", None)
-        snapshot_loader = getattr(state_store, "operation_barrier_runtime_snapshot", None)
-        if callable(snapshot_loader):
-            snapshot = snapshot_loader(
-                [
-                    {
-                        "read_model_key": target.read_model_key,
-                        "scope_type": target.scope_type or "",
-                        "scope_key": target.scope_key,
-                    }
-                    for target in targets
-                ]
-            )
-            return snapshot if isinstance(snapshot, dict) else {}
-        return {
-            "read_model_statuses": {
-                "__runtime__": {
-                    "status": "unavailable",
-                    "last_error": "operation barrier runtime snapshot provider unavailable",
-                }
-            },
-            "outbox_statuses": {},
-            "worker_statuses": {},
-        }
 
     def _handle_api_operations_app_health_dashboard(self, headers: dict[str, str] | None) -> Response:
         _, admin_error = self._resolve_admin_session(headers)
@@ -3471,11 +3296,8 @@ class Application:
             repository=PostgresBankImportWithdrawalRepository(connection),
             relation_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                require_fresh_relations=False,
                 tenant_id=tenant_id,
             ),
-            queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
-            tenant_id=tenant_id,
         )
 
     def _operations_audit_service(self) -> OperationsAuditService | None:
@@ -3782,18 +3604,16 @@ class Application:
             active_jobs=active_jobs,
             attention_jobs=attention_jobs,
             app_health_snapshot=snapshot,
-            read_model_statuses=runtime_statuses["read_model_statuses"],
             worker_statuses=runtime_statuses["worker_statuses"],
             outbox_statuses=runtime_statuses["outbox_statuses"],
         )
         self._emit_app_health_timing(snapshot)
         return snapshot
 
-    def _app_status_runtime_statuses(self) -> dict[str, dict[str, dict[str, object]] | None]:
+    def _app_status_runtime_statuses(self) -> dict[str, dict[str, dict[str, object]]]:
         snapshot_provider = getattr(self._state_store, "app_status_runtime_snapshot", None) if self._state_store is not None else None
         if not callable(snapshot_provider):
             return {
-                "read_model_statuses": None,
                 "worker_statuses": {},
                 "outbox_statuses": {},
             }
@@ -3809,7 +3629,6 @@ class Application:
                     return deepcopy(payload)
             snapshot = snapshot_provider()
             normalized = snapshot if isinstance(snapshot, dict) else {
-                "read_model_statuses": None,
                 "worker_statuses": {},
                 "outbox_statuses": {},
             }
@@ -3826,7 +3645,6 @@ class Application:
             return load_snapshot()
         snapshot = snapshot_provider()
         return snapshot if isinstance(snapshot, dict) else {
-            "read_model_statuses": None,
             "worker_statuses": {},
             "outbox_statuses": {},
         }
@@ -3986,8 +3804,7 @@ class Application:
     def _is_oa_sync_rebuild_scheduled(self) -> bool:
         return False
 
-
-    def _workbench_write_freshness_guard(self, payload: dict[str, object]) -> Response | None:
+    def _workbench_oa_sync_safety_guard(self, payload: dict[str, object]) -> Response | None:
         oa_sync_payload = self._oa_sync_status_payload()
         dirty_scopes = [
             str(scope)
@@ -4155,7 +3972,7 @@ class Application:
                 history_operation_type="etc_summary_unmerged",
             )
         else:
-            result = self._cancel_etc_summary_relations_for_batch_via_facade(
+            result = self._cancel_etc_summary_relations_for_row_ids(
                 summary_row_ids,
                 command_service=command_service,
             )
@@ -4177,44 +3994,7 @@ class Application:
         return sorted(set(changed_months))
 
     def _assert_etc_summary_relation_write_precondition_for_batch(self, batch: object) -> None:
-        summary_row_ids = self._etc_business_batch_summary_row_ids(batch)
-        if not summary_row_ids:
-            return
-        command_service = self._workbench_relation_command_service()
-        assert_write_precondition = getattr(command_service, "assert_write_precondition", None)
-        if callable(assert_write_precondition):
-            assert_write_precondition(
-                row_ids=summary_row_ids,
-                month_scope=self._etc_business_batch_relation_month_scope(batch),
-            )
-            return
-        relation_facade = self._workbench_relation_read_facade()
-        if relation_facade is None:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_unavailable",
-                "Workbench relation read facade is not configured.",
-                payload={
-                    "read_model_status": "unavailable",
-                    "read_model_stale_reasons": ["relation_facade_unavailable"],
-                    "read_model_scope_keys": ["all"],
-                    "refresh_enqueued": False,
-                },
-            )
-        month_scope = self._etc_business_batch_relation_month_scope(batch)
-        payload = relation_facade.get_by_row_ids(
-            summary_row_ids,
-            require_fresh=True,
-            reason="etc_summary_relation_write_precondition",
-            month_hint=month_scope,
-            scope_keys_hint=[month_scope],
-        )
-        status = str(payload.get("status") or payload.get("read_model_status") or "missing") if isinstance(payload, dict) else "missing"
-        if status != "fresh":
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_not_fresh",
-                "Workbench relation read model is not fresh. Refresh and retry the mutation.",
-                payload=self._workbench_relation_command_error_payload(payload if isinstance(payload, dict) else {}),
-            )
+        return None
 
     @staticmethod
     def _etc_business_batch_relation_month_scope(batch: object) -> str:
@@ -4225,41 +4005,23 @@ class Application:
                 return scope_month
         return "all"
 
-    def _cancel_etc_summary_relations_for_batch_via_facade(
+    def _cancel_etc_summary_relations_for_row_ids(
         self,
         summary_row_ids: list[str],
         *,
         command_service: object,
     ) -> dict[str, object]:
-        relation_facade = self._workbench_relation_read_facade()
-        if relation_facade is None:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_unavailable",
-                "Workbench relation read facade is not configured.",
-                payload={
-                    "read_model_status": "unavailable",
-                    "read_model_stale_reasons": ["relation_facade_unavailable"],
-                    "read_model_scope_keys": ["all"],
-                    "refresh_enqueued": False,
-                },
-            )
-        payload = relation_facade.get_by_row_ids(
-            summary_row_ids,
-            require_fresh=True,
-            reason="etc_summary_relation_cancel",
-            scope_keys_hint=["all"],
-        )
-        status = str(payload.get("status") or payload.get("read_model_status") or "missing") if isinstance(payload, dict) else "missing"
-        if status != "fresh":
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_read_model_not_fresh",
-                "Workbench relation read model is not fresh. Refresh and retry the mutation.",
-                payload=self._workbench_relation_command_error_payload(payload if isinstance(payload, dict) else {}),
-            )
         summary_row_id_set = {str(row_id).strip() for row_id in list(summary_row_ids or []) if str(row_id).strip()}
+        active_relations = getattr(command_service, "active_relations_for_row_ids", None)
+        if not callable(active_relations):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Workbench relation command service does not expose active_relations_for_row_ids.",
+            )
         relations = [
-            relation
-            for relation in relation_dicts_from_distribution_payload(payload)
+            dict(relation)
+            for relation in list(active_relations(list(summary_row_id_set)) or [])
+            if isinstance(relation, dict)
             if summary_row_id_set.intersection(
                 {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
             )
@@ -4297,29 +4059,6 @@ class Application:
         return {
             "changed_case_ids": list(dict.fromkeys(changed_case_ids)),
             "affected_months": list(dict.fromkeys(affected_months)),
-        }
-
-    @staticmethod
-    def _workbench_relation_command_error_payload(payload: dict[str, object]) -> dict[str, object]:
-        stale_reasons = payload.get("stale_reasons")
-        if not isinstance(stale_reasons, list):
-            stale_reasons = payload.get("read_model_stale_reasons")
-        scope_keys = payload.get("read_model_scope_keys")
-        if not isinstance(scope_keys, list):
-            scope_keys = ["all"]
-        return {
-            "read_model_status": str(payload.get("status") or payload.get("read_model_status") or "missing"),
-            "read_model_stale_reasons": [
-                str(reason)
-                for reason in list(stale_reasons or [])
-                if str(reason).strip()
-            ],
-            "read_model_scope_keys": [
-                str(scope_key)
-                for scope_key in list(scope_keys or [])
-                if str(scope_key).strip()
-            ],
-            "refresh_enqueued": bool(payload.get("refresh_enqueued")),
         }
 
     @staticmethod
@@ -4613,32 +4352,14 @@ class Application:
         if not normalized_months:
             raise RuntimeError("Workbench requirement repair requires exact month scopes.")
         normalized_reason = str(reason or "workbench_requirement_repair").strip()
-        metadata = {
-            "source": "workbench_requirement_repair",
-            "reason": normalized_reason,
-            "case_ids": sorted(
-                dict.fromkeys(str(case_id).strip() for case_id in case_ids if str(case_id).strip())
-            ),
-            "row_ids": sorted(
-                dict.fromkeys(str(row_id).strip() for row_id in row_ids if str(row_id).strip())
-            ),
-        }
-        relation_enqueued = self._enqueue_generic_read_model_refreshes(
-            "workbench_relation",
-            normalized_months,
-            reason=normalized_reason,
-            metadata=metadata,
-        )
+        _ = case_ids, row_ids
         dirty_months = self._mark_workbench_matching_dirty_scopes(
             normalized_months,
             reason=normalized_reason,
             debounce_seconds=0,
         )
-        if not relation_enqueued:
-            raise RuntimeError("Workbench relation refresh enqueue failed.")
         return {
             "months": normalized_months,
-            "workbench_relation_enqueued": relation_enqueued,
             "matching_dirty_months": dirty_months,
         }
 
@@ -5338,11 +5059,10 @@ class Application:
             return service
         service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
+            relation_reader=self._workbench_relation_command_service(),
             oa_projection=getattr(self, "_workbench_query_service", None),
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
-            require_fresh_relations=False,
         )
         self._input_invoice_usage_query_service = service
         return service
@@ -5372,7 +5092,7 @@ class Application:
     def _input_invoice_usage_page_query_service(self) -> InputInvoiceUsageCanonicalQueryService:
         service = getattr(self, "_input_invoice_usage_page_query_service_instance", None)
         repository = getattr(self, "_input_invoice_usage_canonical_query_repository", None)
-        if repository is None and self._requires_sql_read_model_runtime():
+        if repository is None and self._requires_postgres_runtime():
             raise RuntimeError("Input invoice usage canonical query repository is required in PostgreSQL runtime.")
         row_assembler = self._input_invoice_usage_service()
         if isinstance(service, InputInvoiceUsageCanonicalQueryService) and (
@@ -5786,14 +5506,13 @@ class Application:
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
         if connection is None:
-            if self._requires_sql_read_model_runtime():
+            if self._requires_postgres_runtime():
                 raise RuntimeError("OA pending payment source snapshot writer requires PostgreSQL runtime repositories.")
             return None
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
             relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                require_fresh_relations=False,
             ),
         )
         self._oa_pending_payment_source_snapshot_repository_instance = repository
@@ -5826,7 +5545,7 @@ class Application:
         if override is not None:
             return override
         repository = self._postgres_oa_projection_repository()
-        if repository is None and self._requires_sql_read_model_runtime():
+        if repository is None and self._requires_postgres_runtime():
             raise RuntimeError("OA pending payment projection requires the PostgreSQL OA projection repository.")
         return repository
 
@@ -5861,8 +5580,7 @@ class Application:
             return service
         service = OutputInvoiceCollectionQueryService(
             import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
-            require_fresh_relations=False,
+            relation_reader=self._workbench_relation_command_service(),
         )
         self._output_invoice_collection_query_service = service
         return service
@@ -5870,7 +5588,7 @@ class Application:
     def _output_invoice_collection_page_query_service(self) -> OutputInvoiceCollectionCanonicalQueryService:
         service = getattr(self, "_output_invoice_collection_page_query_service_instance", None)
         repository = getattr(self, "_output_invoice_collection_canonical_query_repository", None)
-        if repository is None and self._requires_sql_read_model_runtime():
+        if repository is None and self._requires_postgres_runtime():
             raise RuntimeError("Output invoice collection canonical query repository is required in PostgreSQL runtime.")
         row_assembler = self._output_invoice_collection_service()
         if isinstance(service, OutputInvoiceCollectionCanonicalQueryService) and (
@@ -5947,7 +5665,7 @@ class Application:
             connection = getattr(getattr(self, "_state_store", None), "_connection", None)
             repository = (
                 PostgresPendingInvoiceCanonicalRepository(connection)
-                if self._requires_sql_read_model_runtime()
+                if self._requires_postgres_runtime()
                 else LocalPendingInvoiceCanonicalRepository(
                     import_service=getattr(self, "_import_service", None),
                     query_service=query_service,
@@ -6506,9 +6224,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
@@ -6524,9 +6242,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         status, preview = self._workbench_action_api_routes.confirm_link_preview(payload)
         return self._json_response(status, preview)
 
@@ -6534,9 +6252,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         status, response_payload = self._workbench_action_api_routes.exception_preview(payload)
         return self._json_response(status, response_payload)
 
@@ -6551,9 +6269,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
@@ -6570,9 +6288,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         return self._handle_live_workbench_mark_exception(payload)
 
     def _handle_api_workbench_cancel_link(
@@ -6586,9 +6304,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
@@ -6604,9 +6322,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.withdraw_link_preview(payload)
         return self._workbench_write_response(result)
 
@@ -6621,9 +6339,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         auth_context = self._workbench_write_auth_context(headers, session=access_session)
         if isinstance(auth_context, Response):
             return auth_context
@@ -6651,9 +6369,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.confirm_cash_pass_through(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
@@ -6666,9 +6384,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.confirm_cash_ticket_purchase(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
@@ -6681,9 +6399,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.cancel_cash_special(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
@@ -6691,9 +6409,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.update_bank_exception(payload)
         return self._workbench_write_response(result)
 
@@ -6701,9 +6419,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.oa_bank_exception(payload)
         return self._workbench_write_response(result)
 
@@ -6716,9 +6434,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
@@ -6726,27 +6444,27 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         return self._handle_live_workbench_cancel_exception(payload)
 
     def _handle_api_workbench_ignore_row(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         return self._handle_workbench_ignore_row_payload(payload)
 
     def _handle_api_workbench_unignore_row(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        freshness_error = self._workbench_write_freshness_guard(payload)
-        if freshness_error is not None:
-            return freshness_error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
         return self._handle_workbench_unignore_row_payload(payload)
 
     def _get_or_build_tax_offset_month_payload(self, month: str) -> dict[str, object]:
@@ -6922,7 +6640,6 @@ class Application:
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
-            relation_facade=self._workbench_relation_read_facade(),
             relation_command_service=self._workbench_relation_command_service(
                 repository=self._state_store,
                 save_repository=False,
@@ -7340,10 +7057,6 @@ class Application:
                     for key, value in details.items()
                     if str(key)
                     in {
-                        "read_model_status",
-                        "read_model_stale_reasons",
-                        "read_model_scope_keys",
-                        "refresh_enqueued",
                         "conflicting_case_ids",
                         "row_ids",
                     }
@@ -7473,7 +7186,7 @@ class Application:
         return self._workbench_write_response(result)
 
     def _postgres_oa_projection_repository(self) -> object | None:
-        if not self._requires_sql_read_model_runtime():
+        if not self._requires_postgres_runtime():
             return None
         repository = getattr(self._state_store, "oa_projection_repository", None)
         return repository if repository is not None else None
@@ -8865,7 +8578,6 @@ class Application:
                 if metadata:
                     domain_plan["metadata"] = dict(metadata)
         executors = {
-            "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
             "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
             "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -8874,24 +8586,6 @@ class Application:
             plan,
             executors=executors,
         )
-
-    def _enqueue_generic_read_model_refreshes(
-        self,
-        scope_type: str,
-        scope_keys: list[str],
-        *,
-        reason: str,
-        metadata: dict[str, object] | None = None,
-    ) -> bool:
-        queue_repository = getattr(
-            getattr(self, "_runtime_repositories", None),
-            "queue_repository",
-            None,
-        )
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return False
-        return bool(refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason, metadata=metadata))
 
     def _derived_lifecycle_dirty_scopes_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
@@ -8916,15 +8610,6 @@ class Application:
             "deleted_counts": {"workbench_matching_dirty_scopes": 0},
             "invalidated_scopes": dirty_months,
         }
-
-    def _workbench_relation_derived_lifecycle_executor(self) -> WorkbenchRelationDerivedLifecycleExecutor:
-        return WorkbenchRelationDerivedLifecycleExecutor(
-            enqueue_refresh=lambda scope_keys, **kwargs: self._enqueue_generic_read_model_refreshes(
-                "workbench_relation",
-                scope_keys,
-                **kwargs,
-            ),
-        )
 
     def _derived_lifecycle_oa_adapter_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         adapter = self._workbench_query_service._oa_adapter
@@ -8960,28 +8645,6 @@ class Application:
     def _domain_plan_metadata(domain_plan: dict[str, object]) -> dict[str, object]:
         metadata = domain_plan.get("metadata")
         return dict(metadata) if isinstance(metadata, dict) else {}
-
-    @staticmethod
-    def _read_model_refresh_metadata(domain_plan: dict[str, object]) -> dict[str, object] | None:
-        metadata = domain_plan.get("metadata")
-        if not isinstance(metadata, dict):
-            return None
-        refresh_metadata: dict[str, object] = {}
-        for key in (
-            "source",
-            "case_id",
-            "row_ids",
-            "case_ids",
-            "action_name",
-            "downstream_scope_types",
-            "pending_invoice_scope_keys",
-        ):
-            if key in metadata:
-                refresh_metadata[key] = metadata[key]
-        action_name = str(metadata.get("action_name") or "").strip()
-        if action_name:
-            refresh_metadata["action_name"] = action_name
-        return refresh_metadata or None
 
     @staticmethod
     def _months_from_lifecycle_scope_keys(scope_keys: list[str]) -> list[str]:

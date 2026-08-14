@@ -56,7 +56,7 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_turnover_ledger_api \
   tests.test_turnover_ledger_uow_contract \
   tests.test_turnover_workbench_integration \
-  tests.test_audit_page_business_read_model_tool \
+  tests.test_audit_page_canonical_data_tool \
   tests.test_runtime_worker_registry \
   tests.test_read_model_manifest \
   tests.test_platform_runtime_boundary_guards

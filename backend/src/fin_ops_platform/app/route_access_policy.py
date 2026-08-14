@@ -5,7 +5,6 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _READ_ONLY_POST_ROUTES = frozenset(
     {
         "/api/input-invoice-usage/oa-reverse/preview",
-        "/api/operation-barrier/status",
         "/api/pending-invoices/attach-existing-invoices/preview",
         "/api/pending-invoices/invoice-candidates/batch",
         "/api/tax-offset/calculate",

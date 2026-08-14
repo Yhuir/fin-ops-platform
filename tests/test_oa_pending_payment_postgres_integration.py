@@ -43,7 +43,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             self.connection,
             relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                require_fresh_relations=False,
             ),
         )
 
@@ -468,7 +467,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         with self.connection.transaction() as transaction:
             service = WorkbenchRelationCommandService(
                 relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                require_fresh_relations=False,
             )
             with self.assertRaises(WorkbenchRelationCommandError) as context:
                 service.confirm_formal_relation_plans(

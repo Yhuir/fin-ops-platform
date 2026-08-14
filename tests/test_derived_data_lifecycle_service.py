@@ -27,10 +27,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual(plan["affected_scopes"], ["2026-03", "2026-04"])
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("historical_etc_repair_state", domains)
-        self.assertIn("workbench_relation_read_model", domains)
         self.assertIn("workbench_matching_dirty_scopes", domains)
-        self.assertNotIn("workbench_read_model", domains)
-        self.assertNotIn("tax_offset_read_model", domains)
         self.assertNotIn("all", plan["affected_scopes"])
 
     def test_settings_reset_is_explicit_full_history_maintenance(self) -> None:
@@ -72,14 +69,14 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         summary = service.execute_plan(
             plan,
             executors={
-                "workbench_relation_read_model": lambda domain_plan: {
-                    "deleted_counts": {"workbench_relation_read_models": 1},
+                "workbench_matching_dirty_scopes": lambda domain_plan: {
+                    "deleted_counts": {"workbench_matching_dirty_scopes": 1},
                     "invalidated_scopes": domain_plan["scope_keys"],
                 },
             },
         )
 
-        self.assertEqual(summary["deleted_counts"]["workbench_relation_read_models"], 1)
+        self.assertEqual(summary["deleted_counts"]["workbench_matching_dirty_scopes"], 1)
         self.assertEqual(summary["invalidated_scopes"], ["2026-03"])
         self.assertEqual(summary["errors"], [])
         json.dumps(summary)

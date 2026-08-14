@@ -19,8 +19,8 @@
 - XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
 - 多 sheet 税务导出若存在唯一 `发票基础信息`，只从该 sheet 生成 canonical invoice facts；`信息汇总表` 仅提供同票明细证据。表头 sheet 重名、无有效行、模板不合法或明细强身份不能唯一归属时 fail closed，禁止回退到首个可解析 sheet。历史单 sheet 文件仍走共享模板识别。
 - 将导入结果转化为发票源事实与精确 affected scopes。
-- Direct-canonical 下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
-- 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 read model targets 与 operation barrier targets 为空。
+- 所有下游页面在下次请求的同一只读 snapshot 中直接看到已提交 facts；Workbench 自动匹配仅使用独立领域 dirty-scope worker，不是页面读取依赖。
+- 导入确认结果或完成后的 job result 必须透出 canonical write result envelope；不得返回已退役的 page target、freshness 或 operation-barrier 字段。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只终结未确认 preview，不改发票 canonical facts。
 
 ### 不负责
@@ -58,15 +58,15 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | 人工录入确认 | `/imports/files/confirm` | 只使用 manual preview 返回的 session/file id；与 Excel 导入共用 durable `file_import.confirm`、canonical invoice identity、source link、审计和失败回滚。不得自动建立 OA/银行流水关系。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态。相同 fingerprint 的失败确认通过正式 confirm I/O 复用原 job id；不同 fingerprint 返回结构化 `409 idempotency_conflict`。 |
-| Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次 canonical 写入影响的精确月份，不在写路径展开为页面 refresh jobs |
-| Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`；普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作，页面访问负责精确收敛 |
+| Affected scope | 前端 / 必要领域任务 | 返回本次 canonical 写入影响的精确月份，不在写路径展开为页面 refresh jobs |
+| Write result envelope | 前端导入页面/job result | 只返回当前 canonical 写合同字段与 `affected_scope_keys`；前端立即结束写操作，页面访问负责直接重读 |
 
 ## 持久化与投影
 
-- Own read model：无独立 manifest entry。
-- Page Audit：`imports.invoices` 是 `read_model_keys=()`、`relation_proof_required=false` 的 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
+- Own read model：无；App 内不存在 read model manifest。
+- Page Audit：`imports.invoices` 是 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
 - 下游 direct-canonical consumer：税金抵扣与成本统计在 import job 提交 `app.invoices` 后由各自页面 GET 直接读取新事实，不等待页面 read model。
-- 保留 read-model 消费者：`workbench`、`workbench_relation`；其余发票生命周期、待找发票、进/销项、OA 待付款、税金和成本均为 direct-canonical 消费者。Search runtime 没有当前入口。
+- 其他消费者：Workbench、发票生命周期、待找发票、进/销项、OA 待付款、税金和成本均通过各自 canonical query API 读取；`workbench-matching` 只负责候选匹配领域任务。
 - Worker：import job/runtime handlers。
 
 ## 文件范围

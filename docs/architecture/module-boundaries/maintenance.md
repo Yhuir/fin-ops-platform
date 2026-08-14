@@ -10,7 +10,7 @@
 - 新增、删除或改变 API endpoint、API 响应 shape、前端页面入口。
 - 改变 service、repository、gateway、facade、adapter 的职责或依赖方向。
 - 新增、删除或改变 PostgreSQL canonical fact 表、owner、写入口、读入口、旧生产 source-of-truth 删除状态或跨模块读写路径。
-- 改变 read model scope、dirty scope、outbox event、projection strategy、freshness gate 或 worker。
+- 改变领域 dirty scope、outbox event、worker，或发现已退役 read model/projection/freshness runtime 回归。
 - 改变业务状态机、非法状态、权限、审计、部署、生产验证或回滚方式。
 - 删除旧链路、引入新链路，或改变旧链路的兼容条件。
 
@@ -34,7 +34,7 @@
 
 - 后端 route/API 文件。
 - 后端 service/facade/gateway/orchestrator 文件。
-- repository/SQL/read model projection 文件。
+- repository/SQL 文件；projection 文件只允许作为待删除回归被登记。
 - worker/job/runtime registry 文件。
 - 前端 page/feature/api 文件。
 - tests/e2e 文件。
@@ -65,7 +65,7 @@
 
 - 是否还有 route、service、worker、脚本、测试或前端调用。
 - 是否仍承担兼容、迁移或生产回滚职责。
-- 是否绕过了新的 module boundary、read model freshness gate 或 scope policy。
+- 是否绕过了新的 module boundary 或恢复了已退役 projection/freshness 链路。
 - 删除后是否有测试覆盖旧行为不再需要，或新链路已经覆盖。
 
 如果旧代码污染新链路，优先迁移调用点到新边界，再删除旧路径。删除条件和验证方式应写入模块 `implementation-notes.md` 或 `boundary-io.md`。
@@ -77,26 +77,14 @@
 - `docs/architecture/module-boundaries/canonical-facts.md` 的 owner matrix。
 - 事实 owner 模块 `docs/modules/<owner>/boundary-io.md`。
 - 允许写入口、允许读入口、跨模块 adapter/UoW 和 direct SQL 禁止路径。
-- 写后 dirty scope、domain event、operation barrier target、audit 和 rollback manifest。
+- 写后 affected scope、必要领域任务、domain event、audit 和 rollback manifest。
 - 是否引入或删除 legacy full snapshot、local pickle、`state:*` JSON、Mongo app snapshot、GridFS fallback 或 direct owner bypass。
-- 对应 owner 模块的 service/API/read model/regression tests。
+- 对应 owner 模块的 service/API/repository/regression tests。
 
 旧生产 source-of-truth 路径默认必须删除。migration、audit、rollback 工具如果暂时保留，必须隔离在生产 API/worker 主链路之外，并且不算 canonical facts closure。
 
 不能只把表登记到 shared repository，却不声明业务 owner 和 I/O 边界。
 
-## Read Model 维护规则
+## Read Model 退役维护规则
 
-修改 read model 时必须同时检查：
-
-- manifest entry。
-- scope policy registry。
-- refresh gateway / runtime queue。
-- worker registry 和 deployment env/systemd。
-- query freshness/status gate。
-- API contract tests。
-- worker/read model tests。
-- 前端 loading/stale/refreshing/fresh 状态。
-- 生产 drain、freshness 和性能验证方式。
-
-不能只改 projection SQL 或 service 逻辑而不更新 scope/freshness/worker 合同。
+当前 App runtime 数量固定为 0。维护时检查生产源码、API DTO、前端 client、worker registry、deploy env/systemd、migration 与运维工具，确保没有 manifest、scope policy、refresh gateway、query freshness gate、page cache、projection reader/writer 或 operation barrier 回归。任何重新引入物化读取的需求都必须先形成独立架构决策和实测证据，不能复活旧实现。

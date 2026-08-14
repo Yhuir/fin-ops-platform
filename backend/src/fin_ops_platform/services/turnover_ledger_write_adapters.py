@@ -13,7 +13,6 @@ from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedge
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationValidationError
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
@@ -374,7 +373,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         local_idempotency_store_provider: Callable[[], Any],
         pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
-        relation_facade: Any | None = None,
     ) -> None:
         self._state_store = state_store
         self._relation_service = relation_service
@@ -388,7 +386,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._local_idempotency_store_provider = local_idempotency_store_provider
         self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
-        self._relation_facade = relation_facade
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -406,7 +403,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
-                    relation_facade=self._relation_facade,
                 )
                 if self._relation_command_service_factory is not None
                 else None
@@ -434,7 +430,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
-                    relation_facade=self._relation_facade,
                 )
                 if self._relation_command_service_factory is not None
                 else None
@@ -472,7 +467,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         rules_payload_provider: Callable[[], dict[str, object]],
         pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
-        relation_facade: Any | None = None,
     ) -> None:
         self._state_store = state_store
         self._relation_service = relation_service
@@ -487,7 +481,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._rules_payload_provider = rules_payload_provider
         self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
-        self._relation_facade = relation_facade
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -508,7 +501,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
-                    relation_facade=self._relation_facade,
                     bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
                     rules_payload_provider=self._rules_payload_provider,
                 )
@@ -540,7 +532,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
-                    relation_facade=self._relation_facade,
                     bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
                     rules_payload_provider=self._rules_payload_provider,
                 )
@@ -1258,12 +1249,10 @@ class TurnoverLedgerWorkbenchPairPort:
         self,
         *,
         relation_command_service_factory: Callable[..., Any] | None = None,
-        relation_facade: Any | None = None,
         bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]] | None = None,
         rules_payload_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._relation_command_service_factory = relation_command_service_factory
-        self._relation_facade = relation_facade
         self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._rules_payload_provider = rules_payload_provider
 
@@ -1510,14 +1499,6 @@ class TurnoverLedgerWorkbenchPairPort:
                     message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
                 )
             return
-        active_relation = self._active_relation_by_case_id_from_facade(case_id, list(bank_row_ids or []))
-        if active_relation is not None:
-            if not self._is_turnover_manual_closure_withdrawable_from_turnover(active_relation):
-                raise TurnoverLedgerWritePreconditionError(
-                    error_code="turnover_closure_withdraw_requires_workbench",
-                    message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
-                )
-            return
         return
 
     def withdraw_turnover_manual_closure(
@@ -1752,8 +1733,6 @@ class TurnoverLedgerWorkbenchPairPort:
     def _command_precondition_error(exc: WorkbenchRelationCommandError) -> TurnoverLedgerWritePreconditionError:
         if exc.error_code == "workbench_relation_active_row_conflict":
             message = "银行流水已存在关联台闭环关系，请刷新后重试。"
-        elif exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
-            message = "关联台关系状态正在刷新，请稍后重试。"
         else:
             message = exc.message or exc.error_code
         return TurnoverLedgerWritePreconditionError(
@@ -1787,54 +1766,6 @@ class TurnoverLedgerWorkbenchPairPort:
     def _turnover_case_id(relation_id: str) -> str:
         normalized_relation_id = str(relation_id or "").strip()
         return f"turnover:{normalized_relation_id}" if normalized_relation_id else ""
-
-    def _active_relation_by_case_id_from_facade(
-        self,
-        case_id: str,
-        row_ids: list[str],
-    ) -> dict[str, object] | None:
-        if self._relation_facade is None or not row_ids:
-            return None
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
-        if not callable(reader):
-            return None
-        try:
-            payload = reader(
-                [str(row_id) for row_id in list(row_ids or []) if str(row_id).strip()],
-                require_fresh=True,
-                reason="turnover_manual_closure_withdraw_precheck",
-            )
-        except TypeError:
-            payload = reader([str(row_id) for row_id in list(row_ids or []) if str(row_id).strip()])
-        if not isinstance(payload, dict):
-            return None
-        status = str(payload.get("status") or payload.get("read_model_status") or "fresh")
-        if status != "fresh":
-            raise TurnoverLedgerWritePreconditionError(
-                error_code="turnover_relation_conflict",
-                message="关联台关系状态正在刷新，请稍后重试。",
-            )
-        for relation in relation_dicts_from_distribution_payload(payload):
-            if str(relation.get("case_id") or "") == case_id:
-                return dict(relation)
-        for group in list(payload.get("groups") or []):
-            if not isinstance(group, dict):
-                continue
-            group_id = str(group.get("group_id") or "").strip()
-            payload_dict = group.get("payload") if isinstance(group.get("payload"), dict) else {}
-            payload_group_id = str(payload_dict.get("group_id") or payload_dict.get("case_id") or "").strip()
-            if case_id not in {group_id, payload_group_id}:
-                continue
-            return {
-                "case_id": case_id,
-                "relation_mode": str(payload_dict.get("relation_mode") or group.get("relation_mode") or ""),
-                "row_ids": list(payload_dict.get("row_ids") or group.get("row_ids") or []),
-                "row_types": list(payload_dict.get("row_types") or group.get("row_types") or []),
-                "special_metadata": dict(payload_dict.get("special_metadata") or {})
-                if isinstance(payload_dict.get("special_metadata"), dict)
-                else {},
-            }
-        return None
 
     @staticmethod
     def _active_relation_by_case_id_from_command(

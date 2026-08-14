@@ -76,11 +76,8 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertNotIn("app.no_oa_bank_batches", source)
         self.assertNotIn("bank_flow_rule_batch_relation_read_model_not_fresh", source)
 
-    def test_operation_barrier_has_no_bank_flow_to_no_oa_alias(self) -> None:
-        source = (SERVICES_ROOT / "operation_freshness_barrier.py").read_text(encoding="utf-8")
-
-        self.assertNotIn("READ_MODEL_STATUS_SOURCE_KEYS", source)
-        self.assertNotIn('"bank_flow_rule_batch": "no_oa_bank_batch"', source)
+    def test_operation_barrier_is_removed(self) -> None:
+        self.assertFalse((SERVICES_ROOT / "operation_freshness_barrier.py").exists())
 
     def test_postgres_state_store_bank_flow_storage_is_targeted_to_formal_mutations(self) -> None:
         source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")

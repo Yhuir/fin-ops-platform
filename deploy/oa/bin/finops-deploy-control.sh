@@ -34,13 +34,6 @@ LEGACY_ADMIN_ENV="FIN_OPS_""ADMIN_USERNAMES"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
-WORKBENCH_PAGE_WORKER_ENV="${FINOPS_WORKBENCH_PAGE_WORKER_ENV:-$ENV_DIR/fin-ops.worker.workbench.env}"
-WORKBENCH_PAGE_WORKER_UNIT="${FINOPS_WORKBENCH_PAGE_WORKER_UNIT:-/etc/systemd/system/fin-ops-worker@workbench.service}"
-WORKBENCH_PAGE_WORKER_ROLLBACK_DIRNAME="workbench-page-worker-runtime"
-WORKBENCH_PAGE_WORKER_ROLLBACK_ENV_BASENAME="fin-ops.worker.workbench.env"
-WORKBENCH_PAGE_WORKER_ROLLBACK_METADATA_BASENAME="fin-ops.worker.workbench.env.json"
-RETIRED_WORKBENCH_PAGE_OBSERVER_PID=""
-RETIRED_WORKBENCH_PAGE_OBSERVER_STOP_PATH=""
 PRUNE_RUNTIME_QUEUE_HISTORY_HELPER="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_HELPER:-/usr/local/sbin/finops-prune-runtime-queue-history}"
 PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_SERVICE_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.service}"
 PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT="${FINOPS_PRUNE_RUNTIME_QUEUE_HISTORY_TIMER_UNIT:-/etc/systemd/system/finops-prune-runtime-queue-history.timer}"
@@ -106,10 +99,6 @@ commands:
                                       backfill strict canonical invoice links for one ETC business batch
   etc-submitted-batch-member-repair <release-name> [tool args]
                                       repair proven canonical invoices into one submitted ETC batch
-  read-model-scope-contract <release-name> [args]
-                                      check or repair read model scope contracts using runtime env
-  read-model-slo-smoke <release-name> [args]
-                                      run read model SLO smoke dry-run using runtime env; --apply is refused
   write-operation-restore-point <release-name> <run-id>
                                       create and verify a fixed full PostgreSQL backup before write smoke
   settings-data-reset-restore-point <release-name> <run-id> <action> <operator>
@@ -123,16 +112,12 @@ commands:
   api-request-trace <request-id>
   api-request-timing <request-id>
                                       run the fixed production relation runner; admin token is read from stdin
-  read-model-refresh <release-name> [args]
-                                      validate or enqueue read-model refresh scopes through the durable gateway
   settings-normalize <release-name> [--dry-run|--execute]
                                       normalize App settings through the canonical service/repository boundary
   import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--discover-recover-import-job-id <id>] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...] [--repair-bank-source <session>=<file,...> ... --expected-bank-target-count <n> --expected-bank-protected-count <n> --expected-bank-duplicate-delete-count <n> --expected-bank-replay-create-count <n> --expected-bank-replay-repaired-duplicate-count <n> --operator-id <id> [--cleanup-related-bank-duplicates --expected-bank-category-cleanup-count <n> --expected-bank-workbench-withdraw-count <n> --expected-bank-workbench-transaction-id <id>]]
                                       repair strict import facts through the canonical PostgreSQL boundary
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer
-  runtime-queue-resolve-covered <release-name> [args]
-                                      resolve only dead letters covered by fresh/done scope proof
   restart                              restart API, active workers, and active dispatcher
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
@@ -410,6 +395,10 @@ for migration in migrations:
 
 server_version_num = int(run_psql(database_url, sql="show server_version_num;"))
 applied_versions = sorted(applied)
+forward_only_versions = {"0149"}
+forward_only = bool(pending) and all(
+    item["version"] in forward_only_versions for item in pending
+)
 
 
 def release_identity(name, release_meta, contract):
@@ -436,7 +425,9 @@ plan = {
         "applied_migration_head": applied_versions[-1] if applied_versions else None,
     },
     "pending_migrations": pending,
-    "requires_compatibility_evidence": bool(pending),
+    "forward_only": forward_only,
+    "rollback_supported": not forward_only,
+    "requires_compatibility_evidence": bool(pending) and not forward_only,
 }
 plan["plan_fingerprint_sha256"] = hashlib.sha256(
     json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
@@ -965,20 +956,6 @@ rabbitmq_dispatch_event_types() {
     "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --rabbitmq-dispatch-event-types
 }
 
-registered_read_models() {
-  local src="$1"
-  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$WORKER_PYTHON" -c \
-      'from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST; print(" ".join(sorted(READ_MODEL_MANIFEST)))'
-}
-
-release_has_workbench_page_read_model() {
-  local src="$1"
-  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$WORKER_PYTHON" -c \
-      'from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST; raise SystemExit(0 if "workbench" in READ_MODEL_MANIFEST else 1)'
-}
-
 known_worker_services() {
   {
     all_worker_services
@@ -991,10 +968,9 @@ known_worker_services() {
 worker_inventory_report() {
   local src="$1"
   local output="$2"
-  local registered required read_models active unknown missing service instance
+  local registered required active unknown missing service instance
   registered="$(registered_worker_instances "$src")"
   required="$(required_worker_instances "$src")"
-  read_models="$(registered_read_models "$src")"
   active="$(
     active_worker_services \
       | sed -E 's/^fin-ops-worker@//; s/\.service$//' \
@@ -1018,7 +994,6 @@ worker_inventory_report() {
   done
   REGISTERED_WORKERS="$registered" \
   REQUIRED_WORKERS="$required" \
-  REGISTERED_READ_MODELS="$read_models" \
   ACTIVE_WORKERS="$active" \
   UNKNOWN_WORKERS="$unknown" \
   MISSING_WORKERS="$missing" \
@@ -1037,8 +1012,6 @@ payload = {
     "status": "PASS" if not unknown and not missing else "FAIL",
     "registered_workers": words("REGISTERED_WORKERS"),
     "required_workers": words("REQUIRED_WORKERS"),
-    "registered_read_models": words("REGISTERED_READ_MODELS"),
-    "registered_read_model_count": len(words("REGISTERED_READ_MODELS")),
     "active_workers": words("ACTIVE_WORKERS"),
     "unknown_workers": unknown,
     "missing_required_workers": missing,
@@ -1062,15 +1035,9 @@ stop_runtime_worker_services_for_activation() {
 }
 
 enter_runtime_maintenance() {
-  local generation_service generation_timer
-  generation_service="$(basename "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT")"
-  generation_timer="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
-
   systemctl stop fin-ops.service >/dev/null 2>&1 || true
   systemctl stop fin-ops-rabbitmq-dispatcher.service >/dev/null 2>&1 || true
   stop_runtime_worker_services_for_activation >/dev/null 2>&1 || true
-  systemctl disable --now "$generation_timer" >/dev/null 2>&1 || true
-  systemctl stop "$generation_service" >/dev/null 2>&1 || true
 }
 
 retire_unregistered_worker_services() {
@@ -1097,14 +1064,18 @@ retire_unregistered_worker_services() {
   done < <(known_worker_services)
 }
 
-retire_workbench_page_runtime_assets() {
-  local src="$1"
-  release_has_workbench_page_read_model "$src" && return 0
-
-  systemctl disable --now fin-ops-worker@workbench.service >/dev/null 2>&1 || true
-  systemctl stop fin-ops-worker@workbench.service >/dev/null 2>&1 || true
-  systemctl reset-failed fin-ops-worker@workbench.service >/dev/null 2>&1 || true
-  rm -f -- "$WORKBENCH_PAGE_WORKER_ENV" "$WORKBENCH_PAGE_WORKER_UNIT"
+retire_removed_runtime_assets() {
+  local generation_service generation_timer
+  generation_service="$(basename "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT")"
+  generation_timer="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
+  systemctl disable --now "$generation_timer" >/dev/null 2>&1 || true
+  systemctl stop "$generation_service" >/dev/null 2>&1 || true
+  rm -f -- \
+    "$PRUNE_WORKBENCH_GENERATIONS_HELPER" \
+    "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT" \
+    "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT" \
+    "$ENV_DIR/fin-ops.worker.workbench.env" \
+    "$ENV_DIR/fin-ops.worker.workbench-relation.env"
   systemctl daemon-reload
 }
 
@@ -1138,251 +1109,6 @@ if not stat.S_ISDIR(metadata.st_mode) or path.is_symlink():
 if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
     raise SystemExit(f"private runtime evidence directory must be root-owned with mode 0700: {path}")
 PY
-}
-
-capture_workbench_page_worker_env_for_cutover() {
-  local candidate_release="$1"
-  local previous_release="$2"
-  local evidence_dir="$3"
-  local candidate_src previous_src backup_dir backup_path metadata_path
-  local backup_temp metadata_temp source_facts source_uid source_gid source_mode source_sha256
-  candidate_src="$(release_src "$candidate_release")"
-  previous_src="$(release_src "$previous_release")"
-  release_has_workbench_page_read_model "$candidate_src" && return 0
-  release_has_workbench_page_read_model "$previous_src" || return 0
-
-  assert_root_owned_runtime_env "$WORKBENCH_PAGE_WORKER_ENV"
-  backup_dir="$evidence_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_DIRNAME"
-  backup_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_ENV_BASENAME"
-  metadata_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_METADATA_BASENAME"
-  [[ ! -e "$backup_path" && ! -L "$backup_path" ]] \
-    || die "previous Workbench page worker env backup already exists"
-  [[ ! -e "$metadata_path" && ! -L "$metadata_path" ]] \
-    || die "previous Workbench page worker env metadata already exists"
-  install -d -m 0700 "$backup_dir"
-  if ! assert_root_owned_private_directory "$backup_dir"; then
-    die "Workbench page worker rollback evidence directory is not private root-owned storage"
-  fi
-
-  source_facts="$("$API_PYTHON" - "$WORKBENCH_PAGE_WORKER_ENV" <<'PY'
-import hashlib
-from pathlib import Path
-import stat
-import sys
-
-path = Path(sys.argv[1])
-metadata = path.lstat()
-print(
-    metadata.st_uid,
-    metadata.st_gid,
-    format(stat.S_IMODE(metadata.st_mode), "04o"),
-    hashlib.sha256(path.read_bytes()).hexdigest(),
-)
-PY
-)"
-  read -r source_uid source_gid source_mode source_sha256 <<<"$source_facts"
-  [[ "$source_uid" =~ ^[0-9]+$ && "$source_gid" =~ ^[0-9]+$ ]] \
-    || die "invalid Workbench page worker env ownership evidence"
-  [[ "$source_mode" =~ ^0[0-7]{3}$ && "$source_sha256" =~ ^[0-9a-f]{64}$ ]] \
-    || die "invalid Workbench page worker env mode or hash evidence"
-
-  backup_temp="$(mktemp "$backup_dir/.fin-ops.worker.workbench.env.XXXXXX")"
-  metadata_temp="$(mktemp "$backup_dir/.fin-ops.worker.workbench.env.json.XXXXXX")"
-  if ! install -m 0600 "$WORKBENCH_PAGE_WORKER_ENV" "$backup_temp" \
-    || [[ "$(sha256sum "$backup_temp" | awk '{print $1}')" != "$source_sha256" ]] \
-    || ! mv -f -- "$backup_temp" "$backup_path"; then
-    rm -f -- "$backup_temp" "$metadata_temp"
-    die "failed to capture exact Workbench page worker env for automatic rollback"
-  fi
-  if ! assert_root_owned_private_file "$backup_path"; then
-    rm -f -- "$backup_path" "$metadata_temp"
-    die "captured Workbench page worker rollback env is not private root-owned evidence"
-  fi
-  if ! "$API_PYTHON" - \
-    "$metadata_temp" "$candidate_release" "$previous_release" \
-    "$WORKBENCH_PAGE_WORKER_ENV" "$backup_path" \
-    "$source_uid" "$source_gid" "$source_mode" "$source_sha256" <<'PY'
-from datetime import UTC, datetime
-import json
-from pathlib import Path
-import sys
-
-(
-    output_path,
-    candidate_release,
-    previous_release,
-    source_path,
-    backup_path,
-    source_uid,
-    source_gid,
-    source_mode,
-    source_sha256,
-) = sys.argv[1:]
-payload = {
-    "contract": "workbench-page-worker-env-rollback-v1",
-    "status": "ready",
-    "candidate_release": candidate_release,
-    "previous_release": previous_release,
-    "captured_at": datetime.now(UTC).isoformat(),
-    "source_path": source_path,
-    "backup_path": backup_path,
-    "source_uid": int(source_uid),
-    "source_gid": int(source_gid),
-    "source_mode": source_mode,
-    "sha256": source_sha256,
-}
-Path(output_path).write_text(
-    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-    encoding="utf-8",
-)
-PY
-  then
-    rm -f -- "$metadata_temp" "$backup_path"
-    die "failed to write Workbench page worker rollback metadata"
-  fi
-  if ! chmod 0600 "$metadata_temp" \
-    || ! mv -f -- "$metadata_temp" "$metadata_path" \
-    || ! assert_root_owned_private_file "$metadata_path"; then
-    rm -f -- "$metadata_temp" "$metadata_path" "$backup_path"
-    die "failed to finalize private Workbench page worker rollback evidence"
-  fi
-}
-
-workbench_page_worker_env_rollback_facts() {
-  local candidate_release="$1"
-  local previous_release="$2"
-  local evidence_dir="$3"
-  local backup_dir backup_path metadata_path
-  backup_dir="$evidence_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_DIRNAME"
-  backup_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_ENV_BASENAME"
-  metadata_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_METADATA_BASENAME"
-  if ! assert_root_owned_private_directory "$backup_dir" \
-    || ! assert_root_owned_private_file "$backup_path" \
-    || ! assert_root_owned_private_file "$metadata_path"; then
-    die "Workbench page worker rollback evidence is not private root-owned storage"
-  fi
-  "$API_PYTHON" - \
-    "$metadata_path" "$candidate_release" "$previous_release" \
-    "$WORKBENCH_PAGE_WORKER_ENV" "$backup_path" <<'PY'
-import hashlib
-import json
-from pathlib import Path
-import re
-import sys
-
-metadata_path = Path(sys.argv[1])
-candidate_release = sys.argv[2]
-previous_release = sys.argv[3]
-expected_source_path = sys.argv[4]
-expected_backup_path = sys.argv[5]
-payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-if not isinstance(payload, dict):
-    raise SystemExit("Workbench page worker rollback metadata must be an object")
-expected = {
-    "contract": "workbench-page-worker-env-rollback-v1",
-    "status": "ready",
-    "candidate_release": candidate_release,
-    "previous_release": previous_release,
-    "source_path": expected_source_path,
-    "backup_path": expected_backup_path,
-}
-for key, value in expected.items():
-    if payload.get(key) != value:
-        raise SystemExit(f"Workbench page worker rollback metadata mismatch: {key}")
-try:
-    source_uid = int(payload["source_uid"])
-    source_gid = int(payload["source_gid"])
-except (KeyError, TypeError, ValueError) as exc:
-    raise SystemExit("Workbench page worker rollback ownership metadata is invalid") from exc
-source_mode = str(payload.get("source_mode") or "")
-source_sha256 = str(payload.get("sha256") or "")
-if source_uid < 0 or source_gid < 0 or re.fullmatch(r"0[0-7]{3}", source_mode) is None:
-    raise SystemExit("Workbench page worker rollback owner or mode is invalid")
-if int(source_mode, 8) & 0o022:
-    raise SystemExit("Workbench page worker rollback mode is group/world writable")
-if re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None:
-    raise SystemExit("Workbench page worker rollback hash is invalid")
-actual_sha256 = hashlib.sha256(Path(expected_backup_path).read_bytes()).hexdigest()
-if actual_sha256 != source_sha256:
-    raise SystemExit("Workbench page worker rollback backup hash mismatch")
-print(source_uid, source_gid, source_mode, source_sha256)
-PY
-}
-
-restore_previous_workbench_page_worker_env() {
-  local previous_release="$1"
-  local candidate_release="$2"
-  local evidence_dir="$3"
-  local previous_src backup_dir backup_path restore_temp rollback_facts
-  local source_uid source_gid source_mode source_sha256
-  previous_src="$(release_src "$previous_release")"
-  release_has_workbench_page_read_model "$previous_src" \
-    || die "refusing Workbench page worker env restore for a direct-only release"
-  if ! rollback_facts="$(workbench_page_worker_env_rollback_facts \
-    "$candidate_release" "$previous_release" "$evidence_dir")"; then
-    die "Workbench page worker rollback evidence validation failed"
-  fi
-  read -r source_uid source_gid source_mode source_sha256 <<<"$rollback_facts"
-  backup_dir="$evidence_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_DIRNAME"
-  backup_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_ENV_BASENAME"
-  [[ -d "$ENV_DIR" && ! -L "$ENV_DIR" ]] \
-    || die "runtime env directory must be a non-symlink directory: $ENV_DIR"
-  [[ ! -L "$WORKBENCH_PAGE_WORKER_ENV" ]] \
-    || die "refusing to replace symlink Workbench page worker env"
-  restore_temp="$(mktemp "$ENV_DIR/.fin-ops.worker.workbench.env.rollback.XXXXXX")"
-  if ! install -m 0600 "$backup_path" "$restore_temp" \
-    || ! chown "$source_uid:$source_gid" "$restore_temp" \
-    || ! chmod "$source_mode" "$restore_temp" \
-    || ! mv -f -- "$restore_temp" "$WORKBENCH_PAGE_WORKER_ENV"; then
-    rm -f -- "$restore_temp"
-    die "failed to atomically restore previous Workbench page worker env"
-  fi
-  if ! "$API_PYTHON" - \
-    "$WORKBENCH_PAGE_WORKER_ENV" "$source_uid" "$source_gid" "$source_mode" "$source_sha256" <<'PY'
-import hashlib
-from pathlib import Path
-import stat
-import sys
-
-path = Path(sys.argv[1])
-expected_uid = int(sys.argv[2])
-expected_gid = int(sys.argv[3])
-expected_mode = int(sys.argv[4], 8)
-expected_sha256 = sys.argv[5]
-metadata = path.lstat()
-actual = (
-    metadata.st_uid,
-    metadata.st_gid,
-    stat.S_IMODE(metadata.st_mode),
-    hashlib.sha256(path.read_bytes()).hexdigest(),
-)
-expected = (expected_uid, expected_gid, expected_mode, expected_sha256)
-if path.is_symlink() or actual != expected:
-    raise SystemExit("restored Workbench page worker env does not match rollback evidence")
-PY
-  then
-    die "restored Workbench page worker env failed exact owner/mode/hash validation"
-  fi
-}
-
-discard_workbench_page_worker_env_rollback_backup() {
-  local candidate_release="$1"
-  local previous_release="$2"
-  local evidence_dir="$3"
-  local candidate_src previous_src backup_dir backup_path
-  candidate_src="$(release_src "$candidate_release")"
-  previous_src="$(release_src "$previous_release")"
-  release_has_workbench_page_read_model "$candidate_src" && return 0
-  release_has_workbench_page_read_model "$previous_src" || return 0
-  if ! workbench_page_worker_env_rollback_facts \
-    "$candidate_release" "$previous_release" "$evidence_dir" >/dev/null; then
-    die "refusing to delete invalid Workbench page worker rollback evidence"
-  fi
-  backup_dir="$evidence_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_DIRNAME"
-  backup_path="$backup_dir/$WORKBENCH_PAGE_WORKER_ROLLBACK_ENV_BASENAME"
-  rm -f -- "$backup_path"
-  [[ ! -e "$backup_path" && ! -L "$backup_path" ]] \
-    || die "failed to delete Workbench page worker rollback env after validated release closure"
 }
 
 sync_rabbitmq_dispatcher_event_types() {
@@ -1535,8 +1261,6 @@ run_workbench_direct_compatibility_preflight() {
   local bootstrap_path="$evidence_dir/workbench-direct-application-bootstrap.json"
   local temporary
 
-  release_has_workbench_page_read_model "$src" \
-    && die "direct Workbench compatibility preflight requires a direct-only release"
   install -d -m 0700 "$evidence_dir"
 
   temporary="${first_path}.tmp"
@@ -1608,789 +1332,6 @@ if report != {
 PY
 }
 
-assert_retired_page_runtime_quiesced() {
-  local src="$1"
-  local evidence_path="${2:-}"
-  local first second terminal_resolution final report sample_seconds temporary
-  sample_seconds="${FINOPS_RETIRED_PAGE_RUNTIME_STABILITY_SECONDS:-2}"
-  [[ "$sample_seconds" =~ ^[0-9]+$ ]] \
-    && (( sample_seconds >= 2 && sample_seconds <= 60 )) \
-    || die "FINOPS_RETIRED_PAGE_RUNTIME_STABILITY_SECONDS must be an integer from 2 through 60"
-  if ! first="$(retired_page_runtime_snapshot "$src")"; then
-    printf 'retired page runtime is not quiesced: %s\n' "$first" >&2
-    die "refusing activation while retired page outbox or dirty-scope work is active"
-  fi
-  sleep "$sample_seconds"
-  if ! second="$(retired_page_runtime_snapshot "$src")"; then
-    printf 'retired page runtime is not quiesced: %s\n' "$second" >&2
-    die "refusing activation while retired page outbox or dirty-scope work is active"
-  fi
-  if ! FIRST="$first" SECOND="$second" "$API_PYTHON" -c '
-import json
-import os
-
-first = json.loads(os.environ["FIRST"])
-second = json.loads(os.environ["SECOND"])
-stable_fields = (
-    "event_total_count",
-    "event_latest_created_at",
-    "scope_total_count",
-    "scope_latest_created_at",
-)
-changed = {field: [first.get(field), second.get(field)] for field in stable_fields if first.get(field) != second.get(field)}
-if changed:
-    print(json.dumps({"status": "FAIL", "changed": changed}, ensure_ascii=False, sort_keys=True))
-    raise SystemExit(4)
-' >/dev/null; then
-    printf 'retired Workbench page runtime changed during the stability sample: first=%s second=%s\n' \
-      "$first" "$second" >&2
-    die "retired Workbench page runtime changed during the stability sample; production remains in maintenance"
-  fi
-  terminal_resolution="$(terminalize_retired_page_runtime_history "$src")"
-  if ! final="$(retired_page_runtime_snapshot "$src")"; then
-    printf 'retired page runtime is active after terminal history resolution: %s\n' "$final" >&2
-    die "retired Workbench page runtime became active during terminal history resolution"
-  fi
-  if ! report="$(FIRST="$first" SECOND="$second" FINAL="$final" RESOLUTION="$terminal_resolution" \
-    "$API_PYTHON" -c '
-import json
-import os
-
-first = json.loads(os.environ["FIRST"])
-second = json.loads(os.environ["SECOND"])
-final = json.loads(os.environ["FINAL"])
-resolution = json.loads(os.environ["RESOLUTION"])
-stable_fields = (
-    "event_total_count",
-    "event_latest_created_at",
-    "scope_total_count",
-    "scope_latest_created_at",
-)
-changed = {
-    field: [second.get(field), final.get(field)]
-    for field in stable_fields
-    if second.get(field) != final.get(field)
-}
-remaining_terminal = {
-    "failed_event_count": final.get("event_failed_count", 0),
-    "dead_lettered_event_count": final.get("event_dead_lettered_count", 0),
-    "failed_scope_count": final.get("scope_failed_count", 0),
-}
-if changed or any(remaining_terminal.values()):
-    print(json.dumps({
-        "status": "FAIL",
-        "changed": changed,
-        "remaining_terminal_history": remaining_terminal,
-        "resolution": resolution,
-    }, ensure_ascii=False, sort_keys=True))
-    raise SystemExit(5)
-print(json.dumps({
-    "status": "PASS",
-    "first": first,
-    "second": second,
-    "final": final,
-    "terminal_history": {
-        "failed_event_count": second.get("event_failed_count", 0),
-        "dead_lettered_event_count": second.get("event_dead_lettered_count", 0),
-        "failed_scope_count": second.get("scope_failed_count", 0),
-        "disposition": "terminalized_in_place_for_retired_page_runtime",
-        "resolution": resolution,
-    },
-}, ensure_ascii=False, sort_keys=True))
-')"; then
-    printf 'retired Workbench page runtime failed final terminal-history validation: %s\n' "$report" >&2
-    die "retired Workbench page terminal history did not converge; production remains in maintenance"
-  fi
-  if [[ -n "$evidence_path" ]]; then
-    install -d -m 0700 "$(dirname "$evidence_path")"
-    temporary="${evidence_path}.tmp.$$"
-    printf '%s\n' "$report" >"$temporary"
-    chmod 0600 "$temporary"
-    mv -f -- "$temporary" "$evidence_path"
-  fi
-  printf '%s\n' "$report"
-}
-
-terminalize_retired_page_runtime_history() {
-  local src="$1"
-  [[ -f "$MIGRATOR_ENV" ]] || die "missing PostgreSQL migrator env: $MIGRATOR_ENV"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    # shellcheck disable=SC1090
-    source "$MIGRATOR_ENV"
-    set +a
-    [[ -n "${FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL:-}" ]] \
-      || die "missing FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL in $MIGRATOR_ENV"
-    export DATABASE_URL="$FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL"
-    unset FIN_OPS_POSTGRES_DATABASE_URL
-    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-    cd "$src"
-    "$API_PYTHON" -c '
-import json
-import os
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-
-def bounded_positive_int(name, default, maximum):
-    try:
-        value = int(os.environ.get(name, default))
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be an integer") from exc
-    if value <= 0 or value > maximum:
-        raise RuntimeError(f"{name} must be between 1 and {maximum}")
-    return value
-
-batch_size = bounded_positive_int("FINOPS_RETIRED_PAGE_RUNTIME_TERMINAL_BATCH_SIZE", 500, 5000)
-max_rows = bounded_positive_int("FINOPS_RETIRED_PAGE_RUNTIME_TERMINAL_MAX_ROWS", 20000, 100000)
-batch_size = min(batch_size, max_rows)
-connection = PostgresConnection(PostgresSettings.from_env())
-
-def assert_no_active(transaction):
-    active = transaction.fetch_one(
-        """
-        select
-            count(*) filter (where status in (%s, %s))::bigint as active_event_count,
-            count(*) filter (where publish_status = %s)::bigint as publishing_event_count
-        from job.outbox_events
-        where event_type = %s
-        """,
-        ("pending", "processing", "publishing", "workbench.read_model.refresh"),
-    ) or {}
-    active_scope = transaction.fetch_one(
-        """
-        select count(*)::bigint as active_scope_count
-        from job.read_model_dirty_scopes
-        where scope_type = %s and status in (%s, %s)
-        """,
-        ("workbench", "pending", "processing"),
-    ) or {}
-    if any(int(value or 0) for value in (
-        active.get("active_event_count"),
-        active.get("publishing_event_count"),
-        active_scope.get("active_scope_count"),
-    )):
-        raise RuntimeError("retired Workbench page runtime became active before terminal history resolution")
-
-with connection.transaction() as transaction:
-    assert_no_active(transaction)
-    inventory = transaction.fetch_one(
-        """
-        select
-            (
-                select count(*)::bigint from (
-                    select 1
-                    from job.outbox_events
-                    where event_type = %s and status in (%s, %s)
-                    limit %s
-                ) bounded_events
-            ) as event_count,
-            (
-                select count(*)::bigint from (
-                    select 1
-                    from job.read_model_dirty_scopes
-                    where scope_type = %s and status = %s
-                    limit %s
-                ) bounded_scopes
-            ) as scope_count
-        """,
-        (
-            "workbench.read_model.refresh", "failed", "dead_lettered", max_rows + 1,
-            "workbench", "failed", max_rows + 1,
-        ),
-    ) or {}
-event_inventory_count = int(inventory.get("event_count") or 0)
-scope_inventory_count = int(inventory.get("scope_count") or 0)
-if event_inventory_count > max_rows or scope_inventory_count > max_rows:
-    raise RuntimeError(
-        "retired Workbench terminal history exceeds the bounded resolution cap: "
-        f"events={event_inventory_count}, scopes={scope_inventory_count}, max_rows={max_rows}"
-    )
-
-event_resolved_count = 0
-while event_resolved_count < max_rows:
-    current_batch_size = min(batch_size, max_rows - event_resolved_count)
-    with connection.transaction() as transaction:
-        assert_no_active(transaction)
-        event_resolution = transaction.fetch_one(
-        """
-        with candidate as (
-            select id
-            from job.outbox_events
-            where event_type = %s
-              and status in (%s, %s)
-            order by updated_at, id
-            limit %s
-            for update skip locked
-        ),
-        resolved as (
-            update job.outbox_events as target
-            set
-                status = %s,
-                processed_at = coalesce(processed_at, now()),
-                locked_by = null,
-                locked_at = null,
-                publish_locked_by = null,
-                publish_locked_at = null,
-                updated_at = now(),
-                raw_payload = jsonb_set(
-                    coalesce(raw_payload, %s::jsonb),
-                    %s::text[],
-                    jsonb_build_object(
-                        %s::text, %s::text,
-                        %s::text, status,
-                        %s::text, last_error,
-                        %s::text, attempts,
-                        %s::text, publish_status,
-                        %s::text, publish_attempt_count,
-                        %s::text, publish_last_error,
-                        %s::text, %s::text,
-                        %s::text, now()
-                    ),
-                    true
-                )
-            from candidate
-            where target.id = candidate.id
-            returning target.id
-        )
-        select count(*)::bigint as resolved_count from resolved
-        """,
-        (
-            "workbench.read_model.refresh", "failed", "dead_lettered", current_batch_size,
-            "done", "{}", ["retirement_resolution"],
-            "reason", "workbench_page_read_model_runtime_retired",
-            "original_status", "original_last_error", "original_attempts",
-            "original_publish_status", "original_publish_attempts", "original_publish_last_error",
-            "terminal_status", "done", "resolved_at",
-        ),
-        ) or {}
-    resolved = int(event_resolution.get("resolved_count") or 0)
-    event_resolved_count += resolved
-    if resolved < current_batch_size:
-        break
-
-scope_resolved_count = 0
-while scope_resolved_count < max_rows:
-    current_batch_size = min(batch_size, max_rows - scope_resolved_count)
-    with connection.transaction() as transaction:
-        assert_no_active(transaction)
-        scope_resolution = transaction.fetch_one(
-        """
-        with candidate as (
-            select id
-            from job.read_model_dirty_scopes
-            where scope_type = %s
-              and status = %s
-            order by updated_at, id
-            limit %s
-            for update skip locked
-        ),
-        resolved as (
-            update job.read_model_dirty_scopes as target
-            set
-                status = %s,
-                locked_by = null,
-                locked_at = null,
-                updated_at = now(),
-                raw_payload = jsonb_set(
-                    coalesce(raw_payload, %s::jsonb),
-                    %s::text[],
-                    jsonb_build_object(
-                        %s::text, %s::text,
-                        %s::text, status,
-                        %s::text, last_error,
-                        %s::text, attempts,
-                        %s::text, %s::text,
-                        %s::text, now()
-                    ),
-                    true
-                )
-            from candidate
-            where target.id = candidate.id
-            returning target.id
-        )
-        select count(*)::bigint as resolved_count from resolved
-        """,
-        (
-            "workbench", "failed", current_batch_size,
-            "superseded", "{}", ["retirement_resolution"],
-            "reason", "workbench_page_read_model_runtime_retired",
-            "original_status", "original_last_error", "original_attempts",
-            "terminal_status", "superseded", "resolved_at",
-        ),
-        ) or {}
-    resolved = int(scope_resolution.get("resolved_count") or 0)
-    scope_resolved_count += resolved
-    if resolved < current_batch_size:
-        break
-print(json.dumps({
-    "status": "PASS",
-    "event_type": "workbench.read_model.refresh",
-    "scope_type": "workbench",
-    "terminalized_event_count": event_resolved_count,
-    "terminalized_scope_count": scope_resolved_count,
-    "terminal_inventory_event_count": event_inventory_count,
-    "terminal_inventory_scope_count": scope_inventory_count,
-    "batch_size": batch_size,
-    "max_rows": max_rows,
-    "audit_metadata": "retirement_resolution",
-}, ensure_ascii=False, sort_keys=True, default=str))
-'
-  )
-}
-
-retired_page_runtime_snapshot() {
-  local src="$1"
-  run_with_runtime_env "$src" -c '
-import json
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-connection = PostgresConnection(PostgresSettings.from_env())
-event = connection.fetch_one(
-    """
-    select
-        count(*)::bigint as total_count,
-        count(*) filter (where status = %s)::bigint as pending_count,
-        count(*) filter (where status = %s)::bigint as processing_count,
-        count(*) filter (where status = %s)::bigint as failed_count,
-        count(*) filter (where status = %s)::bigint as dead_lettered_count,
-        count(*) filter (where publish_status = %s)::bigint as publishing_count,
-        max(created_at)::text as latest_created_at
-    from job.outbox_events
-    where event_type = %s
-    """,
-    (
-        "pending", "processing", "failed", "dead_lettered", "publishing",
-        "workbench.read_model.refresh",
-    ),
-) or {}
-scope = connection.fetch_one(
-    """
-    select
-        count(*)::bigint as total_count,
-        count(*) filter (where status = %s)::bigint as pending_count,
-        count(*) filter (where status = %s)::bigint as processing_count,
-        count(*) filter (where status = %s)::bigint as failed_count,
-        max(created_at)::text as latest_created_at
-    from job.read_model_dirty_scopes
-    where scope_type = %s
-    """,
-    ("pending", "processing", "failed", "workbench"),
-) or {}
-resolution = connection.fetch_one(
-    """
-    select
-        count(*)::bigint as event_count,
-        count(*) filter (
-            where raw_payload->%s::text->>%s::text = %s
-        )::bigint as failed_event_count,
-        count(*) filter (
-            where raw_payload->%s::text->>%s::text = %s
-        )::bigint as dead_lettered_event_count
-    from job.outbox_events
-    where event_type = %s
-      and raw_payload ? %s
-    """,
-    (
-        "retirement_resolution", "original_status", "failed",
-        "retirement_resolution", "original_status", "dead_lettered",
-        "workbench.read_model.refresh", "retirement_resolution",
-    ),
-) or {}
-scope_resolution = connection.fetch_one(
-    """
-    select count(*)::bigint as scope_count
-    from job.read_model_dirty_scopes
-    where scope_type = %s
-      and raw_payload ? %s
-    """,
-    ("workbench", "retirement_resolution"),
-) or {}
-def integer(row, key):
-    return int(row.get(key) or 0)
-payload = dict(
-    event_total_count=integer(event, "total_count"),
-    event_pending_count=integer(event, "pending_count"),
-    event_processing_count=integer(event, "processing_count"),
-    event_publishing_count=integer(event, "publishing_count"),
-    event_failed_count=integer(event, "failed_count"),
-    event_dead_lettered_count=integer(event, "dead_lettered_count"),
-    event_latest_created_at=event.get("latest_created_at"),
-    scope_total_count=integer(scope, "total_count"),
-    scope_pending_count=integer(scope, "pending_count"),
-    scope_processing_count=integer(scope, "processing_count"),
-    scope_failed_count=integer(scope, "failed_count"),
-    scope_latest_created_at=scope.get("latest_created_at"),
-    resolved_failed_event_count=integer(resolution, "failed_event_count"),
-    resolved_dead_lettered_event_count=integer(resolution, "dead_lettered_event_count"),
-    resolved_failed_scope_count=integer(scope_resolution, "scope_count"),
-)
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-active = sum(payload[key] for key in (
-    "event_pending_count", "event_processing_count", "event_publishing_count",
-    "scope_pending_count", "scope_processing_count",
-))
-raise SystemExit(0 if active == 0 else 3)
-'
-}
-
-retired_workbench_page_runtime_window_required() {
-  local candidate_src="$1"
-  local previous_src="$2"
-  ! release_has_workbench_page_read_model "$candidate_src" \
-    && release_has_workbench_page_read_model "$previous_src"
-}
-
-start_retired_workbench_page_runtime_window() {
-  local candidate_release="$1"
-  local previous_release="$2"
-  local evidence_dir="$3"
-  local candidate_src previous_src report_path ready_path stop_path preflight_path attempt
-  candidate_src="$(release_src "$candidate_release")"
-  previous_src="$(release_src "$previous_release")"
-  report_path="$evidence_dir/retired-workbench-page-runtime-window.json"
-  ready_path="$evidence_dir/retired-workbench-page-runtime-window.ready"
-  stop_path="$evidence_dir/retired-workbench-page-runtime-window.stop"
-  preflight_path="$evidence_dir/retired-workbench-page-runtime.json"
-  rm -f -- "$report_path" "$ready_path" "$stop_path"
-
-  if ! retired_workbench_page_runtime_window_required "$candidate_src" "$previous_src"; then
-    "$API_PYTHON" - "$report_path" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-path.write_text(json.dumps({
-    "contract": "retired-workbench-page-runtime-window-v1",
-    "required": False,
-    "status": "NOT_REQUIRED",
-}, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-path.chmod(0o600)
-PY
-    return 0
-  fi
-  [[ -s "$preflight_path" ]] || return 1
-
-  RETIRED_WORKBENCH_PAGE_OBSERVER_STOP_PATH="$stop_path"
-  run_with_runtime_env "$candidate_src" - \
-    "$report_path" "$ready_path" "$stop_path" "$preflight_path" "$candidate_src" <<'PY' &
-from datetime import UTC, datetime
-import json
-from pathlib import Path
-import sys
-import time
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
-from fin_ops_platform.services.runtime_worker_registry import RUNTIME_WORKER_REGISTRY
-
-report_path = Path(sys.argv[1])
-ready_path = Path(sys.argv[2])
-stop_path = Path(sys.argv[3])
-preflight_path = Path(sys.argv[4])
-candidate_src = Path(sys.argv[5]).resolve()
-stable_fields = (
-    "event_total_count",
-    "event_latest_created_at",
-    "scope_total_count",
-    "scope_latest_created_at",
-)
-table_counters = (
-    "seq_scan", "seq_tup_read", "idx_scan", "idx_tup_fetch",
-    "n_tup_ins", "n_tup_upd", "n_tup_del", "n_tup_hot_upd",
-)
-
-def now():
-    return datetime.now(UTC).isoformat()
-
-def integer(row, key):
-    return int(row.get(key) or 0)
-
-def snapshot(connection):
-    event = connection.fetch_one(
-        """
-        select count(*)::bigint as total_count, max(created_at)::text as latest_created_at
-        from job.outbox_events where event_type = %s
-        """,
-        ("workbench.read_model.refresh",),
-    ) or {}
-    scope = connection.fetch_one(
-        """
-        select count(*)::bigint as total_count, max(created_at)::text as latest_created_at
-        from job.read_model_dirty_scopes where scope_type = %s
-        """,
-        ("workbench",),
-    ) or {}
-    extension = connection.fetch_one(
-        "select exists(select 1 from pg_extension where extname = %s) as installed",
-        ("pg_stat_statements",),
-    ) or {}
-    if extension.get("installed") is not True:
-        raise RuntimeError("pg_stat_statements_unavailable")
-    statement_reset = connection.fetch_one(
-        "select stats_reset::text as stats_reset from pg_stat_statements_info"
-    ) or {}
-    visibility = connection.fetch_one(
-        """
-        select
-          count(*) filter (where query = %s)::bigint as hidden_count,
-          count(*) filter (where query <> %s)::bigint as visible_count
-        from pg_stat_statements
-        """,
-        ("<insufficient privilege>", "<insufficient privilege>"),
-    ) or {}
-    if integer(visibility, "visible_count") == 0:
-        raise RuntimeError("pg_stat_statements_visibility_unavailable")
-    projection = connection.fetch_one(
-        """
-        select count(*)::bigint as statement_count,
-               coalesce(sum(calls), 0)::bigint as calls,
-               coalesce(sum(rows), 0)::bigint as rows
-        from pg_stat_statements
-        where lower(query) like any(%s::text[])
-        """,
-        ([
-            "%read_model.workbench_rows%",
-            "%read_model.workbench_groups%",
-            "%read_model.workbench_generations%",
-            "%read_model.workbench_group_rows%",
-            "%read_model.workbench_generation_stats%",
-            "%read_model.workbench_snapshots%",
-            "%read_model.workbench_summary%",
-        ],),
-    ) or {}
-    tables = connection.fetch_all(
-        """
-        select relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch,
-               n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd
-        from pg_stat_user_tables
-        where schemaname = %s and relname = any(%s::text[])
-        order by relname
-        """,
-        (
-            "read_model",
-            [
-                "workbench_rows",
-                "workbench_groups",
-                "workbench_generations",
-                "workbench_group_rows",
-                "workbench_generation_stats",
-                "workbench_snapshots",
-                "workbench_summary",
-            ],
-        ),
-    )
-    database = connection.fetch_one(
-        "select stats_reset::text as stats_reset from pg_stat_database where datname = current_database()"
-    ) or {}
-    return {
-        "captured_at": now(),
-        "event_total_count": integer(event, "total_count"),
-        "event_latest_created_at": event.get("latest_created_at"),
-        "scope_total_count": integer(scope, "total_count"),
-        "scope_latest_created_at": scope.get("latest_created_at"),
-        "pg_stat_statements_reset": statement_reset.get("stats_reset"),
-        "pg_stat_database_reset": database.get("stats_reset"),
-        "projection_statements": {
-            "statement_count": integer(projection, "statement_count"),
-            "calls": integer(projection, "calls"),
-            "rows": integer(projection, "rows"),
-        },
-        "projection_table_stats": {
-            str(row["relname"]): {name: integer(row, name) for name in table_counters}
-            for row in tables
-        },
-    }
-
-def write_report(payload):
-    temporary = report_path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary.chmod(0o600)
-    temporary.replace(report_path)
-
-try:
-    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
-    if preflight.get("status") != "PASS":
-        raise RuntimeError("preflight_retirement_evidence_invalid")
-    preflight_final = preflight.get("final")
-    if not isinstance(preflight_final, dict):
-        raise RuntimeError("preflight_retirement_final_snapshot_missing")
-    connection = PostgresConnection(PostgresSettings.from_env())
-    before = snapshot(connection)
-    startup_changed = {
-        field: {"preflight": preflight_final.get(field), "window_start": before.get(field)}
-        for field in stable_fields
-        if preflight_final.get(field) != before.get(field)
-    }
-    release_metadata = json.loads((candidate_src / "RELEASE.json").read_text(encoding="utf-8"))
-    retired_redis_owners = (
-        "backend/src/fin_ops_platform/services/workbench_groups_page_cache.py",
-        "backend/src/fin_ops_platform/services/workbench_query_freshness_service.py",
-        "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py",
-    )
-    active_read_sources = (
-        "backend/src/fin_ops_platform/services/workbench_query_facade.py",
-        "backend/src/fin_ops_platform/app/routes_workbench.py",
-    )
-    present_retired_owners = [path for path in retired_redis_owners if (candidate_src / path).exists()]
-    active_call_markers = {}
-    for relative_path in active_read_sources:
-        source_path = candidate_src / relative_path
-        if not source_path.is_file():
-            active_call_markers[relative_path] = ["missing_source"]
-            continue
-        source = source_path.read_text(encoding="utf-8")
-        markers = [
-            marker
-            for marker in ("redis_helper", "RuntimeRedisHelper", ".get_json(", ".set_json(", ".get_text(", ".set_text(")
-            if marker in source
-        ]
-        if markers:
-            active_call_markers[relative_path] = markers
-    page_runtime_registrations = [
-        registration.instance_name
-        for registration in RUNTIME_WORKER_REGISTRY
-        if registration.instance_name == "workbench"
-        or registration.read_model_key == "workbench"
-        or "workbench.read_model.refresh" in registration.event_types
-    ]
-    page_read_model_registered = "workbench" in READ_MODEL_MANIFEST
-    redis_page_cache_proof = {
-        "status": (
-            "PASS"
-            if not present_retired_owners
-            and not active_call_markers
-            and not page_runtime_registrations
-            and not page_read_model_registered
-            else "FAIL"
-        ),
-        "mode": "source_owner_absent",
-        "guard_contract": "candidate_source_owner_and_registry_v1",
-        "candidate_git_commit": release_metadata.get("git_commit"),
-        "retired_source_paths_absent": not present_retired_owners,
-        "active_call_markers_absent": not active_call_markers,
-        "page_runtime_registration_absent": not page_runtime_registrations,
-        "page_read_model_registration_absent": not page_read_model_registered,
-        "present_retired_source_paths": present_retired_owners,
-        "active_call_markers": active_call_markers,
-        "page_runtime_registrations": page_runtime_registrations,
-    }
-    ready_path.write_text(now() + "\n", encoding="utf-8")
-    ready_path.chmod(0o600)
-    deadline = time.monotonic() + 600
-    while not stop_path.exists():
-        if time.monotonic() >= deadline:
-            raise RuntimeError("observer_deadline_exceeded")
-        time.sleep(0.25)
-    after = snapshot(connection)
-    changed = {
-        field: {"before": before.get(field), "after": after.get(field)}
-        for field in stable_fields
-        if before.get(field) != after.get(field)
-    }
-    changed.update({f"startup_{field}": value for field, value in startup_changed.items()})
-    if before["pg_stat_statements_reset"] != after["pg_stat_statements_reset"]:
-        changed["pg_stat_statements_reset"] = {
-            "before": before["pg_stat_statements_reset"],
-            "after": after["pg_stat_statements_reset"],
-        }
-    if before["pg_stat_database_reset"] != after["pg_stat_database_reset"]:
-        changed["pg_stat_database_reset"] = {
-            "before": before["pg_stat_database_reset"],
-            "after": after["pg_stat_database_reset"],
-        }
-    if before["projection_statements"] != after["projection_statements"]:
-        changed["projection_statements"] = {
-            "before": before["projection_statements"],
-            "after": after["projection_statements"],
-        }
-    if before["projection_table_stats"] != after["projection_table_stats"]:
-        changed["projection_table_stats"] = {
-            "before": before["projection_table_stats"],
-            "after": after["projection_table_stats"],
-        }
-    if redis_page_cache_proof["status"] != "PASS":
-        changed["redis_page_cache_source_owner"] = redis_page_cache_proof
-    passed = not changed
-    write_report({
-        "contract": "retired-workbench-page-runtime-window-v1",
-        "required": True,
-        "status": "PASS" if passed else "FAIL",
-        "preflight_evidence_status": preflight.get("status"),
-        "before": before,
-        "after": after,
-        "redis_page_cache_proof": redis_page_cache_proof,
-        "changed": changed,
-    })
-    raise SystemExit(0 if passed else 6)
-except BaseException as exc:
-    if isinstance(exc, SystemExit):
-        raise
-    write_report({
-        "contract": "retired-workbench-page-runtime-window-v1",
-        "required": True,
-        "status": "FAIL",
-        "failure_type": type(exc).__name__,
-    })
-    raise SystemExit(7)
-PY
-  RETIRED_WORKBENCH_PAGE_OBSERVER_PID="$!"
-
-  for attempt in $(seq 1 15); do
-    [[ -s "$ready_path" ]] && return 0
-    if [[ -s "$report_path" ]] \
-      && ! kill -0 "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID" >/dev/null 2>&1; then
-      wait "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID" || true
-      RETIRED_WORKBENCH_PAGE_OBSERVER_PID=""
-      return 1
-    fi
-    sleep 1
-  done
-  abandon_retired_workbench_page_runtime_window
-  return 1
-}
-
-finish_retired_workbench_page_runtime_window() {
-  local report_path="$1"
-  local observer_failed=false
-  if [[ -n "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID" ]]; then
-    : >"$RETIRED_WORKBENCH_PAGE_OBSERVER_STOP_PATH"
-    chmod 0600 "$RETIRED_WORKBENCH_PAGE_OBSERVER_STOP_PATH"
-    if ! wait "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID"; then
-      observer_failed=true
-    fi
-    RETIRED_WORKBENCH_PAGE_OBSERVER_PID=""
-  fi
-  [[ "$observer_failed" == false && -s "$report_path" ]] || return 1
-  "$API_PYTHON" - "$report_path" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-required = payload.get("required")
-status = payload.get("status")
-if not ((required is True and status == "PASS") or (required is False and status == "NOT_REQUIRED")):
-    raise SystemExit("retired Workbench page runtime window evidence did not pass")
-PY
-}
-
-abandon_retired_workbench_page_runtime_window() {
-  if [[ -n "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID" ]]; then
-    : >"$RETIRED_WORKBENCH_PAGE_OBSERVER_STOP_PATH" 2>/dev/null || true
-    wait "$RETIRED_WORKBENCH_PAGE_OBSERVER_PID" >/dev/null 2>&1 || true
-    RETIRED_WORKBENCH_PAGE_OBSERVER_PID=""
-  fi
-}
-
 archive_legacy_current() {
   [[ -e "$LEGACY_CURRENT_DIR" || -L "$LEGACY_CURRENT_DIR" ]] || return 0
   mkdir -p "$LEGACY_CURRENT_ARCHIVE_DIR"
@@ -2440,7 +1381,7 @@ write_worker_dropin() {
 WorkingDirectory=$src
 Environment=PYTHONPATH=$src/backend/src
 ExecStart=
-ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.worker --worker-id \${FIN_OPS_WORKER_ID} --registration \${FIN_OPS_WORKER_INSTANCE} --worker-instance \${FIN_OPS_WORKER_INSTANCE} \$FIN_OPS_WORKER_ARGS --lock-timeout-seconds \${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds \${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds \${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts \${FIN_OPS_WORKER_MAX_ATTEMPTS} --max-events-per-iteration \${FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION} --dependency-not-fresh-delay-seconds \${FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS}
+ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.worker --worker-id \${FIN_OPS_WORKER_ID} --registration \${FIN_OPS_WORKER_INSTANCE} --worker-instance \${FIN_OPS_WORKER_INSTANCE} \$FIN_OPS_WORKER_ARGS --lock-timeout-seconds \${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds \${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds \${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts \${FIN_OPS_WORKER_MAX_ATTEMPTS} --max-events-per-iteration \${FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION}
 DROPIN
 }
 
@@ -2464,19 +1405,8 @@ DROPIN
 
 ensure_runtime_workers() {
   local src="$1"
-  local required_existing_worker_envs="${2:-}"
-  local worker worker_env
   [[ -x "$ENSURE_RUNTIME_WORKERS_HELPER" ]] || die "runtime worker ensure helper is not executable: $ENSURE_RUNTIME_WORKERS_HELPER"
-  for worker in $required_existing_worker_envs; do
-    [[ "$worker" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
-      || die "invalid required existing worker env name: $worker"
-    worker_env="$ENV_DIR/fin-ops.worker.${worker}.env"
-    [[ -f "$worker_env" && ! -L "$worker_env" ]] \
-      || die "required restored worker env is missing or not a regular file: $worker_env"
-    assert_root_owned_runtime_env "$worker_env"
-  done
-  FINOPS_REQUIRE_EXISTING_WORKER_ENVS="$required_existing_worker_envs" \
-    "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
+  "$ENSURE_RUNTIME_WORKERS_HELPER" "$src"
 }
 
 install_runtime_worker_helper() {
@@ -2487,73 +1417,6 @@ install_runtime_worker_helper() {
     return 0
   fi
   install -m 0755 -o root -g root "$helper_src" "$ENSURE_RUNTIME_WORKERS_HELPER"
-}
-
-retire_workbench_generation_retention() {
-  local service_unit timer_unit
-  service_unit="$(basename "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT")"
-  timer_unit="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
-
-  systemctl disable --now "$timer_unit" >/dev/null 2>&1 || true
-  systemctl stop "$service_unit" >/dev/null 2>&1 || true
-  rm -f -- \
-    "$PRUNE_WORKBENCH_GENERATIONS_HELPER" \
-    "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT" \
-    "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT"
-  systemctl daemon-reload
-  systemctl reset-failed "$service_unit" "$timer_unit" >/dev/null 2>&1 || true
-}
-
-restore_previous_workbench_generation_retention_for_rollback() {
-  local src="$1"
-  local helper_src service_src timer_src timer_unit
-  helper_src="$src/deploy/oa/bin/finops-prune-workbench-generations.sh"
-  service_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.service.example"
-  timer_src="$src/deploy/oa/systemd/finops-prune-workbench-generations.timer.example"
-  timer_unit="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
-
-  release_has_workbench_page_read_model "$src" \
-    || die "refusing to restore Workbench generation retention from a direct-only release"
-  [[ -f "$helper_src" ]] || die "previous release is missing its Workbench generation prune helper: $helper_src"
-  [[ -f "$service_src" ]] || die "previous release is missing its Workbench generation prune service: $service_src"
-  [[ -f "$timer_src" ]] || die "previous release is missing its Workbench generation prune timer: $timer_src"
-
-  install -m 0755 -o root -g root "$helper_src" "$PRUNE_WORKBENCH_GENERATIONS_HELPER"
-  install -m 0644 -o root -g root "$service_src" "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT"
-  install -m 0644 -o root -g root "$timer_src" "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT"
-  systemctl daemon-reload
-  systemctl enable --now "$timer_unit"
-}
-
-assert_previous_workbench_rollback_evidence() {
-  local release="$1"
-  local evidence_path="$2"
-  [[ -n "$evidence_path" && -f "$evidence_path" && ! -L "$evidence_path" ]] \
-    || die "audited previous-page-runtime activation requires immutable rollback validation evidence"
-  [[ "$(stat -c '%u' "$evidence_path")" == "0" ]] \
-    || die "previous-page-runtime rollback validation evidence must be root-owned"
-  "$API_PYTHON" - "$release" "$evidence_path" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-release = sys.argv[1]
-path = Path(sys.argv[2])
-try:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, ValueError) as exc:
-    raise SystemExit(f"invalid previous-page-runtime rollback evidence: {exc}") from exc
-if not isinstance(payload, dict):
-    raise SystemExit("previous-page-runtime rollback evidence must be a JSON object")
-if payload.get("status") != "PASS":
-    raise SystemExit("previous-page-runtime rollback evidence did not pass")
-if payload.get("previous_release") != release:
-    raise SystemExit("previous-page-runtime rollback evidence does not bind the target release")
-if payload.get("errors") not in ([], None):
-    raise SystemExit("previous-page-runtime rollback evidence contains errors")
-if not payload.get("rebuilt_generation_ids") or not payload.get("active_generation_id"):
-    raise SystemExit("previous-page-runtime rollback evidence does not prove a new active generation")
-PY
 }
 
 install_runtime_queue_history_retention() {
@@ -2926,427 +1789,6 @@ cleanup_releases() {
       done
 }
 
-workbench_page_runtime_audit() {
-  local src="$1"
-  run_with_runtime_env "$src" -c '
-import json
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-
-connection = PostgresConnection(PostgresSettings.from_env())
-status = PostgresReadModelRepository(connection).get_workbench_refresh_status(scope_key="all")
-outbox = connection.fetch_one(
-    """
-    select
-        count(*)::bigint as total_count,
-        count(*) filter (where status = %s)::bigint as pending_count,
-        count(*) filter (where status = %s)::bigint as processing_count,
-        count(*) filter (where publish_status = %s)::bigint as publishing_count,
-        count(*) filter (
-            where status in (%s, %s)
-              and not (raw_payload ? %s)
-        )::bigint as unresolved_terminal_count,
-        max(created_at)::text as latest_created_at
-    from job.outbox_events
-    where event_type = %s
-    """,
-    (
-        "pending", "processing", "publishing", "failed", "dead_lettered",
-        "retirement_resolution", "workbench.read_model.refresh",
-    ),
-) or {}
-dirty = connection.fetch_one(
-    """
-    select
-        count(*) filter (where status = %s)::bigint as pending_count,
-        count(*) filter (where status = %s)::bigint as processing_count,
-        count(*) filter (where status = %s)::bigint as failed_count
-    from job.read_model_dirty_scopes
-    where scope_type = %s
-    """,
-    ("pending", "processing", "failed", "workbench"),
-) or {}
-active_generations = connection.fetch_all(
-    """
-    select scope_key, generation_id, source_versions
-    from read_model.workbench_generations
-    where tenant_id = %s
-      and status = %s
-      and scope_key ~ %s
-    order by scope_key
-    """,
-    ("default", "active", "^[0-9]{4}-[0-9]{2}$"),
-)
-retirement_history = connection.fetch_one(
-    """
-    select
-        count(*)::bigint as event_count,
-        count(*) filter (
-            where raw_payload->%s::text->>%s::text = %s
-        )::bigint as failed_count,
-        count(*) filter (
-            where raw_payload->%s::text->>%s::text = %s
-        )::bigint as dead_lettered_count
-    from job.outbox_events
-    where event_type = %s
-      and raw_payload ? %s
-    """,
-    (
-        "retirement_resolution", "original_status", "failed",
-        "retirement_resolution", "original_status", "dead_lettered",
-        "workbench.read_model.refresh", "retirement_resolution",
-    ),
-) or {}
-retirement_dirty_history = connection.fetch_one(
-    """
-    select count(*)::bigint as scope_count
-    from job.read_model_dirty_scopes
-    where scope_type = %s
-      and raw_payload ? %s
-    """,
-    ("workbench", "retirement_resolution"),
-) or {}
-print(json.dumps({
-    "status": status,
-    "outbox": outbox,
-    "dirty_scopes": dirty,
-    "active_generations": active_generations,
-    "retirement_history": {
-        **retirement_history,
-        **retirement_dirty_history,
-    },
-}, default=str, sort_keys=True))
-'
-}
-
-seed_previous_workbench_rehydrate_scopes() {
-  local src="$1"
-  [[ -f "$MIGRATOR_ENV" ]] || die "missing PostgreSQL migrator env: $MIGRATOR_ENV"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    # shellcheck disable=SC1090
-    source "$MIGRATOR_ENV"
-    set +a
-    [[ -n "${FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL:-}" ]] \
-      || die "missing FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL in $MIGRATOR_ENV"
-    export DATABASE_URL="$FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL"
-    unset FIN_OPS_POSTGRES_DATABASE_URL
-    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-    cd "$src"
-    "$API_PYTHON" -c '
-import json
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.common import jsonb
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
-
-connection = PostgresConnection(PostgresSettings.from_env())
-builder = WorkbenchSqlProjectionBuilder(
-    connection=connection,
-    read_model_repository=PostgresReadModelRepository(connection),
-)
-month_scopes = sorted(set(builder.list_workbench_scope_shards("all")))
-if not month_scopes:
-    raise RuntimeError("previous release discovered no Workbench month shards to rehydrate")
-scope_keys = [*month_scopes, "all"]
-seeded = []
-with connection.transaction() as transaction:
-    processing = transaction.fetch_all(
-        """
-        select scope_key
-        from job.read_model_dirty_scopes
-        where tenant_id = %s
-          and scope_type = %s
-          and status = %s
-          and scope_key = any(%s::text[])
-        order by scope_key
-        """,
-        ("default", "workbench", "processing", scope_keys),
-    )
-    if processing:
-        raise RuntimeError("cannot seed rollback rehydrate while a Workbench dirty scope is processing")
-    for scope_key in scope_keys:
-        marker = {
-            "reason": "direct_only_release_rollback_rehydrate",
-            "rollback_rehydrate_seed": {
-                "scope_key": scope_key,
-                "source": "finops-deploy-control",
-            },
-        }
-        row = transaction.fetch_one(
-            """
-            insert into job.read_model_dirty_scopes(
-                tenant_id, scope_type, scope_key, month, reason,
-                source_version, status, next_run_at, payload, raw_payload
-            )
-            values (
-                %s, %s, %s, %s::date, %s,
-                coalesce((
-                    select max(existing.source_version) + 1
-                    from job.read_model_dirty_scopes existing
-                    where existing.tenant_id = %s
-                      and existing.scope_type = %s
-                      and existing.scope_key = %s
-                ), 0),
-                %s, clock_timestamp(), %s, %s
-            )
-            on conflict (tenant_id, scope_type, scope_key)
-            where status in ($$pending$$, $$processing$$)
-            do update set
-                reason = excluded.reason,
-                source_version = job.read_model_dirty_scopes.source_version + 1,
-                status = %s,
-                next_run_at = clock_timestamp(),
-                locked_by = null,
-                locked_at = null,
-                payload = job.read_model_dirty_scopes.payload || excluded.payload,
-                raw_payload = job.read_model_dirty_scopes.raw_payload || excluded.raw_payload,
-                updated_at = clock_timestamp()
-            where job.read_model_dirty_scopes.status = %s
-            returning scope_key, source_version, status
-            """,
-            (
-                "default", "workbench", scope_key,
-                f"{scope_key}-01" if scope_key != "all" else None,
-                "direct_only_release_rollback_rehydrate",
-                "default", "workbench", scope_key,
-                "pending", jsonb(marker), jsonb(marker),
-                "pending", "pending",
-            ),
-        )
-        if row is None:
-            raise RuntimeError(f"failed to seed rollback rehydrate scope {scope_key}")
-        seeded.append(dict(row))
-print(json.dumps({
-    "status": "PASS",
-    "scope_type": "workbench",
-    "scope_keys": scope_keys,
-    "seeded": seeded,
-}, ensure_ascii=False, sort_keys=True, default=str))
-'
-  )
-}
-
-prepare_previous_workbench_page_runtime() {
-  local previous_release="$1"
-  local evidence_dir="$2"
-  local src rehydrate_report seed_report before_report after_report validation_report stderr_report
-  src="$(release_src "$previous_release")"
-  rehydrate_report="$evidence_dir/rollback-workbench-rehydrate.json"
-  seed_report="$evidence_dir/rollback-workbench-seed.json"
-  before_report="$evidence_dir/rollback-workbench-before.json"
-  after_report="$evidence_dir/rollback-workbench-after.json"
-  validation_report="$evidence_dir/rollback-workbench-validation.json"
-  stderr_report="$evidence_dir/rollback-workbench-rehydrate.stderr"
-
-  [[ -f "$src/scripts/rehydrate-workbench-read-models.py" ]] \
-    || die "previous release is missing its Workbench rehydrate script: $src/scripts/rehydrate-workbench-read-models.py"
-  umask 077
-  workbench_page_runtime_audit "$src" >"$before_report"
-  if ! seed_previous_workbench_rehydrate_scopes "$src" >"$seed_report"; then
-    printf 'previous-release Workbench rollback seed failed; see %s\n' "$seed_report" >&2
-    return 1
-  fi
-  if ! run_with_runtime_env "$src" \
-    "$src/scripts/rehydrate-workbench-read-models.py" --json \
-    >"$rehydrate_report" 2>"$stderr_report"; then
-    printf 'previous-release Workbench rehydrate failed; see %s\n' "$stderr_report" >&2
-    return 1
-  fi
-  workbench_page_runtime_audit "$src" >"$after_report"
-
-  if ! "$API_PYTHON" - \
-    "$rehydrate_report" "$seed_report" "$before_report" "$after_report" "$validation_report" "$previous_release" <<'PY'
-from datetime import datetime
-import json
-from pathlib import Path
-import sys
-
-rehydrate_path, seed_path, before_path, after_path, output_path = map(Path, sys.argv[1:6])
-previous_release = sys.argv[6]
-errors = []
-
-def load(path):
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        errors.append(f"invalid evidence {path.name}: {exc}")
-        return {}
-    if not isinstance(payload, dict):
-        errors.append(f"evidence {path.name} must be a JSON object")
-        return {}
-    return payload
-
-def integer(value):
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return -1
-
-def timestamp(value):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        errors.append(f"invalid outbox watermark: {value}")
-        return None
-
-def validate_generation(status, label, *, require_clean_dirty):
-    if not isinstance(status, dict):
-        errors.append(f"{label} status is missing")
-        return
-    if status.get("read_model_status") != "fresh":
-        errors.append(f"{label} read_model_status is not fresh")
-    if not status.get("active_generation_id"):
-        errors.append(f"{label} active_generation_id is missing")
-    if status.get("building_generation_id") not in (None, ""):
-        errors.append(f"{label} still has a building generation")
-    if status.get("consistency_status") != "fresh":
-        errors.append(f"{label} consistency_status is not fresh")
-    if status.get("consistency_failures"):
-        errors.append(f"{label} has consistency failures")
-    if status.get("all_scope_parent_failures"):
-        errors.append(f"{label} has all-scope parent failures")
-    if status.get("read_model_stale_reasons"):
-        errors.append(f"{label} has stale reasons")
-    if require_clean_dirty and status.get("dirty_scopes"):
-        errors.append(f"{label} still has active dirty scopes")
-    backlog = status.get("outbox_backlog")
-    if not isinstance(backlog, dict):
-        errors.append(f"{label} page refresh backlog is missing")
-    elif any(integer(backlog.get(key)) != 0 for key in ("pending", "processing", "failed", "dead_lettered")):
-        errors.append(f"{label} has unresolved page refresh events")
-
-rehydrate = load(rehydrate_path)
-seed = load(seed_path)
-before = load(before_path)
-after = load(after_path)
-if rehydrate.get("action") != "rehydrate_workbench_read_models":
-    errors.append("rehydrate action is not exact")
-if rehydrate.get("dry_run") is not False:
-    errors.append("rehydrate did not execute")
-
-scope_keys = [str(value) for value in rehydrate.get("scope_keys", [])]
-seed_scope_keys = [str(value) for value in seed.get("scope_keys", [])]
-if seed.get("status") != "PASS":
-    errors.append("rollback rehydrate dirty-scope seed did not pass")
-if sorted(seed_scope_keys) != sorted([*scope_keys, "all"]):
-    errors.append("rollback rehydrate seed did not cover every month shard and all")
-rebuilt = rehydrate.get("rebuilt") if isinstance(rehydrate.get("rebuilt"), list) else []
-rebuilt_scope_keys = [str(item.get("scope_key")) for item in rebuilt if isinstance(item, dict)]
-if sorted(scope_keys) != sorted(rebuilt_scope_keys):
-    errors.append("rehydrate did not rebuild every discovered shard")
-for item in rebuilt:
-    if isinstance(item, dict):
-        validate_generation(item.get("status"), f"scope {item.get('scope_key')}", require_clean_dirty=False)
-all_payload = rehydrate.get("all")
-validate_generation(
-    all_payload.get("status") if isinstance(all_payload, dict) else None,
-    "all-scope publish",
-    require_clean_dirty=False,
-)
-validate_generation(rehydrate.get("status"), "rehydrate final", require_clean_dirty=True)
-validate_generation(after.get("status"), "offline audit", require_clean_dirty=True)
-
-def active_generations(payload):
-    rows = payload.get("active_generations") if isinstance(payload, dict) else None
-    if not isinstance(rows, list):
-        return {}
-    return {
-        str(row.get("scope_key")): str(row.get("generation_id"))
-        for row in rows
-        if isinstance(row, dict) and row.get("scope_key") and row.get("generation_id")
-    }
-
-before_active_generations = active_generations(before)
-after_active_generations = active_generations(after)
-rebuilt_active_generations = {
-    str(item.get("scope_key")): str(item["status"].get("active_generation_id"))
-    for item in rebuilt
-    if isinstance(item, dict)
-    and isinstance(item.get("status"), dict)
-    and item["status"].get("active_generation_id")
-}
-if not scope_keys:
-    errors.append("previous-release rehydrate discovered no Workbench month shards")
-new_generation_ids = []
-for scope_key in scope_keys:
-    after_generation_id = after_active_generations.get(scope_key)
-    if not after_generation_id:
-        errors.append(f"scope {scope_key} has no active generation after rehydrate")
-        continue
-    if after_generation_id == before_active_generations.get(scope_key):
-        errors.append(f"scope {scope_key} did not create a new Workbench generation")
-    else:
-        new_generation_ids.append(after_generation_id)
-    if rebuilt_active_generations.get(scope_key) != after_generation_id:
-        errors.append(f"scope {scope_key} new Workbench generation is not active after rehydrate")
-
-before_retirement_history = before.get("retirement_history")
-after_retirement_history = after.get("retirement_history")
-if not isinstance(before_retirement_history, dict) or not isinstance(after_retirement_history, dict):
-    errors.append("retired page terminal-history audit is missing")
-elif before_retirement_history != after_retirement_history:
-    errors.append("retired page terminal-history evidence changed during offline rehydrate")
-
-before_outbox = before.get("outbox") if isinstance(before.get("outbox"), dict) else {}
-after_outbox = after.get("outbox") if isinstance(after.get("outbox"), dict) else {}
-if integer(before_outbox.get("processing_count")) != 0:
-    errors.append("page refresh outbox was processing before offline rehydrate")
-if any(integer(after_outbox.get(key)) != 0 for key in (
-    "pending_count", "processing_count", "publishing_count", "unresolved_terminal_count",
-)):
-    errors.append("page refresh outbox is not quiesced after offline rehydrate")
-if integer((after.get("dirty_scopes") or {}).get("processing_count")) != 0:
-    errors.append("page dirty scope is processing after offline rehydrate")
-if integer((after.get("dirty_scopes") or {}).get("pending_count")) != 0:
-    errors.append("page dirty scope is pending after offline rehydrate")
-if integer((after.get("dirty_scopes") or {}).get("failed_count")) != 0:
-    errors.append("page dirty scope failed during offline rehydrate")
-before_latest = timestamp(before_outbox.get("latest_created_at"))
-after_latest = timestamp(after_outbox.get("latest_created_at"))
-if before_latest is None and after_latest is not None:
-    errors.append("a page refresh event was created during offline rehydrate")
-elif before_latest is not None and after_latest is not None and after_latest > before_latest:
-    errors.append("page refresh outbox watermark advanced during offline rehydrate")
-if integer(after_outbox.get("total_count")) > integer(before_outbox.get("total_count")):
-    errors.append("page refresh outbox count increased during offline rehydrate")
-
-payload = {
-    "status": "PASS" if not errors else "FAIL",
-    "previous_release": previous_release,
-    "previous_release_rehydrate": str(rehydrate_path),
-    "rollback_seed": str(seed_path),
-    "before_audit": str(before_path),
-    "after_audit": str(after_path),
-    "rebuilt_scope_count": len(rebuilt_scope_keys),
-    "rebuilt_generation_ids": sorted(new_generation_ids),
-    "active_generation_id": (after.get("status") or {}).get("active_generation_id"),
-    "retirement_history": after_retirement_history,
-    "outbox_watermark_before": before_outbox.get("latest_created_at"),
-    "outbox_watermark_after": after_outbox.get("latest_created_at"),
-    "errors": errors,
-}
-output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-raise SystemExit(0 if not errors else 1)
-PY
-  then
-    cat "$validation_report" >&2 || true
-    return 1
-  fi
-  chmod 0600 \
-    "$rehydrate_report" "$seed_report" "$before_report" "$after_report" "$validation_report" "$stderr_report"
-  cat "$validation_report"
-}
-
 workbench_audit_identity() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "workbench-audit-identity requires release name"
@@ -3440,7 +1882,7 @@ batch_accounting_audit() {
   local src
   src="$(release_src "$release")"
   assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_page_business_read_model \
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_page_canonical_data \
     batch_accounting --json --fail-on-issues --tenant-id default --limit 50
 }
 
@@ -3567,33 +2009,6 @@ etc_submitted_batch_member_repair() {
   src="$(release_src "$release")"
   assert_runtime_env_contract
   run_with_runtime_env "$src" -m fin_ops_platform.tools.repair_submitted_etc_batch_members "$@"
-}
-
-read_model_scope_contract() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
-  shift
-  local src
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"
-}
-
-read_model_slo_smoke() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "read-model-slo-smoke requires release name"
-  shift
-  local arg src
-  for arg in "$@"; do
-    case "$arg" in
-      --apply|--apply=*)
-        die "read-model-slo-smoke only permits dry-run through deploy-control; run --apply only from an explicitly approved root session"
-        ;;
-    esac
-  done
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"
 }
 
 write_operation_restore_point() {
@@ -3961,18 +2376,6 @@ api_request_timing() {
   printf '%s\n' "$matches"
 }
 
-read_model_refresh() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "read-model-refresh requires release name"
-  shift
-  local src
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.runtime_queue_ops \
-    enqueue-read-model-refresh "$@"
-}
-
-
 settings_normalize() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "settings-normalize requires release name"
@@ -4003,30 +2406,14 @@ bank_transaction_category_repair() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.repair_unknown_bank_transaction_categories "$@"
 }
 
-runtime_queue_resolve_covered() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "runtime-queue-resolve-covered requires release name"
-  shift
-  local src
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.runtime_queue_ops \
-    resolve-covered-dead-letters "$@"
-}
-
 activate_release() {
   local release="$1"
   local release_profile="${2:-runtime}"
   local dispatcher_restart_override="${3:-auto}"
-  local rollback_page_runtime_mode="${4:-direct-only}"
-  local rollback_page_runtime_evidence="${5:-}"
-  local rollback_candidate_release="${6:-}"
-  local src runtime_worker_helper_src active_workers dispatcher_was_active=false
-  local required_existing_worker_envs=""
+  local src active_workers dispatcher_was_active=false
   [[ "$release_profile" == "frontend" || "$release_profile" == "runtime" || "$release_profile" == "acl" ]] \
     || die "unsupported activation profile: $release_profile"
   src="$(release_src "$release")"
-  runtime_worker_helper_src="$src"
   assert_runtime_env_contract
   active_workers="$(active_worker_services)"
   if [[ "$dispatcher_restart_override" == "true" ]]; then
@@ -4039,34 +2426,13 @@ activate_release() {
   elif [[ "$dispatcher_restart_override" != "auto" ]]; then
     die "invalid dispatcher restart override: $dispatcher_restart_override"
   fi
-  case "$rollback_page_runtime_mode" in
-    direct-only)
-      release_has_workbench_page_read_model "$src" \
-        && die "page read-model release activation requires the audited rollback-only path"
-      ;;
-    audited-previous-page-runtime)
-      release_has_workbench_page_read_model "$src" \
-        || die "audited previous-page-runtime mode requires a page read-model release"
-      [[ -n "$rollback_candidate_release" ]] \
-        || die "audited previous-page-runtime mode requires the exact direct candidate release"
-      runtime_worker_helper_src="$(release_src "$rollback_candidate_release")"
-      release_has_workbench_page_read_model "$runtime_worker_helper_src" \
-        && die "audited previous-page-runtime rollback candidate must be direct-only"
-      assert_previous_workbench_rollback_evidence \
-        "$release" "$rollback_page_runtime_evidence"
-      ;;
-    *)
-      die "invalid Workbench page runtime activation mode: $rollback_page_runtime_mode"
-      ;;
-  esac
   systemctl stop fin-ops.service
-  if [[ "$release_profile" != "frontend" \
-    || "$rollback_page_runtime_mode" == "audited-previous-page-runtime" ]]; then
+  if [[ "$release_profile" != "frontend" ]]; then
     systemctl stop fin-ops-rabbitmq-dispatcher.service >/dev/null 2>&1 || true
   fi
   stop_runtime_worker_services_for_activation
-  if [[ "$release_profile" == "frontend" \
-    && "$rollback_page_runtime_mode" == "direct-only" ]]; then
+  retire_removed_runtime_assets
+  if [[ "$release_profile" == "frontend" ]]; then
     write_api_dropin "$src"
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
@@ -4079,37 +2445,16 @@ activate_release() {
   run_schema_migrations "$src"
   assert_settings_access_control_database_guard "$src"
   sync_python_envs "$src"
-  if [[ "$rollback_page_runtime_mode" == "direct-only" ]]; then
-    run_workbench_direct_compatibility_preflight \
-      "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release"
-  fi
-  install_runtime_worker_helper "$runtime_worker_helper_src"
+  run_workbench_direct_compatibility_preflight \
+    "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release"
+  install_runtime_worker_helper "$src"
   retire_unregistered_worker_services "$src"
-  retire_workbench_page_runtime_assets "$src"
-  if [[ "$rollback_page_runtime_mode" == "direct-only" ]]; then
-    retire_workbench_generation_retention
-  fi
   sync_rabbitmq_dispatcher_event_types "$src"
-  if [[ "$rollback_page_runtime_mode" == "direct-only" ]]; then
-    assert_retired_page_runtime_quiesced \
-      "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release/retired-workbench-page-runtime.json"
-  fi
   archive_legacy_current
   write_api_dropin "$src"
   write_worker_dropin "$src"
   write_dispatcher_dropin "$src"
-  if [[ "$rollback_page_runtime_mode" == "audited-previous-page-runtime" ]]; then
-    if ! restore_previous_workbench_page_worker_env \
-      "$release" "$rollback_candidate_release" \
-      "$(dirname "$rollback_page_runtime_evidence")"; then
-      die "failed to restore exact Workbench page worker env before previous release ensure"
-    fi
-    required_existing_worker_envs="workbench"
-  fi
-  ensure_runtime_workers "$src" "$required_existing_worker_envs"
-  if [[ "$rollback_page_runtime_mode" == "audited-previous-page-runtime" ]]; then
-    restore_previous_workbench_generation_retention_for_rollback "$src"
-  fi
+  ensure_runtime_workers "$src"
   install_runtime_queue_history_retention "$src"
   install_oa_sync_enqueue_timer "$src"
   publish_frontend "$src"
@@ -4262,8 +2607,6 @@ payload = {
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
     "registered_workers": inventory.get("registered_workers") or [],
-    "registered_read_models": inventory.get("registered_read_models") or [],
-    "registered_read_model_count": int(inventory.get("registered_read_model_count") or 0),
     "reports": {
         "worker_inventory": os.environ["INVENTORY_REPORT"],
         "candidate_status": os.environ["CANDIDATE_REPORT"],
@@ -4348,14 +2691,10 @@ release_gate_checkpoint() {
       --page-base-url https://www.yn-sourcing.com
       --api-prefix ""
       --profile "$profile"
-      --read-model-target-ms 5000
       --write-target-ms 5000
       --http-target-ms 1000
       --health-ready-target-ms 1000
-      # Runtime queue claims use a 300-second lease.  A worker can be stopped
-      # immediately after claiming an event during cutover, so the stability
-      # gate must allow that exact lease to expire and be reclaimed.
-      --timeout-seconds 360
+      --timeout-seconds 60
       --output "$closure_report"
     )
     if [[ "$profile" == "preflight" ]]; then
@@ -4396,7 +2735,7 @@ PY
   # A healthy dispatcher can legitimately own one short-lived publishing row
   # while the authenticated probe is still generating runtime traffic.  Give
   # only that transient state a bounded drain window; failed/dead-lettered work
-  # and dirty scopes remain immediate checkpoint failures.
+  # remain immediate checkpoint failures.
   if [[ "$profile" == "stability" ]]; then
     local drain_attempt
     for drain_attempt in 1 2 3 4 5; do
@@ -4407,11 +2746,10 @@ import os
 payload = json.load(open(os.environ["RUNTIME_REPORT"], encoding="utf-8"))
 queue = payload.get("queue_backlog") or {}
 publish = payload.get("rabbitmq_publish_status") or {}
-dirty = payload.get("dirty_scopes") or {}
 failed_or_dead = sum(int(queue.get(key) or 0) for key in ("failed", "dead_lettered"))
 active = sum(int(queue.get(key) or 0) for key in ("pending", "processing"))
 active += int(publish.get("publishing") or 0)
-raise SystemExit(0 if active == 0 or failed_or_dead > 0 or sum(int(value or 0) for value in dirty.values()) > 0 else 1)
+raise SystemExit(0 if active == 0 or failed_or_dead > 0 else 1)
 PY
       then
         break
@@ -4561,7 +2899,6 @@ page_canonical_audit_ready = (
 profile = os.environ["CHECKPOINT_PROFILE"]
 page_canonical_audit_required = True
 queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
-dirty_scopes = runtime.get("dirty_scopes", {}) if isinstance(runtime, dict) else {}
 publish_status = runtime.get("rabbitmq_publish_status", {}) if isinstance(runtime, dict) else {}
 pending = (
     sum(int(queue_backlog.get(status) or 0) for status in ("pending", "processing"))
@@ -4583,7 +2920,6 @@ dead_letters = (
     if durable_dead_letters >= 0 and rabbitmq_dead_letters >= 0
     else -1
 )
-dirty = sum(int(value or 0) for value in dirty_scopes.values()) if isinstance(dirty_scopes, dict) else -1
 passed = (
     inventory.get("status") == "PASS"
     and rabbit.get("status") == "applied"
@@ -4595,7 +2931,6 @@ passed = (
     and publishing == 0
     and failed == 0
     and dead_letters == 0
-    and dirty == 0
 )
 payload = {
     "release_gate_status": "PASS" if passed else "FAIL",
@@ -4614,9 +2949,6 @@ payload = {
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
     "registered_workers": inventory.get("registered_workers") or [],
-    "registered_read_models": inventory.get("registered_read_models") or [],
-    "registered_read_model_count": int(inventory.get("registered_read_model_count") or 0),
-    "dirty_scope_count": dirty,
     "pending_outbox_count": pending,
     "publishing_outbox_count": publishing,
     "failed_outbox_count": failed,
@@ -4668,43 +3000,20 @@ import sys
 
 release_meta = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 root = Path(os.environ["EVIDENCE_DIR"])
-retired_page_runtime_path = root / "retired-workbench-page-runtime.json"
-retired_page_runtime = (
-    json.loads(retired_page_runtime_path.read_text(encoding="utf-8"))
-    if retired_page_runtime_path.is_file()
-    else None
-)
-retired_page_runtime_window_path = root / "retired-workbench-page-runtime-window.json"
-retired_page_runtime_window = (
-    json.loads(retired_page_runtime_window_path.read_text(encoding="utf-8"))
-    if retired_page_runtime_window_path.is_file()
-    else None
-)
 checkpoints = {}
-for label in ("pre", "t0", "t60", "t300", "rollback"):
+for label in ("pre", "t0", "t30", "rollback"):
     path = root / label / "checkpoint.json"
     if path.is_file():
         checkpoints[label] = json.loads(path.read_text(encoding="utf-8"))
-latest = next((checkpoints[name] for name in ("t300", "t60", "t0", "pre") if name in checkpoints), {})
+latest = next((checkpoints[name] for name in ("t30", "t0", "pre") if name in checkpoints), {})
 t0_page_audit = checkpoints.get("t0", {}).get("page_canonical_audit", {})
 pre_dlq = int(checkpoints.get("pre", {}).get("dead_letter_count", 0))
 final_dlq = int(latest.get("dead_letter_count", pre_dlq))
 profile = os.environ["RELEASE_PROFILE"]
-required_final_checkpoint = "t0" if profile == "frontend" else "t300"
-runtime_window_valid = isinstance(retired_page_runtime_window, dict) and (
-    (
-        retired_page_runtime_window.get("required") is True
-        and retired_page_runtime_window.get("status") == "PASS"
-    )
-    or (
-        retired_page_runtime_window.get("required") is False
-        and retired_page_runtime_window.get("status") == "NOT_REQUIRED"
-    )
-)
+required_final_checkpoint = "t0" if profile == "frontend" else "t30"
 passed = (
     os.environ["GATE_STATUS"] == "PASS"
     and required_final_checkpoint in checkpoints
-    and runtime_window_valid
 )
 payload = {
     "release_gate_status": "PASS" if passed else "FAIL",
@@ -4718,9 +3027,6 @@ payload = {
     "unknown_worker_count": int(latest.get("unknown_worker_count", -1)),
     "required_worker_not_ready": int(latest.get("required_worker_not_ready", -1)),
     "registered_workers": latest.get("registered_workers") or [],
-    "registered_read_models": latest.get("registered_read_models") or [],
-    "registered_read_model_count": int(latest.get("registered_read_model_count", -1)),
-    "dirty_scope_count": int(latest.get("dirty_scope_count", -1)),
     "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
     "publishing_outbox_count": int(latest.get("publishing_outbox_count", -1)),
     "dead_letter_delta": final_dlq - pre_dlq,
@@ -4737,16 +3043,8 @@ payload = {
         if isinstance(t0_page_audit, dict)
         else None
     ),
-    "retired_workbench_page_runtime": retired_page_runtime,
-    "retired_workbench_page_runtime_window": retired_page_runtime_window,
-    "retired_workbench_page_runtime_window_status": (
-        retired_page_runtime_window.get("status")
-        if isinstance(retired_page_runtime_window, dict)
-        else None
-    ),
-    "retired_workbench_page_runtime_zero_delta": runtime_window_valid,
     "frontend_verified": latest.get("frontend_verified") is True if profile == "frontend" else None,
-    "queue_stable_after_300_seconds": passed if profile != "frontend" else None,
+    "queue_stable_after_30_seconds": passed if profile != "frontend" else None,
     "checkpoints": checkpoints,
 }
 output = Path(sys.argv[2])
@@ -4765,11 +3063,10 @@ rollback_release_gate() {
   local failure_checkpoint="$5"
   local release_profile="$6"
   local rolled_back=false
-  local previous_src dispatcher_was_active=false dispatcher_state_path rollback_page_runtime_mode=direct-only
-  local rollback_page_runtime_evidence=""
+  local dispatcher_was_active=false dispatcher_state_path
   local schema_plan_path="$evidence_dir/schema-compatibility-plan.json"
   local schema_evidence_required=false
-  abandon_retired_workbench_page_runtime_window
+  local schema_rollback_supported=true
   cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
   dispatcher_state_path="$evidence_dir/dispatcher-was-active"
   if [[ -f "$dispatcher_state_path" ]] \
@@ -4788,6 +3085,18 @@ import sys
 print("true" if json.loads(Path(sys.argv[1]).read_text())["requires_compatibility_evidence"] else "false")
 PY
 )"
+    schema_rollback_supported="$("$API_PYTHON" - "$schema_plan_path" <<'PY'
+import json
+from pathlib import Path
+import sys
+print("true" if json.loads(Path(sys.argv[1]).read_text()).get("rollback_supported", True) else "false")
+PY
+)"
+  fi
+  if [[ "$schema_rollback_supported" != "true" ]]; then
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
+    die "release gate failed at $failure_checkpoint after a forward-only schema migration; production remains in maintenance for forward repair"
   fi
   if [[ "$schema_evidence_required" == "true" ]] \
     && ! schema_compatibility_evidence_valid "$candidate" "$schema_plan_path"; then
@@ -4805,19 +3114,7 @@ PY
       "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
     die "release gate failed at $failure_checkpoint; previous release lacks $SETTINGS_ACL_CONTRACT, production remains in maintenance for forward repair"
   fi
-  previous_src="$(release_src "$previous_release")"
-  if release_has_workbench_page_read_model "$previous_src"; then
-    rollback_page_runtime_mode=audited-previous-page-runtime
-    rollback_page_runtime_evidence="$evidence_dir/rollback-workbench-validation.json"
-    if ! prepare_previous_workbench_page_runtime "$previous_release" "$evidence_dir"; then
-      write_release_gate_evidence \
-        "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
-      die "release gate failed at $failure_checkpoint; previous-release Workbench rehydrate or strict offline audit failed, production remains in maintenance"
-    fi
-  fi
-  if (activate_release "$previous_release" \
-    "$release_profile" "$dispatcher_was_active" "$rollback_page_runtime_mode" \
-    "$rollback_page_runtime_evidence" "$candidate"); then
+  if (activate_release "$previous_release" "$release_profile" "$dispatcher_was_active"); then
     if [[ "$release_profile" == "frontend" ]]; then
       release_gate_frontend_checkpoint \
         "$previous_release" rollback "$admin_token" "$evidence_dir" && rolled_back=true
@@ -4825,11 +3122,6 @@ PY
       "$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"; then
       rolled_back=true
     fi
-  fi
-  if [[ "$rolled_back" == true ]] \
-    && ! (discard_workbench_page_worker_env_rollback_backup \
-      "$candidate" "$previous_release" "$evidence_dir"); then
-    rolled_back=false
   fi
   if [[ "$rolled_back" != true ]]; then
     enter_runtime_maintenance
@@ -4858,7 +3150,7 @@ release_gate_activate() {
   [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
   profile_report="$(mktemp /run/finops-release-profile.XXXXXX)"
   schema_plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
-  trap 'abandon_retired_workbench_page_runtime_window; rm -f -- "$profile_report" "$schema_plan_path"' EXIT
+  trap 'rm -f -- "$profile_report" "$schema_plan_path"' EXIT
   release_gate_profile "$release" --json >"$profile_report"
   release_profile="$("$API_PYTHON" - "$profile_report" <<'PY'
 import json
@@ -4910,20 +3202,9 @@ PY
       "$release" "$previous_release" "$evidence_dir" FAIL false "$release_profile" pre
     die "current production runtime failed the pre-activation release gate"
   fi
-  if ! (capture_workbench_page_worker_env_for_cutover \
-    "$release" "$previous_release" "$evidence_dir"); then
-    write_release_gate_evidence \
-      "$release" "$previous_release" "$evidence_dir" FAIL false "$release_profile" page_worker_env_capture || true
-    die "failed to capture the exact live Workbench page worker env before cutover; services were not stopped"
-  fi
   if ! (activate_release "$release" "$release_profile"); then
     rollback_release_gate \
       "$release" "$previous_release" "$admin_token" "$evidence_dir" activation "$release_profile"
-  fi
-  if ! start_retired_workbench_page_runtime_window \
-    "$release" "$previous_release" "$evidence_dir"; then
-    rollback_release_gate \
-      "$release" "$previous_release" "$admin_token" "$evidence_dir" retired_page_observer_start "$release_profile"
   fi
   if [[ "$release_profile" == "frontend" ]]; then
     if ! release_gate_frontend_checkpoint "$release" t0 "$admin_token" "$evidence_dir"; then
@@ -4935,21 +3216,11 @@ PY
       rollback_release_gate \
         "$release" "$previous_release" "$admin_token" "$evidence_dir" t0 "$release_profile"
     fi
-    sleep 60
-    if ! release_gate_checkpoint "$release" t60 "$admin_token" "$evidence_dir" stability; then
+    sleep 30
+    if ! release_gate_checkpoint "$release" t30 "$admin_token" "$evidence_dir" stability; then
       rollback_release_gate \
-        "$release" "$previous_release" "$admin_token" "$evidence_dir" t60 "$release_profile"
+        "$release" "$previous_release" "$admin_token" "$evidence_dir" t30 "$release_profile"
     fi
-    sleep 240
-    if ! release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability; then
-      rollback_release_gate \
-        "$release" "$previous_release" "$admin_token" "$evidence_dir" t300 "$release_profile"
-    fi
-  fi
-  if ! finish_retired_workbench_page_runtime_window \
-    "$evidence_dir/retired-workbench-page-runtime-window.json"; then
-    rollback_release_gate \
-      "$release" "$previous_release" "$admin_token" "$evidence_dir" retired_page_runtime_window "$release_profile"
   fi
   if ! write_release_gate_evidence \
     "$release" "$previous_release" "$evidence_dir" PASS false "$release_profile"; then
@@ -4973,24 +3244,19 @@ required = {
         "oa-sync",
         "settings-maintenance",
         "workbench-matching",
-        "workbench-relation",
     ],
-    "registered_read_models": ["workbench_relation"],
-    "registered_read_model_count": 1,
 }
 if profile == "frontend":
     required["frontend_verified"] = True
 elif profile in {"runtime", "acl"}:
     required.update(
         {
-            "dirty_scope_count": 0,
             "pending_outbox_count": 0,
             "publishing_outbox_count": 0,
             "dead_letter_delta": 0,
             "terminal_publish_reconciliation_stable": True,
             "page_canonical_audit_status": "pass",
-            "queue_stable_after_300_seconds": True,
-            "retired_workbench_page_runtime_zero_delta": True,
+            "queue_stable_after_30_seconds": True,
         }
     )
 else:
@@ -5010,11 +3276,6 @@ PY
   then
     rollback_release_gate \
       "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract "$release_profile"
-  fi
-  if ! (discard_workbench_page_worker_env_rollback_backup \
-    "$release" "$previous_release" "$evidence_dir"); then
-    rollback_release_gate \
-      "$release" "$previous_release" "$admin_token" "$evidence_dir" backup_cleanup "$release_profile"
   fi
   rm -f -- "$profile_report" "$schema_plan_path"
   trap - EXIT
@@ -5111,14 +3372,6 @@ case "$cmd" in
     shift
     etc_submitted_batch_member_repair "$@"
     ;;
-  read-model-scope-contract)
-    shift
-    read_model_scope_contract "$@"
-    ;;
-  read-model-slo-smoke)
-    shift
-    read_model_slo_smoke "$@"
-    ;;
   write-operation-restore-point)
     shift
     write_operation_restore_point "$@"
@@ -5151,10 +3404,6 @@ case "$cmd" in
     shift
     api_request_timing "$@"
     ;;
-  read-model-refresh)
-    shift
-    read_model_refresh "$@"
-    ;;
   settings-normalize)
     shift
     settings_normalize "$@"
@@ -5166,10 +3415,6 @@ case "$cmd" in
   bank-transaction-category-repair)
     shift
     bank_transaction_category_repair "$@"
-    ;;
-  runtime-queue-resolve-covered)
-    shift
-    runtime_queue_resolve_covered "$@"
     ;;
   restart)
     assert_runtime_env_contract

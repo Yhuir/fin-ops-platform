@@ -438,20 +438,6 @@ class _NoActiveRelationCommandService:
         )
 
 
-class _StaleConfirmRelationCommandService:
-    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
-        raise WorkbenchRelationCommandError(
-            "workbench_relation_read_model_not_fresh",
-            "Workbench relation read model is refreshing.",
-            payload={
-                "read_model_status": "refreshing",
-                "read_model_stale_reasons": ["dirty_scope_pending"],
-                "read_model_scope_keys": ["2026-05"],
-                "refresh_enqueued": True,
-            },
-        )
-
-
 class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
     def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
         self.preview_withdraw_calls.append(dict(kwargs))
@@ -1589,29 +1575,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(cancel.payload["error"], "idempotency_key_in_progress")
         self.assertTrue(cancel.payload["retryable"])
 
-    def test_confirm_link_uow_preserves_relation_command_freshness_error(self) -> None:
-        facade = _new_facade(
-            confirm_uow=_HandlerCallingUoW(),
-            relation_command_service=_StaleConfirmRelationCommandService(),
-        )
-
-        result = facade.confirm_link(
-            {
-                "month": "2026-05",
-                "row_ids": ["oa-1", "bank-1"],
-                "case_id": "CASE-STALE",
-            },
-            actor_id="oa-user-1",
-            tenant_id="default",
-        )
-
-        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
-        self.assertEqual(result.payload["error"], "workbench_relation_read_model_not_fresh")
-        self.assertEqual(result.payload["read_model_status"], "refreshing")
-        self.assertEqual(result.payload["read_model_stale_reasons"], ["dirty_scope_pending"])
-        self.assertEqual(result.payload["read_model_scope_keys"], ["2026-05"])
-        self.assertTrue(result.payload["refresh_enqueued"])
-
     def test_confirm_and_cancel_link_delegate_relation_writes_to_command_service_without_uow(self) -> None:
         relation_command = _RecordingRelationCommandService()
         facade = _new_facade(relation_command_service=relation_command)
@@ -2085,7 +2048,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         app._oa_identity_service = object()
         app._access_control_service = object()
         app._load_json_body = lambda body: ({"month": "2026-05"}, None)
-        app._workbench_write_freshness_guard = lambda _payload: None
+        app._workbench_oa_sync_safety_guard = lambda _payload: None
 
         def live_confirm(payload: dict[str, object], *, request_id: str | None = None, actor_id: str | None = None, tenant_id: str | None = None) -> Response:
             captured["confirm"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}

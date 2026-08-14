@@ -27,7 +27,7 @@ from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
 )
-from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
+from tests.test_pending_invoice_service import FakeCanonicalRelationReader
 
 
 class StaticOAProjection:
@@ -436,7 +436,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             invoice = self._invoice("inv-candidate-oa", "3002", "候选供应商", total_with_tax="109.00")
             oa_projection = StaticOAProjection([self._oa("oa-candidate-existing", "胡蓉", "109.00")])
-            relation_facade = FakeWorkbenchRelationFacade(
+            relation_reader = FakeCanonicalRelationReader(
                 [
                     {
                         "row_id": invoice.id,
@@ -474,7 +474,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                 app,
                 invoices=[invoice],
                 oa_projection=oa_projection,
-                relation_facade=relation_facade,
+                relation_reader=relation_reader,
             )
 
             response = app.handle_request(
@@ -1016,7 +1016,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         transactions: list[BankTransaction] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
         oa_projection: object | None = None,
-        relation_facade: object | None = None,
+        relation_reader: object | None = None,
     ) -> None:
         import_service = ImportNormalizationService(
             existing_invoices=invoices,
@@ -1028,8 +1028,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         query_service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
             import_service=import_service,
-            relation_facade=relation_facade
-            or FakeWorkbenchRelationFacade.from_pair_service(
+            relation_reader=relation_reader
+            or FakeCanonicalRelationReader.from_pair_service(
                 pair_service=relation_service,
                 transactions=list(transactions or []),
                 invoices=list(invoices),

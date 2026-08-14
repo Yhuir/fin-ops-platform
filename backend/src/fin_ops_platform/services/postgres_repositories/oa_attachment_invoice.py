@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
 
 
 class PostgresOAAttachmentInvoiceRepository:
@@ -28,7 +30,7 @@ class PostgresOAAttachmentInvoiceRepository:
     ) -> list[str]:
         with self._connection.transaction() as transaction:
             PostgresCoreRepository(transaction).save_invoices(invoices)
-            return PostgresReadModelRepository.mark_workbench_matching_dirty_scopes_in_transaction(
+            return PostgresWorkbenchMatchingQueueRepository.mark_workbench_matching_dirty_scopes_in_transaction(
                 transaction=transaction,
                 tenant_id="default",
                 scope_months=scope_months,

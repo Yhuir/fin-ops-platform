@@ -8,7 +8,6 @@ class AppStatusDomainDefinition:
     key: str
     label: str
     route: str
-    read_model_keys: tuple[str, ...] = ()
     worker_instances: tuple[str, ...] = ()
     job_types: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()

@@ -21,9 +21,8 @@
 
 ## 已退役 Runtime
 
-旧 `bank_account_balance:all` manifest/worker/repository/backfill 和部署注册已删除。历史
-migration/表只供上一版本回滚，没有当前 reader/writer；任何恢复都必须先重新完成全仓
-consumer scan 和独立架构审批。
+旧 `bank_account_balance:all` manifest/worker/repository/backfill 和部署注册已删除。历史 migration 文件
+只作不可变记录；migration `0149` 已删除 projection schema。不得恢复旧 reader/writer。
 
 ## 变更记录
 

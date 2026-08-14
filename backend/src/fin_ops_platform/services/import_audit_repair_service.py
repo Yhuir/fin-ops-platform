@@ -199,7 +199,7 @@ def public_failed_import_recovery_report(
             "app.import_batch_rows",
             "app.import_files",
             "app.bank_transactions",
-            "derived import read-model scopes",
+            "derived import reconciliation scopes",
         ],
     }
 

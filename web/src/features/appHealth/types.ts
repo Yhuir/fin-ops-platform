@@ -216,49 +216,6 @@ export type OperationsDashboardQueueMetric = {
   warning_code?: string;
 };
 
-export type OperationsDashboardReadModelMetric = {
-  key: string;
-  refresh_duration_ms: OperationsDashboardPercentiles;
-  historical_refresh_duration_ms?: OperationsDashboardPercentiles;
-  refresh_duration_windows?: {
-    recent_15m?: {
-      sample_count: number;
-      last_completed_at: string | null;
-      duration_ms: OperationsDashboardPercentiles;
-    };
-    recent_1h?: {
-      sample_count: number;
-      last_completed_at: string | null;
-      duration_ms: OperationsDashboardPercentiles;
-    };
-  };
-  refresh_duration_by_kind?: Record<string, unknown>;
-  scope_evidence?: Array<{
-    scope_type: string;
-    scope_key: string;
-    operation_class: "current_scope" | "full_history_batch" | string;
-    status: string;
-    expected_source_version: number | null;
-    projection_status: string;
-    projection_source_versions: Record<string, unknown>;
-    lag_seconds: number | null;
-    queue_wait_ms: number | null;
-    handler_duration_ms: number | null;
-    attempts: number;
-    retry_count: number;
-    dedupe_reason: string;
-    last_error: string;
-    available_at: string | null;
-    locked_at: string | null;
-    processed_at: string | null;
-    updated_at: string | null;
-  }>;
-  stale_count: number | null;
-  unavailable_count: number | null;
-  status: OperationsDashboardAvailability;
-  warning_code?: string;
-};
-
 export type OperationsDashboardWorkerMetric = {
   worker_id?: string;
   worker_instance?: string;
@@ -295,7 +252,6 @@ export type OperationsDashboardPayload = {
   runtime_performance: {
     outbox: OperationsDashboardOutboxMetric;
     queues: OperationsDashboardQueueMetric[];
-    read_models: OperationsDashboardReadModelMetric[];
     workers: OperationsDashboardWorkerMetric[];
   };
   freshness: {
@@ -335,12 +291,7 @@ export type PageAuditSummary = {
   source_fact_count?: number | null;
   active_relation_count?: number | null;
   linked_relation_group_count?: number | null;
-  dirty_scope_count?: number | null;
   outbox_backlog_count?: number | null;
-  read_model_count?: number | null;
-  read_model_invoice_member_count?: number | null;
-  read_model_row_count?: number | null;
-  read_model_scope_count?: number | null;
   active_workbench_pair_relation_count?: number | null;
   linked_workbench_relation_group_count?: number | null;
   blocking_issue_sample_count?: number | null;
@@ -372,7 +323,6 @@ export type PageAuditIssue = {
 
 export type PageAuditContract = {
   source_tables?: string[];
-  read_model_tables?: string[];
   relation_tables?: string[];
   scope_types?: string[];
   event_types?: string[];
@@ -387,7 +337,6 @@ export type PageAuditContract = {
   proof_checks?: string[];
   contract_revision?: string;
   proof_availability?: "ready" | "unavailable" | string;
-  registered_read_model_keys?: string[];
   relation_proof_required?: boolean;
   write_policy?: "read_only" | string;
 };

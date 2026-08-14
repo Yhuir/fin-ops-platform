@@ -21,7 +21,7 @@ def postgres_configuration_missing_report(*, tool: str, message: str) -> dict[st
         ],
         "allowed_remote_evidence": [
             "systemd worker status and recent logs",
-            "PostgreSQL read-only dirty scope, outbox, readiness, and pg_stat/EXPLAIN sampling",
+            "PostgreSQL canonical-data, outbox, worker readiness, and pg_stat/EXPLAIN sampling",
             "RabbitMQ queue depth, consumer, unacked, and DLQ read-only checks",
             "Redis, Nginx, App Health, and public/API latency read-only checks",
         ],

@@ -127,7 +127,5 @@ def test_invoice_header_fact_repair_is_idempotent_after_values_match() -> None:
     assert report["target_count"] == 11
     assert report["authorized_write_scope"] == [
         "app.invoices",
-        "job.outbox_events",
-        "job.read_model_dirty_scopes",
         "ops.operation_events",
     ]

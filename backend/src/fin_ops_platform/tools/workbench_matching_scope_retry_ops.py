@@ -9,7 +9,9 @@ import sys
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
 
 
 FAILED_STATUS = "failed"
@@ -47,7 +49,7 @@ def main(
     if args.execute and not args.expected_fingerprint:
         raise SystemExit("--execute requires --expected-fingerprint")
 
-    active_repository = repository or PostgresReadModelRepository(
+    active_repository = repository or PostgresWorkbenchMatchingQueueRepository(
         PostgresConnection(PostgresSettings.from_env())
     )
     scope = _failed_scope(

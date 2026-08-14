@@ -59,7 +59,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         )
         self.assertEqual(report["summary"]["source_fact_count"], 12)
         self.assertEqual(report["summary"]["active_relation_count"], 3)
-        self.assertEqual(report["audit_contract"]["read_model_tables"], [])
+        self.assertEqual(report["audit_contract"]["derived_tables"], [])
         self.assertEqual(report["audit_contract"]["scope_types"], [])
         self.assertEqual(report["audit_contract"]["event_types"], [])
         self.assertEqual(
@@ -120,7 +120,6 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         registration = page_audit_registration("cost-statistics")
 
         self.assertEqual(registration.executor, "cost_statistics")
-        self.assertEqual(registration.read_model_keys, ())
 
 
 if __name__ == "__main__":

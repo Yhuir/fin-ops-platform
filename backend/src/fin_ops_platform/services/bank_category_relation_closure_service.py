@@ -207,7 +207,6 @@ class BankCategoryRelationClosureService:
                 pair_relation_service=WorkbenchPairRelationService(),
                 repository=relation_repository,
             ),
-            require_fresh_relations=False,
         )
         changed_case_ids: list[str] = []
         relation_delta: dict[str, Any] = {

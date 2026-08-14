@@ -408,8 +408,7 @@ def _context(
             existing_invoices=_dedupe_objects(invoices),
             existing_transactions=list(snapshot.transactions),
         ),
-        relation_facade=None,
-        require_fresh_relations=False,
+        relation_reader=None,
     )
     context.add_distributed_relations(snapshot.relations)
     return context

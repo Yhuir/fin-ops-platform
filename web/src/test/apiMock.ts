@@ -38,12 +38,9 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
-  operationBarrierDelay?: Promise<void>;
-  operationBarrierStatus?: Record<string, unknown>;
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
-  importConfirmOperationBarrierTargets?: Array<Record<string, string>>;
   etcImportConfirmPreviewStale?: boolean;
   etcImportConfirmStaleReconciliationTask?: boolean;
   etcImportBlockingIssues?: Array<Record<string, unknown>>;
@@ -4874,20 +4871,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         templates: templateRegistry,
       },
     }),
-    "/api/operation-barrier/status": async () => {
-      if (options.operationBarrierDelay) {
-        await options.operationBarrierDelay;
-      }
-      return {
-        body: options.operationBarrierStatus ?? {
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        },
-      };
-    },
     "/api/workbench": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {
@@ -5296,21 +5279,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
             queues: [
               {
-                event_type: "workbench_relation.read_model.refresh",
-                queue: "finops.workbench_relation.read_model.refresh",
+                event_type: "oa.sync",
+                queue: "finops.oa.sync",
                 messages: 2,
                 unacked: 1,
                 consumers: 1,
                 dlq_messages: 0,
-                status: "available",
-              },
-            ],
-            read_models: [
-              {
-                key: "workbench_relation",
-                refresh_duration_ms: { p50: 110, p95: 450, p99: 700 },
-                stale_count: 1,
-                unavailable_count: 0,
                 status: "available",
               },
             ],
@@ -5438,7 +5412,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         };
       }
       return { body: {
-        mode: "page-business-read-model-audit",
+        mode: "page-canonical-data-audit",
         page_key: pageKey,
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
@@ -5447,9 +5421,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           snapshot_consistency: "repeatable_read_read_only",
           proof_availability: "ready",
           contract_revision: "page-audit-contract.v9",
-          ...(["cost-statistics", "reconciliation-workbench"].includes(pageKey)
-            ? { registered_read_model_keys: [] }
-            : {}),
         },
         summary: {
           blocking_issue_sample_count: 0,
@@ -7478,7 +7449,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: {
           ...latestImportSession,
-          operation_barrier_targets: options.importConfirmOperationBarrierTargets ?? [],
           matching_run: {
             id: "match_run_0001",
             triggered_by: "import_session:import_session_0001",

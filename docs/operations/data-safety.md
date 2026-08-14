@@ -6,7 +6,7 @@
 
 - 生产级数据操作必须考虑权限、审计、回滚、数据一致性和验证方式。
 - PostgreSQL 是 app 主读写事实源；OA MongoDB 继续只读接入。
-- Redis 只缓存 fresh gate 后的 payload；RabbitMQ 只作为可选 transport/wakeup。
+- Redis 只服务明确的 integration/session cache，不保存页面财务事实；RabbitMQ 只作为可选 transport/wakeup。
 - 对象存储保存文件对象，数据库保存对象引用、checksum、大小、文件名和来源。
 
 ## 数据重置
@@ -14,12 +14,12 @@
 数据重置必须限定范围并记录：
 
 - 操作者、时间、原因、环境、影响模块和影响对象。
-- 是否清理 read model、dirty scope、outbox、Redis cache、对象存储引用。
+- 是否清理通用 outbox、领域 dirty scope、integration cache、对象存储引用。
 - 重置前备份和重置后验证命令。
 - 是否需要暂停 worker 或 drain queue。
 - reset job 状态必须进入 `BackgroundJobService` / runtime job 状态面，不能恢复旧内存 `DataResetJob` / `_data_reset_jobs` 路径。
 
-重置后必须确保页面不会把旧缓存或旧 read model 显示为 fresh。
+重置后必须确保页面 canonical API 不返回重置前事实，且 integration cache 不回灌旧数据。
 
 生产执行数据重置前，必须由 root 运维入口创建与动作绑定的恢复点：
 
@@ -42,8 +42,8 @@ sudo /usr/local/sbin/finops-deploy-control settings-data-reset-restore-point \
 
 - app check 可通过。
 - 关键 API 返回 JSON 而不是 HTML。
-- read model freshness/status 正常。
-- worker/queue 可观测且没有大量 orphan dirty scope。
+- canonical 页面 API 与 System Audit 正常。
+- worker/queue 可观测且没有 orphan 领域任务。
 
 ## 对象存储
 
@@ -56,9 +56,8 @@ sudo /usr/local/sbin/finops-deploy-control settings-data-reset-restore-point \
 
 | 操作 | 必要检查 |
 | --- | --- |
-| 清库/重置 | 备份、权限、审计、worker 暂停、read model/cache 清理 |
+| 清库/重置 | 备份、权限、审计、worker 暂停、领域队列/integration cache 清理 |
 | 对象存储迁移 | checksum、引用完整性、dry-run、回滚路径 |
-| read model backfill | scope、source version、dirty scope、worker drain、freshness 验证 |
 | 批量撤回/repair | affected objects、审计、跨页刷新、回滚说明 |
 
 ## 统一事实源合同只读审计
@@ -77,7 +76,7 @@ durable outbox 的结构合同违规数，
 1. 确认 active release 后，通过 root-owned helper 运行 `sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> --dry-run`，记录 `strict_candidate_count` 与 `manual_review_candidate_count`。
 2. 只有同时满足可解析 canonical bank transaction/精确月份、raw payload 标明人工补标签、且 category event 明确证明“从非空人工标签清除为 null”的记录进入 strict 集合；证据不足记录只进入人工复核，不自动修改。
 3. 使用同一 helper 追加 `--apply --operator <审计操作者> --expected-candidate-count <dry-run数量>` 执行。数量变化立即失败，禁止扩大 predicate 或跳过 count gate。
-4. 工具在一个事务内把 strict category 标为 `cleared`，写 event/audit，并通过正式 writer 批量输出精确 read-model scopes；任一写入或入队失败全部回滚。
+4. 工具在一个事务内把 strict category 标为 `cleared`，写 event/audit，并通过正式 writer 输出必要领域任务；任一写入或入队失败全部回滚。
 5. 等待 durable queue drain 后再次 dry-run；strict 必须为 0。随后验证银行明细显示待分类、可重新打标签、自动标签无撤销按钮，并检查 BankDetails/Workbench/外部往来等受影响页面 freshness/Page Audit。
 
 不得直接 `UPDATE` read model、把 `unknown` 改成任意业务标签、忽略 manual review，或以兼容 fallback 保留旧撤销路径。数据库备份/PITR 是灾难回滚边界；单条业务恢复应重新人工补标签，保留审计历史。
@@ -85,6 +84,6 @@ durable outbox 的结构合同违规数，
 ## 相关文档
 
 - PostgreSQL runtime：`postgresql-runtime.md`
-- Worker/read model：`runtime-worker-governance.md`
+- Worker 与已退役 read model 防回归：`runtime-worker-governance.md`
 - 部署：`deployment.md`
 - 监控：`monitoring.md`

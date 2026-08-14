@@ -6,7 +6,6 @@ import hashlib
 import json
 from typing import Any
 
-from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.external_control_evidence import EXTERNAL_CONTROL_EVIDENCE_CONTRACT_VERSION
 from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.page_audit_registry import PageAuditRegistration
@@ -16,7 +15,6 @@ from fin_ops_platform.services.postgres_repositories.external_control_evidence_a
 )
 from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_ALIASES
-from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 
 
@@ -47,7 +45,6 @@ def audit_app_health_system_snapshot(
     actual_inventory = _dict(dashboard.get("data_inventory"))
     issues.extend(_inventory_issues(expected=expected_inventory, actual=actual_inventory))
     issues.extend(_outbox_runtime_issues(_dict(dashboard.get("runtime_performance"))))
-    issues.extend(_read_model_runtime_issues(_dict(dashboard.get("runtime_performance"))))
     issues.extend(_worker_runtime_issues(_dict(dashboard.get("runtime_performance"))))
     evaluation = evaluate_audit_issues(issues, sample_limit=sample_limit)
 
@@ -118,7 +115,6 @@ def audit_app_health_system_snapshot(
             "expected_inventory": expected_inventory,
             "durable_runtime": {
                 "outbox": _dict(_dict(dashboard.get("runtime_performance")).get("outbox")),
-                "read_models": list(_dict(dashboard.get("runtime_performance")).get("read_models") or []),
                 "workers": list(_dict(dashboard.get("runtime_performance")).get("workers") or []),
             },
         },
@@ -147,11 +143,8 @@ def audit_app_health_system_snapshot(
                 "app.oa_application_items",
                 "app.oa_sync_runs",
                 "job.outbox_events",
-                "job.read_model_dirty_scopes",
-                "read_model.app_status_readiness",
                 "job.runtime_worker_heartbeats",
             ],
-            "read_model_tables": [],
             "canonical_expected_set": (
                 "all registered page proof results plus independently recalculated App Health bank/invoice/OA/import "
                 "inventory and current required worker evidence"
@@ -213,7 +206,7 @@ def _page_report_issues(
         if report.get("overall_status") != "pass" or status.get("integrity") != "pass":
             issues.append(_issue("system_page_integrity_failed", page_key, {"audit_status": status}))
         if status.get("freshness") != "fresh":
-            issues.append(_issue("read_model_scope_not_fresh", page_key, {"audit_status": status}))
+            issues.append(_issue("page_data_not_fresh", page_key, {"audit_status": status}))
         if status.get("queue") != "drained":
             issues.append(_issue("page_runtime_queue_not_drained", page_key, {"audit_status": status}))
         if contract.get("contract_revision") != registration.contract_revision:
@@ -384,67 +377,20 @@ def _outbox_runtime_issues(runtime: dict[str, Any]) -> list[AuditIssue]:
     ]
 
 
-def _read_model_runtime_issues(runtime: dict[str, Any]) -> list[AuditIssue]:
-    rows = [row for row in list(runtime.get("read_models") or []) if isinstance(row, dict)]
-    rows_by_key = {str(row.get("key") or ""): row for row in rows}
-    issues: list[AuditIssue] = []
-    manifest_keys = set(READ_MODEL_MANIFEST)
-    status_keys = set(APP_STATUS_READ_MODEL_REGISTRY)
-    if manifest_keys != status_keys:
-        issues.append(
-            _issue(
-                "read_model_manifest_status_registry_mismatch",
-                "read-model-registry",
-                {"manifest_only": sorted(manifest_keys - status_keys), "status_only": sorted(status_keys - manifest_keys)},
-            )
-        )
-    for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
-        row = rows_by_key.get(key)
-        if row is None:
-            issues.append(_issue("read_model_runtime_metric_missing", key, {"critical": definition.critical}))
-            continue
-        stale_count = int(row.get("stale_count") or 0)
-        unavailable_count = int(row.get("unavailable_count") or 0)
-        status = str(row.get("status") or "").strip().lower()
-        warning_code = str(row.get("warning_code") or "").strip()
-        if unavailable_count > 0 or status in {"unknown", "missing", "failed", "unavailable"}:
-            issues.append(
-                _issue(
-                    warning_code or "read_model_runtime_unavailable",
-                    key,
-                    {"unavailable_count": unavailable_count, "status": status, "critical": definition.critical},
-                )
-            )
-        elif stale_count > 0:
-            issues.append(
-                AuditIssue(
-                    severity="error",
-                    code="read_model_scope_not_fresh",
-                    message="App Health system proof found stale current-effective read model scopes.",
-                    subject_id=key,
-                    details={"stale_count": stale_count, "critical": definition.critical},
-                )
-            )
-    return issues
-
-
 def _version_set(registrations: tuple[PageAuditRegistration, ...]) -> dict[str, Any]:
     pages = [
         {
             "page_key": registration.page_key,
             "executor": registration.executor,
             "contract_revision": registration.contract_revision,
-            "read_model_keys": list(registration.read_model_keys),
             "external_evidence_keys": list(registration.external_evidence_keys),
         }
         for registration in registrations
     ]
-    read_models = [asdict(READ_MODEL_MANIFEST[key]) for key in sorted(READ_MODEL_MANIFEST)]
     workers = [asdict(registration) for registration in worker_registrations()]
     return {
         "page_contracts": pages,
         "page_registry_fingerprint": _fingerprint(pages),
-        "read_model_manifest_fingerprint": _fingerprint(read_models),
         "runtime_worker_registry_fingerprint": _fingerprint(workers),
         "external_control_evidence_contract_version": EXTERNAL_CONTROL_EVIDENCE_CONTRACT_VERSION,
     }

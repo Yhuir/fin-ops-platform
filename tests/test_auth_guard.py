@@ -295,7 +295,6 @@ class AuthGuardTests(unittest.TestCase):
 
     def test_readonly_export_user_keeps_read_only_post_contracts(self) -> None:
         read_routes = (
-            "/api/operation-barrier/status",
             "/api/workbench/exception/preview",
             "/api/workbench/actions/confirm-link/preview",
             "/api/workbench/actions/withdraw-link/preview",

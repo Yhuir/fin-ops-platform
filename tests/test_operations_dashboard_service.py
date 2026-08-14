@@ -120,25 +120,14 @@ class FakeRuntimeRepository:
     def dashboard_queue_metrics(self) -> list[dict[str, object]]:
         return [
             {
-                "event_type": "workbench_relation.read_model.refresh",
-                "queue": "finops.workbench_relation.read_model.refresh",
+                "event_type": "oa.sync",
+                "queue": "finops.oa.sync",
                 "messages": None,
                 "unacked": None,
                 "consumers": None,
                 "dlq_messages": None,
                 "status": "unknown",
                 "warning_code": "rabbitmq_metrics_unavailable",
-            }
-        ]
-
-    def dashboard_read_model_metrics(self) -> list[dict[str, object]]:
-        return [
-            {
-                "key": "workbench",
-                "refresh_duration_ms": {"p50": 100.0, "p95": 250.0, "p99": 300.0},
-                "stale_count": 1,
-                "unavailable_count": 0,
-                "status": "available",
             }
         ]
 
@@ -200,7 +189,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
         self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
 
-    def test_optional_historical_worker_warning_stays_row_level_only(self) -> None:
+    def test_worker_warning_stays_row_level_only(self) -> None:
         class RuntimeRepository(FakeRuntimeRepository):
             def dashboard_queue_metrics(self) -> list[dict[str, object]]:
                 return []
@@ -208,14 +197,14 @@ class OperationsDashboardServiceTests(unittest.TestCase):
             def dashboard_worker_metrics(self) -> list[dict[str, object]]:
                 return [
                     {
-                        "worker_kind": "cost-tax-read-model",
+                        "worker_kind": "optional-maintenance",
                         "status": "stale",
                         "required": False,
                         "current_effective": False,
                         "warning_code": "worker_event_type_mismatch",
                     },
                     {
-                        "worker_kind": "workbench-read-model",
+                        "worker_kind": "settings-maintenance",
                         "status": "missing",
                         "required": True,
                         "current_effective": True,
@@ -235,7 +224,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
             for row in payload["runtime_performance"]["workers"]
         }
 
-        self.assertEqual(worker_rows["cost-tax-read-model"]["warning_code"], "worker_event_type_mismatch")
+        self.assertEqual(worker_rows["optional-maintenance"]["warning_code"], "worker_event_type_mismatch")
         self.assertNotIn("worker_event_type_mismatch", payload["freshness"]["warnings"])
         self.assertIn("required_worker_missing", payload["freshness"]["warnings"])
 
@@ -305,8 +294,6 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "metric_windows(window_name" in normalized:
                     return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return []
                 return super().fetch_all(sql, params)
@@ -339,8 +326,6 @@ class OperationsDashboardServiceTests(unittest.TestCase):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return []
@@ -380,81 +365,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         self.assertEqual(worker_rows["oa-sync"]["status"], "stale")
         self.assertEqual(worker_rows["oa-sync"]["warning_code"], "worker_heartbeat_stale")
-        self.assertEqual(worker_rows["workbench-relation-read-model"]["status"], "missing")
-        self.assertEqual(worker_rows["workbench-relation-read-model"]["warning_code"], "required_worker_missing")
-
-    def test_runtime_repository_uses_recent_window_for_read_model_health_duration(self) -> None:
-        class WindowedConnection:
-            def __init__(self) -> None:
-                self.fetch_one_sql: list[str] = []
-
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "metric_windows(window_name" in normalized:
-                    return [
-                        {
-                            "event_type": "workbench_relation.read_model.refresh",
-                            "window_name": "recent_15m",
-                            "refresh_kind": "incremental",
-                            "sample_count": 2,
-                            "last_completed_at": "2026-05-28T10:00:00+00:00",
-                            "p50_ms": 100.0,
-                            "p95_ms": 120.0,
-                            "p99_ms": 125.0,
-                        },
-                        {
-                            "event_type": "workbench_relation.read_model.refresh",
-                            "window_name": "all_time",
-                            "refresh_kind": "full",
-                            "sample_count": 100,
-                            "last_completed_at": "2026-05-28T09:00:00+00:00",
-                            "p50_ms": 4000.0,
-                            "p95_ms": 24000.0,
-                            "p99_ms": 30000.0,
-                        },
-                    ]
-                if "from job.read_model_dirty_scopes" in normalized:
-                    return []
-                if "projection_source_versions" in normalized and "from job.outbox_events" in normalized:
-                    return [
-                        {
-                            "event_type": "workbench_relation.read_model.refresh",
-                            "scope_type": "workbench_relation",
-                            "scope_key": "2026-05",
-                            "status": "done",
-                            "source_version": 7,
-                            "attempts": 2,
-                            "last_error": "",
-                            "available_at": "2026-05-28T09:59:59+00:00",
-                            "locked_at": "2026-05-28T10:00:00+00:00",
-                            "processed_at": "2026-05-28T10:00:00.120000+00:00",
-                            "updated_at": "2026-05-28T10:00:00.120000+00:00",
-                            "lag_seconds": 1.12,
-                            "queue_wait_ms": 1000.0,
-                            "handler_duration_ms": 120.0,
-                            "dedupe_reason": "",
-                            "projection_status": "fresh",
-                            "projection_source_versions": {"source_version": 7},
-                            "projection_last_error": "",
-                        }
-                    ]
-                raise AssertionError(sql)
-
-        connection = WindowedConnection()
-        repository = RuntimeMonitoringRepository(connection)
-
-        rows = repository.dashboard_read_model_metrics()
-
-        relation = next(row for row in rows if row["key"] == "workbench_relation")
-        self.assertEqual(relation["refresh_duration_ms"]["p95"], 120.0)
-        self.assertEqual(relation["historical_refresh_duration_ms"]["p95"], 24000.0)
-        self.assertEqual(relation["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
-        self.assertIn("full", relation["refresh_duration_by_kind"])
-        self.assertEqual(relation["scope_evidence"][0]["operation_class"], "current_scope")
-        self.assertEqual(relation["scope_evidence"][0]["queue_wait_ms"], 1000.0)
-        self.assertEqual(relation["scope_evidence"][0]["handler_duration_ms"], 120.0)
-        self.assertEqual(relation["scope_evidence"][0]["retry_count"], 1)
-        self.assertEqual(relation["scope_evidence"][0]["projection_source_versions"], {"source_version": 7})
+        self.assertEqual(worker_rows["workbench-matching"]["status"], "missing")
+        self.assertEqual(worker_rows["workbench-matching"]["warning_code"], "required_worker_missing")
 
     def test_runtime_repository_splits_outbox_dashboard_attention_candidates(self) -> None:
         class CapturingConnection:
@@ -478,50 +390,9 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         normalized_sql = " ".join(connection.sql.lower().split())
         self.assertEqual(payload["publish_failed_count"], 3)
-        self.assertIn("dashboard_outbox_attention_events as", normalized_sql)
-        self.assertIn("union all", normalized_sql)
-        self.assertIn("e.status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
-        self.assertIn("e.publish_status = 'publishing'", normalized_sql)
-        self.assertNotIn("where e.publish_status = 'failed'", normalized_sql)
-        self.assertIn("e.status not in ('pending', 'failed', 'dead_lettered')", normalized_sql)
-
-    def test_runtime_repository_bounds_read_model_duration_history_query(self) -> None:
-        class CapturingConnection:
-            def __init__(self) -> None:
-                self.duration_sql = ""
-                self.duration_params: tuple[object, ...] = ()
-                self.dirty_sql = ""
-
-            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-                normalized = " ".join(sql.lower().split())
-                if "metric_windows(window_name" in normalized:
-                    self.duration_sql = sql
-                    self.duration_params = params
-                    return []
-                if "from job.read_model_dirty_scopes" in normalized:
-                    self.dirty_sql = sql
-                    return []
-                raise AssertionError(sql)
-
-        connection = CapturingConnection()
-        repository = RuntimeMonitoringRepository(connection)
-
-        repository.dashboard_read_model_metrics()
-
-        normalized_sql = " ".join(connection.duration_sql.lower().split())
-        self.assertIn("event_type_filter(event_type)", normalized_sql)
-        self.assertIn("cross join lateral", normalized_sql)
-        self.assertIn("event_type = event_type_filter.event_type", normalized_sql)
-        self.assertIn("event_type like '%%.read_model.refresh'", normalized_sql)
-        self.assertIn("updated_at >= now() - interval '7 days'", normalized_sql)
-        self.assertIn("order by updated_at desc", normalized_sql)
-        self.assertIn("limit %s", normalized_sql)
-        self.assertIn("'-infinity'::timestamptz", normalized_sql)
-        self.assertNotIn("row_number() over", normalized_sql)
-        self.assertEqual(len(connection.duration_params), 2)
-        self.assertEqual(connection.duration_params[1], 512)
-        normalized_dirty_sql = " ".join(connection.dirty_sql.lower().split())
-        self.assertIn("status in ('pending', 'processing', 'failed')", normalized_dirty_sql)
+        self.assertIn("from job.outbox_events", normalized_sql)
+        self.assertIn("status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
+        self.assertIn("publish_status in ('publishing', 'failed')", normalized_sql)
 
 
 if __name__ == "__main__":

@@ -963,12 +963,12 @@ class PostgresOpsTaxEtcRepository:
             """
             insert into app.tax_offset_plans(
                 plan_id, scope_month, status, selected_output_ids, selected_input_ids,
-                calculation_summary, source_versions, read_model_scope_key,
+                calculation_summary, source_versions,
                 created_by, idempotency_key, audit_trace, raw_payload, created_at, updated_at
             )
             values (
                 %s, %s::date, %s, %s, %s,
-                %s, %s, %s,
+                %s, %s,
                 %s, %s, %s, %s,
                 coalesce(%s::timestamptz, now()), coalesce(%s::timestamptz, now())
             )
@@ -978,7 +978,6 @@ class PostgresOpsTaxEtcRepository:
                 selected_input_ids = excluded.selected_input_ids,
                 calculation_summary = excluded.calculation_summary,
                 source_versions = excluded.source_versions,
-                read_model_scope_key = excluded.read_model_scope_key,
                 created_by = excluded.created_by,
                 audit_trace = excluded.audit_trace,
                 raw_payload = excluded.raw_payload,
@@ -992,7 +991,6 @@ class PostgresOpsTaxEtcRepository:
                 text_list(normalized.get("selected_input_ids")),
                 jsonb(normalized.get("summary") if isinstance(normalized.get("summary"), dict) else {}),
                 jsonb(normalized.get("source_versions") if isinstance(normalized.get("source_versions"), dict) else {}),
-                text(normalized.get("read_model_scope_key")),
                 text(normalized.get("actor_id")),
                 idempotency_key,
                 jsonb(normalized.get("audit") if isinstance(normalized.get("audit"), dict) else {}),

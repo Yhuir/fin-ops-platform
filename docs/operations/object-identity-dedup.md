@@ -94,15 +94,15 @@ Blocking issue 包含：
 - `repair_workbench_pair_relation_integrity` 生产执行必须先 dry-run，并用可重复的 `--case-id <exact-case-id>`
   把写入限制到本轮 `audit_object_identity.workbench_identity_audit.orphan_relation_groups` 已确认的 case；
   禁止因为全量 dry-run 同时发现其它历史关系变化就直接无范围执行 `--execute`。执行后必须复跑对象身份审计，
-  再通过 `ReadModelRefreshGateway` 重建受影响 `workbench_relation`、`invoice_lifecycle` 和页面 read model。
-- OA lifecycle/migration alias 修复优先写入 `app.oa_source_aliases`，并以 `active` 状态受控启用；禁止为了让审计通过而删除 `app.oa_applications`、`app.oa_attachments`、`app.oa_attachment_invoice_cache*` 或手工伪造 read model readiness。
-- 修复或发布后必须重建受影响 workbench/workbench_relation scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
-- relation display 不一致的生产修复只能入队刷新或使用专用 repair 工具重新触发 canonical scope contract；禁止手改 read model 投影行。
+  修复提交后直接重读受影响页面 API，并复跑对象身份与 relation display 审计。
+- OA lifecycle/migration alias 修复优先写入 `app.oa_source_aliases`，并以 `active` 状态受控启用；禁止为了让审计通过而删除 `app.oa_applications`、`app.oa_attachments` 或 `app.oa_attachment_invoice_cache*`。
+- 修复或发布后必须重读受影响 Workbench scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
+- relation display 不一致只能通过正式 relation command 或专用 repair 工具修复 canonical facts；禁止恢复或手改已退役投影。
 
 ## 历史治理记录
 
 - 2026-06-30：生产登记 3 条 `active` OA source alias，覆盖 `oa-exp-69898450db8c0a3633bd748c -> oa-exp-2005`、`oa-exp-69a7aeaedb8c0a3633bd74a7 -> oa-exp-2035`、`oa-exp-69c0b43adb8c0a3633bd74c4 -> oa-exp-2062`。固定入口 `workbench-audit-identity` 复核 `blocking_issue_count=0`、`oa_attachment_invoice_blocking_duplicate_group_count=0`，未删除 OA 投影、附件、附件票 cache 或 read model 行。
 
-## 后续 read model 条件
+## 后续扩展条件
 
-本轮只在 workbench 投影表增加 nullable identity columns，不新增独立 object identity read model 或 worker。只有当两个以上页面需要展示 duplicate group、canonical object 或 source lineage 时，才启用独立 `object_identity` read model。届时需要补齐 migration、worker registry、manifest/systemd env、health、backfill 和 source_versions。
+对象身份展示继续复用 canonical query policy。即使多个页面需要 duplicate group、canonical object 或 source lineage，也应先扩展共享查询策略与必要索引；本 App 不恢复独立 identity projection/worker。

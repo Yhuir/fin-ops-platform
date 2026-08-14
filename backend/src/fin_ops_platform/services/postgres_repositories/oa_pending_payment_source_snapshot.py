@@ -24,7 +24,7 @@ def oa_pending_payment_coverage_only_source_versions(scope_key: str) -> dict[str
 
     This vector is projection metadata, not an integration watermark. It lets the
     OA page publish bank/invoice inventory for a month that has no OA source
-    snapshot without making the read-model worker an owner of integration facts.
+    snapshot without making a page query the owner of integration facts.
     """
 
     normalized_scope_key = _month(scope_key)

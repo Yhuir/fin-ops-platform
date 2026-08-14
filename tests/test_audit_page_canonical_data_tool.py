@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories import page_business_audit
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
-from fin_ops_platform.tools import audit_page_business_read_model
+from fin_ops_platform.tools import audit_page_canonical_data
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -50,11 +50,11 @@ class FakeConnection:
 
 class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_clean_audit_passes_for_every_registered_page_without_writes(self) -> None:
-        for domain_key, contract in audit_page_business_read_model.PAGE_AUDIT_CONTRACTS.items():
+        for domain_key, contract in audit_page_canonical_data.PAGE_AUDIT_CONTRACTS.items():
             with self.subTest(domain_key=domain_key):
                 connection = FakeConnection()
 
-                report = audit_page_business_read_model.audit_page_business_read_model(
+                report = audit_page_canonical_data.audit_page_canonical_data(
                     connection,
                     domain_key=domain_key,
                 )
@@ -72,7 +72,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 self.assertEqual(connection.executed, [])
                 queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls + connection.fetch_all_calls)
                 self.assertIn(contract.source_tables[0], queried_sql)
-                self.assertEqual(report["audit_contract"]["read_model_tables"], [])
+                self.assertEqual(report["audit_contract"]["derived_tables"], [])
                 self.assertEqual(report["mode"], "page-business-canonical-read-audit")
                 if domain_key in {
                     "turnover_ledger",
@@ -88,7 +88,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 self.assertNotIn("read_model.", queried_sql)
 
     def test_proof_checks_are_blocking_integrity_gates(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_member_shape": [
@@ -132,7 +132,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_direct_relation_audit_uses_exact_canonical_etc_summary_contract(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="bank_details",
         )
@@ -166,7 +166,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             self.assertIn("source.status <> 'deleted'", source_sql)
 
     def test_invalid_noncanonical_etc_summary_remains_blocking_for_direct_pages(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_invoice_member_exists": [
@@ -188,7 +188,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
     def test_pending_invoice_canonical_member_gap_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_bank_member_exists": [
@@ -225,7 +225,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             }
         )
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="bank_flow_rule_batches",
         )
@@ -260,7 +260,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 return_value=empty_service,
             ),
         ):
-            report = audit_page_business_read_model.audit_page_business_read_model(
+            report = audit_page_canonical_data.audit_page_canonical_data(
                 connection,
                 domain_key="bank_flow_rule_batches",
             )
@@ -293,7 +293,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 return_value=_bank_flow_188500_candidate_source(),
             ),
         ):
-            report = audit_page_business_read_model.audit_page_business_read_model(
+            report = audit_page_canonical_data.audit_page_canonical_data(
                 connection,
                 domain_key="bank_flow_rule_batches",
             )
@@ -303,7 +303,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_bank_flow_rule_batch_audit_proves_page_and_active_relation_member_sets(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="bank_flow_rule_batches",
         )
@@ -328,7 +328,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
     def test_submitted_bank_flow_batch_without_relation_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "consumer_relation_edge_equality": [
@@ -357,7 +357,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["issues"][0]["details"]["canonical_status"], "submitted")
 
     def test_unsubmitted_bank_flow_batch_occupied_by_other_relation_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "consumer_relation_edge_equality": [
@@ -387,7 +387,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["issues"][0]["details"]["conflicting_case_ids"], ["submitted-batch"])
 
     def test_bank_flow_page_member_set_mismatch_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "consumer_relation_edge_equality": [
@@ -412,7 +412,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_pending_invoice_audit_uses_direct_canonical_contract(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="pending_invoices",
         )
@@ -432,7 +432,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_bank_detail_audit_reads_direct_canonical_facts_only(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="bank_details",
         )
@@ -463,7 +463,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
     def test_bank_detail_missing_canonical_member_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_bank_member_exists": [
@@ -487,7 +487,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["issues"][0]["details"]["row_id"], "bank-missing")
 
     def test_bank_detail_multiple_active_relation_cases_are_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_bank_member_unique": [
@@ -511,7 +511,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
     def test_batch_audits_recompute_their_domain_specific_display_contracts(self) -> None:
         batch_accounting_connection = FakeConnection()
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_page_canonical_data.audit_page_canonical_data(
             batch_accounting_connection,
             domain_key="batch_accounting",
         )
@@ -523,7 +523,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("read_model.", batch_accounting_sql)
 
         rule_batch_connection = FakeConnection()
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_page_canonical_data.audit_page_canonical_data(
             rule_batch_connection,
             domain_key="bank_flow_rule_batches",
         )
@@ -535,7 +535,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_batch_accounting_audit_reads_only_canonical_relations_and_members(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="batch_accounting",
         )
@@ -557,7 +557,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
     def test_batch_accounting_relation_owner_mismatch_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_expected_set": [
@@ -583,7 +583,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_turnover_audit_reads_only_canonical_facts(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="turnover_ledger",
         )
@@ -607,7 +607,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
     def test_turnover_flow_missing_relation_member_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_bank_member_exists": [
@@ -653,7 +653,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_pending_invoice_relation_audit_checks_canonical_member_integrity(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="pending_invoices",
         )
@@ -667,7 +667,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_oa_pending_payment_audit_reads_direct_canonical_facts_only(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="oa_pending_payments",
         )
@@ -703,7 +703,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
     def test_oa_pending_payment_hidden_active_outflow_relation_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "oa_pending_payment_relation_visibility": [
@@ -726,7 +726,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
     def test_oa_pending_payment_missing_canonical_oa_member_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_oa_member_exists": [
@@ -751,7 +751,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_pending_invoice_audit_has_no_projected_consumer_edge_contract(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             connection,
             domain_key="pending_invoices",
         )
@@ -763,7 +763,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["audit_contract"]["event_types"], [])
 
     def test_pending_invoice_duplicate_active_relation_membership_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             FakeConnection(
                 rows_by_check={
                     "canonical_relation_bank_member_unique": [
@@ -798,7 +798,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()
 
-        exit_code = audit_page_business_read_model.main(
+        exit_code = audit_page_canonical_data.main(
             ["bank_details", "--json", "--fail-on-issues"],
             connection=FakeConnection(
                 rows_by_check={
@@ -849,7 +849,7 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
             )
             """
         )
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_page_canonical_data.audit_page_canonical_data(
             self.connection,
             domain_key="bank_details",
         )

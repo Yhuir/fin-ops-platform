@@ -135,14 +135,6 @@ class FailingMarkDirtyQueue(RecordingDirtyQueue):
         raise RuntimeError("db queue unavailable")
 
 
-class RecordingReadModelQueue:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-        self.calls.append(dict(kwargs))
-
-
 class RecordingHeartbeatRecorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -215,74 +207,12 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         )
         self.assertEqual(
             summary["invalidated_scopes"],
-            ["2026-05", "2026-03", "2026-04", "2026-06", "2026-07"],
+            ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"],
         )
 
-    def test_explicit_maintenance_refreshes_keep_owner_metadata(self) -> None:
+    def test_requirement_rule_reapply_marks_only_matching_scopes(self) -> None:
         app = build_application()
-        queue = RecordingReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-        app._execute_explicit_maintenance_lifecycle(
-            "etc_business_batch_changed",
-            scope_keys=["2026-05"],
-            include_all=False,
-            metadata={"source": "historical_etc_repair_link"},
-        )
-
-        workbench_relation_calls = [
-            call
-            for call in queue.calls
-            if call.get("scope_type") == "workbench_relation" and call.get("scope_key") == "2026-05"
-        ]
-        self.assertTrue(workbench_relation_calls)
-        self.assertEqual(
-            workbench_relation_calls[0].get("metadata"),
-            {"source": "historical_etc_repair_link"},
-        )
-
-    def test_historical_etc_repair_refreshes_exact_relation_months_without_page_scope(self) -> None:
-        app = build_application()
-        queue = RecordingReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-
-        app._refresh_after_historical_etc_repair_link(
-            ["2026-06", "invalid", "2026-05", "2026-06"],
-            reason="submitted_etc_batch_members_repaired",
-        )
-
-        relation_calls = [
-            call for call in queue.calls if call.get("scope_type") == "workbench_relation"
-        ]
-        self.assertEqual(
-            relation_calls,
-            [
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-05",
-                    "reason": "submitted_etc_batch_members_repaired",
-                    "metadata": {
-                        "source": "historical_etc_repair_link",
-                    },
-                },
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-06",
-                    "reason": "submitted_etc_batch_members_repaired",
-                    "metadata": {
-                        "source": "historical_etc_repair_link",
-                    },
-                },
-            ],
-        )
-        self.assertNotIn("all", [call["scope_key"] for call in relation_calls])
-        self.assertFalse(any(call.get("scope_type") == "workbench" for call in queue.calls))
-
-    def test_requirement_rule_reapply_refreshes_only_relation_and_matching_scopes(self) -> None:
-        app = build_application()
-        queue = RecordingReadModelQueue()
         dirty_calls: list[dict[str, object]] = []
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
         app._mark_workbench_matching_dirty_scopes = lambda months, **kwargs: (
             dirty_calls.append({"months": list(months), **kwargs}) or list(months)
         )
@@ -296,22 +226,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         self.assertEqual(result["months"], ["2026-05", "2026-07"])
         self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [
-                ("workbench_relation", "2026-05"),
-                ("workbench_relation", "2026-07"),
-            ],
-        )
-        self.assertEqual(
-            queue.calls[0]["metadata"],
-            {
-                "source": "workbench_requirement_repair",
-                "reason": "workbench_requirement_rule_reapply",
-                "case_ids": ["case-1", "case-2"],
-                "row_ids": ["bank-1", "invoice-1"],
-            },
-        )
-        self.assertEqual(
             dirty_calls,
             [
                 {
@@ -321,7 +235,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertNotIn("all", [call["scope_key"] for call in queue.calls])
 
     def test_ordinary_write_events_are_not_accepted_by_maintenance_boundary(self) -> None:
         app = build_application()
@@ -335,18 +248,11 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
     def test_import_state_persistence_does_not_fan_out_page_refreshes(self) -> None:
         app = build_application()
-        queue = RecordingReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._runtime_repositories = SimpleNamespace(queue_repository=object())
 
         app._persist_confirmed_import_delta(
             import_state_payload={"imports": {}, "file_imports": {}},
         )
-
-        refreshes = [
-            (call.get("scope_type"), call.get("scope_key"), call.get("reason"))
-            for call in queue.calls
-        ]
-        self.assertEqual(refreshes, [])
 
     def test_db_dirty_queue_write_path_marks_scope_instead_of_inline_matching(self) -> None:
         app = build_application()
@@ -403,7 +309,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         with (
             patch.object(app, "_resolve_typed_canonical_rows", return_value=rows),
-            patch.object(app, "_workbench_write_freshness_guard", return_value=None),
+            patch.object(app, "_workbench_oa_sync_safety_guard", return_value=None),
         ):
             response = app.handle_request(
                 "POST",

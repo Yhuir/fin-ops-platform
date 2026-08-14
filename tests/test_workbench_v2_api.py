@@ -189,6 +189,30 @@ class RelationDistributionFacadeStub:
             "stale_reasons": [],
         }
 
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        wanted = {str(row_id) for row_id in row_ids}
+        self.calls.append({"row_ids": list(row_ids), "kwargs": {}})
+        relations: list[dict[str, object]] = []
+        for row in self.rows:
+            row_id = str(row.get("row_id") or "")
+            group_ids = [str(value) for value in list(row.get("group_ids") or [])]
+            if row_id not in wanted or not group_ids:
+                continue
+            row_types = ["bank"]
+            if row.get("linked_oa"):
+                row_types.append("oa")
+            if row.get("linked_input_invoices") or row.get("linked_output_invoices"):
+                row_types.append("invoice")
+            relations.append(
+                {
+                    "case_id": group_ids[0],
+                    "status": "active",
+                    "row_ids": [row_id],
+                    "row_types": row_types,
+                }
+            )
+        return relations
+
 class BankDetailCanonicalQueryFixture:
     def __init__(self, app: Application) -> None:
         self._app = app
@@ -331,7 +355,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         rows: list[dict[str, object]],
     ) -> RelationDistributionFacadeStub:
         facade = RelationDistributionFacadeStub(rows)
-        app._bank_details_relation_tag_projection_service._relation_facade = facade
+        app._bank_details_relation_tag_projection_service._relation_reader = facade
         return facade
 
     def _install_bank_detail_canonical_query_fixture(self, app: Application) -> BankDetailCanonicalQueryFixture:
@@ -574,7 +598,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(sheet["N2"].value, "无发票")
         self.assertEqual(sheet["Q2"].value, "工行附言")
         self.assertEqual(sheet["R2"].value, transaction_id)
-        self.assertEqual(facade.calls[0]["kwargs"]["reason"], "bank_details_relation_tag_projection")
+        self.assertEqual(facade.calls[0]["row_ids"], [transaction_id])
         self.assertEqual(audit_entries[-1]["action"], "bank_detail_export_downloaded")
         self.assertEqual(audit_entries[-1]["entity_type"], "bank_detail_export")
         self.assertEqual(audit_entries[-1]["metadata"]["row_count"], 1)
@@ -706,7 +730,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(linked_row["invoice_relation_tag"], "有发票")
         self.assertEqual(linked_row["relation_tags"], ["有oa", "有发票"])
         self.assertEqual(linked_row["relation_case_id"], "CASE-BANK-DETAILS")
-        self.assertEqual(facade.calls[0]["kwargs"]["reason"], "bank_details_relation_tag_projection")
+        self.assertEqual(facade.calls[0]["row_ids"], [transaction_id])
 
         self.assertEqual(unlinked_response.status_code, 200, unlinked_response.body)
         unlinked_payload = json.loads(unlinked_response.body)

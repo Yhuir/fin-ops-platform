@@ -19,7 +19,7 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 from tests.app_test_support import build_local_state_application as build_application
-from tests.test_pending_invoice_service import FakeOAProjection, FakeWorkbenchRelationFacade
+from tests.test_pending_invoice_service import FakeOAProjection, FakeCanonicalRelationReader
 
 
 class StaticOAProjection:
@@ -246,7 +246,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             oa_projection = FakeOAProjection([self._oa("oa-paid", "李四", "80.00")])
             service = InputInvoiceUsageQueryService(
                 import_service=ImportNormalizationService(existing_invoices=[invoice], existing_transactions=[bank]),
-                relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+                relation_reader=FakeCanonicalRelationReader.from_pair_service(
                     pair_service=pair_service,
                     transactions=[bank],
                     invoices=[invoice],

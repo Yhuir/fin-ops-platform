@@ -183,7 +183,7 @@ def _audit_snapshot(
                 "job.import_jobs",
                 "job.outbox_events",
             ],
-            "read_model_tables": [],
+            "derived_tables": [],
             "canonical_expected_set": (
                 "all version-registered bank-transaction file sessions and their preview/confirmed batches and rows, "
                 "plus every canonical bank transaction owned or referenced by those decisions"

@@ -6,7 +6,7 @@ import PageAuditIcon from "../components/common/PageAuditIcon";
 
 
 describe("PageAuditIcon", () => {
-  test("fails closed when the page runtime proof registration is missing", async () => {
+  test("accepts a complete direct-canonical snapshot proof", async () => {
     const user = userEvent.setup();
     render(
       <PageAuditIcon
@@ -29,8 +29,7 @@ describe("PageAuditIcon", () => {
 
     await user.click(screen.getByRole("button", { name: "Audit 测试页面" }));
 
-    expect(await screen.findByText(/Not fresh/)).toHaveTextContent("freshness not_fresh");
-    expect(screen.queryByText(/已登记 App 内部合同一致/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/已登记 App 内部合同一致/)).toHaveTextContent("Fresh");
   });
 
   test("uses the Audit snapshot freshness gate for a registered direct-canonical page", async () => {
@@ -47,7 +46,6 @@ describe("PageAuditIcon", () => {
             snapshot_consistency: "repeatable_read_read_only",
             proof_availability: "ready",
             contract_revision: "page-audit-contract.v12",
-            registered_read_model_keys: [],
             relation_proof_required: true,
             relation_edge_equality: "bidirectional equality for ETC internal typed edges",
           },
@@ -120,7 +118,6 @@ describe("PageAuditIcon", () => {
             snapshot_consistency: "repeatable_read_read_only",
             proof_availability: "ready",
             contract_revision: "page-audit-contract.v9",
-            registered_read_model_keys: [],
           },
           summary: { blocking_issue_sample_count: 0, issue_sample_count: 0 },
           issues: [],
@@ -143,7 +140,6 @@ describe("PageAuditIcon", () => {
         snapshot_consistency: "repeatable_read_read_only",
         proof_availability: "ready",
         contract_revision: "page-audit-contract.v26",
-        registered_read_model_keys: [],
       },
       summary: { blocking_issue_sample_count: 0, issue_sample_count: 0 },
       issues: [],
@@ -186,7 +182,6 @@ describe("PageAuditIcon", () => {
             snapshot_consistency: "repeatable_read_read_only",
             proof_availability: "ready",
             contract_revision: "page-audit-contract.v11",
-            registered_read_model_keys: [],
             relation_proof_required: false,
             relation_edge_equality: "not_applicable: tax-offset does not consume or display Workbench relations",
           },

@@ -41,9 +41,6 @@ function auditMessage(
   const snapshotConsistent =
     payload.audit_contract?.database_snapshot === true &&
     payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
-  const registeredReadModelKeys = payload.audit_contract?.registered_read_model_keys;
-  const directCanonicalPage = Array.isArray(registeredReadModelKeys) && registeredReadModelKeys.length === 0;
-  const pageRuntimeProofReady = Array.isArray(registeredReadModelKeys);
   if (
     payload.overall_status === "pass" &&
     integrityPassed &&
@@ -52,7 +49,6 @@ function auditMessage(
     proofReady &&
     contractVersioned &&
     snapshotConsistent &&
-    pageRuntimeProofReady &&
     blockingSamples === 0
   ) {
     const relationProofNotApplicable =
@@ -75,7 +71,7 @@ function auditMessage(
     if (!queueDrained) {
       return { tone: "warning", text: `${notFreshText} · queue backlog` };
     }
-    const freshness = auditFresh && pageRuntimeProofReady ? "fresh" : "not_fresh";
+    const freshness = auditFresh ? "fresh" : "not_fresh";
     return { tone: "warning", text: `${notFreshText} · freshness ${freshness}` };
   }
   const truncated = summary?.issue_samples_truncated ? "+" : "";

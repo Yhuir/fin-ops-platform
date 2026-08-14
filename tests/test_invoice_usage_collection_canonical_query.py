@@ -408,7 +408,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
     ) -> None:
         context = DistributedInvoiceRelationContext(
             import_service=CountingImportService(),
-            relation_facade=None,
+            relation_reader=None,
         )
         context.add_distributed_relations(
             [

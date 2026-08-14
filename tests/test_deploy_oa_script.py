@@ -213,7 +213,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not archive legacy /opt/fin-ops/current", remote_script)
         self.assertIn("deploy-control helper does not enforce OA session env", remote_script)
         self.assertIn("deploy-control helper does not tolerate non-ready worker readiness polls under set -e", remote_script)
-        self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn("deploy-control helper does not install versioned runtime queue history retention", remote_script)
         self.assertIn("settings access-control safety contract", remote_script)
         self.assertIn("deploy-control helper does not install versioned OA sync enqueue timer", remote_script)
@@ -424,13 +423,9 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertIn("Environment=FIN_OPS_WORKER_INSTANCE=%i", template)
         self.assertIn("EnvironmentFile=-/etc/fin-ops/fin-ops.rabbitmq-worker.env", template)
-        self.assertIn("FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25", template)
         self.assertIn("--registration ${FIN_OPS_WORKER_INSTANCE}", template)
         self.assertIn("--worker-instance ${FIN_OPS_WORKER_INSTANCE}", template)
-        self.assertIn(
-            "--dependency-not-fresh-delay-seconds ${FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS}",
-            template,
-        )
+        self.assertNotIn("FIN_OPS_WORKER_KIND", template)
 
     def test_workbench_requirement_repair_fixed_modes(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
@@ -472,14 +467,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("oa_attachment_invoice_promotion()", script)
         self.assertNotIn("workbench-rehydrate <release-name>", script)
         self.assertNotIn("workbench_rehydrate()", script)
-        self.assertIn('"$src/scripts/rehydrate-workbench-read-models.py" --json', script)
 
     def test_batch_accounting_read_only_validation_commands_are_fixed(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
         self.assertIn("batch-accounting-audit <release-name>", script)
         self.assertIn("batch-accounting-audit accepts only release name", script)
-        self.assertIn("audit_page_business_read_model", script)
+        self.assertIn("audit_page_canonical_data", script)
         self.assertIn("batch_accounting --json --fail-on-issues", script)
         self.assertIn("batch-accounting-read-smoke <release-name> --bank-year YYYY", script)
         self.assertIn("batch-accounting-read-smoke accepts only --bank-year YYYY [--iterations N]", script)
@@ -529,7 +523,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("repair-active-api-runtime", script)
         self.assertNotIn("install_deploy_control_helper", script)
         self.assertIn("install_runtime_worker_helper", script)
-        self.assertIn('install_runtime_worker_helper "$runtime_worker_helper_src"', script)
+        self.assertIn('install_runtime_worker_helper "$src"', script)
         self.assertIn('ensure_runtime_workers "$src"', script)
         self.assertIn('"$ENSURE_RUNTIME_WORKERS_HELPER" "$src"', script)
         self.assertIn("RuntimeDirectory=fin-ops", script)
@@ -566,13 +560,12 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("rabbitmq_topology --apply", script)
         self.assertIn("domain_contract_audit", script)
         self.assertIn("runtime_sync_closure_gate", script)
-        self.assertNotIn("--apply-read-model-smoke", script)
-        self.assertIn("--read-model-target-ms 5000", script)
         self.assertIn("--write-target-ms 5000", script)
         self.assertIn("--http-target-ms 1000", script)
         self.assertIn('--required-worker-instance "$required_worker_instance"', script)
-        self.assertIn("sleep 60", script)
-        self.assertIn("sleep 240", script)
+        self.assertIn("sleep 30", script)
+        self.assertNotIn("sleep 60", script)
+        self.assertNotIn("sleep 240", script)
         self.assertIn("rollback_release_gate", script)
         self.assertIn("contract-version [--require VERSION]", script)
         self.assertIn("candidate-status <release-name> --json", script)
@@ -586,7 +579,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"release_gate_status": "PASS"', script)
         self.assertIn('"unknown_worker_count": 0', script)
         self.assertIn('"required_worker_not_ready": 0', script)
-        self.assertIn('"dirty_scope_count": 0', script)
         self.assertIn('"pending_outbox_count": 0', script)
         self.assertIn('"publishing_outbox_count": 0', script)
         self.assertNotIn('reconcile_completed_publish_states "$verification_release"', script)
@@ -599,8 +591,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"diagnostics": diagnostics or None', script)
         self.assertIn('"snapshot",', script)
         self.assertIn('"page_canonical_audit_status": "pass"', script)
-        self.assertIn('"queue_stable_after_300_seconds": True', script)
-        self.assertIn("read-model-scope-contract <release-name> [args]", script)
+        self.assertIn('"queue_stable_after_30_seconds": True', script)
         self.assertIn("workbench-requirement-repair <release-name>", script)
         self.assertIn("workbench_requirement_repair()", script)
         self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
@@ -611,12 +602,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("workbench_matching_retry()", script)
         self.assertIn("fin_ops_platform.tools.workbench_matching_scope_retry_ops", script)
         self.assertIn('case "$mode" in', script)
-        self.assertIn("read_model_scope_contract()", script)
-        self.assertIn('run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"', script)
-        self.assertIn("read-model-slo-smoke <release-name> [args]", script)
-        self.assertIn("read_model_slo_smoke()", script)
-        self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", script)
-        self.assertIn('run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"', script)
         self.assertIn("write-operation-restore-point <release-name> <run-id>", script)
         self.assertIn("write_operation_restore_point()", script)
         self.assertIn("write-operation-restore-point run-id must be 1..80 safe filename characters", script)
@@ -694,19 +679,12 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('grep -F "\\\"request_id\\\": \\\"$request_id\\\""', script)
         self.assertIn("journalctl -u fin-ops.service --since '2 hours ago'", script)
         self.assertIn("request error not found in the bounded journal window", script)
-        self.assertIn("read-model-refresh <release-name> [args]", script)
-        self.assertNotIn("no-oa-read-model-refresh-drain", script)
         self.assertIn("settings-normalize <release-name> [--dry-run|--execute]", script)
         self.assertIn("import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]", script)
         self.assertIn("bank-transaction-category-repair <release-name>", script)
-        self.assertIn("runtime-queue-resolve-covered <release-name> [args]", script)
-        self.assertIn("read_model_refresh()", script)
         self.assertIn("settings_normalize()", script)
         self.assertIn("import_audit_repair()", script)
         self.assertIn("bank_transaction_category_repair()", script)
-        self.assertIn("runtime_queue_resolve_covered()", script)
-        self.assertIn("enqueue-read-model-refresh", script)
-        self.assertNotIn("no_oa_read_model_refresh_drain()", script)
         self.assertNotIn('service="fin-ops-worker@no-oa-bank-batch.service"', script)
         self.assertNotIn("fin-ops-worker@no-oa-bank-batch.service", script)
         self.assertNotIn('--scope "no_oa_bank_batch=$scope_key"', script)
@@ -715,11 +693,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("fin_ops_platform.tools.settings_normalization_ops", script)
         self.assertIn("fin_ops_platform.tools.import_audit_repair_ops", script)
         self.assertIn("fin_ops_platform.tools.repair_unknown_bank_transaction_categories", script)
-        self.assertIn("resolve-covered-dead-letters", script)
         self.assertIn("FINOPS_WORKER_READY_TIMEOUT_SECONDS", script)
         self.assertIn("missing_required_worker_count", script)
         self.assertIn("stale_required_worker_count", script)
-        self.assertIn("--dependency-not-fresh-delay-seconds \\${FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS}", script)
         self.assertIn("worker_kind_mismatch", script)
         self.assertIn("worker_event_type_mismatch", script)
         self.assertIn("readiness_status=0", script)
@@ -728,8 +704,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--registration \\${FIN_OPS_WORKER_INSTANCE}", script)
         self.assertIn("--worker-instance \\${FIN_OPS_WORKER_INSTANCE}", script)
         self.assertLess(script.rindex('ensure_runtime_workers "$src"'), script.rindex("wait_required_workers_ready"))
-        self.assertLess(script.rindex("read_model_scope_contract()"), script.rindex('case "$cmd" in'))
-        self.assertLess(script.rindex("read_model_slo_smoke()"), script.rindex('case "$cmd" in'))
+        self.assertNotIn("read_model", script)
         self.assertNotIn("EnvironmentFile=/opt/fin-ops/fin-ops.env", script)
         self.assertNotIn("/root/fin_ops_stage23_postgres_runtime.env", script)
         self.assertNotIn("FIN_OPS_POSTGRES_DATABASE_URL=", script)
@@ -774,8 +749,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn('assert_settings_access_control_preflight "$release"', activate)
         self.assertIn('approved.get("eligible") is not True', script)
         self.assertNotIn('approved.get("cutover_eligible") is not True', script)
-        self.assertIn('"$rollback_page_runtime_mode" == "direct-only"', runtime_activate)
-        self.assertIn('"$rollback_page_runtime_mode" == "audited-previous-page-runtime"', runtime_activate)
+        self.assertNotIn("rollback_page_runtime_mode", runtime_activate)
+        self.assertNotIn("read_model", runtime_activate)
         self.assertIn("release_gate_frontend_checkpoint", activate)
         self.assertIn('assert_runtime_env_contract', activate)
         self.assertNotIn("prepare_settings_access_control_runtime_env", script)
@@ -977,380 +952,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('"$previous_release" rollback "$admin_token" "$evidence_dir" preflight "$candidate"', script)
         self.assertIn('cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true', script)
         self.assertIn('release_gate_checkpoint "$release" t0 "$admin_token" "$evidence_dir" stability', activate)
-        self.assertIn('release_gate_checkpoint "$release" t300 "$admin_token" "$evidence_dir" stability', activate)
+        self.assertIn('release_gate_checkpoint "$release" t30 "$admin_token" "$evidence_dir" stability', activate)
         self.assertNotIn("install_deploy_control_helper", activate)
         self.assertIn('cat "$evidence_dir/pre/checkpoint.json" >&2', activate)
         self.assertIn('"component_statuses": {', script)
-
-    def test_workbench_page_worker_env_backup_restores_exact_bytes_without_secret_output(self) -> None:
-        definitions = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8").split(
-            '\ncmd="${1:-}"', 1
-        )[0]
-        secret_value = "RABBITMQ_URL=amqp://rollback-secret-never-print" + chr(10)
-        secret_value += "FIN_OPS_WORKER_ARGS=--once" + chr(10)
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            env_dir = root / "env"
-            evidence_dir = root / "evidence" / "candidate"
-            release_root = root / "releases"
-            env_dir.mkdir()
-            evidence_dir.mkdir(parents=True)
-            for release in ("candidate", "wrong-candidate", "previous"):
-                (release_root / release / "src").mkdir(parents=True)
-            worker_env = env_dir / "fin-ops.worker.workbench.env"
-            worker_env.write_text(secret_value, encoding="utf-8")
-            worker_env.chmod(0o640)
-            definitions_path = root / "definitions.sh"
-            definitions_path.write_text(definitions, encoding="utf-8")
-            harness_prelude = """
-source "$1"
-release_src() { echo "$TEST_RELEASE_ROOT/$1/src"; }
-release_has_workbench_page_read_model() { [[ "$1" == "$TEST_RELEASE_ROOT/previous/src" ]]; }
-assert_root_owned_runtime_env() { [[ -f "$1" && ! -L "$1" ]]; }
-assert_root_owned_private_file() { [[ -f "$1" && ! -L "$1" ]]; }
-assert_root_owned_private_directory() { [[ -d "$1" && ! -L "$1" ]]; }
-"""
-            environment = {
-                **os.environ,
-                "FINOPS_API_PYTHON": sys.executable,
-                "FINOPS_ENV_DIR": str(env_dir),
-                "FINOPS_RELEASE_ROOT": str(release_root),
-                "FINOPS_WORKBENCH_PAGE_WORKER_ENV": str(worker_env),
-                "TEST_RELEASE_ROOT": str(release_root),
-                "TEST_EVIDENCE_DIR": str(evidence_dir),
-            }
-            captured = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    harness_prelude
-                    + 'capture_workbench_page_worker_env_for_cutover candidate previous "$TEST_EVIDENCE_DIR"\n',
-                    "bash",
-                    str(definitions_path),
-                ],
-                env=environment,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            self.assertEqual(captured.returncode, 0, captured.stderr)
-            backup_dir = evidence_dir / "workbench-page-worker-runtime"
-            backup_path = backup_dir / "fin-ops.worker.workbench.env"
-            metadata_path = backup_dir / "fin-ops.worker.workbench.env.json"
-            self.assertTrue(backup_path.is_file())
-
-            wrong_candidate = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    harness_prelude
-                    + 'discard_workbench_page_worker_env_rollback_backup wrong-candidate previous "$TEST_EVIDENCE_DIR"\n',
-                    "bash",
-                    str(definitions_path),
-                ],
-                env=environment,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            self.assertNotEqual(wrong_candidate.returncode, 0)
-            self.assertTrue(backup_path.is_file())
-            self.assertNotIn("rollback-secret-never-print", wrong_candidate.stdout)
-            self.assertNotIn("rollback-secret-never-print", wrong_candidate.stderr)
-
-            restored = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    harness_prelude
-                    + 'echo corrupted-but-not-secret >"$WORKBENCH_PAGE_WORKER_ENV"\n'
-                    + 'restore_previous_workbench_page_worker_env previous candidate "$TEST_EVIDENCE_DIR"\n'
-                    + 'discard_workbench_page_worker_env_rollback_backup candidate previous "$TEST_EVIDENCE_DIR"\n'
-                    + "echo PASS\n",
-                    "bash",
-                    str(definitions_path),
-                ],
-                env=environment,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-
-            self.assertEqual(restored.returncode, 0, restored.stderr)
-            self.assertEqual(restored.stdout, "PASS" + chr(10))
-            self.assertNotIn("rollback-secret-never-print", captured.stdout)
-            self.assertNotIn("rollback-secret-never-print", captured.stderr)
-            self.assertNotIn("rollback-secret-never-print", restored.stdout)
-            self.assertNotIn("rollback-secret-never-print", restored.stderr)
-            self.assertEqual(worker_env.read_text(encoding="utf-8"), secret_value)
-            self.assertEqual(stat.S_IMODE(worker_env.stat().st_mode), 0o640)
-            self.assertFalse(backup_path.exists())
-            self.assertTrue(metadata_path.is_file())
-            self.assertEqual(stat.S_IMODE(metadata_path.stat().st_mode), 0o600)
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            self.assertEqual(metadata["contract"], "workbench-page-worker-env-rollback-v1")
-            self.assertEqual(metadata["candidate_release"], "candidate")
-            self.assertEqual(metadata["previous_release"], "previous")
-            self.assertEqual(metadata["source_mode"], "0640")
-            self.assertNotIn("rollback-secret-never-print", json.dumps(metadata))
-
-    def test_retired_workbench_page_runtime_window_not_required_evidence_is_executable(self) -> None:
-        definitions = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8").split(
-            '\ncmd="${1:-}"', 1
-        )[0]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            release_root = root / "releases"
-            evidence_dir = root / "evidence"
-            for release in ("candidate", "previous"):
-                (release_root / release / "src").mkdir(parents=True)
-            evidence_dir.mkdir()
-            definitions_path = root / "definitions.sh"
-            definitions_path.write_text(definitions, encoding="utf-8")
-            harness = """
-source "$1"
-release_src() { echo "$TEST_RELEASE_ROOT/$1/src"; }
-release_has_workbench_page_read_model() { return 1; }
-start_retired_workbench_page_runtime_window candidate previous "$TEST_EVIDENCE_DIR"
-finish_retired_workbench_page_runtime_window \
-  "$TEST_EVIDENCE_DIR/retired-workbench-page-runtime-window.json"
-"""
-            completed = subprocess.run(
-                ["bash", "-c", harness, "bash", str(definitions_path)],
-                env={
-                    **os.environ,
-                    "FINOPS_API_PYTHON": sys.executable,
-                    "FINOPS_RELEASE_ROOT": str(release_root),
-                    "TEST_RELEASE_ROOT": str(release_root),
-                    "TEST_EVIDENCE_DIR": str(evidence_dir),
-                },
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            report_path = evidence_dir / "retired-workbench-page-runtime-window.json"
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-            self.assertEqual(report["contract"], "retired-workbench-page-runtime-window-v1")
-            self.assertIs(report["required"], False)
-            self.assertEqual(report["status"], "NOT_REQUIRED")
-            self.assertEqual(stat.S_IMODE(report_path.stat().st_mode), 0o600)
-
-    def test_retired_workbench_page_runtime_observer_passes_zero_delta_and_rejects_drift(self) -> None:
-        deploy_control = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
-        observer_source = deploy_control.split(
-            '"$report_path" "$ready_path" "$stop_path" "$preflight_path" "$candidate_src" <<\'PY\' &\n',
-            1,
-        )[1].split('\nPY\n  RETIRED_WORKBENCH_PAGE_OBSERVER_PID="$!"', 1)[0]
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            package_root = root / "fake-runtime"
-            services = package_root / "fin_ops_platform" / "services"
-            services.mkdir(parents=True)
-            (package_root / "fin_ops_platform" / "__init__.py").write_text("", encoding="utf-8")
-            (services / "__init__.py").write_text("", encoding="utf-8")
-            (services / "postgres_connection.py").write_text(
-                """
-import os
-
-class PostgresSettings:
-    @classmethod
-    def from_env(cls):
-        return cls()
-
-class PostgresConnection:
-    def __init__(self, _settings):
-        self.event_reads = 0
-
-    def fetch_one(self, sql, params=()):
-        normalized = " ".join(sql.lower().split())
-        if "from job.outbox_events" in normalized:
-            self.event_reads += 1
-            drift = os.environ.get("TEST_OBSERVER_DRIFT") == "1" and self.event_reads > 1
-            return {"total_count": 2 if drift else 1, "latest_created_at": "2026-08-13T00:00:00Z"}
-        if "from job.read_model_dirty_scopes" in normalized:
-            return {"total_count": 1, "latest_created_at": "2026-08-13T00:00:00Z"}
-        if "from pg_extension" in normalized:
-            return {"installed": True}
-        if "from pg_stat_statements_info" in normalized:
-            return {"stats_reset": "2026-08-01T00:00:00Z"}
-        if "count(*) filter" in normalized and "from pg_stat_statements" in normalized:
-            return {"hidden_count": 0, "visible_count": 1}
-        if "coalesce(sum(calls)" in normalized:
-            return {"statement_count": 1, "calls": 7, "rows": 11}
-        if "from pg_stat_database" in normalized:
-            return {"stats_reset": "2026-08-01T00:00:00Z"}
-        raise AssertionError(normalized)
-
-    def fetch_all(self, sql, params=()):
-        if "pg_stat_user_tables" not in sql:
-            raise AssertionError(sql)
-        return [{
-            "relname": "workbench_rows",
-            "seq_scan": 1,
-            "seq_tup_read": 2,
-            "idx_scan": 3,
-            "idx_tup_fetch": 4,
-            "n_tup_ins": 5,
-            "n_tup_upd": 6,
-            "n_tup_del": 7,
-            "n_tup_hot_upd": 8,
-        }]
-""",
-                encoding="utf-8",
-            )
-            (services / "read_model_manifest.py").write_text(
-                "READ_MODEL_MANIFEST = {'workbench_relation': object()}\n",
-                encoding="utf-8",
-            )
-            (services / "runtime_worker_registry.py").write_text(
-                """
-from types import SimpleNamespace
-RUNTIME_WORKER_REGISTRY = (
-    SimpleNamespace(
-        instance_name="workbench-relation",
-        read_model_key="workbench_relation",
-        event_types=("workbench_relation.read_model.refresh",),
-    ),
-)
-""",
-                encoding="utf-8",
-            )
-            app_root = package_root / "fin_ops_platform" / "app"
-            app_root.mkdir()
-            (app_root / "routes_workbench.py").write_text("# direct canonical route\n", encoding="utf-8")
-            (services / "workbench_query_facade.py").write_text("# direct canonical facade\n", encoding="utf-8")
-            (package_root / "RELEASE.json").write_text(
-                json.dumps({"git_commit": "abc123"}),
-                encoding="utf-8",
-            )
-            guarded_services = package_root / "backend" / "src" / "fin_ops_platform" / "services"
-            guarded_app = package_root / "backend" / "src" / "fin_ops_platform" / "app"
-            guarded_services.mkdir(parents=True)
-            guarded_app.mkdir(parents=True)
-            (guarded_services / "workbench_query_facade.py").write_text(
-                "# direct canonical facade\n",
-                encoding="utf-8",
-            )
-            (guarded_app / "routes_workbench.py").write_text(
-                "# direct canonical route\n",
-                encoding="utf-8",
-            )
-
-            def run_observer(*, drift: bool) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
-                run_root = root / ("drift" if drift else "stable")
-                run_root.mkdir()
-                report_path = run_root / "report.json"
-                ready_path = run_root / "ready"
-                stop_path = run_root / "stop"
-                preflight_path = run_root / "preflight.json"
-                preflight_path.write_text(
-                    json.dumps(
-                        {
-                            "status": "PASS",
-                            "final": {
-                                "event_total_count": 1,
-                                "event_latest_created_at": "2026-08-13T00:00:00Z",
-                                "scope_total_count": 1,
-                                "scope_latest_created_at": "2026-08-13T00:00:00Z",
-                            },
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-                process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-c",
-                        observer_source,
-                        str(report_path),
-                        str(ready_path),
-                        str(stop_path),
-                        str(preflight_path),
-                        str(package_root),
-                    ],
-                    env={
-                        **os.environ,
-                        "PYTHONPATH": str(package_root),
-                        "TEST_OBSERVER_DRIFT": "1" if drift else "0",
-                    },
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                for _ in range(500):
-                    if ready_path.exists() or process.poll() is not None:
-                        break
-                    time.sleep(0.01)
-                if not ready_path.exists():
-                    stdout, stderr = process.communicate(timeout=5)
-                    report = report_path.read_text(encoding="utf-8") if report_path.exists() else "missing"
-                    self.fail(
-                        "retired runtime observer did not become ready: "
-                        f"returncode={process.returncode} stdout={stdout!r} stderr={stderr!r} report={report!r}"
-                    )
-                stop_path.write_text("stop\n", encoding="utf-8")
-                stdout, stderr = process.communicate(timeout=5)
-                completed = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
-                return completed, json.loads(report_path.read_text(encoding="utf-8"))
-
-            stable_completed, stable = run_observer(drift=False)
-            self.assertEqual(stable_completed.returncode, 0, stable_completed.stderr)
-            self.assertEqual(stable["status"], "PASS")
-            self.assertEqual(stable["changed"], {})
-            self.assertEqual(stable["redis_page_cache_proof"]["status"], "PASS")
-            self.assertEqual(stable["redis_page_cache_proof"]["mode"], "source_owner_absent")
-            self.assertEqual(stable["redis_page_cache_proof"]["candidate_git_commit"], "abc123")
-            self.assertIs(stable["redis_page_cache_proof"]["page_runtime_registration_absent"], True)
-            self.assertIs(stable["redis_page_cache_proof"]["page_read_model_registration_absent"], True)
-
-            drift_completed, drift = run_observer(drift=True)
-            self.assertEqual(drift_completed.returncode, 6, drift_completed.stderr)
-            self.assertEqual(drift["status"], "FAIL")
-            self.assertIn("event_total_count", drift["changed"])
-
-    def test_runtime_worker_helper_refuses_example_fallback_for_required_restored_env(self) -> None:
-        definitions = ENSURE_WORKERS_SCRIPT_PATH.read_text(encoding="utf-8").split(
-            '\nif [ "$(id -u)" -ne 0 ]', 1
-        )[0]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            definitions_path = root / "definitions.sh"
-            definitions_path.write_text(definitions, encoding="utf-8")
-            env_dir = root / "env"
-            env_dir.mkdir()
-            harness = """
-source "$1"
-required_existing_worker_envs=workbench
-env_dir="$TEST_ENV_DIR"
-ensure_worker_env workbench
-"""
-            missing = subprocess.run(
-                ["bash", "-c", harness, "bash", str(definitions_path)],
-                env={**os.environ, "TEST_ENV_DIR": str(env_dir)},
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn("required existing worker env is missing", missing.stderr)
-
-            worker_env = env_dir / "fin-ops.worker.workbench.env"
-            worker_env.write_text("EXACT_RESTORED_ENV=keep" + chr(10), encoding="utf-8")
-            accepted = subprocess.run(
-                ["bash", "-c", harness, "bash", str(definitions_path)],
-                env={**os.environ, "TEST_ENV_DIR": str(env_dir)},
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(accepted.returncode, 0, accepted.stderr)
-            self.assertEqual(worker_env.read_text(encoding="utf-8"), "EXACT_RESTORED_ENV=keep" + chr(10))
 
     def test_release_gate_blocks_unproven_schema_rollback_before_services_stop(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -1481,7 +1086,7 @@ ensure_worker_env workbench
     def test_release_gate_loads_rabbitmq_env_without_automatic_business_write(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         checkpoint = script.split("release_gate_checkpoint() {", 1)[1].split(
-            "\nrelease_gate_checkpoint_passed() {",
+            "\nwrite_release_gate_evidence() {",
             1,
         )[0]
 
@@ -1499,7 +1104,7 @@ ensure_worker_env workbench
         self.assertNotIn("--apply-read-model-smoke", checkpoint)
         self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
         self.assertIn('required_worker_instances "$src"', checkpoint)
-        self.assertIn("--timeout-seconds 360", checkpoint)
+        self.assertIn("--timeout-seconds 60", checkpoint)
         self.assertLess(
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),
             checkpoint.index('"$API_PYTHON" - "$runtime_report"'),
@@ -1511,30 +1116,6 @@ ensure_worker_env workbench
         self.assertIn("for drain_attempt in 1 2 3 4 5", checkpoint)
         self.assertIn('sleep 1', checkpoint)
         self.assertIn('failed_or_dead > 0', checkpoint)
-        self.assertIn('sum(int(value or 0) for value in dirty.values()) > 0', checkpoint)
-
-    def test_deploy_control_read_model_slo_smoke_refuses_apply_before_release_lookup(self) -> None:
-        env = {**os.environ, "FINOPS_RELEASE_ROOT": "/tmp/finops-release-root-does-not-exist"}
-
-        result = subprocess.run(
-            [
-                str(DEPLOY_CONTROL_SCRIPT_PATH),
-                "read-model-slo-smoke",
-                "fake-release",
-                "--apply",
-                "--json",
-            ],
-            cwd=Path(__file__).resolve().parents[1],
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", result.stderr)
-        self.assertNotIn("release src directory not found", result.stderr)
 
     def test_deploy_control_write_operation_runner_refuses_untrusted_scenario_path(self) -> None:
         result = subprocess.run(

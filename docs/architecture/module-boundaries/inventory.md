@@ -9,7 +9,7 @@
 模块文件范围必须覆盖以下层级，不能只写前端页面或只写后端 service：
 
 - 后端 HTTP 边界：`backend/src/fin_ops_platform/app/http_adapter.py`、`application_factory.py`、`routes_*.py` 和 `server.py` 中的依赖组装。
-- 后端业务边界：`backend/src/fin_ops_platform/services/` 下的 service、facade、orchestrator、gateway、read model service。
+- 后端业务边界：`backend/src/fin_ops_platform/services/` 下的 service、facade、orchestrator 与 repository。
 - 后端持久化边界：repository port、`postgres_repositories/`、SQL projection、state store、runtime queue。
 - Worker 边界：`runtime_worker_registry.py`、worker service、projection runner、tooling。
 - 前端边界：`web/src/pages/`、`web/src/features/<feature>/`、`web/src/api/`。
@@ -23,7 +23,7 @@
 | Module key | 名称 | 类型 | Route/入口 | 边界文档 | 文件范围来源 |
 | --- | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | 关联台 | 页面模块 | `/` | `../../modules/reconciliation-workbench/README.md` + `../../modules/reconciliation-workbench/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical API contract |
-| `workbench-relations` | 关联台关系事实源 | 资源模块 | N/A | `../../modules/workbench-relations/README.md` + `../../modules/workbench-relations/boundary-io.md` | 模块 README 代码入口 + boundary-io + relation read model contract |
+| `workbench-relations` | 关联台关系事实源 | 资源模块 | N/A | `../../modules/workbench-relations/README.md` + `../../modules/workbench-relations/boundary-io.md` | 模块 README 代码入口 + boundary-io + canonical relation contract |
 | `canonical-facts` | PostgreSQL 业务唯一真相 | 资源治理模块 | N/A | `../../modules/canonical-facts/README.md` + `../../modules/canonical-facts/boundary-io.md` | `canonical-facts.md` + 拥有事实的业务模块 boundary-io |
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `../../modules/tax-offset/README.md` + `../../modules/tax-offset/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
 | `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `../../modules/cost-statistics/README.md` + `../../modules/cost-statistics/boundary-io.md` | 模块 README 代码入口 + boundary-io + direct canonical read contract |
@@ -44,7 +44,7 @@
 | `imports-bank-transactions` | 银行流水导入 | 页面模块 | `/imports/bank-transactions` | `../../modules/imports-bank-transactions/README.md` + `../../modules/imports-bank-transactions/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `imports-invoices` | 发票导入 | 页面模块 | `/imports/invoices` | `../../modules/imports-invoices/README.md` + `../../modules/imports-invoices/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `imports-etc-invoices` | ETC发票导入 | 页面模块 | `/imports/etc-invoices` | `../../modules/imports-etc-invoices/README.md` + `../../modules/imports-etc-invoices/boundary-io.md` | 模块 README 代码入口 + boundary-io |
-| `read-models` | Read Model | 资源模块 | N/A | `../../modules/read-models/README.md` + `../../modules/read-models/boundary-io.md` | 本目录 `read-model-contracts.md` + 模块 README + boundary-io |
+| `read-models` | 已退役 Read Model 防回归合同 | 墓碑模块 | N/A | `../../modules/read-models/README.md` + `../../modules/read-models/boundary-io.md` | 本目录 `read-model-contracts.md` + 删除面 guard；无运行时 owner |
 | `runtime-workers` | Runtime Worker | 资源模块 | N/A | `../../modules/runtime-workers/README.md` + `../../modules/runtime-workers/boundary-io.md` | runtime worker registry + 模块 README + boundary-io |
 | `domain-events-lifecycle` | Domain Events 与 Derived Lifecycle | 资源模块 | N/A | `../../modules/domain-events-lifecycle/README.md` + `../../modules/domain-events-lifecycle/boundary-io.md` | 模块 README 代码入口 + boundary-io |
 | `app-shell-navigation` | App Shell 与导航 | 资源模块 | N/A | `../../modules/app-shell-navigation/README.md` + `../../modules/app-shell-navigation/boundary-io.md` | 模块 README 代码入口 + boundary-io |
@@ -58,10 +58,10 @@
 
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。
-- Read model 当前以 `backend/src/fin_ops_platform/services/read_model_manifest.py` 为可执行合同，只覆盖 `workbench_relation` 这一个 runtime read model，详见 `read-model-contracts.md`。Workbench page 是 direct canonical consumer，不得重新登记为 read model。
-- Worker 当前以 `backend/src/fin_ops_platform/services/runtime_worker_registry.py` 为可执行合同，read model worker/event 与 manifest 可以互相核对。
+- Read model runtime 集合为空，以 `read-model-contracts.md` 与 `tests/test_read_model_runtime_removal.py` 为删除合同。
+- Worker 当前以 `backend/src/fin_ops_platform/services/runtime_worker_registry.py` 为可执行合同，精确为四个 domain/integration worker。
 - HTTP runtime 由 Gunicorn + `WsgiHttpAdapter` 提供有界并发、请求体、request ID、access log 和 graceful shutdown；`application_factory.py` 负责构造依赖，`server.py` 保留路由/HTTP 映射，后台任务只允许由 worker/显式 maintenance 入口启动。
-- 前端页面已按 `web/src/pages/` 与 `web/src/features/<feature>/` 组织；修改页面时必须同步核对后端 API、该页面的 direct canonical 或已登记 read-model 读取合同，以及模块测试文档。
+- 前端页面已按 `web/src/pages/` 与 `web/src/features/<feature>/` 组织；修改页面时必须同步核对后端 API、direct canonical 读取合同和模块测试文档。
 - `.planning/refactors/` 中的模块化记录只能作为历史分析参考；已确认的长期规则需要落到本目录和对应模块文档。
 
 ## 缺口处理规则
@@ -70,5 +70,5 @@
 
 1. 补齐模块 README 和 `boundary-io.md`。
 2. 如影响模块列表，更新本清单。
-3. 如影响 read model，更新 `read-model-contracts.md`、manifest、registry、测试和运维文档。
+3. 如扫描到 read model 运行时回归，更新删除面 guard、`read-model-contracts.md`、测试和运维文档；禁止恢复 manifest/registry。
 4. 在最终说明中写明边界文档已更新，或明确说明 docs 不适用的理由。

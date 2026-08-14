@@ -39,16 +39,16 @@ class RabbitMqIntegrationTests(unittest.TestCase):
         try:
             channel = connection.channel()
             RabbitMqTopologyManager(settings).apply(channel)
-            route = rabbitmq_event_routes(settings)["workbench_relation.read_model.refresh"]
+            route = rabbitmq_event_routes(settings)["oa.sync"]
             event = RuntimeQueueEvent(
                 event_id=str(uuid4()),
                 tenant_id="default",
-                event_type="workbench_relation.read_model.refresh",
-                aggregate_type="read_model",
+                event_type="oa.sync",
+                aggregate_type="oa_sync",
                 aggregate_id="all",
-                scope_type="workbench_relation",
+                scope_type="oa_sync",
                 scope_key="all",
-                dedupe_key="workbench_relation.read_model.refresh:workbench_relation:all",
+                dedupe_key="oa.sync:default:all",
                 payload={"source_version": 1},
                 attempts=0,
                 status="pending",

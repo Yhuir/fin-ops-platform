@@ -72,10 +72,7 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
             self.assertEqual(plan["count_guard"]["status"], "pass")
             self.assertEqual(
                 [blocker["required_decision"] for blocker in plan["soft_reference_blockers"]],
-                [
-                    "archive_or_rebuild_oa_reverse_batches_before_canonical_pool_reset",
-                    "refresh_workbench_relation_after_reimport",
-                ],
+                ["archive_or_rebuild_oa_reverse_batches_before_canonical_pool_reset"],
             )
 
     def test_preflight_blocks_when_app_invoice_count_changed_since_dry_run(self) -> None:
@@ -111,24 +108,17 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             self.assertEqual(plan["gate_recommendation"], "PASS_READY_TO_EXECUTE")
             self.assertEqual(plan["soft_reference_blockers"], [])
             self.assertEqual(
                 [action["action"] for action in plan["resolved_soft_reference_actions"]],
-                [
-                    "archive_legacy_polluted_oa_reverse_batches_before_canonical_pool_reset",
-                    "rebuild_workbench_relation_groups_after_canonical_invoice_reimport",
-                ],
+                ["archive_legacy_polluted_oa_reverse_batches_before_canonical_pool_reset"],
             )
             self.assertEqual(
                 plan["soft_reference_strategies"],
-                {
-                    "oa_reverse_batch_strategy": "archive_legacy_polluted_history",
-                    "workbench_relation_strategy": "rebuild_after_reimport",
-                },
+                {"oa_reverse_batch_strategy": "archive_legacy_polluted_history"},
             )
             actions_by_name = {action["action"]: action for action in plan["planned_actions"]}
             legacy_cleanup = actions_by_name["remove_legacy_etc_created_canonical_pollution"]
@@ -150,7 +140,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             self.assertEqual(plan["gate_recommendation"], "PASS_READY_TO_EXECUTE")
@@ -186,7 +175,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 dry_run_dir=dry_run_owner / "cleanup_dry_run",
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             self.assertEqual(plan["gate_recommendation"], "PASS_READY_TO_EXECUTE")
@@ -238,7 +226,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             self.assertEqual(plan["gate_recommendation"], "BLOCKED_BACKUP_ARTIFACT_MISSING")
@@ -295,8 +282,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                         invoice_pool_cleanup.CONFIRM_TOKEN,
                         "--oa-reverse-batch-strategy",
                         "archive_legacy_polluted_history",
-                        "--workbench-relation-strategy",
-                        "rebuild_after_reimport",
                     ],
                     stdout=stdout,
                     stderr=stderr,
@@ -337,8 +322,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                         invoice_pool_cleanup.CONFIRM_TOKEN,
                         "--oa-reverse-batch-strategy",
                         "archive_legacy_polluted_history",
-                        "--workbench-relation-strategy",
-                        "rebuild_after_reimport",
                         "--execution-sql-file",
                         str(sql_path),
                         "--execution-sql-sha256",
@@ -381,8 +364,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                         invoice_pool_cleanup.CONFIRM_TOKEN,
                         "--oa-reverse-batch-strategy",
                         "archive_legacy_polluted_history",
-                        "--workbench-relation-strategy",
-                        "rebuild_after_reimport",
                         "--execution-sql-file",
                         str(sql_path),
                         "--execution-sql-sha256",
@@ -433,8 +414,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                         invoice_pool_cleanup.CONFIRM_TOKEN,
                         "--oa-reverse-batch-strategy",
                         "archive_legacy_polluted_history",
-                        "--workbench-relation-strategy",
-                        "rebuild_after_reimport",
                         "--execution-sql-file",
                         str(sql_path),
                         "--execution-sql-sha256",
@@ -459,7 +438,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(app_invoices=638),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             result = invoice_pool_cleanup.verify_final_invoice_pool(
@@ -514,7 +492,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
             result = invoice_pool_cleanup.verify_final_invoice_pool(
                 plan,
@@ -681,7 +658,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             result = invoice_pool_cleanup.verify_final_invoice_pool(
@@ -713,7 +689,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                 backup_dir,
                 connection=_FakeConnection(),
                 oa_reverse_batch_strategy="archive_legacy_polluted_history",
-                workbench_relation_strategy="rebuild_after_reimport",
             )
 
             result = invoice_pool_cleanup.verify_final_invoice_pool(
@@ -742,8 +717,6 @@ class InvoicePoolCleanupToolTests(unittest.TestCase):
                     "--verify-final",
                     "--oa-reverse-batch-strategy",
                     "archive_legacy_polluted_history",
-                    "--workbench-relation-strategy",
-                    "rebuild_after_reimport",
                 ],
                 stdout=stdout,
                 stderr=stderr,

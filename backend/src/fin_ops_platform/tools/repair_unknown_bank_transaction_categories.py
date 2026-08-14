@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Inspect candidates without writing.")
-    mode.add_argument("--apply", action="store_true", help="Clear strict candidates and enqueue dependent read models.")
+    mode.add_argument("--apply", action="store_true", help="Clear strict candidates and enqueue required domain work.")
     parser.add_argument("--operator", default="", help="Required audit actor for --apply.")
     parser.add_argument(
         "--expected-candidate-count",

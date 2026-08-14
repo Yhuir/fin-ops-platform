@@ -10,7 +10,6 @@ DERIVED_DATA_EVENTS = (
 )
 
 DERIVED_DATA_DOMAINS = (
-    "workbench_relation_read_model",
     "workbench_matching_dirty_scopes",
     "oa_adapter_records_cache",
     "file_import_sessions",
@@ -44,7 +43,6 @@ class DerivedDataLifecycleService:
     """
 
     _DOMAIN_ACTIONS: dict[str, str] = {
-        "workbench_relation_read_model": "invalidate",
         "workbench_matching_dirty_scopes": "mark_dirty",
         "oa_adapter_records_cache": "clear",
         "file_import_sessions": "ttl_cleanup",
@@ -55,13 +53,11 @@ class DerivedDataLifecycleService:
 
     _EVENT_DOMAINS: dict[str, tuple[str, ...]] = {
         "etc_business_batch_changed": (
-            "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
             "historical_etc_repair_state",
         ),
         "settings_reset_completed": (
             "oa_adapter_records_cache",
-            "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
             "file_import_sessions",
             "tax_certified_import_sessions",

@@ -2,46 +2,27 @@
 
 ## 当前不变量
 
-- `RUNTIME_WORKER_REGISTRY` 是 registration/event/handler/scope lane 的唯一清单。
-- required instance 精确为 `oa-sync`、`workbench-matching`、`workbench`、`workbench-relation`、`import`、`settings-maintenance`；带 `read_model_key` 的 registration 精确覆盖 `workbench`、`workbench_relation`，并与 manifest 双向相等。retired Search/no-OA/secondary/page worker、event、CLI flag 与 env 不存在。
-- PostgreSQL durable queue 是 job/read-model 状态事实源；RabbitMQ 只负责 wakeup。
+- `RUNTIME_WORKER_REGISTRY` 是 registration/event/handler 的唯一清单，required instances 精确为 `oa-sync`、`workbench-matching`、`import`、`settings-maintenance`。
+- PostgreSQL 是 durable item/heartbeat 事实源；RabbitMQ 只负责 wakeup。
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
-- import、OA sync、Workbench matching 是领域/integration job，不能登记为页面 read model；
-  BankFlow live candidate 不是 job，不得登记 event 或 worker。
-- `settings-maintenance` 是 required PostgreSQL-only maintenance worker；settings reset job/outbox 不含密码，API 进程不执行 destructive handler。
-- deploy 必须 stop/disable 未登记 instance，并在 retired processing work 存在时拒绝激活。
+- App read model manifest/worker/event/dirty-scope/readiness/projection 数量为 0。
+- deploy 停止并移除 registry 外旧实例，但不删除主数据库或有效业务队列。
 
 ## 七类测试
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching 业务规则；BankFlow live candidate 由页面模块测试覆盖 |
-| 2. Service/repository | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_settings_data_reset_job.py`：claim、retry、defer、ack、heartbeat、timeout、destructive reset crash fail-closed |
-| 3. API contract | 间接适用 | `tests/test_settings_data_reset_job.py` 与 job/App Status API tests 保护权限、secret 隔离、状态和错误 shape；worker 自身无 HTTP API |
-| 4. Read model/cache/background job | 核心适用 | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_manifest.py` |
-| 5. 前端交互 | 间接适用 | App Status、job progress 和导入页面 tests；worker 不拥有 UI |
-| 6. 端到端 | 适用 | import/OA/settings/BankFlow E2E 与 backend integration flows |
-| 7. 既有功能回归 | 核心适用 | 全量 backend/frontend/E2E，加 deploy/RabbitMQ/queue/migration tests |
+| 1. 业务核心 | 间接适用 | 各 handler owner 测试保护 import/OA/matching/settings 规则。 |
+| 2. Service/repository | 适用 | runtime worker/queue/settings reset tests。 |
+| 3. API contract | 间接适用 | job/App Health API tests；worker 无 HTTP API。 |
+| 4. Cache/background job | 核心适用 | registry、runtime queue、RabbitMQ、removal guard tests。 |
+| 5. 前端交互 | 间接适用 | App Health、job progress、导入页面 tests。 |
+| 6. 端到端 | 适用 | import/OA/settings/matching E2E 与生产 closure gate。 |
+| 7. 既有回归 | 核心适用 | 全量 backend/frontend/E2E、deploy/migration tests。 |
 
 ## 必须保留的负向断言
 
-- retired page `*.read_model.refresh`、scope、handler、registration、env/systemd unit 不存在。
-- registry/manifest/scope/App Status 集合精确四项；同一 read-model key 的 worker instance 集合也必须完全一致。
-- BankFlow draft event/owner/producer/worker/env/replay 保持删除，且不进入 registry、manifest 或 readiness。
-- RabbitMQ consumer 必须回 PostgreSQL claim；publish success 不代表 done/fresh。
-- import/OA sync 不写 full-state snapshot 或 retired page fan-out。
-- deploy preflight 不删除历史表/backlog，不在门禁失败时停止所有保留 worker。
-
-## 验证
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest \
-  tests.test_runtime_worker_registry \
-  tests.test_runtime_worker \
-  tests.test_runtime_queue \
-  tests.test_runtime_worker_read_model_refresh_scopes \
-  tests.test_deploy_runtime_examples -v
-```
-
-生产 systemd instance、真实 RabbitMQ wakeup、旧 processing backlog 和 worker drain 必须在
-发布窗口验证；本地 fake 不能证明生产进程已收敛。
+- 任意新 `*.read_model.refresh`、旧 registration/env/systemd/timer、operation barrier 或页面 refresh polling 均失败。
+- RabbitMQ consumer 回 PostgreSQL claim；publish success 不代表 done。
+- import/OA sync 不写 full-state snapshot 或旧 page fan-out。
+- deploy 不恢复旧 schema/worker，也不删除主数据库。

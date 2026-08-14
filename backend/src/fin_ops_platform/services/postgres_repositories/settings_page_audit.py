@@ -50,7 +50,7 @@ def audit_settings_page(
                     "app.oa_applicant_credentials",
                     "job.background_jobs",
                 ],
-                "read_model_tables": [],
+                "derived_tables": [],
                 "canonical_expected_set": (
                     "the persisted app_settings singleton normalized by the production settings contract, "
                     "secret-safe OA applicant credential summaries, and registered settings reset jobs"

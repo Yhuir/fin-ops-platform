@@ -1092,7 +1092,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw"
         )
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
-        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 4)
+        self.assertEqual(report["results"][0]["write_slo"]["results"], [])
 
     def test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -1136,13 +1136,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         write_slo = report["results"][0]["write_slo"]
         self.assertEqual(report["status"], "pass")
         self.assertEqual(write_slo["requested_event_sample_limit"], 1)
-        self.assertEqual(
-            write_slo["effective_event_sample_limit"],
-            write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT,
-        )
-        self.assertEqual(
-            connection.fetch_all_calls[-1][1][-1], write_operation_e2e_smoke.MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT
-        )
+        self.assertEqual(write_slo["effective_event_sample_limit"], 1)
+        self.assertEqual(connection.fetch_all_calls[-1][1][-1], 1)
 
     def test_exact_checkpoint_event_set_rejects_unknown_or_unmatched_event_ids(self) -> None:
         rows = [
@@ -1172,8 +1167,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["error"], "exact_checkpoint_event_set_mismatch")
-        self.assertEqual(report["missing_or_unmatched_event_ids"], ["unknown-extra-event"])
+        self.assertEqual(report["error"], "forbidden_retired_projection_event_detected")
 
     def test_exact_receipt_rejects_forbidden_write_time_page_refreshes(self) -> None:
         rows = [
@@ -1195,9 +1189,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["error"], "forbidden_write_time_read_model_fan_out_detected")
-        self.assertEqual(report["unexpected_event_contracts"], [])
-        self.assertTrue(any(result["status"] == "fail" for result in report["results"]))
+        self.assertEqual(report["error"], "forbidden_retired_projection_event_detected")
+        self.assertEqual(len(report["unexpected_event_contracts"]), 3)
 
     def test_exact_receipt_rejects_refresh_scope_outside_operation_contract(self) -> None:
         rows = [
@@ -1223,8 +1216,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["error"], "unexpected_checkpoint_event_contract")
-        self.assertEqual(report["unexpected_event_contracts"][0]["scope_type"], "tax_offset")
+        self.assertEqual(report["error"], "forbidden_retired_projection_event_detected")
 
     def test_write_step_failure_skips_write_slo_claim(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -1472,7 +1464,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["steps"][0]["error"], "html_response_for_api_probe")
         self.assertEqual(result["write_slo"]["status"], "skipped")
 
-    def test_unknown_operation_in_scenario_is_rejected(self) -> None:
+    def test_scenario_operation_is_an_observability_label(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
             path.write_text(
@@ -1488,8 +1480,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "Unknown write-operation SLO profiles"):
-                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+            scenarios = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+        self.assertEqual(scenarios[0].operations, ("does_not_exist",))
 
     def test_legacy_scenario_is_normalized_to_one_checkpoint(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1583,7 +1576,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         metadata_only = _raw_bank_invoice_scenario("metadata-only", "strict-metadata")
         metadata_only["checkpoints"][0]["consumers"][0]["assertions"] = [  # type: ignore[index]
-            {"pointer": "/read_model_status", "equals": "fresh"}
+            {"pointer": "/metadata_status", "equals": "fresh"}
         ]
         cases.append(("business-root", metadata_only, "business roots"))
 
@@ -2073,16 +2066,16 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(withdraw_result.result.status, "fail")
         self.assertIn("canonical_withdraw_preview_contract_invalid", withdraw_result.result.error or "")
 
-    def test_consumer_and_system_audit_gates_reject_nonfresh_or_incomplete_payloads(self) -> None:
+    def test_consumer_accepts_canonical_payload_and_audit_rejects_incomplete_snapshot(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
 
-        def nonfresh_request(
+        def canonical_request(
             url: str, method: str, headers, body, timeout_seconds: float
         ) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
-                body=b'{"read_model_status":"refreshing","refresh_enqueued":true,"rows":[{"linked":true}]}',
+                body=b'{"rows":[{"linked":true}]}',
             )
 
         consumer = write_operation_e2e_smoke._collect_checkpoint_consumers(
@@ -2091,7 +2084,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             api_prefix="/fin-ops-api",
             headers={"Authorization": "Bearer token"},
             timeout_seconds=1,
-            request_fn=nonfresh_request,
+            request_fn=canonical_request,
             variables={},
             strict=True,
         )
@@ -2108,8 +2101,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(consumer["status"], "fail")
-        self.assertEqual(consumer["results"][0]["error"], "consumer_read_model_not_fresh")
+        self.assertEqual(consumer["status"], "pass")
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
 
@@ -2348,7 +2340,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             return http_slo_probe.HttpProbeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
-                body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+                body=b'{"rows":[{"visible":true}]}',
             )
 
         result = write_operation_e2e_smoke._collect_checkpoint_consumers(
@@ -2406,7 +2398,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 request_fn=lambda *_args: http_slo_probe.HttpProbeResponse(
                     status_code=200,
                     headers={"content-type": "application/json"},
-                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+                    body=b'{"rows":[{"visible":true}]}',
                 ),
                 variables={"month": "2026-07"},
                 strict=True,
@@ -2454,7 +2446,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 request_fn=lambda *_args: http_slo_probe.HttpProbeResponse(
                     status_code=200,
                     headers={"content-type": "application/json"},
-                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"visible":true}]}',
+                    body=b'{"rows":[{"visible":true}]}',
                 ),
                 variables={},
                 strict=True,
@@ -2465,23 +2457,15 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["access_to_visible_ms"], 2900.0)
         self.assertEqual(result["results"][0]["operation_commit_to_visible_ms"], 3100.0)
 
-    def test_consumer_wait_retries_refreshing_and_affected_business_visibility(self) -> None:
+    def test_consumer_wait_retries_accepted_status_and_business_visibility(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         attempts = 0
 
-        def refreshing_then_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
+        def accepted_then_visible(*_args) -> http_slo_probe.HttpProbeResponse:
             nonlocal attempts
             attempts += 1
-            if attempts == 1:
-                status = 202
-                payload = {"read_model_status": "refreshing", "refresh_enqueued": True}
-            else:
-                status = 200
-                payload = {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "rows": [{"linked": True}],
-                }
+            status = 202 if attempts == 1 else 200
+            payload = {"rows": [{"linked": attempts > 1}]}
             return http_slo_probe.HttpProbeResponse(
                 status_code=status,
                 headers={"content-type": "application/json"},
@@ -2496,75 +2480,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 headers={"Authorization": "Bearer token"},
                 timeout_seconds=1,
                 poll_interval_seconds=0.05,
-                request_fn=refreshing_then_fresh,
-                variables={},
-                strict=True,
-            )
-
-        self.assertEqual(converged["status"], "pass")
-        self.assertEqual(attempts, 2)
-
-        attempts = 0
-
-        def refreshing_statistics_then_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
-            nonlocal attempts
-            attempts += 1
-            return http_slo_probe.HttpProbeResponse(
-                status_code=200,
-                headers={"content-type": "application/json"},
-                body=json.dumps(
-                    {
-                        "read_model_status": "fresh",
-                        "refresh_enqueued": False,
-                        "statistics_status": "refreshing" if attempts == 1 else "fresh",
-                        "statistics_refresh_enqueued": attempts == 1,
-                        "rows": [{"linked": True}],
-                    }
-                ).encode(),
-            )
-
-        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
-            converged = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
-                checkpoint,
-                base_url="https://example.test",
-                api_prefix="/fin-ops-api",
-                headers={"Authorization": "Bearer token"},
-                timeout_seconds=1,
-                poll_interval_seconds=0.05,
-                request_fn=refreshing_statistics_then_fresh,
-                variables={},
-                strict=True,
-            )
-
-        self.assertEqual(converged["status"], "pass")
-        self.assertEqual(attempts, 2)
-
-        attempts = 0
-
-        def stale_business_value_then_visible(*_args) -> http_slo_probe.HttpProbeResponse:
-            nonlocal attempts
-            attempts += 1
-            return http_slo_probe.HttpProbeResponse(
-                status_code=200,
-                headers={"content-type": "application/json"},
-                body=json.dumps(
-                    {
-                        "read_model_status": "fresh",
-                        "refresh_enqueued": False,
-                        "rows": [{"linked": attempts > 1}],
-                    }
-                ).encode(),
-            )
-
-        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
-            converged = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
-                checkpoint,
-                base_url="https://example.test",
-                api_prefix="/fin-ops-api",
-                headers={"Authorization": "Bearer token"},
-                timeout_seconds=1,
-                poll_interval_seconds=0.05,
-                request_fn=stale_business_value_then_visible,
+                request_fn=accepted_then_visible,
                 variables={},
                 strict=True,
                 operation_commit_ack_monotonic=write_operation_e2e_smoke.monotonic(),
@@ -2573,15 +2489,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(converged["status"], "pass")
         self.assertEqual(attempts, 2)
         self.assertGreaterEqual(converged["results"][0]["access_to_visible_ms"], 0)
-        self.assertEqual(
-            converged["results"][0]["access_to_visible_clock"],
-            "first_consumer_access_started",
-        )
         self.assertGreaterEqual(converged["results"][0]["operation_commit_to_visible_ms"], 0)
-        self.assertEqual(
-            converged["results"][0]["operation_commit_clock"],
-            "successful_mutation_response_received",
-        )
 
     def test_consumer_wait_retries_only_unresolved_consumers(self) -> None:
         stable_consumer = write_operation_e2e_smoke.ConsumerProbe(
@@ -2613,9 +2521,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 headers={"content-type": "application/json"},
                 body=json.dumps(
                     {
-                        "read_model_status": "refreshing" if refreshing else "fresh",
-                        "refresh_enqueued": refreshing,
-                        "ready": not refreshing,
+                                                                        "ready": not refreshing,
                     }
                 ).encode(),
             )
@@ -2697,7 +2603,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 status_code=200,
                 headers={"content-type": "application/json"},
                 body=json.dumps(
-                    {"read_model_status": "fresh", "refresh_enqueued": False, "stable_total": current_total}
+                    {"stable_total": current_total}
                 ).encode(),
             )
 
@@ -2790,12 +2696,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             attempts += 1
             status = 202 if attempts == 1 else 200
             payload = (
-                {"read_model_status": "refreshing", "refresh_enqueued": True}
+                {"status": "processing"}
                 if status == 202
                 else {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "rows": [{"id": "stable"}],
+                                                            "rows": [{"id": "stable"}],
                 }
             )
             return http_slo_probe.HttpProbeResponse(
@@ -2846,9 +2750,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 headers={"content-type": "application/json"},
                 body=json.dumps(
                     {
-                        "read_model_status": "fresh",
-                        "refresh_enqueued": False,
-                        "rows": [{"id": "stable"}],
+                                                                        "rows": [{"id": "stable"}],
                     }
                 ).encode(),
             )
@@ -2901,7 +2803,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             "path": "/api/cost-statistics/explorer",
             "role": "affected",
             "status": "fail",
-            "error": "consumer_read_model_not_fresh",
+            "error": "unexpected_status:202",
         }
         converged = {
             "page_key": "cost-statistics",
@@ -2966,10 +2868,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 headers={"content-type": "application/json"},
                 body=json.dumps(
                     {
-                        "read_model_status": "fresh",
-                        "read_model_scope_key": "active:all",
-                        "refresh_enqueued": False,
-                        "source_versions": {"bank_detail": 1},
+                                                                                                "source_versions": {"bank_detail": 1},
                         "rows": [{"linked": True}],
                     }
                 ).encode(),
@@ -3235,7 +3134,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 response = _system_audit_payload(f"system-audit:{audit_count}")
             elif url.endswith("/api/consumer"):
                 checkpoint_order.append("consumer")
-                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+                response = {"rows": [{"linked": True}]}
             else:
                 response = {"ok": True}
             return http_slo_probe.HttpProbeResponse(
@@ -3260,7 +3159,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 side_effect=lambda connection: next(timestamps),
             ),
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 side_effect=[["event-confirm"], ["event-withdraw"]],
             ),
             patch(
@@ -3319,7 +3218,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 audit_count += 1
                 response = _system_audit_payload(f"system-audit:zero-fanout:{audit_count}")
             elif url.endswith("/api/consumer"):
-                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+                response = {"rows": [{"linked": True}]}
             else:
                 mutation_count += 1
                 response = {"ok": True, **({"outbox_event_ids": []} if mutation_count == 1 else {})}
@@ -3331,7 +3230,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with (
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 return_value=["event-withdraw"],
             ) as durable_receipt,
             patch(
@@ -3380,7 +3279,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 audit_count += 1
                 response = _system_audit_payload(f"system-audit:recovery:{audit_count}")
             elif url.endswith("/api/consumer"):
-                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+                response = {"rows": [{"linked": True}]}
             else:
                 response = {"ok": True}
             return http_slo_probe.HttpProbeResponse(
@@ -3391,7 +3290,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with (
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 side_effect=[["event-confirm"], ["event-recover"]],
             ),
             patch(
@@ -3470,13 +3369,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 and execute_count == 1
                 and not refresh_ready
             ):
-                payload = {"read_model_status": "refreshing", "refresh_enqueued": True}
+                payload = {"status": "processing"}
                 status = 202
             else:
                 payload = {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "rows": [{"id": "stable"}],
+                                                            "rows": [{"id": "stable"}],
                 }
                 status = 200
             return http_slo_probe.HttpProbeResponse(
@@ -3576,7 +3473,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 audit_count += 1
                 response = _system_audit_payload(f"system-audit:withdraw:{audit_count}")
             elif url.endswith("/api/consumer"):
-                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+                response = {"rows": [{"linked": True}]}
             else:
                 mutation_calls += 1
                 response = {"ok": True}
@@ -3588,7 +3485,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with (
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 side_effect=[["event-confirm"], ["event-withdraw"]],
             ),
             patch(
@@ -3686,7 +3583,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 return http_slo_probe.HttpProbeResponse(
                     status_code=200,
                     headers={"content-type": "application/json"},
-                    body=b'{"read_model_status":"fresh","refresh_enqueued":false,"rows":[{"linked":true}]}',
+                    body=b'{"rows":[{"linked":true}]}',
                 )
             mutation_calls += 1
             return http_slo_probe.HttpProbeResponse(
@@ -3697,11 +3594,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with (
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.workbench_idempotency_evidence",
                 return_value={"status": "committed", "outbox_event_ids": ["event-confirm"], "response_payload": {}},
             ),
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 return_value=["event-recover"],
             ),
             patch(
@@ -3759,7 +3656,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         with patch(
-            "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+            "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.workbench_idempotency_evidence",
             side_effect=ValueError("expected exactly one Workbench idempotency record"),
         ):
             report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
@@ -3809,19 +3706,15 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 status = 500 if len(mutation_paths) == 1 else 200
             elif route.startswith("/api/cost-statistics/explorer"):
                 payload = {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "rows": [{"transaction_id": "turnover-bank-test-1"}],
+                                                            "rows": [{"transaction_id": "turnover-bank-test-1"}],
                 }
                 status = 200
             elif route.startswith("/api/input-invoice-usage/rows"):
-                payload = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": []}
+                payload = {"rows": []}
                 status = 200
             elif route.startswith("/api/workbench?"):
                 payload = {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "paired": {
+                                                            "paired": {
                         "groups": [{"bank_rows": [{"id": "turnover-bank-test-1"}]}],
                     },
                     "unpaired": {
@@ -3831,9 +3724,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 status = 200
             else:
                 payload = {
-                    "read_model_status": "fresh",
-                    "refresh_enqueued": False,
-                    "rows": [{"id": "turnover-bank-test-1"}],
+                                                            "rows": [{"id": "turnover-bank-test-1"}],
                 }
                 status = 200
             return http_slo_probe.HttpProbeResponse(
@@ -3844,7 +3735,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         with (
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.workbench_idempotency_evidence",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.workbench_idempotency_evidence",
                 return_value={
                     "status": "committed",
                     "outbox_event_ids": ["event-confirm"],
@@ -3854,7 +3745,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 },
             ),
             patch(
-                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                "fin_ops_platform.tools.write_operation_e2e_smoke.retired_projection_event_audit.committed_workbench_outbox_event_ids",
                 return_value=["event-recovery"],
             ),
             patch(

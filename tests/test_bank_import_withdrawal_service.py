@@ -87,29 +87,18 @@ class FakeRelationService:
         return {"changed_case_ids": ["case-1"], "affected_months": ["2026-08"]}
 
 
-class FakeQueueRepository:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def enqueue_read_model_refreshes_in_transaction(self, **kwargs: object):
-        self.calls.append(dict(kwargs))
-        return []
-
-
 class BankImportWithdrawalServiceTests(unittest.TestCase):
     def build_service(self, repository: FakeWithdrawalRepository):
         relation = FakeRelationService()
-        queue = FakeQueueRepository()
         service = BankImportWithdrawalService(
             repository=repository,  # type: ignore[arg-type]
             relation_service_for_transaction=lambda transaction: relation,
-            queue_repository=queue,
         )
-        return service, relation, queue
+        return service, relation
 
     def test_withdraw_is_atomic_removes_only_owned_rows_and_refreshes_changed_relation_scope(self) -> None:
         repository = FakeWithdrawalRepository()
-        service, relation, queue = self.build_service(repository)
+        service, relation = self.build_service(repository)
 
         result = service.withdraw(batch_id="batch-1", actor_id="005", request_id="request-1")
 
@@ -120,7 +109,6 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
             relation.calls[0]["cancel_history_operation_type"],
             "cancel_relation_for_withdrawn_bank_import_fact",
         )
-        self.assertEqual(queue.calls[0]["refreshes"][0]["scope_key"], "2026-08")
         call_names = [name for name, _ in repository.calls]
         self.assertLess(call_names.index("cleanup"), call_names.index("delete"))
         self.assertLess(call_names.index("delete"), call_names.index("mark_withdrawn"))
@@ -130,14 +118,13 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
     def test_blocks_external_business_references_without_mutation(self) -> None:
         repository = FakeWithdrawalRepository()
         repository.blockers = {"oa_pending_relations": 1}
-        service, relation, queue = self.build_service(repository)
+        service, relation = self.build_service(repository)
 
         with self.assertRaises(BankImportWithdrawalConflict) as raised:
             service.withdraw(batch_id="batch-1", actor_id="005")
 
         self.assertEqual(raised.exception.blockers, {"oa_pending_relations": 1})
         self.assertEqual(relation.calls, [])
-        self.assertEqual(queue.calls, [])
         self.assertNotIn("delete", [name for name, _ in repository.calls])
         self.assertEqual(repository.calls[-1], ("transaction", "rollback"))
 
@@ -164,7 +151,7 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
 
     def test_rejects_updated_or_partially_owned_batch_and_supports_idempotent_replay(self) -> None:
         repository = FakeWithdrawalRepository()
-        service, _, _ = self.build_service(repository)
+        service, _ = self.build_service(repository)
         repository.batch["updated_count"] = 1
         with self.assertRaisesRegex(BankImportWithdrawalConflict, "更新过既有流水"):
             service.withdraw(batch_id="batch-1", actor_id="005")

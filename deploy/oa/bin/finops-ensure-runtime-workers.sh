@@ -10,7 +10,6 @@ worker_python="${FINOPS_WORKER_PYTHON:-/opt/fin-ops/venv/bin/python}"
 runtime_pythonpath="$release_src/backend/src"
 required_workers="${FINOPS_REQUIRED_WORKERS:-}"
 optional_workers="${FINOPS_OPTIONAL_WORKERS:-}"
-required_existing_worker_envs="${FINOPS_REQUIRE_EXISTING_WORKER_ENVS:-}"
 
 fail() {
   printf 'finops-ensure-runtime-workers: %s\n' "$*" >&2
@@ -56,21 +55,10 @@ worker_env_example() {
   runtime_worker_manifest --env-example "$1"
 }
 
-worker_env_must_already_exist() {
-  local worker="$1"
-  [[ " $required_existing_worker_envs " == *" $worker "* ]]
-}
-
 ensure_worker_env() {
   local worker="$1"
   local example_file target_file
   target_file="$env_dir/fin-ops.worker.${worker}.env"
-  if worker_env_must_already_exist "$worker"; then
-    if [ ! -f "$target_file" ] || [ -L "$target_file" ]; then
-      fail "required existing worker env is missing or not a regular file: $target_file"
-    fi
-    return
-  fi
   example_file="$(worker_env_example "$worker")"
   install_if_missing \
     "$release_src/deploy/oa/env/$example_file" \
@@ -162,9 +150,7 @@ fi
 
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
-  if ! worker_env_must_already_exist "$worker"; then
-    migrate_legacy_worker_poll_interval "$worker"
-  fi
+  migrate_legacy_worker_poll_interval "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

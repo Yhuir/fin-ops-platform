@@ -22,7 +22,6 @@ const globalAppStatus = {
       status: "ready",
       reason: "银行明细已同步",
       details: [],
-      read_models: [],
       workers: [],
       job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -35,7 +34,6 @@ const globalAppStatus = {
       status: "refreshing",
       reason: "ETC发票导入正在同步",
       details: [],
-      read_models: [],
       workers: ["import"],
       job_ids: ["job_etc_001"],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -48,7 +46,6 @@ const globalAppStatus = {
       status: "missing",
       reason: "税金抵扣正在同步",
       details: [],
-      read_models: [],
       workers: [],
       job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
@@ -59,43 +56,14 @@ const globalAppStatus = {
       route: "/",
       level: "busy",
       status: "failed",
-      reason: "关联关系局部分片需要重试",
-      details: ["2026-05: projection failed"],
-      read_models: ["workbench_relation"],
-      read_model_scopes: [
-        {
-          read_model_key: "workbench_relation",
-          scope_type: "workbench_relation",
-          scope_key: "all",
-          status: "fresh",
-          updated_at: "2026-06-04T10:03:00+08:00",
-        },
-        {
-          read_model_key: "workbench_relation",
-          scope_type: "workbench_relation",
-          scope_key: "2026-05",
-          status: "failed",
-          last_error: "projection failed",
-          updated_at: "2026-06-04T10:05:00+08:00",
-        },
-      ],
-      workers: ["workbench-relation"],
+      reason: "关联匹配分片需要重试",
+      details: [],
+      workers: ["workbench-matching"],
       job_ids: [],
       updated_at: "2026-06-04T10:05:00+08:00",
     },
   ],
   runtime_summary: {
-    read_models: {
-      total: 4,
-      fresh: 1,
-      refreshing: 1,
-      stale: 0,
-      missing: 1,
-      failed: 1,
-      unavailable: 0,
-      issue_count: 3,
-      scope_issue_count: 1,
-    },
     workers: {
       total: 4,
       required: 3,
@@ -187,8 +155,6 @@ describe("global app status indicator", () => {
     expect(within(statusDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
     expect(within(statusDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
     const runtimeSummary = within(statusDialog).getByTestId("app-status-runtime-summary");
-    expect(runtimeSummary).toHaveTextContent("Read model");
-    expect(runtimeSummary).toHaveTextContent("1 失败 / 0 不可用");
     expect(runtimeSummary).toHaveTextContent("Worker");
     expect(runtimeSummary).toHaveTextContent("1 stale / 1 missing / 0 mismatch");
     expect(runtimeSummary).toHaveTextContent("Queue");
@@ -197,8 +163,6 @@ describe("global app status indicator", () => {
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
     expect(within(statusDialog).getByText("关联台")).toBeInTheDocument();
-    expect(within(statusDialog).getByText("2026-05")).toBeInTheDocument();
-    expect(within(statusDialog).getByText("projection failed")).toBeInTheDocument();
     expect(within(statusDialog).queryByText("就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();
     expect(screen.queryByText(/更新于/)).not.toBeInTheDocument();
