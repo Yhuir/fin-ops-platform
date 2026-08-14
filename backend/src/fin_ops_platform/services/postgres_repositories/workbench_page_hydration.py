@@ -411,7 +411,20 @@ class PostgresWorkbenchPageHydrationRepository:
                                     ),
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
-                                    'attachment_file_count', item.value->>'attachment_file_count'
+                                    'attachment_file_count', item.value->>'attachment_file_count',
+                                    'attachment_parse_failed_count', case
+                                        when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
+                                            then (item.value->>'attachment_parse_failed_count')::integer
+                                        else (
+                                            select count(*)::integer
+                                            from jsonb_array_elements(
+                                                case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
+                                                     then item.value->'attachment_artifacts'
+                                                     else '[]'::jsonb end
+                                            ) artifact(value)
+                                            where artifact.value->>'parse_status' = 'parse_failed'
+                                        )
+                                    end
                                 )) order by item.ordinality
                             )
                             from jsonb_array_elements(
@@ -488,7 +501,20 @@ class PostgresWorkbenchPageHydrationRepository:
                                     ),
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
-                                    'attachment_file_count', item.value->>'attachment_file_count'
+                                    'attachment_file_count', item.value->>'attachment_file_count',
+                                    'attachment_parse_failed_count', case
+                                        when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
+                                            then (item.value->>'attachment_parse_failed_count')::integer
+                                        else (
+                                            select count(*)::integer
+                                            from jsonb_array_elements(
+                                                case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
+                                                     then item.value->'attachment_artifacts'
+                                                     else '[]'::jsonb end
+                                            ) artifact(value)
+                                            where artifact.value->>'parse_status' = 'parse_failed'
+                                        )
+                                    end
                                 )) order by item.ordinality
                             )
                             from jsonb_array_elements(
@@ -678,7 +704,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         'source_workbench_row_id', link_flags.oa_link->>'source_workbench_row_id',
                         'source_attachment_key', link_flags.oa_link->>'source_attachment_key',
                         'source_attachment_name', link_flags.oa_link->>'source_attachment_name',
-                        'source_expense_item_id', link_flags.oa_link->>'source_expense_item_id',
+                        'source_expense_item_ids', link_flags.expense_item_ids,
                         'source_expense_row_index', link_flags.oa_link->>'source_expense_row_index',
                         'invoice_bank_relation', jsonb_build_object(
                             'code', 'pending_collection',
@@ -703,6 +729,11 @@ class PostgresWorkbenchPageHydrationRepository:
                         coalesce(jsonb_agg(link.compact_link order by link.ordinality)
                             filter (where link.source_type = 'oa_attachment_invoice'),
                             '[]'::jsonb) as compact_links,
+                        coalesce(jsonb_agg(to_jsonb(link.compact_link->>'source_expense_item_id') order by link.ordinality)
+                            filter (
+                                where link.source_type = 'oa_attachment_invoice'
+                                  and nullif(link.compact_link->>'source_expense_item_id', '') is not null
+                            ), '[]'::jsonb) as expense_item_ids,
                         (array_agg(link.compact_link order by link.ordinality)
                             filter (where link.source_type = 'oa_attachment_invoice'))[1]
                             as oa_link

@@ -228,6 +228,39 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["affected_invoice_count"], 0)
         self.assertEqual(repository.save_calls, [])
 
+    def test_links_one_invoice_to_multiple_expense_items_in_the_same_oa(self) -> None:
+        first = _attachment("26532000000000000036", "36.00", "item-18-a", "shared.pdf")
+        second = {**first, "source_expense_item_id": "item-18-b", "source_expense_row_index": "1"}
+        invoice = _invoice(first)
+        repository = FakeInvoiceRepository([invoice])
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        record = SimpleNamespace(
+            id="oa-exp-shared",
+            month="2026-07",
+            attachment_invoices=[first],
+            attachment_evidences=[],
+            expense_items=[
+                {"expense_item_id": "item-18-a", "row_index": "0", "attachment_invoices": [first]},
+                {"expense_item_id": "item-18-b", "row_index": "1", "attachment_invoices": [second]},
+            ],
+        )
+
+        report = service.promote_records([record])
+
+        self.assertEqual(report["summary"]["cache_candidate_count"], 2)
+        self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+        self.assertEqual(
+            [
+                link["source_expense_item_id"]
+                for link in invoice.source_links
+                if link.get("source_type") == "oa_attachment_invoice"
+            ],
+            ["item-18-a", "item-18-b"],
+        )
+
     def test_enriches_legacy_parent_link_with_expense_item_context(self) -> None:
         payload = _attachment("26532000000000000800", "800.00", "item-2", "invoice.pdf")
         invoice = _invoice(payload)

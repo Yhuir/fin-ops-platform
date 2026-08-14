@@ -1520,6 +1520,50 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             ["attachment-key-001", "attachment-key-002"],
         )
 
+    def test_oa_attachment_invoice_keeps_same_attachment_links_for_multiple_expense_items(self) -> None:
+        payload = {
+            "evidence_type": "tax_invoice",
+            "digital_invoice_no": "26532000000141671583",
+            "seller_tax_no": "91530000431200506F",
+            "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+            "buyer_tax_no": "915300007194052520",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-01-27",
+            "amount": "36.00",
+            "total_with_tax": "36.00",
+            "source_attachment_key": "shared-attachment-key",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "expense-item-18-a",
+        }
+        first = self.service.upsert_oa_attachment_invoice(
+            payload,
+            oa_form_id="oa-form-shared",
+            oa_row_id="oa-exp-shared",
+            source_workbench_row_id="oa-att-shared-a",
+            allow_create=True,
+        )
+        second = self.service.upsert_oa_attachment_invoice(
+            {
+                **payload,
+                "source_expense_row_index": "1",
+                "source_expense_item_id": "expense-item-18-b",
+            },
+            oa_form_id="oa-form-shared",
+            oa_row_id="oa-exp-shared",
+            source_workbench_row_id="oa-att-shared-b",
+        )
+
+        self.assertIs(first, second)
+        assert first is not None
+        self.assertEqual(
+            [
+                link["source_expense_item_id"]
+                for link in first.source_links
+                if link.get("source_type") == "oa_attachment_invoice"
+            ],
+            ["expense-item-18-a", "expense-item-18-b"],
+        )
+
     def test_oa_attachment_non_tax_receipt_is_not_promoted_as_formal_invoice(self) -> None:
         invoice = self.service.upsert_oa_attachment_invoice(
             {

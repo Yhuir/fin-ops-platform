@@ -641,11 +641,83 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["bank"]})
         invoice = group["invoice_rows"][0]
         self.assertEqual(
-            invoice["source_expense_item_id"],
-            "oa-exp-2206:item:2:5f9f908c6e6d",
+            invoice["source_expense_item_ids"],
+            ["oa-exp-2206:item:2:5f9f908c6e6d"],
         )
         self.assertEqual(invoice["source_oa_id"], "oa-exp-2206")
         self.assertEqual(rows["inv_imported_0058"]["source_expense_item_id"], original_source_item_id)
+
+    def test_shared_attachment_invoice_keeps_both_expense_item_sources_without_false_anomaly(self) -> None:
+        rows = {
+            "oa-1": {
+                "id": "oa-1",
+                "type": "oa",
+                "object_identity_key": "oa-1",
+                "amount": "36.00",
+                "apply_type": "日常报销",
+                "expense_items": [
+                    {
+                        "id": "oa-1:item:0",
+                        "row_index": "0",
+                        "amount": "18.00",
+                        "attachment_file_count": "1",
+                    },
+                    {
+                        "id": "oa-1:item:1",
+                        "row_index": "1",
+                        "amount": "18.00",
+                        "attachment_file_count": "1",
+                    },
+                ],
+            },
+            "bank-1": {
+                "id": "bank-1",
+                "type": "bank",
+                "object_identity_key": "bank-1",
+                "amount": "36.00",
+                "direction": "expense",
+            },
+            "invoice-36": {
+                "id": "invoice-36",
+                "type": "invoice",
+                "object_identity_key": "invoice-36",
+                "source_kind": "oa_attachment_invoice",
+                "total_with_tax": "36.00",
+                "source_links": [
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": "oa-1",
+                        "source_expense_item_id": "oa-1:item:0",
+                        "source_expense_row_index": "0",
+                    },
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": "oa-1",
+                        "source_expense_item_id": "oa-1:item:1",
+                        "source_expense_row_index": "1",
+                    },
+                ],
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-05",
+            rows_by_id=rows,
+            active_relations=[{
+                "case_id": "CASE-SHARED-INVOICE",
+                "row_ids": list(rows),
+                "row_types": ["oa", "bank", "invoice"],
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+            }],
+        )
+
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(
+            group["invoice_rows"][0]["source_expense_item_ids"],
+            ["oa-1:item:0", "oa-1:item:1"],
+        )
+        self.assertNotIn("oa_invoice_anomaly", group)
 
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
@@ -787,7 +859,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(group["oa_invoice_anomaly"]["state"], "active")
         self.assertEqual(item["code"], "oa_invoice_attachment_missing")
         self.assertEqual(item["display_label"], "OA发票附件缺失")
-        self.assertEqual(item["source_expense_item_id"], "oa-1:item:0")
+        self.assertEqual(item["source_expense_item_ids"], ["oa-1:item:0"])
         self.assertEqual(item["invoice_row_ids"], [])
 class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):
     def setUp(self) -> None:

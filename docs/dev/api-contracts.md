@@ -465,7 +465,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=active|processed`。`active` 返回 active OA/发票异常的关系组；`processed` 返回 fingerprint-bound ignored OA/发票异常。过滤在 exact total/row counts 和 keyset 分页之前完成，不读 page generation 或 legacy WEX bucket。
 
-关系组可携带 additive `oa_invoice_anomaly`：`{code="oa_invoice_anomaly",fingerprint,state="active|ignored",items[]}`。每个 item 包含 `code="oa_invoice_amount_mismatch|oa_invoice_attachment_missing"`、`label`、`display_label`、`fingerprint`、`comparison_unit_id`、`source_oa_id`、`source_expense_item_id`、`oa_total`、`invoice_total`、`amount_delta`、`invoice_row_ids[]` 和 `attachment_file_count`。日常报销每个子付款项只产生一个异常 item；支付申请没有子项时按关系组总额生成一个 item。缺失 bundle 表示当前关系没有 OA/发票异常；旧 `amount_anomaly` 和发票行复制字段不再发布。
+关系组可携带 additive `oa_invoice_anomaly`：`{code="oa_invoice_anomaly",fingerprint,state="active|ignored",items[]}`。每个 item 包含 `code="oa_invoice_amount_mismatch|oa_invoice_attachment_missing|oa_invoice_attachment_parse_failed|oa_invoice_attachment_unassigned"`、`label`、`display_label`、`fingerprint`、`comparison_unit_id`、`source_oa_ids[]`、`source_expense_item_ids[]`、`oa_total`、`invoice_total`、`amount_delta`、`invoice_row_ids[]` 和 `attachment_file_count`。日常报销按子付款项与发票来源边组成连通比较单元；同一张发票连接多个子付款项时只计一次。支付申请没有子项时按关系组总额生成一个 item。缺失 bundle 表示当前关系没有 OA/发票异常；旧单值 `source_oa_id` / `source_expense_item_id`、旧 `amount_anomaly` 和发票行复制字段不再发布。
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
@@ -898,7 +898,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 ]
 ```
 
-该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。OA 附件发票 row 可返回 `source_expense_item_id`；只有该值与 `expense_items[*].id` 精确相等时前端才可同带对齐。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
+该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖；`attachment_parse_failed_count` 用于区分解析失败与真正缺失。OA 附件发票 row 返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
 
 ## 发票生命周期状态
 

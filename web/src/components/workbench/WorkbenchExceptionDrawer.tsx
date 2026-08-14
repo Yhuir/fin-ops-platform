@@ -344,9 +344,9 @@ function exceptionLabels(group: WorkbenchRelationGroup) {
     text: item.displayLabel,
     color: group.oaInvoiceAnomaly?.state === "ignored"
       ? "default" as const
-      : item.code === "oa_invoice_attachment_missing"
-        ? "warning" as const
-        : "danger" as const,
+      : item.code === "oa_invoice_amount_mismatch"
+        ? "danger" as const
+        : "warning" as const,
   }])).values());
 }
 

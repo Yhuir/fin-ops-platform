@@ -879,8 +879,8 @@ describe("workbench api bank amount mapping", () => {
                   display_label: "已忽略：金额不一致",
                   fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   comparison_unit_id: "oa-paired:item:1",
-                  source_oa_id: "oa-paired",
-                  source_expense_item_id: "oa-paired:item:1",
+                  source_oa_ids: ["oa-paired"],
+                  source_expense_item_ids: ["oa-paired:item:1"],
                   oa_total: "60.00",
                   invoice_total: "59.00",
                   amount_delta: "1.00",
@@ -939,7 +939,12 @@ describe("workbench api bank amount mapping", () => {
                   total_with_tax: "99.00",
                   derived_from_oa_id: "legacy-oa:item:1",
                   source_oa_id: "oa-paired",
-                  source_expense_item_id: "oa-paired:item:1",
+                  source_expense_item_ids: ["oa-paired:item:1"],
+                  source_links: [{
+                    source_type: "oa_attachment_invoice",
+                    derived_from_oa_id: "oa-paired",
+                    source_expense_item_id: "oa-paired:item:1",
+                  }],
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
@@ -995,7 +1000,7 @@ describe("workbench api bank amount mapping", () => {
       tableValues: { transactionTime: "2026-08-12 16:11:07" },
     });
     expect(group.rows.invoice[0].sourceOaId).toBe("oa-paired");
-    expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");
+    expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
     expect(group.oaInvoiceAnomaly).toMatchObject({ state: "ignored" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
     expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "已忽略：金额不一致", amountDelta: "1.00" });

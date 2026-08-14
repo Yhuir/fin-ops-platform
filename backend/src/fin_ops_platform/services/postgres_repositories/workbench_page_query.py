@@ -84,7 +84,20 @@ def _compact_anomaly_oa_payload_sql(
                             item.value->>'settlement_amount',
                             item.value->>'total_with_tax'
                         ),
-                        'attachment_file_count', item.value->>'attachment_file_count'
+                        'attachment_file_count', item.value->>'attachment_file_count',
+                        'attachment_parse_failed_count', case
+                            when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
+                                then (item.value->>'attachment_parse_failed_count')::integer
+                            else (
+                                select count(*)::integer
+                                from jsonb_array_elements(
+                                    case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
+                                         then item.value->'attachment_artifacts'
+                                         else '[]'::jsonb end
+                                ) artifact(value)
+                                where artifact.value->>'parse_status' = 'parse_failed'
+                            )
+                        end
                     ))
                     order by item.ordinality
                 )
@@ -1100,7 +1113,12 @@ oa_expense_items as materialized (
             when coalesce(item.value->>'attachment_file_count', '') ~ '^[0-9]+$'
                 then greatest(0, (item.value->>'attachment_file_count')::integer)
             else 0
-        end as attachment_file_count
+        end as attachment_file_count,
+        case
+            when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
+                then greatest(0, (item.value->>'attachment_parse_failed_count')::integer)
+            else 0
+        end as attachment_parse_failed_count
     from relation_anomaly_members member
     cross join lateral jsonb_array_elements(
         case when jsonb_typeof(member.oa_payload->'expense_items') = 'array'
@@ -1113,7 +1131,7 @@ oa_expense_items as materialized (
       )), '') is not null
 ),
 invoice_anomaly_facts as materialized (
-    select
+    select distinct
         member.internal_key,
         member.case_id,
         member.row_id as invoice_row_id,
@@ -1126,12 +1144,17 @@ invoice_anomaly_facts as materialized (
                 ':',
                 1
             ), '')
-        ) as source_expense_row_index
+        ) as source_expense_row_index,
+        coalesce(
+            nullif(source_link.derived_from_oa_id, ''),
+            nullif(split_part(source_link.source_expense_item_id, ':item:', 1), '')
+        ) as source_parent_oa_id
     from relation_anomaly_members member
     left join lateral (
         select
             link.value->>'source_expense_item_id' as source_expense_item_id,
-            link.value->>'source_expense_row_index' as source_expense_row_index
+            link.value->>'source_expense_row_index' as source_expense_row_index,
+            link.value->>'derived_from_oa_id' as derived_from_oa_id
         from jsonb_array_elements(
             case when jsonb_typeof(member.invoice_source_links) = 'array'
                  then member.invoice_source_links
@@ -1142,8 +1165,6 @@ invoice_anomaly_facts as materialized (
             link.value->>'type',
             link.value->>'source'
         ) = 'oa_attachment_invoice'
-        order by link.ordinality
-        limit 1
     ) source_link on true
     where member.row_type = 'invoice'
 ),
@@ -1151,9 +1172,15 @@ invoice_item_candidates as materialized (
     select
         invoice.internal_key,
         invoice.invoice_row_id,
+        invoice.source_expense_item_id,
+        invoice.source_expense_row_index,
         expense.item_id,
         count(*) over (
-            partition by invoice.internal_key, invoice.invoice_row_id
+            partition by
+                invoice.internal_key,
+                invoice.invoice_row_id,
+                invoice.source_expense_item_id,
+                invoice.source_expense_row_index
         ) as candidate_count
     from invoice_anomaly_facts invoice
     join oa_expense_items expense
@@ -1193,6 +1220,8 @@ normalized_invoice_anomaly_facts as materialized (
                 from invoice_item_candidates candidate
                 where candidate.internal_key = invoice.internal_key
                   and candidate.invoice_row_id = invoice.invoice_row_id
+                  and candidate.source_expense_item_id is not distinct from invoice.source_expense_item_id
+                  and candidate.source_expense_row_index is not distinct from invoice.source_expense_row_index
                   and candidate.candidate_count = 1
                 limit 1
             ),
@@ -1200,82 +1229,232 @@ normalized_invoice_anomaly_facts as materialized (
         ) as canonical_expense_item_id
     from invoice_anomaly_facts invoice
 ),
-expense_item_totals as materialized (
+normalized_invoice_item_links as materialized (
+    select distinct
+        invoice.internal_key,
+        invoice.case_id,
+        invoice.invoice_row_id,
+        invoice.invoice_amount,
+        invoice.canonical_expense_item_id
+    from normalized_invoice_anomaly_facts invoice
+    join oa_expense_items expense
+      on expense.internal_key = invoice.internal_key
+     and expense.item_id = invoice.canonical_expense_item_id
+),
+expense_component_reach(internal_key, item_id, reachable_item_id) as (
+    select distinct
+        link.internal_key,
+        link.canonical_expense_item_id,
+        link.canonical_expense_item_id
+    from normalized_invoice_item_links link
+    union
     select
-        expense.internal_key,
-        expense.case_id,
-        expense.oa_row_id,
-        expense.item_id,
-        expense.item_amount,
-        expense.attachment_file_count,
-        count(invoice.invoice_row_id)::bigint as invoice_count,
-        count(invoice.invoice_row_id) filter (
-            where invoice.invoice_amount is null
-        )::bigint as invalid_invoice_amount_count,
+        reach.internal_key,
+        reach.item_id,
+        peer.canonical_expense_item_id
+    from expense_component_reach reach
+    join normalized_invoice_item_links current_link
+      on current_link.internal_key = reach.internal_key
+     and current_link.canonical_expense_item_id = reach.reachable_item_id
+    join normalized_invoice_item_links peer
+      on peer.internal_key = current_link.internal_key
+     and peer.invoice_row_id = current_link.invoice_row_id
+),
+expense_item_components as materialized (
+    select
+        reach.internal_key,
+        reach.item_id,
+        min(reach.reachable_item_id) as component_id
+    from expense_component_reach reach
+    group by reach.internal_key, reach.item_id
+),
+component_expense_totals as materialized (
+    select
+        component.internal_key,
+        min(expense.case_id) as case_id,
+        component.component_id,
+        count(*)::bigint as item_count,
+        count(*) filter (where expense.item_amount is null)::bigint as invalid_item_amount_count,
+        round(sum(expense.item_amount), 2) as oa_total,
+        sum(expense.attachment_file_count)::bigint as attachment_file_count,
+        string_agg(
+            encode(convert_to(expense.item_id, 'UTF8'), 'hex'),
+            '00' order by expense.item_id
+        ) as item_ids_hex
+    from expense_item_components component
+    join oa_expense_items expense
+      on expense.internal_key = component.internal_key
+     and expense.item_id = component.item_id
+    group by component.internal_key, component.component_id
+),
+component_invoice_rows as materialized (
+    select distinct
+        component.internal_key,
+        component.component_id,
+        invoice.invoice_row_id,
+        invoice.invoice_amount
+    from expense_item_components component
+    join normalized_invoice_item_links invoice
+      on invoice.internal_key = component.internal_key
+     and invoice.canonical_expense_item_id = component.item_id
+),
+component_invoice_totals as materialized (
+    select
+        invoice.internal_key,
+        invoice.component_id,
+        count(*)::bigint as invoice_count,
+        count(*) filter (where invoice.invoice_amount is null)::bigint as invalid_invoice_amount_count,
         round(sum(invoice.invoice_amount), 2) as invoice_total,
         string_agg(
             encode(convert_to(invoice.invoice_row_id, 'UTF8'), 'hex'),
             '00' order by invoice.invoice_row_id
         ) as invoice_row_ids_hex
-    from oa_expense_items expense
-    left join normalized_invoice_anomaly_facts invoice
+    from component_invoice_rows invoice
+    group by invoice.internal_key, invoice.component_id
+),
+component_anomaly_items as materialized (
+    select
+        expense.internal_key,
+        expense.case_id,
+        encode(digest(
+            convert_to(expense.case_id, 'UTF8') || decode('00', 'hex') ||
+            convert_to('oa_invoice_amount_mismatch', 'UTF8') || decode('00', 'hex') ||
+            convert_to(
+                case when expense.item_count = 1
+                     then convert_from(decode(expense.item_ids_hex, 'hex'), 'UTF8')
+                     else 'expense-component:' || substring(
+                         encode(digest(decode(expense.item_ids_hex, 'hex'), 'sha256'), 'hex')
+                         from 1 for 24
+                     ) end,
+                'UTF8'
+            ) || decode('00', 'hex') ||
+            convert_to(
+                coalesce(to_char(
+                    expense.oa_total,
+                    'FM999999999999999999990.00'
+                ), ''),
+                'UTF8'
+            ) || decode('00', 'hex') ||
+            convert_to(
+                coalesce(to_char(
+                    invoice.invoice_total,
+                    'FM999999999999999999990.00'
+                ), ''),
+                'UTF8'
+            ) || decode('00', 'hex') ||
+            convert_to(expense.attachment_file_count::text, 'UTF8') ||
+            decode('00', 'hex') || decode(invoice.invoice_row_ids_hex, 'hex'),
+            'sha256'
+        ), 'hex') as item_fingerprint
+    from component_expense_totals expense
+    join component_invoice_totals invoice
       on invoice.internal_key = expense.internal_key
-     and invoice.canonical_expense_item_id = expense.item_id
+     and invoice.component_id = expense.component_id
+    where expense.invalid_item_amount_count = 0
+      and invoice.invalid_invoice_amount_count = 0
+      and expense.oa_total is not null
+      and invoice.invoice_total is not null
+      and expense.oa_total <> invoice.invoice_total
+),
+unassigned_invoice_rows as materialized (
+    select distinct
+        expense.internal_key,
+        expense.item_id,
+        invoice.invoice_row_id
+    from oa_expense_items expense
+    join normalized_invoice_anomaly_facts invoice
+      on invoice.internal_key = expense.internal_key
+     and invoice.source_parent_oa_id is not null
+     and (
+          invoice.source_parent_oa_id = expense.oa_row_id
+          or invoice.source_parent_oa_id in (
+              expense.oa_payload->>'oa_row_id',
+              expense.oa_payload->>'oa_id',
+              expense.oa_payload->>'source_oa_row_id',
+              expense.oa_payload->>'object_identity_key'
+          )
+          or exists (
+              select 1
+              from jsonb_array_elements_text(
+                  case when jsonb_typeof(expense.oa_payload->'source_aliases') = 'array'
+                       then expense.oa_payload->'source_aliases'
+                       else '[]'::jsonb end
+              ) alias(value)
+              where invoice.source_parent_oa_id in (
+                  alias.value,
+                  regexp_replace(alias.value, '^oa-(exp|pay)-', '')
+              )
+          )
+     )
+    where not exists (
+        select 1
+        from normalized_invoice_item_links linked
+        where linked.internal_key = invoice.internal_key
+          and linked.invoice_row_id = invoice.invoice_row_id
+    )
+),
+unlinked_expense_items as materialized (
+    select
+        expense.internal_key,
+        expense.case_id,
+        expense.item_id,
+        expense.item_amount,
+        expense.attachment_file_count,
+        expense.attachment_parse_failed_count,
+        count(unassigned.invoice_row_id)::bigint as unassigned_invoice_count,
+        string_agg(
+            encode(convert_to(unassigned.invoice_row_id, 'UTF8'), 'hex'),
+            '00' order by unassigned.invoice_row_id
+        ) as invoice_row_ids_hex
+    from oa_expense_items expense
+    left join normalized_invoice_item_links linked
+      on linked.internal_key = expense.internal_key
+     and linked.canonical_expense_item_id = expense.item_id
+    left join unassigned_invoice_rows unassigned
+      on unassigned.internal_key = expense.internal_key
+     and unassigned.item_id = expense.item_id
+    where linked.invoice_row_id is null
+      and expense.attachment_file_count > 0
     group by
         expense.internal_key,
         expense.case_id,
-        expense.oa_row_id,
         expense.item_id,
         expense.item_amount,
-        expense.attachment_file_count
+        expense.attachment_file_count,
+        expense.attachment_parse_failed_count
 ),
-expense_anomaly_items as materialized (
+unlinked_expense_anomaly_items as materialized (
     select
         totals.internal_key,
         totals.case_id,
         encode(digest(
             convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
             convert_to(
-                case when totals.attachment_file_count > 0 and totals.invoice_count = 0
-                     then 'oa_invoice_attachment_missing'
-                     else 'oa_invoice_amount_mismatch' end,
+                case when totals.unassigned_invoice_count > 0
+                     then 'oa_invoice_attachment_unassigned'
+                     when totals.attachment_parse_failed_count > 0
+                     then 'oa_invoice_attachment_parse_failed'
+                     else 'oa_invoice_attachment_missing' end,
                 'UTF8'
             ) || decode('00', 'hex') ||
             convert_to(totals.item_id, 'UTF8') || decode('00', 'hex') ||
-            convert_to(
-                coalesce(to_char(
-                    totals.item_amount,
-                    'FM999999999999999999990.00'
-                ), ''),
-                'UTF8'
-            ) || decode('00', 'hex') ||
-            convert_to(
-                coalesce(to_char(
-                    totals.invoice_total,
-                    'FM999999999999999999990.00'
-                ), ''),
-                'UTF8'
-            ) || decode('00', 'hex') ||
+            convert_to(coalesce(to_char(
+                totals.item_amount,
+                'FM999999999999999999990.00'
+            ), ''), 'UTF8') || decode('00', 'hex') ||
+            decode('00', 'hex') ||
             convert_to(totals.attachment_file_count::text, 'UTF8') ||
-            case when totals.invoice_count > 0
-                 then decode('00', 'hex') || decode(
-                     totals.invoice_row_ids_hex,
-                     'hex'
-                 )
+            case when totals.unassigned_invoice_count > 0
+                 then decode('00', 'hex') || decode(totals.invoice_row_ids_hex, 'hex')
                  else ''::bytea end,
             'sha256'
         ), 'hex') as item_fingerprint
-    from expense_item_totals totals
-    where (
-            totals.attachment_file_count > 0
-        and totals.invoice_count = 0
-    ) or (
-            totals.item_amount is not null
-        and totals.invoice_count > 0
-        and totals.invalid_invoice_amount_count = 0
-        and totals.invoice_total is not null
-        and totals.item_amount <> totals.invoice_total
-    )
+    from unlinked_expense_items totals
+),
+expense_anomaly_items as materialized (
+    select * from component_anomaly_items
+    union all
+    select * from unlinked_expense_anomaly_items
 ),
 payment_relation_totals as materialized (
     select
@@ -1463,7 +1642,7 @@ class PostgresWorkbenchPageQueryRepository:
             raise ValueError("Initial Workbench query does not accept exception_bucket.")
         rows = self._connection.fetch_all(
             f"""
-            with {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {self._initial_zone_ctes('paired', paired_plan)},
             {self._initial_zone_ctes('unpaired', unpaired_plan)},
             {_ANOMALY_STATE_CTES},
@@ -1972,7 +2151,7 @@ class PostgresWorkbenchPageQueryRepository:
         )
         rows = self._connection.fetch_all(
             f"""
-            with {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
             {anomaly_ctes}
             filtered_groups as materialized (
@@ -2572,7 +2751,7 @@ class PostgresWorkbenchPageQueryRepository:
             ]
         rows = self._connection.fetch_all(
             f"""
-            with {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
             {f'{_ANOMALY_STATE_CTES},' if normalized_exception_bucket else ''}
             filtered_groups as materialized (

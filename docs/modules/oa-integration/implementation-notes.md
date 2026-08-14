@@ -205,3 +205,9 @@
 - 受控写入：全量扫描 form 2，按 ETC 强 marker 限定对象；逐记录备份、哈希并发门禁后，只把内部绝对前缀替换为根相对 `/fileManager/`。
 - 生产结果：1,554 条记录全量复扫，7 条 ETC OA 与全部非 ETC OA 的目标错误引用均为 0；206 个唯一 ETC PDF 全部验证为真实 PDF。
 - 不变项：不重提 OA，不修改 `processStatus`、金额、附件成员、App canonical facts、配对关系或任何 read model/worker。
+## 2026-08-15 - OA附件发票多子付款项来源保真
+
+- 根因：record 级发票聚合和 promotion 单值冲突规则会折叠同一物理发票在同一 OA 多个子付款项的来源；解析 cache 又把子付款项上下文混入 key，导致相同附件重复 OCR。
+- 收口：物理附件 cache identity 排除 item occurrence、保留 OA 边界；每个 expense item 的 occurrence 仍生成独立来源 key。promotion 从 item 级结果生成候选，同一 OA 的多条 item 来源允许追加，canonical invoice source links 按 item 去重保留；跨 OA 自动合并继续 fail closed。
+- 模板确认：现有解析器已覆盖 `电子发票（铁路电子客票）` / `railway_e_ticket_invoice` 的票号、日期、金额和正式发票准入，本次无需新增并行模板。
+- 数据与运行时：没有新增 migration、表、read model、worker 或任务型数据库备份；正常 OA sync / 精确 attachment refresh 会幂等补齐来源，不执行全历史重放。

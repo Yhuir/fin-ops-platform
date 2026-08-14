@@ -391,7 +391,7 @@ class WorkbenchQueryService:
                     "source_workbench_row_id": row_id,
                     "source_attachment_key": source_attachment_key,
                     "source_attachment_name": source_attachment_name,
-                    "source_expense_item_id": source_expense_item_id,
+                    "source_expense_item_ids": [source_expense_item_id] if source_expense_item_id else [],
                     "source_expense_row_index": source_link["source_expense_row_index"],
                     "source_region_key": source_link["source_region_key"],
                     "evidence_type": source_link["evidence_type"],

@@ -2115,6 +2115,82 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter._attachment_invoice_cache_key(second_file),
         )
 
+    def test_expense_claim_parses_shared_physical_attachment_once_and_keeps_two_item_occurrences(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        shared_file = {
+            "fileId": "shared-file-36",
+            "fileName": "shared.pdf",
+            "filePath": "/expense/shared.pdf",
+            "suffix": "pdf",
+        }
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-shared-attachment",
+                        "form_id": "32",
+                        "modifiedTime": "2026-07-16T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-07-16",
+                            "Reimbursement Personnel": "樊祖芳",
+                            "titleName": "日常报销",
+                            "processId": "exp-shared-attachment-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "18.00",
+                                    "feeContent": "第一项快递费",
+                                    "detailReimbursementAttachment": {"files": [shared_file]},
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailReimbursementAmount": "18.00",
+                                    "feeContent": "第二项快递费",
+                                    "detailReimbursementAttachment": {"files": [shared_file]},
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+            attachment_invoice_cache=cache,
+        )
+
+        with (
+            adapter.force_attachment_invoice_sync_parse(),
+            patch.object(
+                adapter._attachment_invoice_service,
+                "parse_evidences",
+                return_value=[
+                    {
+                        "evidence_type": "tax_invoice",
+                        "digital_invoice_no": "26532000000000000036",
+                        "issue_date": "2026-07-16",
+                        "amount": "36.00",
+                        "total_with_tax": "36.00",
+                        "attachment_name": "shared.pdf",
+                    }
+                ],
+            ) as parse_evidences,
+        ):
+            record = adapter.list_application_records("2026-07")[0]
+
+        parse_evidences.assert_called_once()
+        self.assertEqual(len(record.expense_items), 2)
+        self.assertEqual(
+            [
+                item["attachment_invoices"][0]["source_expense_item_id"]
+                for item in record.expense_items
+            ],
+            [item["expense_item_id"] for item in record.expense_items],
+        )
+        self.assertNotEqual(
+            record.expense_items[0]["attachment_invoices"][0]["source_attachment_key"],
+            record.expense_items[1]["attachment_invoices"][0]["source_attachment_key"],
+        )
+
     def test_expense_claim_normalizes_current_cache_entry_amount_to_net_amount(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}

@@ -134,18 +134,49 @@ def oa_row_source_alias_map(rows: list[dict[str, Any]]) -> dict[str, str]:
     return aliases
 
 
-def canonical_oa_expense_item_id(
+def canonical_oa_expense_item_ids(
     *,
     oa_row: dict[str, Any],
     invoice_row: dict[str, Any],
+) -> list[str]:
+    source_rows = [
+        source_link
+        for source_link in list(invoice_row.get("source_links") or [])
+        if isinstance(source_link, dict)
+        and str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+    ]
+    if not source_rows:
+        source_rows = [invoice_row]
+
+    item_order = {
+        str(item.get("id") or item.get("expense_item_id") or "").strip(): index
+        for index, item in enumerate(list(oa_row.get("expense_items") or []))
+        if isinstance(item, dict)
+        and str(item.get("id") or item.get("expense_item_id") or "").strip()
+    }
+    canonical_ids = {
+        canonical_id
+        for source_row in source_rows
+        if (canonical_id := _canonical_oa_expense_item_id_for_source(
+            oa_row=oa_row,
+            source_row=source_row,
+        ))
+    }
+    return sorted(canonical_ids, key=lambda item_id: (item_order.get(item_id, len(item_order)), item_id))
+
+
+def _canonical_oa_expense_item_id_for_source(
+    *,
+    oa_row: dict[str, Any],
+    source_row: dict[str, Any],
 ) -> str:
-    source_item_id = _first_field_value(invoice_row, "source_expense_item_id")
+    source_item_id = _first_field_value(source_row, "source_expense_item_id")
     if not source_item_id:
         return ""
     if oa_attachment_parent_oa_id(source_item_id) not in set(oa_row_source_ids(oa_row)):
         return ""
 
-    source_row_index = _first_field_value(invoice_row, "source_expense_row_index")
+    source_row_index = _first_field_value(source_row, "source_expense_row_index")
     if not source_row_index:
         parts = source_item_id.split(":item:", 1)
         source_row_index = parts[1].split(":", 1)[0] if len(parts) == 2 else ""

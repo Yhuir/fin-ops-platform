@@ -237,11 +237,29 @@ class OAAttachmentInvoicePromotionService:
         candidates: list[OAAttachmentInvoiceCandidate] = []
         for record in records:
             oa_row_id = _clean_text(getattr(record, "id", None))
-            invoices = [
-                dict(item)
-                for item in list(getattr(record, "attachment_invoices", None) or [])
-                if isinstance(item, dict)
-            ]
+            invoices: list[dict[str, Any]] = []
+            for expense_item in list(getattr(record, "expense_items", None) or []):
+                if not isinstance(expense_item, dict):
+                    continue
+                expense_item_id = _clean_text(
+                    expense_item.get("expense_item_id") or expense_item.get("id")
+                )
+                expense_row_index = _clean_text(expense_item.get("row_index"))
+                for attachment_invoice in list(expense_item.get("attachment_invoices") or []):
+                    if not isinstance(attachment_invoice, dict):
+                        continue
+                    invoice = dict(attachment_invoice)
+                    if expense_item_id:
+                        invoice.setdefault("source_expense_item_id", expense_item_id)
+                    if expense_row_index:
+                        invoice.setdefault("source_expense_row_index", expense_row_index)
+                    invoices.append(invoice)
+            if not invoices:
+                invoices = [
+                    dict(item)
+                    for item in list(getattr(record, "attachment_invoices", None) or [])
+                    if isinstance(item, dict)
+                ]
             if not invoices:
                 invoices = [
                     dict(item)
@@ -325,15 +343,11 @@ class OAAttachmentInvoicePromotionService:
     @staticmethod
     def _has_source_context_conflict(invoice: Invoice, candidate: OAAttachmentInvoiceCandidate) -> bool:
         incoming_oa_id = _clean_text(candidate.oa_row_id)
-        incoming_item_id = _clean_text(candidate.attachment_invoice.get("source_expense_item_id"))
         for source_link in list(invoice.source_links or []):
             if str(source_link.get("source_type") or "") != "oa_attachment_invoice":
                 continue
             existing_oa_id = _clean_text(source_link.get("derived_from_oa_id"))
-            existing_item_id = _clean_text(source_link.get("source_expense_item_id"))
             if existing_oa_id and incoming_oa_id and existing_oa_id != incoming_oa_id:
-                return True
-            if existing_item_id and incoming_item_id and existing_item_id != incoming_item_id:
                 return True
         return False
 

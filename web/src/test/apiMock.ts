@@ -1879,6 +1879,12 @@ function buildWorkbenchRowPayload(
           invoice_type: "进项专票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          source_expense_item_ids: ["oa-o-202603-001:item:1"],
+          source_links: [{
+            source_type: "oa_attachment_invoice",
+            derived_from_oa_id: "oa-o-202603-001",
+            source_expense_item_id: "oa-o-202603-001:item:1",
+          }],
           detail_fields: {
             发票号码: "12561048",
             derived_from_oa_id: "oa-o-202603-001",
@@ -1925,6 +1931,12 @@ function buildWorkbenchRowPayload(
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          source_expense_item_ids: ["oa-exp-2035:item:0"],
+          source_links: [{
+            source_type: "oa_attachment_invoice",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_item_id: "oa-exp-2035:item:0",
+          }],
           detail_fields: {
             发票号码: "OA2035-MACHINE-25",
             derived_from_oa_id: "oa-exp-2035",
@@ -1951,6 +1963,12 @@ function buildWorkbenchRowPayload(
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          source_expense_item_ids: ["oa-exp-2035:item:0"],
+          source_links: [{
+            source_type: "oa_attachment_invoice",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_item_id: "oa-exp-2035:item:0",
+          }],
           detail_fields: {
             发票号码: "OA2035-MACHINE-23",
             derived_from_oa_id: "oa-exp-2035",
@@ -1977,6 +1995,12 @@ function buildWorkbenchRowPayload(
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          source_expense_item_ids: ["oa-exp-2035:item:1"],
+          source_links: [{
+            source_type: "oa_attachment_invoice",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_item_id: "oa-exp-2035:item:1",
+          }],
           detail_fields: {
             发票号码: "OA2035-FUEL-200",
             derived_from_oa_id: "oa-exp-2035",
@@ -2031,6 +2055,12 @@ function buildWorkbenchRowPayload(
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          source_expense_item_ids: ["oa-exp-292:item:1"],
+          source_links: [{
+            source_type: "oa_attachment_invoice",
+            derived_from_oa_id: "oa-exp-292",
+            source_expense_item_id: "oa-exp-292:item:1",
+          }],
           detail_fields: {
             发票号码: "OAATT-292-001",
             derived_from_oa_id: "oa-exp-292",

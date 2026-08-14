@@ -2172,11 +2172,16 @@ class ImportNormalizationService:
     @staticmethod
     def _append_invoice_source_link(invoice: Invoice, source_link: dict[str, str]) -> None:
         for existing in invoice.source_links:
-            if (
+            same_source = (
                 existing.get("source_type") == source_link.get("source_type")
                 and existing.get("source_id") == source_link.get("source_id")
                 and existing.get("batch_id") == source_link.get("batch_id")
-            ):
+            )
+            if same_source and source_link.get("source_type") == "oa_attachment_invoice":
+                incoming_item_id = str(source_link.get("source_expense_item_id") or "").strip()
+                existing_item_id = str(existing.get("source_expense_item_id") or "").strip()
+                same_source = existing_item_id == incoming_item_id or not existing_item_id
+            if same_source:
                 incoming_item_id = str(source_link.get("source_expense_item_id") or "").strip()
                 existing_item_id = str(existing.get("source_expense_item_id") or "").strip()
                 if incoming_item_id and not existing_item_id:

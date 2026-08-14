@@ -1610,3 +1610,9 @@
 - 生产只读采样确认 combined initial 的连接获取不是瓶颈，主要耗时来自同一首屏 SQL 三次重复执行正式发票可见性、来源类型和强身份计算。
 - 只在既有 `PostgresWorkbenchPageQueryRepository` 私有 SQL 边界内把可见发票窄事实集物化一次，并由 scope、强身份去重和候选构造共同复用；响应 DTO、分页、完整性 guard、事务隔离、SQL 条数和其它页面 I/O 均不改变。
 - 同一生产快照的旧/新 payload SHA-256 完全一致；只读 `EXPLAIN ANALYZE` 的主查询执行时间由约 `471ms` 降到约 `388ms`，shared blocks 从约 `25.7k` 降到约 `20.3k`，无 temp spill。该证据用于候选优化选择，最终性能仍以发布后的 authenticated HTTP 样本为准。
+## 2026-08-15 - OA发票多对多同行与异常计算闭环
+
+- 根因：API/前端/异常 SQL 都只消费单值 `source_expense_item_id`，使一张 36 元发票对应两个 18 元子付款项时一项金额不一致、另一项附件缺失；无 item 来源的发票又落入父 OA 摘要。
+- 收口：Workbench direct API 改为复数 `source_expense_item_ids[]`；服务与 PostgreSQL exception filter 都按付款项—发票二部图连通分量比较，发票按 ID 去重。前端同样按连通分量渲染，一票多项只出现一次，多票一项保持同带，待归属发票进入独立残余带。
+- 状态：明确区分 `attachment_missing`、`attachment_parse_failed` 和 `attachment_unassigned`，移除旧顶层单值 DTO。缺失/解析失败 chip 可在新窗口打开 OA 日常报销列表；OA 无稳定既有详情 deep-link 合同，因此不使用跨 SPA DOM 自动点击。
+- 性能与边界：无新增 HTTP、read model、worker、cache 或逐行查询；全部发生在既有 direct canonical 批量 SQL及当前页纯内存数据内。父 OA 仍是唯一 relation/action/selection identity。

@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-14
+日期：2026-08-15
 
 ## 职责
 
@@ -43,10 +43,10 @@ ReconciliationWorkbenchPage
 | --- | --- | --- |
 | canonical OA | OA canonical repositories | 同一 tenant 下合并 completed OA 与 in-progress admission；输出稳定 typed identity、权威申请时间和 `workflow_status=completed|in_progress`。in-progress admission 的申请时间只从 source snapshot 的 `detail_fields.申请时间/申请日期`（兼容同义顶层字段）读取，并同时作为 OA 搜索、筛选和排序日期；不得回退到审批完成、创建、修改或更新时间。同一 OA 同时命中两源时 fail closed。费用子项仅用于展示和金额比较，不成为 relation member。 |
 | canonical bank | bank canonical repositories | 使用稳定 typed identity、权威金额/方向/账号/交易日期和既有有效分类结果；页面查询不重新实现分类规则。 |
-| canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment link、已提交 ETC business batch/link；ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
+| canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
-| anomaly decisions | workbench exception repository | OA/发票自动异常按当前 canonical group set-based 计算；ignore/restore decision 以 scenario/fingerprint 关联。历史 WEX/row-ignore 只保留审计，不重新进入页面分区。 |
+| anomaly decisions | workbench exception repository | OA/发票自动异常按当前 canonical group set-based 计算；日常报销以付款项—发票二部图连通分量计算，发票按 ID 去重，未绑定项区分 missing / parse_failed / unassigned。ignore/restore decision 以 scenario/fingerprint 关联。历史 WEX/row-ignore 只保留审计，不重新进入页面分区。 |
 | list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
@@ -113,6 +113,7 @@ requested tenant/scope
 | filter options | 表头菜单 | `options[{value,label,missing}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins。 |
 | paired groups | 前端 | 冻结要求满足且关系内 OA workflow 已完成的 active formal relation；`group_type=relation`。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足或含 in-progress OA 的完整 active relation；不完整 relation 不被强行拆散。 |
+| OA expense/invoice display | 前端 | OA row 输出 `expense_items[]`，OA attachment invoice 输出复数 `source_expense_item_ids[]`。前端按来源图连通分量同带渲染；一张发票只出现一次，无 item 来源的发票只能进入独立残余带，不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
@@ -136,6 +137,7 @@ requested tenant/scope
 - mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
+- OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。异常 chip 的 OA 跳转使用普通 `<a target="_blank" rel="noopener noreferrer">`，禁止轮询或操纵 OA SPA DOM 自动点击详情。
 - 页面 rows 不写入 session storage/长期 cache。长列表继续分页；DOM virtualization 属于独立前端性能任务，不用 read-model 迁移夹带新框架。
 
 ## 共享边界与跨页面隔离

@@ -249,18 +249,19 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
 
     def test_expense_items_compare_all_explicitly_bound_invoices_per_item(self) -> None:
         oa_row = {
-            **self._oa_row("695.00"),
+            **self._oa_row("640.00"),
             "id": "oa-1",
             "expense_items": [
                 {"id": "item-290", "amount": "290.00", "attachment_file_count": "2"},
-                {"id": "item-405", "amount": "405.00", "attachment_file_count": "2"},
+                {"id": "item-350", "amount": "350.00", "attachment_file_count": "3"},
             ],
         }
         invoices = [
-            {**self._invoice_row("145.00"), "id": "invoice-145-a", "source_expense_item_id": "item-290"},
-            {**self._invoice_row("145.00"), "id": "invoice-145-b", "source_expense_item_id": "item-290"},
-            {**self._invoice_row("350.00"), "id": "invoice-350", "source_expense_item_id": "item-405"},
-            {**self._invoice_row("55.00"), "id": "invoice-55", "source_expense_item_id": "item-405"},
+            {**self._invoice_row("145.00"), "id": "invoice-145-a", "source_expense_item_ids": ["item-290"]},
+            {**self._invoice_row("145.00"), "id": "invoice-145-b", "source_expense_item_ids": ["item-290"]},
+            {**self._invoice_row("150.00"), "id": "invoice-150", "source_expense_item_ids": ["item-350"]},
+            {**self._invoice_row("100.00"), "id": "invoice-100-a", "source_expense_item_ids": ["item-350"]},
+            {**self._invoice_row("100.00"), "id": "invoice-100-b", "source_expense_item_ids": ["item-350"]},
         ]
 
         self.assertIsNone(
@@ -279,8 +280,8 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
                     "expense_items": [{"id": "item-290", "amount": "290.00", "attachment_file_count": "2"}],
                 }],
                 "invoice": [
-                    {**self._invoice_row("145.00"), "id": "invoice-1", "source_expense_item_id": "item-290"},
-                    {**self._invoice_row("144.99"), "id": "invoice-2", "source_expense_item_id": "item-290"},
+                    {**self._invoice_row("145.00"), "id": "invoice-1", "source_expense_item_ids": ["item-290"]},
+                    {**self._invoice_row("144.99"), "id": "invoice-2", "source_expense_item_ids": ["item-290"]},
                 ],
             },
             relation_id="CASE-ITEM-MISMATCH",
@@ -310,7 +311,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         item = anomaly["items"][0]
         self.assertEqual(item["code"], "oa_invoice_attachment_missing")
         self.assertEqual(item["label"], "OA发票附件缺失")
-        self.assertEqual(item["source_expense_item_id"], "item-38")
+        self.assertEqual(item["source_expense_item_ids"], ["item-38"])
         self.assertEqual(item["attachment_file_count"], 1)
         self.assertEqual(item["invoice_row_ids"], [])
         self.assertIsNone(
@@ -319,6 +320,71 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
                 relation_id="CASE-1",
             )
         )
+
+    def test_shared_invoice_is_counted_once_across_two_expense_items(self) -> None:
+        self.assertIsNone(
+            self.service.oa_invoice_anomaly(
+                {
+                    "oa": [{
+                        **self._oa_row("36.00"),
+                        "id": "oa-1",
+                        "expense_items": [
+                            {"id": "item-18-a", "amount": "18.00", "attachment_file_count": "1"},
+                            {"id": "item-18-b", "amount": "18.00", "attachment_file_count": "1"},
+                        ],
+                    }],
+                    "invoice": [{
+                        **self._invoice_row("36.00"),
+                        "id": "invoice-36",
+                        "source_expense_item_ids": ["item-18-a", "item-18-b"],
+                    }],
+                },
+                relation_id="CASE-SHARED-INVOICE",
+            )
+        )
+
+    def test_unassigned_and_parse_failed_are_not_reported_as_missing(self) -> None:
+        unassigned = self.service.oa_invoice_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("38.00"),
+                    "id": "oa-1",
+                    "expense_items": [
+                        {"id": "item-38", "amount": "38.00", "attachment_file_count": "1"},
+                    ],
+                }],
+                "invoice": [{
+                    **self._invoice_row("38.00"),
+                    "id": "invoice-38",
+                    "source_links": [{
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": "oa-1",
+                    }],
+                }],
+            },
+            relation_id="CASE-UNASSIGNED",
+        )
+        assert unassigned is not None
+        self.assertEqual(unassigned["items"][0]["code"], "oa_invoice_attachment_unassigned")
+
+        parse_failed = self.service.oa_invoice_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("38.00"),
+                    "id": "oa-1",
+                    "expense_items": [{
+                        "id": "item-38",
+                        "amount": "38.00",
+                        "attachment_file_count": "1",
+                        "attachment_parse_failed_count": "1",
+                    }],
+                }],
+                "invoice": [],
+            },
+            relation_id="CASE-PARSE-FAILED",
+        )
+        assert parse_failed is not None
+        self.assertEqual(parse_failed["items"][0]["code"], "oa_invoice_attachment_parse_failed")
         self.assertIsNone(
             self.service.oa_invoice_anomaly(
                 {

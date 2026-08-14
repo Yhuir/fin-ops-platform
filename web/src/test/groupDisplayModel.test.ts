@@ -254,7 +254,7 @@ describe("groupDisplayModel time filter", () => {
     };
     const invoice = (id: string, itemIndex: number, amount: string) => ({
       ...buildAttachmentInvoiceRow(id, parent.id, amount),
-      sourceExpenseItemId: `oa-exp-3061:item:${itemIndex}`,
+      sourceExpenseItemIds: [`oa-exp-3061:item:${itemIndex}`],
       tableValues: { grossAmount: amount },
     });
     const invoices = [
@@ -306,11 +306,11 @@ describe("groupDisplayModel time filter", () => {
     };
     const invoice350 = {
       ...buildAttachmentInvoiceRow("invoice-350", parent.id, "350.00"),
-      sourceExpenseItemId: "item-405",
+      sourceExpenseItemIds: ["item-405"],
     };
     const invoice5499 = {
       ...buildAttachmentInvoiceRow("invoice-54.99", parent.id, "54.99"),
-      sourceExpenseItemId: "item-405",
+      sourceExpenseItemIds: ["item-405"],
     };
     const group: WorkbenchRelationGroup = {
       id: "case:explicit-mismatch",
@@ -326,6 +326,59 @@ describe("groupDisplayModel time filter", () => {
     expect(segment?.rows.oa[0].tableValues.amount).toBe("405.00");
   });
 
+  test("renders one shared invoice once beside both linked expense items", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-shared-36", "36.00"),
+      expenseItems: [
+        { id: "item-18-a", rowIndex: "0", projectName: "项目甲", amount: "18.00" },
+        { id: "item-18-b", rowIndex: "1", projectName: "项目乙", amount: "18.00" },
+      ],
+    };
+    const sharedInvoice = {
+      ...buildAttachmentInvoiceRow("invoice-36", parent.id, "36.00"),
+      sourceExpenseItemIds: ["item-18-a", "item-18-b"],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:shared-invoice",
+      groupType: "paired",
+      matchConfidence: "high",
+      reason: "shared OA attachment",
+      rows: { oa: [parent], bank: [], invoice: [sharedInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const component = layout?.segments.find(({ id }) => id === "item-18-a+item-18-b");
+    const displayedInvoiceIds = layout?.segments.flatMap(({ rows }) => rows.invoice.map(({ id }) => id));
+
+    expect(component?.rows.oa.map((row) => row.sourceExpenseItemIds?.[0])).toEqual([
+      "item-18-a",
+      "item-18-b",
+    ]);
+    expect(component?.rows.invoice).toEqual([sharedInvoice]);
+    expect(displayedInvoiceIds).toEqual(["invoice-36"]);
+  });
+
+  test("keeps an unassigned OA invoice out of the reimbursement summary row", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-unassigned", "38.00"),
+      expenseItems: [{ id: "item-38", rowIndex: "0", projectName: "项目甲", amount: "38.00" }],
+    };
+    const unassignedInvoice = buildAttachmentInvoiceRow("invoice-38", parent.id, "38.00");
+    const group: WorkbenchRelationGroup = {
+      id: "case:unassigned-invoice",
+      groupType: "paired",
+      matchConfidence: "high",
+      reason: "unassigned OA attachment",
+      rows: { oa: [parent], bank: [], invoice: [unassignedInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+
+    expect(layout?.segments.find(({ id }) => id.endsWith(":summary"))?.rows.invoice).toEqual([]);
+    expect(layout?.segments.find(({ id }) => id.endsWith(":invoice:unassigned"))?.rows.invoice)
+      .toEqual([unassignedInvoice]);
+  });
+
   test("renders one display-only invoice placeholder for an uploaded item with no parsed invoice", () => {
     const missingAnomaly = {
       code: "oa_invoice_attachment_missing" as const,
@@ -333,8 +386,8 @@ describe("groupDisplayModel time filter", () => {
       displayLabel: "OA发票附件缺失",
       fingerprint: "a".repeat(64),
       comparisonUnitId: "item-missing",
-      sourceOaId: "oa-exp-missing",
-      sourceExpenseItemId: "item-missing",
+      sourceOaIds: ["oa-exp-missing"],
+      sourceExpenseItemIds: ["item-missing"],
       oaTotal: "38.00",
       invoiceRowIds: [],
       attachmentFileCount: 1,
@@ -366,6 +419,7 @@ describe("groupDisplayModel time filter", () => {
     expect(invoiceRows?.[0]).toMatchObject({
       displayOnly: true,
       label: "OA发票附件缺失",
+      externalUrl: "/oa/#/normal/32?formId=32",
       oaInvoiceAnomaly: missingAnomaly,
     });
     expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
@@ -378,8 +432,8 @@ describe("groupDisplayModel time filter", () => {
       displayLabel: "OA发票附件缺失",
       fingerprint: "b".repeat(64),
       comparisonUnitId: "item-28.80",
-      sourceOaId: "oa-exp-174.94",
-      sourceExpenseItemId: "item-28.80",
+      sourceOaIds: ["oa-exp-174.94"],
+      sourceExpenseItemIds: ["item-28.80"],
       oaTotal: "28.80",
       invoiceRowIds: [],
       attachmentFileCount: 1,
@@ -408,7 +462,7 @@ describe("groupDisplayModel time filter", () => {
     };
     const invoice = (id: string, itemId: string, amount: string) => ({
       ...buildAttachmentInvoiceRow(id, parent.id, amount),
-      sourceExpenseItemId: itemId,
+      sourceExpenseItemIds: [itemId],
       tableValues: { grossAmount: amount },
     });
     const invoices = [
@@ -458,7 +512,7 @@ describe("groupDisplayModel time filter", () => {
     };
     const invoice = (id: string, amount: string) => ({
       ...buildAttachmentInvoiceRow(id, parent.id, amount),
-      sourceExpenseItemId: "oa-exp-partial-composite:item:0",
+      sourceExpenseItemIds: ["oa-exp-partial-composite:item:0"],
       tableValues: { grossAmount: amount },
     });
     const invoice29 = invoice("iv-partial-29", "29.00");

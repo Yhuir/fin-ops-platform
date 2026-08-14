@@ -343,7 +343,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         initial_statement = next(
             statement
             for statement in self.connection.statements
-            if "with requested_scope" in str(statement.get("sql") or "")
+            if "with recursive requested_scope" in str(statement.get("sql") or "")
         )
         self.assertEqual(initial_statement["operation"], "fetch_all")
         self.assertEqual(initial_statement["metadata_row_count"], 1)
@@ -504,6 +504,150 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             exception_bucket="processed",
         )
         self.assertEqual(processed["total"], 1)
+
+    def test_shared_invoice_sources_are_counted_once_with_sql_fingerprint_parity(self) -> None:
+        oa_payload = {
+            "id": "oa-shared-36",
+            "month": "2026-07",
+            "section": "unpaired",
+            "applicant": "樊祖芳",
+            "project_name": "快递费",
+            "apply_type": "日常报销",
+            "amount": "36.00",
+            "workflow_status": "completed",
+            "expense_items": [
+                {
+                    "id": "oa-shared-36:item:0",
+                    "expense_item_id": "oa-shared-36:item:0",
+                    "row_index": "0",
+                    "amount": "18.00",
+                    "attachment_file_count": "1",
+                },
+                {
+                    "id": "oa-shared-36:item:1",
+                    "expense_item_id": "oa-shared-36:item:1",
+                    "row_index": "1",
+                    "amount": "18.00",
+                    "attachment_file_count": "1",
+                },
+            ],
+        }
+        source_links = [
+            {
+                "source_type": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-shared-36",
+                "source_expense_item_id": "oa-shared-36:item:0",
+                "source_expense_row_index": "0",
+            },
+            {
+                "source_type": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-shared-36",
+                "source_expense_item_id": "oa-shared-36:item:1",
+                "source_expense_row_index": "1",
+            },
+        ]
+        self.raw_connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount, currency,
+                normalized_payload, raw_payload
+            ) values (
+                'oa-source-shared-36', '32', '日常报销', 'oa-shared-36',
+                'active', 'completed', '樊祖芳', '2026-07-16', '2026-07-01',
+                '快递费', 36, 'CNY', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (json.dumps(oa_payload, ensure_ascii=False),),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, summary, raw_payload, status
+            ) values (
+                'bank-shared-36', '6222000011118108', '基本户', 'outflow',
+                '云南顺丰速运有限公司', 36, -36, '2026-07-16', '2026-07-01',
+                '2026-07-16 10:00:00+08', '快递费', '{}'::jsonb, 'active'
+            )
+            """
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                amount, signed_amount, total_with_tax, status, workbench_visibility,
+                source_links, raw_payload
+            ) values (
+                'invoice-shared-36', 'input', 'INV-SHARED-36', '2026-07-16', '2026-07-01',
+                36, 36, 36, 'active', 'visible', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (json.dumps(source_links, ensure_ascii=False),),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'CASE-SHARED-36', 'manual_confirmed', 'active', 1, '2026-07-01',
+                array['oa-shared-36','bank-shared-36','invoice-shared-36'],
+                array['oa','bank','invoice'], '{}'::jsonb,
+                '{"requires_oa":true,"requires_invoice":true}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+
+        matched = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        matched_group = next(
+            group
+            for group in matched["paired"]["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        self.assertNotIn("oa_invoice_anomaly", matched_group)
+        self.assertEqual(
+            matched_group["invoice_rows"][0]["source_expense_item_ids"],
+            ["oa-shared-36:item:0", "oa-shared-36:item:1"],
+        )
+
+        with self.raw_connection.transaction() as transaction:
+            transaction.execute(
+                "select set_config('fin_ops.correction_reason', '多对多金额异常测试', true)"
+            )
+            transaction.execute("select set_config('fin_ops.actor_id', 'test-suite', true)")
+            transaction.execute(
+                """
+                update app.invoices
+                set amount = 35.99, signed_amount = 35.99, total_with_tax = 35.99
+                where legacy_mongo_id = 'invoice-shared-36'
+                """
+            )
+        mismatched = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        mismatched_group = next(
+            group
+            for group in mismatched["paired"]["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        anomaly = mismatched_group["oa_invoice_anomaly"]
+        self.assertEqual(anomaly["items"][0]["source_expense_item_ids"], [
+            "oa-shared-36:item:0",
+            "oa-shared-36:item:1",
+        ])
+        active = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="paired",
+            exception_bucket="active",
+        )
+        active_group = next(
+            group for group in active["groups"] if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        self.assertEqual(
+            active_group["oa_invoice_anomaly"]["fingerprint"],
+            anomaly["fingerprint"],
+        )
 
     def test_summary_hydration_does_not_transport_large_unused_source_payloads(self) -> None:
         sentinel = "summary-hot-path-unused-" + ("x" * 200_000)

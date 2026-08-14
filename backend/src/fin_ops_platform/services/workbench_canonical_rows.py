@@ -925,6 +925,12 @@ class WorkbenchCanonicalRowsBuilder:
             return None
         source_links = _list_of_dicts(row.get("source_links") if isinstance(row.get("source_links"), list) else detail_fields.get("source_links"))
         oa_attachment_source_link = _first_source_link(source_links, "oa_attachment_invoice")
+        source_expense_item_ids = list(dict.fromkeys(
+            value
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+            and (value := str(source_link.get("source_expense_item_id") or "").strip())
+        ))
         source_kind = OA_ATTACHMENT_INVOICE_SOURCE_KIND if oa_attachment_source_link is not None else "invoice"
         tags = _text_list(row.get("tags"))
         if _first_source_link(source_links, "manual_invoice_import") is not None and "人工导入" not in tags:
@@ -963,7 +969,7 @@ class WorkbenchCanonicalRowsBuilder:
             "source_workbench_row_id": _metadata_value(oa_attachment_source_link, detail_fields, "source_workbench_row_id"),
             "source_attachment_key": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_key"),
             "source_attachment_name": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_name"),
-            "source_expense_item_id": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_item_id"),
+            "source_expense_item_ids": source_expense_item_ids,
             "source_expense_row_index": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_row_index"),
             "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
             "summary_fields": {

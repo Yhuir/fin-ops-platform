@@ -47,6 +47,7 @@ export type WorkbenchExpenseItem = {
   feeContent?: string;
   feeDescription?: string;
   attachmentFileCount?: number;
+  attachmentParseFailedCount?: number;
   oaInvoiceAnomaly?: WorkbenchOaInvoiceAnomalyItem;
 };
 
@@ -63,13 +64,18 @@ export type WorkbenchAmountCheck = {
 };
 
 export type WorkbenchOaInvoiceAnomalyItem = {
-  code: "oa_invoice_amount_mismatch" | "oa_invoice_attachment_missing" | (string & {});
+  code:
+    | "oa_invoice_amount_mismatch"
+    | "oa_invoice_attachment_missing"
+    | "oa_invoice_attachment_parse_failed"
+    | "oa_invoice_attachment_unassigned"
+    | (string & {});
   label: string;
   displayLabel: string;
   fingerprint: string;
   comparisonUnitId: string;
-  sourceOaId?: string;
-  sourceExpenseItemId?: string;
+  sourceOaIds: string[];
+  sourceExpenseItemIds: string[];
   oaTotal?: string;
   invoiceTotal?: string;
   amountDelta?: string;
@@ -101,7 +107,8 @@ export type WorkbenchRecord = {
   recordType: WorkbenchRecordType;
   sourceKind?: WorkbenchSourceKind;
   sourceOaId?: string;
-  sourceExpenseItemId?: string;
+  sourceExpenseItemIds?: string[];
+  externalUrl?: string;
   expenseItems?: WorkbenchExpenseItem[];
   displayRole?: "expense-claim-summary" | "expense-claim-item";
   label: string;

@@ -93,7 +93,9 @@ row detail GET 是纯读操作：按 typed identity 窄查 latest committed cano
 ```text
 日常报销 item 金额 = 显式绑定发票合计          -> absent
 日常报销 item 金额完整且与绑定发票合计不等      -> active（金额不一致）
-日常报销 item 有附件且零已解析绑定发票           -> active（OA发票附件缺失）
+日常报销 item 有附件且解析明确失败                -> active（OA附件解析失败）
+日常报销 item 有附件且父 OA 发票缺明确 item 来源   -> active（OA发票待归属）
+日常报销 item 有附件且无以上证据                  -> active（OA发票附件缺失）
 支付申请 OA/发票总额完整且不等                  -> active（金额不一致）
 active --ignore--> ignored（已忽略：对应异常）
 ignored --restore--> active

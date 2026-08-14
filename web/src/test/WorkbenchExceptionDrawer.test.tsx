@@ -12,6 +12,8 @@ const anomalyItem = {
   displayLabel: "金额不一致",
   fingerprint: "a".repeat(64),
   comparisonUnitId: "case:CASE-1",
+  sourceOaIds: [],
+  sourceExpenseItemIds: [],
   oaTotal: "100.00",
   invoiceTotal: "99.99",
   amountDelta: "0.01",
@@ -188,6 +190,7 @@ describe("Workbench amount mismatch exception UI", () => {
           id: "missing-item",
           displayOnly: true,
           sourceKind: "oa_attachment_unknown",
+          externalUrl: "/oa/#/normal/32?formId=32",
           label: "OA发票附件缺失",
           oaInvoiceAnomaly: missingItem,
         }}
@@ -202,6 +205,9 @@ describe("Workbench amount mismatch exception UI", () => {
 
     const chip = screen.getByText("OA发票附件缺失").closest('[data-slot="chip"]');
     expect(chip).toHaveAttribute("title", "OA子付款项已上传 1 个附件，但未解析出发票");
+    expect(chip?.closest("a")).toHaveAttribute("href", "/oa/#/normal/32?formId=32");
+    expect(chip?.closest("a")).toHaveAttribute("target", "_blank");
+    expect(chip?.closest("a")).toHaveAttribute("rel", "noopener noreferrer");
     await userEvent.click(chip!.closest('[role="row"]') as HTMLElement);
     expect(onSelectRow).not.toHaveBeenCalled();
   });

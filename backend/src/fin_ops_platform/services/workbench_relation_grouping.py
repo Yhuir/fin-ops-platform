@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    canonical_oa_expense_item_id,
+    canonical_oa_expense_item_ids,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_relation_requirements import (
@@ -266,22 +266,21 @@ class WorkbenchRelationGroupingService:
             if str(row.get("type") or "").strip() == "invoice"
             and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
         ):
-            matches = {
-                (str(oa_row.get("id") or "").strip(), canonical_item_id)
-                for oa_row in oa_rows
-                if (
-                    canonical_item_id := canonical_oa_expense_item_id(
-                        oa_row=oa_row,
-                        invoice_row=invoice_row,
-                    )
+            matches: set[tuple[str, tuple[str, ...]]] = set()
+            for oa_row in oa_rows:
+                canonical_item_ids = canonical_oa_expense_item_ids(
+                    oa_row=oa_row,
+                    invoice_row=invoice_row,
                 )
-            }
+                if canonical_item_ids:
+                    matches.add((str(oa_row.get("id") or "").strip(), tuple(canonical_item_ids)))
             if len(matches) != 1:
                 continue
-            oa_row_id, canonical_item_id = next(iter(matches))
+            oa_row_id, canonical_item_ids = next(iter(matches))
             invoice_row["source_oa_id"] = oa_row_id
             invoice_row["source_oa_row_id"] = oa_row_id
-            invoice_row["source_expense_item_id"] = canonical_item_id
+            invoice_row["source_expense_item_ids"] = list(canonical_item_ids)
+            invoice_row.pop("source_expense_item_id", None)
 
     @staticmethod
     def _relation_row(row: dict[str, Any], relation: dict[str, Any], *, zone: str) -> dict[str, Any]:

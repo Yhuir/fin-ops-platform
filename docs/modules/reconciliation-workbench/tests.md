@@ -77,6 +77,12 @@
 - Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、附件数大于零且零绑定发票生成 `OA发票附件缺失`；支付申请继续按关系组总额比较，缺金额不误报。
 - Service/read model/API：`tests/test_workbench_relation_grouping.py` 保护 bundle `oa_invoice_anomaly.items[]`、active/ignored 计数和旧逐发票 `amount_anomaly` 不再发布；`tests/test_workbench_query_service.py` 保护 item `attachment_file_count`；`tests/test_workbench_sql_runtime.py` 保护当前 v20 淘汰旧 generation/cache，且异常桶在分页前过滤。
 - Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行、部分筛选不伪造同行、附件缺失生成不可选择 display-only 发票占位；`WorkbenchApi.test.ts` 保护新 DTO 与一个 comparison unit 只装饰一行；`WorkbenchExceptionDrawer.test.tsx` 和 `WorkbenchSelection.test.tsx` 保护 HeroUI chip、`异常 n | 已忽略 m`、折叠/展开、忽略/撤回及只读行为。
+
+## 2026-08-15 OA附件发票多对多与子付款项定位
+
+- Business/service：`test_mongo_oa_adapter.py` 保护同一物理附件跨两个子付款项只解析一次、再分别绑定来源；`test_oa_attachment_invoice_promotion_service.py` 与 `test_import_service.py` 保护同 OA 多来源边不丢失；`test_workbench_amount_check_service.py` 和 `test_workbench_relation_grouping.py` 保护 `18+18=36` 不重复计票、一个 item 多票集合求和，以及缺失/解析失败/待归属分类。
+- API/frontend：Workbench DTO 只发布复数 `source_expense_item_ids[]` / anomaly source arrays；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护一票多项只渲染一次、多票一项同带、待归属发票不进入父摘要。`WorkbenchExceptionDrawer.test.tsx` 保护缺失 chip 使用 `target=_blank` 与 `noopener noreferrer` 打开稳定 OA 列表路由。
+- Performance/regression：复用单次 Workbench direct canonical SQL 与前端纯内存图遍历；无新增 HTTP、read model、worker、数据库表、逐行 I/O 或页面 effect。PostgreSQL exception filter 使用 relation 内递归连通分量，避免顶部异常计数继续按旧单值来源误报。
 - Regression：没有新增表、migration、read model、worker、queue、cache owner、HTTP 详情链路或依赖；旧逐关系总额、逐发票复制字段和金额决定显式 ownership 的判断已删除。
 
 ## 2026-08-05 紧凑异常抽屉与撤回忽略

@@ -1033,6 +1033,11 @@ class MongoOAAdapter(OAAdapter):
                     "fee_description": fee_description,
                     "reimbursement_date": reimbursement_date,
                     "attachment_file_count": str(len(item_attachment_files)),
+                    "attachment_parse_failed_count": str(sum(
+                        1
+                        for artifact in item_attachment_artifacts
+                        if clean_string(artifact.get("parse_status")) == "parse_failed"
+                    )),
                     "attachment_files": [
                         dict(file_entry)
                         for file_entry in (
@@ -1733,6 +1738,45 @@ class MongoOAAdapter(OAAdapter):
         raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
 
+    @classmethod
+    def _physical_source_attachment_key(cls, file_entry: dict[str, object]) -> str:
+        """Return the stable document identity without expense-item occurrence context."""
+        context = cls._attachment_source_context(file_entry)
+        file_id = clean_string(
+            file_entry.get("fileId")
+            or file_entry.get("file_id")
+            or file_entry.get("id")
+            or file_entry.get("uid")
+            or file_entry.get("attachmentId")
+            or file_entry.get("attachment_id")
+            or ""
+        )
+        file_path = clean_string(
+            file_entry.get("filePath")
+            or file_entry.get("url")
+            or file_entry.get("path")
+            or file_entry.get("downloadUrl")
+            or ""
+        )
+        file_name = cls._attachment_display_name(file_entry)
+        if file_id:
+            identity_kind = "id"
+            identity = file_id
+        elif file_path:
+            identity_kind = "path"
+            identity = file_path
+        else:
+            identity_kind = "name"
+            identity = file_name
+        fingerprint = {
+            "identity_kind": identity_kind,
+            "identity": identity,
+            "suffix": clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower(),
+            "oa_external_id": context.get("oa_external_id", ""),
+        }
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
     def _parse_attachment_invoices(self, files: list[dict[str, object]], *, month: str | None = None) -> list[dict[str, str]]:
         return self._parse_attachment_evidence_pool(files, month=month)["invoices"]
 
@@ -1941,7 +1985,7 @@ class MongoOAAdapter(OAAdapter):
         fingerprint = {
             "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
             "parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
-            "source_attachment_key": MongoOAAdapter._source_attachment_key(file_entry),
+            "physical_source_attachment_key": MongoOAAdapter._physical_source_attachment_key(file_entry),
             "size": clean_string(file_entry.get("size") or file_entry.get("fileSize") or ""),
             "modified_time": clean_string(
                 file_entry.get("modifiedTime")
@@ -1955,14 +1999,20 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _legacy_attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
-        if ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY not in file_entry:
-            return MongoOAAdapter._attachment_invoice_cache_key(file_entry)
-        legacy_file_entry = {
-            key: value
-            for key, value in file_entry.items()
-            if key != ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY
+        fingerprint = {
+            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+            "parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "source_attachment_key": MongoOAAdapter._source_attachment_key(file_entry),
+            "size": clean_string(file_entry.get("size") or file_entry.get("fileSize") or ""),
+            "modified_time": clean_string(
+                file_entry.get("modifiedTime")
+                or file_entry.get("lastModified")
+                or file_entry.get("updatedAt")
+                or ""
+            ),
         }
-        return MongoOAAdapter._attachment_invoice_cache_key(legacy_file_entry)
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
 
     @classmethod
     def _attachment_invoice_source_fields(cls, file_entry: dict[str, object]) -> dict[str, str]:

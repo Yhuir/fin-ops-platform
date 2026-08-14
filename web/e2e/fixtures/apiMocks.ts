@@ -845,7 +845,12 @@ function buildOaExpenseItemsWorkbenchGroup() {
         seller_name: "中国石油云南销售公司",
         amount: "200.00",
         total_with_tax: "200.00",
-        source_expense_item_id: "oa-exp-2035:item:1",
+        source_expense_item_ids: ["oa-exp-2035:item:1"],
+        source_links: [{
+          source_type: "oa_attachment_invoice",
+          derived_from_oa_id: "oa-exp-2035",
+          source_expense_item_id: "oa-exp-2035:item:1",
+        }],
         detail_fields: {
           ...rows.invoice.detail_fields,
           derived_from_oa_id: "oa-exp-2035",
@@ -859,7 +864,12 @@ function buildOaExpenseItemsWorkbenchGroup() {
         seller_name: "重庆京东创盟信息技术有限公司",
         amount: "29.00",
         total_with_tax: "29.00",
-        source_expense_item_id: "oa-exp-2035:item:2",
+        source_expense_item_ids: ["oa-exp-2035:item:2"],
+        source_links: [{
+          source_type: "oa_attachment_invoice",
+          derived_from_oa_id: "oa-exp-2035",
+          source_expense_item_id: "oa-exp-2035:item:2",
+        }],
         detail_fields: {
           ...rows.invoice.detail_fields,
           derived_from_oa_id: "oa-exp-2035",
@@ -873,7 +883,12 @@ function buildOaExpenseItemsWorkbenchGroup() {
         seller_name: "重庆京东创盟信息技术有限公司",
         amount: "47.80",
         total_with_tax: "47.80",
-        source_expense_item_id: "oa-exp-2035:item:2",
+        source_expense_item_ids: ["oa-exp-2035:item:2"],
+        source_links: [{
+          source_type: "oa_attachment_invoice",
+          derived_from_oa_id: "oa-exp-2035",
+          source_expense_item_id: "oa-exp-2035:item:2",
+        }],
         detail_fields: {
           ...rows.invoice.detail_fields,
           derived_from_oa_id: "oa-exp-2035",

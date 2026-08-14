@@ -54,7 +54,7 @@ canonical fact repositories
 
 ## OA/发票异常合同
 
-- 日常报销按 OA 子付款项与全部显式绑定发票比较；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；子付款项有上传附件但零已解析绑定发票时生成 `OA发票附件缺失`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
+- 日常报销按 `source_expense_item_ids[]` 与发票组成的连通分量比较，分量内子付款项求和、发票按 ID 去重求和；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；零绑定发票时区分 `OA发票附件缺失`、`OA附件解析失败` 和 `OA发票待归属`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
 - active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 direct group spine、异常桶、计数、主区可见性或页面查询结果。
 - 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常，已忽略展示 ignored OA/发票异常。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、legacy WEX/row-ignore 抽屉入口、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
@@ -67,7 +67,7 @@ canonical fact repositories
 - 单条银行流水/发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。显式 `sourceOaId` / `sourceExpenseItemId` 优先；API 映射必须优先 canonical `source_oa_id` / `source_oa_row_id`，历史 `derived_from_oa_id` 只作兜底，不能覆盖 canonical ownership。显式费用子项 ownership 不以金额相等为前提。缺少显式来源时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
 - 同一费用子项下的所有显式绑定附件发票共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。即使合计金额不等，也保持同行并由异常 chip 表达差异。筛选后缺少任一组成发票时不建立部分复合同行。
 - 其他父 OA 级一对多/多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，以及无显式费用子项归属的 2～6 条金额合计都不建立同行；已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
-- 多项目报销继续显示父 OA 摘要和费用子项；满足单条精确条件或上述显式费用子项复合条件的附件发票逐项同行，其余附件留在残余展示带。缺失附件发票的展示位只显示 `OA发票附件缺失`，不得再叠加历史 `未识别附件` 来源标签。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
+- 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属附件发票留在独立残余展示带且不得进入父摘要。缺失附件发票的展示位只显示原因明确的异常 chip，不得再叠加历史 `未识别附件` 来源标签。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
 - 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 
 ## 不变量

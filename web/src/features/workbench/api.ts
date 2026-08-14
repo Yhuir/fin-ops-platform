@@ -122,6 +122,7 @@ type ApiWorkbenchRow = {
     fee_content?: string | null;
     fee_description?: string | null;
     attachment_file_count?: string | number | null;
+    attachment_parse_failed_count?: string | number | null;
   }> | null;
   apply_type?: string | null;
   workflow_status?: string | null;
@@ -171,7 +172,13 @@ type ApiWorkbenchRow = {
   relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
-  source_expense_item_id?: string | null;
+  source_expense_item_ids?: unknown[] | null;
+  source_links?: Array<{
+    source_type?: string | null;
+    source_expense_item_id?: string | null;
+    derived_from_oa_id?: string | null;
+    source_workbench_row_id?: string | null;
+  }> | null;
 };
 
 type ApiWorkbenchOaInvoiceAnomalyItem = {
@@ -180,8 +187,8 @@ type ApiWorkbenchOaInvoiceAnomalyItem = {
   display_label?: string | null;
   fingerprint?: string | null;
   comparison_unit_id?: string | null;
-  source_oa_id?: string | null;
-  source_expense_item_id?: string | null;
+  source_oa_ids?: unknown[] | null;
+  source_expense_item_ids?: unknown[] | null;
   oa_total?: string | number | null;
   invoice_total?: string | number | null;
   amount_delta?: string | number | null;
@@ -957,7 +964,7 @@ function mapOaInvoiceAnomaly(
     }
     const label = toDisplayValue(
       item.label,
-      code === "oa_invoice_attachment_missing" ? "OA发票附件缺失" : "金额不一致",
+      anomalyLabel(code),
     );
     return [{
       code: code as WorkbenchOaInvoiceAnomalyItem["code"],
@@ -965,8 +972,8 @@ function mapOaInvoiceAnomaly(
       displayLabel: toDisplayValue(item.display_label, state === "ignored" ? `已忽略：${label}` : label),
       fingerprint: itemFingerprint,
       comparisonUnitId,
-      sourceOaId: toDisplayValue(item.source_oa_id, "") || undefined,
-      sourceExpenseItemId: toDisplayValue(item.source_expense_item_id, "") || undefined,
+      sourceOaIds: toStringList(item.source_oa_ids),
+      sourceExpenseItemIds: toStringList(item.source_expense_item_ids),
       oaTotal: toDisplayValue(item.oa_total, "") || undefined,
       invoiceTotal: toDisplayValue(item.invoice_total, "") || undefined,
       amountDelta: toDisplayValue(item.amount_delta, "") || undefined,
@@ -1311,11 +1318,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     recordType: row.type,
     sourceKind: row.source_kind ?? undefined,
     sourceOaId: resolveWorkbenchRowSourceOaId(row),
-    sourceExpenseItemId: firstNonPlaceholderDisplayValue(
-      row.source_expense_item_id,
-      row.detail_fields?.source_expense_item_id,
-      row.detail_fields?.["来源付款项ID"],
-    ),
+    sourceExpenseItemIds: resolveWorkbenchRowSourceExpenseItemIds(row),
     expenseItems: mapExpenseItems(row.expense_items),
     label: rowLabel(row),
     status: rowRelation(row)?.label ?? "待处理",
@@ -1361,6 +1364,9 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
       attachmentFileCount: toCount(item.attachment_file_count),
+      ...(item.attachment_parse_failed_count === null || item.attachment_parse_failed_count === undefined
+        ? {}
+        : { attachmentParseFailedCount: toCount(item.attachment_parse_failed_count) }),
     }];
   });
   return mapped.length > 0 ? mapped : undefined;
@@ -1376,7 +1382,20 @@ function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
     row.detail_fields?.source_oa_row_id,
     row.detail_fields?.oa_row_id,
     row.detail_fields?.derived_from_oa_id,
+    ...(Array.isArray(row.source_links)
+      ? row.source_links.flatMap((link) => [link.derived_from_oa_id, link.source_workbench_row_id])
+      : []),
   );
+}
+
+function resolveWorkbenchRowSourceExpenseItemIds(row: ApiWorkbenchRow) {
+  const sourceIds = [
+    ...toStringList(row.source_expense_item_ids),
+    ...(Array.isArray(row.source_links)
+      ? row.source_links.map((link) => String(link.source_expense_item_id ?? "").trim())
+      : []),
+  ].filter(Boolean);
+  return sourceIds.length > 0 ? Array.from(new Set(sourceIds)) : undefined;
 }
 
 function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): WorkbenchPaneRows {
@@ -1469,16 +1488,36 @@ function decorateOaInvoiceAnomaly(
     if (invoiceRow) {
       invoiceRow.oaInvoiceAnomaly = item;
     }
-    if (!item.sourceExpenseItemId) {
+    if (item.sourceExpenseItemIds.length === 0) {
       return;
     }
     rows.oa.forEach((oaRow) => {
-      const expenseItem = oaRow.expenseItems?.find((candidate) => candidate.id === item.sourceExpenseItemId);
-      if (expenseItem) {
-        expenseItem.oaInvoiceAnomaly = item;
-      }
+      oaRow.expenseItems
+        ?.filter((candidate) => item.sourceExpenseItemIds.includes(candidate.id))
+        .forEach((expenseItem) => {
+          expenseItem.oaInvoiceAnomaly = item;
+        });
     });
   });
+}
+
+function anomalyLabel(code: string) {
+  if (code === "oa_invoice_attachment_missing") {
+    return "OA发票附件缺失";
+  }
+  if (code === "oa_invoice_attachment_parse_failed") {
+    return "OA附件解析失败";
+  }
+  if (code === "oa_invoice_attachment_unassigned") {
+    return "OA发票待归属";
+  }
+  return "金额不一致";
+}
+
+function toStringList(values: unknown[] | null | undefined) {
+  return Array.isArray(values)
+    ? Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)))
+    : [];
 }
 
 function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchRelationGroup["rowCounts"] | undefined {

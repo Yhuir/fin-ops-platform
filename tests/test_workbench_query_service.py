@@ -719,7 +719,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             ["24800001", "24800002", "24800003"],
         )
         first_invoice = next(row for row in invoice_rows if row["invoice_no"] == "24800001")
-        self.assertEqual(first_invoice["source_expense_item_id"], "oa-exp-hurong-248:item:0:maint")
+        self.assertEqual(first_invoice["source_expense_item_ids"], ["oa-exp-hurong-248:item:0:maint"])
         self.assertEqual(first_invoice["source_attachment_key"], "oa-exp-hurong-248:item:0:att:a")
         self.assertEqual(first_invoice["source_attachment_name"], "付款项1-发票A.pdf")
         self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "3")
@@ -759,7 +759,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         ]
         self.assertEqual(len(invoice_rows), 1)
         self.assertEqual(invoice_rows[0]["invoice_no"], "29200001")
-        self.assertEqual(invoice_rows[0]["source_expense_item_id"], "oa-exp-hurong-292:item:0:energy")
+        self.assertEqual(invoice_rows[0]["source_expense_item_ids"], ["oa-exp-hurong-292:item:0:energy"])
         self.assertEqual(invoice_rows[0]["source_attachment_key"], "oa-exp-hurong-292:item:0:att:only")
         self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "1")
         self.assertIn("29200001", oa_rows[0]["detail_fields"]["附件发票摘要"])

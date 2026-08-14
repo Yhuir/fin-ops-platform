@@ -14373,6 +14373,18 @@ body.column-layout-dragging {
   white-space: normal;
 }
 
+.invoice-oa-anomaly-link {
+  display: inline-flex;
+  color: inherit;
+  text-decoration: none;
+}
+
+.invoice-oa-anomaly-link:focus-visible {
+  border-radius: 999px;
+  outline: 2px solid var(--fin-color-focus, #2563eb);
+  outline-offset: 2px;
+}
+
 .workbench-anomaly-drawer .finance-drawer__body {
   padding: 0;
   overflow: hidden;

@@ -231,7 +231,10 @@ function buildWorkbenchGroupSourceSegments(
   if (group.displayMode === "collapsed_summary" || group.rows.oa.length === 0) {
     return null;
   }
-  const hasExpenseClaimItems = group.rows.oa.some(hasExpandableExpenseItems);
+  const hasExpenseClaimItems = group.rows.oa.some((oaRow) => shouldExpandExpenseClaim(
+    oaRow,
+    group.rows.invoice.filter((invoiceRow) => normalizeSourceOaId(invoiceRow.sourceOaId) === oaRow.id),
+  ));
   if (group.rows.oa.length < 2 && !hasExpenseClaimItems) {
     return null;
   }
@@ -284,10 +287,20 @@ function findAlignedRowIdsBySegment(
 
   segments.forEach((segment) => {
     const rows = segment.rows[paneId];
+    if (segment.rows.oa.length === 0 && rows.length > 0) {
+      alignedRowsBySegmentId.set(segment.id, rows.map((row) => row.id));
+      return;
+    }
+    const segmentItemIds = new Set(
+      segment.rows.oa
+        .filter((row) => row.displayRole === "expense-claim-item")
+        .map((row) => row.sourceExpenseItemIds?.[0] ?? "")
+        .filter(Boolean),
+    );
     const hasExplicitExpenseItemOwnership = paneId === "invoice"
-      && segment.rows.oa[0]?.displayRole === "expense-claim-item"
+      && segmentItemIds.size > 0
       && rows.length > 0
-      && rows.every((row) => row.sourceExpenseItemId === segment.id);
+      && rows.every((row) => rowExpenseItemIds(row).some((itemId) => segmentItemIds.has(itemId)));
     if (hasExplicitExpenseItemOwnership) {
       alignedRowsBySegmentId.set(segment.id, rows.map((row) => row.id));
       return;
@@ -343,14 +356,16 @@ function findAlignedRowIdsBySegment(
 }
 
 function segmentTargetAmountCents(segment: WorkbenchGroupDisplaySegment) {
-  const row = segment.rows.oa[0];
-  if (!row) {
+  if (segment.rows.oa.length === 0) {
     return 0;
   }
-  if (row.displayRole === "expense-claim-item") {
-    return parseWorkbenchAmountCents(row.tableValues.amount ?? "");
+  if (segment.rows.oa.every((row) => row.displayRole === "expense-claim-item")) {
+    return segment.rows.oa.reduce(
+      (total, row) => total + parseWorkbenchAmountCents(row.tableValues.amount ?? ""),
+      0,
+    );
   }
-  return workbenchComparableAmountCents(row);
+  return workbenchComparableAmountCents(segment.rows.oa[0]);
 }
 
 function canUseAmountFallback(
@@ -372,23 +387,27 @@ function canUseAmountFallback(
 function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
   const parent = segment.rows.oa[0];
   const items = parent?.expenseItems ?? [];
-  if (!parent || !hasExpandableExpenseItems(parent)) {
+  if (!parent || !shouldExpandExpenseClaim(parent, segment.rows.invoice)) {
     return [segment];
   }
 
   const itemIds = new Set(items.map((item) => item.id));
+  const itemOrder = new Map(items.map((item, index) => [item.id, index]));
+  const linkedInvoiceRows = segment.rows.invoice.map((row) => ({
+    row,
+    itemIds: rowExpenseItemIds(row).filter((itemId) => itemIds.has(itemId)),
+  }));
+  const residualInvoices = linkedInvoiceRows
+    .filter(({ itemIds: linkedItemIds }) => linkedItemIds.length === 0)
+    .map(({ row }) => row);
   const invoicesByItemId = new Map<string, WorkbenchRecord[]>();
-  segment.rows.invoice.forEach((row) => {
-    if (!row.sourceExpenseItemId || !itemIds.has(row.sourceExpenseItemId)) {
-      return;
-    }
-    const rows = invoicesByItemId.get(row.sourceExpenseItemId) ?? [];
-    rows.push(row);
-    invoicesByItemId.set(row.sourceExpenseItemId, rows);
+  linkedInvoiceRows.forEach(({ row, itemIds: linkedItemIds }) => {
+    linkedItemIds.forEach((itemId) => {
+      const rows = invoicesByItemId.get(itemId) ?? [];
+      rows.push(row);
+      invoicesByItemId.set(itemId, rows);
+    });
   });
-  const summaryInvoices = segment.rows.invoice.filter(
-    (row) => !row.sourceExpenseItemId || !itemIds.has(row.sourceExpenseItemId),
-  );
   const summaryRow: WorkbenchRecord = {
     ...parent,
     displayRole: "expense-claim-summary",
@@ -398,12 +417,38 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
       amount: "—",
     },
   };
-  const itemSegments = items.map((item) => ({
-    id: item.id,
-    rows: {
-      oa: [{
+  const remainingItemIds = new Set(items.map((item) => item.id));
+  const itemSegments: WorkbenchGroupDisplaySegment[] = [];
+  while (remainingItemIds.size > 0) {
+    const firstItemId = [...remainingItemIds].sort(
+      (left, right) => (itemOrder.get(left) ?? 0) - (itemOrder.get(right) ?? 0),
+    )[0];
+    const pendingItemIds = [firstItemId];
+    const componentItemIds = new Set<string>();
+    const componentInvoiceRows = new Map<string, WorkbenchRecord>();
+    while (pendingItemIds.length > 0) {
+      const itemId = pendingItemIds.pop();
+      if (!itemId || componentItemIds.has(itemId)) {
+        continue;
+      }
+      componentItemIds.add(itemId);
+      (invoicesByItemId.get(itemId) ?? []).forEach((invoiceRow) => {
+        componentInvoiceRows.set(invoiceRow.id, invoiceRow);
+        rowExpenseItemIds(invoiceRow)
+          .filter((linkedItemId) => itemIds.has(linkedItemId) && !componentItemIds.has(linkedItemId))
+          .forEach((linkedItemId) => pendingItemIds.push(linkedItemId));
+      });
+    }
+    componentItemIds.forEach((itemId) => remainingItemIds.delete(itemId));
+    const componentItems = items.filter((item) => componentItemIds.has(item.id));
+    const componentId = componentItems.map((item) => item.id).join("+");
+    itemSegments.push({
+      id: componentId,
+      rows: {
+        oa: componentItems.map((item) => ({
         ...parent,
         amount: item.amount,
+        sourceExpenseItemIds: [item.id],
         displayRole: "expense-claim-item" as const,
         tableValues: {
           ...parent.tableValues,
@@ -420,23 +465,33 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
           reconciliationStatus: "—",
         },
         availableActions: [],
-      }],
-      bank: [],
-      invoice: invoicesByItemId.get(item.id) ?? missingInvoicePlaceholder(parent, item),
-    },
-  }));
+        })),
+        bank: [],
+        invoice: componentInvoiceRows.size > 0
+          ? Array.from(componentInvoiceRows.values())
+          : missingInvoicePlaceholder(parent, componentItems[0]),
+      },
+    });
+  }
 
-  return [
+  const expandedSegments = [
     {
       id: `${parent.id}:summary`,
       rows: {
         oa: [summaryRow],
         bank: segment.rows.bank,
-        invoice: summaryInvoices,
+        invoice: [],
       },
     },
     ...itemSegments,
   ];
+  if (residualInvoices.length > 0) {
+    expandedSegments.push({
+      id: `${parent.id}:invoice:unassigned`,
+      rows: { oa: [], bank: [], invoice: residualInvoices },
+    });
+  }
+  return expandedSegments;
 }
 
 function missingInvoicePlaceholder(
@@ -444,19 +499,26 @@ function missingInvoicePlaceholder(
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
 ) {
   const anomaly = item.oaInvoiceAnomaly;
-  if (anomaly?.code !== "oa_invoice_attachment_missing") {
+  if (!anomaly || ![
+    "oa_invoice_attachment_missing",
+    "oa_invoice_attachment_parse_failed",
+  ].includes(anomaly.code)) {
     return [];
   }
+  const label = anomaly.code === "oa_invoice_attachment_parse_failed"
+    ? "OA附件解析失败"
+    : "OA发票附件缺失";
   return [{
     id: `${parent.id}:missing-invoice:${item.id}`,
     caseId: parent.caseId,
     recordType: "invoice" as const,
     sourceKind: "oa_attachment_unknown" as const,
     sourceOaId: parent.id,
-    sourceExpenseItemId: item.id,
-    label: "OA发票附件缺失",
+    sourceExpenseItemIds: [item.id],
+    externalUrl: "/oa/#/normal/32?formId=32",
+    label,
     status: "待处理",
-    statusCode: "oa_invoice_attachment_missing",
+    statusCode: anomaly.code,
     statusTone: "danger",
     exceptionHandled: false,
     amount: "—",
@@ -479,7 +541,21 @@ function missingInvoicePlaceholder(
 
 function hasExpandableExpenseItems(row: WorkbenchRecord) {
   const items = row.expenseItems ?? [];
-  return items.length > 1 || items.some((item) => item.oaInvoiceAnomaly?.code === "oa_invoice_attachment_missing");
+  return items.length > 1 || items.some((item) => [
+    "oa_invoice_attachment_missing",
+    "oa_invoice_attachment_parse_failed",
+  ].includes(item.oaInvoiceAnomaly?.code ?? ""));
+}
+
+function shouldExpandExpenseClaim(parent: WorkbenchRecord, invoiceRows: WorkbenchRecord[]) {
+  return (parent.expenseItems?.length ?? 0) > 0 && (
+    hasExpandableExpenseItems(parent)
+    || invoiceRows.some((row) => row.sourceKind === "oa_attachment_invoice")
+  );
+}
+
+function rowExpenseItemIds(row: WorkbenchRecord) {
+  return Array.from(new Set((row.sourceExpenseItemIds ?? []).map((itemId) => itemId.trim()).filter(Boolean)));
 }
 
 function expenseItemSummaryLabel(items: NonNullable<WorkbenchRecord["expenseItems"]>) {
