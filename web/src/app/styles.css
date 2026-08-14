@@ -14888,47 +14888,6 @@ body.column-layout-dragging {
   min-width: 0;
 }
 
-.workbench-compact-cell-trigger {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: inherit;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.workbench-compact-cell-trigger > * {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workbench-compact-cell-popover {
-  z-index: 1700;
-  max-width: min(420px, calc(100vw - 24px));
-  border: 1px solid #d8e1eb;
-  border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
-}
-
-.workbench-compact-cell-dialog {
-  padding: 9px 11px;
-  color: #243548;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: pre-line;
-}
-
 @media (max-width: 720px) {
   .workbench-zone-slot .zone .zone-header,
   .workbench-zone-slot .zone .zone-title-block,

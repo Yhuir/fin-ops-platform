@@ -1,6 +1,6 @@
 import { Info } from "lucide-react";
-import { memo, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
-import { Chip, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
+import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
+import { Chip } from "@heroui/react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import { formatMoney } from "../../features/money";
@@ -94,14 +94,7 @@ function WorkbenchRecordCard({
           >
             <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
-              {isCompactTruncatedColumn(paneId, column.key) ? (
-                <CompactCellPopover
-                  label={compactCellLabel(row, column.key, value)}
-                  onSelect={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
-                >
-                  {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
-                </CompactCellPopover>
-              ) : renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
             </div>
           </div>
         );
@@ -149,62 +142,6 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.onOpenDetail === nextProps.onOpenDetail
   && previousProps.onRowAction === nextProps.onRowAction
 ));
-
-function isCompactTruncatedColumn(paneId: WorkbenchRecordType, columnKey: string) {
-  return (
-    (paneId === "oa" && ["projectName", "counterparty"].includes(columnKey))
-    || (paneId === "bank" && columnKey === "note")
-    || (paneId === "invoice" && columnKey === "buyerName")
-  );
-}
-
-function compactCellLabel(row: WorkbenchRecord, columnKey: string, fallback: string) {
-  if (row.recordType === "bank" && columnKey === "note" && row.bankTextFields?.length) {
-    return row.bankTextFields.map((field) => `${field.label}：${field.value}`).join("\n");
-  }
-  if (row.recordType === "invoice" && columnKey === "buyerName") {
-    return [row.tableValues.buyerName, row.tableValues.buyerTaxId].filter(Boolean).join("\n");
-  }
-  return fallback;
-}
-
-function CompactCellPopover({ label, children, onSelect }: { label: string; children: ReactNode; onSelect?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const show = () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    setOpen(true);
-  };
-  const hide = () => {
-    closeTimer.current = setTimeout(() => setOpen(false), 80);
-  };
-
-  useEffect(() => () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-  }, []);
-
-  return (
-    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        aria-label={`查看完整内容：${label}`}
-        className="workbench-compact-cell-trigger"
-        onBlur={hide}
-        onFocus={show}
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect?.();
-        }}
-      >
-        {children}
-      </PopoverTrigger>
-      <PopoverContent className="workbench-compact-cell-popover" onMouseEnter={show} onMouseLeave={hide} placement="bottom start">
-        <PopoverDialog className="workbench-compact-cell-dialog">{label}</PopoverDialog>
-      </PopoverContent>
-    </PopoverRoot>
-  );
-}
 
 function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, columns: WorkbenchColumn[]) {
   const values: string[] = [];

@@ -292,8 +292,9 @@ describe("WorkbenchZone", () => {
     expect(onPaneTimeFilterChange).not.toHaveBeenCalled();
   });
 
-  test("reveals full compact cell content on hover", async () => {
+  test("renders all three panes directly without compact cell hover popovers", async () => {
     const user = userEvent.setup();
+    const onSelectRow = vi.fn();
 
     render(
       <WorkbenchZone
@@ -304,18 +305,24 @@ describe("WorkbenchZone", () => {
         onSearchQueryChange={() => {}}
         onOpenDetail={() => {}}
         onRowAction={() => {}}
-        onSelectRow={() => {}}
+        onSelectRow={onSelectRow}
         panes={panes}
         zoneId="paired"
       />,
     );
 
-    const trigger = screen.getByLabelText("查看完整内容：华东改造项目");
-    await user.hover(trigger);
-
-    expect(await screen.findByText("华东改造项目", { selector: ".workbench-compact-cell-dialog" })).toBeVisible();
+    const directValues = ["华东改造项目", "设备采购款", "华东项目甲方"].map((value) => screen.getByText(value));
+    for (const value of directValues) {
+      expect(value).toBeVisible();
+      await user.hover(value);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await user.unhover(value);
+    }
     expect(screen.getByText("设备首付款支付")).toBeVisible();
-    expect(screen.queryByLabelText("查看完整内容：设备首付款支付")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看完整内容/ })).not.toBeInTheDocument();
+
+    await user.click(directValues[0]);
+    expect(onSelectRow).toHaveBeenCalledTimes(1);
   });
 
   test("renders one HeroUI search field inside the zone header", async () => {
