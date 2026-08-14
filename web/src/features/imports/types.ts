@@ -195,3 +195,28 @@ export type ImportSessionPayload = {
   job?: BackgroundJob;
   affectedScopeKeys: string[];
 };
+
+export type ManualInvoiceDirection = "input" | "output";
+export type ManualInvoiceNature = "blue" | "red";
+
+export type ManualInvoiceEntryValues = {
+  invoiceDirection: ManualInvoiceDirection;
+  invoiceNature: ManualInvoiceNature;
+  sellerName: string;
+  sellerTaxNo: string;
+  buyerName: string;
+  buyerTaxNo: string;
+  invoiceNumber: string;
+  invoiceCode: string;
+  invoiceDate: string;
+  netAmount: string;
+  taxRate: string;
+  taxAmount: string;
+  totalWithTax: string;
+};
+
+export type ManualInvoiceEntryPreview = {
+  values: ManualInvoiceEntryValues;
+  fileId: string;
+  importSession: ImportSessionPayload;
+};

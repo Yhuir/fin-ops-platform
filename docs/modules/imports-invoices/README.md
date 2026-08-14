@@ -28,11 +28,14 @@
 
 - `web/src/pages/imports/ImportInvoicesPage.tsx`
 - `web/src/components/imports/ImportWorkflowPage.tsx`
+- `web/src/components/imports/ManualInvoiceEntryDrawer.tsx`
 - `web/src/features/imports/api.ts`
 - `web/src/features/imports/types.ts`
 - `web/src/app/importRoutes.ts`
 - `backend/src/fin_ops_platform/app/server.py`
 - `backend/src/fin_ops_platform/services/import_file_service.py`
+- `backend/src/fin_ops_platform/services/manual_invoice_entry_service.py`
+- `backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py`
 - `backend/src/fin_ops_platform/services/imports.py`
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
 - `backend/src/fin_ops_platform/services/import_job_queue.py`
@@ -47,7 +50,9 @@
 
 `/imports/invoices` 只渲染 `ImportWorkflowPage mode="invoice"`。共享导入工作流负责文件选择、每文件票据方向选择、预览、重复审计、确认、后台 job 反馈和 session restore。
 
-当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。旧 `/imports/preview`、`/imports/confirm` JSON 写入入口已删除，HTTP 只有 file/session API。
+当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。
+
+同一页面的“发票录入”是单张发票的人工入口：JPG/JPEG/PDF 上传可选，`/imports/invoices/manual/recognize` 只返回当前发票池需要的预填字段；用户编辑后由 `/imports/invoices/manual/preview` 执行服务端必填、金额、红蓝字、票号/代码条件和重复校验，并生成普通 `FileImportSession`。最终确认仍只调用 `/imports/files/confirm`，不建立第二发票池、专用确认写链、专用 read model 或银行流水关系。旧 `/imports/preview`、`/imports/confirm` JSON 写入入口，以及待找发票 service 内不可达的 `preview_manual_invoice` / `confirm_manual_invoice` 旧链均已删除。
 
 税务平台多 sheet 工作簿若包含唯一的 `发票基础信息`，该 sheet 是每张 canonical 发票的唯一表头事实源；不得因前面的 `信息汇总表` 可以解析就提前返回。`信息汇总表` 只作为同票商品/服务行证据附着到表头行，不参与 canonical 金额、税额、价税合计或商品行字段的顶层赋值。`发票基础信息` 重名、无法识别、无有效发票或与明细强身份不一致时整文件 fail closed，不回退旧首 sheet 链；不含该 sheet 的历史单 sheet 模板继续使用共享模板识别合同。
 

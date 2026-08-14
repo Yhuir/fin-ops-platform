@@ -36,6 +36,8 @@ rows、summary、全期间 statistics、filter options、筛选、排序、服�
 
 候选发票、流水/发票/OA 详情和 relation detail 同样走页面 canonical repository。选择已有发票、收入状态、规则保存的权限、审计、幂等、CAS/占用冲突和 command/relation 写模型保持不变；写成功后页面重新 GET canonical facts，不等待 read-model barrier。
 
+待找发票不创建新发票。旧 `preview_manual_invoice` / `confirm_manual_invoice` service 写链已经删除；用户需要单张录入时只能进入“发票导入 → 发票录入”，由统一 file import preview/confirm job 写入 canonical 发票池，且不会自动关联当前银行流水。
+
 页面使用共享 `FinanceTable` 的有界表内滚动和 sticky 表头；HeroUI 页容量选择器、范围和上一页/下一页统一位于表格 footer，不保留表格外的旧分页容器。
 
 `pending_invoice`、`search-pending`、`invoice_lifecycle` 页面 projection/worker 与独立 Search runtime 已删除。`workbench_relation` 共享 distribution 仅供仍登记消费者使用，本页面直接读取 canonical facts，不消费它。

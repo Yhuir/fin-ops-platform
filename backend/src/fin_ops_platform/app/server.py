@@ -169,6 +169,10 @@ from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleSe
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.manual_invoice_entry_service import (
+    ManualInvoiceEntryError,
+    ManualInvoiceEntryService,
+)
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
 )
@@ -260,6 +264,7 @@ from fin_ops_platform.services.operation_freshness_barrier import (
 )
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -816,6 +821,11 @@ class Application:
             self._import_service,
             persisted_state.get("file_imports"),
             file_store=self._state_store,
+        )
+        self._invoice_document_recognizer = OAAttachmentInvoiceService()
+        self._manual_invoice_entry_service = ManualInvoiceEntryService(
+            file_import_service=self._file_import_service,
+            document_recognizer=self._invoice_document_recognizer,
         )
         self._matching_service = MatchingEngineService.from_snapshot(
             self._import_service,
@@ -1988,6 +1998,10 @@ class Application:
             return self._handle_import_batch(batch_id)
         if method == "GET" and route_path == "/imports/templates":
             return self._handle_import_templates()
+        if method == "POST" and route_path == "/imports/invoices/manual/recognize":
+            return self._handle_manual_invoice_recognize(body, headers)
+        if method == "POST" and route_path == "/imports/invoices/manual/preview":
+            return self._handle_manual_invoice_preview(body, imported_by=request_actor_id)
         if method == "POST" and route_path == "/imports/files/preview":
             return self._handle_import_file_preview(body, headers, imported_by=request_actor_id)
         if method == "POST" and route_path == "/imports/files/confirm":
@@ -2074,6 +2088,8 @@ class Application:
                 "/imports/files/confirm",
                 "/imports/files/retry",
                 "/imports/files/sessions/{session_id}",
+                "/imports/invoices/manual/recognize",
+                "/imports/invoices/manual/preview",
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/bank-details/auto-tag-rules/reapply",
@@ -7670,6 +7686,60 @@ class Application:
             },
         )
 
+    def _handle_manual_invoice_recognize(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        if not files:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "manual_invoice_file_required", "message": "请选择 JPG、JPEG 或 PDF 发票文件。"},
+            )
+        upload = files[0]
+        try:
+            values = self._manual_invoice_entry_service.recognize(
+                file_name=upload.file_name,
+                content=upload.content,
+            )
+        except ManualInvoiceEntryError as exc:
+            return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
+        return self._json_response(HTTPStatus.OK, {"values": values})
+
+    def _handle_manual_invoice_preview(
+        self,
+        body: str | bytes | None,
+        *,
+        imported_by: str,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._manual_invoice_entry_service.preview(
+                payload=payload,
+                imported_by=imported_by,
+            )
+            self._persist_import_preview_delta(preview.session.id)
+        except ManualInvoiceEntryError as exc:
+            return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "manual_invoice_preview_unavailable", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "values": preview.values,
+                "file_id": preview.file_id,
+                "import_session": self._serialize_file_session(preview.session),
+            },
+        )
+
     def _handle_import_file_preview(
         self,
         body: str | bytes | None,
@@ -8076,6 +8146,10 @@ class Application:
             import_service,
             load_file_imports(),
             file_store=self._state_store,
+        )
+        self._manual_invoice_entry_service = ManualInvoiceEntryService(
+            file_import_service=self._file_import_service,
+            document_recognizer=self._invoice_document_recognizer,
         )
 
     def _parse_import_file_preview_overrides(

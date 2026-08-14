@@ -6,7 +6,9 @@ import {
   fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
+  previewManualInvoice,
   previewImportFiles,
+  recognizeManualInvoice,
   resolveImportApiErrorMessage,
   retryImportFiles,
 } from "../features/imports/api";
@@ -21,6 +23,94 @@ afterEach(() => {
 });
 
 describe("imports api", () => {
+  test("maps OCR prefill and serializes the server-authoritative manual invoice preview", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        values: {
+          seller_name: "云南供应商",
+          invoice_number: "12345678901234567890",
+          tax_rate: "13",
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        values: {
+          invoice_direction: "input",
+          invoice_nature: "red",
+          seller_name: "云南供应商",
+          seller_tax_no: "915300001",
+          buyer_name: "云南采购方",
+          buyer_tax_no: "915300002",
+          invoice_number: "12345678901234567890",
+          invoice_code: "",
+          invoice_date: "2026-08-14",
+          net_amount: "100.00",
+          tax_rate: "13",
+          tax_amount: "13.00",
+          total_with_tax: "113.00",
+        },
+        file_id: "manual_file_1",
+        import_session: {
+          session: {
+            id: "manual_session_1",
+            imported_by: "web_finance_user",
+            file_count: 1,
+            status: "awaiting_confirmation",
+            created_at: "2026-08-14T10:00:00+08:00",
+          },
+          files: [{
+            id: "manual_file_1",
+            file_name: "发票录入",
+            template_code: "manual_invoice_entry",
+            batch_type: "input_invoice",
+            status: "preview_ready",
+            message: "预览成功",
+            row_count: 1,
+            success_count: 1,
+            error_count: 0,
+            duplicate_count: 0,
+            suspected_duplicate_count: 0,
+            updated_count: 0,
+            row_results: [],
+          }],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    global.fetch = fetchMock as typeof fetch;
+
+    const recognized = await recognizeManualInvoice(new File(["jpg"], "invoice.jpg", { type: "image/jpeg" }));
+    const preview = await previewManualInvoice({
+      invoiceDirection: "input",
+      invoiceNature: "red",
+      sellerName: "云南供应商",
+      sellerTaxNo: "915300001",
+      buyerName: "云南采购方",
+      buyerTaxNo: "915300002",
+      invoiceNumber: "12345678901234567890",
+      invoiceCode: "",
+      invoiceDate: "2026-08-14",
+      netAmount: "100",
+      taxRate: "13",
+      taxAmount: "13",
+      totalWithTax: "113",
+    });
+
+    expect(recognized).toMatchObject({ sellerName: "云南供应商", taxRate: "13" });
+    expect(preview.fileId).toBe("manual_file_1");
+    expect(preview.values.invoiceNature).toBe("red");
+    expect(preview.importSession.files[0]?.templateCode).toBe("manual_invoice_entry");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/imports/invoices/manual/recognize",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+    const previewRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(JSON.parse(String(previewRequest.body))).toMatchObject({
+      invoice_direction: "input",
+      invoice_nature: "red",
+      invoice_number: "12345678901234567890",
+      tax_rate: "13",
+    });
+  });
+
   test("extracts backend message from json-shaped request errors", () => {
     expect(
       resolveImportApiErrorMessage(

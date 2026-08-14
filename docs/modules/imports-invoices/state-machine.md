@@ -12,6 +12,8 @@
 | --- | --- | --- |
 | `files_selected` | 前端本地状态，用户已选择一个或多个文件 | `files_configured`、清空 |
 | `files_configured` | 每个文件已选择 `input_invoice` 或 `output_invoice` | `previewing`、清空 |
+| `manual_editing` | 单张人工录入表单可编辑；附件识别仅为可选预填 | `manual_previewing`、清空 |
+| `manual_previewing` | 服务端正在校验人工字段、查重并创建普通 file import preview | `preview_ready`、`error` |
 | `previewing` | 前端正在调用 `/imports/files/preview` | `preview_ready`、`preview_ready_with_errors`、`error`、unmount cleanup |
 | `preview_ready` | 所有可识别文件生成 preview batch，可选择确认 | `confirming`、重新预览、清空 |
 | `preview_ready_with_errors` | 至少一个文件不可识别或存在 file-level error | 可确认其中 `preview_ready` 文件，或重试/重新预览 |
@@ -49,6 +51,7 @@
 - error：文件读取失败、模板不识别、权限/API 错误、job failure 必须有用户可见反馈。
 - stale/refreshing：`preview_stale` 显示重新预览提示；下游页面 stale/refreshing 由各自 read model status 呈现。
 - permission disabled/hidden：当前导入写权限由后端 contract 决定；若未来增加前端权限显示，必须补隐藏/禁用交互测试。
+- manual entry：只读账号不显示入口；识别、预览、返回编辑和确认期间锁定关闭。返回编辑必须先成功 discard 服务端预览；确认弹窗只读且最终确认仍走普通 file confirm job。
 - session persistence：同一路由重挂载先使用本地 session id，本地缺失/失效时从服务端恢复当前用户最新活跃 preview。清空已预览内容必须先成功调用 discard，再清理本地状态；discard 失败时保留预览。
 
 ## Read Model / Worker 状态
@@ -65,7 +68,6 @@
 刷新触发来源：
 
 - `invoice_import_confirmed`
-- `manual_invoice_confirmed`
 - `tax_certified_import_confirmed`
 - canonical `pair_relation_changed` 相关下游 source-version/read-model 链路；不包含前端跨页事件
 - `startup_stale_scan` 默认关闭，且不直接刷新发票相关 read model；它只标记 workbench matching dirty scopes。
@@ -80,6 +82,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-14 | 新增单张发票人工录入并删除待找发票旧写链 | 可选附件识别只预填；服务端预览、重复校验、红蓝字金额和普通 confirm job 形成单一闭环；不自动绑定银行流水 | `tests/test_manual_invoice_entry_service.py`、`tests/test_import_file_api.py`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-08-11 | 导入生命周期以服务端恢复并支持显式放弃 | 浏览器本地状态不再是唯一恢复入口；放弃的 preview 不再永久显示 pending，确认链仍复用既有 durable job/outbox | `tests/test_import_lifecycle_service.py`、`test_preview_session_can_be_recovered_and_discarded_before_confirm`、`ImportCenterPage.test.tsx` |
 | 2026-08-11 | 放弃状态 formal payload 原子闭环 | batch/file/session 的 canonical 列与 normalized payload 同时进入 `reverted`；历史精确 mismatch 通过指纹绑定工具修复，不扫描 canonical 发票 | `tests/test_import_lifecycle_service.py`、`tests/test_audit_invoice_import_page.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-07-22 | preview 持久化收窄为 session-scoped exact delta | stale API 后续预览不能覆盖另一进程已确认的 file/session/batch；batch 与 file/session 同事务提交 | `test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`test_save_import_delta_rolls_back_batch_when_file_write_fails` |

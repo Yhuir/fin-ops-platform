@@ -716,39 +716,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(statuses[first_transaction_id], "cash_income")
         self.assertEqual(statuses[second_transaction_id], "cash_income")
 
-    def test_legacy_manual_invoice_recoverable_failure_persists_command_log(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            app = build_application(data_dir=data_dir)
-            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Recoverable")
-            payload = {
-                "bank_transaction_id": transaction_id,
-                "invoice_no": "API-MAN-RECOVER",
-                "issue_date": "2026-05-20",
-                "total_with_tax": "118.00",
-                "seller_name": "Vendor Recoverable",
-                "buyer_name": "云南溯源科技有限公司",
-            }
-            preview = app._pending_invoice_application_service.preview_manual_invoice(payload)
-            app._pending_invoice_application_service._fault_injector = (
-                lambda phase, _command: (_ for _ in ()).throw(RuntimeError("boom"))
-                if phase == "after_invoice_created"
-                else None
-            )
-
-            with self.assertRaises(RuntimeError):
-                app._pending_invoice_application_service.confirm_manual_invoice(
-                    {**payload, "preview_id": preview["preview_id"], "request_id": "api-recoverable"},
-                    actor_id="api-test",
-                )
-            app._persist_state()
-
-            reloaded = build_application(data_dir=data_dir, bootstrap_mode="legacy")
-
-        command = reloaded._pending_invoice_commands["api-recoverable"]
-        self.assertEqual(command["status"], "failed_recoverable")
-        self.assertEqual(command["last_successful_status"], "invoice_created")
-
     @staticmethod
     def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False) -> str:
         preview = app._import_service.preview_import(

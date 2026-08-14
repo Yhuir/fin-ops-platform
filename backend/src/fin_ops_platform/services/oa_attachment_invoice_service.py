@@ -32,6 +32,7 @@ from fin_ops_platform.services.untrusted_document_policy import (
     UntrustedDocumentError,
     ValidatedDocument,
     inspect_untrusted_document,
+    normalize_image_for_ocr,
 )
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -83,6 +84,55 @@ class OAAttachmentInvoiceService:
             for evidence in self.parse_evidences(files)
             if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
         ]
+
+    def recognize_uploaded_invoice(self, *, file_name: str, content: bytes) -> dict[str, str]:
+        suffix = Path(file_name).suffix.lower()
+        expected_kind = "jpeg" if suffix in {".jpg", ".jpeg"} else "pdf" if suffix == ".pdf" else ""
+        document = inspect_untrusted_document(
+            file_name=file_name,
+            content=content,
+            allowed_kinds=frozenset({expected_kind}) if expected_kind else frozenset(),
+            limits=OA_ATTACHMENT_LIMITS,
+        )
+        if document.kind == "pdf":
+            for segment in self._extract_pdf_text_segments(document):
+                if evidence := self._first_invoice_evidence(segment):
+                    return evidence
+            return self._recognize_first_invoice_from_pdf_images(document)
+        extracted_text = self._extract_image_text(document)
+        return self._first_invoice_evidence(extracted_text) or {}
+
+    def _recognize_first_invoice_from_pdf_images(self, document: ValidatedDocument) -> dict[str, str]:
+        if fitz is None:
+            return {}
+        try:
+            pdf = fitz.open(stream=document.content, filetype="pdf")
+        except Exception:
+            return {}
+        try:
+            for page in pdf:
+                try:
+                    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                    normalized_image = normalize_image_for_ocr(
+                        content=pixmap.tobytes("png"),
+                        limits=OA_ATTACHMENT_LIMITS,
+                    )
+                except (UntrustedDocumentError, ValueError):
+                    continue
+                extracted_text = "\n".join(self._run_image_ocr(normalized_image)).strip()
+                if evidence := self._first_invoice_evidence(extracted_text):
+                    return evidence
+        finally:
+            pdf.close()
+        return {}
+
+    def _first_invoice_evidence(self, extracted_text: str) -> dict[str, str] | None:
+        if not clean_string(extracted_text):
+            return None
+        for evidence in self._parse_evidences_from_text(extracted_text):
+            if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence):
+                return dict(evidence)
+        return None
 
     def parse_evidences(self, files: list[dict[str, object]]) -> list[dict[str, str]]:
         evidences: list[dict[str, str]] = []

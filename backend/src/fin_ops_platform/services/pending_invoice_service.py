@@ -8,7 +8,7 @@ from http import HTTPStatus
 import json
 from typing import Any, Callable
 
-from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceType, TransactionDirection
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -35,24 +35,17 @@ from fin_ops_platform.services.workbench_relation_distribution_mapper import rel
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
-PENDING_INVOICE_RELATION_MODE = "pending_invoice_manual_invoice"
 ATTACH_EXISTING_INVOICE_RELATION_MODE = "pending_invoice_attach_existing_invoice"
-MANUAL_INVOICE_SOURCE_NAME = "pending_invoice_manual_entry"
-MANUAL_INVOICE_SOURCE_TYPE = "manual_invoice_import"
 EXPENSE_FILTERS = {"requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
 INCOME_FILTERS = {"requires_invoice", "no_invoice_required", "cash_income"}
 VALID_FILTERS = {"all", *EXPENSE_FILTERS, *INCOME_FILTERS}
 
 
 def record_pending_invoice_audit(audit_service: Any, event: dict[str, Any]) -> None:
-    action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
+    action = str(event.get("action") or "pending_invoice_command_recorded")
     entity_type = str(event.get("entity_type") or event.get("source") or "")
     if not entity_type:
-        entity_type = (
-            "pending_invoice_attach_existing_invoice"
-            if action == "pending_invoice_attach_existing_invoice_confirmed"
-            else "pending_invoice_manual_invoice"
-        )
+        entity_type = "pending_invoice_command"
     audit_service.record_action(
         actor_id=str(event.get("actor_id") or "pending_invoice"),
         action=action,
@@ -1701,63 +1694,6 @@ class PendingInvoiceApplicationService:
             raise PendingInvoiceError("pending_invoice_command_repository_unavailable", "Pending invoice command repository is not configured.")
         save(command)
 
-    def preview_manual_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
-        transaction = self._get_transaction(str(payload.get("bank_transaction_id") or ""))
-        direction = self.direction_for_transaction(transaction)
-        request_key = self.request_key_for_payload(payload, direction=direction)
-        import_row = self.invoice_import_row(payload, request_key)
-        preview = self._import_service.preview_import(
-            batch_type=self.batch_type_for_direction(direction),
-            source_name=MANUAL_INVOICE_SOURCE_NAME,
-            imported_by=str(payload.get("actor_id") or payload.get("actor") or "pending_invoice_preview"),
-            rows=[import_row],
-        )
-        row_result = preview.row_results[0]
-        duplicate_status = "clear"
-        if row_result.decision in (ImportDecision.DUPLICATE_SKIPPED, ImportDecision.SUSPECTED_DUPLICATE):
-            duplicate_status = str(row_result.decision.value)
-        elif row_result.decision == ImportDecision.ERROR:
-            raise PendingInvoiceError(
-                "invalid_invoice_payload",
-                row_result.decision_reason or "Invalid invoice payload.",
-                status_code=HTTPStatus.BAD_REQUEST,
-            )
-        preview_id = f"pending_invoice_preview_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:16]}"
-        affected_months = self._affected_months_for_transaction(transaction)
-        result = {
-            "preview_id": preview_id,
-            "request_key": request_key,
-            "can_confirm": duplicate_status == "clear" or self._find_invoice_by_request_key(request_key) is not None,
-            "target_invoice_type": "input" if direction == "expense" else "output",
-            "bank_transaction_summary": {
-                "id": transaction.id,
-                "direction": direction,
-                "counterparty_name": transaction.counterparty_name_raw,
-                "trade_time": transaction.trade_time or transaction.txn_date,
-                "amount": _decimal_to_str(transaction.amount),
-            },
-            "invoice_identity": {
-                "source_unique_key": preview.normalized_rows[0].get("source_unique_key"),
-                "data_fingerprint": preview.normalized_rows[0].get("data_fingerprint"),
-            },
-            "duplicate_check": {
-                "status": duplicate_status,
-                "matched_invoice_id": row_result.linked_object_id,
-                "message": row_result.decision_reason or "",
-            },
-            "relation_impact": {
-                "relation_mode": PENDING_INVOICE_RELATION_MODE,
-                "affected_months": affected_months,
-            },
-            "warnings": [],
-        }
-        self._previews[preview_id] = {
-            "request_key": request_key,
-            "payload_fingerprint": self._payload_fingerprint(payload),
-            "direction": direction,
-        }
-        return result
-
     def preview_attach_existing_invoice(self, *, transaction_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         transaction = self._get_transaction(transaction_id)
         direction = self.direction_for_transaction(transaction)
@@ -2082,109 +2018,6 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "failed_recoverable")
             raise
 
-    def confirm_manual_invoice(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        preview_id = str(payload.get("preview_id") or "").strip()
-        request_id = str(payload.get("request_id") or "").strip()
-        if not preview_id or not request_id:
-            raise PendingInvoiceError("invalid_invoice_payload", "preview_id and request_id are required.")
-        preview = self.preview_manual_invoice(payload)
-        if preview["preview_id"] != preview_id:
-            raise PendingInvoiceError("invalid_invoice_payload", "preview_id does not match the invoice payload.")
-        request_key = str(preview["request_key"])
-        direction = "expense" if preview["target_invoice_type"] == "input" else "income"
-        transaction_id = str(payload.get("bank_transaction_id") or "").strip()
-        affected_months = list(preview["relation_impact"]["affected_months"])
-        command = self._get_command(request_id)
-        if isinstance(command, dict) and command.get("status") == "completed":
-            return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
-        if not isinstance(command, dict):
-            command = {
-                "request_id": request_id,
-                "request_key": request_key,
-                "status": "started",
-                "status_history": ["started"],
-                "created_at": _now(),
-                "updated_at": _now(),
-            }
-            self._save_command(command)
-        elif command.get("request_key") != request_key:
-            raise PendingInvoiceError("invalid_invoice_payload", "request_id was already used for another invoice payload.")
-
-        try:
-            invoice_id = str(command.get("invoice_id") or "")
-            relation_case_id = str(command.get("relation_case_id") or "")
-            if not relation_case_id:
-                self._assert_relation_write_precondition(
-                    row_ids=[transaction_id],
-                    month_scope=affected_months[0] if len(affected_months) == 1 else "all",
-                )
-            if not invoice_id:
-                orphan_invoice = self._find_invoice_by_request_key(request_key)
-                if orphan_invoice is not None and not self._invoice_has_pending_relation(
-                    orphan_invoice.id,
-                    transaction_id=transaction_id,
-                ):
-                    invoice_id = orphan_invoice.id
-                elif orphan_invoice is not None:
-                    self._mark_command(command, "failed_terminal", error_code="duplicate_invoice")
-                    raise PendingInvoiceError(
-                        "duplicate_invoice",
-                        "Invoice identity matched an existing pending invoice relation.",
-                        status_code=HTTPStatus.CONFLICT,
-                    )
-                else:
-                    if preview["duplicate_check"]["status"] != "clear":
-                        self._mark_command(command, "failed_terminal", error_code="duplicate_invoice")
-                        raise PendingInvoiceError(
-                            "duplicate_invoice",
-                            "Invoice identity matched an existing invoice.",
-                            status_code=HTTPStatus.CONFLICT,
-                        )
-                    invoice_id = self._create_invoice(payload, request_key=request_key, direction=direction, actor_id=actor_id)
-                command["invoice_id"] = invoice_id
-                self._mark_command(command, "invoice_created")
-                self._inject_fault("after_invoice_created", command)
-
-            if not relation_case_id:
-                relation_case_id = self._create_relation(
-                    transaction_id=transaction_id,
-                    invoice_id=invoice_id,
-                    request_key=request_key,
-                    actor_id=actor_id,
-                )
-                command["relation_case_id"] = relation_case_id
-                self._mark_command(command, "relation_created")
-                self._inject_fault("after_relation_created", command)
-
-            result = self._result_payload(
-                transaction_id=transaction_id,
-                invoice_id=invoice_id,
-                relation_case_id=relation_case_id,
-                affected_months=affected_months,
-                direction=direction,
-            )
-            result = _with_pending_invoice_affected_scopes(result)
-            self._record_audit(
-                actor_id=actor_id,
-                transaction_id=transaction_id,
-                invoice_id=invoice_id,
-                relation_case_id=relation_case_id,
-                request_id=request_id,
-                request_key=request_key,
-                affected_months=affected_months,
-            )
-            command["result"] = deepcopy(result)
-            self._mark_command(command, "completed")
-            return result
-        except PendingInvoiceError as exc:
-            self._mark_relation_precondition_error(command, exc)
-            raise
-        except Exception as exc:
-            command["error"] = str(exc)
-            command["last_successful_status"] = self._last_successful_status(command)
-            self._mark_command(command, "failed_recoverable")
-            raise
-
     def confirm_income_status_override(
         self,
         *,
@@ -2384,68 +2217,12 @@ class PendingInvoiceApplicationService:
         latest = getattr(self._command_repository, "latest_income_status_override", None)
         return latest(transaction_id) if callable(latest) else latest_income_status_override_from_commands(self.snapshot(), transaction_id)
 
-    def batch_type_for_direction(self, direction: str) -> BatchType:
-        return BatchType.INPUT_INVOICE if direction == "expense" else BatchType.OUTPUT_INVOICE
-
     def direction_for_transaction(self, transaction: BankTransaction) -> str:
         if transaction.txn_direction == TransactionDirection.OUTFLOW:
             return "expense"
         if transaction.txn_direction == TransactionDirection.INFLOW:
             return "income"
         raise PendingInvoiceError("invalid_direction", "Unsupported bank transaction direction.")
-
-    def invoice_import_row(self, payload: dict[str, Any], request_key: str) -> dict[str, Any]:
-        transaction = self._get_transaction(str(payload.get("bank_transaction_id") or ""))
-        direction = self.direction_for_transaction(transaction)
-        invoice_no = str(payload.get("invoice_no") or "").strip()
-        digital_invoice_no = str(payload.get("digital_invoice_no") or "").strip()
-        issue_date = str(payload.get("issue_date") or payload.get("invoice_date") or "").strip()
-        total_with_tax = self._required_decimal(payload.get("total_with_tax"), "total_with_tax")
-        seller_name = str(payload.get("seller_name") or "").strip()
-        buyer_name = str(payload.get("buyer_name") or "").strip()
-        if not (invoice_no or digital_invoice_no) or not issue_date:
-            raise PendingInvoiceError("invalid_invoice_payload", "invoice_no or digital_invoice_no and issue_date are required.")
-        if direction == "expense" and not seller_name:
-            raise PendingInvoiceError("invalid_invoice_payload", "seller_name is required for expense manual invoices.")
-        if direction == "income" and not buyer_name:
-            raise PendingInvoiceError("invalid_invoice_payload", "buyer_name is required for income manual invoices.")
-        tax_amount = self._optional_decimal(payload.get("tax_amount"))
-        row = {
-            "counterparty_name": seller_name if direction == "expense" else buyer_name,
-            "invoice_code": str(payload.get("invoice_code") or "").strip(),
-            "invoice_no": invoice_no,
-            "digital_invoice_no": digital_invoice_no,
-            "invoice_date": issue_date,
-            "amount": _decimal_to_str(total_with_tax),
-            "total_with_tax": _decimal_to_str(total_with_tax),
-            "tax_amount": _decimal_to_str(tax_amount) if tax_amount is not None else None,
-            "tax_rate": str(payload.get("tax_rate") or "").strip(),
-            "seller_name": seller_name,
-            "seller_tax_no": str(payload.get("seller_tax_no") or "").strip(),
-            "buyer_name": buyer_name,
-            "buyer_tax_no": str(payload.get("buyer_tax_no") or "").strip(),
-            "remark": str(payload.get("remark") or "").strip(),
-            "invoice_source": MANUAL_INVOICE_SOURCE_NAME,
-            "pending_invoice_request_key": request_key,
-            "pending_invoice_bank_transaction_id": transaction.id,
-        }
-        return {key: value for key, value in row.items() if value not in (None, "")}
-
-    def request_key_for_payload(self, payload: dict[str, Any], *, direction: str) -> str:
-        transaction_id = str(payload.get("bank_transaction_id") or "").strip()
-        identity_payload = {
-            "invoice_code": str(payload.get("invoice_code") or "").strip(),
-            "invoice_no": str(payload.get("invoice_no") or "").strip(),
-            "digital_invoice_no": str(payload.get("digital_invoice_no") or "").strip(),
-            "issue_date": str(payload.get("issue_date") or payload.get("invoice_date") or "").strip(),
-            "total_with_tax": _decimal_to_str(self._required_decimal(payload.get("total_with_tax"), "total_with_tax")),
-            "seller_tax_no": str(payload.get("seller_tax_no") or "").strip(),
-            "buyer_tax_no": str(payload.get("buyer_tax_no") or "").strip(),
-            "seller_name": str(payload.get("seller_name") or "").strip(),
-            "buyer_name": str(payload.get("buyer_name") or "").strip(),
-        }
-        digest = hashlib.sha1(str(sorted(identity_payload.items())).encode("utf-8")).hexdigest()[:20]
-        return f"manual-pending-invoice:{transaction_id}:{direction}:{digest}"
 
     @staticmethod
     def attach_existing_request_key(*, transaction_id: str, invoice_id: str) -> str:
@@ -2492,24 +2269,6 @@ class PendingInvoiceApplicationService:
                 f"Invoice not found: {invoice_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             ) from exc
-
-    def _create_invoice(self, payload: dict[str, Any], *, request_key: str, direction: str, actor_id: str) -> str:
-        preview = self._import_service.preview_import(
-            batch_type=self.batch_type_for_direction(direction),
-            source_name=MANUAL_INVOICE_SOURCE_NAME,
-            imported_by=actor_id,
-            rows=[self.invoice_import_row(payload, request_key)],
-        )
-        row_result = preview.row_results[0]
-        if row_result.decision in (ImportDecision.DUPLICATE_SKIPPED, ImportDecision.SUSPECTED_DUPLICATE):
-            raise PendingInvoiceError("duplicate_invoice", "Invoice identity matched an existing invoice.", status_code=HTTPStatus.CONFLICT)
-        if row_result.decision == ImportDecision.ERROR:
-            raise PendingInvoiceError("invalid_invoice_payload", row_result.decision_reason or "Invalid invoice payload.")
-        self._import_service.confirm_import(preview.id)
-        linked_invoice_id = preview.row_results[0].linked_object_id
-        if not linked_invoice_id:
-            raise PendingInvoiceError("invalid_invoice_payload", "Invoice creation did not return an invoice id.")
-        return str(linked_invoice_id)
 
     def _confirm_relation_via_command_service(
         self,
@@ -2589,65 +2348,6 @@ class PendingInvoiceApplicationService:
                 details=dict(exc.payload),
             )
         return PendingInvoiceError(exc.error_code, exc.message, details=dict(exc.payload))
-
-    def _create_relation(self, *, transaction_id: str, invoice_id: str, request_key: str, actor_id: str) -> str:
-        existing_relations = self._active_relation_dicts_for_row_ids(
-            [transaction_id, invoice_id],
-            reason="pending_invoice_manual_invoice_confirm",
-        )
-        expected_rows = {transaction_id, invoice_id}
-        for relation in existing_relations:
-            row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
-            if expected_rows.issubset(row_ids) and relation.get("relation_mode") == PENDING_INVOICE_RELATION_MODE:
-                return str(relation.get("case_id"))
-            if invoice_id in row_ids:
-                raise PendingInvoiceError(
-                    "relation_conflict",
-                    "Invoice already has a conflicting active relation.",
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            if transaction_id in row_ids:
-                existing_row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
-                existing_row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
-                resolved_row_types = [
-                    existing_row_types[index]
-                    if index < len(existing_row_types) and existing_row_types[index]
-                    else _row_type_for_relation_row_id(row_id)
-                    for index, row_id in enumerate(existing_row_ids)
-                ]
-                metadata = dict(relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {})
-                metadata.update(
-                    {
-                        "pending_invoice_request_key": request_key,
-                        "bank_transaction_id": transaction_id,
-                        "invoice_id": invoice_id,
-                    }
-                )
-                return self._confirm_relation_via_command_service(
-                    case_id=str(relation.get("case_id") or ""),
-                    row_ids=[*existing_row_ids, invoice_id],
-                    row_types=[*resolved_row_types, "invoice"],
-                    relation_mode=str(relation.get("relation_mode") or PENDING_INVOICE_RELATION_MODE),
-                    actor_id=actor_id,
-                    request_key=request_key,
-                    special_metadata=metadata,
-                    before_relations=[relation],
-                    month_scope=str(relation.get("month_scope") or "all"),
-                )
-        case_id = self._relation_case_id(request_key)
-        return self._confirm_relation_via_command_service(
-            case_id=case_id,
-            row_ids=[transaction_id, invoice_id],
-            row_types=["bank", "invoice"],
-            relation_mode=PENDING_INVOICE_RELATION_MODE,
-            actor_id=actor_id,
-            request_key=request_key,
-            special_metadata={
-                "pending_invoice_request_key": request_key,
-                "bank_transaction_id": transaction_id,
-                "invoice_id": invoice_id,
-            },
-        )
 
     def _create_attach_existing_relation(self, *, transaction_id: str, invoice_id: str, request_key: str, actor_id: str) -> str:
         expected_rows = {transaction_id, invoice_id}
@@ -2901,40 +2601,6 @@ class PendingInvoiceApplicationService:
             return paid_total.quantize(Decimal("0.01"))
         return Decimal("0.00")
 
-    def _find_invoice_by_request_key(self, request_key: str) -> Invoice | None:
-        for invoice in self._import_service.list_invoices():
-            for link in list(getattr(invoice, "source_links", []) or []):
-                if (
-                    isinstance(link, dict)
-                    and str(link.get("source_type") or "") == MANUAL_INVOICE_SOURCE_TYPE
-                    and str(link.get("request_key") or "") == request_key
-                ):
-                    return invoice
-        return None
-
-    def _invoice_has_pending_relation(self, invoice_id: str, *, transaction_id: str) -> bool:
-        relation_row = self._relation_distribution_row(invoice_id, reason="pending_invoice_relation_exists")
-        if relation_row is not None:
-            linked_bank_ids = {
-                str(item.get("id") or item.get("transaction_id") or "").strip()
-                for item in list(relation_row.get("linked_bank_transactions") or [])
-                if isinstance(item, dict) and _distribution_item_is_linked(item)
-            }
-            if transaction_id not in linked_bank_ids:
-                return False
-            for group in list(relation_row.get("_relation_groups") or []):
-                if not isinstance(group, dict):
-                    continue
-                if not _distribution_group_is_linked(group):
-                    continue
-                payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
-                relation_mode = str(payload.get("relation_mode") or "").strip()
-                row_ids = {str(row_id).strip() for row_id in list(payload.get("row_ids") or []) if str(row_id).strip()}
-                if {invoice_id, transaction_id}.issubset(row_ids) and relation_mode == PENDING_INVOICE_RELATION_MODE:
-                    return True
-            return False
-        return False
-
     def _relation_distribution_row(self, row_id: str, *, reason: str) -> dict[str, Any] | None:
         normalized_row_id = str(row_id or "").strip()
         if not normalized_row_id or self._relation_facade is None:
@@ -3031,32 +2697,6 @@ class PendingInvoiceApplicationService:
         if relation_case_id and relation_case_id not in relation_case_ids:
             relation_case_ids.append(relation_case_id)
         row["relation_case_ids"] = relation_case_ids
-
-    def _record_audit(
-        self,
-        *,
-        actor_id: str,
-        transaction_id: str,
-        invoice_id: str,
-        relation_case_id: str,
-        request_id: str,
-        request_key: str,
-        affected_months: list[str],
-    ) -> None:
-        if self._audit_recorder is None:
-            return
-        self._audit_recorder(
-            {
-                "actor_id": actor_id,
-                "action": "pending_invoice_manual_invoice_confirmed",
-                "transaction_id": transaction_id,
-                "invoice_id": invoice_id,
-                "relation_case_id": relation_case_id,
-                "request_id": request_id,
-                "request_key": request_key,
-                "affected_months": list(affected_months),
-            }
-        )
 
     def _record_attach_existing_audit(
         self,
@@ -3198,34 +2838,9 @@ class PendingInvoiceApplicationService:
         return "started"
 
     @staticmethod
-    def _relation_case_id(request_key: str) -> str:
-        return f"case_pending_invoice_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:20]}"
-
-    @staticmethod
-    def _payload_fingerprint(payload: dict[str, Any]) -> str:
-        comparable = {key: value for key, value in payload.items() if key not in {"preview_id", "request_id"}}
-        return hashlib.sha1(str(sorted(comparable.items())).encode("utf-8")).hexdigest()
-
-    @staticmethod
     def _affected_months_for_transaction(transaction: BankTransaction) -> list[str]:
         month = str(transaction.trade_time or transaction.txn_date or "")[:7]
         return [month] if len(month) == 7 else []
-
-    @staticmethod
-    def _required_decimal(value: Any, field_name: str) -> Decimal:
-        parsed = PendingInvoiceApplicationService._optional_decimal(value)
-        if parsed is None:
-            raise PendingInvoiceError("invalid_invoice_payload", f"{field_name} is required and must be a valid amount.")
-        return parsed
-
-    @staticmethod
-    def _optional_decimal(value: Any) -> Decimal | None:
-        if value in (None, ""):
-            return None
-        try:
-            return Decimal(str(value)).quantize(Decimal("0.01"))
-        except (InvalidOperation, ValueError) as exc:
-            raise PendingInvoiceError("invalid_invoice_payload", "amount fields must be valid decimal values.") from exc
 
 
 def _optional_int(value: int | str | None, *, default: int) -> int:

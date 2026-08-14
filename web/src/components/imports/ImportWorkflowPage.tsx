@@ -1,5 +1,5 @@
 import { Alert, Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
-import { ArrowLeft, RefreshCw, Trash2, UploadCloud } from "lucide-react";
+import { ArrowLeft, FilePlus2, RefreshCw, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
@@ -18,6 +18,7 @@ import {
 } from "../common/FinanceTable";
 import PageScaffold from "../common/PageScaffold";
 import PageBusinessAuditIcon from "../common/PageBusinessAuditIcon";
+import ManualInvoiceEntryDrawer from "./ManualInvoiceEntryDrawer";
 import {
   confirmImportFiles,
   discardImportSession,
@@ -851,6 +852,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
   const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
   const [isDiscarding, setIsDiscarding] = useState(false);
+  const [manualInvoiceEntryOpen, setManualInvoiceEntryOpen] = useState(false);
   const mountedRef = useRef(false);
 
   const title = TITLES[mode];
@@ -1415,6 +1417,17 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
   }
 
+  function handleManualInvoiceImportAccepted(payload: ImportSessionPayload) {
+    if (payload.job && payload.job.status !== "succeeded" && payload.job.status !== "partial_success") {
+      setFeedbackMessage("已开始后台导入");
+      setProgress({ tone: "loading", label: "发票录入任务已创建。" });
+    } else {
+      setFeedbackMessage("已确认导入");
+      completeImportFeedback(payload);
+    }
+    setContextRefreshToken((current) => current + 1);
+  }
+
   async function submitConfirm() {
     if (healthStatus.blocksMutations) {
       setErrorMessage("登录已失效或系统不可用，请返回 OA 系统重新进入。");
@@ -1514,6 +1527,18 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               返回关联台
             </RouterLink>
+            {mode === "invoice" && canMutateData ? (
+              <Button
+                isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding}
+                onPress={() => setManualInvoiceEntryOpen(true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <FilePlus2 aria-hidden="true" size={16} />
+                发票录入
+              </Button>
+            ) : null}
             <Button
               isDisabled={isPreviewing || isConfirming || isDiscarding || isRefreshingContext || settingsLoading || readyEtcTasksLoading}
               onPress={handleRefresh}
@@ -1908,6 +1933,15 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           </div>
         </div>
       </PageScaffold>
+
+      {mode === "invoice" ? (
+        <ManualInvoiceEntryDrawer
+          disabled={!canMutateData || healthStatus.blocksMutations}
+          onClose={() => setManualInvoiceEntryOpen(false)}
+          onImportAccepted={handleManualInvoiceImportAccepted}
+          open={manualInvoiceEntryOpen}
+        />
+      ) : null}
 
     </div>
   );

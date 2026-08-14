@@ -7,6 +7,8 @@ import type {
   ImportReviewRowsPage,
   ImportSessionPayload,
   ImportTemplate,
+  ManualInvoiceEntryPreview,
+  ManualInvoiceEntryValues,
   MatchingRunSummary,
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
@@ -164,6 +166,22 @@ type ApiImportTemplatesPayload = {
     allowed_batch_types: Array<"input_invoice" | "output_invoice" | "bank_transaction">;
     required_headers: string[];
   }>;
+};
+
+type ApiManualInvoiceEntryValues = {
+  invoice_direction?: string;
+  invoice_nature?: string;
+  seller_name?: string;
+  seller_tax_no?: string;
+  buyer_name?: string;
+  buyer_tax_no?: string;
+  invoice_number?: string;
+  invoice_code?: string;
+  invoice_date?: string;
+  net_amount?: string;
+  tax_rate?: string;
+  tax_amount?: string;
+  total_with_tax?: string;
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -403,6 +421,82 @@ function mapImportTemplates(payload: ApiImportTemplatesPayload): ImportTemplate[
     allowedBatchTypes: template.allowed_batch_types,
     requiredHeaders: template.required_headers,
   }));
+}
+
+function mapManualInvoiceEntryValues(
+  payload: ApiManualInvoiceEntryValues,
+): Partial<ManualInvoiceEntryValues> {
+  const values: Partial<ManualInvoiceEntryValues> = {};
+  const direction = payload.invoice_direction;
+  const nature = payload.invoice_nature;
+  if (direction === "input" || direction === "output") values.invoiceDirection = direction;
+  if (nature === "blue" || nature === "red") values.invoiceNature = nature;
+  const fields: Array<[keyof ManualInvoiceEntryValues, unknown]> = [
+    ["sellerName", payload.seller_name],
+    ["sellerTaxNo", payload.seller_tax_no],
+    ["buyerName", payload.buyer_name],
+    ["buyerTaxNo", payload.buyer_tax_no],
+    ["invoiceNumber", payload.invoice_number],
+    ["invoiceCode", payload.invoice_code],
+    ["invoiceDate", payload.invoice_date],
+    ["netAmount", payload.net_amount],
+    ["taxRate", payload.tax_rate],
+    ["taxAmount", payload.tax_amount],
+    ["totalWithTax", payload.total_with_tax],
+  ];
+  fields.forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      Object.assign(values, { [key]: String(value) });
+    }
+  });
+  return values;
+}
+
+function serializeManualInvoiceEntryValues(values: ManualInvoiceEntryValues) {
+  return {
+    invoice_direction: values.invoiceDirection,
+    invoice_nature: values.invoiceNature,
+    seller_name: values.sellerName,
+    seller_tax_no: values.sellerTaxNo,
+    buyer_name: values.buyerName,
+    buyer_tax_no: values.buyerTaxNo,
+    invoice_number: values.invoiceNumber,
+    invoice_code: values.invoiceCode,
+    invoice_date: values.invoiceDate,
+    net_amount: values.netAmount,
+    tax_rate: values.taxRate,
+    tax_amount: values.taxAmount,
+    total_with_tax: values.totalWithTax,
+  };
+}
+
+export async function recognizeManualInvoice(file: File): Promise<Partial<ManualInvoiceEntryValues>> {
+  const formData = new FormData();
+  formData.append("files", file);
+  const payload = await requestJson<{ values?: ApiManualInvoiceEntryValues }>(
+    "/imports/invoices/manual/recognize",
+    { method: "POST", body: formData },
+  );
+  return mapManualInvoiceEntryValues(payload.values ?? {});
+}
+
+export async function previewManualInvoice(
+  values: ManualInvoiceEntryValues,
+): Promise<ManualInvoiceEntryPreview> {
+  const payload = await requestJson<{
+    values: ApiManualInvoiceEntryValues;
+    file_id: string;
+    import_session: ApiImportSessionPayload;
+  }>("/imports/invoices/manual/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(serializeManualInvoiceEntryValues(values)),
+  });
+  return {
+    values: mapManualInvoiceEntryValues(payload.values) as ManualInvoiceEntryValues,
+    fileId: payload.file_id,
+    importSession: mapImportPayload(payload.import_session),
+  };
 }
 
 export async function previewImportFiles(

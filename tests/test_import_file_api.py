@@ -62,7 +62,110 @@ def build_multipart_payload(
     return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
 
+def manual_invoice_payload(**overrides: str) -> dict[str, str]:
+    values = {
+        "invoice_direction": "input",
+        "invoice_nature": "blue",
+        "seller_name": "云南供应商有限公司",
+        "seller_tax_no": "915300000000000001",
+        "buyer_name": "云南溯源科技有限公司",
+        "buyer_tax_no": "915300007194052520",
+        "invoice_number": "26117000001052654674",
+        "invoice_code": "",
+        "invoice_date": "2026-08-14",
+        "net_amount": "100.00",
+        "tax_rate": "13",
+        "tax_amount": "13.00",
+        "total_with_tax": "113.00",
+    }
+    values.update(overrides)
+    return values
+
+
 class ImportFileApiTests(unittest.TestCase):
+    def test_manual_invoice_preview_and_confirm_use_the_formal_import_job_chain(self) -> None:
+        app = build_application()
+        import_queue = install_durable_import_queue(app)
+
+        preview_response = app.handle_request(
+            "POST",
+            "/imports/invoices/manual/preview",
+            json.dumps(manual_invoice_payload()),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["values"]["invoice_number"], "26117000001052654674")
+        self.assertEqual(preview_payload["import_session"]["files"][0]["template_code"], "manual_invoice_entry")
+        self.assertEqual(preview_payload["import_session"]["files"][0]["batch_type"], "input_invoice")
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps(
+                {
+                    "session_id": preview_payload["import_session"]["session"]["id"],
+                    "selected_file_ids": [preview_payload["file_id"]],
+                }
+            ),
+        )
+        self.assertEqual(confirm_response.status_code, 202)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirm_payload["job"]["affected_domains"], ["imports_invoices"])
+
+        import_queue.process_all()
+        invoices = app._import_service.list_invoices()  # type: ignore[attr-defined]
+        self.assertEqual(len(invoices), 1)
+        self.assertEqual(invoices[0].invoice_no, "26117000001052654674")
+        self.assertEqual(str(invoices[0].amount), "100.00")
+        self.assertEqual(invoices[0].invoice_source, "manual_invoice_entry")
+        self.assertEqual(invoices[0].source_links[0]["source_type"], "manual_invoice_import")
+
+    def test_manual_invoice_preview_blocks_exact_duplicate(self) -> None:
+        app = build_application()
+        first = app._manual_invoice_entry_service.preview(  # type: ignore[attr-defined]
+            payload=manual_invoice_payload(),
+            imported_by="local",
+        )
+        app._file_import_service.confirm_session(  # type: ignore[attr-defined]
+            session_id=first.session.id,
+            selected_file_ids=[first.file_id],
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/imports/invoices/manual/preview",
+            json.dumps(manual_invoice_payload()),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.body)["error"], "manual_invoice_duplicate")
+
+    def test_manual_invoice_recognition_uses_only_the_first_uploaded_file(self) -> None:
+        app = build_application()
+        calls: list[tuple[str, bytes]] = []
+
+        def recognize(*, file_name: str, content: bytes) -> dict[str, str]:
+            calls.append((file_name, content))
+            return {"invoice_number": "FIRST"}
+
+        app._manual_invoice_entry_service.recognize = recognize  # type: ignore[attr-defined,method-assign]
+        body, headers = build_multipart_payload(
+            imported_by="finance-user",
+            files=[MockImportFile("first.jpg", b"first"), MockImportFile("second.pdf", b"second")],
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/imports/invoices/manual/recognize",
+            body=body,
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body)["values"]["invoice_number"], "FIRST")
+        self.assertEqual(calls, [("first.jpg", b"first")])
+
     def test_import_batch_error_csv_contains_review_rows_without_internal_ids(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(  # type: ignore[attr-defined]

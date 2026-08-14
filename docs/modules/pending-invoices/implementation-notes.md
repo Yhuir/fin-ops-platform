@@ -61,7 +61,7 @@
 - 选择已有进项发票候选表的“流水关联”chip 必须使用后端返回的 `bank_relation_status` / `linked_bank_transaction_count`，不能用 `remaining_amount=0` 或候选金额推断；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。
 - attach existing 可并入兼容的 bank+invoice 或 OA+invoice active relation；confirm 后如果从关联台 withdraw 新 active case，必须恢复 confirm 前上一 active relation 状态。
 - 页面只有 loading/empty/error；禁止恢复 refreshing/stale banner、定时 polling、202、refresh enqueue、双读或 fallback。
-- manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` 只保留旧 command 恢复和迁移兼容。
+- manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` service 写链已删除。单张发票统一从发票导入模块进入普通 file import confirm job。
 - 收入状态覆盖必须走批量 service/API 边界，先整批校验再一次写 command/audit/finalizer，不能由前端循环单条接口形成半成功。
 - 2026-07-27 直读迁移测试覆盖 canonical query/service/repository、API、页面交互、无旧状态/轮询、真实 PostgreSQL 50k smoke 与共享 Search/lifecycle 回归；完整生产并发/SLO 和共享 worker 最终清理由主控负责。
 
@@ -382,7 +382,7 @@
 
 - 目标：移除待找发票行内三点按钮和“补票”新入口；支出侧只保留选中工具栏“选择发票”；收入侧增加多选后批量“标记无需开票/标记现金收入”。
 - 影响范围：pending invoice routes/application service/status action、SQL projection、`PendingInvoicesPage`、`PendingInvoicesTable`、relation drawer、pending invoice API/types、模块/API/产品/页面架构文档和相关测试。
-- 关键决策：manual invoice HTTP preview/confirm 返回 `not_found`；历史 manual command/service/table 保留为旧数据恢复兼容。收入批量状态复用 income status command/audit/finalizer/projection 模式，先拒绝重复 ID、非收入流水、已关联发票和非法状态，再一次写入并合并 affected months。
+- 关键决策：manual invoice HTTP preview/confirm 返回 `not_found`；旧 manual service 写链删除，历史 command 表因仍承载 attach-existing/income-status command 且含既有数据而保留。收入批量状态复用 income status command/audit/finalizer/projection 模式，先拒绝重复 ID、非收入流水、已关联发票和非法状态，再一次写入并合并 affected months。
 - 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、本实施记录、`docs/dev/api-contracts.md`、`docs/product-specs/invoice-lifecycle.md` 和 `docs/app-architecture/pages.md`。
 - 测试覆盖：新增/更新 backend service/API、SQL projection 兼容、frontend page/API mapper 测试，覆盖 manual 新入口不可达、历史 command 恢复、支出选中工具栏、收入批量状态和旧 UI/API 移除。
 - 验证命令：见最终交付说明。
@@ -501,11 +501,11 @@
 - 决策：`PostgresPendingInvoiceLifecycleReadModelRepository.pending_invoice_workbench_relation_source_versions(...)` 改为按当前 pending invoice rows 命中的月份和 row id 调 `workbench_relation_source_summary_from_source(...)`，与 worker 保存的 actual source_versions 使用同一事实源；不新增旧 read model fallback，也不让页面绕过 fresh gate。
 - 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months` 锁定 expected source versions 使用 source summary，并传递 month + row_ids。
 
-## 2026-06-12 - relation 写入口迁入 workbench relation command service
+## 2026-06-12 - relation 写入口迁入 workbench relation command service（manual 部分已于 2026-08-14 删除）
 
-- 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。
+- 历史目标：当时让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`。其中 manual invoice writer 已删除；attach existing 继续委托统一 relation command。
 - 影响范围：`PendingInvoiceApplicationService`、`WorkbenchRelationCommandService`、`Application` dependency wiring、`tests/test_pending_invoice_service.py`、本模块 README/tests 和 `docs/modules/workbench-relations/*`。
-- 关键决策：manual/attach 写 relation 走 `WorkbenchRelationCommandService.confirm_relation(...)`；写前读取既有 active relation 只走 `WorkbenchRelationReadFacade.get_by_row_ids(...)` 的 distribution payload；缺少 command service 时 fail fast。manual invoice confirm 在创建发票前先调用 relation write precondition，relation read model stale 时不创建发票并把 pending command 标记为 `failed_recoverable`。
+- 当前有效决策：attach 写 relation 走 `WorkbenchRelationCommandService.confirm_relation(...)`；写前读取既有 active relation 只走正式 relation read 边界，缺少 command service 时 fail fast。历史 manual invoice precondition/恢复逻辑不再存在。
 - 文档影响：更新本模块 `README.md`、`tests.md`、本实施记录，以及 `workbench-relations` 模块 README/tests/implementation-notes。
 - 测试覆盖：新增/更新 `tests/test_pending_invoice_service.py`，覆盖 manual/attach 单条/批量委托 command service、stale fail-fast、不产生孤儿发票、命令可恢复状态；保留 pending invoice API 旧 shape 回归。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_api.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution -q`；`python3 -m compileall -q backend/src/fin_ops_platform/services/pending_invoice_service.py backend/src/fin_ops_platform/services/workbench_relation_command_service.py`。

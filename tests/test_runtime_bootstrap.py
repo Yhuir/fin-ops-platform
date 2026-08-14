@@ -121,6 +121,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
         )
         app = object.__new__(server_module.Application)
         app._state_store = store
+        app._invoice_document_recognizer = SimpleNamespace()
 
         app._reload_file_import_runtime_state()
 

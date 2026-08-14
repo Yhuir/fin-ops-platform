@@ -1,6 +1,6 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-07-27
+日期：2026-08-14
 
 ## 模块化状态
 
@@ -25,6 +25,7 @@
 - 不拥有 bank/invoice/OA canonical facts，也不直接写这些表。
 - 不拥有 `app.workbench_pair_relations`；关系写入仍委托 `WorkbenchRelationCommandService`。
 - 不拥有 Search API、invoice lifecycle 页面或共享 read-model/worker 的删除。
+- 不负责创建新发票；待找发票 manual preview/confirm 旧 service 写链已删除，单张发票统一由发票导入模块负责。
 - 不从外部 OA/Mongo/MySQL/对象存储读取页面请求。
 
 ## 输入 I/O
@@ -87,3 +88,4 @@
 - `PendingInvoiceReadModelService`、source-version provider、repository/projection、manifest/query-owner 和 `search-pending`/invoice-lifecycle 页面链已删除。
 - 独立 Search runtime 已删除；`workbench_relation` 共享 distribution 只保留给明确登记消费者，本页面不消费它。
 - `read_model.pending_invoice_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
+- `app.pending_invoice_manual_invoice_commands` 名称为历史遗留，但仍承载当前 attach-existing/income-status command 并保存既有审计数据；不得据此恢复已删除的 manual invoice writer。

@@ -41,7 +41,7 @@
 - `bank_statement_as_invoice`、`no_invoice_required`、`cash_income` 也按最终状态筛选。特别是 `bank_statement_as_invoice` 只展示最终仍为“流水代替发票”的流水；如果同一流水已关联发票并变成 `paid_invoiced`，不能继续出现在“流水代替发票”筛选结果里。
 - 支出侧选择多条流水后从选中工具栏进入“选择发票”，只允许选择已有进项发票并写入统一 Workbench relation command。
 - 收入侧支持多选后批量标记“无需开票”或“现金收入”；后端必须先完成整批校验再一次写入，不允许前端逐行循环造成半成功。
-- 当前页面不再提供 manual invoice preview/confirm 或“补票”新写入口；历史 manual command 只用于旧数据恢复/迁移兼容。
+- 待找发票页面不提供 manual invoice preview/confirm 或“补票”新写入口。单张发票只能从“发票导入 → 发票录入”进入统一 file import preview/confirm 链；旧 pending-invoice manual service 写链已删除，历史 command 表只保留既有数据和当前待找发票其它 command 类型。
 - 右侧工作流支持候选查看、关系明细、撤回和导出。
 - OA、银行流水和发票配对展示以统一 Workbench relation / `workbench_relation` distribution 为事实源。同一 relation 下存在多笔流水时，待找发票列表仍按 relation 聚合为一行，但银行流水栏必须显示 `bank_transactions.summaries` 中的真实对方户名列表，不用 `+N` 替代户名，也不在对方户名下显示交易时间；流水详情通过该栏的详情入口展开。同一 relation 下存在多张 OA 或多张发票时，对应栏仍以 `+N` 表达该类型全部成员；包含在明细中的成员不得在同一栏再展示为单独 primary，也不得再作为 standalone relation 成员行重复出现。
 - 刷新范围按动作分发：发票导入、选择已有发票关系和撤回关系进入发票生命周期链路；收入状态覆盖只刷新待找发票和搜索。

@@ -284,6 +284,11 @@ describe("Import pages", () => {
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
     expectProjectImportShell();
     const invoiceUploadInput = expectProjectUploadZone("上传发票文件");
+    const manualEntryButton = screen.getByRole("button", { name: "发票录入" });
+    await user.click(manualEntryButton);
+    expect(await screen.findByRole("dialog", { name: "发票录入" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭发票录入" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "发票录入" })).not.toBeInTheDocument());
     expect(screen.queryByRole("dialog", { name: "发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
@@ -318,6 +323,20 @@ describe("Import pages", () => {
         batch_type: "input_invoice",
       },
     ]);
+  });
+
+  test("invoice import hides manual entry from read-only users", async () => {
+    installMockApiFetch({ sessionAccessTier: "read_only" });
+
+    renderAppAt("/imports/invoices", {
+      session: {
+        accessTier: "read_only",
+        canMutateData: false,
+      },
+    });
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发票录入" })).not.toBeInTheDocument();
   });
 
   test("invoice import with no declared targets completes without probing Workbench", async () => {

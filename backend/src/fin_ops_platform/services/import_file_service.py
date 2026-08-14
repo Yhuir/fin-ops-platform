@@ -400,6 +400,49 @@ class FileImportService:
         self._sessions[session.id] = session
         return session
 
+    def preview_manual_invoice_entry(
+        self,
+        *,
+        imported_by: str,
+        batch_type: BatchType,
+        row: dict[str, Any],
+    ) -> FileImportSession:
+        if batch_type not in {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}:
+            raise ValueError("manual invoice entry requires an invoice batch type")
+        preview = self._import_service.preview_import(
+            batch_type=batch_type,
+            source_name="manual_invoice_entry",
+            imported_by=imported_by,
+            rows=[dict(row)],
+        )
+        file_item = FileImportPreviewItem(
+            id=self._next_file_id(),
+            file_name="发票录入",
+            template_code="manual_invoice_entry",
+            batch_type=batch_type,
+            status="preview_ready",
+            message="手工录入发票已通过预览校验。",
+            row_count=1,
+            success_count=preview.success_count,
+            error_count=preview.error_count,
+            duplicate_count=preview.duplicate_count,
+            suspected_duplicate_count=preview.suspected_duplicate_count,
+            updated_count=preview.updated_count,
+            preview_batch_id=preview.id,
+            row_results=preview.row_results,
+            normalized_rows=preview.normalized_rows,
+        )
+        session = FileImportSession(
+            id=self._next_session_id(),
+            imported_by=imported_by,
+            file_count=1,
+            status="preview_ready",
+            files=[file_item],
+        )
+        self._refresh_session_audit(session)
+        self._sessions[session.id] = session
+        return session
+
     def get_session(self, session_id: str) -> FileImportSession:
         return self._sessions[session_id]
 
@@ -412,10 +455,13 @@ class FileImportService:
     def list_active_sessions(self, *, imported_by: str, mode: str | None = None) -> list[FileImportSession]:
         def matches_mode(session: FileImportSession) -> bool:
             batch_types = {item.batch_type for item in session.files if item.batch_type is not None}
+            has_manual_invoice_entry = any(item.template_code == "manual_invoice_entry" for item in session.files)
             if mode == "bank_transaction":
                 return BatchType.BANK_TRANSACTION in batch_types
             if mode == "invoice":
-                return bool(batch_types & {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE})
+                return bool(batch_types & {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}) and not has_manual_invoice_entry
+            if mode == "manual_invoice":
+                return has_manual_invoice_entry
             return True
 
         return sorted(

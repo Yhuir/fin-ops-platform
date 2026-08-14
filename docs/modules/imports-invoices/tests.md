@@ -7,10 +7,10 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportInvoicesPage.tsx` | 只传 `mode="invoice"`，共享工作流改动会同时影响银行流水和 ETC 导入 |
-| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | 每文件票据方向、preview stale、重复审计、session restore、route unmount cleanup、job feedback、read-only 导入门禁 |
+| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx` | 每文件票据方向、单张人工录入、可选 OCR、preview stale、重复审计、session restore、route unmount cleanup、job feedback、read-only 导入门禁 |
 | Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 覆盖文件、方向、预览、确认、错误与权限；确认后打开各下游页面验证 canonical 结果，并证明单独发票导入不会形成 OA 项目成本。 |
 | 前端 API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、`batch_type`、snake_case/camelCase、`preview_stale` 错误映射、job/session shape |
-| HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | file/session API 是唯一 HTTP 写入合同；confirm 必须防 stale、unknown selected ids 和重复提交 |
+| HTTP routes | `server.py` `/imports/files/preview`、`/imports/invoices/manual/recognize`、`/imports/invoices/manual/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | manual recognize 只读预填；所有正式写入仍收敛到 file/session confirm；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
 | Normalization core | `ImportNormalizationService` | input/output invoice identity、digital invoice number fallback、重复/疑似重复、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、source links、tags |
 | Import processing | `ImportProcessingService` | file confirm job 后必须执行发票生命周期、共享 relation/matching exact-scope 计算和 state persistence；不得生成 Workbench page scope |
@@ -20,6 +20,7 @@
 ## 场景覆盖清单
 
 - 发票导入页必须发送每文件方向：`input_invoice` / `output_invoice`。
+- 单张人工录入必须覆盖纯手工、仅取首个 JPG/PDF、OCR 后可编辑、20 位票号代码可选、传统票代码必填、0–100 数字税率、红字正数输入转 canonical 负数、金额平衡、精确重复阻断、返回编辑 discard 和普通 confirm job。
 - Browser e2e 必须覆盖发票导入页真实选择控件、预览按钮禁用/启用、慢预览 in-flight 动作锁定、审计汇总、重复项明细、未导入项明细、确认导入、显式 operation barrier 等待和零 Workbench 页面请求。
 - read_export_only 用户必须能打开发票导入页但不能选择文件、预览或确认导入。
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。
@@ -45,11 +46,11 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_preview_audit.py`、`tests/test_invoice_header_fact_repair_service.py` | 覆盖发票 identity、重复/疑似重复、占位电子发票号 fallback、已存在 ETC-linked canonical invoice 合并、submitted ETC metadata 反向链接、批内/跨批重复、source links，以及 11 张精确表头事实修复的 allowlist/hash/幂等/恢复清单。 |
+| 1. Business core unit tests | 适用 | `tests/test_import_service.py`、`tests/test_import_preview_audit.py`、`tests/test_manual_invoice_entry_service.py`、`tests/test_invoice_header_fact_repair_service.py` | 覆盖发票 identity、人工录入红蓝字/金额/税率/代码条件/重复、批内/跨批重复、source links，以及 11 张精确表头事实修复。 |
 | 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_import_audit_repair_ops.py`、`tests/test_postgres_repositories_core.py` | 覆盖 file/session preview/confirm、stale preview、header/detail sheet I/O、job queue、retry/original file retention、derived lifecycle fan-out，以及修复 dry-run/CAS/队列刷新。 |
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、read-model 下游状态字段，以及税金抵扣 canonical snapshot token/无旧状态字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、仍存在的 read-model 下游 App Status/readiness，并用 `invoice_import_confirmed` write-operation profile保护共享下游；税金抵扣页面读取不再属于本类。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、预览审计、慢预览动作锁定、重复明细、未导入项明细、错误提示、session restore、route unmount、API mapper、全局 status popover，以及真实浏览器中的上传/选择/确认交互、损坏文件混合、preview stale/confirm failure、下游页面重新读取、成功后无可见错误残留和 read-only 导入门禁。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、人工录入抽屉/确认弹窗/OCR 首文件/返回编辑/权限、预览审计、错误提示、session restore、API mapper和既有浏览器导入回归。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale preview protection -> Workbench 与其它 direct-canonical 下游 normal GET；前端导入流程不主动请求 Workbench 页面，用户进入关联台时直接读取已提交事实。真实 import/matching worker drain 仍需 staging/后续 smoke。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，以及下游模块测试矩阵、`web/e2e/imports-invoices-flow.spec.ts` | 每次改 shared import、invoice fact、lifecycle、read model 或 App Status 时，都必须回归发票导入和下游页面旧行为。 |
 
@@ -106,6 +107,7 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_import_service \
   tests.test_import_file_service \
   tests.test_import_file_api \
+  tests.test_manual_invoice_entry_service \
   tests.test_import_preview_audit \
   tests.test_import_job_queue \
   tests.test_import_formalization_api \
@@ -131,6 +133,7 @@ pytest -q \
 
 cd web && npm test -- --run \
   src/test/ImportsApi.test.ts \
+  src/test/ManualInvoiceEntryDrawer.test.tsx \
   src/test/ImportCenterPage.test.tsx \
   src/test/AppStatusIndicator.test.tsx
 

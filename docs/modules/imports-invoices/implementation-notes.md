@@ -1,5 +1,13 @@
 # 发票导入 实施记录
 
+## 2026-08-14 - 单张发票录入统一导入闭环
+
+- 新入口位于发票导入页；HeroUI 紧凑抽屉承载可选 JPG/JPEG/PDF 首文件识别和全部可编辑字段，最终使用只读确认弹窗。
+- OCR 只提供预填。服务端统一校验方向、红蓝字、条件式发票代码、数字税率、金额平衡与重复；红字正数输入转为 canonical 负数。
+- 预览生成普通 `FileImportSession`，确认复用既有 durable `file_import.confirm`，不增加表、队列、read model、依赖或 OA/银行流水关系。
+- 删除待找发票 service 中不可达的旧 manual preview/confirm、直接发票创建、关系写入和专用辅助函数；历史 command 表继续服务仍在用的 attach-existing/income-status command 和既有数据。
+- 测试覆盖业务规则、OCR 有界停止、API 合同、后台确认链、抽屉/弹窗、返回编辑 discard、权限与既有发票导入回归。
+
 ## 2026-08-14 - OA-first 成本隔离更正
 
 - 单独导入发票不构成 OA 成本归集事实；只有完成 OA 与付款流水的正式关系才能进入 OA 成本视图。
