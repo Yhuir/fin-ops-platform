@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
@@ -83,6 +85,32 @@ def manual_invoice_payload(**overrides: str) -> dict[str, str]:
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def test_postgres_discard_synchronizes_local_session_without_full_runtime_reload(self) -> None:
+        app = build_application()
+        preview = app._manual_invoice_entry_service.preview(  # type: ignore[attr-defined]
+            payload=manual_invoice_payload(invoice_number="26117000001052654675"),
+            imported_by="local",
+        )
+        lifecycle = SimpleNamespace(discard_session=Mock(return_value=1))
+        app._state_store = SimpleNamespace(_connection=object(), storage_backend="postgres")  # type: ignore[attr-defined]
+
+        with (
+            patch("fin_ops_platform.app.server.ImportLifecycleService", return_value=lifecycle),
+            patch.object(app, "_reload_file_import_runtime_state") as reload_runtime,
+        ):
+            response = app._handle_import_file_discard(  # type: ignore[attr-defined]
+                json.dumps({"session_id": preview.session.id}),
+                owner_user_id="local",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app._file_import_service.get_session(preview.session.id).status, "reverted")  # type: ignore[attr-defined]
+        lifecycle.discard_session.assert_called_once_with(
+            session_id=preview.session.id,
+            imported_by="local",
+        )
+        reload_runtime.assert_not_called()
+
     def test_manual_invoice_preview_and_confirm_use_the_formal_import_job_chain(self) -> None:
         app = build_application()
         import_queue = install_durable_import_queue(app)

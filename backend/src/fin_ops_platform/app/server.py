@@ -8040,8 +8040,17 @@ class Application:
                     session_id=session_id,
                     imported_by=owner_user_id,
                 )
-                self._reload_file_import_runtime_state()
-                session = self._file_import_service.get_session(session_id)
+                try:
+                    session = self._file_import_service.discard_session(
+                        session_id=session_id,
+                        imported_by=owner_user_id,
+                    )
+                except (KeyError, PermissionError, ValueError):
+                    # A different API process may own the in-memory preview. Keep the
+                    # PostgreSQL fact authoritative and only pay the snapshot reload
+                    # cost when this process cannot synchronize its local session.
+                    self._reload_file_import_runtime_state()
+                    session = self._file_import_service.get_session(session_id)
             else:
                 session = self._file_import_service.discard_session(
                     session_id=session_id,
