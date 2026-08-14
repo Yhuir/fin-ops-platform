@@ -712,8 +712,21 @@ test.describe("permissions browser role matrix", () => {
       });
     }
 
+    await page.goto("/input-invoice-usage");
+    await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
+    await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
+    const invoicePrefillDrawer = page.getByRole("dialog", { name: "OA 草稿预填管理" });
+    await expect(invoicePrefillDrawer.getByLabel("开户行")).toBeDisabled();
+    await expect(invoicePrefillDrawer.getByRole("button", { name: "保存" })).toHaveCount(0);
+    await invoicePrefillDrawer.getByRole("button", { name: "关闭抽屉" }).click();
+
     await page.goto("/etc-tickets");
     await expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible();
+    await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
+    const etcPrefillDrawer = page.getByRole("dialog", { name: "OA 草稿预填管理" });
+    await expect(etcPrefillDrawer.getByLabel("开户行")).toBeDisabled();
+    await expect(etcPrefillDrawer.getByRole("button", { name: "保存" })).toHaveCount(0);
+    await etcPrefillDrawer.getByRole("button", { name: "关闭抽屉" }).click();
     await expect(page.getByText(/当前账号仅支持查看和导出，不能创建.*草稿、人工确认、上传、删除或新建.*批次。/)).toBeVisible();
     await expect(page.getByRole("button", { name: "新建批次" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "当前账号仅支持查看和导出，不能删除 ETC 批次。" }).first()).toBeDisabled();
@@ -727,6 +740,10 @@ test.describe("permissions browser role matrix", () => {
 
     expect(mutationCalls(api.calls, readExportAllowedReadLikeCalls)).toEqual([]);
     expect(api.count("POST /api/workbench/settings")).toBe(0);
+    expect(api.count("GET /api/workbench/settings/oa-draft-prefill/input-invoice-usage")).toBe(1);
+    expect(api.count("GET /api/workbench/settings/oa-draft-prefill/etc")).toBe(1);
+    expect(api.count("PUT /api/workbench/settings/oa-draft-prefill/input-invoice-usage")).toBe(0);
+    expect(api.count("PUT /api/workbench/settings/oa-draft-prefill/etc")).toBe(0);
     expect(api.count("POST /api/bank-details/transactions/bk-o-202603-001/category-confirmation")).toBe(0);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/batches")).toBe(0);

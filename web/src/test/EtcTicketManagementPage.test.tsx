@@ -684,6 +684,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "OA 草稿预填管理" })).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
     expect(within(page).queryByText("对账任务")).not.toBeInTheDocument();
     expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2026-05-19 09:00");

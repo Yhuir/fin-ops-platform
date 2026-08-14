@@ -601,6 +601,7 @@ describe("Input invoice usage page", () => {
     expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
     expect(await within(page).findByRole("grid", { name: "进项发票使用情况表" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "OA 草稿预填管理" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("button--primary");
     const refreshButton = within(page).getByRole("button", { name: "刷新" });

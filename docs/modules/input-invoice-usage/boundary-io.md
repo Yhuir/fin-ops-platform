@@ -38,7 +38,7 @@
 | payment rules | `app.app_settings` | 使用现有 input invoice payment rule contract |
 | OA reverse facts | `app.input_invoice_usage_oa_reverse_batches` | statistics、preview 和命令状态 |
 | lifecycle command | 页面专属写 API | 保持原权限、审计、CAS/idempotency；成功后 GET |
-| OA 草稿预填配置 | `GET/PUT /api/workbench/settings/oa-draft-prefill/input-invoice-usage` | 页面右上角 admin-only 抽屉读取/保存独立 versioned family；创建 reverse batch 时固化当次配置快照，后续 OA draft 创建不受并发设置变更影响。多销方或缺失销方 fail closed |
+| OA 草稿预填配置 | `GET/PUT /api/workbench/settings/oa-draft-prefill/input-invoice-usage` | 所有已授权 App 账户可见并可只读打开页面右上角抽屉，仅 admin 可编辑/保存独立 versioned family；创建 reverse batch 时固化当次配置快照，后续 OA draft 创建不受并发设置变更影响。多销方或缺失销方 fail closed |
 
 ## 输出 I/O
 

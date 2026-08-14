@@ -395,15 +395,13 @@ export default function InputInvoiceUsagePage() {
       >
         发票与支付状态规则设置
       </Button>
-      {canAdminAccess ? (
-        <Button
-          onPress={() => setOaPrefillOpen(true)}
-          size="sm"
-          variant="secondary"
-        >
-          OA 草稿预填管理
-        </Button>
-      ) : null}
+      <Button
+        onPress={() => setOaPrefillOpen(true)}
+        size="sm"
+        variant="secondary"
+      >
+        OA 草稿预填管理
+      </Button>
       <Button
         isDisabled={exportDisabled}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
@@ -414,7 +412,7 @@ export default function InputInvoiceUsagePage() {
         筛选内容导出
       </Button>
     </PageToolbar>
-  ), [canAdminAccess, exportDisabled, loadRows, loading, refreshing, setQuery]);
+  ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
   const visibleStatistics = statistics;
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">

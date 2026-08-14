@@ -659,7 +659,7 @@ function ReconciliationDescriptionCell({
 export default function EtcTicketManagementPage() {
   const { active, activationGeneration } = useOptionalPageActivation("etc-tickets");
   const { jobs } = useBackgroundJobProgress();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
   const [batchPage, setBatchPage] = useState(1);
   const [batchPagination, setBatchPagination] = useState({
@@ -1909,16 +1909,14 @@ export default function EtcTicketManagementPage() {
               label="ETC票据管理"
               pageKey="etc-tickets"
             />
-            {canAdminAccess ? (
-              <Button
-                className="etc-secondary-action"
-                onPress={() => setOaPrefillOpen(true)}
-                size="sm"
-                variant="secondary"
-              >
-                OA 草稿预填管理
-              </Button>
-            ) : null}
+            <Button
+              className="etc-secondary-action"
+              onPress={() => setOaPrefillOpen(true)}
+              size="sm"
+              variant="secondary"
+            >
+              OA 草稿预填管理
+            </Button>
             <Button
               className="etc-secondary-action"
               isDisabled={batchNavigationDisabled || taskLoading}

@@ -90,7 +90,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `保存凭据` | `web/src/components/settings/SettingsOaApplicantCredentialsSection.tsx` | settings OA 申请人凭据保存。 |
 | `清空密码` | `web/src/components/settings/SettingsOaApplicantCredentialsSection.tsx` | settings OA 申请人凭据清空。 |
 | `创建 OA 草稿` | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 进项发票反提 OA 草稿创建。 |
-| `OA 草稿预填管理` / `保存` | `web/src/components/common/OaDraftPrefillDrawer.tsx` | ETC 与进项发票使用页面的 admin-only versioned 预填设置写入口；非 admin 不展示入口，后端 PUT 再校验 admin。 |
+| `OA 草稿预填管理` / `保存` | `web/src/components/common/OaDraftPrefillDrawer.tsx` | ETC 与进项发票使用页面对所有已授权 App 账户展示 versioned 预填设置入口；非 admin 只读且不展示保存操作，后端 PUT 再校验 admin。 |
 | `关联支出流水` | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending 关联支出流水。 |
 | `关联OA项` | `web/src/pages/BatchAccountingPage.tsx` | 批量账务关联 OA 项与流水。 |
 | `确认为过账` | `web/src/components/workbench/RowActions.tsx` | 关联台现金过账行级菜单。 |
