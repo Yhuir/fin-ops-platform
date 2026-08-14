@@ -1,341 +1,141 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
-import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
-import type { WorkbenchRecord, WorkbenchRelationGroup } from "../features/workbench/types";
+import type { WorkbenchRelationGroup } from "../features/workbench/types";
 
-const anomalyItem = {
-  code: "oa_invoice_amount_mismatch" as const,
-  label: "金额不一致",
-  displayLabel: "金额不一致",
-  fingerprint: "a".repeat(64),
-  comparisonUnitId: "case:CASE-1",
-  sourceOaIds: [],
-  sourceExpenseItemIds: [],
-  oaTotal: "100.00",
-  invoiceTotal: "99.99",
-  amountDelta: "0.01",
-  invoiceRowIds: ["invoice-1"],
-  attachmentFileCount: 0,
-};
-
-const anomaly = {
-  code: "oa_invoice_anomaly" as const,
-  fingerprint: "b".repeat(64),
-  state: "active" as const,
-  items: [anomalyItem],
-};
-
-const invoiceRow: WorkbenchRecord = {
-  id: "invoice-1",
-  recordType: "invoice",
-  sourceKind: "manual_import",
-  label: "进项发票",
-  status: "已关联",
-  statusCode: "paired",
-  statusTone: "success",
-  exceptionHandled: false,
-  amount: "99.99",
-  counterparty: "测试供应商",
-  tableValues: {
-    sellerName: "测试供应商",
-    sellerTaxId: "915300000000000000",
-    buyerName: "云南溯源科技有限公司",
-    buyerTaxId: "915300007194052520",
-    invoiceType: "进项发票",
+const anomalyItems = [
+  {
+    code: "oa_bank_amount_mismatch" as const,
+    label: "OA流水金额不一致",
+    displayLabel: "OA流水金额不一致",
+    fingerprint: "b".repeat(64),
+    comparisonUnitId: "CASE-1",
+    sourceOaIds: ["oa-1"],
+    sourceExpenseItemIds: [],
+    oaTotal: "100.00",
+    bankTotal: "90.00",
+    amountDelta: "10.00",
+    mismatchPair: ["oa", "bank"] as ["oa", "bank"],
+    invoiceRowIds: [],
+    attachmentFileCount: 0,
   },
-  detailFields: [],
-  actionVariant: "detail-only",
-  availableActions: ["detail"],
-  oaInvoiceAnomaly: anomalyItem,
-};
+  {
+    code: "bank_invoice_amount_mismatch" as const,
+    label: "流水发票金额不一致",
+    displayLabel: "流水发票金额不一致",
+    fingerprint: "c".repeat(64),
+    comparisonUnitId: "CASE-1",
+    sourceOaIds: ["oa-1"],
+    sourceExpenseItemIds: [],
+    bankTotal: "90.00",
+    invoiceTotal: "80.00",
+    amountDelta: "10.00",
+    mismatchPair: ["bank", "invoice"] as ["bank", "invoice"],
+    invoiceRowIds: ["invoice-1"],
+    attachmentFileCount: 0,
+  },
+];
 
-const group: WorkbenchRelationGroup = {
-  id: "case:CASE-1",
-  groupType: "paired",
-  rawGroupType: "relation",
-  matchConfidence: "high",
-  reason: "active_formal_relation",
-  rows: { oa: [], bank: [], invoice: [invoiceRow] },
-  oaInvoiceAnomaly: anomaly,
-};
+function group(zone: "paired" | "unpaired"): WorkbenchRelationGroup {
+  return {
+    id: "case:CASE-1",
+    groupType: zone,
+    matchConfidence: "high",
+    reason: "active_formal_relation",
+    rows: { oa: [], bank: [], invoice: [] },
+    workbenchAnomaly: {
+      code: "workbench_anomaly",
+      fingerprint: "a".repeat(64),
+      reviewDecision: zone === "paired" ? "accept_paired" : "pending",
+      reviewedItemFingerprints: zone === "paired" ? anomalyItems.map((item) => item.fingerprint) : [],
+      reviewNote: "",
+      reviewedBy: zone === "paired" ? "reviewer" : "",
+      items: anomalyItems,
+    },
+  };
+}
 
-describe("Workbench amount mismatch exception UI", () => {
-  test("requests bounded summary pages and defers detail until a group expands", async () => {
+function renderDrawer(
+  bucket: "paired" | "unpaired",
+  onReviewAnomaly = vi.fn(),
+  canMutateData = true,
+) {
+  render(
+    <WorkbenchExceptionDrawer
+      bucket={bucket}
+      canMutateData={canMutateData}
+      contentGeneration={1}
+      error={null}
+      groups={[group(bucket)]}
+      hasMore={false}
+      loading={false}
+      loadingMore={false}
+      open
+      total={1}
+      onBucketChange={vi.fn()}
+      onClose={vi.fn()}
+      onEnsureGroupDetail={async (value) => value}
+      onLoadMore={vi.fn()}
+      onReviewAnomaly={onReviewAnomaly}
+    />,
+  );
+}
+
+describe("WorkbenchExceptionDrawer", () => {
+  it("uses the unpaired and paired anomaly tab labels", () => {
+    renderDrawer("unpaired");
+    expect(screen.getByText("未配对异常")).toBeInTheDocument();
+    expect(screen.getByText("已配对异常")).toBeInTheDocument();
+  });
+
+  it("requires every anomaly item to be reviewed before either decision", async () => {
     const user = userEvent.setup();
-    const onEnsureGroupDetail = vi.fn(async (candidate: WorkbenchRelationGroup) => candidate);
-    const onLoadMore = vi.fn();
+    const onReview = vi.fn();
+    renderDrawer("unpaired", onReview);
+    const keep = screen.getByRole("button", { name: "留在未配对" });
+    const accept = screen.getByRole("button", { name: "进入已配对" });
+    expect(keep).toBeDisabled();
+    expect(accept).toBeDisabled();
 
-    render(
-      <WorkbenchExceptionDrawer
-        bucket="active"
-        canMutateData
-        contentGeneration={0}
-        error={null}
-        groups={[group]}
-        hasMore
-        loading={false}
-        loadingMore={false}
-        open
-        total={2}
-        onBucketChange={vi.fn()}
-        onClose={vi.fn()}
-        onEnsureGroupDetail={onEnsureGroupDetail}
-        onIgnoreOaInvoiceAnomaly={vi.fn()}
-        onLoadMore={onLoadMore}
-        onRestoreOaInvoiceAnomaly={vi.fn()}
-      />,
+    await user.click(screen.getByRole("checkbox", { name: "确认已审阅 OA流水金额不一致" }));
+    expect(accept).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: "确认已审阅 流水发票金额不一致" }));
+    expect(accept).toBeEnabled();
+    await user.click(accept);
+
+    expect(onReview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "case:CASE-1" }),
+      "accept_paired",
+      anomalyItems.map((item) => item.fingerprint),
     );
-
-    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(within(drawer).getByText("1 / 2 项")).toBeInTheDocument();
-    expect(onEnsureGroupDetail).not.toHaveBeenCalled();
-    await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
-    expect(onLoadMore).toHaveBeenCalledTimes(1);
-    expect(onEnsureGroupDetail).not.toHaveBeenCalled();
-
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
-    expect(await within(drawer).findByText("测试供应商")).toBeInTheDocument();
-    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(1);
   });
 
-  test("renders a collapsed three-pane outline and expands all details together", async () => {
+  it("shows only specific amount chips", () => {
+    renderDrawer("unpaired");
+    expect(screen.getByText("OA流水金额不一致")).toBeInTheDocument();
+    expect(screen.getByText("流水发票金额不一致")).toBeInTheDocument();
+    expect(screen.queryByText(/^金额不一致$/)).not.toBeInTheDocument();
+  });
+
+  it("keeps anomaly evidence readable without exposing local review controls to read-only users", () => {
+    renderDrawer("unpaired", vi.fn(), false);
+    expect(screen.getByText("OA流水金额不一致")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /确认已审阅/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "进入已配对" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "留在未配对" })).not.toBeInTheDocument();
+  });
+
+  it("withdraws an accepted anomaly back to unpaired", async () => {
     const user = userEvent.setup();
-    const onIgnore = vi.fn();
-
-    render(
-      <WorkbenchExceptionDrawer
-        bucket="active"
-        canMutateData
-        contentGeneration={0}
-        error={null}
-        groups={[group]}
-        hasMore={false}
-        loading={false}
-        loadingMore={false}
-        open
-        total={1}
-        onBucketChange={vi.fn()}
-        onClose={vi.fn()}
-        onEnsureGroupDetail={async (candidate) => candidate}
-        onIgnoreOaInvoiceAnomaly={onIgnore}
-        onLoadMore={vi.fn()}
-        onRestoreOaInvoiceAnomaly={vi.fn()}
-      />,
+    const onReview = vi.fn();
+    renderDrawer("paired", onReview);
+    await user.click(screen.getByRole("button", { name: "撤回" }));
+    expect(onReview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "case:CASE-1" }),
+      "keep_unpaired",
+      anomalyItems.map((item) => item.fingerprint),
     );
-
-    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(within(drawer).getByText("OA · 0项")).toBeInTheDocument();
-    expect(within(drawer).getByText("流水 · 0项")).toBeInTheDocument();
-    expect(within(drawer).getByText("发票 · 1项")).toBeInTheDocument();
-    expect(within(drawer).getByText("99.99")).toBeInTheDocument();
-    const activeBucketControl = within(drawer).getByRole("radio", { name: "进行中的异常" });
-    expect(activeBucketControl).toHaveAttribute("aria-checked", "true");
-    expect(within(drawer).getByRole("radio", { name: "已忽略的异常" })).toBeInTheDocument();
-    expect(within(drawer).queryByTestId("pane-invoice")).not.toBeInTheDocument();
-
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
-    expect(await within(drawer).findByText("测试供应商")).toBeInTheDocument();
-    expect(within(drawer).queryByTestId("pane-invoice")).not.toBeInTheDocument();
-
-    await user.click(within(drawer).getByRole("button", { name: "忽略" }));
-    expect(onIgnore).toHaveBeenCalledWith(group);
-    expect(activeBucketControl).toHaveFocus();
-  });
-
-  test("shows the anomaly chip directly after the invoice source row", () => {
-    render(
-      <WorkbenchRecordCard
-        canMutateData
-        columns={[{ key: "sellerName", label: "销方", track: "1fr", minWidth: 120 }]}
-        paneId="invoice"
-        row={invoiceRow}
-        rowState="idle"
-        showWorkflowActions={false}
-        zoneId="paired"
-        onOpenDetail={vi.fn()}
-        onRowAction={vi.fn()}
-        onSelectRow={vi.fn()}
-      />,
-    );
-
-    const source = screen.getByText("人工导入");
-    const chip = screen.getByText("金额不一致").closest('[data-slot="chip"]');
-    expect(source.closest(".invoice-chip-row")?.nextElementSibling).toBe(chip);
-    expect(chip).toHaveAttribute("title", "OA 100.00 / 发票 99.99 / 差额 0.01");
-  });
-
-  test("renders a missing OA attachment as one non-interactive invoice anomaly row", async () => {
-    const missingItem = {
-      ...anomalyItem,
-      code: "oa_invoice_attachment_missing" as const,
-      label: "OA发票附件缺失",
-      displayLabel: "OA发票附件缺失",
-      invoiceTotal: undefined,
-      amountDelta: undefined,
-      invoiceRowIds: [],
-      attachmentFileCount: 1,
-    };
-    const onSelectRow = vi.fn();
-
-    render(
-      <WorkbenchRecordCard
-        canMutateData
-        columns={[{ key: "sellerName", label: "销方", track: "1fr", minWidth: 120 }]}
-        paneId="invoice"
-        row={{
-          ...invoiceRow,
-          id: "missing-item",
-          displayOnly: true,
-          sourceKind: "oa_attachment_unknown",
-          externalUrl: "/oa/#/normal/32?formId=32",
-          label: "OA发票附件缺失",
-          oaInvoiceAnomaly: missingItem,
-        }}
-        rowState="idle"
-        showWorkflowActions={false}
-        zoneId="unpaired"
-        onOpenDetail={vi.fn()}
-        onRowAction={vi.fn()}
-        onSelectRow={onSelectRow}
-      />,
-    );
-
-    const chip = screen.getByText("OA发票附件缺失").closest('[data-slot="chip"]');
-    expect(chip).toHaveAttribute("title", "OA子付款项已上传 1 个附件，但未解析出发票");
-    expect(chip?.closest("a")).toHaveAttribute("href", "/oa/#/normal/32?formId=32");
-    expect(chip?.closest("a")).toHaveAttribute("target", "_blank");
-    expect(chip?.closest("a")).toHaveAttribute("rel", "noopener noreferrer");
-    await userEvent.click(chip!.closest('[role="row"]') as HTMLElement);
-    expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  test("shows ignored mismatch and withdraws the ignore without a confirmation modal", async () => {
-    const user = userEvent.setup();
-    const ignoredItem = {
-      ...anomalyItem,
-      displayLabel: "已忽略：金额不一致",
-    };
-    const ignoredAnomaly = {
-      ...anomaly,
-      state: "ignored" as const,
-      items: [ignoredItem],
-    };
-    const ignoredGroup: WorkbenchRelationGroup = {
-      ...group,
-      oaInvoiceAnomaly: ignoredAnomaly,
-      rows: {
-        ...group.rows,
-        invoice: [{ ...invoiceRow, oaInvoiceAnomaly: ignoredItem }],
-      },
-    };
-    const onRestore = vi.fn();
-
-    render(
-      <WorkbenchExceptionDrawer
-        bucket="processed"
-        canMutateData
-        contentGeneration={0}
-        error={null}
-        groups={[ignoredGroup]}
-        hasMore={false}
-        loading={false}
-        loadingMore={false}
-        open
-        total={1}
-        onBucketChange={vi.fn()}
-        onClose={vi.fn()}
-        onEnsureGroupDetail={async (candidate) => candidate}
-        onIgnoreOaInvoiceAnomaly={vi.fn()}
-        onLoadMore={vi.fn()}
-        onRestoreOaInvoiceAnomaly={onRestore}
-      />,
-    );
-
-    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(within(drawer).getAllByText("已忽略：金额不一致").length).toBeGreaterThan(0);
-    await user.click(within(drawer).getByRole("button", { name: "撤回忽略" }));
-    expect(onRestore).toHaveBeenCalledWith(ignoredGroup);
-    expect(screen.queryByRole("dialog", { name: "取消异常处理确认弹窗" })).not.toBeInTheDocument();
-  });
-
-  test("keeps only one relation group expanded", async () => {
-    const user = userEvent.setup();
-    const secondGroup: WorkbenchRelationGroup = {
-      ...group,
-      id: "case:CASE-2",
-      rows: {
-        ...group.rows,
-        invoice: [{ ...invoiceRow, id: "invoice-2", counterparty: "第二供应商" }],
-      },
-    };
-
-    render(
-      <WorkbenchExceptionDrawer
-        bucket="active"
-        canMutateData
-        contentGeneration={0}
-        error={null}
-        groups={[group, secondGroup]}
-        hasMore={false}
-        loading={false}
-        loadingMore={false}
-        open
-        total={2}
-        onBucketChange={vi.fn()}
-        onClose={vi.fn()}
-        onEnsureGroupDetail={async (candidate) => candidate}
-        onIgnoreOaInvoiceAnomaly={vi.fn()}
-        onLoadMore={vi.fn()}
-        onRestoreOaInvoiceAnomaly={vi.fn()}
-      />,
-    );
-
-    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    const triggers = within(drawer).getAllByRole("button", { name: "展开异常明细" });
-    await user.click(triggers[0]);
-    expect(triggers[0]).toHaveAttribute("aria-expanded", "true");
-    await user.click(within(drawer).getAllByRole("button", { name: "展开异常明细" })[0]);
-    expect(triggers[0]).toHaveAttribute("aria-expanded", "false");
-  });
-
-  test("drops expanded detail cache when a fresh bucket generation replaces the canonical page", async () => {
-    const user = userEvent.setup();
-    const onEnsureGroupDetail = vi.fn(async (candidate: WorkbenchRelationGroup) => candidate);
-    const drawer = (contentGeneration: number) => (
-      <WorkbenchExceptionDrawer
-        bucket="active"
-        canMutateData
-        contentGeneration={contentGeneration}
-        error={null}
-        groups={[group]}
-        hasMore={false}
-        loading={false}
-        loadingMore={false}
-        open
-        total={1}
-        onBucketChange={vi.fn()}
-        onClose={vi.fn()}
-        onEnsureGroupDetail={onEnsureGroupDetail}
-        onIgnoreOaInvoiceAnomaly={vi.fn()}
-        onLoadMore={vi.fn()}
-        onRestoreOaInvoiceAnomaly={vi.fn()}
-      />
-    );
-    const { rerender } = render(drawer(1));
-
-    await user.click(screen.getByRole("button", { name: "展开异常明细" }));
-    expect(await screen.findByText("测试供应商")).toBeInTheDocument();
-    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(1);
-
-    rerender(drawer(2));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "展开异常明细" })).toHaveAttribute("aria-expanded", "false");
-    });
-    await user.click(screen.getByRole("button", { name: "展开异常明细" }));
-    expect(await screen.findByText("测试供应商")).toBeInTheDocument();
-    expect(onEnsureGroupDetail).toHaveBeenCalledTimes(2);
   });
 });

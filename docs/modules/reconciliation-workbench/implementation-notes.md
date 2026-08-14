@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-15 - 统一异常审阅与展示分区
+
+- 当前合同以 `workbench_anomaly` 为唯一自动异常 bundle，覆盖 OA—流水、OA—发票、流水—发票以及 OA 附件缺失/解析失败/待归属；旧 `oa_invoice_anomaly`、amount-mismatch ignore/restore service、routes 和前端动作已删除。
+- 异常默认阻断关联台进入已配对；逐项审阅后写 `accept_paired|keep_unpaired`。决定只改变关联台有效展示分区，不修改 active 正式关系或下游关系事实。数据或成员 fingerprint 变化后决定失效。
+- 抽屉只保留“未配对异常 / 已配对异常”，每次读取一个 bucket。accept/撤回后各执行一次 canonical direct GET 与一次目标 bucket GET；无新表、迁移、read model、worker、缓存或依赖。
+
 ## 2026-08-12 - generation retention 小批事务与专用超时
 
 - 根因：旧 prune 一次 preview 最多 500 个跨 scope generation，并在一个事务内依次删除六张子表；生产默认 10 秒 statement timeout 在 `workbench_group_rows` 删除处中止，导致整批回滚，历史 generation 持续堆积。
@@ -1570,20 +1576,20 @@
 - 前端：复用 AppDrawer 与 RelationGroupGrid 形成统一三栏异常抽屉；旧已处理/已忽略双 modal、样式和测试删除。没有新增依赖、页面状态域、read model、worker、queue、表或 migration。
 - 生产前向修复：`month=all` 异常桶计数不能继续读取不含 `payload` 的 group-key 快路径；仅异常过滤复用既有非聚合 canonical group 查询，普通查询仍保持 group-key 快路径。投影 schema 升级为 v18，使 v17 历史 generation fail closed 并通过既有 Workbench refresh/rehydrate 发布当时的关系级金额异常，禁止把缺少新字段的旧 payload 标记为 fresh。
 
-## 2026-08-05 - 紧凑异常抽屉与已忽略语义收口
+## 2026-08-05 - 紧凑异常抽屉与已忽略语义收口（历史，已替代）
 
 - 用户口径统一为“进行中的异常 / 已忽略的异常”“忽略 / 撤回忽略”；后端既有 `active|processed` transport 保持不变，不新增状态、API 或迁移。summary 增加准确 `ignored_exception_count`，同时统计 ignored 金额异常、legacy processed relation group 和 payload `ignored=true` 的独立行。
 - 抽屉复用 HeroUI `ToggleButtonGroup`、`DisclosureGroup`、`Chip`、`Button` 与既有 `AppDrawer`/`RelationGroupGrid`。每组默认一行展示 OA/流水/发票成员数与总金额，只展开一组完整三栏；删除重复 pane 表头、说明副标题、大卡片和旧撤回确认 modal。
 - 撤回忽略直接对当前完整关系组执行 canonical cancel action，成功后刷新当前关联台和已忽略桶；read-export 不显示写按钮。删除 `CancelProcessedExceptionModal.tsx`，不保留旧 UI 或 fallback。
 
-## 2026-08-05 - OA/发票比较单元与附件缺失异常
+## 2026-08-05 - OA/发票比较单元与附件缺失异常（历史，比较单元仍有效，处置已替代）
 
 - 根因收口：旧投影先按关系组汇总 OA/发票总额，再把同一异常复制到每张发票，无法表达 `290=145+145`、`405=350+55` 等子付款项组合，也让显式 ownership 被金额差异拆行。新合同以日常报销 `source_expense_item_id` 为比较单元，支付申请才使用关系组总额；显式 ownership 决定同行，金额只决定异常。
 - 新增同一 bundle 下的 `oa_invoice_amount_mismatch|oa_invoice_attachment_missing` items。子付款项有附件但零已解析绑定发票时，发票栏生成只读 display-only 占位；一个比较单元只显示一个 chip，旧逐发票 `amount_anomaly` 字段和复制循环已删除。
 - 投影 schema 升级为 v19，v18 generation/cache fail closed 并通过既有 Workbench exact-scope refresh 重建；没有新增数据库表、migration、read model、scope、worker、queue、Redis owner、依赖或并行旧路径。既有 amount-mismatch command/repository 继续作为关系组忽略决定的持久化边界。
 - 前端异常入口固定为 `异常 n | 已忽略 m`；统一抽屉继续复用 HeroUI `ToggleButtonGroup`、`DisclosureGroup`、`Chip`、`Button`，默认折叠、按需展开、只保留一条操作栏。
 
-## 2026-08-05 - 历史 WEX 运行时退役与搜索可发现性闭环
+## 2026-08-05 - 历史 WEX 运行时退役与搜索可发现性闭环（历史）
 
 - 根因：历史 WEX/row-ignore 元数据被当作第三种运行时状态，导致无 active relation 的 canonical rows 被主区过滤、进入异常抽屉并触发无意义 generation stale；金额搜索又直接比较原始金额字符串，`202.00` 无法命中存储值 `202`，OA 完成时间也未进入搜索投影。
 - 决策：保留历史 WEX 表和记录作为审计事实，但从 canonical projection、grouping、异常桶、计数、前端旧动作和 generation source freshness 全部移除。只有新 `oa_invoice_anomaly` 能进入“异常 / 已忽略”链路；正式关系继续是唯一 ownership 事实源。

@@ -33,7 +33,7 @@ class WorkbenchRelationGroupingService:
         *,
         rows_by_id: dict[str, dict[str, Any]],
         active_relations: list[dict[str, Any]],
-        amount_mismatch_decisions: dict[str, str] | None = None,
+        anomaly_review_decisions: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         canonical_rows, display_rows = self._normalize_rows(rows_by_id)
         relations = self._normalize_relations(active_relations)
@@ -44,7 +44,7 @@ class WorkbenchRelationGroupingService:
                 relation,
                 canonical_rows,
                 display_rows,
-                amount_mismatch_decisions=amount_mismatch_decisions or {},
+                anomaly_review_decisions=anomaly_review_decisions or {},
             )
             for relation in relations
         ]
@@ -72,21 +72,15 @@ class WorkbenchRelationGroupingService:
                 "invoice_count": counts["invoice"],
                 "paired_count": len(paired_groups),
                 "unpaired_count": len(unpaired_groups),
-                "exception_count": sum(
+                "unpaired_exception_count": sum(
                     1
-                    for group in [*paired_groups, *unpaired_groups]
-                    if (
-                        isinstance(group.get("oa_invoice_anomaly"), dict)
-                        and group["oa_invoice_anomaly"].get("state") == "active"
-                    )
+                    for group in unpaired_groups
+                    if isinstance(group.get("workbench_anomaly"), dict)
                 ),
-                "ignored_exception_count": sum(
+                "paired_exception_count": sum(
                     1
-                    for group in [*paired_groups, *unpaired_groups]
-                    if (
-                        isinstance(group.get("oa_invoice_anomaly"), dict)
-                        and group["oa_invoice_anomaly"].get("state") == "ignored"
-                    )
+                    for group in paired_groups
+                    if isinstance(group.get("workbench_anomaly"), dict)
                 ),
             },
             "paired": {"groups": paired_groups},
@@ -188,7 +182,7 @@ class WorkbenchRelationGroupingService:
         rows_by_id: dict[str, dict[str, Any]],
         display_rows_by_case: dict[str, list[dict[str, Any]]],
         *,
-        amount_mismatch_decisions: dict[str, str],
+        anomaly_review_decisions: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
         case_id = str(relation["case_id"])
         special_metadata = relation.get("special_metadata")
@@ -207,9 +201,43 @@ class WorkbenchRelationGroupingService:
                 else None
             ),
         )
-        zone = "paired" if completion["is_complete"] else "unpaired"
-        rows = [self._relation_row(rows_by_id[row_id], relation, zone=zone) for row_id in relation["row_ids"]]
+        base_zone = "paired" if completion["is_complete"] else "unpaired"
+        rows = [
+            self._relation_row(rows_by_id[row_id], relation, zone=base_zone)
+            for row_id in relation["row_ids"]
+        ]
         self._normalize_oa_attachment_expense_item_ids(rows)
+        rows_by_type = {
+            row_type: [row for row in rows if str(row.get("type")) == row_type]
+            for row_type in ROW_TYPES
+        }
+        anomaly = WorkbenchAmountCheckService().workbench_anomaly(
+            rows_by_type,
+            relation_id=case_id,
+        )
+        review = (
+            anomaly_review_decisions.get(str(anomaly.get("fingerprint")))
+            if isinstance(anomaly, dict)
+            else None
+        )
+        decision = (
+            str((review or {}).get("decision") or "pending")
+            if isinstance(review, dict)
+            else "pending"
+        )
+        accepted = decision == "accept_paired"
+        zone = base_zone if not anomaly or accepted else "unpaired"
+        if anomaly and not accepted:
+            completion = deepcopy(completion)
+            completion["is_complete"] = False
+            completion["blocking_reasons"] = list(
+                dict.fromkeys(
+                    [*list(completion.get("blocking_reasons") or []), "anomaly_review_required"]
+                )
+            )
+        if zone != base_zone:
+            for row in rows:
+                row["status"] = zone
         group = self._base_group(
             group_id=f"case:{case_id}",
             group_type="relation",
@@ -222,20 +250,17 @@ class WorkbenchRelationGroupingService:
         group["relation_mode"] = relation_mode
         group["case_id"] = case_id
         group["can_withdraw"] = True
-        anomaly = WorkbenchAmountCheckService().oa_invoice_anomaly(
-            {
-                "oa": group["oa_rows"],
-                "bank": group["bank_rows"],
-                "invoice": group["invoice_rows"],
-            },
-            relation_id=case_id,
-        )
         if anomaly:
-            state = "ignored" if amount_mismatch_decisions.get(anomaly["fingerprint"]) == "ignored" else "active"
-            anomaly["state"] = state
+            anomaly["review_decision"] = decision
+            anomaly["reviewed_item_fingerprints"] = list(
+                (review or {}).get("reviewed_item_fingerprints") or []
+            ) if isinstance(review, dict) else []
+            anomaly["review_note"] = str((review or {}).get("note") or "") if isinstance(review, dict) else ""
+            anomaly["reviewed_by"] = str((review or {}).get("reviewed_by") or "") if isinstance(review, dict) else ""
+            anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
             for item in anomaly["items"]:
-                item["display_label"] = f"已忽略：{item['label']}" if state == "ignored" else item["label"]
-            group["oa_invoice_anomaly"] = anomaly
+                item["display_label"] = item["label"]
+            group["workbench_anomaly"] = anomaly
         if isinstance(relation.get("amount_check"), dict):
             group["amount_check"] = deepcopy(relation["amount_check"])
         if isinstance(special_metadata, dict):

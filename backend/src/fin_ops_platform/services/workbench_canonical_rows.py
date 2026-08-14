@@ -130,7 +130,7 @@ class WorkbenchCanonicalRowsBuilder:
         rows_by_typed_id: dict[tuple[str, str], dict[str, Any]],
         relations: list[dict[str, Any]],
         page_overrides: dict[tuple[str, str], dict[str, Any]] | None = None,
-        amount_mismatch_decisions: dict[str, str] | None = None,
+        anomaly_review_decisions: dict[str, dict[str, Any]] | None = None,
         page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Apply canonical Workbench domain policies to one selected page batch."""
@@ -192,7 +192,7 @@ class WorkbenchCanonicalRowsBuilder:
             rows_by_id,
             normalized_relations,
             overrides_applied=True,
-            amount_mismatch_decisions=amount_mismatch_decisions,
+            anomaly_review_decisions=anomaly_review_decisions,
             page_etc_summaries=page_etc_summaries,
         )
         display_ids = {
@@ -1081,7 +1081,7 @@ class WorkbenchCanonicalRowsBuilder:
         relations: list[dict[str, Any]],
         *,
         overrides_applied: bool = False,
-        amount_mismatch_decisions: dict[str, str] | None = None,
+        anomaly_review_decisions: dict[str, dict[str, Any]] | None = None,
         page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
@@ -1208,12 +1208,12 @@ class WorkbenchCanonicalRowsBuilder:
             month,
             rows_by_id=working_rows_by_id,
             active_relations=relations,
-            amount_mismatch_decisions=(
-                amount_mismatch_decisions
-                if amount_mismatch_decisions is not None
+            anomaly_review_decisions=(
+                anomaly_review_decisions
+                if anomaly_review_decisions is not None
                 else PostgresWorkbenchRepository(
                     self._connection
-                ).load_workbench_amount_mismatch_decisions(scope_key=month)
+                ).load_workbench_anomaly_review_decisions(scope_key=month)
             ),
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}

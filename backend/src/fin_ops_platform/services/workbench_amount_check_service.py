@@ -13,13 +13,14 @@ ZERO = Decimal("0.00")
 
 
 class WorkbenchAmountCheckService:
-    def oa_invoice_anomaly(
+    def workbench_anomaly(
         self,
         rows_by_type: dict[str, list[dict[str, Any]]],
         *,
         relation_id: str,
     ) -> dict[str, Any] | None:
         oa_rows = list(rows_by_type.get("oa") or [])
+        bank_rows = list(rows_by_type.get("bank") or [])
         invoice_rows = list(rows_by_type.get("invoice") or [])
         if not oa_rows:
             return None
@@ -29,20 +30,56 @@ class WorkbenchAmountCheckService:
             invoice_rows,
             relation_id=relation_id,
         )
-        if items is None:
-            item = self._payment_application_anomaly(
-                oa_rows,
-                invoice_rows,
-                relation_id=relation_id,
+        has_expense_items = items is not None
+        items = items or []
+        amount_check = self.check(
+            {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows}
+        )
+        totals = {
+            "oa": self._decimal(amount_check.get("oa_total")),
+            "bank": self._decimal(amount_check.get("bank_total")),
+            "invoice": self._decimal(amount_check.get("invoice_total")),
+        }
+        for pane, pane_rows in (
+            ("oa", oa_rows),
+            ("bank", bank_rows),
+            ("invoice", invoice_rows),
+        ):
+            if any(self._amount(row) is None for row in pane_rows):
+                totals[pane] = None
+        for left, right, code in (
+            ("oa", "bank", "oa_bank_amount_mismatch"),
+            ("oa", "invoice", "oa_invoice_amount_mismatch"),
+            ("bank", "invoice", "bank_invoice_amount_mismatch"),
+        ):
+            if has_expense_items and code == "oa_invoice_amount_mismatch":
+                continue
+            left_total = totals[left]
+            right_total = totals[right]
+            if left_total is None or right_total is None or left_total == right_total:
+                continue
+            items.append(
+                self._anomaly_item(
+                    code=code,
+                    relation_id=relation_id,
+                    comparison_unit_id=str(relation_id or "").strip(),
+                    source_oa_ids=[self._row_id(row) for row in oa_rows],
+                    source_expense_item_ids=[],
+                    oa_total=totals["oa"],
+                    bank_total=totals["bank"],
+                    invoice_total=totals["invoice"],
+                    invoice_rows=invoice_rows,
+                    attachment_file_count=0,
+                    mismatch_pair=(left, right),
+                )
             )
-            items = [item] if item else []
         if not items:
             return None
         fingerprint_source = "\0".join(
             [str(relation_id or "").strip(), *sorted(str(item["fingerprint"]) for item in items)]
         )
         return {
-            "code": "oa_invoice_anomaly",
+            "code": "workbench_anomaly",
             "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
             "items": items,
         }
@@ -119,9 +156,11 @@ class WorkbenchAmountCheckService:
                     source_oa_ids=[source_oa_id],
                     source_expense_item_ids=[expense_item_id],
                     oa_total=self._decimal(expense_item.get("amount")),
+                    bank_total=None,
                     invoice_total=None,
                     invoice_rows=matching_unassigned_invoices,
                     attachment_file_count=attachment_count,
+                    mismatch_pair=None,
                 )
             )
 
@@ -180,40 +219,17 @@ class WorkbenchAmountCheckService:
                     source_oa_ids=source_oa_ids,
                     source_expense_item_ids=ordered_item_ids,
                     oa_total=oa_total,
+                    bank_total=None,
                     invoice_total=invoice_total,
                     invoice_rows=component_invoices,
                     attachment_file_count=sum(
                         self._non_negative_int(expense_by_id[item_id][1].get("attachment_file_count"))
                         for item_id in ordered_item_ids
                     ),
+                    mismatch_pair=("oa", "invoice"),
                 )
             )
         return anomalies
-
-    def _payment_application_anomaly(
-        self,
-        oa_rows: list[dict[str, Any]],
-        invoice_rows: list[dict[str, Any]],
-        *,
-        relation_id: str,
-    ) -> dict[str, Any] | None:
-        if not invoice_rows:
-            return None
-        oa_total = self._strict_sum_amounts(oa_rows)
-        invoice_total = self._strict_sum_amounts(invoice_rows)
-        if oa_total is None or invoice_total is None or oa_total == invoice_total:
-            return None
-        return self._anomaly_item(
-            code="oa_invoice_amount_mismatch",
-            relation_id=relation_id,
-            comparison_unit_id=str(relation_id or "").strip(),
-            source_oa_ids=[self._row_id(oa_rows[0])] if len(oa_rows) == 1 else [],
-            source_expense_item_ids=[],
-            oa_total=oa_total,
-            invoice_total=invoice_total,
-            invoice_rows=invoice_rows,
-            attachment_file_count=0,
-        )
 
     def _anomaly_item(
         self,
@@ -224,22 +240,28 @@ class WorkbenchAmountCheckService:
         source_oa_ids: list[str],
         source_expense_item_ids: list[str],
         oa_total: Decimal | None,
+        bank_total: Decimal | None,
         invoice_total: Decimal | None,
         invoice_rows: list[dict[str, Any]],
         attachment_file_count: int,
+        mismatch_pair: tuple[str, str] | None,
     ) -> dict[str, Any]:
         invoice_row_ids = sorted(self._row_id(row) for row in invoice_rows if self._row_id(row))
         label = {
             "oa_invoice_attachment_missing": "OA发票附件缺失",
             "oa_invoice_attachment_parse_failed": "OA附件解析失败",
             "oa_invoice_attachment_unassigned": "OA发票待归属",
-        }.get(code, "金额不一致")
+            "oa_bank_amount_mismatch": "OA流水金额不一致",
+            "oa_invoice_amount_mismatch": "OA发票金额不一致",
+            "bank_invoice_amount_mismatch": "流水发票金额不一致",
+        }[code]
         fingerprint_source = "\0".join(
             [
                 str(relation_id or "").strip(),
                 code,
                 comparison_unit_id,
                 self._format_amount(oa_total) or "",
+                self._format_amount(bank_total) or "",
                 self._format_amount(invoice_total) or "",
                 str(attachment_file_count),
                 *invoice_row_ids,
@@ -253,13 +275,34 @@ class WorkbenchAmountCheckService:
             "source_oa_ids": [value for value in source_oa_ids if value],
             "source_expense_item_ids": [value for value in source_expense_item_ids if value],
             "oa_total": self._format_amount(oa_total),
+            "bank_total": self._format_amount(bank_total),
             "invoice_total": self._format_amount(invoice_total),
-            "amount_delta": self._format_amount(abs(oa_total - invoice_total))
-            if oa_total is not None and invoice_total is not None
-            else None,
+            "amount_delta": self._mismatch_delta(
+                mismatch_pair,
+                oa_total=oa_total,
+                bank_total=bank_total,
+                invoice_total=invoice_total,
+            ),
+            "mismatch_pair": list(mismatch_pair) if mismatch_pair else None,
             "invoice_row_ids": invoice_row_ids,
             "attachment_file_count": attachment_file_count,
         }
+
+    def _mismatch_delta(
+        self,
+        mismatch_pair: tuple[str, str] | None,
+        *,
+        oa_total: Decimal | None,
+        bank_total: Decimal | None,
+        invoice_total: Decimal | None,
+    ) -> str | None:
+        if mismatch_pair is None:
+            return None
+        totals = {"oa": oa_total, "bank": bank_total, "invoice": invoice_total}
+        left, right = (totals[value] for value in mismatch_pair)
+        if left is None or right is None:
+            return None
+        return self._format_amount(abs(left - right))
 
     @staticmethod
     def _source_expense_item_ids(row: dict[str, Any]) -> list[str]:

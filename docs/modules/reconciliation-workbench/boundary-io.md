@@ -8,7 +8,7 @@
 
 - 通过 direct canonical API 读取 OA、银行流水、发票、ETC 批次和正式关系，并把当前提交事实划分为 `paired` / `unpaired`。
 - 提供同一只读快照内的首屏统计与两区首页、区域级搜索/筛选/排序、cursor 分页、filter options、group/row detail 和异常抽屉。
-- 提供人工正式关联、关系级撤回、自动异常 ignore/restore；撤回恢复最近一次确认前的稳定拓扑。
+- 提供人工正式关联、关系级撤回和异常人工审阅；撤回关系恢复最近一次确认前的稳定拓扑，撤回异常放行只改变展示分区。
 - 保持权限、审计、幂等、canonical member exact-set、preview fingerprint、relation/entity version 和稳定加锁顺序。
 - 写成功后由页面执行一次普通 direct GET，读取已提交事实；页面不等待 projection worker。
 
@@ -46,7 +46,7 @@ ReconciliationWorkbenchPage
 | canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
-| anomaly decisions | workbench exception repository | OA/发票自动异常按当前 canonical group set-based 计算；日常报销以付款项—发票二部图连通分量计算，发票按 ID 去重，未绑定项区分 missing / parse_failed / unassigned。ignore/restore decision 以 scenario/fingerprint 关联。历史 WEX/row-ignore 只保留审计，不重新进入页面分区。 |
+| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 missing / parse_failed / unassigned 附件异常。任一异常默认阻断进入已配对区；`accept_paired|keep_unpaired` 决定绑定当前 bundle fingerprint，输入变化后自动失效。历史 ignore/restore、WEX/row-ignore 只保留审计，不重新进入页面分区。 |
 | list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
@@ -97,7 +97,7 @@ requested tenant/scope
 
 ### 异常与详情
 
-- `/groups?exception_bucket=active|processed` 在 SQL group spine 上应用 anomaly state/fingerprint 和 ignore decision，精确计数并有界分页；前端不得 drain 全部 full-detail pages 后本地合并。
+- `/groups?exception_bucket=unpaired|paired` 在 SQL group spine 上应用 anomaly fingerprint 和人工决定，精确计数并有界分页；bucket 必须与 zone 相同，前端每次只读取当前 bucket，不得并行读取两区或 drain full-detail pages 后本地合并。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。
 - detail 读取 latest committed 事实，不接受 `expected_read_model_version`，不构建全 scope group CTE。
 - summary 列表禁止携带 raw payload、OCR/附件全文和完整 detail fields；折叠内容只在用户展开后读取。
@@ -111,8 +111,8 @@ requested tenant/scope
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
 | filter options | 表头菜单 | `options[{value,label,missing}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins。 |
-| paired groups | 前端 | 冻结要求满足且关系内 OA workflow 已完成的 active formal relation；`group_type=relation`。 |
-| unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足或含 in-progress OA 的完整 active relation；不完整 relation 不被强行拆散。 |
+| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户明确 `accept_paired` 的 active formal relation；具体异常 chip 仍保留。 |
+| unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
 | OA expense/invoice display | 前端 | OA row 输出 `expense_items[]`，OA attachment invoice 输出复数 `source_expense_item_ids[]`。前端按来源图连通分量同带渲染；一张发票只出现一次，无 item 来源的发票只能进入独立残余带，不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
@@ -134,7 +134,7 @@ requested tenant/scope
 - mount：一个 combined initial、权威 OA sync status、settings；不请求 `/api/workbench/refresh-status`。
 - query/filter/sort 变化：abort 上一请求，只重取受影响 zone 并清空该区 cursor；不重复读取 summary 和另一 zone。
 - pagination/filter options/detail：每个 owner single-flight 或 latest-wins，有界 payload。
-- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。
+- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅随后只读取决定对应的一个异常 bucket。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
 - OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。异常 chip 的 OA 跳转使用普通 `<a target="_blank" rel="noopener noreferrer">`，禁止轮询或操纵 OA SPA DOM 自动点击详情。
@@ -187,11 +187,11 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 测试与验证
 
-- 业务核心：typed identity、任意类型组合、不完整 relation、amount note、exact-set、withdraw 前序拓扑、异常 ignore/restore。
+- 业务核心：typed identity、任意类型组合、不完整 relation、三组按分差异、附件异常、exact-set、withdraw 前序拓扑、异常 accept/keep/withdraw。
 - repository/service：单请求 RR/RO、scope-first、fixed query count、batch hydration、exact totals、cursor/query hash、search/filter/facet/exception 等价、timeout/rollback。
 - API：direct response shape、不含 RM 字段、refresh-status 不存在、GET 零 queue/cache、权限和稳定错误映射、action 无 expected RM version。
 - runtime：page `workbench` registry/manifest/event/worker/timer 为零；`workbench_relation` 与 matching 正常。
-- frontend：mount 无 status poll、zone-only query、cursor pagination、bounded exception drawer、OA/global gates、每次写一次 mutation + 一次 refetch。
+- frontend：mount 无 status poll、zone-only query、cursor pagination、单 bucket bounded exception drawer、逐项审阅、OA/global gates、每次写一次 mutation + 一次 canonical refetch。
 - E2E：direct load、confirm/refetch、withdraw 恢复、incomplete relation、异常、权限、no-OA 隔离、direct failure 不 fallback。
 - 跨页面：bank details、pending invoices、OA、cost/turnover、batch accounting、no-OA、App Health 和 operations 不产生回归或污染 I/O。
 

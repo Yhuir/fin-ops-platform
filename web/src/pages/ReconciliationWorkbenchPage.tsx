@@ -35,7 +35,7 @@ import {
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
-  setWorkbenchOaInvoiceAnomalyIgnored,
+  reviewWorkbenchAnomaly,
   withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -369,7 +369,7 @@ export default function ReconciliationWorkbenchPage() {
   const [canonicalEpoch, setCanonicalEpoch] = useState(0);
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [exceptionDrawerOpen, setExceptionDrawerOpen] = useState(false);
-  const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"active" | "processed">("active");
+  const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"unpaired" | "paired">("unpaired");
   const exceptionDrawerOpenRef = useRef(exceptionDrawerOpen);
   const exceptionDrawerBucketRef = useRef(exceptionDrawerBucket);
   exceptionDrawerOpenRef.current = exceptionDrawerOpen;
@@ -378,7 +378,7 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerPages, setExceptionDrawerPages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(
     () => createInitialZonePages(),
   );
-  const [ignoredExceptionCount, setIgnoredExceptionCount] = useState(0);
+  const [pairedExceptionCount, setPairedExceptionCount] = useState(0);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
   const [exceptionDrawerLoadingMore, setExceptionDrawerLoadingMore] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
@@ -386,7 +386,7 @@ export default function ReconciliationWorkbenchPage() {
   const exceptionDrawerRequestGenerationRef = useRef(0);
   const exceptionGroupDetailRequestGenerationRef = useRef(0);
   const exceptionGroupDetailRequestsRef = useRef(new Map<string, {
-    bucket: "active" | "processed";
+    bucket: "unpaired" | "paired";
     canonicalEpoch: number;
     controller: AbortController;
     detailKey: string | undefined;
@@ -394,6 +394,7 @@ export default function ReconciliationWorkbenchPage() {
     promise: Promise<WorkbenchRelationGroup>;
   }>());
   const [exceptionDrawerContentGeneration, setExceptionDrawerContentGeneration] = useState(0);
+  const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
   const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
@@ -788,7 +789,7 @@ export default function ReconciliationWorkbenchPage() {
     setExceptionDrawerPages(createInitialZonePages());
 
     setWorkbenchData(workbenchPayload.data);
-    setIgnoredExceptionCount(workbenchPayload.data.summary.ignoredExceptionCount);
+    setPairedExceptionCount(workbenchPayload.data.summary.pairedExceptionCount);
     setStatistics(workbenchPayload.statistics ?? null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
@@ -864,7 +865,7 @@ export default function ReconciliationWorkbenchPage() {
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setExceptionDrawerGroups([]);
-        setIgnoredExceptionCount(0);
+        setPairedExceptionCount(0);
         setLoadError(normalizedError.message);
         setIsLoading(false);
       } else {
@@ -1471,7 +1472,7 @@ export default function ReconciliationWorkbenchPage() {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
   };
 
-  const loadExceptionDrawer = useCallback(async (bucket: "active" | "processed") => {
+  const loadExceptionDrawer = useCallback(async (bucket: "unpaired" | "paired") => {
     invalidateExceptionGroupDetailRequests();
     exceptionDrawerRequestRef.current?.abort();
     const controller = new AbortController();
@@ -1491,15 +1492,17 @@ export default function ReconciliationWorkbenchPage() {
         return false;
       }
       setExceptionDrawerGroups(result.groups);
-      setExceptionDrawerPages(result.pages);
+      const pages = createInitialZonePages();
+      pages[bucket] = result.page;
+      setExceptionDrawerPages(pages);
       setExceptionDrawerContentGeneration((current) => current + 1);
-      const bucketTotal = result.pages.paired.total + result.pages.unpaired.total;
-      if (bucket === "processed") {
-        setIgnoredExceptionCount(bucketTotal);
+      const bucketTotal = result.page.total;
+      if (bucket === "paired") {
+        setPairedExceptionCount(bucketTotal);
       } else {
         setWorkbenchData((current) => current ? {
           ...current,
-          summary: { ...current.summary, exceptionCount: bucketTotal },
+          summary: { ...current.summary, unpairedExceptionCount: bucketTotal },
         } : current);
       }
       return true;
@@ -1644,10 +1647,10 @@ export default function ReconciliationWorkbenchPage() {
 
   const handleOpenExceptionDrawer = useCallback(() => {
     setExceptionDrawerOpen(true);
-    setExceptionDrawerBucket("active");
+    setExceptionDrawerBucket("unpaired");
   }, []);
 
-  const handleExceptionDrawerBucketChange = useCallback((bucket: "active" | "processed") => {
+  const handleExceptionDrawerBucketChange = useCallback((bucket: "unpaired" | "paired") => {
     if (bucket === exceptionDrawerBucket) {
       return;
     }
@@ -1683,6 +1686,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [
     exceptionDrawerBucket,
     exceptionDrawerOpen,
+    exceptionDrawerReloadGeneration,
     loadExceptionDrawer,
   ]);
 
@@ -2176,30 +2180,35 @@ export default function ReconciliationWorkbenchPage() {
     }
   };
 
-  const handleOaInvoiceAnomalyDecision = useCallback(async (
+  const handleAnomalyReview = useCallback(async (
     group: WorkbenchRelationGroup,
-    ignored: boolean,
+    decision: "accept_paired" | "keep_unpaired",
+    reviewedItemFingerprints: string[],
   ) => {
-    if (!ensureCanWriteWorkbench() || !group.oaInvoiceAnomaly) {
+    if (!ensureCanWriteWorkbench() || !group.workbenchAnomaly) {
       return;
     }
     handleCloseDetail();
     const outcome = await runOperation({
-      loadingMessage: ignored ? "正在忽略异常..." : "正在撤回忽略...",
+      loadingMessage: decision === "accept_paired" ? "正在确认进入已配对..." : "正在确认留在未配对...",
       action: async ({ setMessage }) => {
-        const result = await setWorkbenchOaInvoiceAnomalyIgnored({
+        const result = await reviewWorkbenchAnomaly({
           month: WORKBENCH_VIEW_MONTH,
           zone: group.groupType,
           groupId: group.id,
-          fingerprint: group.oaInvoiceAnomaly!.fingerprint,
-        }, ignored);
-        setMessage("异常处理已写入，正在重新读取当前异常列表...");
-        if (
-          !exceptionDrawerOpenRef.current
-          || !await loadExceptionDrawer(exceptionDrawerBucketRef.current)
-        ) {
-          throw new Error("异常处理已写入，但当前异常列表重新读取失败；请勿重复提交，稍后重新打开异常抽屉确认。");
+          fingerprint: group.workbenchAnomaly!.fingerprint,
+          decision,
+          reviewedItemFingerprints,
+        });
+        setMessage("异常处理已写入，正在重新读取关联台...");
+        if (!await rereadWorkbenchAfterCommit()) {
+          throw new Error("异常处理已写入，但关联台重新读取失败；请勿重复提交，稍后刷新确认。");
         }
+        const nextBucket = decision === "accept_paired" ? "paired" : "unpaired";
+        exceptionDrawerOpenRef.current = true;
+        setExceptionDrawerBucket(nextBucket);
+        setExceptionDrawerOpen(true);
+        setExceptionDrawerReloadGeneration((current) => current + 1);
         return actionResultMessage(result);
       },
     });
@@ -2209,7 +2218,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [
     ensureCanWriteWorkbench,
     handleCloseDetail,
-    loadExceptionDrawer,
+    rereadWorkbenchAfterCommit,
     runOperation,
   ]);
 
@@ -2246,12 +2255,12 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `异常 ${workbenchData?.summary.exceptionCount ?? 0} | 已忽略 ${ignoredExceptionCount}`,
+        label: `未配对异常 ${workbenchData?.summary.unpairedExceptionCount ?? 0} | 已配对异常 ${pairedExceptionCount}`,
         onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },
     ],
-    [handleOpenExceptionDrawer, ignoredExceptionCount, workbenchData?.summary.exceptionCount],
+    [handleOpenExceptionDrawer, pairedExceptionCount, workbenchData?.summary.unpairedExceptionCount],
   );
 
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
@@ -2487,8 +2496,7 @@ export default function ReconciliationWorkbenchPage() {
         open={exceptionDrawerOpen}
         onBucketChange={handleExceptionDrawerBucketChange}
         onClose={handleCloseExceptionDrawer}
-        onIgnoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, true)}
-        onRestoreOaInvoiceAnomaly={(group) => handleOaInvoiceAnomalyDecision(group, false)}
+        onReviewAnomaly={handleAnomalyReview}
         hasMore={exceptionDrawerPages.paired.hasMore || exceptionDrawerPages.unpaired.hasMore}
         loadingMore={exceptionDrawerLoadingMore}
         total={exceptionDrawerPages.paired.total + exceptionDrawerPages.unpaired.total}

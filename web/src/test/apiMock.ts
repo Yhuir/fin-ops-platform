@@ -2102,11 +2102,11 @@ function toGroupedWorkbenchPayload(payload: {
       invoice_count: payload.summary.invoice_count,
       paired_count: pairedGroups.length,
       unpaired_count: unpairedGroups.length,
-      exception_count: [...pairedGroups, ...unpairedGroups].filter(
-        (group) => (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "active",
+      unpaired_exception_count: unpairedGroups.filter(
+        (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
       ).length,
-      ignored_exception_count: [...pairedGroups, ...unpairedGroups].filter(
-        (group) => (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "ignored",
+      paired_exception_count: pairedGroups.filter(
+        (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
       ).length,
     },
     invoice_inventory: {
@@ -4965,10 +4965,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         payload[zone].groups.filter((group) => (
           mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)
           && (
-            exceptionBucket === "active"
-              ? (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "active"
-              : exceptionBucket === "processed"
-                ? (group as { oa_invoice_anomaly?: { state?: string } }).oa_invoice_anomaly?.state === "ignored"
+            exceptionBucket === "unpaired"
+              ? zone === "unpaired" && (group as { workbench_anomaly?: object }).workbench_anomaly != null
+              : exceptionBucket === "paired"
+                ? zone === "paired" && (group as { workbench_anomaly?: object }).workbench_anomaly != null
                 : true
           )
         )),

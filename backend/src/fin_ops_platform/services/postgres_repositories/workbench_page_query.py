@@ -111,7 +111,12 @@ def _compact_anomaly_oa_payload_sql(
             'oa_row_id', {source_payload}->>'oa_row_id',
             'oa_id', {source_payload}->>'oa_id',
             'source_oa_row_id', {source_payload}->>'source_oa_row_id',
-            'object_identity_key', {source_payload}->>'object_identity_key'
+            'object_identity_key', {source_payload}->>'object_identity_key',
+            'apply_type', coalesce(
+                {source_payload}->>'apply_type',
+                {source_payload}->>'application_type',
+                {source_payload}->>'form_type'
+            )
         ))
         else null end
     """
@@ -909,24 +914,27 @@ canonical_group_members as materialized (
 # relation; no all-scope member JSON is copied into the application process.
 _ANOMALY_STATE_CTES = f"""
 latest_anomaly_decisions as materialized (
-    select fingerprint, status
+    select group_id, fingerprint, resolution as decision, updated_at
     from (
         select
+            exception.raw_payload#>>'{{normalized_payload,group_id}}' as group_id,
             exception.raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint,
-            exception.status,
+            exception.resolution,
+            exception.updated_at,
             row_number() over (
-                partition by exception.raw_payload#>>'{{normalized_payload,fingerprint}}'
+                partition by exception.raw_payload#>>'{{normalized_payload,group_id}}'
                 order by exception.updated_at desc,
                          exception.version desc,
                          exception.case_id desc
             ) as decision_rank
         from app.workbench_exception_cases exception
         cross join requested_scope scope
-        where exception.scenario = 'oa_invoice_amount_mismatch'
+        where exception.scenario = 'workbench_anomaly_review'
           and (scope.scope_key = 'all' or exception.scope_month = scope.scope_month)
     ) ranked_decisions
     where decision_rank = 1
-      and status = 'ignored'
+      and resolution in ('accept_paired', 'keep_unpaired')
+      and nullif(group_id, '') is not null
       and nullif(fingerprint, '') is not null
 ),
 relation_anomaly_etc_requests as materialized (
@@ -1054,12 +1062,47 @@ relation_anomaly_members as materialized (
         else null end as oa_payload,
         completed_oa.amount as completed_oa_amount,
         pending_oa.amount as pending_oa_amount,
+        bank.amount as bank_amount,
+        case
+            when lower(coalesce(bank.txn_direction, '')) in
+                 ('out', 'outflow', 'debit', 'expense', 'payment', 'pay', '支出', '付款')
+                 or coalesce(bank.signed_amount, 0) < 0
+                then 'payment'
+            when lower(coalesce(bank.txn_direction, '')) in
+                 ('in', 'inflow', 'credit', 'income', 'receipt', 'receive', '收入', '收款')
+                 or coalesce(bank.signed_amount, 0) > 0
+                then 'receipt'
+            else null
+        end as bank_direction,
         coalesce(invoice.amount, etc_total.invoice_total) as invoice_amount,
         coalesce(
             invoice.total_with_tax,
             invoice.amount,
             etc_total.invoice_total
         ) as invoice_total_with_tax,
+        case
+            when lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                 ('output', 'output_invoice', 'out_invoice', 'sales', 'sale', 'sales_invoice', 'receivable')
+                 or coalesce(invoice.invoice_type, '') like '%%销项%%'
+                then 'receipt'
+            when lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                 ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
+                 or coalesce(invoice.invoice_type, '') like '%%进项%%'
+                 or exists (
+                    select 1
+                    from jsonb_array_elements(
+                        case when jsonb_typeof(invoice.source_links) = 'array'
+                             then invoice.source_links else '[]'::jsonb end
+                    ) source_link(value)
+                    where coalesce(
+                        source_link.value->>'source_type',
+                        source_link.value->>'type',
+                        source_link.value->>'source'
+                    ) = 'oa_attachment_invoice'
+                 )
+                then 'payment'
+            else null
+        end as invoice_direction,
         case when member.row_type = 'invoice' then
             {_compact_anomaly_invoice_source_links_sql('invoice')}
         else '[]'::jsonb end as invoice_source_links
@@ -1076,6 +1119,10 @@ relation_anomaly_members as materialized (
      and pending_oa.tenant_id = (select tenant_id from requested_scope)
      and pending_oa.workflow_status = 'in_progress'
      and pending_oa.oa_id = member.row_id
+    left join app.bank_transactions bank
+      on member.row_type = 'bank'
+     and coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
+     and bank.status <> 'deleted'
     left join app.invoices invoice
       on member.row_type = 'invoice'
      and coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
@@ -1086,7 +1133,7 @@ relation_anomaly_members as materialized (
     left join relation_anomaly_etc_totals etc_total
       on etc_total.external_batch_id = etc_key.external_batch_id
     where groups.group_kind = 'relation'
-      and member.row_type in ('oa', 'invoice')
+      and member.row_type in ('oa', 'bank', 'invoice')
 ),
 oa_expense_items as materialized (
     select
@@ -1456,7 +1503,28 @@ expense_anomaly_items as materialized (
     union all
     select * from unlinked_expense_anomaly_items
 ),
-payment_relation_totals as materialized (
+relation_directions as materialized (
+    select
+        member.internal_key,
+        case
+            when count(distinct direction.value) = 1 then min(direction.value)
+            else null
+        end as direction
+    from relation_anomaly_members member
+    left join lateral (
+        select case
+            when member.row_type = 'oa'
+             and coalesce(member.oa_payload->>'apply_type', '') like '%%收%%'
+             and coalesce(member.oa_payload->>'apply_type', '') not like '%%付%%'
+                then 'receipt'
+            when member.row_type = 'oa' then 'payment'
+            when member.row_type = 'invoice' then member.invoice_direction
+            else null
+        end as value
+    ) direction on true
+    group by member.internal_key
+),
+relation_pane_totals as materialized (
     select
         member.internal_key,
         min(member.case_id) as case_id,
@@ -1469,59 +1537,109 @@ payment_relation_totals as materialized (
             member.completed_oa_amount,
             member.pending_oa_amount
         )) filter (where member.row_type = 'oa'), 2) as oa_total,
+        count(*) filter (where member.row_type = 'bank')::bigint as bank_count,
+        count(*) filter (
+            where member.row_type = 'bank' and member.bank_amount is null
+        )::bigint as invalid_bank_amount_count,
+        round(case
+            when direction.direction is null then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            when count(*) filter (
+                where member.row_type = 'bank' and member.bank_direction is not null
+            ) = 0 then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            else coalesce(sum(member.bank_amount) filter (
+                where member.row_type = 'bank'
+                  and member.bank_direction = direction.direction
+            ), 0)
+        end, 2) as bank_total,
         count(*) filter (where member.row_type = 'invoice')::bigint as invoice_count,
         count(*) filter (
             where member.row_type = 'invoice'
               and coalesce(member.invoice_total_with_tax, member.invoice_amount) is null
         )::bigint as invalid_invoice_amount_count,
-        round(sum(coalesce(
-            member.invoice_total_with_tax,
-            member.invoice_amount
-        )) filter (where member.row_type = 'invoice'), 2) as invoice_total,
+        round(case
+            when direction.direction is null then sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (where member.row_type = 'invoice')
+            when count(*) filter (
+                where member.row_type = 'invoice' and member.invoice_direction is not null
+            ) = 0 then sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (where member.row_type = 'invoice')
+            else coalesce(sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (
+                where member.row_type = 'invoice'
+                  and member.invoice_direction = direction.direction
+            ), 0)
+        end, 2) as invoice_total,
         string_agg(
             encode(convert_to(member.row_id, 'UTF8'), 'hex'),
             '00' order by member.row_id
         ) filter (where member.row_type = 'invoice') as invoice_row_ids_hex
     from relation_anomaly_members member
-    group by member.internal_key
+    join relation_directions direction on direction.internal_key = member.internal_key
+    group by member.internal_key, direction.direction
 ),
-payment_anomaly_items as materialized (
-    select
-        totals.internal_key,
-        totals.case_id,
-        encode(digest(
-            convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
-            convert_to('oa_invoice_amount_mismatch', 'UTF8') || decode('00', 'hex') ||
-            convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
-            convert_to(to_char(
-                totals.oa_total,
-                'FM999999999999999999990.00'
-            ), 'UTF8') || decode('00', 'hex') ||
-            convert_to(to_char(
-                totals.invoice_total,
-                'FM999999999999999999990.00'
-            ), 'UTF8') || decode('00', 'hex') ||
-            convert_to('0', 'UTF8') || decode('00', 'hex') ||
-            decode(totals.invoice_row_ids_hex, 'hex'),
-            'sha256'
-        ), 'hex') as item_fingerprint
-    from payment_relation_totals totals
-    where totals.oa_count > 0
-      and totals.invoice_count > 0
-      and totals.invalid_oa_amount_count = 0
-      and totals.invalid_invoice_amount_count = 0
-      and totals.oa_total is not null
-      and totals.invoice_total is not null
+relation_pair_mismatches as materialized (
+    select totals.*, 'oa_bank_amount_mismatch'::text as code,
+           totals.oa_total as left_total, totals.bank_total as right_total
+    from relation_pane_totals totals
+    where totals.oa_count > 0 and totals.bank_count > 0
+      and totals.invalid_oa_amount_count = 0 and totals.invalid_bank_amount_count = 0
+      and totals.oa_total is not null and totals.bank_total is not null
+      and totals.oa_total <> totals.bank_total
+    union all
+    select totals.*, 'oa_invoice_amount_mismatch',
+           totals.oa_total, totals.invoice_total
+    from relation_pane_totals totals
+    where totals.oa_count > 0 and totals.invoice_count > 0
+      and totals.invalid_oa_amount_count = 0 and totals.invalid_invoice_amount_count = 0
+      and totals.oa_total is not null and totals.invoice_total is not null
       and totals.oa_total <> totals.invoice_total
       and not exists (
           select 1 from oa_expense_items expense
           where expense.internal_key = totals.internal_key
       )
+    union all
+    select totals.*, 'bank_invoice_amount_mismatch',
+           totals.bank_total, totals.invoice_total
+    from relation_pane_totals totals
+    where totals.bank_count > 0 and totals.invoice_count > 0
+      and totals.invalid_bank_amount_count = 0 and totals.invalid_invoice_amount_count = 0
+      and totals.bank_total is not null and totals.invoice_total is not null
+      and totals.bank_total <> totals.invoice_total
+),
+relation_pair_anomaly_items as materialized (
+    select
+        totals.internal_key,
+        totals.case_id,
+        encode(digest(
+            convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
+            convert_to(totals.code, 'UTF8') || decode('00', 'hex') ||
+            convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
+            convert_to(coalesce(to_char(totals.oa_total,
+                'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
+            convert_to(coalesce(to_char(totals.bank_total,
+                'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
+            convert_to(coalesce(to_char(totals.invoice_total,
+                'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
+            convert_to('0', 'UTF8') ||
+            case when totals.invoice_row_ids_hex is not null
+                 then decode('00', 'hex') || decode(totals.invoice_row_ids_hex, 'hex')
+                 else ''::bytea end,
+            'sha256'
+        ), 'hex') as item_fingerprint
+    from relation_pair_mismatches totals
 ),
 all_anomaly_items as materialized (
     select * from expense_anomaly_items
     union all
-    select * from payment_anomaly_items
+    select * from relation_pair_anomaly_items
 ),
 anomaly_fingerprints as materialized (
     select
@@ -1543,11 +1661,40 @@ anomaly_states as materialized (
         anomaly.internal_key,
         anomaly.case_id,
         anomaly.fingerprint,
-        case when decision.fingerprint is not null
-             then 'processed' else 'active' end as state
+        case
+            when decision.fingerprint = anomaly.fingerprint
+             and decision.updated_at >= groups.updated_at
+                then decision.decision
+            else 'pending'
+        end as decision
     from anomaly_fingerprints anomaly
+    join canonical_groups groups on groups.internal_key = anomaly.internal_key
     left join latest_anomaly_decisions decision
-      on decision.fingerprint = anomaly.fingerprint
+      on decision.group_id = anomaly.internal_key
+)
+"""
+
+_EFFECTIVE_GROUPS_CTES = """
+effective_groups as materialized (
+    select
+        groups.internal_key,
+        groups.detail_key,
+        groups.group_kind,
+        case
+            when anomaly.internal_key is not null
+             and anomaly.decision <> 'accept_paired'
+                then 'unpaired'
+            else groups.zone
+        end as zone,
+        groups.member_ids,
+        groups.member_types,
+        groups.scope_month,
+        groups.updated_at,
+        groups.external_etc_batch_id,
+        groups.missing_row_types
+    from canonical_groups groups
+    left join anomaly_states anomaly
+      on anomaly.internal_key = groups.internal_key
 )
 """
 
@@ -1643,9 +1790,10 @@ class PostgresWorkbenchPageQueryRepository:
         rows = self._connection.fetch_all(
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
             {self._initial_zone_ctes('paired', paired_plan)},
             {self._initial_zone_ctes('unpaired', unpaired_plan)},
-            {_ANOMALY_STATE_CTES},
             overall_summary as materialized (
                 select
                     count(distinct (member.row_type, member.row_id))
@@ -1701,7 +1849,7 @@ class PostgresWorkbenchPageQueryRepository:
                     count(distinct (member.row_type, member.row_id)) filter (
                         where groups.zone = 'paired' and member.row_type = 'invoice'
                     )::bigint as paired_invoice_count
-                from canonical_groups groups
+                from effective_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
             ),
@@ -1757,11 +1905,15 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             anomaly_counts as materialized (
                 select
-                    count(*) filter (where state = 'active')::bigint
-                        as exception_count,
-                    count(*) filter (where state = 'processed')::bigint
-                        as ignored_exception_count
-                from anomaly_states
+                    count(*) filter (
+                        where groups.zone = 'unpaired'
+                    )::bigint as unpaired_exception_count,
+                    count(*) filter (
+                        where groups.zone = 'paired'
+                    )::bigint as paired_exception_count
+                from anomaly_states anomaly
+                join effective_groups groups
+                  on groups.internal_key = anomaly.internal_key
             ),
             page_metadata as materialized (
                 select *
@@ -1883,8 +2035,8 @@ class PostgresWorkbenchPageQueryRepository:
         normalized_columns = normalize_workbench_column_filters(payload.get("column_filters"))
         normalized_times = normalize_workbench_time_filters(payload.get("time_filters"))
         exception_bucket = text(payload.get("exception_bucket"))
-        if exception_bucket not in {None, "active", "processed"}:
-            raise ValueError("exception_bucket must be active or processed.")
+        if exception_bucket not in {None, "unpaired", "paired"}:
+            raise ValueError("exception_bucket must be unpaired or paired.")
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix=zone,
             search=normalized_search,
@@ -1938,7 +2090,7 @@ class PostgresWorkbenchPageQueryRepository:
                         as invoice_sort_min,
                     max(member.sort_date) filter (where member.row_type = 'invoice')
                         as invoice_sort_max
-                from canonical_groups groups
+                from effective_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
                 where {plan['where_sql']}
@@ -2024,8 +2176,8 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as inventory_extra_etc_total,
                 null::bigint as inventory_oa_attachment_total,
                 null::bigint as inventory_etc_summary_batch_count,
-                null::bigint as exception_count,
-                null::bigint as ignored_exception_count
+                null::bigint as unpaired_exception_count,
+                null::bigint as paired_exception_count
             from {prefix}_exact_totals totals
             cross join {prefix}_exact_row_counts row_counts
             left join {prefix}_page_groups page on true
@@ -2108,8 +2260,8 @@ class PostgresWorkbenchPageQueryRepository:
         normalized_columns = normalize_workbench_column_filters(column_filters)
         normalized_times = normalize_workbench_time_filters(time_filters)
         normalized_exception_bucket = text(exception_bucket)
-        if normalized_exception_bucket not in {None, "active", "processed"}:
-            raise ValueError("exception_bucket must be active or processed.")
+        if normalized_exception_bucket not in {None, "unpaired", "paired"}:
+            raise ValueError("exception_bucket must be unpaired or paired.")
         normalized_query = {
             "scope_key": normalized_scope,
             "zone": normalized_zone,
@@ -2146,14 +2298,12 @@ class PostgresWorkbenchPageQueryRepository:
             direction=direction,
         )
         order_sql = self._group_order_sql(direction)
-        anomaly_ctes = (
-            f"{_ANOMALY_STATE_CTES}," if normalized_exception_bucket else ""
-        )
         rows = self._connection.fetch_all(
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {anomaly_ctes}
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select
                     groups.*,
@@ -2163,7 +2313,7 @@ class PostgresWorkbenchPageQueryRepository:
                     max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
                     min(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_min,
                     max(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_max
-                from canonical_groups groups
+                from effective_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
                 where {where_sql}
@@ -2655,8 +2805,8 @@ class PostgresWorkbenchPageQueryRepository:
         normalized_columns = normalize_workbench_column_filters(column_filters)
         normalized_times = normalize_workbench_time_filters(time_filters)
         normalized_exception_bucket = text(exception_bucket)
-        if normalized_exception_bucket not in {None, "active", "processed"}:
-            raise ValueError("exception_bucket must be active or processed.")
+        if normalized_exception_bucket not in {None, "unpaired", "paired"}:
+            raise ValueError("exception_bucket must be unpaired or paired.")
         if normalized_facet == "column" and normalized_column is not None:
             pane_filters = dict(normalized_columns.get(normalized_pane, {}))
             pane_filters.pop(normalized_column, None)
@@ -2753,10 +2903,11 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {f'{_ANOMALY_STATE_CTES},' if normalized_exception_bucket else ''}
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key
-                from canonical_groups groups
+                from effective_groups groups
                 where {where_sql}
             ),
             facet_values as materialized (
@@ -2860,9 +3011,11 @@ class PostgresWorkbenchPageQueryRepository:
                 "invoice_count": invoice_count,
                 "paired_count": paired_count,
                 "unpaired_count": unpaired_count,
-                "exception_count": int_value(metadata.get("exception_count"), 0),
-                "ignored_exception_count": int_value(
-                    metadata.get("ignored_exception_count"), 0
+                "unpaired_exception_count": int_value(
+                    metadata.get("unpaired_exception_count"), 0
+                ),
+                "paired_exception_count": int_value(
+                    metadata.get("paired_exception_count"), 0
                 ),
                 "zone_counts": zone_counts,
             },
@@ -3049,14 +3202,14 @@ class PostgresWorkbenchPageQueryRepository:
                 "where search_member.internal_key = groups.internal_key)"
             )
         if normalized_exception_bucket := text(exception_bucket):
-            if normalized_exception_bucket not in {"active", "processed"}:
-                raise ValueError("exception_bucket must be active or processed.")
+            if normalized_exception_bucket not in {"unpaired", "paired"}:
+                raise ValueError("exception_bucket must be unpaired or paired.")
+            if normalized_exception_bucket != zone:
+                clauses.append("false")
             clauses.append(
                 "exists (select 1 from anomaly_states anomaly "
-                "where anomaly.internal_key = groups.internal_key "
-                "and anomaly.state = %s)"
+                "where anomaly.internal_key = groups.internal_key)"
             )
-            params.append(normalized_exception_bucket)
         for pane in ("oa", "bank", "invoice"):
             pane_filters = column_filters.get(pane, {})
             time_filter = time_filters.get(pane)

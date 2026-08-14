@@ -14430,7 +14430,7 @@ body.column-layout-dragging {
 
 .workbench-anomaly-drawer__group-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 38%);
   min-height: 62px;
   align-items: center;
 }
@@ -14502,6 +14502,26 @@ body.column-layout-dragging {
   gap: 4px;
 }
 
+.workbench-anomaly-drawer__review-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.workbench-anomaly-drawer__review-item input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #1d4ed8;
+}
+
+.workbench-anomaly-drawer__decision-buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
 .workbench-anomaly-drawer__details {
   padding: 0;
   border-top: 1px solid #e3e9ef;
@@ -14530,11 +14550,16 @@ body.column-layout-dragging {
 
 @media (max-width: 820px) {
   .workbench-anomaly-drawer__group-header {
-    grid-template-columns: minmax(0, 1fr) 112px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .workbench-anomaly-drawer__pane-summary {
     padding-inline: 8px;
+  }
+
+  .workbench-anomaly-drawer__action {
+    border-top: 1px solid #d9e2eb;
+    border-left: 0;
   }
 }
 

@@ -27,8 +27,8 @@ import type {
   WorkbenchSummary,
   WorkbenchColumnLayouts,
   WorkbenchAmountCheck,
-  WorkbenchOaInvoiceAnomaly,
-  WorkbenchOaInvoiceAnomalyItem,
+  WorkbenchAnomaly,
+  WorkbenchAnomalyItem,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -181,7 +181,7 @@ type ApiWorkbenchRow = {
   }> | null;
 };
 
-type ApiWorkbenchOaInvoiceAnomalyItem = {
+type ApiWorkbenchAnomalyItem = {
   code?: string | null;
   label?: string | null;
   display_label?: string | null;
@@ -190,17 +190,23 @@ type ApiWorkbenchOaInvoiceAnomalyItem = {
   source_oa_ids?: unknown[] | null;
   source_expense_item_ids?: unknown[] | null;
   oa_total?: string | number | null;
+  bank_total?: string | number | null;
   invoice_total?: string | number | null;
   amount_delta?: string | number | null;
+  mismatch_pair?: unknown[] | null;
   invoice_row_ids?: unknown[] | null;
   attachment_file_count?: string | number | null;
 };
 
-type ApiWorkbenchOaInvoiceAnomaly = {
+type ApiWorkbenchAnomaly = {
   code?: string | null;
   fingerprint?: string | null;
-  state?: string | null;
-  items?: ApiWorkbenchOaInvoiceAnomalyItem[] | null;
+  review_decision?: string | null;
+  reviewed_item_fingerprints?: unknown[] | null;
+  review_note?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  items?: ApiWorkbenchAnomalyItem[] | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -212,8 +218,8 @@ type ApiWorkbenchPayload = {
     invoice_count: number;
     paired_count: number;
     unpaired_count: number;
-    exception_count: number;
-    ignored_exception_count?: number;
+    unpaired_exception_count: number;
+    paired_exception_count?: number;
     zone_counts?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>;
   };
   paired: {
@@ -433,7 +439,7 @@ type ApiWorkbenchGroup = {
   can_withdraw?: boolean;
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
-  oa_invoice_anomaly?: ApiWorkbenchOaInvoiceAnomaly | null;
+  workbench_anomaly?: ApiWorkbenchAnomaly | null;
   special_metadata?: Record<string, unknown> | null;
   completion?: {
     is_complete?: boolean | null;
@@ -675,11 +681,14 @@ type IgnoreRowPayload = {
   comment?: string;
 };
 
-type OaInvoiceAnomalyDecisionPayload = {
+type WorkbenchAnomalyReviewPayload = {
   month: string;
   zone: WorkbenchZoneId;
   groupId: string;
   fingerprint: string;
+  decision: "accept_paired" | "keep_unpaired";
+  note?: string;
+  reviewedItemFingerprints: string[];
 };
 
 type ConfirmCashPassThroughPayload = {
@@ -944,14 +953,18 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
   };
 }
 
-function mapOaInvoiceAnomaly(
-  value: ApiWorkbenchOaInvoiceAnomaly | null | undefined,
-): WorkbenchOaInvoiceAnomaly | undefined {
+function mapWorkbenchAnomaly(
+  value: ApiWorkbenchAnomaly | null | undefined,
+): WorkbenchAnomaly | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
   }
   const fingerprint = String(value.fingerprint ?? "").trim();
-  const state = value.state === "ignored" ? "ignored" : value.state === "active" ? "active" : null;
+  const reviewDecision = value.review_decision === "accept_paired"
+    ? "accept_paired"
+    : value.review_decision === "keep_unpaired"
+      ? "keep_unpaired"
+      : "pending";
   const items = (Array.isArray(value.items) ? value.items : []).flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
@@ -967,29 +980,37 @@ function mapOaInvoiceAnomaly(
       anomalyLabel(code),
     );
     return [{
-      code: code as WorkbenchOaInvoiceAnomalyItem["code"],
+      code: code as WorkbenchAnomalyItem["code"],
       label,
-      displayLabel: toDisplayValue(item.display_label, state === "ignored" ? `已忽略：${label}` : label),
+      displayLabel: toDisplayValue(item.display_label, label),
       fingerprint: itemFingerprint,
       comparisonUnitId,
       sourceOaIds: toStringList(item.source_oa_ids),
       sourceExpenseItemIds: toStringList(item.source_expense_item_ids),
       oaTotal: toDisplayValue(item.oa_total, "") || undefined,
+      bankTotal: toDisplayValue(item.bank_total, "") || undefined,
       invoiceTotal: toDisplayValue(item.invoice_total, "") || undefined,
       amountDelta: toDisplayValue(item.amount_delta, "") || undefined,
+      mismatchPair: Array.isArray(item.mismatch_pair) && item.mismatch_pair.length === 2
+        ? item.mismatch_pair.map(String) as WorkbenchAnomalyItem["mismatchPair"]
+        : undefined,
       invoiceRowIds: (Array.isArray(item.invoice_row_ids) ? item.invoice_row_ids : [])
         .map((rowId) => String(rowId).trim())
         .filter(Boolean),
       attachmentFileCount: toCount(item.attachment_file_count),
     }];
   });
-  if (!fingerprint || !state || items.length === 0) {
+  if (!fingerprint || items.length === 0) {
     return undefined;
   }
   return {
-    code: toDisplayValue(value.code, "oa_invoice_anomaly") as WorkbenchOaInvoiceAnomaly["code"],
+    code: toDisplayValue(value.code, "workbench_anomaly") as WorkbenchAnomaly["code"],
     fingerprint,
-    state,
+    reviewDecision,
+    reviewedItemFingerprints: toStringList(value.reviewed_item_fingerprints),
+    reviewNote: toDisplayValue(value.review_note, ""),
+    reviewedBy: toDisplayValue(value.reviewed_by, ""),
+    reviewedAt: toDisplayValue(value.reviewed_at, "") || undefined,
     items,
   };
 }
@@ -1423,8 +1444,8 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     bank: group.bank_rows.map(mapRow),
     invoice: group.invoice_rows.map(mapRow),
   };
-  const oaInvoiceAnomaly = mapOaInvoiceAnomaly(group.oa_invoice_anomaly);
-  decorateOaInvoiceAnomaly(rows, oaInvoiceAnomaly);
+  const workbenchAnomaly = mapWorkbenchAnomaly(group.workbench_anomaly);
+  decorateOaInvoiceAnomaly(rows, workbenchAnomaly);
   const rawGroupType = String(group.group_type || "").trim();
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
@@ -1450,7 +1471,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
-    oaInvoiceAnomaly,
+    workbenchAnomaly,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     completion: group.completion && typeof group.completion === "object"
       ? {
@@ -1476,7 +1497,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
 
 function decorateOaInvoiceAnomaly(
   rows: WorkbenchPaneRows,
-  anomaly: WorkbenchOaInvoiceAnomaly | undefined,
+  anomaly: WorkbenchAnomaly | undefined,
 ) {
   if (!anomaly) {
     return;
@@ -1502,6 +1523,15 @@ function decorateOaInvoiceAnomaly(
 }
 
 function anomalyLabel(code: string) {
+  if (code === "oa_bank_amount_mismatch") {
+    return "OA流水金额不一致";
+  }
+  if (code === "oa_invoice_amount_mismatch") {
+    return "OA发票金额不一致";
+  }
+  if (code === "bank_invoice_amount_mismatch") {
+    return "流水发票金额不一致";
+  }
   if (code === "oa_invoice_attachment_missing") {
     return "OA发票附件缺失";
   }
@@ -1511,7 +1541,7 @@ function anomalyLabel(code: string) {
   if (code === "oa_invoice_attachment_unassigned") {
     return "OA发票待归属";
   }
-  return "金额不一致";
+  return "异常待审阅";
 }
 
 function toStringList(values: unknown[] | null | undefined) {
@@ -1766,8 +1796,8 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
     invoiceCount,
     pairedCount: toCount(summary.paired_count),
     unpairedCount: toCount(summary.unpaired_count),
-    exceptionCount: toCount(summary.exception_count),
-    ignoredExceptionCount: toCount(summary.ignored_exception_count),
+    unpairedExceptionCount: toCount(summary.unpaired_exception_count),
+    pairedExceptionCount: toCount(summary.paired_exception_count),
     totalCount: oaCount + bankCount + invoiceCount,
     zoneCounts,
   };
@@ -2522,31 +2552,25 @@ export async function fetchWorkbenchFilterOptions(
 
 export async function fetchWorkbenchExceptionGroups(
   month: string,
-  bucket: "active" | "processed",
+  bucket: "unpaired" | "paired",
   signal?: AbortSignal,
 ): Promise<{
   groups: WorkbenchRelationGroup[];
-  pages: Record<WorkbenchZoneId, WorkbenchZonePageInfo>;
+  page: WorkbenchZonePageInfo;
 }> {
-  const loadZone = async (zone: WorkbenchZoneId) => {
-    return fetchWorkbenchGroupsPage(
-      month,
-      zone,
-      null,
-      WORKBENCH_GROUP_PAGE_SIZE,
-      signal,
-      { detailLevel: "summary", exceptionBucket: bucket },
-      1,
-      { forceFresh: true },
-    );
-  };
-  const [paired, unpaired] = await Promise.all([
-    loadZone("paired"),
-    loadZone("unpaired"),
-  ]);
+  const result = await fetchWorkbenchGroupsPage(
+    month,
+    bucket,
+    null,
+    WORKBENCH_GROUP_PAGE_SIZE,
+    signal,
+    { detailLevel: "summary", exceptionBucket: bucket },
+    1,
+    { forceFresh: true },
+  );
   return {
-    groups: [...paired.groups, ...unpaired.groups],
-    pages: { paired: paired.page, unpaired: unpaired.page },
+    groups: result.groups,
+    page: result.page,
   };
 }
 
@@ -3372,12 +3396,11 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<Wor
   return mapWorkbenchActionResult(result);
 }
 
-export async function setWorkbenchOaInvoiceAnomalyIgnored(
-  payload: OaInvoiceAnomalyDecisionPayload,
-  ignored: boolean,
+export async function reviewWorkbenchAnomaly(
+  payload: WorkbenchAnomalyReviewPayload,
 ): Promise<WorkbenchActionResult> {
   const result = await requestJson<ApiWorkbenchActionResult>(
-    `/api/workbench/exceptions/amount-mismatch/${ignored ? "ignore" : "restore"}`,
+    "/api/workbench/exceptions/review",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3386,6 +3409,9 @@ export async function setWorkbenchOaInvoiceAnomalyIgnored(
         zone: payload.zone,
         group_id: payload.groupId,
         fingerprint: payload.fingerprint,
+        decision: payload.decision,
+        note: payload.note,
+        reviewed_item_fingerprints: payload.reviewedItemFingerprints,
       }),
     },
   );

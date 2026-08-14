@@ -46,17 +46,18 @@ canonical fact repositories
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
 - Direct page SQL：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
-- OA/发票异常：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_amount_mismatch_exception_service.py`
+- 统一异常判断/审阅：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_anomaly_review_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 - 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
 - 保留的独立 Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_relation_read_model_worker.py`
 
-## OA/发票异常合同
+## 关联台异常合同
 
-- 日常报销按 `source_expense_item_ids[]` 与发票组成的连通分量比较，分量内子付款项求和、发票按 ID 去重求和；支付申请按关系组 OA/发票总额比较。金额完整且不相等时生成 `金额不一致`；零绑定发票时区分 `OA发票附件缺失`、`OA附件解析失败` 和 `OA发票待归属`。每个比较单元只投影一个 chip，不创建第三种关系状态或展示级发票事实。
-- active/ignored 决定复用既有 exception case repository，但只认独立 `oa_invoice_amount_mismatch` scenario；历史 WEX/row-ignore 记录仅保留审计，不得进入 direct group spine、异常桶、计数、主区可见性或页面查询结果。
-- 页面只保留统一 `WorkbenchExceptionDrawer`：进行中展示 active OA/发票异常，已忽略展示 ignored OA/发票异常。每个关系组默认只显示三栏成员数与总金额，按需展开完整三栏，忽略/撤回忽略直接作用于该关系组；入口文案固定为 `异常 n | 已忽略 m`，旧确认 modal、legacy WEX/row-ignore 抽屉入口、`IgnoredItemsModal` 和 `ProcessedExceptionsModal` 均不得恢复。
+- 系统按当前方向分别比较 OA—流水、OA—发票、流水—发票；日常报销的 OA—发票仍按 `source_expense_item_ids[]` 连通分量去重计算。金额完整且不等时只输出 `OA流水金额不一致`、`OA发票金额不一致`、`流水发票金额不一致` 之一或多项；附件异常继续区分缺失、解析失败和待归属。
+- 任何当前异常默认把完整 active relation 留在 `unpaired`。用户逐项确认审阅后选择 `accept_paired` 或 `keep_unpaired`；只有无其他完整性 blocker 时前者才允许进入 `paired`。放行后 chip 仍保留；“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对。
+- 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧金额 ignore/restore API、service 和前端动作已删除；历史记录、WEX/row-ignore 仅保留审计。
+- 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 
 ## 三栏纵向展示合同

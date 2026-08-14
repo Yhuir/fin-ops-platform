@@ -88,22 +88,19 @@ repository / migration / timeout 不可用              -> 503，显示详情暂
 
 row detail GET 是纯读操作：按 typed identity 窄查 latest committed canonical row，不构建全 scope group spine，不触发 dirty scope、outbox、refresh 或 cache。ETC 与流水规则 summary 只负责展开完整成员，不进入 row detail 状态机。
 
-## OA/发票异常状态
+## 统一异常审阅状态
 
 ```text
-日常报销 item 金额 = 显式绑定发票合计          -> absent
-日常报销 item 金额完整且与绑定发票合计不等      -> active（金额不一致）
-日常报销 item 有附件且解析明确失败                -> active（OA附件解析失败）
-日常报销 item 有附件且父 OA 发票缺明确 item 来源   -> active（OA发票待归属）
-日常报销 item 有附件且无以上证据                  -> active（OA发票附件缺失）
-支付申请 OA/发票总额完整且不等                  -> active（金额不一致）
-active --ignore--> ignored（已忽略：对应异常）
-ignored --restore--> active
-比较单元/成员/金额/附件状态变化 -> fingerprint 变化 -> 旧 ignored 决定失效
+无异常且 relation 完整                           -> paired
+任一金额对不等或附件异常                         -> unpaired / 未配对异常
+逐项已审阅 --keep_unpaired-->                    -> unpaired / 未配对异常
+逐项已审阅 --accept_paired 且无其他 blocker-->   -> paired / 已配对异常
+已配对异常 --撤回--> keep_unpaired               -> unpaired / 未配对异常
+成员/金额/附件状态变化 -> fingerprint 变化       -> 旧决定失效，重新回到未配对异常
 ```
 
-该状态机只描述异常处置，不是第三种关系状态；它与 `paired|unpaired` 正交。ignore/restore 不修改 relation、canonical facts 或金额，只持久化 fingerprint-bound 决定和 audit。“进行中的异常”与“已忽略的异常”由同一个右侧抽屉读取；后者可按关系组执行“撤回忽略”。
+该状态机改变关联台的有效展示分区，但不修改 `app.workbench_pair_relations.status=active`、成员或 canonical 金额。下游页面仍消费同一正式关系，避免异常审阅污染已支付、成本和发票归属。审阅只持久化 fingerprint-bound 决定与 audit。
 
-只有当前 direct canonical descriptor 计算出的 `oa_invoice_anomaly` 及其 `oa_invoice_amount_mismatch` 决定进入这套状态机。历史 WEX/row-ignore 记录仅保留审计：不得改变 `paired|unpaired`、成员、主区可见性、异常抽屉、异常计数或搜索结果。
+只有当前 direct canonical descriptor 计算出的 `workbench_anomaly` 进入状态机；金额 item 必须是具体的三种 pair code，禁止恢复泛化“金额不一致”。历史 ignore/restore、WEX/row-ignore 不得改变分区、成员、抽屉或计数。
 
-未配对工具栏不再提供人工“异常处理”状态入口。删除该入口不改变上述自动异常状态机、右上 `异常 n | 已忽略 m`、统一异常抽屉或 ignore/restore 转换。
+未配对工具栏不提供第二套人工异常入口；右上统一入口显示 `未配对异常 n | 已配对异常 m`。

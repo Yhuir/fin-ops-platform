@@ -22,7 +22,7 @@ import {
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
-  setWorkbenchOaInvoiceAnomalyIgnored,
+  reviewWorkbenchAnomaly,
   updateWorkbenchBankException,
   withdrawWorkbenchLink,
   WorkbenchApiError,
@@ -196,14 +196,15 @@ describe("workbench api bank amount mapping", () => {
               match_confidence: "high",
               reason: "active_formal_relation",
               exception_state: "processed",
-              oa_invoice_anomaly: {
-                code: "oa_invoice_anomaly",
+              workbench_anomaly: {
+                code: "workbench_anomaly",
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                state: "ignored",
+                review_decision: "accept_paired",
+                reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
                 items: [{
                   code: "oa_invoice_amount_mismatch",
-                  label: "金额不一致",
-                  display_label: "已忽略：金额不一致",
+                  label: "OA发票金额不一致",
+                  display_label: "OA发票金额不一致",
                   fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   comparison_unit_id: "case:CASE-1",
                   oa_total: "100.00",
@@ -604,8 +605,8 @@ describe("workbench api bank amount mapping", () => {
                 invoice_count: 0,
                 paired_count: 1,
                 unpaired_count: 1,
-                exception_count: 0,
-                ignored_exception_count: 3,
+                unpaired_exception_count: 0,
+                paired_exception_count: 3,
                 zone_counts: {
                   paired: { groups: 1, oa: 0, bank: 7, invoice: 0, rows: 7 },
                   unpaired: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
@@ -742,7 +743,7 @@ describe("workbench api bank amount mapping", () => {
     ]);
 
     expect(result.data.summary.pairedCount).toBe(1);
-    expect(result.data.summary.ignoredExceptionCount).toBe(3);
+    expect(result.data.summary.pairedExceptionCount).toBe(3);
     expect(duplicateResult).toEqual(result);
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
     expect(result.pages.paired.rowCounts.bank).toBe(7);
@@ -791,8 +792,8 @@ describe("workbench api bank amount mapping", () => {
         invoice_count: 0,
         paired_count: 0,
         unpaired_count: 0,
-        exception_count: 0,
-        ignored_exception_count: 0,
+        unpaired_exception_count: 0,
+        paired_exception_count: 0,
       },
       paired: {
         page_size: 50,
@@ -869,14 +870,15 @@ describe("workbench api bank amount mapping", () => {
                 amount_delta: "1.00",
                 requires_note: true,
               },
-              oa_invoice_anomaly: {
-                code: "oa_invoice_anomaly",
+              workbench_anomaly: {
+                code: "workbench_anomaly",
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                state: "ignored",
+                review_decision: "accept_paired",
+                reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
                 items: [{
                   code: "oa_invoice_amount_mismatch",
-                  label: "金额不一致",
-                  display_label: "已忽略：金额不一致",
+                  label: "OA发票金额不一致",
+                  display_label: "OA发票金额不一致",
                   fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   comparison_unit_id: "oa-paired:item:1",
                   source_oa_ids: ["oa-paired"],
@@ -990,7 +992,7 @@ describe("workbench api bank amount mapping", () => {
         feeContent: "住宿费",
         feeDescription: "",
         attachmentFileCount: 1,
-        oaInvoiceAnomaly: expect.objectContaining({ displayLabel: "已忽略：金额不一致" }),
+        oaInvoiceAnomaly: expect.objectContaining({ displayLabel: "OA发票金额不一致" }),
       },
     ]);
     expect(group.rows.bank[0]).toMatchObject({
@@ -1001,9 +1003,9 @@ describe("workbench api bank amount mapping", () => {
     });
     expect(group.rows.invoice[0].sourceOaId).toBe("oa-paired");
     expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
-    expect(group.oaInvoiceAnomaly).toMatchObject({ state: "ignored" });
+    expect(group.workbenchAnomaly).toMatchObject({ reviewDecision: "accept_paired" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
-    expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "已忽略：金额不一致", amountDelta: "1.00" });
+    expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "OA发票金额不一致", amountDelta: "1.00" });
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -1038,7 +1040,7 @@ describe("workbench api bank amount mapping", () => {
       timeFilterByPane: {
         bank: { mode: "month", month: "2026-04" },
       },
-      exceptionBucket: "processed",
+      exceptionBucket: "unpaired",
     }, 2);
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
@@ -1055,7 +1057,7 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
-    expect(url.searchParams.get("exception_bucket")).toBe("processed");
+    expect(url.searchParams.get("exception_bucket")).toBe("unpaired");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
       bank: { amount: ["建行 8106", "支出"], counterparty: ["云南溯源科技有限公司"] },
     });
@@ -1111,7 +1113,7 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
-  test("posts an amount mismatch decision without a client supplied actor", async () => {
+  test("posts an anomaly review without a client supplied actor", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1122,15 +1124,17 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await setWorkbenchOaInvoiceAnomalyIgnored({
+    await reviewWorkbenchAnomaly({
       month: "all",
       zone: "paired",
       groupId: "case:CASE-1",
       fingerprint: "a".repeat(64),
-    }, true);
+      decision: "accept_paired",
+      reviewedItemFingerprints: ["b".repeat(64)],
+    });
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      "/api/workbench/exceptions/amount-mismatch/ignore",
+      "/api/workbench/exceptions/review",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -1138,6 +1142,8 @@ describe("workbench api bank amount mapping", () => {
           zone: "paired",
           group_id: "case:CASE-1",
           fingerprint: "a".repeat(64),
+          decision: "accept_paired",
+          reviewed_item_fingerprints: ["b".repeat(64)],
         }),
       }),
     );

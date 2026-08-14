@@ -387,8 +387,8 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
-from fin_ops_platform.services.workbench_amount_mismatch_exception_service import (
-    WorkbenchAmountMismatchExceptionService,
+from fin_ops_platform.services.workbench_anomaly_review_service import (
+    WorkbenchAnomalyReviewService,
 )
 from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
     WorkbenchConfirmLinkContextRelationReadPort,
@@ -701,8 +701,8 @@ class Application:
             if postgres_connection is not None
             else None
         )
-        self._workbench_amount_mismatch_exception_service = (
-            WorkbenchAmountMismatchExceptionService(
+        self._workbench_anomaly_review_service = (
+            WorkbenchAnomalyReviewService(
                 group_repository=self._workbench_page_query_repository,
                 decision_repository=PostgresWorkbenchRepository(postgres_connection),
             )
@@ -1060,7 +1060,7 @@ class Application:
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             exception_service=self._workbench_exception_application_service,
             write_facade_provider=self._workbench_write_facade,
-            amount_mismatch_service=self._workbench_amount_mismatch_exception_service,
+            anomaly_review_service=self._workbench_anomaly_review_service,
         )
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -1806,13 +1806,9 @@ class Application:
                 headers=headers,
                 access_session=access_session,
             )
-        if method == "POST" and route_path in {
-            "/api/workbench/exceptions/amount-mismatch/ignore",
-            "/api/workbench/exceptions/amount-mismatch/restore",
-        }:
-            return self._handle_api_workbench_amount_mismatch_decision(
+        if method == "POST" and route_path == "/api/workbench/exceptions/review":
+            return self._handle_api_workbench_anomaly_review(
                 body,
-                ignored=route_path.endswith("/ignore"),
                 headers=headers,
                 access_session=access_session,
             )
@@ -3104,11 +3100,10 @@ class Application:
         )
         return self._json_response(status_code, payload)
 
-    def _handle_api_workbench_amount_mismatch_decision(
+    def _handle_api_workbench_anomaly_review(
         self,
         body: str | None,
         *,
-        ignored: bool,
         headers: dict[str, str] | None,
         access_session: OARequestSession | None,
     ) -> Response:
@@ -3122,10 +3117,9 @@ class Application:
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, _tenant_id = auth_context
-        status_code, result = self._workbench_action_api_routes.set_amount_mismatch_ignored(
+        status_code, result = self._workbench_action_api_routes.review_anomaly(
             payload,
             actor_id=actor_id,
-            ignored=ignored,
         )
         return self._json_response(status_code, result)
 
@@ -6350,7 +6344,7 @@ class Application:
             self._workbench_action_api_routes = WorkbenchActionApiRoutes(
                 exception_service=getattr(self, "_workbench_exception_application_service", None),
                 write_facade_provider=self._workbench_write_facade,
-                amount_mismatch_service=getattr(self, "_workbench_amount_mismatch_exception_service", None),
+                anomaly_review_service=getattr(self, "_workbench_anomaly_review_service", None),
             )
         result = self._workbench_action_api_routes.withdraw_link(
             payload,

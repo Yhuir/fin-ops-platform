@@ -139,7 +139,7 @@ function withUnpairedActiveRelations(memberIdSets: string[][]) {
 
 function withAmountMismatchGroups(
   payload: Record<string, unknown>,
-  state: "active" | "ignored",
+  state: "unpaired" | "paired",
   count = 1,
 ) {
   const paired = payload.paired as { groups: TestWorkbenchApiGroup[] };
@@ -150,14 +150,17 @@ function withAmountMismatchGroups(
   const groups = Array.from({ length: count }, (_, index) => ({
     ...sourceGroup,
     group_id: `case:ANOMALY-${index + 1}`,
-    oa_invoice_anomaly: {
-      code: "oa_invoice_anomaly",
+    zone: state,
+    status: state,
+    workbench_anomaly: {
+      code: "workbench_anomaly",
       fingerprint: "a".repeat(64),
-      state,
+      review_decision: state === "paired" ? "accept_paired" : "pending",
+      reviewed_item_fingerprints: state === "paired" ? ["b".repeat(64)] : [],
       items: [{
         code: "oa_invoice_amount_mismatch",
-        label: "金额不一致",
-        display_label: state === "ignored" ? "已忽略：金额不一致" : "金额不一致",
+        label: "OA发票金额不一致",
+        display_label: "OA发票金额不一致",
         fingerprint: "b".repeat(64),
         comparison_unit_id: `case:ANOMALY-${index + 1}`,
         oa_total: "100.00",
@@ -172,12 +175,16 @@ function withAmountMismatchGroups(
     ...payload,
     summary: {
       ...summary,
-      exception_count: state === "active" ? count : 0,
-      ignored_exception_count: state === "ignored" ? count : 0,
+      unpaired_exception_count: state === "unpaired" ? count : 0,
+      paired_exception_count: state === "paired" ? count : 0,
     },
     paired: {
       ...paired,
-      groups,
+      groups: state === "paired" ? groups : [],
+    },
+    unpaired: {
+      ...(payload.unpaired as Record<string, unknown>),
+      groups: state === "unpaired" ? groups : [],
     },
   };
 }
@@ -1514,9 +1521,58 @@ describe("Workbench row selection and detail drawer", () => {
     expect(initialReadCount).toBe(3);
   }, 8_000);
 
-  test("amount mismatch decisions reread exactly one bounded fresh current bucket and replace its cursor state", async () => {
+  test("keeping an anomaly unpaired rereads the canonical page and refreshes the same bucket once", async () => {
     const user = userEvent.setup();
-    let anomalyState: "active" | "ignored" = "active";
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "unpaired",
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/exceptions/review") {
+        return Promise.resolve(jsonResponse({
+          success: true,
+          action: "review_workbench_anomaly",
+          month: "all",
+          affected_row_ids: [],
+          affected_scope_keys: ["2026-03"],
+          message: "异常已保留在未配对。",
+        }));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    const initialCombinedReads = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
+    const initialBucketReads = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
+    }).length;
+
+    await user.click(within(drawer).getByRole("checkbox", { name: "确认已审阅 OA发票金额不一致" }));
+    await user.click(within(drawer).getByRole("button", { name: "留在未配对" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input) === "/api/workbench/exceptions/review"
+    ))).toHaveLength(1));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(
+      initialCombinedReads + 1,
+    ));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
+    })).toHaveLength(initialBucketReads + 1));
+    expect(within(drawer).getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
+    expect(within(drawer).getByRole("button", { name: "进入已配对" })).toBeDisabled();
+  });
+
+  test("amount mismatch decisions reread the canonical page and exactly one fresh destination bucket", async () => {
+    const user = userEvent.setup();
+    let anomalyState: "unpaired" | "paired" = "unpaired";
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
         payload as Record<string, unknown>,
@@ -1525,80 +1581,79 @@ describe("Workbench row selection and detail drawer", () => {
     });
     const defaultFetch = fetchMock.getMockImplementation();
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/ignore") {
-        anomalyState = "ignored";
+      if (fetchPath(input) === "/api/workbench/exceptions/review") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { decision?: string };
+        anomalyState = body.decision === "accept_paired" ? "paired" : "unpaired";
         return Promise.resolve(jsonResponse({
           success: true,
-          action: "ignore_oa_invoice_anomaly",
+          action: "review_workbench_anomaly",
           month: "all",
           affected_row_ids: [],
           affected_scope_keys: ["2026-03"],
-          message: "已忽略金额异常。",
-        }));
-      }
-      if (fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/restore") {
-        anomalyState = "active";
-        return Promise.resolve(jsonResponse({
-          success: true,
-          action: "restore_oa_invoice_anomaly",
-          month: "all",
-          affected_row_ids: [],
-          affected_scope_keys: ["2026-03"],
-          message: "已撤回忽略金额异常。",
+          message: "异常审阅已保存。",
         }));
       }
       return defaultFetch!(input, init);
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /异常 1 \| 已忽略 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     const initialCombinedReads = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
     const initialBucketReads = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
-      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "active";
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     });
-    expect(initialBucketReads).toHaveLength(2);
+    expect(initialBucketReads).toHaveLength(1);
 
-    await user.click(within(drawer).getByRole("button", { name: "忽略" }));
-    expect(await within(drawer).findByText("当前没有进行中的异常。")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("checkbox", { name: "确认已审阅 OA发票金额不一致" }));
+    await user.click(within(drawer).getByRole("button", { name: "进入已配对" }));
+    expect(await within(drawer).findByRole("button", { name: "撤回" })).toBeInTheDocument();
 
     const currentBucketReads = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
-      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "active";
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     });
-    expect(currentBucketReads).toHaveLength(initialBucketReads.length + 2);
-    currentBucketReads.slice(-2).forEach(([, init]) => {
+    expect(currentBucketReads).toHaveLength(initialBucketReads.length);
+    const pairedReadsAfterAccept = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
+    });
+    expect(pairedReadsAfterAccept).toHaveLength(1);
+    pairedReadsAfterAccept.forEach(([, init]) => {
       expect(init).toMatchObject({ method: "GET", cache: "no-store" });
       expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
     });
     expect(fetchMock.mock.calls.filter(([input]) => (
-      fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/ignore"
+      fetchPath(input) === "/api/workbench/exceptions/review"
     ))).toHaveLength(1);
 
-    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
-    expect(await within(drawer).findByRole("button", { name: "撤回忽略" })).toBeInTheDocument();
-    const processedReadsBeforeRestore = fetchMock.mock.calls.filter(([input]) => {
+    const pairedReadsBeforeWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
-      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "processed";
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
     }).length;
-    expect(processedReadsBeforeRestore).toBe(2);
+    expect(pairedReadsBeforeWithdraw).toBe(1);
 
-    await user.click(within(drawer).getByRole("button", { name: "撤回忽略" }));
-    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
-    const processedReadsAfterRestore = fetchMock.mock.calls.filter(([input]) => {
+    await user.click(within(drawer).getByRole("button", { name: "撤回" }));
+    expect(await within(drawer).findByRole("button", { name: "进入已配对" })).toBeInTheDocument();
+    const pairedReadsAfterWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
-      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "processed";
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
     });
-    expect(processedReadsAfterRestore).toHaveLength(processedReadsBeforeRestore + 2);
-    processedReadsAfterRestore.slice(-2).forEach(([, init]) => {
+    expect(pairedReadsAfterWithdraw).toHaveLength(pairedReadsBeforeWithdraw);
+    const unpairedReadsAfterWithdraw = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
+    });
+    expect(unpairedReadsAfterWithdraw).toHaveLength(initialBucketReads.length + 1);
+    unpairedReadsAfterWithdraw.slice(-1).forEach(([, init]) => {
       expect(init).toMatchObject({ method: "GET", cache: "no-store" });
       expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
     });
     expect(fetchMock.mock.calls.filter(([input]) => (
-      fetchPath(input) === "/api/workbench/exceptions/amount-mismatch/restore"
-    ))).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(initialCombinedReads);
+      fetchPath(input) === "/api/workbench/exceptions/review"
+    ))).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(initialCombinedReads + 2);
   });
 
   test("switching exception buckets aborts load-more and clears its pending generation", async () => {
@@ -1608,7 +1663,7 @@ describe("Workbench row selection and detail drawer", () => {
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
         payload as Record<string, unknown>,
-        "active",
+        "unpaired",
         51,
       ),
     });
@@ -1617,7 +1672,7 @@ describe("Workbench row selection and detail drawer", () => {
       const url = new URL(fetchPath(input), "http://localhost");
       if (
         url.pathname === "/api/workbench/groups"
-        && url.searchParams.get("exception_bucket") === "active"
+        && url.searchParams.get("exception_bucket") === "unpaired"
         && url.searchParams.has("cursor")
       ) {
         loadMoreStarted = true;
@@ -1637,30 +1692,30 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /异常 51 \| 已忽略 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 51 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     expect(await within(drawer).findByText("50 / 51 项")).toBeInTheDocument();
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 
-    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
     await waitFor(() => expect(loadMoreAborted).toBe(true));
-    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前没有已配对异常。")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("radio", { name: "进行中的异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: "未配对异常" }));
     const loadMoreButton = await within(drawer).findByRole("button", { name: "加载更多异常" });
     expect(loadMoreButton).toBeEnabled();
     expect(loadMoreButton).not.toHaveAttribute("aria-busy", "true");
   });
 
-  test("switching exception buckets aborts an expanded detail and keeps the processed bucket canonical", async () => {
+  test("switching exception buckets aborts an expanded detail and keeps the paired bucket canonical", async () => {
     const user = userEvent.setup();
     const staleDetail = deferredResponse();
     let staleDetailSignal: AbortSignal | null = null;
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
         payload as Record<string, unknown>,
-        "active",
+        "unpaired",
       ),
     });
     const defaultFetch = fetchMock.getMockImplementation();
@@ -1678,17 +1733,17 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /异常 1 \| 已忽略 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     await waitFor(() => expect(staleDetailSignal).not.toBeNull());
-    await user.click(within(drawer).getByRole("radio", { name: "已忽略的异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
     await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true));
-    expect(await within(drawer).findByText("当前没有已忽略的异常。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前没有已配对异常。")).toBeInTheDocument();
 
     staleDetail.resolve(jsonResponse({}));
     await act(async () => Promise.resolve());
-    expect(within(drawer).getByText("当前没有已忽略的异常。")).toBeInTheDocument();
+    expect(within(drawer).getByText("当前没有已配对异常。")).toBeInTheDocument();
     expect(within(drawer).queryByText("明细快照")).not.toBeInTheDocument();
   });
 

@@ -33,7 +33,7 @@
 - Service layer：confirm/withdraw 继续走 `WorkbenchRelationCommandService` + UoW，保护 canonical revalidation、idempotency、history/audit、partial-failure rollback 与 immutable OA attachment/ETC 既有约束。未配对 active case 撤回必须要求 exact full active member set，并从最近 confirm history 的 `before_relations` 恢复上一稳定拓扑；在同一事务锁内重验 canonical member、restored case 与唯一 owner，历史不可证明或 owner 冲突时 fail closed，不做部分恢复。
 - API contract：继续复用 `confirm-link/preview -> confirm-link` 与 `withdraw-link/preview -> withdraw-link`；response shape、error envelope、权限和 `amount_check.requires_note`/`note` 字段不变。preview/submit 覆盖同栏人工关系、`requires_note=true` 时缺 note 拒绝/带 note 成功、材料不完整成功后仍 unpaired、两区 active case 可撤回、singleton 撤回拒绝、exact selection 400 和 topology/canonical/version drift 409。
 - Read model/cache/worker（历史当时合同）：当时覆盖 relation mutation 后 exact scope 与 generation；2026-08-13 起由 direct normal GET 和 page runtime 零引用合同替代，unpaired relation topology 恢复仍保持。
-- Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护选择任意至少 2 个不同成员后确认可用、`requires_note=true` 时差额说明必填、未完整关系提交后仍在未配对区、unpaired active relation 显示关系级撤回、singleton 不显示撤回，以及未配对工具栏“异常处理”完全删除。右上 `异常 n | 已忽略 m`、`WorkbenchExceptionDrawer`、自动异常 chip 和 ignore/restore 回归继续通过。
+- Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护关系确认/撤回；`WorkbenchExceptionDrawer.test.tsx` 保护 `未配对异常 n | 已配对异常 m`、逐项审阅、accept/keep/撤回、具体 chip 和只读权限。
 - End-to-end：`workbench-withdraw-flow.spec.ts` 承担 paired/unpaired active relation 撤回与上一稳定拓扑恢复；relation/network flows 承担同栏/跨栏 confirm、`requires_note` 路径、fresh 收敛与幂等；permissions/stale/exception flows 保护权限、non-fresh gate 和删除人工入口后系统异常链仍可用。覆盖映射以 `e2e-coverage.md` 的实际落地状态为准。
 - Regression：自动 matching exact-sum/证据/唯一性/资源保护与撤回 fingerprint 不放宽；paired/unpaired 完整性、520/13 张发票、OA attachment、ETC、no-OA、batch accounting、turnover 和下游 linked/unlinked 保持原合同。
 - 非适用：无 DB schema/migration/backfill、API response shape、read-model scope、worker topology 或新依赖变化，因此不新增迁移兼容、worker registry/manifest 或部署拓扑测试；用现有边界 guard 证明未扩散即可。
@@ -67,16 +67,16 @@
 
 ## 2026-08-05 历史 WEX 运行时退役与搜索合同 v20
 
-- Business core：`tests/test_workbench_relation_grouping.py` 证明历史 `exception_state`、`handled_exception` 和 WEX summary 不再改变分组、异常计数或 canonical row；新 `oa_invoice_anomaly` 仍保持 active/ignored 互斥。
+- Business core：`tests/test_workbench_relation_grouping.py` 证明任何当前异常默认阻断已配对、`accept_paired` 只覆盖异常 blocker、`keep_unpaired` 与撤回保持未配对，历史 WEX 不再改变分组。
 - Service/read model/API：`tests/test_workbench_sql_runtime.py` 保护 v20 淘汰 v19 generation/cache、projection 丢弃 `exception_case`/`handled_exception`、source freshness 排除历史 exception table、搜索投影包含 OA `completed_at`；`tests/test_search_query.py` 和 `tests/test_workbench_routes.py` 保护金额及人民币符号数值等价与普通文本转义。
-- Frontend：`WorkbenchSelection.test.tsx` 与 `WorkbenchExceptionDrawer.test.tsx` 保护历史 WEX 不隐藏 canonical rows、不进入抽屉且不暴露旧取消/恢复动作；新 OA/发票异常继续可忽略和撤回忽略。
-- E2E / regression：`workbench-exception-flow.spec.ts` 保护旧异常写入后 canonical rows 仍在主区且抽屉无旧记录；权限套件改用真实 `oa_invoice_anomaly` 验证 read-export 零 mutation。没有删除历史审计表、增加表、worker、queue、cache owner、依赖或并行 fallback。
+- Frontend：`WorkbenchSelection.test.tsx` 与 `WorkbenchExceptionDrawer.test.tsx` 保护单 bucket 有界读取、逐项审阅、进入已配对、留在未配对、撤回与主区 canonical refetch。
+- E2E / regression：`workbench-exception-flow.spec.ts` 保护异常默认未配对、人工放行进入已配对、撤回同步返回未配对；权限套件验证 read-export 零 mutation。没有增加表、worker、queue、cache owner、依赖或并行 fallback。
 
 ## 2026-08-05 OA/发票比较单元与附件缺失异常
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、附件数大于零且零绑定发票生成 `OA发票附件缺失`；支付申请继续按关系组总额比较，缺金额不误报。
-- Service/read model/API：`tests/test_workbench_relation_grouping.py` 保护 bundle `oa_invoice_anomaly.items[]`、active/ignored 计数和旧逐发票 `amount_anomaly` 不再发布；`tests/test_workbench_query_service.py` 保护 item `attachment_file_count`；`tests/test_workbench_sql_runtime.py` 保护当前 v20 淘汰旧 generation/cache，且异常桶在分页前过滤。
-- Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行、部分筛选不伪造同行、附件缺失生成不可选择 display-only 发票占位；`WorkbenchApi.test.ts` 保护新 DTO 与一个 comparison unit 只装饰一行；`WorkbenchExceptionDrawer.test.tsx` 和 `WorkbenchSelection.test.tsx` 保护 HeroUI chip、`异常 n | 已忽略 m`、折叠/展开、忽略/撤回及只读行为。
+- Service/API：`tests/test_workbench_relation_grouping.py` 保护 `workbench_anomaly.items[]` 和具体 pair chip；`tests/test_workbench_anomaly_review_service.py` 保护 exact item review、stale fingerprint、其他 blocker 与新 API；PostgreSQL integration 保护异常桶在分页前过滤及 SQL/Python fingerprint 一致。
+- Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行和附件占位；`WorkbenchApi.test.ts` 保护统一 anomaly DTO；抽屉/页面测试保护具体 chip、两个新 bucket、逐项审阅、流转与只读行为。
 
 ## 2026-08-15 OA附件发票多对多与子付款项定位
 
@@ -85,13 +85,13 @@
 - Performance/regression：复用单次 Workbench direct canonical SQL 与前端纯内存图遍历；无新增 HTTP、read model、worker、数据库表、逐行 I/O 或页面 effect。PostgreSQL exception filter 使用 relation 内递归连通分量，避免顶部异常计数继续按旧单值来源误报。
 - Regression：没有新增表、migration、read model、worker、queue、cache owner、HTTP 详情链路或依赖；旧逐关系总额、逐发票复制字段和金额决定显式 ownership 的判断已删除。
 
-## 2026-08-05 紧凑异常抽屉与撤回忽略
+## 2026-08-05 紧凑异常抽屉与撤回忽略（历史合同，已由 2026-08-15 统一异常审阅替代）
 
 - Business core / repository：`tests/test_workbench_relation_grouping.py` 与 `tests/test_workbench_sql_runtime.py` 保护进行中、已忽略 OA/发票异常组的互斥计数；历史 ignored row/WEX 不进入运行时列表或计数。
 - API / frontend：`WorkbenchApi.test.ts` 保护 additive `ignored_exception_count` 与三栏总金额映射；`WorkbenchExceptionDrawer.test.tsx` 保护 HeroUI 单选状态、默认折叠摘要、单组展开、无重复三栏表头、ignore/撤回忽略和只读权限；`WorkbenchSelection.test.tsx` 保护撤回忽略直接调用 canonical action、刷新主表和抽屉且不再打开旧确认 modal。
 - E2E / regression：`workbench-exception-flow.spec.ts` 与权限 Browser suites 覆盖“进行中的异常/已忽略的异常”、折叠展开、写权限和撤回忽略；旧 `CancelProcessedExceptionModal` 已删除，不保留兼容入口。
 
-## 2026-08-04 OA/发票金额不一致异常闭环
+## 2026-08-04 OA/发票金额不一致异常闭环（历史合同，已由 2026-08-15 统一异常审阅替代）
 
 - Business core：`tests/test_workbench_amount_check_service.py` 覆盖按分精确相等、1 分差异、缺少任一侧和任一成员金额时不误报；`test_workbench_relation_grouping.py` 保护 active/ignored anomaly 在 group payload 中传播。
 - Service/repository/API：`tests/test_workbench_amount_mismatch_exception_service.py` 覆盖 server actor、all-scope 实际 month、stale fingerprint/version、幂等 ignore/restore、审计、month-scoped decision read，并证明 legacy exception loader 排除独立 scenario；`test_workbench_query_facade.py` 保护 `exception_bucket` 透传，`test_auth_guard.py` 保护 read-export 拒绝两个写接口。

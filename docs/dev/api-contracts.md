@@ -463,13 +463,13 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ### Workbench OA/发票异常 API
 
-`GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=active|processed`。`active` 返回 active OA/发票异常的关系组；`processed` 返回 fingerprint-bound ignored OA/发票异常。过滤在 exact total/row counts 和 keyset 分页之前完成，不读 page generation 或 legacy WEX bucket。
+`GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=unpaired|paired`。bucket 必须等于 zone，返回该展示区内携带当前异常的关系组。过滤发生在 exact total/row counts 与 keyset 分页之前，不读 page generation 或 legacy WEX bucket。
 
-关系组可携带 additive `oa_invoice_anomaly`：`{code="oa_invoice_anomaly",fingerprint,state="active|ignored",items[]}`。每个 item 包含 `code="oa_invoice_amount_mismatch|oa_invoice_attachment_missing|oa_invoice_attachment_parse_failed|oa_invoice_attachment_unassigned"`、`label`、`display_label`、`fingerprint`、`comparison_unit_id`、`source_oa_ids[]`、`source_expense_item_ids[]`、`oa_total`、`invoice_total`、`amount_delta`、`invoice_row_ids[]` 和 `attachment_file_count`。日常报销按子付款项与发票来源边组成连通比较单元；同一张发票连接多个子付款项时只计一次。支付申请没有子项时按关系组总额生成一个 item。缺失 bundle 表示当前关系没有 OA/发票异常；旧单值 `source_oa_id` / `source_expense_item_id`、旧 `amount_anomaly` 和发票行复制字段不再发布。
+关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",reviewed_item_fingerprints[],review_note,reviewed_by,reviewed_at,items[]}`。item code 支持三种具体金额差异与三种 OA 附件异常，并返回 `oa_total`、`bank_total`、`invoice_total`、`mismatch_pair`、`amount_delta` 及来源 IDs。缺失 bundle 表示当前关系无异常；禁止发布泛化 `金额不一致` 或旧 `oa_invoice_anomaly.state`。
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
-`POST /api/workbench/exceptions/amount-mismatch/ignore` 与 `POST /api/workbench/exceptions/amount-mismatch/restore` 保留既有持久化命令路径，接受 `{month,zone,group_id,fingerprint}`；fingerprint 是整个 `oa_invoice_anomaly` bundle 的当前指纹。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；canonical anomaly fingerprint 漂移返回 409；当前状态的幂等重复成功但不重复写 audit。成功后返回决定与精确 affected Workbench scope，页面恰好一次 normal GET，不修改正式关系、canonical 金额、附件或发票事实。
+`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,fingerprint,decision,reviewed_item_fingerprints,note?}`；`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。旧 amount-mismatch ignore/restore routes 返回 404。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 
@@ -867,12 +867,12 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 - 每区 shape 固定为 `groups,total,row_counts,page_size,has_more,next_cursor`。首屏 `page_size=50`，候选 SQL 返回 `page_size+1` keys 判定 `has_more`，再 set-based hydration 只完整装配当前页的 groups。
 - `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket` 的明确白名单合同。`cursor` 绑定 scope/zone/search/filter/sort 和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback。
 - `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填白名单 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page_size` 默认 100、最大 200，使用 opaque `cursor`；响应固定为 `options[{value,label,missing}],page_size,has_more,next_cursor`。候选来自完整 eligible group domain，目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。
-- `exception_bucket=active|processed` 在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 进行精确筛选/计数；异常抽屉使用同一有界 summary cursor 分页，展开单组时再惰性读 detail，不在浏览器 drain 全部 full-detail pages。
+- `exception_bucket=unpaired|paired` 必须与请求 zone 相同，并在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 精确筛选/计数；异常抽屉一次只读当前 bucket，展开单组时再惰性读 detail。
 - 旧独立 summary HTTP、`/api/workbench/refresh-status`、page Redis cache、refresh enqueue 和 generation/version 参数均不是当前 API。
 
 关系分区只允许 `paired` / `unpaired`：
 
-- `paired.groups[*]` 必须一一对应冻结要求已满足的 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
+- `paired.groups[*]` 必须一一对应冻结要求已满足且无 pending/keep 异常，或当前异常已人工 `accept_paired` 的 active 正式关系；完整包含 relation 成员，具体异常 chip 不因放行消失。
 - `unpaired.groups[*]` 可以是一个未被 active relation 占用的 canonical singleton，也可以是冻结要求未满足的 active relation group；后一种必须返回 `completion.is_complete=false` 和精确 `missing_row_types`，不能拆散 relation ownership。
 - 普通 relation 含 OA 但缺银行流水时必须位于 `unpaired`，并返回 `missing_row_types=["bank"]`；OA 附件发票 immutable binding 只表达 ownership，不等于付款链路完整。显式 batch-accounting/ETC batch relation 继续使用各自登记的完整性豁免。
 - `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。

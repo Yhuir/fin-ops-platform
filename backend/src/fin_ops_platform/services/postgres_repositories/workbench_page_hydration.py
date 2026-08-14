@@ -902,14 +902,26 @@ class PostgresWorkbenchPageHydrationRepository:
                     null::text as external_batch_id,
                     jsonb_build_object(
                         'fingerprint', decision.fingerprint,
-                        'status', decision.status
+                        'decision', decision.resolution,
+                        'reviewed_item_fingerprints', coalesce(
+                            decision.raw_payload#>'{normalized_payload,reviewed_item_fingerprints}',
+                            '[]'::jsonb
+                        ),
+                        'note', coalesce(
+                            decision.raw_payload#>>'{normalized_payload,note}',
+                            ''
+                        ),
+                        'reviewed_by', coalesce(decision.updated_by, ''),
+                        'reviewed_at', decision.updated_at
                     ) as payload
                 from (
                     select
                         exception.raw_payload#>>'{normalized_payload,group_id}' as group_id,
                         exception.raw_payload#>>'{normalized_payload,fingerprint}'
                             as fingerprint,
-                        exception.status,
+                        exception.resolution,
+                        exception.updated_by,
+                        exception.updated_at,
                         exception.raw_payload,
                         row_number() over (
                             partition by exception.raw_payload#>>'{normalized_payload,fingerprint}'
@@ -918,7 +930,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                      exception.case_id desc
                         ) as decision_rank
                     from app.workbench_exception_cases exception
-                    where exception.scenario = 'oa_invoice_amount_mismatch'
+                    where exception.scenario = 'workbench_anomaly_review'
                       and exception.raw_payload#>>'{normalized_payload,group_id}' = any(
                           select 'case:' || requested.case_id
                           from requested_relations requested
@@ -1103,7 +1115,7 @@ class PostgresWorkbenchPageHydrationRepository:
         rows_by_typed_id: dict[tuple[str, str], dict[str, Any]] = {}
         relations: list[dict[str, Any]] = []
         page_overrides: dict[tuple[str, str], dict[str, Any]] = {}
-        decisions: dict[str, str] = {}
+        decisions: dict[str, dict[str, Any]] = {}
         page_etc_summaries: dict[str, dict[str, Any]] = {}
         settings: dict[str, Any] | None = None
         for source in rows:
@@ -1130,8 +1142,9 @@ class PostgresWorkbenchPageHydrationRepository:
                 )] = payload
             elif record_kind == "decision":
                 fingerprint = str(payload.get("fingerprint") or "").strip()
-                if fingerprint and str(payload.get("status") or "") == "ignored":
-                    decisions[fingerprint] = "ignored"
+                decision = str(payload.get("decision") or "").strip()
+                if fingerprint and decision in {"accept_paired", "keep_unpaired"}:
+                    decisions[fingerprint] = payload
             elif record_kind == "etc":
                 external_batch_id = str(
                     source.get("external_batch_id") or ""
@@ -1179,7 +1192,7 @@ class PostgresWorkbenchPageHydrationRepository:
             rows_by_typed_id=rows_by_typed_id,
             relations=relations,
             page_overrides=page_overrides,
-            amount_mismatch_decisions=decisions,
+            anomaly_review_decisions=decisions,
             page_etc_summaries=page_etc_summaries,
         )
         grouped_groups = [

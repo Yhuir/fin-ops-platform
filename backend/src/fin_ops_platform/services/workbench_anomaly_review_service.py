@@ -2,30 +2,37 @@ from __future__ import annotations
 
 from typing import Any
 
-class WorkbenchAmountMismatchConflict(ValueError):
+
+class WorkbenchAnomalyReviewConflict(ValueError):
     pass
 
 
-class WorkbenchAmountMismatchExceptionService:
+class WorkbenchAnomalyReviewService:
     def __init__(self, *, group_repository: Any, decision_repository: Any) -> None:
         self._group_repository = group_repository
         self._decision_repository = decision_repository
 
-    def set_ignored(
-        self,
-        payload: dict[str, object],
-        *,
-        actor_id: str,
-        ignored: bool,
-    ) -> dict[str, object]:
+    def review(self, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
         scope_key = str(payload.get("month") or "").strip()
         zone = str(payload.get("zone") or "").strip()
         group_id = str(payload.get("group_id") or "").strip()
         fingerprint = str(payload.get("fingerprint") or "").strip().lower()
+        decision = str(payload.get("decision") or "").strip()
+        note = str(payload.get("note") or "").strip()
+        reviewed_items = sorted(
+            dict.fromkeys(
+                str(value or "").strip().lower()
+                for value in list(payload.get("reviewed_item_fingerprints") or [])
+                if str(value or "").strip()
+            )
+        )
         if zone not in {"paired", "unpaired"}:
             raise ValueError("zone must be paired or unpaired.")
+        if decision not in {"accept_paired", "keep_unpaired"}:
+            raise ValueError("decision must be accept_paired or keep_unpaired.")
         if not scope_key or not group_id or not fingerprint:
             raise ValueError("month, group_id and fingerprint are required.")
+
         detail = self._group_repository.get_workbench_group_detail(
             scope_key=scope_key,
             zone=zone,
@@ -35,10 +42,28 @@ class WorkbenchAmountMismatchExceptionService:
         if not isinstance(group, dict) and isinstance(detail, dict):
             group = detail
         if not isinstance(group, dict):
-            raise WorkbenchAmountMismatchConflict("金额异常关系组已变化，请刷新后重试。")
-        anomaly = group.get("oa_invoice_anomaly")
+            raise WorkbenchAnomalyReviewConflict("异常关系组已变化，请刷新后重试。")
+        anomaly = group.get("workbench_anomaly")
         if not isinstance(anomaly, dict) or str(anomaly.get("fingerprint") or "") != fingerprint:
-            raise WorkbenchAmountMismatchConflict("金额异常已变化或已消失，请刷新后重试。")
+            raise WorkbenchAnomalyReviewConflict("异常已变化或已消失，请刷新后重试。")
+        current_items = sorted(
+            str(item.get("fingerprint") or "").strip().lower()
+            for item in list(anomaly.get("items") or [])
+            if isinstance(item, dict) and str(item.get("fingerprint") or "").strip()
+        )
+        if reviewed_items != current_items:
+            raise ValueError("必须审阅当前异常中的每一项后才能提交判断。")
+        if decision == "accept_paired":
+            other_blockers = [
+                reason
+                for reason in list((group.get("completion") or {}).get("blocking_reasons") or [])
+                if reason != "anomaly_review_required"
+            ]
+            if other_blockers:
+                raise WorkbenchAnomalyReviewConflict(
+                    "该关系仍有未解决的配对条件，不能强制进入已配对。"
+                )
+
         group_scope = str(
             (detail.get("source_scope_key") if isinstance(detail, dict) else None)
             or group.get("source_scope_key")
@@ -50,18 +75,17 @@ class WorkbenchAmountMismatchExceptionService:
         ).strip()
         decision_scope_key = group_scope[:7] if len(group_scope) >= 7 else scope_key
         if decision_scope_key == "all":
-            raise WorkbenchAmountMismatchConflict("金额异常缺少所属月份，请刷新后重试。")
-        result = self._decision_repository.set_workbench_amount_mismatch_decision(
+            raise WorkbenchAnomalyReviewConflict("异常缺少所属月份，请刷新后重试。")
+        result = self._decision_repository.set_workbench_anomaly_review_decision(
             fingerprint=fingerprint,
             group_id=group_id,
             scope_key=decision_scope_key,
             actor_id=actor_id,
-            ignored=ignored,
+            decision=decision,
+            note=note,
+            reviewed_item_fingerprints=reviewed_items,
         )
-        return {
-            **result,
-            "affected_scope_keys": [decision_scope_key],
-        }
+        return {**result, "affected_scope_keys": [decision_scope_key]}
 
     @staticmethod
     def _group_row_scope(group: dict[str, object]) -> str:
@@ -85,7 +109,4 @@ class WorkbenchAmountMismatchExceptionService:
         return next(iter(scopes)) if len(scopes) == 1 else ""
 
 
-__all__ = [
-    "WorkbenchAmountMismatchConflict",
-    "WorkbenchAmountMismatchExceptionService",
-]
+__all__ = ["WorkbenchAnomalyReviewConflict", "WorkbenchAnomalyReviewService"]

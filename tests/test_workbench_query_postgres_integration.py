@@ -293,10 +293,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(initial["summary"]["oa_count"], 1)
         self.assertEqual(initial["summary"]["bank_count"], 2)
         self.assertEqual(initial["summary"]["invoice_count"], 4)
-        self.assertEqual(initial["summary"]["paired_count"], 1)
-        self.assertEqual(initial["summary"]["unpaired_count"], 4)
-        self.assertEqual(initial["paired"]["total"], 1)
-        self.assertEqual(initial["unpaired"]["total"], 4)
+        self.assertEqual(initial["summary"]["paired_count"], 0)
+        self.assertEqual(initial["summary"]["unpaired_count"], 5)
+        self.assertEqual(initial["paired"]["total"], 0)
+        self.assertEqual(initial["unpaired"]["total"], 5)
         initial_bank_rows = [
             row
             for zone in ("paired", "unpaired")
@@ -337,7 +337,11 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "etc-summary-ETC-"
         )
         self.assertEqual(
-            initial["paired"]["groups"][0]["invoice_rows"][0]["source_kind"],
+            next(
+                group
+                for group in initial["unpaired"]["groups"]
+                if group.get("detail_key") == "CASE-DIRECT-1"
+            )["invoice_rows"][0]["source_kind"],
             "etc_invoice_summary",
         )
         initial_statement = next(
@@ -382,7 +386,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(page["total"], 0, "percent must be treated as a literal")
         page = self.repository.get_workbench_groups_page(
             scope_key="2026-07",
-            zone="paired",
+            zone="unpaired",
             search="云南腾安科技有限公司",
         )
         self.assertEqual(page["total"], 1)
@@ -431,12 +435,16 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
     def test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded(self) -> None:
         self.connection.statements.clear()
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
-        group = initial["paired"]["groups"][0]
-        anomaly = dict(group.get("oa_invoice_anomaly") or {})
+        group = next(
+            group
+            for group in initial["unpaired"]["groups"]
+            if group.get("detail_key") == "CASE-DIRECT-1"
+        )
+        anomaly = dict(group.get("workbench_anomaly") or {})
 
-        self.assertEqual(initial["summary"]["exception_count"], 1)
-        self.assertEqual(initial["summary"]["ignored_exception_count"], 0)
-        self.assertEqual(anomaly.get("state"), "active")
+        self.assertEqual(initial["summary"]["unpaired_exception_count"], 1)
+        self.assertEqual(initial["summary"]["paired_exception_count"], 0)
+        self.assertEqual(anomaly.get("review_decision"), "pending")
         self.assertTrue(str(anomaly.get("fingerprint") or ""))
         candidate_statement = next(
             statement
@@ -447,15 +455,15 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(candidate_statement["page_rows_with_anomaly_payload"], 0)
 
         self.connection.statements.clear()
-        active = self.repository.get_workbench_groups_page(
+        unpaired = self.repository.get_workbench_groups_page(
             scope_key="2026-07",
-            zone="paired",
+            zone="unpaired",
             page_size=1,
-            exception_bucket="active",
+            exception_bucket="unpaired",
         )
-        self.assertEqual(active["total"], 1)
+        self.assertEqual(unpaired["total"], 1)
         self.assertEqual(
-            active["groups"][0]["oa_invoice_anomaly"]["fingerprint"],
+            unpaired["groups"][0]["workbench_anomaly"]["fingerprint"],
             anomaly["fingerprint"],
         )
         self.assertEqual(
@@ -471,39 +479,43 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             if statement["operation"] == "fetch_all"
             and "anomaly_states" in str(statement.get("raw_sql") or "")
         )
-        self.assertIn("anomaly.state = %s", exception_sql)
+        self.assertIn("groups.zone = %s", exception_sql)
         self.assertIn("limit %s", exception_sql.lower())
 
         self.raw_connection.execute(
             """
             insert into app.workbench_exception_cases(
-                case_id, status, version, business_line, scenario, scope_month,
-                row_ids, candidate_ids, raw_payload
+                case_id, status, resolution, version, business_line, scenario, scope_month,
+                row_ids, candidate_ids, updated_by, raw_payload
             ) values (
-                'amount-mismatch-sql-parity', 'ignored', 1,
-                'reconciliation_workbench', 'oa_invoice_amount_mismatch',
-                '2026-07-01', array[]::text[], array[]::text[],
+                'amount-mismatch-sql-parity', 'resolved', 'accept_paired', 1,
+                'reconciliation_workbench', 'workbench_anomaly_review',
+                '2026-07-01', array[]::text[], array[]::text[], 'test-suite',
                 jsonb_build_object('normalized_payload', jsonb_build_object(
                     'group_id', 'case:CASE-DIRECT-1',
-                    'fingerprint', %s::text
+                    'fingerprint', %s::text,
+                    'reviewed_item_fingerprints', jsonb_build_array(%s::text)
                 ))
             )
             """,
-            (str(anomaly["fingerprint"]),),
+            (
+                str(anomaly["fingerprint"]),
+                str(anomaly["items"][0]["fingerprint"]),
+            ),
         )
-        ignored = self.repository.get_workbench_initial_page(scope_key="2026-07")
-        self.assertEqual(ignored["summary"]["exception_count"], 0)
-        self.assertEqual(ignored["summary"]["ignored_exception_count"], 1)
+        accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertEqual(accepted["summary"]["unpaired_exception_count"], 0)
+        self.assertEqual(accepted["summary"]["paired_exception_count"], 1)
         self.assertEqual(
-            ignored["paired"]["groups"][0]["oa_invoice_anomaly"]["state"],
-            "ignored",
+            accepted["paired"]["groups"][0]["workbench_anomaly"]["review_decision"],
+            "accept_paired",
         )
-        processed = self.repository.get_workbench_groups_page(
+        paired = self.repository.get_workbench_groups_page(
             scope_key="2026-07",
             zone="paired",
-            exception_bucket="processed",
+            exception_bucket="paired",
         )
-        self.assertEqual(processed["total"], 1)
+        self.assertEqual(paired["total"], 1)
 
     def test_shared_invoice_sources_are_counted_once_with_sql_fingerprint_parity(self) -> None:
         oa_payload = {
@@ -607,7 +619,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             for group in matched["paired"]["groups"]
             if group.get("detail_key") == "CASE-SHARED-36"
         )
-        self.assertNotIn("oa_invoice_anomaly", matched_group)
+        self.assertNotIn("workbench_anomaly", matched_group)
         self.assertEqual(
             matched_group["invoice_rows"][0]["source_expense_item_ids"],
             ["oa-shared-36:item:0", "oa-shared-36:item:1"],
@@ -628,24 +640,24 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         mismatched = self.repository.get_workbench_initial_page(scope_key="2026-07")
         mismatched_group = next(
             group
-            for group in mismatched["paired"]["groups"]
+            for group in mismatched["unpaired"]["groups"]
             if group.get("detail_key") == "CASE-SHARED-36"
         )
-        anomaly = mismatched_group["oa_invoice_anomaly"]
+        anomaly = mismatched_group["workbench_anomaly"]
         self.assertEqual(anomaly["items"][0]["source_expense_item_ids"], [
             "oa-shared-36:item:0",
             "oa-shared-36:item:1",
         ])
         active = self.repository.get_workbench_groups_page(
             scope_key="2026-07",
-            zone="paired",
-            exception_bucket="active",
+            zone="unpaired",
+            exception_bucket="unpaired",
         )
         active_group = next(
             group for group in active["groups"] if group.get("detail_key") == "CASE-SHARED-36"
         )
         self.assertEqual(
-            active_group["oa_invoice_anomaly"]["fingerprint"],
+            active_group["workbench_anomaly"]["fingerprint"],
             anomaly["fingerprint"],
         )
 

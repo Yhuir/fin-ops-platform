@@ -200,7 +200,7 @@ class PostgresWorkbenchPageSelectionRepository:
             tenant_id=self._tenant_id,
         ).hydrate_groups(
             scope_key=normalized_scope,
-            descriptors=descriptors,
+            descriptors=[{**descriptor, "zone": ""} for descriptor in descriptors],
             detail_level="full",
         )
         if len(groups) != len(descriptors):

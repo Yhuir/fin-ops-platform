@@ -37,7 +37,7 @@
 | `RECON-WB-E2E-006` | direct query failed/timeout 状态 | P0 | direct query 503/超时时显示可重试错误，不显示 false-empty、不读旧 projection/cache、不请求 refresh-status；OA sync dirty/refreshing 仍按独立安全合同禁写。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认、关系级撤回和异常抽屉内写操作，并且不会发出 mutation API；未配对工具栏对任何角色都不显示旧人工“异常处理”。 |
-| `RECON-WB-E2E-009` | 统一异常抽屉与 OA/发票异常 ignore/restore | P1 | 只有按 OA 子付款项/支付申请比较的精确金额差异和 `OA发票附件缺失` 从统一右侧抽屉处理；未配对工具栏“异常处理”及其人工 handler 不存在。`290=145+145`、`405=350+55` 同行且无误报，一个比较单元只显示一个 chip。历史 WEX/row-ignore 记录继续可审计，但 canonical rows 留在 paired/unpaired 主区且不进入抽屉或计数。右上入口显示 `异常 n | 已忽略 m`，抽屉默认折叠三栏计数/总金额、展开完整成员；异常可忽略并撤回，主表 chip 与计数同步；操作后只通过当前关联台正常 GET 更新页面，零 downstream job。 |
+| `RECON-WB-E2E-009` | 统一异常审阅与分区流转 | P1 | OA—流水、OA—发票、流水—发票和附件异常必须默认留在未配对；`290=145+145`、`405=350+55` 同行且无误报。用户逐项审阅后可 accept/keep；accept 后保留具体 chip并进入已配对异常，撤回后抽屉与主区同步回未配对。每次决定一次 canonical GET、一次目标 bucket GET，零 downstream job；旧 ignore/restore routes 与 UI 不存在。 |
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 两区首屏各保留 50 组且没有手动“加载更多”；滚动接近区底部才自动读取下一页，失败不循环重试；区域搜索可命中尚未加载的全部服务端数据并高亮；详情、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |
 | `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；OA 状态恢复后按权威 OA status 自动恢复，不引入 Workbench generation/version gate。 |

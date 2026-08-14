@@ -142,8 +142,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "summary_paired_count": 1,
         "summary_unpaired_count": 1,
         "inventory_system_total": 2,
-        "exception_count": 0,
-        "ignored_exception_count": 0,
+        "unpaired_exception_count": 0,
+        "paired_exception_count": 0,
     }
     connection = _CountingQueryConnection(
         [
@@ -216,7 +216,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "case:case-1",
         "row:bank:bank-1",
     ]
-    assert payload["summary"]["exception_count"] == 0
+    assert payload["summary"]["unpaired_exception_count"] == 0
+    assert payload["summary"]["paired_exception_count"] == 0
     assert "anomaly_states" in sql
     assert "anomaly_counts" in sql
     assert payload["summary"]["paired_count"] == 1
@@ -242,7 +243,7 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
 
     assert "relation_anomaly_members" in sql
     assert "latest_anomaly_decisions" in sql
-    assert "oa_invoice_amount_mismatch" in sql
+    assert "workbench_anomaly_review" in sql
     assert "digest(" in sql
     assert "anomaly_fingerprints" in sql
     assert "anomaly_states" in sql

@@ -29,7 +29,8 @@ from fin_ops_platform.services.workbench_row_identity import (
 
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
 BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
-OA_INVOICE_AMOUNT_MISMATCH_SCENARIO = "oa_invoice_amount_mismatch"
+WORKBENCH_ANOMALY_REVIEW_SCENARIO = "workbench_anomaly_review"
+LEGACY_OA_INVOICE_AMOUNT_MISMATCH_SCENARIO = "oa_invoice_amount_mismatch"
 
 
 def _no_oa_batch_relation_mode(payload: Any) -> str:
@@ -573,10 +574,13 @@ class PostgresWorkbenchRepository:
             """
             select case_id as key, raw_payload
             from app.workbench_exception_cases
-            where scenario is distinct from %s
+            where scenario is null or scenario not in (%s, %s)
             order by case_id
             """,
-            (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,),
+            (
+                LEGACY_OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                WORKBENCH_ANOMALY_REVIEW_SCENARIO,
+            ),
         )
         if not rows:
             return {}
@@ -613,7 +617,7 @@ class PostgresWorkbenchRepository:
                 """
                 select case_id as key, raw_payload
                 from app.workbench_exception_cases
-                where scenario is distinct from %s
+                where (scenario is null or scenario not in (%s, %s))
                   and jsonb_typeof(raw_payload#>'{normalized_payload,row_ids}') = 'array'
                   and jsonb_typeof(raw_payload#>'{normalized_payload,row_types}') = 'array'
                   and jsonb_array_length(raw_payload#>'{normalized_payload,row_ids}')
@@ -621,7 +625,10 @@ class PostgresWorkbenchRepository:
                 order by case_id
                 for update
                 """,
-                (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,),
+                (
+                    LEGACY_OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                    WORKBENCH_ANOMALY_REVIEW_SCENARIO,
+                ),
             )
             exception_repaired = self._repair_locked_legacy_workbench_exception_case_identities(
                 connection,
@@ -856,19 +863,29 @@ class PostgresWorkbenchRepository:
                 )
         return len(repaired)
 
-    def load_workbench_amount_mismatch_decisions(self, *, scope_key: str | None = None) -> dict[str, str]:
+    def load_workbench_anomaly_review_decisions(
+        self,
+        *,
+        scope_key: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
         normalized_scope_key = str(scope_key or "").strip()
         scope_clause = "and scope_month = %s::date" if normalized_scope_key and normalized_scope_key != "all" else ""
-        params: tuple[Any, ...] = (OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,)
+        params: tuple[Any, ...] = (WORKBENCH_ANOMALY_REVIEW_SCENARIO,)
         if scope_clause:
             params = (*params, month_start(normalized_scope_key))
         rows = self._connection.fetch_all(
             f"""
-            select fingerprint, status
+            select fingerprint, resolution, updated_by, updated_at,
+                   raw_payload#>'{{normalized_payload,reviewed_item_fingerprints}}'
+                       as reviewed_item_fingerprints,
+                   raw_payload#>>'{{normalized_payload,note}}' as note
             from (
                 select
                     raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint,
-                    status,
+                    resolution,
+                    updated_by,
+                    updated_at,
+                    raw_payload,
                     row_number() over (
                         partition by raw_payload#>>'{{normalized_payload,fingerprint}}'
                         order by updated_at desc, version desc, case_id desc
@@ -878,61 +895,92 @@ class PostgresWorkbenchRepository:
                   {scope_clause}
             ) latest_decisions
             where decision_rank = 1
-              and status = 'ignored'
             """,
             params,
         )
         return {
-            fingerprint: "ignored"
+            fingerprint: {
+                "decision": text(row.get("resolution")),
+                "reviewed_item_fingerprints": text_list(
+                    row.get("reviewed_item_fingerprints")
+                ),
+                "note": text(row.get("note")),
+                "reviewed_by": text(row.get("updated_by")),
+                "reviewed_at": serialize_value(row.get("updated_at")),
+            }
             for row in rows
             if (fingerprint := text(row.get("fingerprint")))
+            and text(row.get("resolution")) in {"accept_paired", "keep_unpaired"}
         }
 
-    def set_workbench_amount_mismatch_decision(
+    def set_workbench_anomaly_review_decision(
         self,
         *,
         fingerprint: str,
         group_id: str,
         scope_key: str,
         actor_id: str,
-        ignored: bool,
+        decision: str,
+        note: str,
+        reviewed_item_fingerprints: list[str],
     ) -> dict[str, Any]:
         normalized_fingerprint = str(fingerprint or "").strip().lower()
         normalized_group_id = str(group_id or "").strip()
         normalized_scope_key = str(scope_key or "").strip()
         normalized_actor_id = str(actor_id or "").strip()
+        normalized_decision = str(decision or "").strip()
+        normalized_note = str(note or "").strip()
+        normalized_reviewed_items = sorted(
+            dict.fromkeys(
+                str(value or "").strip().lower()
+                for value in reviewed_item_fingerprints
+                if str(value or "").strip()
+            )
+        )
         if len(normalized_fingerprint) != 64 or any(
             character not in "0123456789abcdef" for character in normalized_fingerprint
         ):
             raise ValueError("fingerprint must be a SHA-256 hex digest.")
         if not normalized_group_id or not normalized_scope_key or not normalized_actor_id:
             raise ValueError("group_id, scope_key and actor_id are required.")
-        case_id = f"AMOUNT-MISMATCH-{normalized_fingerprint[:32]}"
-        desired_status = "ignored" if ignored else "cancelled"
+        if normalized_decision not in {"accept_paired", "keep_unpaired"}:
+            raise ValueError("decision must be accept_paired or keep_unpaired.")
+        case_id = f"ANOMALY-REVIEW-{normalized_fingerprint[:32]}"
 
         def write(connection: Any) -> dict[str, Any]:
             current = connection.fetch_one(
                 """
-                select id::text as id, status, version, created_by, created_at
+                select id::text as id, status, resolution, version, created_by, created_at,
+                       raw_payload#>'{normalized_payload,reviewed_item_fingerprints}'
+                           as reviewed_item_fingerprints,
+                       raw_payload#>>'{normalized_payload,note}' as note
                 from app.workbench_exception_cases
                 where case_id = %s
                 for update
                 """,
                 (case_id,),
             )
-            current_status = text((current or {}).get("status"))
+            current_resolution = text((current or {}).get("resolution"))
             current_version = int_value((current or {}).get("version"), 0)
-            changed = current_status != desired_status
+            changed = (
+                current_resolution != normalized_decision
+                or text((current or {}).get("note")) != normalized_note
+                or sorted(text_list((current or {}).get("reviewed_item_fingerprints")))
+                != normalized_reviewed_items
+            )
             next_version = max(1, current_version + (1 if changed else 0))
             normalized_payload = {
                 "case_id": case_id,
-                "status": desired_status,
+                "status": "resolved",
                 "version": next_version,
                 "business_line": "reconciliation_workbench",
-                "scenario_code": OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                "scenario_code": WORKBENCH_ANOMALY_REVIEW_SCENARIO,
                 "fingerprint": normalized_fingerprint,
                 "group_id": normalized_group_id,
                 "scope_month": normalized_scope_key,
+                "decision": normalized_decision,
+                "note": normalized_note,
+                "reviewed_item_fingerprints": normalized_reviewed_items,
                 "row_ids": [],
                 "candidate_ids": [],
                 "updated_by": normalized_actor_id,
@@ -945,13 +993,14 @@ class PostgresWorkbenchRepository:
             connection.execute(
                 """
                 insert into app.workbench_exception_cases(
-                    case_id, status, version, business_line, scenario, scope_month,
+                    case_id, status, resolution, version, business_line, scenario, scope_month,
                     row_ids, candidate_ids, created_by, updated_by, raw_payload
                 )
-                values (%s, %s, %s, 'reconciliation_workbench', %s, %s::date,
+                values (%s, 'resolved', %s, %s, 'reconciliation_workbench', %s, %s::date,
                         array[]::text[], array[]::text[], %s, %s, %s)
                 on conflict (case_id) do update set
                     status = excluded.status,
+                    resolution = excluded.resolution,
                     version = excluded.version,
                     scope_month = excluded.scope_month,
                     updated_by = excluded.updated_by,
@@ -960,9 +1009,9 @@ class PostgresWorkbenchRepository:
                 """,
                 (
                     case_id,
-                    desired_status,
+                    normalized_decision,
                     next_version,
-                    OA_INVOICE_AMOUNT_MISMATCH_SCENARIO,
+                    WORKBENCH_ANOMALY_REVIEW_SCENARIO,
                     month_start(normalized_scope_key),
                     normalized_actor_id,
                     normalized_actor_id,
@@ -982,7 +1031,10 @@ class PostgresWorkbenchRepository:
                 (
                     case_id,
                     case_id,
-                    "amount_mismatch_ignored" if ignored else "amount_mismatch_restored",
+                    "workbench_anomaly_acceptance_withdrawn"
+                    if current_resolution == "accept_paired"
+                    and normalized_decision == "keep_unpaired"
+                    else "workbench_anomaly_reviewed",
                     normalized_actor_id,
                     jsonb(normalized_payload),
                     jsonb({"normalized_payload": normalized_payload}),

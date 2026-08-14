@@ -20,7 +20,7 @@ import RelationGroupGrid from "./RelationGroupGrid";
 
 type WorkbenchExceptionDrawerProps = {
   open: boolean;
-  bucket: "active" | "processed";
+  bucket: "unpaired" | "paired";
   contentGeneration: number;
   groups: WorkbenchRelationGroup[];
   loading: boolean;
@@ -29,12 +29,15 @@ type WorkbenchExceptionDrawerProps = {
   total: number;
   hasMore: boolean;
   canMutateData: boolean;
-  onBucketChange: (bucket: "active" | "processed") => void;
+  onBucketChange: (bucket: "unpaired" | "paired") => void;
   onClose: () => void;
   onEnsureGroupDetail: (group: WorkbenchRelationGroup) => Promise<WorkbenchRelationGroup>;
   onLoadMore: () => Promise<void> | void;
-  onIgnoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
-  onRestoreOaInvoiceAnomaly: (group: WorkbenchRelationGroup) => Promise<void> | void;
+  onReviewAnomaly: (
+    group: WorkbenchRelationGroup,
+    decision: "accept_paired" | "keep_unpaired",
+    reviewedItemFingerprints: string[],
+  ) => Promise<void> | void;
 };
 
 const PANE_IDS: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -60,14 +63,14 @@ export default function WorkbenchExceptionDrawer({
   onClose,
   onEnsureGroupDetail,
   onLoadMore,
-  onIgnoreOaInvoiceAnomaly,
-  onRestoreOaInvoiceAnomaly,
+  onReviewAnomaly,
 }: WorkbenchExceptionDrawerProps) {
   const [expandedKeys, setExpandedKeys] = useState<Set<Key>>(new Set());
   const [pendingGroupId, setPendingGroupId] = useState<string | null>(null);
   const [detailGroups, setDetailGroups] = useState<Record<string, WorkbenchRelationGroup>>({});
   const [detailLoadingIds, setDetailLoadingIds] = useState<Set<string>>(new Set());
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  const [reviewedItems, setReviewedItems] = useState<Record<string, Set<string>>>({});
   const detailRequestsRef = useRef(new Set<string>());
   const detailGenerationRef = useRef(0);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -80,6 +83,7 @@ export default function WorkbenchExceptionDrawer({
     setDetailGroups({});
     setDetailLoadingIds(new Set());
     setDetailErrors({});
+    setReviewedItems({});
     setPendingGroupId(null);
   }, [bucket, contentGeneration, open]);
 
@@ -163,15 +167,15 @@ export default function WorkbenchExceptionDrawer({
           size="sm"
           onSelectionChange={(keys) => {
             const [next] = Array.from(keys);
-            if (next === "active" || next === "processed") {
+            if (next === "unpaired" || next === "paired") {
               onBucketChange(next);
             }
           }}
         >
-          <ToggleButton id="active">进行中的异常</ToggleButton>
-          <ToggleButton id="processed">
+          <ToggleButton id="unpaired">未配对异常</ToggleButton>
+          <ToggleButton id="paired">
             <ToggleButtonGroup.Separator />
-            已忽略的异常
+            已配对异常
           </ToggleButton>
         </ToggleButtonGroup>
         <span className="workbench-anomaly-drawer__count">
@@ -183,7 +187,7 @@ export default function WorkbenchExceptionDrawer({
         {error ? <div className="detail-state-panel error">{error}</div> : null}
         {loading ? <div className="detail-state-panel">正在加载异常关系…</div> : null}
         {!loading && !error && visibleGroups.length === 0 ? (
-          <div className="detail-state-panel">当前没有{bucket === "active" ? "进行中" : "已忽略"}的异常。</div>
+          <div className="detail-state-panel">当前没有{bucket === "unpaired" ? "未配对" : "已配对"}异常。</div>
         ) : null}
         {!loading && visibleGroups.length > 0 ? (
           <DisclosureGroup
@@ -226,12 +230,19 @@ export default function WorkbenchExceptionDrawer({
                       </Button>
                     </Disclosure.Heading>
                     <ExceptionAction
+                      bucket={bucket}
                       canMutateData={canMutateData}
                       group={group}
                       pending={pendingGroupId === group.id}
+                      reviewedItems={reviewedItems[group.id] ?? new Set()}
                       onAction={(action) => runGroupAction(group.id, action)}
-                      onIgnoreOaInvoiceAnomaly={onIgnoreOaInvoiceAnomaly}
-                      onRestoreOaInvoiceAnomaly={onRestoreOaInvoiceAnomaly}
+                      onReviewAnomaly={onReviewAnomaly}
+                      onToggleReviewed={(fingerprint) => setReviewedItems((current) => {
+                        const next = new Set(current[group.id] ?? []);
+                        if (next.has(fingerprint)) next.delete(fingerprint);
+                        else next.add(fingerprint);
+                        return { ...current, [group.id]: next };
+                      })}
                     />
                   </div>
                   <Disclosure.Content>
@@ -288,63 +299,80 @@ export default function WorkbenchExceptionDrawer({
 
 function ExceptionAction({
   canMutateData,
+  bucket,
   group,
   pending,
+  reviewedItems,
   onAction,
-  onIgnoreOaInvoiceAnomaly,
-  onRestoreOaInvoiceAnomaly,
+  onReviewAnomaly,
+  onToggleReviewed,
 }: Pick<
   WorkbenchExceptionDrawerProps,
   | "canMutateData"
-  | "onIgnoreOaInvoiceAnomaly"
-  | "onRestoreOaInvoiceAnomaly"
+  | "bucket"
+  | "onReviewAnomaly"
 > & {
   group: WorkbenchRelationGroup;
   pending: boolean;
+  reviewedItems: Set<string>;
   onAction: (action: () => Promise<void> | void) => void;
+  onToggleReviewed: (fingerprint: string) => void;
 }) {
   const labels = exceptionLabels(group);
-  let action: (() => Promise<void> | void) | null = null;
-  let actionLabel = "";
-
-  if (group.oaInvoiceAnomaly?.state === "active") {
-    action = () => onIgnoreOaInvoiceAnomaly(group);
-    actionLabel = "忽略";
-  } else if (group.oaInvoiceAnomaly?.state === "ignored") {
-    action = () => onRestoreOaInvoiceAnomaly(group);
-    actionLabel = "撤回忽略";
-  }
+  const itemFingerprints = group.workbenchAnomaly?.items.map((item) => item.fingerprint) ?? [];
+  const allReviewed = itemFingerprints.length > 0
+    && itemFingerprints.every((fingerprint) => reviewedItems.has(fingerprint));
+  const submit = (decision: "accept_paired" | "keep_unpaired") => () => (
+    onReviewAnomaly(group, decision, itemFingerprints)
+  );
 
   return (
     <div className="workbench-anomaly-drawer__action">
       <div className="workbench-anomaly-drawer__chips">
         {labels.map((label) => (
-          <Chip color={label.color} key={label.text} size="sm" variant="soft">
-            <Chip.Label>{label.text}</Chip.Label>
-          </Chip>
+          <label className="workbench-anomaly-drawer__review-item" key={label.fingerprint}>
+            {bucket === "unpaired" && canMutateData ? (
+              <input
+                aria-label={`确认已审阅 ${label.text}`}
+                checked={reviewedItems.has(label.fingerprint)}
+                type="checkbox"
+                onChange={() => onToggleReviewed(label.fingerprint)}
+              />
+            ) : null}
+            <Chip color={label.color} size="sm" variant="soft">
+              <Chip.Label>{label.text}</Chip.Label>
+            </Chip>
+          </label>
         ))}
       </div>
-      {canMutateData && action ? (
-        <Button
-          isDisabled={pending}
-          isPending={pending}
-          size="sm"
-          variant="secondary"
-          onPress={() => onAction(action)}
-        >
-          {actionLabel}
-        </Button>
+      {canMutateData && group.workbenchAnomaly ? (
+        bucket === "paired" ? (
+          <Button isDisabled={pending} isPending={pending} size="sm" variant="secondary"
+            onPress={() => onAction(submit("keep_unpaired"))}>
+            撤回
+          </Button>
+        ) : (
+          <div className="workbench-anomaly-drawer__decision-buttons">
+            <Button isDisabled={pending || !allReviewed} isPending={pending} size="sm"
+              variant="secondary" onPress={() => onAction(submit("keep_unpaired"))}>
+              留在未配对
+            </Button>
+            <Button isDisabled={pending || !allReviewed} isPending={pending} size="sm"
+              variant="primary" onPress={() => onAction(submit("accept_paired"))}>
+              进入已配对
+            </Button>
+          </div>
+        )
       ) : null}
     </div>
   );
 }
 
 function exceptionLabels(group: WorkbenchRelationGroup) {
-  return Array.from(new Map((group.oaInvoiceAnomaly?.items ?? []).map((item) => [item.displayLabel, {
+  return Array.from(new Map((group.workbenchAnomaly?.items ?? []).map((item) => [item.fingerprint, {
+    fingerprint: item.fingerprint,
     text: item.displayLabel,
-    color: group.oaInvoiceAnomaly?.state === "ignored"
-      ? "default" as const
-      : item.code === "oa_invoice_amount_mismatch"
+    color: item.code.endsWith("amount_mismatch")
         ? "danger" as const
         : "warning" as const,
   }])).values());

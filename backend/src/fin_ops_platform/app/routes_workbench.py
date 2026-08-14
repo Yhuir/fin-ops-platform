@@ -165,8 +165,8 @@ class WorkbenchReadApiRoutes:
                 maximum=200,
             )
             normalized_exception_bucket = str(exception_bucket or "").strip() or None
-            if normalized_exception_bucket not in {None, "active", "processed"}:
-                raise ValueError("exception_bucket must be active or processed.")
+            if normalized_exception_bucket not in {None, "unpaired", "paired"}:
+                raise ValueError("exception_bucket must be unpaired or paired.")
             normalized_status = self._normalize_status(status)
             normalized_source_kind = self._normalize_source_kind(source_kind)
             normalized_sort = self._normalize_sort(sort)
@@ -237,8 +237,8 @@ class WorkbenchReadApiRoutes:
                 raise ValueError("option_search must not exceed 100 characters.")
             normalized_page_size = self._normalize_positive_int(page_size, "page_size", default=100, maximum=200)
             normalized_exception_bucket = str(exception_bucket or "").strip() or None
-            if normalized_exception_bucket not in {None, "active", "processed"}:
-                raise ValueError("exception_bucket must be active or processed.")
+            if normalized_exception_bucket not in {None, "unpaired", "paired"}:
+                raise ValueError("exception_bucket must be unpaired or paired.")
             normalized_status = self._normalize_status(status)
             normalized_source_kind = self._normalize_source_kind(source_kind)
         except ValueError as error:

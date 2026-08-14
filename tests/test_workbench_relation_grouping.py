@@ -223,8 +223,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         group = payload["unpaired"]["groups"][0]
         self.assertNotIn("exception_state", group)
         self.assertNotIn("processed_exception_summary", group)
-        self.assertEqual(payload["summary"]["exception_count"], 0)
-        self.assertEqual(payload["summary"]["ignored_exception_count"], 0)
+        self.assertEqual(payload["summary"]["unpaired_exception_count"], 0)
+        self.assertEqual(payload["summary"]["paired_exception_count"], 0)
 
     def test_unpaired_etc_summary_preserves_all_collapsed_invoice_details(self) -> None:
         payload = self.service.group_payload(
@@ -717,7 +717,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             group["invoice_rows"][0]["source_expense_item_ids"],
             ["oa-1:item:0", "oa-1:item:1"],
         )
-        self.assertNotIn("oa_invoice_anomaly", group)
+        self.assertNotIn("workbench_anomaly", group)
 
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
@@ -758,7 +758,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                 active_relations=[],
             )
 
-    def test_oa_invoice_anomaly_is_group_scoped_and_ignored_by_fingerprint(self) -> None:
+    def test_anomaly_blocks_pairing_until_review_accepts_current_fingerprint(self) -> None:
         rows = {
             "oa-1": {
                 "id": "oa-1",
@@ -795,27 +795,39 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             rows_by_id=rows,
             active_relations=[relation],
         )
-        active_group = active_payload["paired"]["groups"][0]
-        fingerprint = active_group["oa_invoice_anomaly"]["fingerprint"]
-        self.assertEqual(active_payload["summary"]["exception_count"], 1)
-        self.assertEqual(active_payload["summary"]["ignored_exception_count"], 0)
-        self.assertEqual(active_group["oa_invoice_anomaly"]["state"], "active")
-        self.assertEqual(active_group["oa_invoice_anomaly"]["items"][0]["display_label"], "金额不一致")
+        active_group = active_payload["unpaired"]["groups"][0]
+        fingerprint = active_group["workbench_anomaly"]["fingerprint"]
+        self.assertEqual(active_payload["summary"]["unpaired_exception_count"], 1)
+        self.assertEqual(active_payload["summary"]["paired_exception_count"], 0)
+        self.assertEqual(active_group["workbench_anomaly"]["review_decision"], "pending")
+        self.assertEqual(
+            {item["display_label"] for item in active_group["workbench_anomaly"]["items"]},
+            {"OA发票金额不一致", "流水发票金额不一致"},
+        )
+        self.assertIn("anomaly_review_required", active_group["completion"]["blocking_reasons"])
         self.assertNotIn("amount_anomaly", active_group["invoice_rows"][0])
 
-        ignored_payload = self.service.group_payload(
+        accepted_payload = self.service.group_payload(
             "2026-05",
             rows_by_id=rows,
             active_relations=[relation],
-            amount_mismatch_decisions={fingerprint: "ignored"},
+            anomaly_review_decisions={
+                fingerprint: {
+                    "decision": "accept_paired",
+                    "reviewed_item_fingerprints": [
+                        item["fingerprint"]
+                        for item in active_group["workbench_anomaly"]["items"]
+                    ],
+                    "reviewed_by": "reviewer",
+                }
+            },
         )
-        ignored_group = ignored_payload["paired"]["groups"][0]
-        self.assertEqual(ignored_payload["summary"]["exception_count"], 0)
-        self.assertEqual(ignored_payload["summary"]["ignored_exception_count"], 1)
-        self.assertEqual(ignored_group["oa_invoice_anomaly"]["state"], "ignored")
+        accepted_group = accepted_payload["paired"]["groups"][0]
+        self.assertEqual(accepted_payload["summary"]["unpaired_exception_count"], 0)
+        self.assertEqual(accepted_payload["summary"]["paired_exception_count"], 1)
         self.assertEqual(
-            ignored_group["oa_invoice_anomaly"]["items"][0]["display_label"],
-            "已忽略：金额不一致",
+            accepted_group["workbench_anomaly"]["review_decision"],
+            "accept_paired",
         )
 
     def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:
@@ -854,9 +866,9 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
 
         group = payload["unpaired"]["groups"][0]
-        item = group["oa_invoice_anomaly"]["items"][0]
-        self.assertEqual(payload["summary"]["exception_count"], 1)
-        self.assertEqual(group["oa_invoice_anomaly"]["state"], "active")
+        item = group["workbench_anomaly"]["items"][0]
+        self.assertEqual(payload["summary"]["unpaired_exception_count"], 1)
+        self.assertEqual(group["workbench_anomaly"]["review_decision"], "pending")
         self.assertEqual(item["code"], "oa_invoice_attachment_missing")
         self.assertEqual(item["display_label"], "OA发票附件缺失")
         self.assertEqual(item["source_expense_item_ids"], ["oa-1:item:0"])
