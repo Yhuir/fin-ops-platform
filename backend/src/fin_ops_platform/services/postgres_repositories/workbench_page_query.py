@@ -13,6 +13,8 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
+    pending_oa_application_date_sql,
+    pending_oa_application_time_sql,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
@@ -553,17 +555,14 @@ oa_candidate_facts as materialized (
         'oa'::text,
         (admission.scope_key || '-01')::date,
         coalesce(
-            nullif(admission.source_payload->>'application_date', '')::date,
+            {pending_oa_application_date_sql('admission')},
             (admission.scope_key || '-01')::date
         ),
         admission.updated_at,
         'in_progress'::text,
         jsonb_strip_nulls(jsonb_build_object(
             'applicant', admission.applicant,
-            'applicationTime', coalesce(
-                admission.source_payload->>'application_time',
-                admission.source_payload->>'application_date'
-            ),
+            'applicationTime', {pending_oa_application_time_sql('admission')},
             'projectName', coalesce(admission.project_name_display, admission.project_name),
             'applicationType', coalesce(
                 admission.source_payload->>'apply_type',
@@ -3024,7 +3023,7 @@ class PostgresWorkbenchPageQueryRepository:
                 "(oa.application_date = %s::date or oa.approved_at::date = %s::date)"
             )
             pending_predicates.append(
-                "coalesce(nullif(pending.source_payload->>'application_date', '')::date, "
+                f"coalesce({pending_oa_application_date_sql('pending')}, "
                 "(pending.scope_key || '-01')::date) = %s::date"
             )
             bank_predicates.append(

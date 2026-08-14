@@ -1668,10 +1668,8 @@ function buildWorkbenchRowPayload(
           amount: "128,000.00",
           counterparty_name: "华东设备供应商",
           reason: "设备首付款支付",
+          apply_time: "2026-03-25 11:05",
           oa_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
-          detail_fields: {
-            审批完成时间: "2026-03-25 11:05",
-          },
           available_actions: ["detail", "cancel_link"],
         },
       ],

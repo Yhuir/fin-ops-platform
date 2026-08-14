@@ -244,8 +244,6 @@ function renderCellValue(
       value,
       row.tableValues.direction ?? "",
       row.tableValues.paymentAccount ?? "",
-      row.categoryLabel ?? "",
-      row.categoryResolutionStatus ?? "",
       row,
       zoneId,
       searchQuery,
@@ -339,7 +337,9 @@ function renderOaApplicantValue(
       <span className="compound-cell-secondary">
         {hasApplicationType ? <FinanceStatusTag>{highlightSearchText(applicationType, searchQuery)}</FinanceStatusTag> : null}
         <OaWorkflowStatusChip status={workflowStatus} />
-        {hasApplicationTime ? renderInlineDateTimeTag(applicationTime, searchQuery) : null}
+        {hasApplicationTime
+          ? renderInlineDateTimeTag(applicationTime, searchQuery)
+          : <span className="inline-meta-tag inline-meta-tag-muted">时间缺失</span>}
       </span>
     </span>
   );
@@ -454,8 +454,6 @@ function renderBankMoneyValue(
   value: string,
   direction: string,
   paymentAccount: string,
-  categoryLabel: string,
-  categoryResolutionStatus: string,
   row: WorkbenchRecord,
   zoneId: "paired" | "unpaired",
   searchQuery = "",
@@ -465,12 +463,9 @@ function renderBankMoneyValue(
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
-  const normalizedCategoryLabel = resolveBankCategoryDisplayLabel(
-    categoryLabel,
-    categoryResolutionStatus,
-  );
+  const normalizedCategoryLabel = resolveBankCategoryDisplayLabel(row);
   const shouldShowCategory = normalizedCategoryLabel !== "" && normalizedCategoryLabel !== "--" && normalizedCategoryLabel !== "—";
-  const pendingCategory = categoryResolutionStatus === "unmatched" || categoryResolutionStatus === "needs_confirmation";
+  const pendingCategory = row.categoryResolutionStatus === "unmatched" || row.categoryResolutionStatus === "needs_confirmation";
 
   return (
     <span className="money-cell-stack">
@@ -512,14 +507,24 @@ function renderBankMoneyValue(
   );
 }
 
-function resolveBankCategoryDisplayLabel(categoryLabel: string, resolutionStatus: string) {
-  if (resolutionStatus === "needs_confirmation") {
+function resolveBankCategoryDisplayLabel(row: WorkbenchRecord) {
+  if (row.categoryResolutionStatus === "needs_confirmation") {
     return "待确认";
   }
-  if (resolutionStatus === "unmatched") {
+  if (row.categoryResolutionStatus === "unmatched") {
     return "待分类";
   }
-  return categoryLabel.trim();
+  const categoryPath = (row.categoryLabelPath ?? []).map((label) => label.trim()).filter(Boolean);
+  if (categoryPath.length > 0) {
+    return categoryPath.join(" / ");
+  }
+  const primaryAndSubCategory = [row.categoryPrimaryLabel, row.categorySubLabel]
+    .map((label) => (label ?? "").trim())
+    .filter(Boolean);
+  if (primaryAndSubCategory.length > 0) {
+    return primaryAndSubCategory.join(" / ");
+  }
+  return (row.categoryLabel ?? "").trim();
 }
 
 function renderOaMoneyValue(

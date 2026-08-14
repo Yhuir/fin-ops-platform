@@ -110,12 +110,6 @@ type ApiWorkbenchRow = {
   application_time?: string | null;
   application_date?: string | null;
   apply_date?: string | null;
-  submitted_at?: string | null;
-  completed_at?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  modified_time?: string | null;
-  modifiedTime?: string | null;
   date?: string | null;
   project_name?: string | null;
   project_name_display?: string | null;
@@ -907,7 +901,7 @@ function toWorkbenchDateTimeDisplayValue(value: unknown, fallback = "--") {
   }
   const normalizedValue = displayValue.trim();
   const isoDateTimeMatch = normalizedValue.match(
-    /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/,
+    /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/,
   );
   if (isoDateTimeMatch) {
     return `${isoDateTimeMatch[1]} ${isoDateTimeMatch[2]}`;
@@ -1186,16 +1180,6 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
           detailFields["申请日期"],
           summaryFields["申请日期"],
           row.date,
-          row.completed_at,
-          detailFields["审批完成时间"],
-          summaryFields["审批完成时间"],
-          row.submitted_at,
-          row.modified_time,
-          row.modifiedTime,
-          row.created_at,
-          row.updated_at,
-          detailFields["创建时间"],
-          summaryFields["创建时间"],
         ),
       ),
       projectName: toDisplayValue(row.project_name_display ?? row.project_name),

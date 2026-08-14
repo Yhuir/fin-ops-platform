@@ -41,7 +41,7 @@ ReconciliationWorkbenchPage
 
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
-| canonical OA | OA canonical repositories | 同一 tenant 下合并 completed OA 与 in-progress admission；输出稳定 typed identity 和 `workflow_status=completed|in_progress`。同一 OA 同时命中两源时 fail closed。费用子项仅用于展示和金额比较，不成为 relation member。 |
+| canonical OA | OA canonical repositories | 同一 tenant 下合并 completed OA 与 in-progress admission；输出稳定 typed identity、权威申请时间和 `workflow_status=completed|in_progress`。in-progress admission 的申请时间只从 source snapshot 的 `detail_fields.申请时间/申请日期`（兼容同义顶层字段）读取，并同时作为 OA 搜索、筛选和排序日期；不得回退到审批完成、创建、修改或更新时间。同一 OA 同时命中两源时 fail closed。费用子项仅用于展示和金额比较，不成为 relation member。 |
 | canonical bank | bank canonical repositories | 使用稳定 typed identity、权威金额/方向/账号/交易日期和既有有效分类结果；页面查询不重新实现分类规则。 |
 | canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment link、已提交 ETC business batch/link；ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
@@ -104,7 +104,7 @@ requested tenant/scope
 
 ## 输出 I/O
 
-- Workbench bank row DTO 对当前可见页银行流水输出 canonical `category_code`、`category_label`、path/source 字段与必有的 `category_resolution_status`；未命中分类时状态为 `unmatched`。分类投影只对分页后可见 bank typed IDs 在同一只读 snapshot 内批量执行一次，不读取 Bank Details 页面 payload、不复制分类规则、不逐行查询。
+- Workbench bank row DTO 对当前可见页银行流水输出 canonical `category_code`、`category_label`、`category_label_path`、path/source 字段与必有的 `category_resolution_status`；前端分类 chip 优先以 `category_label_path` 按 `主标签 / 子标签`（含更深层级时显示完整路径）展示，只有完整路径缺失时才回退 primary/sub 或 leaf label；未命中分类时状态为 `unmatched` 并显示“待分类”。分类投影只对分页后可见 bank typed IDs 在同一只读 snapshot 内批量执行一次，不读取 Bank Details 页面 payload、不复制分类规则、不逐行查询。
 
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
@@ -135,6 +135,7 @@ requested tenant/scope
 - pagination/filter options/detail：每个 owner single-flight 或 latest-wins，有界 payload。
 - mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
+- OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
 - 页面 rows 不写入 session storage/长期 cache。长列表继续分页；DOM virtualization 属于独立前端性能任务，不用 read-model 迁移夹带新框架。
 
 ## 共享边界与跨页面隔离

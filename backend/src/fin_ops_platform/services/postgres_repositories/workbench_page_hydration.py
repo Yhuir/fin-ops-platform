@@ -26,6 +26,26 @@ WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 8
 WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 2
 
 
+def pending_oa_application_time_sql(alias: str) -> str:
+    """Return the canonical pending-OA application time SQL expression."""
+
+    return f"""coalesce(
+        nullif(btrim({alias}.source_payload#>>'{{detail_fields,申请时间}}'), ''),
+        nullif(btrim({alias}.source_payload#>>'{{detail_fields,申请日期}}'), ''),
+        nullif(btrim({alias}.source_payload->>'application_time'), ''),
+        nullif(btrim({alias}.source_payload->>'application_date'), '')
+    )"""
+
+
+def pending_oa_application_date_sql(alias: str) -> str:
+    application_time = pending_oa_application_time_sql(alias)
+    return f"""case
+        when ({application_time}) ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}'
+        then substring(({application_time}) from 1 for 10)::date
+        else null::date
+    end"""
+
+
 class _BudgetedReadConnection:
     def __init__(self, connection: Any, *, maximum_statements: int) -> None:
         self._connection = connection
@@ -438,12 +458,9 @@ class PostgresWorkbenchPageHydrationRepository:
                             admission.source_payload->>'applicant',
                             admission.applicant
                         ),
-                        'apply_time', coalesce(
-                            admission.source_payload->>'application_time',
-                            admission.source_payload->>'application_date'
-                        ),
-                        'application_date', admission.source_payload->>'application_date',
-                        'date', admission.source_payload->>'application_date',
+                        'apply_time', __PENDING_OA_APPLICATION_TIME_SQL__,
+                        'application_date', __PENDING_OA_APPLICATION_DATE_SQL__::text,
+                        'date', __PENDING_OA_APPLICATION_DATE_SQL__::text,
                         'project_name', coalesce(
                             admission.project_name_display,
                             admission.project_name
@@ -1034,7 +1051,15 @@ class PostgresWorkbenchPageHydrationRepository:
             union all select * from etc_summary_rows
             union all select * from bank_settings_row
             order by record_kind, case_id, row_type, row_id
-            """,
+            """
+            .replace(
+                "__PENDING_OA_APPLICATION_TIME_SQL__",
+                pending_oa_application_time_sql("admission"),
+            )
+            .replace(
+                "__PENDING_OA_APPLICATION_DATE_SQL__",
+                pending_oa_application_date_sql("admission"),
+            ),
             (
                 member_types,
                 member_ids,

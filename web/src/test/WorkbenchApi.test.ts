@@ -893,6 +893,7 @@ describe("workbench api bank amount mapping", () => {
                   id: "oa-paired",
                   type: "oa",
                   applicant: "张三",
+                  apply_time: "2026-08-12 16:11:07+08",
                   amount: "100.00",
                   expense_items: [
                     {
@@ -921,8 +922,10 @@ describe("workbench api bank amount mapping", () => {
                 {
                   id: "bank-paired",
                   type: "bank",
+                  trade_time: "2026-08-12 16:11:07+08",
                   debit_amount: "100.00",
-                  category_label: "手续费",
+                  category_label: "设备采购",
+                  category_label_path: ["货款", "设备采购"],
                   category_resolution_status: "manual_confirmed",
                   invoice_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
@@ -962,6 +965,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa[0]).toMatchObject({
       actionVariant: "detail-only",
       availableActions: ["detail"],
+      tableValues: { applicationTime: "2026-08-12 16:11:07" },
     });
     expect(group.rows.oa[0].expenseItems).toEqual([
       {
@@ -985,8 +989,10 @@ describe("workbench api bank amount mapping", () => {
       },
     ]);
     expect(group.rows.bank[0]).toMatchObject({
-      categoryLabel: "手续费",
+      categoryLabel: "设备采购",
+      categoryLabelPath: ["货款", "设备采购"],
       categoryResolutionStatus: "manual_confirmed",
+      tableValues: { transactionTime: "2026-08-12 16:11:07" },
     });
     expect(group.rows.invoice[0].sourceOaId).toBe("oa-paired");
     expect(group.rows.invoice[0].sourceExpenseItemId).toBe("oa-paired:item:1");

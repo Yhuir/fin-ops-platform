@@ -388,6 +388,46 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(page["total"], 1)
         self.assertEqual(page["groups"][0]["detail_key"], "CASE-DIRECT-1")
 
+    def test_pending_oa_uses_nested_application_date_for_display_and_search(self) -> None:
+        self.raw_connection.execute(
+            """
+            insert into app.oa_pending_payment_admissions(
+                tenant_id, scope_key, oa_id, workflow_status, applicant,
+                project_name, project_name_display, amount, source_signature,
+                source_payload, raw_payload
+            ) values (
+                'default', '2026-07', 'oa-pending-with-time', 'in_progress', '胡琦',
+                '大理卷烟厂余热综合利用项目', '大理卷烟厂余热综合利用项目', 175,
+                'signature:oa-pending-with-time',
+                '{"detail_fields":{"申请日期":"2026-07-17 09:08:07"},"apply_type":"日常报销"}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+
+        initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        pending_row = next(
+            row
+            for group in initial["unpaired"]["groups"]
+            for row in list(group.get("oa_rows") or [])
+            if row.get("id") == "oa-pending-with-time"
+        )
+        self.assertEqual(pending_row["apply_time"], "2026-07-17 09:08:07")
+        self.assertEqual(pending_row["application_date"], "2026-07-17")
+
+        searched = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="2026-07-17",
+        )
+        self.assertTrue(
+            any(
+                row.get("id") == "oa-pending-with-time"
+                for group in searched["groups"]
+                for row in list(group.get("oa_rows") or [])
+            )
+        )
+
     def test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded(self) -> None:
         self.connection.statements.clear()
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")

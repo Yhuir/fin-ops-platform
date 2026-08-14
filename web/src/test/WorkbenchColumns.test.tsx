@@ -194,7 +194,7 @@ describe("Workbench columns and inline actions", () => {
     expect(headerNames.slice(0, 5)).toEqual(["项目名称", "申请人", "对方户名", "金额", "申请事由"]);
   });
 
-  test("renders OA applicant column with an approval time tag on the second line", async () => {
+  test("renders OA applicant column with an application time tag on the second line", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -253,6 +253,43 @@ describe("Workbench columns and inline actions", () => {
     expect(dateChip?.closest(".compound-cell-secondary")).not.toBeNull();
     expect(screen.getByText("14:04:00").closest(".inline-meta-tag")).toBe(dateChip);
     expect(screen.getByLabelText("OA流程状态：进行中")).toBeInTheDocument();
+  });
+
+  test("shows an explicit missing-time chip when an OA has no authoritative application time", () => {
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columns={[{ key: "applicant", label: "申请人", track: "minmax(112px, 112fr)", minWidth: 112 }]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="oa"
+        row={{
+          id: "oa-applicant-missing-time-1",
+          recordType: "oa",
+          label: "支付申请",
+          status: "待处理",
+          statusCode: "pending",
+          statusTone: "warn",
+          exceptionHandled: false,
+          amount: "900.00",
+          counterparty: "云南省建筑技工学校",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            applicant: "樊祖芳",
+            applicationTime: "--",
+            workflowStatus: "in_progress",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="unpaired"
+      />,
+    );
+
+    expect(screen.getByText("时间缺失").closest(".inline-meta-tag")).toHaveClass("inline-meta-tag-muted");
   });
 
   test("moves the OA type to the applicant cell and keeps the project cell free of workflow chips", async () => {
@@ -600,7 +637,8 @@ describe("Workbench columns and inline actions", () => {
           actionVariant: "detail-only",
           availableActions: ["detail"],
           detailFields: [],
-          categoryLabel: "公司暂借款：待还款",
+          categoryLabel: "待还款",
+          categoryLabelPath: ["借入", "公司往来款", "待还款"],
           categoryResolutionStatus: "manual_confirmed",
           categoryPath: ["借入", "公司往来款", "待还款"],
           tableValues: {
@@ -620,7 +658,7 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    const categoryTag = screen.getByText("公司暂借款：待还款");
+    const categoryTag = screen.getByText("借入 / 公司往来款 / 待还款");
     const accountTag = screen.getByText("8106").closest(".bank-account-tag");
     const categoryRow = categoryTag.closest(".money-cell-category-row");
     const metadataRow = accountTag?.closest(".money-cell-meta-row");
@@ -628,7 +666,7 @@ describe("Workbench columns and inline actions", () => {
     expect(categoryTag.closest('[data-slot="chip"]')).toHaveClass("workbench-bank-category-chip");
     expect(categoryTag.closest('[data-slot="chip"]')).toHaveAttribute(
       "aria-label",
-      "流水分类：公司暂借款：待还款",
+      "流水分类：借入 / 公司往来款 / 待还款",
     );
     expect(categoryRow).not.toBeNull();
     expect(metadataRow).not.toBeNull();

@@ -50,6 +50,12 @@
 
 - Frontend component：`WorkbenchZone.test.tsx` 保护银行“全部 + 年月”位于区域标题栏、栏显示菜单只包含 OA/银行流水/进销项发票且最后一栏不可隐藏；`WorkbenchSelection.test.tsx` 保护 paired/unpaired 时间筛选独立、筛选仍映射既有银行时间 I/O、两区始终同时可见且无布局/放大入口。
 - `WorkbenchZone.test.tsx` 同时保护 OA、银行流水、进销项发票三栏长文本完整直显、不创建行单元格 hover 浮层，且直接点击文本仍只触发一次行选择；列筛选候选仍由 HeroUI 菜单惰性读取并允许长标签换行。
+
+## 2026-08-14 OA 申请时间与银行完整分类路径
+
+- PostgreSQL integration：`test_workbench_query_postgres_integration.py` 使用真实 migration 后临时库，保护 in-progress OA 从 source snapshot 的嵌套 `detail_fields.申请日期` 输出 `apply_time/application_date`，并能按真实申请日期搜索；不得回退 scope 月首日。
+- Frontend API/component：`WorkbenchApi.test.ts` 保护 PostgreSQL `timestamptz::text` 的 `+08` 后缀被格式化为稳定本地展示文本且完整 `category_label_path` 保真；`WorkbenchColumns.test.tsx` 保护每个 OA 父记录有时间或“时间缺失”chip、银行分类显示完整 `主标签 / 子标签` 路径，并保留待分类/待确认状态优先级。
+- Regression/performance：实现复用 direct canonical 批量查询和既有 DTO，无新增 HTTP、SQL statement、逐行 I/O、React state/effect、Popover、read model、cache 或 worker；日常报销子付款项仍不重复父 OA 时间。
 - Layout / regression：`RelationGroupGrid.test.tsx`、`WorkbenchColumnLayout.test.tsx` 与 `App.test.tsx` 保护单一紧凑列合同、无经典 action column/focus body class；详情、预览、异常抽屉继续复用同一固定布局。没有后端、API response、read model、worker、权限或持久化合同变化。
 
 ## 2026-08-06 进行中 OA workflow gate v21
