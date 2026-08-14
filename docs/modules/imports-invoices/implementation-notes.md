@@ -290,3 +290,4 @@
 - 生产验证发现人工发票预览约 96ms，但复用的 PostgreSQL discard 在写入成功后无条件全量重载导入运行态，返回编辑约 2.9s。
 - 修复后 PostgreSQL 仍是唯一 durable 事实源；同一 API 进程直接把已验证 owner 的本地 session 与 preview batch 同步为 `reverted`，仅当请求落到不持有该 preview 的其它进程或本地状态不一致时才执行原有快照恢复。
 - 不新增 API、表、read model、worker 或并行写链；测试锁定同进程常规路径不得调用全量运行态重载。
+- 人工录入的 import file 是逻辑会话记录，不伪造不存在的 JPG/PDF/Excel 对象。页面 Audit 仅对精确 `manual_invoice_entry` 模板免除物理对象、URI、哈希和字节数证明；file/session/batch/row/canonical/source-link/job 的其余合同继续完整校验，普通文件导入仍必须具备对象与哈希。

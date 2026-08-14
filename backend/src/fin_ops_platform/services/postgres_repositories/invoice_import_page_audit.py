@@ -262,7 +262,8 @@ def _file_issues(
         batch_type = _text(payload.get("batch_type") or payload.get("override_batch_type"))
         if batch_type not in INVOICE_BATCH_TYPES:
             issues.append(_issue("invoice_import_file_batch_type_invalid", file_id, {"batch_type": batch_type}))
-        if _text(row.get("status")) != "deleted":
+        is_logical_manual_entry = _text(row.get("template_kind")) == "manual_invoice_entry"
+        if _text(row.get("status")) != "deleted" and not is_logical_manual_entry:
             if not _text(row.get("file_object_id")):
                 issues.append(_issue("invoice_import_file_object_missing", file_id, None))
             if not _text(row.get("storage_uri")) or not _text(row.get("sha256")) or row.get("size_bytes") is None:

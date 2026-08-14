@@ -255,6 +255,43 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    def test_logical_manual_entry_does_not_fabricate_a_physical_file_object(self) -> None:
+        connection = FakeConnection()
+        file_row = connection.files[0]
+        file_payload = file_row["raw_payload"]["normalized_payload"]
+        file_row.update(
+            {
+                "file_object_id": None,
+                "stored_file_path": "",
+                "original_filename": "发票录入",
+                "template_kind": "manual_invoice_entry",
+                "status": "reverted",
+                "storage_uri": None,
+                "sha256": None,
+                "size_bytes": None,
+            }
+        )
+        file_payload.update(
+            {
+                "file_name": "发票录入",
+                "stored_file_path": "",
+                "template_code": "manual_invoice_entry",
+                "status": "reverted",
+            }
+        )
+        connection.batches[0]["status"] = "reverted"
+        connection.batches[0]["raw_payload"]["normalized_payload"]["status"] = "reverted"
+
+        issues = invoice_import_page_audit._file_issues(
+            connection.files,
+            connection.files,
+            connection.batches,
+        )
+        issue_codes = {issue.code for issue in issues}
+
+        self.assertNotIn("invoice_import_file_object_missing", issue_codes)
+        self.assertNotIn("invoice_import_file_hash_registration_incomplete", issue_codes)
+
     def test_distinct_line_components_are_compared_as_one_invoice_total(self) -> None:
         connection = FakeConnection()
         first = connection.rows[0]
