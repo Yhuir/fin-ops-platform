@@ -377,7 +377,10 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                 "path": "/api/turnover-ledger/closures/confirm",
                 "json": {
                     "bank_row_ids": fixture_row_ids,
-                    "expected_versions": {f"turnover_bank_row:{row_id}": 1 for row_id in fixture_row_ids},
+                    "expected_versions": {
+                        f"turnover_bank_row_selection:{row_id}": f"selection-{row_id}"
+                        for row_id in fixture_row_ids
+                    },
                     "idempotency_key": f"{key_prefix}-confirm",
                 },
                 "captures": {"cash_closure_case_id": "/workbench_pair_relation/case_id"},

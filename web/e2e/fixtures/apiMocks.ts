@@ -6591,6 +6591,7 @@ function turnoverFlowRow(
     category_third_label: "",
     category_label_path: isIncome ? ["外部往来款收款", "收回借款"] : ["外部往来款付款", "归还借款"],
     category_version: categoryVersion,
+    selection_version: `selection-${rowId}-${categoryVersion}`,
     counterparty_bank_name: "建设银行",
     bank_account_labels: ["建行 8106"],
     summary_text: isIncome ? "浏览器 e2e 收回借款" : "浏览器 e2e 归还借款",
@@ -6698,8 +6699,8 @@ function delay(ms: number) {
 function turnoverClosureExpectedVersions() {
   return Object.fromEntries(
     Object.entries(turnoverBankRowVersions).map(([rowId, version]) => [
-      `turnover_bank_row:${rowId}`,
-      version,
+      `turnover_bank_row_selection:${rowId}`,
+      `selection-${rowId}-${version}`,
     ]),
   );
 }

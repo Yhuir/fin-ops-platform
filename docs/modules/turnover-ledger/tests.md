@@ -1,6 +1,6 @@
 # 外部往来款管理测试矩阵
 
-日期：2026-08-02
+日期：2026-08-14
 
 ## 影响面
 
@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Direct read | `TurnoverLedgerQueryService` | 单 snapshot、canonical-only、无旧 projection/queue/status |
 | Business composition | `TurnoverLedgerService` / relation context | 标签准入、分组、金额、闭环两侧一致、relation case |
-| Writes | facade/UoW/adapters/Workbench command | OCC、幂等、rollback、确认/撤回、零页面 fan-out |
+| Writes | facade/UoW/adapters/Workbench command | exact canonical selection OCC、幂等、rollback、确认/撤回、零页面 fan-out |
 | API | `TurnoverLedgerApiRoutes` | 权限、DTO、错误、筛选、分页、导出、无 freshness metadata |
 | Frontend | `TurnoverLedgerPage.tsx` | loading/empty/error/retry、50 条服务端分页、`total > 100` 全页可达、family/page 请求身份、越界末页回退、extra editor request identity、关闭/停用失效、保存 relation identity/OCC、即时按钮反馈、当前页一次 reload、成功后 reload 失败语义 |
 | Audit/runtime | page audit / registries | canonical invariants、无 Turnover worker/read model/event |
@@ -19,11 +19,11 @@
 | 类别 | 适用性 | 证据 |
 | --- | --- | --- |
 | 1. Business core unit | 适用 | `tests/test_turnover_ledger_service.py`、`tests/test_turnover_relation_service.py`、`tests/test_turnover_ledger_extra_service.py` |
-| 2. Service layer | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py` |
+| 2. Service layer | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py`；覆盖单次精确 canonical provider、同事务复用、旧双读 proof 删除和 rollback |
 | 3. API contract | 适用 | `tests/test_turnover_ledger_api.py` |
 | 4. Read model/cache/job | 适用但结论为删除 | PostgreSQL integration 证明退休 projection 不可见；manifest/worker/registry tests 证明 Turnover 不再登记 |
 | 5. Frontend interaction | 适用 | `web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
-| 6. E2E business flow | 适用 | `web/e2e/turnover-ledger-flow.spec.ts` 的 121 组分页链路 + Workbench integration + 部署后 test-owned fixture confirm/refresh/withdraw |
+| 6. E2E business flow | 适用 | `tests/test_turnover_ledger_postgres_integration.py` 保护 direct GET mapper → selection token → 同事务精确 POST precondition；`web/e2e/turnover-ledger-flow.spec.ts` 的 121 组分页链路 + Workbench integration + 部署后 test-owned fixture confirm/refresh/withdraw |
 | 7. Existing regression | 适用 | Audit、runtime registry、read-model manifest、platform boundary guards、关联台 relation tests |
 
 ## 关键回归
@@ -35,6 +35,9 @@
 - 不同 active case 的正负余额不互相抵消；无 active relation 的零余额组不显示闭环；mode/source 不单独构成闭环证据。
 - summary、family summary 和 group 的 `closed_amount` 固定为 `0.00`。
 - confirm/withdraw 的 canonical write 语义不因 read 链切换而改变。
+- grouped GET 与 closure POST 必须复用相同的 canonical 分类和 Turnover 行映射；银行事实时间戳、有效分类、规则版本或 role/action/family 任一变化都使旧 `selection_version` 冲突。不得重新接入 ImportService 全量 DTO、独立 source proof 或 category-only fallback。
+- 精确选择读取按本次 row IDs 单次批量查询，不得逐行 SQL 或加载全部银行流水；同一 UoW 的 stale check、月份解析和 preview 复用同一不可变选择快照。
+- 生产可逆 write-operation runner 的 Turnover scenario 只接受 `turnover_bank_row_selection:<id>`，防止部署验证工具把退休 token 重新带回正式链路。
 - 当前页写成功只 GET 一次；另一个页面/tab 不自动 I/O。
 - 列表固定请求 `page_size=50`；121 组 fixture 必须依次请求 `page=1/2/3`，第 51、101、121 组可见且旧页行被替换。
 - GET 失败可由普通刷新恢复；写成功后的 reload 失败不伪装写失败。

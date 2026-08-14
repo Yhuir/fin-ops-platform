@@ -13,6 +13,10 @@ from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.turnover_ledger_query_service import (
     TurnoverLedgerQueryService,
+    canonical_turnover_bank_rows_by_ids,
+)
+from fin_ops_platform.services.turnover_ledger_write_adapters import (
+    TurnoverLedgerBankRowSelectionPort,
 )
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -205,6 +209,32 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
                 "turnover-income-140000": True,
                 "turnover-expense-140000": True,
             },
+        )
+        selection_versions = {
+            str(flow["source_bank_row_id"]): str(flow.get("selection_version") or "")
+            for flow in group["flow_rows"]
+        }
+        self.assertTrue(all(selection_versions.values()))
+
+        selection_port = TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=lambda ids, *, transaction: (
+                canonical_turnover_bank_rows_by_ids(transaction, ids)
+            )
+        )
+        with self.connection.transaction() as transaction:
+            selection_port.assert_current(
+                expected_versions={
+                    f"turnover_bank_row_selection:{row_id}": version
+                    for row_id, version in selection_versions.items()
+                },
+                transaction=transaction,
+            )
+        self.assertEqual(
+            {
+                str(row.get("id") or "")
+                for row in selection_port.rows_by_ids(row_ids)
+            },
+            set(row_ids),
         )
 
 

@@ -1,6 +1,6 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-08-07
+日期：2026-08-14
 
 ## 模块化状态
 
@@ -64,6 +64,7 @@
 - 事务必须显式执行 `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`。
 - transactions 固定使用 settings/read query、set-based rows/summary/facets query 和一次 bounded active relation overlap query；不得逐行查 relation/category。
 - 外部往来款可在自己的同一只读快照内复用 repository 的 set-based effective-category rows helper；该 helper 只返回指定 tag codes 的 canonical rows，不返回 Bank Details 页面 DTO、relation 标签或 freshness 状态。
+- 外部往来闭环写前可在自己的 UoW 事务内调用 `turnover_bank_row_selection_rows(...)`，按本次 legacy/source IDs 一次返回 canonical 银行事实与有效分类。该 helper 只拥有分类 SQL I/O；Turnover 负责标签准入、selection version、金额校验和 relation 命令，不得回读 Bank Details 页面 DTO。
 - 流水规则批量处理的 canonical repository 可复用公开的 `bank_category_classification_cte(...)` SQL compiler，在自己的只读 snapshot 内取得完整 effective category；调用方仍拥有自己的批次、关系、筛选和分页 I/O，不读取银行明细页面 payload。
 - 批量账务可对精确业务流水 IDs 复用 `effective_category_projection_rows(...)`，取得 current effective code/label/source；筛选、分页、Settings 选择和提交资格仍由批量账务 owner 负责。
 - 关联台 direct page hydration 可对本页目标银行 identity 一次批量复用同一 canonical classifier，取得 effective category 与 resolution status；该调用由关联台 query owner 在同一只读请求内负责，银行明细写链不恢复跨页面 fan-out。

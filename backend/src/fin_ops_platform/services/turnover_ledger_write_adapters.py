@@ -8,7 +8,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.turnover_bank_row_version import (
     turnover_bank_row_selection_version,
-    turnover_bank_row_version,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -471,8 +470,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
         rules_payload_provider: Callable[[], dict[str, object]],
-        bank_row_source_proofs_provider: Callable[..., dict[str, dict[str, object]]] | None = None,
-        current_rule_version_provider: Callable[[], str] | None = None,
         pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
@@ -488,8 +485,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
         self._rules_payload_provider = rules_payload_provider
-        self._bank_row_source_proofs_provider = bank_row_source_proofs_provider
-        self._current_rule_version_provider = current_rule_version_provider
         self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
@@ -498,16 +493,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         bank_row_selection_port = TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
-            bank_row_source_proofs_provider=(
-                self._bank_row_source_proofs_provider
-                if storage_backend == "postgres"
-                else None
-            ),
-            current_rule_version_provider=(
-                self._current_rule_version_provider
-                if storage_backend == "postgres"
-                else None
-            ),
         )
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
@@ -951,16 +936,14 @@ class TurnoverLedgerBankRowSelectionPort:
         self,
         *,
         bank_rows_by_ids_provider: Callable[..., list[dict[str, object]]],
-        bank_row_source_proofs_provider: Callable[..., dict[str, dict[str, object]]] | None = None,
-        current_rule_version_provider: Callable[[], str] | None = None,
     ) -> None:
         self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
-        self._bank_row_source_proofs_provider = bank_row_source_proofs_provider
-        self._current_rule_version_provider = current_rule_version_provider
         self._transaction: object | None = None
         self._rows_by_selection: dict[tuple[str, ...], tuple[dict[str, object], ...]] = {}
 
     def bind_transaction(self, transaction: object) -> None:
+        if transaction is not self._transaction:
+            self._rows_by_selection.clear()
         self._transaction = transaction
 
     def rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
@@ -974,27 +957,14 @@ class TurnoverLedgerBankRowSelectionPort:
             return []
         cached_rows = self._rows_by_selection.get(selection_key)
         if cached_rows is None:
-            if self._bank_row_source_proofs_provider is None:
-                loaded_rows = self._bank_rows_by_ids_provider(normalized_row_ids)
-            else:
-                if self._transaction is None:
-                    raise TurnoverLedgerWritePreconditionError(
-                        error_code="turnover_bank_row_selection_unavailable",
-                        message="银行流水状态校验暂不可用，请稍后重试。",
-                        status_code=503,
-                    )
-                loaded_rows = self._bank_rows_by_ids_provider(
+            loaded_rows = (
+                self._bank_rows_by_ids_provider(normalized_row_ids)
+                if self._transaction is None
+                else self._bank_rows_by_ids_provider(
                     normalized_row_ids,
                     transaction=self._transaction,
                 )
-                loaded_rows = self._current_rows(
-                    normalized_row_ids,
-                    loaded_rows=loaded_rows,
-                    source_proofs=self._bank_row_source_proofs_provider(
-                        normalized_row_ids,
-                        transaction=self._transaction,
-                    ),
-                )
+            )
             cached_rows = tuple(
                 deepcopy(row)
                 for row in list(loaded_rows or [])
@@ -1005,19 +975,19 @@ class TurnoverLedgerBankRowSelectionPort:
 
     def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
         self.bind_transaction(transaction)
-        expected_by_transaction_id: dict[str, object] = {}
         expected_selection_versions: dict[str, object] = {}
         for raw_key, expected_value in dict(expected_versions or {}).items():
             key = str(raw_key)
             if key.startswith("turnover_bank_row:"):
-                transaction_id = key.removeprefix("turnover_bank_row:").strip()
-                if transaction_id:
-                    expected_by_transaction_id[transaction_id] = expected_value
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_bank_row_selection_version_required",
+                    message="银行流水版本格式已更新，请刷新后重试。",
+                )
             elif key.startswith("turnover_bank_row_selection:"):
                 transaction_id = key.removeprefix("turnover_bank_row_selection:").strip()
                 if transaction_id:
                     expected_selection_versions[transaction_id] = expected_value
-        selected_ids = list(dict.fromkeys([*expected_by_transaction_id, *expected_selection_versions]))
+        selected_ids = list(expected_selection_versions)
         if not selected_ids:
             return
         rows_by_transaction_id = {
@@ -1025,14 +995,6 @@ class TurnoverLedgerBankRowSelectionPort:
             for row in self.rows_by_ids(selected_ids)
             if str(row.get("id") or row.get("transaction_id") or "").strip()
         }
-        for transaction_id, expected_value in expected_by_transaction_id.items():
-            row = rows_by_transaction_id.get(transaction_id)
-            current_version = None if row is None else self._bank_row_version(row)
-            if str(current_version) != str(expected_value):
-                raise TurnoverLedgerWritePreconditionError(
-                    error_code="turnover_relation_conflict",
-                    message="银行流水状态已变化，请刷新后重试。",
-                )
         for transaction_id, expected_value in expected_selection_versions.items():
             row = rows_by_transaction_id.get(transaction_id)
             current_version = "" if row is None else turnover_bank_row_selection_version(row)
@@ -1041,91 +1003,6 @@ class TurnoverLedgerBankRowSelectionPort:
                     error_code="turnover_relation_conflict",
                     message="银行流水状态已变化，请刷新后重试。",
                 )
-
-    def _current_rows(
-        self,
-        transaction_ids: list[str],
-        *,
-        loaded_rows: list[dict[str, object]],
-        source_proofs: dict[str, dict[str, object]],
-    ) -> list[dict[str, object]]:
-        if not isinstance(source_proofs, dict):
-            raise TurnoverLedgerWritePreconditionError(
-                error_code="turnover_bank_row_selection_unavailable",
-                message="银行流水状态校验暂不可用，请稍后重试。",
-                status_code=503,
-            )
-        current_rule_version = ""
-        rows_by_id: dict[str, dict[str, object]] = {}
-        for raw_row in list(loaded_rows or []):
-            if not isinstance(raw_row, dict):
-                continue
-            row = dict(raw_row)
-            identities = {
-                str(row.get("id") or "").strip(),
-                str(row.get("transaction_id") or "").strip(),
-                str(row.get("source_bank_row_id") or "").strip(),
-            }
-            proof = next(
-                (
-                    source_proofs[identity]
-                    for identity in identities
-                    if identity and isinstance(source_proofs.get(identity), dict)
-                ),
-                None,
-            )
-            if proof is None:
-                continue
-            if str(row.get("bank_transaction_updated_at") or "").strip() != str(
-                proof.get("bank_transaction_updated_at") or ""
-            ).strip():
-                continue
-            if str(turnover_bank_row_version(row) or 0) != str(proof.get("category_version") or 0):
-                continue
-            canonical_category_code = str(proof.get("category_code") or "").strip()
-            effective_category_code = str(
-                row.get("effective_category_code") or row.get("category_code") or ""
-            ).strip()
-            if canonical_category_code and canonical_category_code != effective_category_code:
-                continue
-            effective_source = str(
-                row.get("effective_category_source") or row.get("category_source") or ""
-            ).strip()
-            if effective_source not in {"manual", "manual_confirmation", "auto_confirmation", "turnover_ledger"}:
-                if not current_rule_version and self._current_rule_version_provider is not None:
-                    current_rule_version = str(self._current_rule_version_provider() or "").strip()
-                if not current_rule_version:
-                    raise TurnoverLedgerWritePreconditionError(
-                        error_code="turnover_bank_row_selection_unavailable",
-                        message="银行流水配对规则状态暂不可用，请稍后重试。",
-                        status_code=503,
-                    )
-                if str(row.get("category_rule_version") or "").strip() != current_rule_version:
-                    continue
-            selection_version = turnover_bank_row_selection_version(row)
-            if not selection_version:
-                continue
-            row["selection_version"] = selection_version
-            for identity in identities:
-                if identity:
-                    rows_by_id.setdefault(identity, row)
-        missing_ids = [
-            transaction_id
-            for transaction_id in transaction_ids
-            if transaction_id not in rows_by_id
-        ]
-        if missing_ids:
-            raise TurnoverLedgerWritePreconditionError(
-                error_code="turnover_relation_conflict",
-                message="银行流水状态已变化，请刷新后重试。",
-                payload={"bank_row_ids": missing_ids},
-            )
-        return [rows_by_id[transaction_id] for transaction_id in transaction_ids]
-
-    @staticmethod
-    def _bank_row_version(row: dict[str, object]) -> object:
-        return turnover_bank_row_version(row)
-
 
 class TurnoverLedgerRelationExtraStalePreconditionPort:
     def __init__(self, *, current_extra_reader: Callable[[str], dict[str, object]]) -> None:

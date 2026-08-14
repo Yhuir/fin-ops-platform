@@ -68,7 +68,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         date_to: str | None,
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
-            settings = self._settings_payload(transaction)
+            settings = self.settings_payload(transaction)
             rows = transaction.fetch_all(BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL)
             counts = self._account_transaction_counts(
                 transaction,
@@ -95,7 +95,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         normalized_page_size = min(max(int(page_size or 100), 1), MAX_PAGE_SIZE)
         with self._snapshot_transaction() as transaction:
             transaction.execute("set local jit = off")
-            settings = self._settings_payload(transaction)
+            settings = self.settings_payload(transaction)
             snapshot = self._load_transaction_page(
                 transaction,
                 settings=settings,
@@ -267,6 +267,47 @@ class PostgresBankDetailsCanonicalQueryRepository:
             if str(row.get("row_id") or "").strip()
         }
 
+    @staticmethod
+    def turnover_bank_row_selection_rows(
+        transaction: Any,
+        *,
+        settings: dict[str, Any],
+        transaction_ids: list[str],
+        tenant_id: str = "default",
+    ) -> list[dict[str, Any]]:
+        """Return canonical category and bank facts for an exact turnover selection."""
+        normalized_ids = list(dict.fromkeys(text_list(transaction_ids)))
+        if not normalized_ids:
+            return []
+        tags = settings.get("bank_transaction_tags")
+        if not isinstance(tags, dict):
+            tags = default_bank_transaction_tag_dictionary_payload()
+        definitions = [
+            dict(item)
+            for item in list(tags.get("definitions") or [])
+            if isinstance(item, dict)
+        ]
+        cte_sql, cte_params = bank_category_classification_cte(
+            definitions=definitions,
+            date_from=None,
+            date_to=None,
+            candidate_transaction_ids=normalized_ids,
+            defer_full_payload=True,
+            tenant_id=tenant_id,
+        )
+        return list(
+            transaction.fetch_all(
+                f"""
+                with {cte_sql}
+                select *
+                from classified_with_semantics
+                where row_id = any(%s::text[])
+                order by row_id
+                """,
+                (*cte_params, normalized_ids),
+            )
+        )
+
     def export_snapshot(
         self,
         *,
@@ -281,7 +322,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         category_third_label: str | None,
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
-            settings = self._settings_payload(transaction)
+            settings = self.settings_payload(transaction)
             snapshot = self._load_transaction_page(
                 transaction,
                 settings=settings,
@@ -325,7 +366,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             yield transaction
 
     @staticmethod
-    def _settings_payload(transaction: Any) -> dict[str, Any]:
+    def settings_payload(transaction: Any) -> dict[str, Any]:
         row = transaction.fetch_one(
             """
             select settings_payload
@@ -1122,6 +1163,7 @@ def bank_category_classification_cte(
             bank.id::text as canonical_transaction_id,
             bank.source_batch_id::text as source_batch_id,
             bank.legacy_source_batch_id,
+            bank.updated_at::text as bank_transaction_updated_at,
             bank.account_no,
             bank.account_name,
             bank.txn_direction,

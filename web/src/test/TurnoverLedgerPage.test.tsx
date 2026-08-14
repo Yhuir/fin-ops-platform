@@ -543,7 +543,15 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       ],
     },
   ];
-  const groups = family === "all" ? allGroups : allGroups.filter((group) => group.family === family);
+  const groups = (family === "all" ? allGroups : allGroups.filter((group) => group.family === family))
+    .map((group) => ({
+      ...group,
+      flow_rows: (group.flow_rows ?? []).map((row) => ({
+        ...row,
+        selection_version: row.selection_version
+          ?? `selection:${String(row.source_bank_row_id ?? row.flow_id ?? "unknown")}:current`,
+      })),
+    }));
   return {
     summary: {
       pending_repayment_amount: "800.00",
@@ -1454,9 +1462,18 @@ describe("Turnover ledger page", () => {
     expect(requestUrls(fetchMock, "/api/operation-barrier/status")).toHaveLength(0);
   });
 
-  test("omits closure expected versions when refreshed flow rows do not expose bank row versions", async () => {
+  test("blocks closure confirm when a selected flow lacks the canonical selection version", async () => {
     const user = userEvent.setup();
-    const fetchMock = installTurnoverLedgerFetch();
+    const payloadWithoutVersions = cloneJson(groupedPayload("all"));
+    for (const group of payloadWithoutVersions.groups) {
+      group.flow_rows = (group.flow_rows ?? []).map((row: Record<string, unknown>) => {
+        const { selection_version: _selectionVersion, ...rest } = row;
+        return rest;
+      });
+    }
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [payloadWithoutVersions],
+    });
     renderTurnoverLedgerPage();
 
     const page = await screen.findByTestId("turnover-ledger-page");
@@ -1471,14 +1488,12 @@ describe("Turnover ledger page", () => {
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
     await user.click(within(drawer).getByRole("button", { name: "确定" }));
 
-    await waitFor(() => {
-      const request = fetchMock.mock.calls.find(([input, init]) => {
-        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
-      });
-      expect(request).toBeDefined();
-      expect(JSON.parse(String(request?.[1]?.body))).not.toHaveProperty("expected_versions");
+    expect(await screen.findByText("银行流水版本信息已更新，请刷新后重试")).toBeInTheDocument();
+    const request = fetchMock.mock.calls.find(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
     });
+    expect(request).toBeUndefined();
   });
 
   test("confirms a manual zero-difference turnover closure from three same-group flow rows", async () => {
@@ -1559,9 +1574,6 @@ describe("Turnover ledger page", () => {
       expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
         bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
         expected_versions: {
-          "turnover_bank_row:bank-jia-income-200000": 1,
-          "turnover_bank_row:bank-jia-income-100000": 2,
-          "turnover_bank_row:bank-jia-expense-300000": 3,
           "turnover_bank_row_selection:bank-jia-income-200000": "selection:bank-jia-income-200000:1",
           "turnover_bank_row_selection:bank-jia-income-100000": "selection:bank-jia-income-100000:2",
           "turnover_bank_row_selection:bank-jia-expense-300000": "selection:bank-jia-expense-300000:3",

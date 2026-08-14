@@ -8,6 +8,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.turnover_bank_row_version import (
+    turnover_bank_row_selection_version,
+)
 from tests.app_test_support import (
     build_grouped_workbench_projection,
     build_local_state_application as build_application,
@@ -100,8 +103,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         requires_oa: bool,
         requires_invoice: bool,
     ) -> None:
-        original_rows_by_ids = app._turnover_bank_transaction_rows_by_ids
-        app._turnover_bank_transaction_rows_by_ids = lambda row_ids: [  # type: ignore[method-assign]
+        original_rows_by_ids = app._turnover_bank_selection_rows_by_ids
+        app._turnover_bank_selection_rows_by_ids = lambda row_ids, **_kwargs: [  # type: ignore[method-assign]
             {**row, "effective_category_code": "external_turnover"}
             for row in original_rows_by_ids(row_ids)
         ]
@@ -239,6 +242,10 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 "category_version": 0,
                 "manual_category_version": 4,
                 "version": 1,
+                "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+                "turnover_role": "external_turnover",
+                "turnover_action_type": "pending_repayment",
+                "turnover_family": "personal",
                 "debit_amount": "",
                 "credit_amount": "200000.00",
                 "txn_date": "2026-02-04",
@@ -252,6 +259,10 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 "category_version": 0,
                 "manual_category_version": 5,
                 "version": 1,
+                "bank_transaction_updated_at": "2026-07-26 01:02:04+00",
+                "turnover_role": "external_turnover",
+                "turnover_action_type": "pending_repayment",
+                "turnover_family": "personal",
                 "debit_amount": "",
                 "credit_amount": "100000.00",
                 "txn_date": "2026-02-04",
@@ -265,6 +276,10 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 "category_version": 0,
                 "manual_category_version": 6,
                 "version": 1,
+                "bank_transaction_updated_at": "2026-07-26 01:02:05+00",
+                "turnover_role": "external_turnover",
+                "turnover_action_type": "repaid",
+                "turnover_family": "personal",
                 "debit_amount": "300000.00",
                 "credit_amount": "",
                 "txn_date": "2026-03-04",
@@ -274,7 +289,9 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         ]
         transaction_ids = [str(row["id"]) for row in rows]
         expected_versions = {
-            f"turnover_bank_row:{row['id']}": row["manual_category_version"]
+            f"turnover_bank_row_selection:{row['id']}": (
+                turnover_bank_row_selection_version(row)
+            )
             for row in rows
         }
         with self._temporary_app() as app:

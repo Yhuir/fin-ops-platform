@@ -1894,7 +1894,10 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             stale_precondition_port=stale_precondition,
         )
         facade = self._write_facade_class()(uow=uow)
-        expected_versions = {"turnover_bank_row:bank_txn_1": "v1", "turnover_bank_row:bank_txn_2": "v1"}
+        expected_versions = {
+            "turnover_bank_row_selection:bank_txn_1": "v1",
+            "turnover_bank_row_selection:bank_txn_2": "v1",
+        }
 
         with self.assertRaisesRegex(RuntimeError, "turnover_write_conflict"):
             facade.confirm_relation(
@@ -1915,69 +1918,55 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    def test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero(self) -> None:
+    def test_bank_row_selection_rejects_retired_category_only_version(self) -> None:
         module = self._write_adapters_module()
-        requested_ids: list[list[str]] = []
-
-        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
-            requested_ids.append(list(row_ids))
-            return [
-                {
-                    "id": "bank_txn_1",
-                    "category_version": 0,
-                    "manual_category_version": 9,
-                }
-            ]
-
         port = module.TurnoverLedgerBankRowSelectionPort(
-            bank_rows_by_ids_provider=load_rows
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: []
         )
 
-        port.assert_current(
-            expected_versions={"turnover_bank_row:bank_txn_1": 9},
-            transaction=object(),
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.assert_current(
+                expected_versions={"turnover_bank_row:bank_txn_1": 9},
+                transaction=object(),
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            "turnover_bank_row_selection_version_required",
         )
-        self.assertEqual(requested_ids, [["bank_txn_1"]])
-
-    def test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero(self) -> None:
-        module = self._write_adapters_module()
-        requested_ids: list[list[str]] = []
-
-        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
-            requested_ids.append(list(row_ids))
-            return [
-                {
-                    "id": "bank_txn_1",
-                    "category_version": 0,
-                    "manual_category_version": 0,
-                    "version": 5,
-                }
-            ]
-
-        port = module.TurnoverLedgerBankRowSelectionPort(
-            bank_rows_by_ids_provider=load_rows
-        )
-
-        port.assert_current(
-            expected_versions={"turnover_bank_row:bank_txn_1": 5},
-            transaction=object(),
-        )
-        self.assertEqual(requested_ids, [["bank_txn_1"]])
 
     def test_bank_row_selection_reuses_the_version_checked_rows_for_relation_preview(self) -> None:
         module = self._write_adapters_module()
         requested_ids: list[list[str]] = []
 
-        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
+        row = {
+            "id": "bank_txn_1",
+            "bank_transaction_updated_at": "2026-07-26 01:02:03+00",
+            "category_version": 5,
+            "category_rule_version": "rules-v1",
+            "effective_category_code": "borrow_out_personal_pending_collection",
+            "effective_turnover_role": "external_turnover",
+            "effective_turnover_action_type": "pending_collection",
+            "effective_turnover_family": "personal",
+        }
+
+        def load_rows(
+            row_ids: list[str], *, transaction: object
+        ) -> list[dict[str, object]]:
+            self.assertIsNotNone(transaction)
             requested_ids.append(list(row_ids))
-            return [{"id": "bank_txn_1", "category_version": 5}]
+            return [dict(row)]
 
         port = module.TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=load_rows
         )
 
         port.assert_current(
-            expected_versions={"turnover_bank_row:bank_txn_1": 5},
+            expected_versions={
+                "turnover_bank_row_selection:bank_txn_1": (
+                    module.turnover_bank_row_selection_version(row)
+                )
+            },
             transaction=object(),
         )
         rows = port.rows_by_ids(["bank_txn_1"])
@@ -2006,34 +1995,26 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             provider_calls.append({"source": "projection", "ids": list(row_ids), "transaction": transaction})
             return [dict(row)]
 
-        def load_proofs(row_ids: list[str], *, transaction: object) -> dict[str, dict[str, object]]:
-            provider_calls.append({"source": "facts", "ids": list(row_ids), "transaction": transaction})
-            return {
-                "bank_txn_1": {
-                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
-                    "category_code": row["effective_category_code"],
-                    "category_version": row["category_version"],
-                }
-            }
-
         port = module.TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=load_rows,
-            bank_row_source_proofs_provider=load_proofs,
-            current_rule_version_provider=lambda: "rules-v1",
         )
         selection_version = module.turnover_bank_row_selection_version(row)
 
         port.assert_current(
             expected_versions={
-                "turnover_bank_row:bank_txn_1": 7,
                 "turnover_bank_row_selection:bank_txn_1": selection_version,
             },
             transaction=transaction,
         )
 
-        self.assertEqual([call["source"] for call in provider_calls], ["projection", "facts"])
+        self.assertEqual([call["source"] for call in provider_calls], ["projection"])
         self.assertTrue(all(call["transaction"] is transaction for call in provider_calls))
-        self.assertEqual(port.rows_by_ids(["bank_txn_1"])[0]["selection_version"], selection_version)
+        self.assertEqual(
+            module.turnover_bank_row_selection_version(
+                port.rows_by_ids(["bank_txn_1"])[0]
+            ),
+            selection_version,
+        )
 
     def test_bank_row_selection_rejects_a_selected_fact_mismatch(self) -> None:
         module = self._write_adapters_module()
@@ -2048,21 +2029,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             "effective_turnover_action_type": "pending_collection",
             "effective_turnover_family": "personal",
         }
+        expected_version = module.turnover_bank_row_selection_version(row)
+        changed_row = {
+            **row,
+            "bank_transaction_updated_at": "2026-07-26 01:02:04+00",
+        }
         port = module.TurnoverLedgerBankRowSelectionPort(
-            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [dict(row)],
-            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {
-                "bank_txn_1": {
-                    **row,
-                    "bank_transaction_updated_at": "2026-07-26 01:02:04+00",
-                    "category_code": row["effective_category_code"],
-                }
-            },
-            current_rule_version_provider=lambda: "rules-v1",
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [changed_row],
         )
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.assert_current(
-                expected_versions={"turnover_bank_row:bank_txn_1": 7},
+                expected_versions={
+                    "turnover_bank_row_selection:bank_txn_1": expected_version,
+                },
                 transaction=object(),
             )
 
@@ -2082,39 +2062,38 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             "effective_turnover_action_type": "pending_collection",
             "effective_turnover_family": "personal",
         }
+        expected_version = module.turnover_bank_row_selection_version(row)
+        current_row = {**row, "category_rule_version": "rules-current"}
         port = module.TurnoverLedgerBankRowSelectionPort(
-            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [dict(row)],
-            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {
-                "bank_txn_1": {
-                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
-                    "category_code": "",
-                    "category_version": 0,
-                }
-            },
-            current_rule_version_provider=lambda: "rules-current",
+            bank_rows_by_ids_provider=lambda _ids, **_kwargs: [current_row],
         )
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.assert_current(
-                expected_versions={"turnover_bank_row:bank_txn_1": 0},
+                expected_versions={
+                    "turnover_bank_row_selection:bank_txn_1": expected_version,
+                },
                 transaction=object(),
             )
 
         self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
 
-    def test_bank_row_selection_requires_transactional_exact_proof_boundary(self) -> None:
+    def test_bank_row_selection_missing_exact_row_conflicts(self) -> None:
         module = self._write_adapters_module()
         port = module.TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=lambda _ids, **_kwargs: [],
-            bank_row_source_proofs_provider=lambda _ids, **_kwargs: {},
-            current_rule_version_provider=lambda: "rules-v1",
         )
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
-            port.rows_by_ids(["bank_txn_1"])
+            port.assert_current(
+                expected_versions={
+                    "turnover_bank_row_selection:bank_txn_1": "stale-version"
+                },
+                transaction=object(),
+            )
 
-        self.assertEqual(context.exception.error_code, "turnover_bank_row_selection_unavailable")
-        self.assertEqual(context.exception.status_code, 503)
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+        self.assertEqual(context.exception.status_code, 409)
 
     def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
@@ -2164,7 +2143,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             tenant_id="default",
             note="idempotent confirm",
             affected_months=["2026-02"],
-            expected_versions={"turnover_bank_row:bank_txn_1": 1},
+            expected_versions={"turnover_bank_row_selection:bank_txn_1": 1},
             idempotency_key="confirm-idem-1",
         )
 
@@ -2182,7 +2161,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             def run(self, command: object, handler: Callable[[object], object]) -> object:
                 self.commands.append(command)
                 assert getattr(command, "action_name") == "turnover_relation_zero_difference_closure"
-                assert getattr(command, "expected_versions") == {"turnover_bank_row:bank_txn_1": "v1"}
+                assert getattr(command, "expected_versions") == {
+                    "turnover_bank_row_selection:bank_txn_1": "v1"
+                }
                 assert getattr(command, "idempotency_key") == "closure-idem-1"
                 assert getattr(command, "request_fingerprint")
                 assert not hasattr(command, "refresh_requests")
@@ -2264,7 +2245,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             tenant_id="default",
             note="manual closure",
             affected_months=["2026-02"],
-            expected_versions={"turnover_bank_row:bank_txn_1": "v1"},
+            expected_versions={"turnover_bank_row_selection:bank_txn_1": "v1"},
             idempotency_key="closure-idem-1",
         )
 
@@ -2351,7 +2332,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             actor_id="finance-user",
             tenant_id="default",
             note="manual closure",
-            expected_versions={"turnover_bank_row:bank_txn_income": "v1"},
+            expected_versions={"turnover_bank_row_selection:bank_txn_income": "v1"},
             idempotency_key="closure-idem-1",
         )
 

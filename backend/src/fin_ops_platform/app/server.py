@@ -362,7 +362,10 @@ from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_ro
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
 )
-from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
+from fin_ops_platform.services.turnover_ledger_query_service import (
+    TurnoverLedgerQueryService,
+    canonical_turnover_bank_rows_by_ids,
+)
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
@@ -1400,7 +1403,7 @@ class Application:
             rows.append(row)
         return rows
 
-    def _turnover_bank_transaction_rows_by_ids(
+    def _turnover_bank_selection_rows_by_ids(
         self,
         transaction_ids: list[str],
         *,
@@ -1413,6 +1416,19 @@ class Application:
         ]
         if not normalized_ids:
             return []
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres":
+            if transaction is None:
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_bank_row_selection_unavailable",
+                    message="银行流水状态校验暂不可用，请稍后重试。",
+                    status_code=503,
+                )
+            return canonical_turnover_bank_rows_by_ids(
+                transaction,
+                normalized_ids,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
         selected_ids = set(normalized_ids)
         return [
             row
@@ -1426,28 +1442,6 @@ class Application:
             )
         ]
 
-    def _turnover_bank_transaction_selection_proofs(
-        self,
-        transaction_ids: list[str],
-        *,
-        transaction: object,
-    ) -> dict[str, dict[str, object]]:
-        repository = getattr(getattr(self, "_state_store", None), "bank_transaction_category_repository", None)
-        loader = getattr(repository, "turnover_bank_row_selection_proofs", None)
-        if not callable(loader):
-            raise TurnoverLedgerWritePreconditionError(
-                error_code="turnover_bank_row_selection_unavailable",
-                message="银行流水状态校验暂不可用，请稍后重试。",
-                status_code=503,
-            )
-        return dict(
-            loader(
-                transaction_ids,
-                transaction=transaction,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-            or {}
-        )
     def _historical_etc_repair_seeded(self) -> bool:
         if self._state_store is None:
             return False
@@ -2730,7 +2724,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
+            bank_rows_by_ids_provider=self._turnover_bank_selection_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             persistence_repository_factory=lambda transaction: support.persistence_repository(
@@ -2740,8 +2734,6 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
-            bank_row_source_proofs_provider=self._turnover_bank_transaction_selection_proofs,
-            current_rule_version_provider=self._bank_transaction_category_service.auto_tag_rule_version_label,
         ).build()
         if facade is not None:
             return facade
@@ -2764,7 +2756,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
+            bank_rows_by_ids_provider=self._turnover_bank_selection_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             persistence_repository_factory=lambda transaction: support.persistence_repository(
@@ -2774,8 +2766,6 @@ class Application:
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
-            bank_row_source_proofs_provider=self._turnover_bank_transaction_selection_proofs,
-            current_rule_version_provider=self._bank_transaction_category_service.auto_tag_rule_version_label,
             pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(
                 pair_relation_service=self._workbench_pair_relation_service,
                 save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
@@ -2807,7 +2797,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
-            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
+            bank_rows_by_ids_provider=self._turnover_bank_selection_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             persistence_repository_factory=lambda transaction: support.persistence_repository(

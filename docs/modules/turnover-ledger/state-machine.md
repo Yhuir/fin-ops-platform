@@ -73,9 +73,10 @@
 same group flow rows selected
   -> one or more income rows + one or more expense rows
   -> amount delta == 0.00
-  -> frontend waits affected turnover_ledger month scopes fresh and reloads grouped ledger
-  -> frontend rebinds selected bank row ids to latest same-group flow rows
-  -> backend stale precondition passes
+  -> frontend submits the current direct-GET flow rows' selection_version tokens
+  -> backend UoW re-reads the exact bank row ids from canonical PostgreSQL facts in one query
+  -> GET and POST reuse the same category/turnover row mapper and selection-version helper
+  -> backend selection CAS passes
   -> Turnover domain validates a deterministic closure descriptor without persistence
   -> reuse the same selected-row snapshot and read canonical rule payload exactly once
   -> canonical Workbench active pair relation only
@@ -87,7 +88,6 @@ same group flow rows selected
   -> canonical relation/history/version/audit 原子提交，零页面 dirty/outbox
   -> API 返回业务结果、case identity 与信息性 affected months；freshness target arrays 为空
   -> frontend 结束命令阻塞并重跑当前 turnover normal GET
-  -> turnover fresh gate 发现 mismatch 时只入队当前 exact month；Workbench/成本/搜索等页面在访问或重新激活时各自收敛
   -> frontend emits lightweight refresh hints; post-write current-page reload blockage is warning, not mutation failure
 ```
 
@@ -98,11 +98,11 @@ same group flow rows selected
 - `bank_row_ids` 必须至少两条，不能重复；不再限制为正好两条。
 - 全部流水必须同组、同对方、同语义。
 - 必须至少一收一支，收支合计差额为 `0.00`。
-- 前端不能用抽屉打开时缓存的 flow row 版本直接提交；提交前必须刷新并重绑定，若任一流水消失、离开原 group、或刷新后不再零差额，必须中止并要求重新选择。
+- 正式前端必须为每一条所选 flow row 提交 `turnover_bank_row_selection:<id>`；任一行缺少 `selection_version` 时不得发 POST，并提示刷新。后端在写事务内按精确 IDs 重读当前 canonical 银行事实、有效分类、规则版本和往来语义；token 不一致或行消失时返回 409，关系写入不得开始。
 - 不得被其他 active Turnover confirmed relation 占用。
 - 已处于 Workbench active relation 的所选银行流水，只有当既有 relation 的 row types 仅包含 `oa` 和 `bank` 时，外部往来闭环确认才可合并这些 relation；合并后新的 `turnover_manual_closure` active case 包含既有 OA rows、既有 bank rows 和本次新增 bank rows。既有 relation 包含 `invoice` 或其他业务 row type 时必须拒绝，并要求到关联台处理完整关系。
 - 合并后的每个 bank member 都必须属于本次 `bank_row_ids`；既有 OA-bank relation 若带入未选择银行流水，必须在 relation command 前返回冲突，不能扩大用户确认范围。
-- `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
+- `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验；旧 `turnover_bank_row:<id>` category-only token 不再接受，不能恢复为 fallback。
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
 - 已确认后不能追加流水；漏选时必须先撤回原闭环关系，再重新选择完整流水确认。
 - 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。

@@ -1435,7 +1435,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "bank_row_ids": transaction_ids,
                         "note": "stale confirm should fail",
                         "expected_versions": {
-                            f"turnover_bank_row:{transaction_ids[0]}": 0,
+                            f"turnover_bank_row_selection:{transaction_ids[0]}": "stale-selection",
                         },
                     }
                 ),
@@ -1491,7 +1491,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.request_fingerprint, "")
 
     def test_target_confirm_request_expected_versions_reach_write_command(self) -> None:
-        expected_versions = {"turnover_bank_row:bank-txn-confirm-1": "v1"}
+        expected_versions = {
+            "turnover_bank_row_selection:bank-txn-confirm-1": "v1"
+        }
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -1715,7 +1717,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("TurnoverLedgerBankRowSelectionPort(", source)
         self.assertIn("bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids", source)
-        self.assertIn("bank_row_source_proofs_provider=", source)
+        self.assertNotIn("bank_row_source_proofs_provider=", source)
         self.assertIn("stale_precondition_port = bank_row_selection_port", source)
         self.assertIn("bank_rows_provider=self._bank_rows_provider", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
@@ -1758,7 +1760,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         app._bank_transaction_tag_reader = lambda: _CategoryProvider()
         app._bank_transaction_category_service = _CategoryService()
 
-        rows = app._turnover_bank_transaction_rows_by_ids(["bank_txn_1"])
+        rows = app._turnover_bank_selection_rows_by_ids(["bank_txn_1"])
 
         self.assertEqual([row["id"] for row in rows], ["bank_txn_1"])
         self.assertEqual(rows[0]["category_version"], 7)
@@ -3846,20 +3848,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 }
                 for row in turnover_rows
             ]
-            app._turnover_bank_transaction_rows_by_ids = lambda row_ids, **_kwargs: [  # type: ignore[method-assign]
+            app._turnover_bank_selection_rows_by_ids = lambda row_ids, **_kwargs: [  # type: ignore[method-assign]
                 dict(row)
                 for row in exact_rows
                 if str(row.get("id") or "") in set(row_ids)
             ]
-            app._turnover_bank_transaction_selection_proofs = lambda row_ids, **_kwargs: {  # type: ignore[method-assign]
-                str(row.get("id")): {
-                    "bank_transaction_updated_at": row["bank_transaction_updated_at"],
-                    "category_code": row.get("effective_category_code"),
-                    "category_version": row.get("category_version"),
-                }
-                for row in exact_rows
-                if str(row.get("id") or "") in set(row_ids)
-            }
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository

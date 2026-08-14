@@ -600,6 +600,44 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertIn("tenant-workbench", params)
         self.assertEqual(sql.count("%s"), len(params))
 
+    def test_turnover_selection_reads_exact_canonical_rows_with_bank_version(self) -> None:
+        class Transaction:
+            def __init__(self) -> None:
+                self.reads: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                self.reads.append((sql, params))
+                return [
+                    {
+                        "row_id": "bank-legacy-1",
+                        "bank_transaction_updated_at": "2026-08-10 15:32:00+00",
+                        "effective_category_code": "turnover-personal",
+                    }
+                ]
+
+        transaction = Transaction()
+        rows = PostgresBankDetailsCanonicalQueryRepository.turnover_bank_row_selection_rows(
+            transaction,
+            settings={"bank_transaction_tags": {"version": 3, "definitions": []}},
+            transaction_ids=["bank-legacy-1", "bank-legacy-1", ""],
+            tenant_id="tenant-turnover",
+        )
+
+        self.assertEqual(rows[0]["row_id"], "bank-legacy-1")
+        self.assertEqual(len(transaction.reads), 1)
+        sql, params = transaction.reads[0]
+        normalized_sql = " ".join(sql.split()).lower()
+        self.assertIn("bank.updated_at::text as bank_transaction_updated_at", normalized_sql)
+        self.assertIn("from classified_with_semantics", normalized_sql)
+        self.assertIn("row_id = any(%s::text[])", normalized_sql)
+        self.assertEqual(params[-1], ["bank-legacy-1"])
+        self.assertIn("tenant-turnover", params)
+        self.assertEqual(sql.count("%s"), len(params))
+
 
 if __name__ == "__main__":
     unittest.main()

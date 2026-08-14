@@ -199,18 +199,13 @@ function isCashClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
 
 function closureExpectedVersions(rows: TurnoverLedgerGroupedRow[]) {
   const expectedVersions: Record<string, unknown> = {};
-  rows.forEach((row) => {
+  for (const row of rows) {
     const bankRowId = flowBankRowId(row);
-    if (!bankRowId) {
-      return;
+    if (!bankRowId || !row.selectionVersion) {
+      return undefined;
     }
-    if (row.selectionVersion) {
-      expectedVersions[`turnover_bank_row_selection:${bankRowId}`] = row.selectionVersion;
-    }
-    if (typeof row.categoryVersion === "number" && Number.isFinite(row.categoryVersion)) {
-      expectedVersions[`turnover_bank_row:${bankRowId}`] = row.categoryVersion;
-    }
-  });
+    expectedVersions[`turnover_bank_row_selection:${bankRowId}`] = row.selectionVersion;
+  }
   return Object.keys(expectedVersions).length > 0 ? expectedVersions : undefined;
 }
 
@@ -657,6 +652,11 @@ export default function TurnoverLedgerPage() {
     if (bankRowIds.length < 2) {
       return;
     }
+    const expectedVersions = closureExpectedVersions(currentSelection.rows);
+    if (!expectedVersions) {
+      setToast({ severity: "error", message: "银行流水版本信息已更新，请刷新后重试" });
+      return;
+    }
     let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在确认外部往来闭环...",
@@ -666,7 +666,7 @@ export default function TurnoverLedgerPage() {
           setMessage("正在确认外部往来闭环...");
           const closureResult = await confirmTurnoverClosure({
             bankRowIds,
-            expectedVersions: closureExpectedVersions(currentSelection.rows),
+            expectedVersions,
             idempotencyKey: closureIdempotencyKey(bankRowIds),
           });
           setClosureSelection(null);

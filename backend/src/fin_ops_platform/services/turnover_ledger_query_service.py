@@ -164,6 +164,14 @@ def _canonical_turnover_rows(
             if source_name == "manual_confirmation"
             else row.get("manual_category_version")
         )
+        category_rule_version = str(row.get("confirmation_rule_version") or "").strip()
+        if source_name not in {
+            "manual",
+            "manual_confirmation",
+            "auto_confirmation",
+            "turnover_ledger",
+        }:
+            category_rule_version = category_service.auto_tag_rule_version_label()
         transactions.append(
             {
                 **row,
@@ -186,6 +194,7 @@ def _canonical_turnover_rows(
             "source": source_name,
             "category_version": int(category_version or 0),
             "manual_category_version": int(row.get("manual_category_version") or 0),
+            "category_rule_version": category_rule_version,
             "turnover_role": semantics.get("turnover_role")
             or definition.get("turnover_role"),
             "turnover_action_type": semantics.get("turnover_action_type")
@@ -195,3 +204,51 @@ def _canonical_turnover_rows(
             or definition.get("turnover_family"),
         }
     return transactions, categories
+
+
+def canonical_turnover_bank_rows_by_ids(
+    transaction: Any,
+    transaction_ids: list[str],
+    *,
+    tenant_id: str = "default",
+) -> list[dict[str, Any]]:
+    """Load an exact turnover selection from the same canonical facts as the page GET."""
+    normalized_ids = list(
+        dict.fromkeys(
+            str(transaction_id or "").strip()
+            for transaction_id in list(transaction_ids or [])
+            if str(transaction_id or "").strip()
+        )
+    )
+    if not normalized_ids:
+        return []
+    settings_snapshot = PostgresBankDetailsCanonicalQueryRepository.settings_payload(
+        transaction
+    )
+    tag_dictionary = settings_snapshot.get("bank_transaction_tags")
+    category_service = BankTransactionCategoryService()
+    if isinstance(tag_dictionary, dict):
+        category_service.configure_tag_dictionary(tag_dictionary)
+    canonical_rows, canonical_categories = _canonical_turnover_rows(
+        PostgresBankDetailsCanonicalQueryRepository.turnover_bank_row_selection_rows(
+            transaction,
+            settings=settings_snapshot,
+            transaction_ids=normalized_ids,
+            tenant_id=tenant_id,
+        ),
+        category_service=category_service,
+    )
+    selected_tag_codes = AppSettingsService.turnover_ledger_selected_tag_codes_from_settings(
+        settings_snapshot
+    )
+    return TurnoverLedgerService(
+        import_service=SimpleNamespace(
+            list_transactions=lambda **_kwargs: canonical_rows,
+        ),
+        category_service=category_service,
+        relation_service=TurnoverRelationService.from_snapshot({}),
+        category_provider=SimpleNamespace(
+            bulk_get_for_rows=lambda _rows: canonical_categories,
+        ),
+        selected_tag_codes_provider=lambda: selected_tag_codes,
+    ).selected_bank_rows()

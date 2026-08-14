@@ -300,6 +300,10 @@ class TurnoverLedgerService:
             }
         raise KeyError(normalized_relation_id)
 
+    def selected_bank_rows(self) -> list[dict[str, Any]]:
+        """Return the currently selected turnover rows with canonical category facts."""
+        return self._bank_rows()
+
     def _bank_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         selected_tag_codes: set[str] | None = None

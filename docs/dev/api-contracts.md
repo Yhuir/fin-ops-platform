@@ -586,7 +586,9 @@ OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前
 ```json
 {
   "bank_row_ids": ["bank-income-001", "bank-income-002", "bank-expense-001"],
-  "expected_versions": {"turnover_bank_row:bank-income-001": "v1"},
+  "expected_versions": {
+    "turnover_bank_row_selection:bank-income-001": "v1|2026-08-14T02:00:00+00:00|1|bank-auto-tag-rules:7|external_turnover_collection|external_turnover|collected|business"
+  },
   "idempotency_key": "closure-20260605-001",
   "note": "人工确认零差额闭环"
 }
@@ -595,7 +597,8 @@ OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前
 校验规则：
 
 - `bank_row_ids` 必须至少两条且不能重复；不再限制为正好两条。
-- 后端必须重新读取当前银行流水和分类事实；全部流水必须属于同一往来台账组、同一往来语义、同一对方，并同时包含收入和支出。
+- 页面 grouped flow row 为每条可提交流水输出 `selection_version`；正式前端必须逐条以 `turnover_bank_row_selection:<id>` 提交。缺失 token 时前端不得发 POST；旧 `turnover_bank_row:<id>` category-only key 返回 409 并要求刷新。
+- 后端必须在同一写事务内按精确 IDs 一次重新读取当前 canonical 银行流水、有效分类、规则版本和往来语义，并复用页面 GET 的分类/行映射；全部流水必须属于同一往来台账组、同一往来语义、同一对方，并同时包含收入和支出。
 - 收入金额与支出金额差额必须为 `0.00`；否则返回 `400 turnover_closure_amount_mismatch` 或方向/语义相关业务错误。
 - 流水不得已被其他 active Turnover confirmed relation 占用。若所选流水已被 Workbench active relation 占用，只有 row types 子集为 `{oa, bank}` 的 relation 可被本次闭环合并；包含 `invoice` 或其他业务 row type 时返回 `409 turnover_closure_requires_workbench` 或 `409 turnover_relation_conflict`，并提示去关联台处理完整关系。已确认后如需补选流水，必须先撤回原闭环关系，再重新选择完整流水确认。
 - `expected_versions` 进入写 UoW 的 stale precondition；版本冲突必须在写 canonical Workbench relation 前失败。

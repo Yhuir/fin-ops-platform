@@ -497,7 +497,7 @@ class WorkbenchQueryService:
             detail_fields.get("申请日期"),
         )
         completed_at = self._first_oa_time_value(
-            record.completed_at,
+            getattr(record, "completed_at", None),
             detail_fields.get("审批完成时间"),
         )
         tags = self._oa_row_tags(

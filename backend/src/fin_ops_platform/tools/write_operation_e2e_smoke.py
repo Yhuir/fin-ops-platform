@@ -2839,7 +2839,11 @@ def _validate_turnover_closure_steps(
         if (
             body.get("bank_row_ids") != list(checkpoint.fixture_row_ids)
             or not isinstance(expected_versions, dict)
-            or set(expected_versions) != {f"turnover_bank_row:{row_id}" for row_id in checkpoint.fixture_row_ids}
+            or set(expected_versions)
+            != {
+                f"turnover_bank_row_selection:{row_id}"
+                for row_id in checkpoint.fixture_row_ids
+            }
             or set(body) - {"bank_row_ids", "expected_versions", "idempotency_key", "note"}
         ):
             raise ValueError(

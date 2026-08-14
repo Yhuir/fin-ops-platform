@@ -1,5 +1,13 @@
 # 外部往来款管理 实施记录
 
+## 2026-08-14 - 闭环选择版本双读污染清理
+
+- 真实原因：外部往来页面 GET 已从 PostgreSQL canonical facts 直读，但确认闭环的 stale precondition 仍走旧 `Application._turnover_bank_transaction_rows_by_ids(...)`，先读取 ImportService 全量 DTO，再用独立 `turnover_bank_row_selection_proofs(...)` 拼接银行/分类证据。GET 与 POST 的字段、分类规则版本和往来语义 owner 不同，`_current_rows` 无法稳定重建同一选择版本，因此未发生真实数据变更也会误报 409。
+- 修复边界：Bank Details canonical SQL owner 新增精确 ID 批量选择 helper；Turnover query owner 在写事务内复用与页面 GET 相同的 `_canonical_turnover_rows(...)` 和 `TurnoverLedgerService` 行映射。正式前端只提交 `selection_version`，由银行 `updated_at`、有效分类版本/规则版本和 role/action/family 共同构成；缺失 token 不发请求，实际变化仍 fail closed。
+- 旧代码删除：生产闭环链移除旧 by-id ImportService DTO、独立 source-proof provider、category-only/current-rule 合并和 `_current_rows` 二次拼装。repository 中仍供受控数据修复工具使用的 source-proof 查询不属于页面闭环链，未误删。
+- 性能与隔离：一次设置读取 + 一次精确 ID set-based classifier 查询；同一 UoW 的校验、月份解析和 preview 复用不可变选择快照。未新增表、migration、索引、read model、worker、queue、cache、跨页 refresh 或数据库备份。
+- 测试：新增精确 SQL query-count/ID 边界、真实 PostgreSQL direct mapper→selection CAS 集成、银行时间戳/自动规则变化冲突、旧 token 拒绝、missing row、单请求缓存和前端缺 token 阻断；现有 API、Workbench relation、分类写和页面交互回归继续通过。
+
 ## 2026-08-14 - OA-first 成本隔离更正
 
 - 外部往来闭环本身不构成 OA 成本。相关银行流水仍进入成本统计“按时间/按标签”，但没有完成 OA 付款关系时不得进入项目成本。
