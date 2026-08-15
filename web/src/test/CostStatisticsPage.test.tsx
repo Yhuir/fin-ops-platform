@@ -193,7 +193,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
     expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border\)[^}]*background:\s*var\(--fp-surface-muted\)/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.business-period-trigger\s*{[^}]*min-height:\s*34px/s);
+    expect(css).toMatch(/\.business-period-picker\s*{[^}]*--business-period-control-height:\s*40px/s);
     expect(css).toMatch(/\.business-period-popover\s*{[^}]*width:\s*min\(340px,\s*calc\(100vw - 24px\)\)/s);
     expect(css).toMatch(/\.cost-time-workspace,\s*\.cost-explorer-grid\s*{[^}]*height:\s*var\(--cost-workspace-height\)/s);
     expect(css).toMatch(/\.cost-analysis-layout\.time-layout\s*{[^}]*grid-template-columns:\s*minmax\(190px, 15%\) minmax\(0, 1fr\)/s);

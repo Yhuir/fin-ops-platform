@@ -7,6 +7,7 @@ import { vi } from "vitest";
 import BusinessPeriodPicker, { formatMonthLabel } from "../components/common/BusinessPeriodPicker";
 
 const sourcePath = "src/components/common/BusinessPeriodPicker.tsx";
+const stylesPath = "src/app/styles.css";
 
 function renderPeriodPicker(
   props: Partial<Parameters<typeof BusinessPeriodPicker>[0]> = {},
@@ -31,6 +32,16 @@ describe("BusinessPeriodPicker", () => {
     expect(existsSync(resolve(__dirname, "../components/MonthPicker.tsx"))).toBe(false);
     expect(source).toContain("@heroui/react");
     expect(source).not.toMatch(/<button|@mui\/|MuiDatePickerCompatProvider/);
+  });
+
+  test("owns one compact segmented geometry contract without page-level alignment overrides", () => {
+    const css = readFileSync(resolve(__dirname, "..", stylesPath.replace(/^src\//, "")), "utf8");
+
+    expect(css).toMatch(/\.business-period-picker\s*{[^}]*--business-period-control-height:\s*40px/s);
+    expect(css).toMatch(/\.business-period-picker--segmented\s*{[^}]*width:\s*fit-content[^}]*max-width:\s*100%/s);
+    expect(css).toMatch(/\.business-period-picker--segmented \.business-period-all\s*{[^}]*height:\s*var\(--business-period-control-height\)/s);
+    expect(css).toMatch(/\.business-period-trigger\s*{[^}]*height:\s*var\(--business-period-control-height\)/s);
+    expect(css).not.toMatch(/\.pane-time-filter\s*{[^}]*align-items:\s*center/s);
   });
 
   test("keeps the external month value as YYYY-MM", async () => {

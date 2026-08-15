@@ -47,6 +47,40 @@ function createOaPendingLatencyRecorder(page: Page, testInfo: TestInfo) {
   });
 }
 
+async function expectSegmentedPeriodPickerGeometry(page: Page, name: string) {
+  const metrics = await page.getByRole("group", { name }).evaluate((element) => {
+    const root = element as HTMLElement;
+    const all = root.querySelector<HTMLElement>(".business-period-all");
+    const trigger = root.querySelector<HTMLElement>(".business-period-trigger");
+    if (!all || !trigger) {
+      throw new Error("segmented business period picker is incomplete");
+    }
+    const rootRect = root.getBoundingClientRect();
+    const allRect = all.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const rootStyle = window.getComputedStyle(root);
+    return {
+      root: rootRect.toJSON(),
+      all: allRect.toJSON(),
+      trigger: triggerRect.toJSON(),
+      borderTop: Number.parseFloat(rootStyle.borderTopWidth),
+      borderRight: Number.parseFloat(rootStyle.borderRightWidth),
+      borderBottom: Number.parseFloat(rootStyle.borderBottomWidth),
+      borderLeft: Number.parseFloat(rootStyle.borderLeftWidth),
+    };
+  });
+  const tolerance = 1;
+
+  expect(Math.abs(metrics.all.height - metrics.trigger.height)).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.all.y - (metrics.root.y + metrics.borderTop))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.trigger.y - (metrics.root.y + metrics.borderTop))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.all.y + metrics.all.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.trigger.y + metrics.trigger.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.all.x - (metrics.root.x + metrics.borderLeft))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.trigger.x - (metrics.all.x + metrics.all.width))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.trigger.x + metrics.trigger.width) - (metrics.root.x + metrics.root.width - metrics.borderRight))).toBeLessThanOrEqual(tolerance);
+}
+
 test.describe("OA pending payments browser flow", () => {
   test("recovers rows after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
@@ -107,6 +141,7 @@ test.describe("OA pending payments browser flow", () => {
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "OA 待付款核对" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "OA待付款核对表格" })).toBeVisible();
+    await expectSegmentedPeriodPickerGeometry(page, "OA月份筛选");
 
     const row = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(row).toBeVisible();

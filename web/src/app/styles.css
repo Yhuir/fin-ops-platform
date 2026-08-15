@@ -286,6 +286,8 @@ textarea {
 }
 
 .business-period-picker {
+  --business-period-control-height: 40px;
+
   display: inline-flex;
   min-width: 0;
   align-items: stretch;
@@ -293,6 +295,9 @@ textarea {
 }
 
 .business-period-picker--segmented {
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 1 auto;
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
@@ -301,21 +306,34 @@ textarea {
 }
 
 .business-period-picker--segmented .business-period-all {
-  min-height: 34px;
+  height: var(--business-period-control-height);
+  min-height: var(--business-period-control-height);
+  flex: 0 0 auto;
+  align-self: stretch;
   border: 0;
   border-radius: 0;
 }
 
 .business-period-picker--segmented .business-period-trigger {
+  min-width: 0;
+  flex: 1 1 154px;
   border: 0;
   border-left: 1px solid var(--fp-border);
   border-radius: 0;
 }
 
+.business-period-picker--segmented:has(.business-period-all[data-focus-visible]),
+.business-period-picker--segmented:has(.business-period-trigger[data-focus-visible]) {
+  outline: 2px solid var(--fp-focus);
+  outline-offset: 2px;
+}
+
 .business-period-trigger {
   display: inline-flex;
   min-width: 154px;
-  min-height: 34px;
+  height: var(--business-period-control-height);
+  min-height: var(--business-period-control-height);
+  box-sizing: border-box;
   align-items: center;
   justify-content: space-between;
   gap: var(--fp-space-3);
@@ -329,7 +347,15 @@ textarea {
 
 .business-period-trigger > span:first-child {
   display: grid;
+  min-width: 0;
   gap: 1px;
+}
+
+.business-period-trigger small,
+.business-period-trigger strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .business-period-trigger small {
@@ -14803,7 +14829,6 @@ body.column-layout-dragging {
 .pane-time-filter {
   position: relative;
   display: inline-flex;
-  align-items: center;
 }
 
 .pane-tool-btn {
