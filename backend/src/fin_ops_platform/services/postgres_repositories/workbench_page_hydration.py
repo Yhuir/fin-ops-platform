@@ -15,6 +15,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     without_keys,
 )
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
     normalize_oa_attachment_expense_item_ids,
 )
 from fin_ops_platform.services.workbench_canonical_rows import (
@@ -47,6 +48,23 @@ def pending_oa_application_date_sql(alias: str) -> str:
         then substring(({application_time}) from 1 for 10)::date
         else null::date
     end"""
+
+
+def oa_source_identity_aliases_sql(source_payload: str) -> str:
+    """Return the compact external OA identity aliases used during hydration."""
+
+    source_identity_values = ",\n                ".join(
+        f"({source_payload}{path}->>'{field_name}')"
+        for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
+        for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
+    )
+    return f"""coalesce((
+        select jsonb_agg(identity.value order by identity.value)
+        from (values
+            {source_identity_values}
+        ) identity(value)
+        where nullif(btrim(identity.value), '') is not null
+    ), '[]'::jsonb)"""
 
 
 class _BudgetedReadConnection:
@@ -438,6 +456,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             ) with ordinality as item(value, ordinality)
                         ), '[]'::jsonb),
                         'source_aliases', oa.normalized_payload->'source_aliases',
+                        'source_identity_aliases', __COMPLETED_OA_SOURCE_IDENTITY_ALIASES_SQL__,
                         'oa_row_id', oa.normalized_payload->>'oa_row_id',
                         'oa_id', oa.normalized_payload->>'oa_id',
                         'source_oa_row_id', oa.normalized_payload->>'source_oa_row_id',
@@ -528,6 +547,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             ) with ordinality as item(value, ordinality)
                         ), '[]'::jsonb),
                         'source_aliases', admission.source_payload->'source_aliases',
+                        'source_identity_aliases', __PENDING_OA_SOURCE_IDENTITY_ALIASES_SQL__,
                         'oa_row_id', admission.source_payload->>'oa_row_id',
                         'oa_id', admission.source_payload->>'oa_id',
                         'source_oa_row_id', admission.source_payload->>'source_oa_row_id',
@@ -1110,6 +1130,14 @@ class PostgresWorkbenchPageHydrationRepository:
             .replace(
                 "__PENDING_OA_APPLICATION_DATE_SQL__",
                 pending_oa_application_date_sql("admission"),
+            )
+            .replace(
+                "__COMPLETED_OA_SOURCE_IDENTITY_ALIASES_SQL__",
+                oa_source_identity_aliases_sql("oa.normalized_payload"),
+            )
+            .replace(
+                "__PENDING_OA_SOURCE_IDENTITY_ALIASES_SQL__",
+                oa_source_identity_aliases_sql("admission.source_payload"),
             ),
             (
                 member_types,

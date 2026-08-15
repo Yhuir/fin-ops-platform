@@ -13,11 +13,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
+    oa_source_identity_aliases_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
-)
-from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
@@ -73,11 +71,6 @@ def _compact_anomaly_oa_payload_sql(
         f"coalesce({completed_alias}.normalized_payload, "
         f"{pending_alias}.source_payload, '{{}}'::jsonb)"
     )
-    source_identity_values = ",\n                    ".join(
-        f"({source_payload}{path}->>'{field_name}')"
-        for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
-        for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
-    )
     return f"""
         case when {completed_alias}.row_id is not null or {pending_alias}.oa_id is not null
         then jsonb_strip_nulls(jsonb_build_object(
@@ -120,13 +113,7 @@ def _compact_anomaly_oa_payload_sql(
             'oa_id', {source_payload}->>'oa_id',
             'source_oa_row_id', {source_payload}->>'source_oa_row_id',
             'object_identity_key', {source_payload}->>'object_identity_key',
-            'source_identity_aliases', coalesce((
-                select jsonb_agg(identity.value order by identity.value)
-                from (values
-                    {source_identity_values}
-                ) identity(value)
-                where nullif(btrim(identity.value), '') is not null
-            ), '[]'::jsonb),
+            'source_identity_aliases', {oa_source_identity_aliases_sql(source_payload)},
             'apply_type', coalesce(
                 {source_payload}->>'apply_type',
                 {source_payload}->>'application_type',

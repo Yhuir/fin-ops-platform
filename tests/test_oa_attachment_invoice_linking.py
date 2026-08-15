@@ -45,6 +45,45 @@ def test_normalizes_historical_attachment_item_ids_to_current_canonical_item() -
     assert {invoice["source_oa_row_id"] for invoice in invoices} == {"oa-exp-350"}
 
 
+def test_normalizes_compact_hydration_external_identity_alias() -> None:
+    oa_row = {
+        "id": "oa-exp-2204",
+        "type": "oa",
+        "source_identity_aliases": ["6a0ea9ef3bb8164165d8c619"],
+        "expense_items": [
+            {
+                "id": "oa-exp-2204:item:0:currenthash",
+                "expense_item_id": "oa-exp-2204:item:0:currenthash",
+                "row_index": "0",
+            }
+        ],
+    }
+    invoice = {
+        "id": "invoice-150",
+        "type": "invoice",
+        "source_kind": "oa_attachment_invoice",
+        "source_links": [
+            {
+                "source_type": "oa_attachment_invoice",
+                "source_expense_item_id": (
+                    "oa-exp-6a0ea9ef3bb8164165d8c619:item:0:historicalhash"
+                ),
+                "source_expense_row_index": "0",
+            }
+        ],
+        "source_expense_item_ids": [
+            "oa-exp-6a0ea9ef3bb8164165d8c619:item:0:historicalhash"
+        ],
+    }
+
+    normalize_oa_attachment_expense_item_ids([oa_row, invoice])
+
+    assert invoice["source_expense_item_ids"] == [
+        "oa-exp-2204:item:0:currenthash"
+    ]
+    assert invoice["source_oa_row_id"] == "oa-exp-2204"
+
+
 def test_leaves_ambiguous_or_foreign_attachment_sources_unassigned() -> None:
     rows = [
         {

@@ -266,6 +266,40 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     assert "'oa-exp-' || alias.value" in sql
 
 
+def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> None:
+    class _CaptureConnection:
+        def __init__(self) -> None:
+            self.sql = ""
+
+        def fetch_all(
+            self, sql: str, _params: tuple[Any, ...] = ()
+        ) -> list[dict[str, Any]]:
+            self.sql = " ".join(sql.split())
+            return []
+
+    connection = _CaptureConnection()
+    repository = PostgresWorkbenchPageHydrationRepository(connection)
+
+    with pytest.raises(ValueError, match="changed during hydration"):
+        repository.hydrate_groups(
+            scope_key="2026-05",
+            descriptors=[
+                {
+                    "internal_key": "case:CASE-1",
+                    "detail_key": "CASE-1",
+                    "group_kind": "relation",
+                    "member_ids": ["oa-exp-1"],
+                    "member_types": ["oa"],
+                }
+            ],
+            detail_level="summary",
+        )
+
+    assert "'source_identity_aliases'" in connection.sql
+    assert "'Mongo文档ID'" in connection.sql
+    assert "oa.normalized_payload->'detail_fields'->>'Mongo文档ID'" in connection.sql
+
+
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:
     connection = _CountingQueryConnection([])
     repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")

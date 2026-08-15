@@ -93,7 +93,11 @@ def oa_row_source_ids(row: dict[str, Any]) -> list[str]:
             identity_values.append(value)
 
     raw_source_aliases = row.get("source_aliases")
-    source_aliases = raw_source_aliases if isinstance(raw_source_aliases, (list, tuple, set)) else ()
+    source_aliases = (
+        raw_source_aliases
+        if isinstance(raw_source_aliases, (list, tuple, set))
+        else ()
+    )
     for source_alias in source_aliases:
         parent_alias = oa_attachment_parent_oa_id(source_alias)
         if not parent_alias:
@@ -102,6 +106,23 @@ def oa_row_source_ids(row: dict[str, Any]) -> list[str]:
         for prefix in ("oa-exp-", "oa-pay-"):
             if parent_alias.startswith(prefix) and len(parent_alias) > len(prefix):
                 source_ids.append(parent_alias[len(prefix):])
+
+    raw_identity_aliases = row.get("source_identity_aliases")
+    identity_aliases = (
+        raw_identity_aliases
+        if isinstance(raw_identity_aliases, (list, tuple, set))
+        else ()
+    )
+    for identity_alias in identity_aliases:
+        parent_alias = oa_attachment_parent_oa_id(identity_alias)
+        if not parent_alias:
+            continue
+        source_ids.append(parent_alias)
+        for prefix in ("oa-exp-", "oa-pay-"):
+            if parent_alias.startswith(prefix) and len(parent_alias) > len(prefix):
+                source_ids.append(parent_alias[len(prefix) :])
+            elif not parent_alias.startswith(("oa-exp-", "oa-pay-")):
+                source_ids.append(f"{prefix}{parent_alias}")
 
     payload = row.get("normalized_payload")
     containers = [row, payload] if isinstance(payload, dict) else [row]
