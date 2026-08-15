@@ -1,6 +1,12 @@
 # 关联台测试与验证
 
-日期：2026-08-13
+日期：2026-08-16
+
+## 2026-08-16 异常抽屉紧凑布局回归
+
+- Frontend interaction：`WorkbenchExceptionDrawer.test.tsx` 保护折叠态只有三栏摘要与异常数量，展开后才显示完整证据、具体异常 chip、HeroUI 审阅复选框、人工金额判断和决定按钮；金额分类互斥、附件逐项审阅、只读权限、进入已配对与撤回合同不变。
+- Browser E2E：`workbench-exception-flow.spec.ts` 保护 1440px 与 1024px 视口内抽屉和审阅区不越界，详情仍按点击惰性加载，accept/withdraw 后 bucket 重置为折叠态且链路仍只执行既有 API。
+- 非适用：本轮不改变业务金额判断、API DTO、repository、数据库、read model、worker、cache、权限或其它页面 I/O，因此不新增后端、迁移或跨页面数据测试；既有异常 Browser 主链和全量前端回归承担隔离验证。
 
 ## 2026-08-13 Direct canonical API 与 page runtime 退役
 

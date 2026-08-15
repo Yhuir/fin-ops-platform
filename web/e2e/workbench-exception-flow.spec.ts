@@ -128,6 +128,9 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(drawer.getByText("异常", { exact: true }).first()).toBeVisible();
+    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(drawer.getByText("OA发票金额不一致").first()).toBeVisible();
     await drawer.getByRole("button", { name: /人工金额判断/ }).click();
     await page.getByRole("option", { name: "OA发票金额不一致" }).click();
@@ -137,7 +140,7 @@ test.describe("workbench exception browser flow", () => {
     await drawer.getByRole("button", { name: "进入已配对" }).click();
 
     await expect(drawer.getByRole("radio", { name: "已配对异常" })).toHaveAttribute("aria-checked", "true");
-    await expect(drawer.getByText("OA发票金额不一致").first()).toBeVisible();
+    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
     await expect(pairedZone.getByText("OA发票金额不一致")).toBeVisible();
     await expect(unpairedZone.getByText("OA发票金额不一致")).toHaveCount(0);
     expect(api.count("POST /api/workbench/exceptions/review")).toBe(1);
@@ -158,6 +161,7 @@ test.describe("workbench exception browser flow", () => {
 
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     const bucketLoadsBeforeWithdraw = api.count("GET /api/workbench/groups");
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await drawer.getByRole("button", { name: "撤回" }).click();
 
     await expect(drawer.getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
@@ -182,5 +186,56 @@ test.describe("workbench exception browser flow", () => {
     await expect(drawer).toHaveCount(0);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
+  test("keeps the wider compact drawer inside the viewport without clipping review controls", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchAmountMismatchScenario: true,
+      workbenchInitialRelationConfirmed: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+    await page
+      .getByTestId("zone-unpaired")
+      .getByRole("button", { name: "未配对异常 1 | 已配对异常 0" })
+      .click();
+
+    const drawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(drawer).toBeVisible();
+    await expect.poll(async () => {
+      const box = await drawer.boundingBox();
+      return box ? box.x + box.width : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(1440);
+    const collapsedBox = await drawer.boundingBox();
+    expect(collapsedBox).not.toBeNull();
+    expect(collapsedBox!.x).toBeGreaterThanOrEqual(0);
+    expect(collapsedBox!.x + collapsedBox!.width).toBeLessThanOrEqual(1440);
+    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
+
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
+    const review = drawer.getByRole("region", { name: "异常审阅" });
+    await review.scrollIntoViewIfNeeded();
+    await expect(review.getByText("OA发票金额不一致").first()).toBeVisible();
+    await expect(review.getByRole("button", { name: /人工金额判断/ })).toBeVisible();
+    await expect(review.getByRole("button", { name: "留在未配对" })).toBeVisible();
+    await expect(review.getByRole("button", { name: "进入已配对" })).toBeVisible();
+    const reviewBox = await review.boundingBox();
+    expect(reviewBox).not.toBeNull();
+    expect(reviewBox!.x).toBeGreaterThanOrEqual(collapsedBox!.x);
+    expect(reviewBox!.x + reviewBox!.width).toBeLessThanOrEqual(collapsedBox!.x + collapsedBox!.width);
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await expect.poll(async () => {
+      const box = await drawer.boundingBox();
+      return box ? box.x + box.width : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(1024);
+    const compactDrawerBox = await drawer.boundingBox();
+    const compactReviewBox = await review.boundingBox();
+    expect(compactDrawerBox).not.toBeNull();
+    expect(compactReviewBox).not.toBeNull();
+    expect(compactDrawerBox!.x + compactDrawerBox!.width).toBeLessThanOrEqual(1024);
+    expect(compactReviewBox!.x + compactReviewBox!.width)
+      .toBeLessThanOrEqual(compactDrawerBox!.x + compactDrawerBox!.width);
   });
 });

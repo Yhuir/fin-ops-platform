@@ -1,5 +1,6 @@
 import {
   Button,
+  Checkbox,
   Chip,
   Disclosure,
   DisclosureGroup,
@@ -176,7 +177,7 @@ export default function WorkbenchExceptionDrawer({
       className="workbench-anomaly-drawer"
       open={open}
       title="异常处理"
-      width="min(1160px, 96vw)"
+      width="min(1740px, 96vw)"
       onClose={onClose}
     >
       <div className="workbench-anomaly-drawer__toolbar" ref={toolbarRef}>
@@ -220,61 +221,41 @@ export default function WorkbenchExceptionDrawer({
             {visibleGroups.map((group) => {
               const expanded = expandedKeys.has(group.id);
               const detailGroup = expanded ? detailGroups[group.id] : null;
+              const anomalyCount = exceptionLabels(group).length;
               return (
                 <Disclosure
                   className="workbench-anomaly-drawer__group"
                   id={group.id}
                   key={`${contentGeneration}:${group.id}`}
                 >
-                  <div className="workbench-anomaly-drawer__group-header">
-                    <Disclosure.Heading>
-                      <Button
-                        aria-label={`${expanded ? "收起" : "展开"}异常明细`}
-                        className="workbench-anomaly-drawer__trigger"
-                        fullWidth
-                        slot="trigger"
-                        variant="tertiary"
-                      >
-                        <span className="workbench-anomaly-drawer__outline">
-                          {PANE_IDS.map((paneId) => {
-                            const summary = paneSummary(group, paneId);
-                            return (
-                              <span className="workbench-anomaly-drawer__pane-summary" key={paneId}>
-                                <span className="workbench-anomaly-drawer__pane-label">
-                                  {PANE_LABELS[paneId]} · {summary.count}项
-                                </span>
-                                <strong>{summary.total}</strong>
+                  <Disclosure.Heading>
+                    <Button
+                      aria-label={`${expanded ? "收起" : "展开"}异常明细`}
+                      className="workbench-anomaly-drawer__trigger"
+                      fullWidth
+                      slot="trigger"
+                      variant="tertiary"
+                    >
+                      <span className="workbench-anomaly-drawer__outline">
+                        {PANE_IDS.map((paneId) => {
+                          const summary = paneSummary(group, paneId);
+                          return (
+                            <span className="workbench-anomaly-drawer__pane-summary" key={paneId}>
+                              <span className="workbench-anomaly-drawer__pane-label">
+                                {PANE_LABELS[paneId]} · {summary.count}项
                               </span>
-                            );
-                          })}
-                          <Disclosure.Indicator className="workbench-anomaly-drawer__indicator" />
+                              <strong>{summary.total}</strong>
+                            </span>
+                          );
+                        })}
+                        <span className="workbench-anomaly-drawer__anomaly-summary">
+                          <span className="workbench-anomaly-drawer__pane-label">异常</span>
+                          <strong>{anomalyCount}项</strong>
                         </span>
-                      </Button>
-                    </Disclosure.Heading>
-                    <ExceptionAction
-                      bucket={bucket}
-                      canMutateData={canMutateData}
-                      group={group}
-                      pending={pendingGroupId === group.id}
-                      reviewClassifications={reviewClassifications[group.id]
-                        ?? group.workbenchAnomaly?.reviewClassificationCodes
-                        ?? []}
-                      reviewedItems={reviewedItems[group.id]
-                        ?? new Set(group.workbenchAnomaly?.reviewedItemFingerprints ?? [])}
-                      onAction={(action) => runGroupAction(group.id, action)}
-                      onReviewAnomaly={onReviewAnomaly}
-                      onToggleReviewed={(fingerprint) => setReviewedItems((current) => {
-                        const next = new Set(current[group.id] ?? []);
-                        if (next.has(fingerprint)) next.delete(fingerprint);
-                        else next.add(fingerprint);
-                        return { ...current, [group.id]: next };
-                      })}
-                      onReviewClassificationChange={(codes) => setReviewClassifications((current) => ({
-                        ...current,
-                        [group.id]: codes,
-                      }))}
-                    />
-                  </div>
+                        <Disclosure.Indicator className="workbench-anomaly-drawer__indicator" />
+                      </span>
+                    </Button>
+                  </Disclosure.Heading>
                   <Disclosure.Content>
                     <Disclosure.Body className="workbench-anomaly-drawer__details">
                       {detailLoadingIds.has(group.id) ? (
@@ -284,24 +265,49 @@ export default function WorkbenchExceptionDrawer({
                         <div className="detail-state-panel error">{detailErrors[group.id]}</div>
                       ) : null}
                       {detailGroup ? (
-                        <RelationGroupGrid
-                          canMutateData={false}
-                          getRowState={() => "idle"}
-                          groups={[detailGroup]}
-                          hidePaneHeaders
-                          onOpenDetail={() => undefined}
-                          onRowAction={() => undefined}
-                          onSelectRow={() => undefined}
-                          panes={PANE_IDS.map((paneId) => ({
-                            id: paneId,
-                            title: PANE_LABELS[paneId],
-                            rows: detailGroup.rows[paneId],
-                          }))}
-                          readOnly
-                          rowTemplateColumns={DRAWER_DETAIL_COLUMNS}
-                          zoneId={detailGroup.groupType}
-                        />
+                        <div className="workbench-anomaly-drawer__detail-grid">
+                          <RelationGroupGrid
+                            canMutateData={false}
+                            getRowState={() => "idle"}
+                            groups={[detailGroup]}
+                            hidePaneHeaders
+                            onOpenDetail={() => undefined}
+                            onRowAction={() => undefined}
+                            onSelectRow={() => undefined}
+                            panes={PANE_IDS.map((paneId) => ({
+                              id: paneId,
+                              title: PANE_LABELS[paneId],
+                              rows: detailGroup.rows[paneId],
+                            }))}
+                            readOnly
+                            rowTemplateColumns={DRAWER_DETAIL_COLUMNS}
+                            zoneId={detailGroup.groupType}
+                          />
+                        </div>
                       ) : null}
+                      <ExceptionReviewPanel
+                        bucket={bucket}
+                        canMutateData={canMutateData}
+                        group={group}
+                        pending={pendingGroupId === group.id}
+                        reviewClassifications={reviewClassifications[group.id]
+                          ?? group.workbenchAnomaly?.reviewClassificationCodes
+                          ?? []}
+                        reviewedItems={reviewedItems[group.id]
+                          ?? new Set(group.workbenchAnomaly?.reviewedItemFingerprints ?? [])}
+                        onAction={(action) => runGroupAction(group.id, action)}
+                        onReviewAnomaly={onReviewAnomaly}
+                        onToggleReviewed={(fingerprint) => setReviewedItems((current) => {
+                          const next = new Set(current[group.id] ?? []);
+                          if (next.has(fingerprint)) next.delete(fingerprint);
+                          else next.add(fingerprint);
+                          return { ...current, [group.id]: next };
+                        })}
+                        onReviewClassificationChange={(codes) => setReviewClassifications((current) => ({
+                          ...current,
+                          [group.id]: codes,
+                        }))}
+                      />
                     </Disclosure.Body>
                   </Disclosure.Content>
                 </Disclosure>
@@ -327,7 +333,7 @@ export default function WorkbenchExceptionDrawer({
   );
 }
 
-function ExceptionAction({
+function ExceptionReviewPanel({
   canMutateData,
   bucket,
   group,
@@ -370,30 +376,43 @@ function ExceptionAction({
   );
 
   return (
-    <div className="workbench-anomaly-drawer__action">
+    <section aria-label="异常审阅" className="workbench-anomaly-drawer__review">
       <div className="workbench-anomaly-drawer__chips">
         {labels.map((label) => (
-          <label className="workbench-anomaly-drawer__review-item" key={label.fingerprint}>
-            {bucket === "unpaired" && canMutateData && !amountItemFingerprints.has(label.fingerprint) ? (
-              <input
-                aria-label={`确认已审阅 ${label.text}`}
-                checked={reviewedItems.has(label.fingerprint)}
-                type="checkbox"
-                onChange={() => onToggleReviewed(label.fingerprint)}
-              />
-            ) : null}
-            <Chip color={label.color} size="sm" variant="soft">
-              <Chip.Label>{label.text}</Chip.Label>
-            </Chip>
-          </label>
+          bucket === "unpaired" && canMutateData && !amountItemFingerprints.has(label.fingerprint) ? (
+            <Checkbox
+              key={label.fingerprint}
+              aria-label={`确认已审阅 ${label.text}`}
+              className="workbench-anomaly-drawer__review-item"
+              isSelected={reviewedItems.has(label.fingerprint)}
+              onChange={() => onToggleReviewed(label.fingerprint)}
+            >
+              <Checkbox.Control>
+                <Checkbox.Indicator />
+              </Checkbox.Control>
+              <Checkbox.Content>
+                <Chip color={label.color} size="sm" variant="soft">
+                  <Chip.Label>{label.text}</Chip.Label>
+                </Chip>
+              </Checkbox.Content>
+            </Checkbox>
+          ) : (
+            <span className="workbench-anomaly-drawer__review-item" key={label.fingerprint}>
+              <Chip color={label.color} size="sm" variant="soft">
+                <Chip.Label>{label.text}</Chip.Label>
+              </Chip>
+            </span>
+          )
         ))}
       </div>
       {canMutateData && group.workbenchAnomaly ? (
         bucket === "paired" ? (
-          <Button isDisabled={pending} isPending={pending} size="sm" variant="secondary"
-            onPress={() => onAction(submit("keep_unpaired"))}>
-            撤回
-          </Button>
+          <div className="workbench-anomaly-drawer__decision-buttons">
+            <Button isDisabled={pending} isPending={pending} size="sm" variant="secondary"
+              onPress={() => onAction(submit("keep_unpaired"))}>
+              撤回
+            </Button>
+          </div>
         ) : (
           <>
             {amountItemFingerprints.size > 0 ? (
@@ -449,7 +468,7 @@ function ExceptionAction({
           </>
         )
       ) : null}
-    </div>
+    </section>
   );
 }
 

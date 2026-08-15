@@ -1651,3 +1651,10 @@
 - 根因：`buildWorkbenchGroupSourceSegments` 已按 canonical `sourceOaId` 把多条流水归入正确 OA，但 `findAlignedRowIdsBySegment` 仍用 `rows.length === 1` 拒绝所有父 OA 银行 1:N，使生产 `88050 = 64996.69 + 23053.31` 被拆成 OA 主轨和银行残余带。
 - 收口：普通非日常报销父 OA 的多条显式来源流水只有在当前显示完整、金额合法且合计按分等于 OA 时共享现有复合行轨。无来源金额组合、金额不等、日常报销父级流水、多对一和冲突来源继续 fail closed；不恢复 subset-sum。
 - 边界：只修改既有前端纯展示投影并复用 segment/Flex 渲染；API DTO、relation membership、异常状态、selection/action identity、其它页面 I/O、数据库、read model、worker、cache 和依赖均不改变。
+
+## 2026-08-16 - 异常处理抽屉密度与响应式收口
+
+- 根因：旧抽屉最大宽度 1160px，却把三栏摘要与全部 chip、下拉和动作同时塞进 `1fr + 38%` 的折叠行；多异常时 chip 必然换行并挤压三栏证据，原生 checkbox 还绕过了应用的 HeroUI 交互与可访问性合同。
+- 收口：抽屉扩大为 `min(1740px, 96vw)`；折叠态只保留三栏摘要、异常计数和展开控制，完整 `RelationGroupGrid` 与审阅动作统一进入展开区。审阅区按“证据 chip / 人工判断 / 决定”排列，窄视口降为两列或单列；只有明细三栏拥有局部横向滚动。删除旧 38% 操作栏、原生 checkbox 和固定 245px 分类宽度。
+- 边界：复用现有 AppDrawer、Disclosure、RelationGroupGrid 与 HeroUI Button/Chip/Checkbox/Select；不新增组件状态源、API、依赖、DOM 测量、全局样式或业务门禁。模块 I/O、异常状态机、权限、数据库与其它页面合同不变。
+- 验证：组件测试新增折叠/展开信息层级和附件 checkbox 审阅；Chromium E2E 新增 1440/1024 几何边界并更新 accept/withdraw 展开步骤；发布后再以生产 authenticated 浏览器检查宽度、滚动、chip 完整性与真实详情惰性加载。

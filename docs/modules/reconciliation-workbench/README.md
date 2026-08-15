@@ -58,6 +58,7 @@ canonical fact repositories
 - 任何当前异常默认把完整 active relation 留在 `unpaired`。金额异常必须先在多选下拉中人工选择三种具体差异或互斥的“无异常”，再选择 `accept_paired` 或 `keep_unpaired`；附件异常继续逐项审阅。只有无其他完整性 blocker 时前者才允许进入 `paired`。决定后的 chip 使用人工分类，“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对；系统检测证据仍保留用于审计。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧金额 ignore/restore API、service 和前端动作已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
+- 异常抽屉宽度固定为 `min(1740px, 96vw)`。折叠态只显示 OA、流水、发票三栏金额/数量摘要和异常数量；展开后先复用只读 `RelationGroupGrid` 展示完整三栏证据，再在独立审阅区显示全部 chip、HeroUI 审阅复选框、人工金额判断和决定按钮。窄视口只允许三栏明细区局部横向滚动，抽屉和审阅控件不得溢出视口；不得恢复折叠行右侧的并排操作栏或原生 HTML 表单控件。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 
 ## 三栏纵向展示合同

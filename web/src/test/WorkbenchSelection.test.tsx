@@ -1554,6 +1554,7 @@ describe("Workbench row selection and detail drawer", () => {
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     }).length;
 
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: /人工金额判断/ }));
     await user.click(screen.getByRole("option", { name: "OA发票金额不一致" }));
     await user.keyboard("{Escape}");
@@ -1570,6 +1571,7 @@ describe("Workbench row selection and detail drawer", () => {
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     })).toHaveLength(initialBucketReads + 1));
     expect(within(drawer).getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     expect(within(drawer).getByRole("button", { name: "进入已配对" })).toBeDisabled();
   });
 
@@ -1609,10 +1611,12 @@ describe("Workbench row selection and detail drawer", () => {
     });
     expect(initialBucketReads).toHaveLength(1);
 
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: /人工金额判断/ }));
     await user.click(screen.getByRole("option", { name: "OA发票金额不一致" }));
     await user.keyboard("{Escape}");
     await user.click(within(drawer).getByRole("button", { name: "进入已配对" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     expect(await within(drawer).findByRole("button", { name: "撤回" })).toBeInTheDocument();
 
     const currentBucketReads = fetchMock.mock.calls.filter(([input]) => {
@@ -1640,6 +1644,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(pairedReadsBeforeWithdraw).toBe(1);
 
     await user.click(within(drawer).getByRole("button", { name: "撤回" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     expect(await within(drawer).findByRole("button", { name: "进入已配对" })).toBeInTheDocument();
     const pairedReadsAfterWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
