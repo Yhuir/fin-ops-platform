@@ -326,6 +326,83 @@ describe("groupDisplayModel time filter", () => {
     expect(segment?.rows.oa[0].tableValues.amount).toBe("405.00");
   });
 
+  test("renders the canonical 145 train invoice beside its only reimbursement item without a missing placeholder", () => {
+    const itemId = "oa-exp-2156:item:0:835797c662b5";
+    const parent = {
+      ...buildOaRow("oa-exp-2156", "145.00"),
+      expenseItems: [{
+        id: itemId,
+        rowIndex: "0",
+        projectName: "大理卷烟厂余热综合利用项目",
+        amount: "145.00",
+        feeContent: "火车费",
+        feeDescription: "",
+        attachmentFileCount: 2,
+      }],
+    };
+    const trainInvoice = {
+      ...buildAttachmentInvoiceRow("invoice-train-145", parent.id, "145.00"),
+      sourceExpenseItemIds: [itemId],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:CASE-OA-ATT-oa-exp-2156",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      rows: { oa: [parent], bank: [], invoice: [trainInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const summary = layout?.segments.find(({ id }) => id === `${parent.id}:summary`);
+    const item = layout?.segments.find(({ id }) => id === itemId);
+
+    expect(summary?.rows.invoice).toEqual([]);
+    expect(item?.rows.oa).toHaveLength(1);
+    expect(item?.rows.invoice).toEqual([trainInvoice]);
+    expect(layout?.segments.flatMap(({ rows }) => rows.invoice).filter(({ displayOnly }) => displayOnly))
+      .toEqual([]);
+  });
+
+  test("keeps an unnormalized OA attachment invoice out of same-amount reimbursement items", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-current", "155.00"),
+      expenseItems: [
+        { id: "oa-exp-current:item:0:new", rowIndex: "0", projectName: "项目甲", amount: "145.00" },
+        { id: "oa-exp-current:item:1:new", rowIndex: "1", projectName: "项目乙", amount: "10.00" },
+      ],
+    };
+    const historicalInvoice = {
+      ...buildAttachmentInvoiceRow("invoice-historical-145", "oa-exp-historical", "145.00"),
+      sourceExpenseItemIds: ["oa-exp-historical:item:0:old"],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:historical-unassigned",
+      groupType: "unpaired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      amountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "155.00",
+        oaAmount: "155.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+      rows: { oa: [parent], bank: [], invoice: [historicalInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const child145 = layout?.segments.find(({ id }) => id === "oa-exp-current:item:0:new");
+    const summary = layout?.segments.find(({ id }) => id === `${parent.id}:summary`);
+    const residual = layout?.segments.find(({ id }) => id === `${group.id}:invoice:residual`);
+
+    expect(child145?.rows.invoice).toEqual([]);
+    expect(summary?.rows.invoice).toEqual([]);
+    expect(residual?.rows.invoice).toEqual([historicalInvoice]);
+  });
+
   test("renders one shared invoice once beside both linked expense items", () => {
     const parent = {
       ...buildOaRow("oa-exp-shared-36", "36.00"),

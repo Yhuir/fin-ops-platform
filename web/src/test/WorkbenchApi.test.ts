@@ -944,8 +944,8 @@ describe("workbench api bank amount mapping", () => {
                   source_expense_item_ids: ["oa-paired:item:1"],
                   source_links: [{
                     source_type: "oa_attachment_invoice",
-                    derived_from_oa_id: "oa-paired",
-                    source_expense_item_id: "oa-paired:item:1",
+                    derived_from_oa_id: "oa-paired-historical",
+                    source_expense_item_id: "oa-paired-historical:item:1:old-fingerprint",
                   }],
                   invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],

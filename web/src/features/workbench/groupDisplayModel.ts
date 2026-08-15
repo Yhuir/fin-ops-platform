@@ -144,11 +144,21 @@ export function buildWorkbenchGroupDisplayLayout(
   const hasExpenseClaimItems = segments.some(
     (segment) => segment.rows.oa[0]?.displayRole === "expense-claim-summary",
   );
+  const expenseItemIds = new Set(
+    segments.flatMap((segment) => segment.rows.oa.flatMap((row) => row.sourceExpenseItemIds ?? [])),
+  );
+  const hasUnassignedOaAttachmentInvoices = hasExpenseClaimItems && group.rows.invoice.some((row) => (
+    row.sourceKind === "oa_attachment_invoice"
+    && !rowExpenseItemIds(row).some((itemId) => expenseItemIds.has(itemId))
+  ));
   const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
     !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
-    && Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
-      rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
-    ))
+    && (
+      (paneId === "invoice" && hasUnassignedOaAttachmentInvoices)
+      || Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
+        rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
+      ))
+    )
   ));
   if (segmentedPaneIds.length === 0 && !hasExpenseClaimItems) {
     return null;
@@ -373,6 +383,9 @@ function canUseAmountFallback(
   paneId: WorkbenchRecordType,
   row: WorkbenchRecord,
 ) {
+  if (paneId === "invoice" && row.sourceKind === "oa_attachment_invoice") {
+    return false;
+  }
   const direction = group.amountCheck?.direction;
   if (!direction || direction === "unknown") {
     return false;

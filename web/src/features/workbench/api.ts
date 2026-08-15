@@ -1421,12 +1421,7 @@ function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
 }
 
 function resolveWorkbenchRowSourceExpenseItemIds(row: ApiWorkbenchRow) {
-  const sourceIds = [
-    ...toStringList(row.source_expense_item_ids),
-    ...(Array.isArray(row.source_links)
-      ? row.source_links.map((link) => String(link.source_expense_item_id ?? "").trim())
-      : []),
-  ].filter(Boolean);
+  const sourceIds = toStringList(row.source_expense_item_ids);
   return sourceIds.length > 0 ? Array.from(new Set(sourceIds)) : undefined;
 }
 

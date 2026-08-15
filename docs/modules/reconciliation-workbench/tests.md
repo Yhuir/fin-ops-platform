@@ -87,7 +87,7 @@
 ## 2026-08-15 OA附件发票多对多与子付款项定位
 
 - Business/service：`test_mongo_oa_adapter.py` 保护同一物理附件跨两个子付款项只解析一次、再分别绑定来源；`test_oa_attachment_invoice_promotion_service.py` 与 `test_import_service.py` 保护同 OA 多来源边不丢失；`test_workbench_amount_check_service.py` 和 `test_workbench_relation_grouping.py` 保护 `18+18=36` 不重复计票、一个 item 多票集合求和，以及缺失/解析失败/待归属分类。
-- API/frontend：Workbench DTO 只发布复数 `source_expense_item_ids[]` / anomaly source arrays；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护一票多项只渲染一次、多票一项同带、待归属发票不进入父摘要。`WorkbenchExceptionDrawer.test.tsx` 保护缺失 chip 使用 `target=_blank` 与 `noopener noreferrer` 打开稳定 OA 列表路由。
+- API/frontend：Workbench DTO 只发布复数 canonical `source_expense_item_ids[]` / anomaly source arrays，前端不把历史 `source_links[].source_expense_item_id` 混入展示 identity；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护 145 元高铁票与唯一子付款项同带且不生成缺失占位、一票多项只渲染一次、多票一项同带、待归属 OA 附件不按金额兜底且不进入父摘要。`WorkbenchExceptionDrawer.test.tsx` 保护缺失 chip 使用 `target=_blank` 与 `noopener noreferrer` 打开稳定 OA 列表路由。
 - Performance/regression：复用单次 Workbench direct canonical SQL 与前端纯内存图遍历；无新增 HTTP、read model、worker、数据库表、逐行 I/O 或页面 effect。PostgreSQL exception filter 使用 relation 内递归连通分量，避免顶部异常计数继续按旧单值来源误报。
 - Regression：没有新增表、migration、read model、worker、queue、cache owner、HTTP 详情链路或依赖；旧逐关系总额、逐发票复制字段和金额决定显式 ownership 的判断已删除。
 
