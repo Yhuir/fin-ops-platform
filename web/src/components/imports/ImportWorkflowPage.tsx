@@ -1759,7 +1759,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               </div>
             </section>
 
-            <section className="import-workflow-panel">
+            <section className="import-workflow-panel import-workflow-panel--table">
               <div className="import-workflow-panel__content">
                 <div className="import-workflow-panel__header">
                   <h2 className="import-workflow-panel__title">预览</h2>

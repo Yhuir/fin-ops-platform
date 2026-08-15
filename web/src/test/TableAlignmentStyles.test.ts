@@ -16,9 +16,17 @@ function expectDeclaration(selector: string, declaration: RegExp) {
   expect(cssBlock(selector)).toMatch(declaration);
 }
 
+function expectSquareSurface(selector: string) {
+  const radii = [...cssBlock(selector).matchAll(/border-radius:\s*([^;]+);/g)].map((match) => match[1]?.trim());
+  expect(radii.every((radius) => radius === "0" || radius === "0px"), selector).toBe(true);
+}
+
 describe("finance table alignment styles", () => {
   test("defines the shared HeroUI finance table shell contract", () => {
     expectDeclaration(".finance-table", /--finance-table-row-height:\s*var\(--fp-table-row-height\)/);
+    expectDeclaration(".finance-table", /border-radius:\s*0/);
+    expectDeclaration(".finance-table", /background:\s*var\(--fp-surface\)/);
+    expectDeclaration(".finance-table", /padding:\s*0/);
     expectDeclaration(".finance-table__scroll", /overflow-x:\s*auto/);
     expectDeclaration(".finance-table--contained", /height:\s*100%/);
     expectDeclaration(".finance-table--contained .finance-table__scroll", /overflow:\s*auto/);
@@ -30,6 +38,40 @@ describe("finance table alignment styles", () => {
     expectDeclaration(".finance-table__column", /position:\s*sticky/);
     expectDeclaration(".finance-table__column", /top:\s*0/);
     expectDeclaration(".finance-table__cell", /border-bottom:\s*1px solid var\(--fp-border-subtle\)/);
+  });
+
+  test("keeps table-bearing page surfaces square instead of nesting rounded cards", () => {
+    const flatSurfaceSelectors = [
+      ".oa-pending-payments-table-frame",
+      ".batch-accounting-oa-panel",
+      ".turnover-ledger-table-panel",
+      ".turnover-ledger-table-wrap",
+      ".turnover-ledger-export-dialog__table-wrap",
+      ".bank-flow-rule-batches-transactions",
+      ".bank-flow-rule-batches-table-wrap",
+      ".app-health-section",
+      ".app-health-inventory-panel",
+      ".import-workflow-panel--table",
+      ".import-workflow-detail-shell",
+      ".tax-panel",
+      ".settings-native-table-shell",
+      ".settings-project-column",
+      ".bank-transaction-panel",
+      ".bank-transaction-grid",
+      ".etc-invoice-table-container",
+      ".etc-reconciliation-table-container",
+      ".input-invoice-usage-rules-table-shell",
+      ".output-invoice-collection-rules-table-frame",
+      ".workbench-detail-table-shell",
+      ".bank-auto-tag-table-container",
+    ];
+
+    flatSurfaceSelectors.forEach((selector) => {
+      expectSquareSurface(selector);
+    });
+
+    expect(source).toMatch(/\.settings-content-panel,\s*\.settings-section-panel\s*\{[^}]*border-radius:\s*0/s);
+    expect(source).toMatch(/\.cost-table-shell,\s*\.cost-table-section\s*\{[^}]*border-radius:\s*0/s);
   });
 
   test("aligns cells by column role instead of globally centering every table cell", () => {

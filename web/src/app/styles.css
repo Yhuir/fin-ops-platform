@@ -1774,7 +1774,6 @@ textarea {
   color: var(--fp-success);
 }
 
-.input-invoice-usage-rules-table-shell,
 .input-invoice-usage-rules-section {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -1783,6 +1782,8 @@ textarea {
 
 .input-invoice-usage-rules-table-shell {
   overflow: auto;
+  border: 1px solid var(--fp-border);
+  background: var(--fp-surface);
 }
 
 .input-invoice-usage-rules-table {
@@ -2761,7 +2762,6 @@ textarea {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -4711,7 +4711,6 @@ textarea {
 .output-invoice-collection-rules-table-frame {
   overflow: auto;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -5640,7 +5639,6 @@ textarea {
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -6075,7 +6073,6 @@ textarea {
 .turnover-ledger-table-panel {
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -6131,8 +6128,6 @@ textarea {
   height: clamp(520px, calc(100dvh - 244px), 720px);
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -6837,7 +6832,6 @@ textarea {
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -7285,7 +7279,6 @@ textarea {
 .bank-flow-rule-batches-transactions {
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -7467,8 +7460,6 @@ textarea {
   height: clamp(220px, 36dvh, 360px);
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -9391,7 +9382,6 @@ textarea {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
   background: var(--fp-surface);
   box-shadow: none;
 }
@@ -9691,8 +9681,6 @@ textarea {
 
 .app-health-inventory-panel {
   min-width: 0;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
   background: var(--fp-surface);
   overflow: hidden;
 }
@@ -9913,6 +9901,10 @@ textarea {
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
   box-shadow: none;
+}
+
+.import-workflow-panel--table {
+  border-radius: 0;
 }
 
 .import-workflow-panel__content,
@@ -10224,7 +10216,6 @@ textarea {
 .import-workflow-detail-shell {
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
 }
 
 .import-workflow-detail-tabs-root {
@@ -10524,8 +10515,12 @@ textarea {
 .finance-table {
   --finance-table-row-height: var(--fp-table-row-height);
   width: 100%;
+  border-radius: 0;
+  background: var(--fp-surface);
+  box-shadow: none;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-data);
+  padding: 0;
 }
 
 .finance-table__scroll {
@@ -15517,7 +15512,6 @@ body.column-layout-dragging {
   min-height: 0;
   min-width: 0;
   border: 1px solid #d8e1eb;
-  border-radius: 18px;
   overflow: hidden;
   background: #ffffff;
 }
@@ -16002,7 +15996,6 @@ body.column-layout-dragging {
 
 .tax-panel {
   border-color: var(--fp-border);
-  border-radius: var(--fp-radius-md);
   background: var(--fp-surface);
 }
 
@@ -16688,7 +16681,6 @@ body.column-layout-dragging {
 .workbench-detail-table-shell {
   overflow: auto;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -17439,7 +17431,6 @@ body.column-layout-dragging {
   width: 100%;
   overflow-x: auto;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -18126,7 +18117,6 @@ body.column-layout-dragging {
 
 .settings-section-panel {
   overflow: hidden;
-  border-radius: 8px;
 }
 
 .settings-nav-header,
@@ -18163,7 +18153,6 @@ body.column-layout-dragging {
   gap: 12px;
   padding: 14px;
   border: 1px solid #e7edf5;
-  border-radius: 8px;
   background: #fbfdff;
   min-height: 0;
 }
@@ -18453,12 +18442,17 @@ body.column-layout-dragging {
 }
 
 .settings-nav-shell,
-.settings-tree-panel,
+.settings-tree-panel {
+  background: var(--fp-surface);
+  border-color: var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+}
+
 .settings-content-panel,
 .settings-section-panel {
   background: var(--fp-surface);
   border-color: var(--fp-border);
-  border-radius: var(--fp-radius-sm);
+  border-radius: 0;
 }
 
 .settings-nav-shell {
@@ -18636,7 +18630,6 @@ body.column-layout-dragging {
 }
 
 .settings-project-toolbar,
-.settings-project-column,
 .settings-bank-mapping-row,
 .settings-data-reset-card,
 .settings-pending-tag-panel,
@@ -18644,6 +18637,12 @@ body.column-layout-dragging {
   background: var(--fp-surface);
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
+}
+
+.settings-project-column {
+  background: var(--fp-surface);
+  border: 1px solid var(--fp-border);
+  border-radius: 0;
 }
 
 .settings-project-toolbar,
@@ -18712,7 +18711,6 @@ body.column-layout-dragging {
 
 .settings-native-table-shell {
   border-color: var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -19257,12 +19255,18 @@ body.column-layout-dragging {
   opacity: 0.55;
 }
 
-.cost-table-shell,
 .cost-explorer-lane,
-.cost-detail-panel-shell,
-.cost-table-section {
+.cost-detail-panel-shell {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+  box-shadow: none;
+}
+
+.cost-table-shell,
+.cost-table-section {
+  border: 1px solid var(--fp-border);
+  border-radius: 0;
   background: var(--fp-surface);
   box-shadow: none;
 }
@@ -21303,7 +21307,6 @@ body.column-layout-dragging {
   overscroll-behavior: contain;
   scrollbar-gutter: stable both-edges;
   border: 1px solid #dfe4ea;
-  border-radius: 4px;
   background: #ffffff;
 }
 
@@ -22075,12 +22078,10 @@ body.column-layout-dragging {
 .bank-transaction-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   min-width: 0;
   min-height: 0;
-  padding: 14px;
   border: 1px solid var(--bank-border);
-  border-radius: 8px;
   background: var(--bank-surface);
   box-shadow: none;
 }
@@ -22088,6 +22089,8 @@ body.column-layout-dragging {
 .bank-transaction-toolbar {
   flex: 0 0 auto;
   min-width: 0;
+  padding: 14px;
+  border-bottom: 1px solid var(--bank-border);
   color: var(--bank-text);
 }
 
@@ -22206,8 +22209,6 @@ body.column-layout-dragging {
   min-height: 420px;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--bank-border);
-  border-radius: 8px;
   background: var(--bank-surface);
 }
 
@@ -23603,6 +23604,10 @@ body.column-layout-dragging {
   }
 
   .bank-transaction-panel {
+    padding: 0;
+  }
+
+  .bank-transaction-toolbar {
     padding: 12px;
   }
 
@@ -24581,7 +24586,6 @@ body.column-layout-dragging {
   min-height: 0;
   overflow: hidden;
   border: 1px solid #d5dde8;
-  border-radius: 8px;
   background: #ffffff;
 }
 
@@ -24690,7 +24694,6 @@ body.column-layout-dragging {
   max-width: 100%;
   overflow: hidden;
   border: 1px solid #d5dde8;
-  border-radius: 8px;
   background: #ffffff;
 }
 
@@ -25385,7 +25388,6 @@ body.column-layout-dragging {
 .etc-invoice-table-container,
 .etc-reconciliation-table-container {
   border-color: var(--fp-border);
-  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 

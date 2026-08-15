@@ -621,11 +621,11 @@ describe("BankFlowRuleBatchPage", () => {
     expect(toastButtonRule).toContain("var(--motion-fast)");
 
     expect(railRule).toContain("border-radius: var(--fp-radius-sm)");
-    expect(transactionRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(transactionRule).not.toContain("border-radius");
     expect(transactionListRule).toContain("max-height: calc(100vh - 214px)");
     expect(selectedBatchRule).toContain("inset 3px 0 0 var(--fp-primary)");
     expect(tableWrapRule).toContain("overflow: hidden");
-    expect(tableWrapRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(tableWrapRule).not.toContain("border-radius");
     expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(amountRule).toContain("text-align: right");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");

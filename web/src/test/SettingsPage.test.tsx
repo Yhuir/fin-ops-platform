@@ -172,7 +172,8 @@ describe("Settings page", () => {
   test("keeps premium settings tree, form, table, dialog, and motion CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
     const shellRule = cssRule(styles, ".settings-route,\n.settings-layout,\n.settings-content-panel");
-    const navRule = cssRule(styles, ".settings-nav-shell,\n.settings-tree-panel,\n.settings-content-panel,\n.settings-section-panel");
+    const navRule = cssRule(styles, ".settings-nav-shell,\n.settings-tree-panel");
+    const panelRule = cssRule(styles, ".settings-content-panel,\n.settings-section-panel");
     const treeMotionRule = cssRule(styles, ".settings-tree-item", "--motion-fast");
     const controlMotionRule = cssRule(
       styles,
@@ -183,7 +184,8 @@ describe("Settings page", () => {
     const tableRule = cssRule(styles, ".settings-native-table th,\n.settings-native-table td");
     const amountRule = cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount");
     const tagRule = cssRule(styles, ".settings-source-tag,\n.settings-selected-tag,\n.oa-manual-import__metrics span");
-    const projectRule = cssRule(styles, ".settings-project-toolbar,\n.settings-project-column,\n.settings-bank-mapping-row,\n.settings-data-reset-card,\n.settings-pending-tag-panel,\n.settings-checkbox-list");
+    const projectRule = cssRule(styles, ".settings-project-toolbar,\n.settings-bank-mapping-row,\n.settings-data-reset-card,\n.settings-pending-tag-panel,\n.settings-checkbox-list");
+    const projectColumnRule = cssRule(styles, ".settings-project-column");
     const oaTableRule = cssRule(styles, ".oa-manual-import__table");
     const selectedRule = cssRule(styles, ".settings-native-table-row--selected > td,\n.settings-tree-item[aria-selected=\"true\"],\n.settings-tree-item--selected");
     const dangerRule = cssRule(styles, ".settings-danger-button:hover:not(:disabled)");
@@ -191,6 +193,7 @@ describe("Settings page", () => {
     expect(shellRule).toContain("var(--fp-surface)");
     expect(navRule).toContain("var(--fp-border)");
     expect(navRule).toContain("var(--fp-radius-sm)");
+    expect(panelRule).toContain("border-radius: 0");
     expect(treeMotionRule).toContain("--motion-fast");
     expect(treeMotionRule).toContain("--ease-out-quart");
     expect(controlMotionRule).toContain("--motion-fast");
@@ -205,6 +208,7 @@ describe("Settings page", () => {
     expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
     expect(projectRule).toContain("var(--fp-surface)");
     expect(projectRule).toContain("var(--fp-border)");
+    expect(projectColumnRule).toContain("border-radius: 0");
     expect(oaTableRule).toContain("min-width: 1500px");
     expect(oaTableRule).toContain("table-layout: fixed");
     expect(selectedRule).toContain("var(--fp-primary-soft)");
