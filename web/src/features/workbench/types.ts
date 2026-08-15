@@ -87,11 +87,18 @@ export type WorkbenchAnomalyItem = {
   attachmentFileCount: number;
 };
 
+export type WorkbenchAnomalyReviewClassificationCode =
+  | "oa_bank_amount_mismatch"
+  | "oa_invoice_amount_mismatch"
+  | "bank_invoice_amount_mismatch"
+  | "no_anomaly";
+
 export type WorkbenchAnomaly = {
   code: "workbench_anomaly" | (string & {});
   fingerprint: string;
   reviewDecision: "pending" | "accept_paired" | "keep_unpaired";
   reviewedItemFingerprints: string[];
+  reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[];
   reviewNote: string;
   reviewedBy: string;
   reviewedAt?: string;

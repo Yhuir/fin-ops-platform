@@ -14,6 +14,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    normalize_oa_attachment_expense_item_ids,
+)
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
 )
@@ -217,6 +220,7 @@ class PostgresWorkbenchPageHydrationRepository:
                 "Canonical Workbench page members changed during hydration: "
                 + ",".join(f"{row_type}:{row_id}" for row_type, row_id in missing)
             )
+        normalize_oa_attachment_expense_item_ids(list(rows_by_typed_id.values()))
         grouped = builder.build_page_groups(
             scope_key=scope_key,
             rows_by_typed_id=rows_by_typed_id,
@@ -907,6 +911,10 @@ class PostgresWorkbenchPageHydrationRepository:
                             decision.raw_payload#>'{normalized_payload,reviewed_item_fingerprints}',
                             '[]'::jsonb
                         ),
+                        'review_classification_codes', coalesce(
+                            decision.raw_payload#>'{normalized_payload,review_classification_codes}',
+                            '[]'::jsonb
+                        ),
                         'note', coalesce(
                             decision.raw_payload#>>'{normalized_payload,note}',
                             ''
@@ -1185,6 +1193,7 @@ class PostgresWorkbenchPageHydrationRepository:
                 connection=connection,
                 settings=settings,
             )
+        normalize_oa_attachment_expense_item_ids(list(rows_by_typed_id.values()))
         grouped = WorkbenchCanonicalRowsBuilder(
             connection=connection
         ).build_page_groups(

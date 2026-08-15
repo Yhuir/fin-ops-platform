@@ -50,6 +50,9 @@ function group(zone: "paired" | "unpaired"): WorkbenchRelationGroup {
       fingerprint: "a".repeat(64),
       reviewDecision: zone === "paired" ? "accept_paired" : "pending",
       reviewedItemFingerprints: zone === "paired" ? anomalyItems.map((item) => item.fingerprint) : [],
+      reviewClassificationCodes: zone === "paired"
+        ? ["oa_bank_amount_mismatch", "bank_invoice_amount_mismatch"]
+        : [],
       reviewNote: "",
       reviewedBy: zone === "paired" ? "reviewer" : "",
       items: anomalyItems,
@@ -61,6 +64,7 @@ function renderDrawer(
   bucket: "paired" | "unpaired",
   onReviewAnomaly = vi.fn(),
   canMutateData = true,
+  anomalyGroup = group(bucket),
 ) {
   render(
     <WorkbenchExceptionDrawer
@@ -68,7 +72,7 @@ function renderDrawer(
       canMutateData={canMutateData}
       contentGeneration={1}
       error={null}
-      groups={[group(bucket)]}
+      groups={[anomalyGroup]}
       hasMore={false}
       loading={false}
       loadingMore={false}
@@ -90,7 +94,7 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByText("已配对异常")).toBeInTheDocument();
   });
 
-  it("requires every anomaly item to be reviewed before either decision", async () => {
+  it("requires a manual amount classification before either decision", async () => {
     const user = userEvent.setup();
     const onReview = vi.fn();
     renderDrawer("unpaired", onReview);
@@ -99,9 +103,10 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(keep).toBeDisabled();
     expect(accept).toBeDisabled();
 
-    await user.click(screen.getByRole("checkbox", { name: "确认已审阅 OA流水金额不一致" }));
-    expect(accept).toBeDisabled();
-    await user.click(screen.getByRole("checkbox", { name: "确认已审阅 流水发票金额不一致" }));
+    await user.click(screen.getByRole("button", { name: /人工金额判断/ }));
+    await user.click(screen.getByRole("option", { name: "OA流水金额不一致" }));
+    await user.click(screen.getByRole("option", { name: "流水发票金额不一致" }));
+    await user.keyboard("{Escape}");
     expect(accept).toBeEnabled();
     await user.click(accept);
 
@@ -109,20 +114,33 @@ describe("WorkbenchExceptionDrawer", () => {
       expect.objectContaining({ id: "case:CASE-1" }),
       "accept_paired",
       anomalyItems.map((item) => item.fingerprint),
+      ["oa_bank_amount_mismatch", "bank_invoice_amount_mismatch"],
     );
+  });
+
+  it("keeps no anomaly mutually exclusive with the mismatch classifications", async () => {
+    const user = userEvent.setup();
+    renderDrawer("unpaired");
+
+    await user.click(screen.getByRole("button", { name: /人工金额判断/ }));
+    await user.click(screen.getByRole("option", { name: "OA流水金额不一致" }));
+    await user.click(screen.getByRole("option", { name: "无异常" }));
+
+    expect(screen.getByRole("option", { name: "无异常" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "OA流水金额不一致" })).toHaveAttribute("aria-selected", "false");
   });
 
   it("shows only specific amount chips", () => {
     renderDrawer("unpaired");
-    expect(screen.getByText("OA流水金额不一致")).toBeInTheDocument();
-    expect(screen.getByText("流水发票金额不一致")).toBeInTheDocument();
+    expect(screen.getAllByText("OA流水金额不一致").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("流水发票金额不一致").length).toBeGreaterThan(0);
     expect(screen.queryByText(/^金额不一致$/)).not.toBeInTheDocument();
   });
 
   it("keeps anomaly evidence readable without exposing local review controls to read-only users", () => {
     renderDrawer("unpaired", vi.fn(), false);
     expect(screen.getByText("OA流水金额不一致")).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: /确认已审阅/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /人工金额判断/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进入已配对" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "留在未配对" })).not.toBeInTheDocument();
   });
@@ -136,6 +154,24 @@ describe("WorkbenchExceptionDrawer", () => {
       expect.objectContaining({ id: "case:CASE-1" }),
       "keep_unpaired",
       anomalyItems.map((item) => item.fingerprint),
+      ["oa_bank_amount_mismatch", "bank_invoice_amount_mismatch"],
+    );
+  });
+
+  it("keeps historical paired anomaly chips visible and allows withdrawal before classification", async () => {
+    const user = userEvent.setup();
+    const onReview = vi.fn();
+    const legacyGroup = group("paired");
+    legacyGroup.workbenchAnomaly!.reviewClassificationCodes = [];
+    renderDrawer("paired", onReview, true, legacyGroup);
+
+    expect(screen.getByText("OA流水金额不一致")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "撤回" }));
+    expect(onReview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "case:CASE-1" }),
+      "keep_unpaired",
+      anomalyItems.map((item) => item.fingerprint),
+      [],
     );
   });
 });

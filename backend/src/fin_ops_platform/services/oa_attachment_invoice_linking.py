@@ -134,6 +134,40 @@ def oa_row_source_alias_map(rows: list[dict[str, Any]]) -> dict[str, str]:
     return aliases
 
 
+def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None:
+    """Translate attachment source identities to the current OA expense-item IDs.
+
+    OA attachment facts retain their immutable source item identity.  Workbench
+    rows expose a current canonical item identity whose fingerprint may change
+    when the source row is normalized.  The parent OA plus source row index is
+    the explicit boundary between those identities; amount and display order
+    are deliberately not used as fallbacks.
+    """
+
+    oa_rows = [row for row in rows if str(row.get("type") or "").strip() == "oa"]
+    for invoice_row in (
+        row
+        for row in rows
+        if str(row.get("type") or "").strip() == "invoice"
+        and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
+    ):
+        matches: set[tuple[str, tuple[str, ...]]] = set()
+        for oa_row in oa_rows:
+            canonical_item_ids = canonical_oa_expense_item_ids(
+                oa_row=oa_row,
+                invoice_row=invoice_row,
+            )
+            if canonical_item_ids:
+                matches.add((str(oa_row.get("id") or "").strip(), tuple(canonical_item_ids)))
+        if len(matches) != 1:
+            continue
+        oa_row_id, canonical_item_ids = next(iter(matches))
+        invoice_row["source_oa_id"] = oa_row_id
+        invoice_row["source_oa_row_id"] = oa_row_id
+        invoice_row["source_expense_item_ids"] = list(canonical_item_ids)
+        invoice_row.pop("source_expense_item_id", None)
+
+
 def canonical_oa_expense_item_ids(
     *,
     oa_row: dict[str, Any],

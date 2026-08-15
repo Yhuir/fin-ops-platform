@@ -66,6 +66,7 @@ import type {
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
+  WorkbenchAnomalyReviewClassificationCode,
   WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchRelationPreview,
@@ -2184,6 +2185,7 @@ export default function ReconciliationWorkbenchPage() {
     group: WorkbenchRelationGroup,
     decision: "accept_paired" | "keep_unpaired",
     reviewedItemFingerprints: string[],
+    reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[],
   ) => {
     if (!ensureCanWriteWorkbench() || !group.workbenchAnomaly) {
       return;
@@ -2199,6 +2201,7 @@ export default function ReconciliationWorkbenchPage() {
           fingerprint: group.workbenchAnomaly!.fingerprint,
           decision,
           reviewedItemFingerprints,
+          reviewClassificationCodes,
         });
         setMessage("异常处理已写入，正在重新读取关联台...");
         if (!await rereadWorkbenchAfterCommit()) {

@@ -419,9 +419,13 @@ class WorkbenchAmountCheckService:
             "invoice": list(rows_by_type.get("invoice") or []),
         }
         direction, has_direction_conflict = self._check_direction(normalized_rows)
+        bank_totals = self._bank_totals_for_direction(
+            normalized_rows["bank"],
+            direction,
+        )
         totals = {
             "oa_total": self._sum_amounts(normalized_rows["oa"]),
-            "bank_total": self._pane_total_for_direction(normalized_rows["bank"], direction),
+            "bank_total": bank_totals["net"],
             "invoice_total": self._pane_total_for_direction(normalized_rows["invoice"], direction),
         }
         directions = self._directions(normalized_rows)
@@ -449,6 +453,9 @@ class WorkbenchAmountCheckService:
             "direction": direction,
             "oa_total": self._format_amount(totals["oa_total"]),
             "bank_total": self._format_amount(totals["bank_total"]),
+            "bank_gross_total": self._format_amount(bank_totals["gross"]),
+            "bank_contra_total": self._format_amount(bank_totals["contra"]),
+            "bank_net_total": self._format_amount(bank_totals["net"]),
             "invoice_total": self._format_amount(totals["invoice_total"]),
             "oa_amount": self._format_amount(totals["oa_total"]),
             "bank_amount": self._format_amount(totals["bank_total"]),
@@ -474,6 +481,41 @@ class WorkbenchAmountCheckService:
         if len(directions) == 1:
             return next(iter(directions)), False
         return "unknown", False
+
+    def _bank_totals_for_direction(
+        self,
+        rows: list[dict[str, Any]],
+        direction: str,
+    ) -> dict[str, Decimal | None]:
+        if not rows:
+            return {"gross": None, "contra": None, "net": None}
+        if direction not in {"payment", "receipt"}:
+            total = self._sum_amounts(rows)
+            return {"gross": total, "contra": ZERO, "net": total}
+
+        directed_rows = [
+            (row, row_direction)
+            for row in rows
+            for row_direction in (self._row_direction(row),)
+            if row_direction in {"payment", "receipt"}
+        ]
+        if not directed_rows:
+            total = self._sum_amounts(rows)
+            return {"gross": total, "contra": ZERO, "net": total}
+
+        gross_rows = [row for row, row_direction in directed_rows if row_direction == direction]
+        contra_rows = [
+            row
+            for row, row_direction in directed_rows
+            if row_direction != direction
+        ]
+        gross = self._sum_amounts(gross_rows) or ZERO
+        contra = self._sum_amounts(contra_rows) or ZERO
+        return {
+            "gross": gross,
+            "contra": contra,
+            "net": (gross - contra).quantize(CENT),
+        }
 
     def _pane_total_for_direction(self, rows: list[dict[str, Any]], direction: str) -> Decimal | None:
         if direction not in {"payment", "receipt"}:

@@ -129,7 +129,9 @@ test.describe("workbench exception browser flow", () => {
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(drawer.getByText("OA发票金额不一致").first()).toBeVisible();
-    await drawer.getByRole("checkbox", { name: "确认已审阅 OA发票金额不一致" }).check();
+    await drawer.getByRole("button", { name: /人工金额判断/ }).click();
+    await page.getByRole("option", { name: "OA发票金额不一致" }).click();
+    await page.keyboard.press("Escape");
     const workbenchLoadsBeforeAccept = api.count("GET /api/workbench");
     const bucketLoadsBeforeAccept = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "进入已配对" }).click();
@@ -146,6 +148,7 @@ test.describe("workbench exception browser flow", () => {
       fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       decision: "accept_paired",
       reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      review_classification_codes: ["oa_invoice_amount_mismatch"],
     });
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeAccept + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeAccept + 1);
@@ -168,6 +171,7 @@ test.describe("workbench exception browser flow", () => {
       fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       decision: "keep_unpaired",
       reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      review_classification_codes: ["oa_invoice_amount_mismatch"],
     });
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeWithdraw + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeWithdraw + 1);

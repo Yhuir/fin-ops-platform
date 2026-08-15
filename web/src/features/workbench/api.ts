@@ -29,6 +29,7 @@ import type {
   WorkbenchAmountCheck,
   WorkbenchAnomaly,
   WorkbenchAnomalyItem,
+  WorkbenchAnomalyReviewClassificationCode,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -203,6 +204,7 @@ type ApiWorkbenchAnomaly = {
   fingerprint?: string | null;
   review_decision?: string | null;
   reviewed_item_fingerprints?: unknown[] | null;
+  review_classification_codes?: unknown[] | null;
   review_note?: string | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
@@ -689,6 +691,7 @@ type WorkbenchAnomalyReviewPayload = {
   decision: "accept_paired" | "keep_unpaired";
   note?: string;
   reviewedItemFingerprints: string[];
+  reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[];
 };
 
 type ConfirmCashPassThroughPayload = {
@@ -1008,6 +1011,14 @@ function mapWorkbenchAnomaly(
     fingerprint,
     reviewDecision,
     reviewedItemFingerprints: toStringList(value.reviewed_item_fingerprints),
+    reviewClassificationCodes: toStringList(value.review_classification_codes).filter(
+      (code): code is WorkbenchAnomalyReviewClassificationCode => (
+        code === "oa_bank_amount_mismatch"
+        || code === "oa_invoice_amount_mismatch"
+        || code === "bank_invoice_amount_mismatch"
+        || code === "no_anomaly"
+      ),
+    ),
     reviewNote: toDisplayValue(value.review_note, ""),
     reviewedBy: toDisplayValue(value.reviewed_by, ""),
     reviewedAt: toDisplayValue(value.reviewed_at, "") || undefined,
@@ -3412,6 +3423,7 @@ export async function reviewWorkbenchAnomaly(
         decision: payload.decision,
         note: payload.note,
         reviewed_item_fingerprints: payload.reviewedItemFingerprints,
+        review_classification_codes: payload.reviewClassificationCodes,
       }),
     },
   );

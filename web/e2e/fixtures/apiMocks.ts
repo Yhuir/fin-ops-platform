@@ -733,6 +733,7 @@ function buildAmountMismatchWorkbenchGroup(decision: WorkbenchAnomalyReviewDecis
     fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     review_decision: decision,
     reviewed_item_fingerprints: decision ? [anomalyItem.fingerprint] : [],
+    review_classification_codes: decision ? ["oa_invoice_amount_mismatch"] : [],
     review_note: decision === "accept_paired" ? "浏览器 E2E 已确认进入已配对" : "",
     items: [anomalyItem],
   };
@@ -9942,7 +9943,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/workbench/exceptions/review") {
       await delay(200);
-      const body = parseJsonBody(request.postData()) as { decision?: string };
+      const body = parseJsonBody(request.postData()) as {
+        decision?: string;
+        review_classification_codes?: string[];
+      };
       const decision = body.decision;
       workbenchAmountMismatchDecision = decision === "accept_paired"
         ? "accept_paired"

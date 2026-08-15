@@ -37,7 +37,7 @@
 | `RECON-WB-E2E-006` | direct query failed/timeout 状态 | P0 | direct query 503/超时时显示可重试错误，不显示 false-empty、不读旧 projection/cache、不请求 refresh-status；OA sync dirty/refreshing 仍按独立安全合同禁写。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认、关系级撤回和异常抽屉内写操作，并且不会发出 mutation API；未配对工具栏对任何角色都不显示旧人工“异常处理”。 |
-| `RECON-WB-E2E-009` | 统一异常审阅与分区流转 | P1 | OA—流水、OA—发票、流水—发票和附件异常必须默认留在未配对；`290=145+145`、`405=350+55` 同行且无误报。用户逐项审阅后可 accept/keep；accept 后保留具体 chip并进入已配对异常，撤回后抽屉与主区同步回未配对。每次决定一次 canonical GET、一次目标 bucket GET，零 downstream job；旧 ignore/restore routes 与 UI 不存在。 |
+| `RECON-WB-E2E-009` | 统一异常审阅与分区流转 | P1 | OA—流水、OA—发票、流水—发票和附件异常必须默认留在未配对；`290=145+145`、`405=350+55`、`350=150+100+100` 同行且无误报，付款关系 `1050-35=1015` 与 OA/发票 `1015` 不生成异常。金额异常必须先人工多选具体分类或互斥的“无异常”，附件异常逐项审阅后才可 accept/keep；accept 后显示人工分类 chip并进入已配对异常，撤回后抽屉与主区同步回未配对。每次决定一次 canonical GET、一次目标 bucket GET，零 downstream job；旧 ignore/restore routes 与 UI 不存在。 |
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 两区首屏各保留 50 组且没有手动“加载更多”；滚动接近区底部才自动读取下一页，失败不循环重试；区域搜索可命中尚未加载的全部服务端数据并高亮；详情、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |
 | `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；OA 状态恢复后按权威 OA status 自动恢复，不引入 Workbench generation/version gate。 |

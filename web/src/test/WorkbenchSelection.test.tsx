@@ -157,6 +157,7 @@ function withAmountMismatchGroups(
       fingerprint: "a".repeat(64),
       review_decision: state === "paired" ? "accept_paired" : "pending",
       reviewed_item_fingerprints: state === "paired" ? ["b".repeat(64)] : [],
+      review_classification_codes: state === "paired" ? ["oa_invoice_amount_mismatch"] : [],
       items: [{
         code: "oa_invoice_amount_mismatch",
         label: "OA发票金额不一致",
@@ -1553,7 +1554,9 @@ describe("Workbench row selection and detail drawer", () => {
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     }).length;
 
-    await user.click(within(drawer).getByRole("checkbox", { name: "确认已审阅 OA发票金额不一致" }));
+    await user.click(within(drawer).getByRole("button", { name: /人工金额判断/ }));
+    await user.click(screen.getByRole("option", { name: "OA发票金额不一致" }));
+    await user.keyboard("{Escape}");
     await user.click(within(drawer).getByRole("button", { name: "留在未配对" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
@@ -1606,7 +1609,9 @@ describe("Workbench row selection and detail drawer", () => {
     });
     expect(initialBucketReads).toHaveLength(1);
 
-    await user.click(within(drawer).getByRole("checkbox", { name: "确认已审阅 OA发票金额不一致" }));
+    await user.click(within(drawer).getByRole("button", { name: /人工金额判断/ }));
+    await user.click(screen.getByRole("option", { name: "OA发票金额不一致" }));
+    await user.keyboard("{Escape}");
     await user.click(within(drawer).getByRole("button", { name: "进入已配对" }));
     expect(await within(drawer).findByRole("button", { name: "撤回" })).toBeInTheDocument();
 

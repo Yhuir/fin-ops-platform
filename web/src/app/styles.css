@@ -14516,6 +14516,12 @@ body.column-layout-dragging {
   accent-color: #1d4ed8;
 }
 
+.workbench-anomaly-drawer__classification {
+  width: min(245px, 24vw);
+  flex: 0 0 auto;
+  text-align: left;
+}
+
 .workbench-anomaly-drawer__decision-buttons {
   display: flex;
   flex: 0 0 auto;

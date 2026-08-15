@@ -78,6 +78,12 @@
 - Service/API：`tests/test_workbench_relation_grouping.py` 保护 `workbench_anomaly.items[]` 和具体 pair chip；`tests/test_workbench_anomaly_review_service.py` 保护 exact item review、stale fingerprint、其他 blocker 与新 API；PostgreSQL integration 保护异常桶在分页前过滤及 SQL/Python fingerprint 一致。
 - Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行和附件占位；`WorkbenchApi.test.ts` 保护统一 anomaly DTO；抽屉/页面测试保护具体 chip、两个新 bucket、逐项审阅、流转与只读行为。
 
+## 2026-08-15 退款净额、历史附件归一与人工金额分类
+
+- Business core：`tests/test_workbench_amount_check_service.py` 保护付款关系按同 relation 的 `1050 支出 - 35 退款收入 = 1015` 与 OA/五张发票 `1015` 比较，三种金额异常均为空；`tests/test_oa_attachment_invoice_linking.py` 保护历史 OA 子项 ID 通过唯一 parent + row index 归一，使 `350` 子付款项与 `150+100+100` 三张发票同带，歧义来源保持 fail closed。
+- Service/API：`tests/test_workbench_page_query_repository.py` 保护 SQL 异常候选分区同步使用净额而非 gross；`tests/test_workbench_anomaly_review_service.py` 保护金额异常必须提交 allowlist 人工分类、`无异常` 互斥、fingerprint/idempotency/persistence；`WorkbenchApi.test.ts` 保护 `review_classification_codes[]` 双向 DTO。
+- Frontend：`WorkbenchExceptionDrawer.test.tsx` 保护金额下拉多选、提交前禁用、`无异常` 互斥、已配对撤回沿用原人工分类及只读权限。没有新增 table、migration、read model、worker、queue、cache、逐行 I/O 或依赖。
+
 ## 2026-08-15 OA附件发票多对多与子付款项定位
 
 - Business/service：`test_mongo_oa_adapter.py` 保护同一物理附件跨两个子付款项只解析一次、再分别绑定来源；`test_oa_attachment_invoice_promotion_service.py` 与 `test_import_service.py` 保护同 OA 多来源边不丢失；`test_workbench_amount_check_service.py` 和 `test_workbench_relation_grouping.py` 保护 `18+18=36` 不重复计票、一个 item 多票集合求和，以及缺失/解析失败/待归属分类。

@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    canonical_oa_expense_item_ids,
+    normalize_oa_attachment_expense_item_ids,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_relation_requirements import (
@@ -206,7 +206,7 @@ class WorkbenchRelationGroupingService:
             self._relation_row(rows_by_id[row_id], relation, zone=base_zone)
             for row_id in relation["row_ids"]
         ]
-        self._normalize_oa_attachment_expense_item_ids(rows)
+        normalize_oa_attachment_expense_item_ids(rows)
         rows_by_type = {
             row_type: [row for row in rows if str(row.get("type")) == row_type]
             for row_type in ROW_TYPES
@@ -255,6 +255,9 @@ class WorkbenchRelationGroupingService:
             anomaly["reviewed_item_fingerprints"] = list(
                 (review or {}).get("reviewed_item_fingerprints") or []
             ) if isinstance(review, dict) else []
+            anomaly["review_classification_codes"] = list(
+                (review or {}).get("review_classification_codes") or []
+            ) if isinstance(review, dict) else []
             anomaly["review_note"] = str((review or {}).get("note") or "") if isinstance(review, dict) else ""
             anomaly["reviewed_by"] = str((review or {}).get("reviewed_by") or "") if isinstance(review, dict) else ""
             anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
@@ -281,31 +284,6 @@ class WorkbenchRelationGroupingService:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group
-
-    @staticmethod
-    def _normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None:
-        oa_rows = [row for row in rows if str(row.get("type") or "").strip() == "oa"]
-        for invoice_row in (
-            row
-            for row in rows
-            if str(row.get("type") or "").strip() == "invoice"
-            and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
-        ):
-            matches: set[tuple[str, tuple[str, ...]]] = set()
-            for oa_row in oa_rows:
-                canonical_item_ids = canonical_oa_expense_item_ids(
-                    oa_row=oa_row,
-                    invoice_row=invoice_row,
-                )
-                if canonical_item_ids:
-                    matches.add((str(oa_row.get("id") or "").strip(), tuple(canonical_item_ids)))
-            if len(matches) != 1:
-                continue
-            oa_row_id, canonical_item_ids = next(iter(matches))
-            invoice_row["source_oa_id"] = oa_row_id
-            invoice_row["source_oa_row_id"] = oa_row_id
-            invoice_row["source_expense_item_ids"] = list(canonical_item_ids)
-            invoice_row.pop("source_expense_item_id", None)
 
     @staticmethod
     def _relation_row(row: dict[str, Any], relation: dict[str, Any], *, zone: str) -> dict[str, Any]:

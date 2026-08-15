@@ -1548,10 +1548,16 @@ relation_pane_totals as materialized (
                 where member.row_type = 'bank' and member.bank_direction is not null
             ) = 0 then
                 sum(member.bank_amount) filter (where member.row_type = 'bank')
-            else coalesce(sum(member.bank_amount) filter (
-                where member.row_type = 'bank'
-                  and member.bank_direction = direction.direction
-            ), 0)
+            else
+                coalesce(sum(member.bank_amount) filter (
+                    where member.row_type = 'bank'
+                      and member.bank_direction = direction.direction
+                ), 0)
+                - coalesce(sum(member.bank_amount) filter (
+                    where member.row_type = 'bank'
+                      and member.bank_direction in ('payment', 'receipt')
+                      and member.bank_direction <> direction.direction
+                ), 0)
         end, 2) as bank_total,
         count(*) filter (where member.row_type = 'invoice')::bigint as invoice_count,
         count(*) filter (

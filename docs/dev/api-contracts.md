@@ -465,11 +465,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=unpaired|paired`。bucket 必须等于 zone，返回该展示区内携带当前异常的关系组。过滤发生在 exact total/row counts 与 keyset 分页之前，不读 page generation 或 legacy WEX bucket。
 
-关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",reviewed_item_fingerprints[],review_note,reviewed_by,reviewed_at,items[]}`。item code 支持三种具体金额差异与三种 OA 附件异常，并返回 `oa_total`、`bank_total`、`invoice_total`、`mismatch_pair`、`amount_delta` 及来源 IDs。缺失 bundle 表示当前关系无异常；禁止发布泛化 `金额不一致` 或旧 `oa_invoice_anomaly.state`。
+关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",reviewed_item_fingerprints[],review_classification_codes[],review_note,reviewed_by,reviewed_at,items[]}`。item code 支持三种具体金额差异与三种 OA 附件异常，并返回 `oa_total`、`bank_total`、`invoice_total`、`mismatch_pair`、`amount_delta` 及来源 IDs。付款方向 `bank_total` 是同一正式关系内支出减收入/退款的净额。缺失 bundle 表示当前关系无异常；禁止发布泛化 `金额不一致` 或旧 `oa_invoice_anomaly.state`。
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
-`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,fingerprint,decision,reviewed_item_fingerprints,note?}`；`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。旧 amount-mismatch ignore/restore routes 返回 404。
+`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,fingerprint,decision,reviewed_item_fingerprints,review_classification_codes,note?}`；`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。存在金额 item 时人工分类必须非空，可从三种金额差异中多选，或单独选择 `no_anomaly`；纯附件异常不得提交金额分类。系统检测 code 与人工分类分别保存。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。旧 amount-mismatch ignore/restore routes 返回 404。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 

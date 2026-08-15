@@ -46,7 +46,7 @@ ReconciliationWorkbenchPage
 | canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
-| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 missing / parse_failed / unassigned 附件异常。任一异常默认阻断进入已配对区；`accept_paired|keep_unpaired` 决定绑定当前 bundle fingerprint，输入变化后自动失效。历史 ignore/restore、WEX/row-ignore 只保留审计，不重新进入页面分区。 |
+| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 missing / parse_failed / unassigned 附件异常。付款关系的流水金额按同一正式关系内 `支出合计 - 收入/退款合计` 计算净额，不能把退款收入丢弃后误报。任一异常默认阻断进入已配对区；人工 `review_classification_codes[]` 与 `accept_paired|keep_unpaired` 决定共同绑定当前 bundle fingerprint，输入变化后自动失效。系统异常证据与人工分类必须分字段保存。历史 ignore/restore、WEX/row-ignore 只保留审计，不重新进入页面分区。 |
 | list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
@@ -98,6 +98,7 @@ requested tenant/scope
 ### 异常与详情
 
 - `/groups?exception_bucket=unpaired|paired` 在 SQL group spine 上应用 anomaly fingerprint 和人工决定，精确计数并有界分页；bucket 必须与 zone 相同，前端每次只读取当前 bucket，不得并行读取两区或 drain full-detail pages 后本地合并。
+- SQL 候选分区和分页后 Python hydration 必须复用相同的流水净额口径；`1050` 支出与同关系 `35` 退款收入的银行总额为 `1015`，不得先按 gross `1050` 分入异常区再在 DTO 层改正。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。
 - detail 读取 latest committed 事实，不接受 `expected_read_model_version`，不构建全 scope group CTE。
 - summary 列表禁止携带 raw payload、OCR/附件全文和完整 detail fields；折叠内容只在用户展开后读取。
@@ -111,7 +112,7 @@ requested tenant/scope
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
 | filter options | 表头菜单 | `options[{value,label,missing}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins。 |
-| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户明确 `accept_paired` 的 active formal relation；具体异常 chip 仍保留。 |
+| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
 | OA expense/invoice display | 前端 | OA row 输出 `expense_items[]`，OA attachment invoice 输出复数 `source_expense_item_ids[]`。前端按来源图连通分量同带渲染；一张发票只出现一次，无 item 来源的发票只能进入独立残余带，不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |

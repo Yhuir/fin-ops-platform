@@ -250,6 +250,14 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     assert "state" in sql
 
 
+def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+
+    assert "member.bank_direction = direction.direction" in sql
+    assert "member.bank_direction <> direction.direction" in sql
+    assert "member.bank_direction in ('payment', 'receipt')" in sql
+
+
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:
     connection = _CountingQueryConnection([])
     repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")

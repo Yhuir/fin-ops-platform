@@ -1131,6 +1131,7 @@ describe("workbench api bank amount mapping", () => {
       fingerprint: "a".repeat(64),
       decision: "accept_paired",
       reviewedItemFingerprints: ["b".repeat(64)],
+      reviewClassificationCodes: ["oa_bank_amount_mismatch"],
     });
 
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -1144,6 +1145,7 @@ describe("workbench api bank amount mapping", () => {
           fingerprint: "a".repeat(64),
           decision: "accept_paired",
           reviewed_item_fingerprints: ["b".repeat(64)],
+          review_classification_codes: ["oa_bank_amount_mismatch"],
         }),
       }),
     );

@@ -110,6 +110,7 @@ test.describe("workbench read-export permission browser flow", () => {
     await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     await expect(exceptionDrawer.getByText("OA发票金额不一致").first()).toBeVisible();
     await expect(exceptionDrawer.getByRole("checkbox", { name: /确认已审阅/ })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "进入已配对" })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "留在未配对" })).toHaveCount(0);
 

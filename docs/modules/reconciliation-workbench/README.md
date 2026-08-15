@@ -54,8 +54,8 @@ canonical fact repositories
 
 ## 关联台异常合同
 
-- 系统按当前方向分别比较 OA—流水、OA—发票、流水—发票；日常报销的 OA—发票仍按 `source_expense_item_ids[]` 连通分量去重计算。金额完整且不等时只输出 `OA流水金额不一致`、`OA发票金额不一致`、`流水发票金额不一致` 之一或多项；附件异常继续区分缺失、解析失败和待归属。
-- 任何当前异常默认把完整 active relation 留在 `unpaired`。用户逐项确认审阅后选择 `accept_paired` 或 `keep_unpaired`；只有无其他完整性 blocker 时前者才允许进入 `paired`。放行后 chip 仍保留；“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对。
+- 系统按当前方向分别比较 OA—流水、OA—发票、流水—发票；付款关系的银行侧使用同一 relation 内支出减退款收入的净额。日常报销的 OA—发票按归一后的 `source_expense_item_ids[]` 连通分量去重计算；历史附件 ID 只有在 OA parent + row index 唯一时才映射到当前 canonical 子付款项。金额完整且不等时只输出三种具体差异之一或多项；附件异常继续区分缺失、解析失败和待归属。
+- 任何当前异常默认把完整 active relation 留在 `unpaired`。金额异常必须先在多选下拉中人工选择三种具体差异或互斥的“无异常”，再选择 `accept_paired` 或 `keep_unpaired`；附件异常继续逐项审阅。只有无其他完整性 blocker 时前者才允许进入 `paired`。决定后的 chip 使用人工分类，“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对；系统检测证据仍保留用于审计。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧金额 ignore/restore API、service 和前端动作已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。

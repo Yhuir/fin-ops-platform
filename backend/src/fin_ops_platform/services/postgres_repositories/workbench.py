@@ -878,6 +878,8 @@ class PostgresWorkbenchRepository:
             select fingerprint, resolution, updated_by, updated_at,
                    raw_payload#>'{{normalized_payload,reviewed_item_fingerprints}}'
                        as reviewed_item_fingerprints,
+                   raw_payload#>'{{normalized_payload,review_classification_codes}}'
+                       as review_classification_codes,
                    raw_payload#>>'{{normalized_payload,note}}' as note
             from (
                 select
@@ -904,6 +906,9 @@ class PostgresWorkbenchRepository:
                 "reviewed_item_fingerprints": text_list(
                     row.get("reviewed_item_fingerprints")
                 ),
+                "review_classification_codes": text_list(
+                    row.get("review_classification_codes")
+                ),
                 "note": text(row.get("note")),
                 "reviewed_by": text(row.get("updated_by")),
                 "reviewed_at": serialize_value(row.get("updated_at")),
@@ -922,6 +927,7 @@ class PostgresWorkbenchRepository:
         actor_id: str,
         decision: str,
         note: str,
+        review_classification_codes: list[str],
         reviewed_item_fingerprints: list[str],
     ) -> dict[str, Any]:
         normalized_fingerprint = str(fingerprint or "").strip().lower()
@@ -930,6 +936,13 @@ class PostgresWorkbenchRepository:
         normalized_actor_id = str(actor_id or "").strip()
         normalized_decision = str(decision or "").strip()
         normalized_note = str(note or "").strip()
+        normalized_classification_codes = sorted(
+            dict.fromkeys(
+                str(value or "").strip()
+                for value in review_classification_codes
+                if str(value or "").strip()
+            )
+        )
         normalized_reviewed_items = sorted(
             dict.fromkeys(
                 str(value or "").strip().lower()
@@ -953,6 +966,8 @@ class PostgresWorkbenchRepository:
                 select id::text as id, status, resolution, version, created_by, created_at,
                        raw_payload#>'{normalized_payload,reviewed_item_fingerprints}'
                            as reviewed_item_fingerprints,
+                       raw_payload#>'{normalized_payload,review_classification_codes}'
+                           as review_classification_codes,
                        raw_payload#>>'{normalized_payload,note}' as note
                 from app.workbench_exception_cases
                 where case_id = %s
@@ -967,6 +982,8 @@ class PostgresWorkbenchRepository:
                 or text((current or {}).get("note")) != normalized_note
                 or sorted(text_list((current or {}).get("reviewed_item_fingerprints")))
                 != normalized_reviewed_items
+                or sorted(text_list((current or {}).get("review_classification_codes")))
+                != normalized_classification_codes
             )
             next_version = max(1, current_version + (1 if changed else 0))
             normalized_payload = {
@@ -980,6 +997,7 @@ class PostgresWorkbenchRepository:
                 "scope_month": normalized_scope_key,
                 "decision": normalized_decision,
                 "note": normalized_note,
+                "review_classification_codes": normalized_classification_codes,
                 "reviewed_item_fingerprints": normalized_reviewed_items,
                 "row_ids": [],
                 "candidate_ids": [],

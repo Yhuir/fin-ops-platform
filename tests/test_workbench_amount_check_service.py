@@ -128,16 +128,15 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_total"], "100.00")
         self.assertIsNone(result["invoice_total"])
 
-    def test_payment_relation_uses_payment_bank_total_when_bank_rows_include_receipts(self) -> None:
+    def test_payment_relation_nets_refund_receipts_inside_the_same_relation(self) -> None:
         result = self.service.check(
             {
-                "oa": [self._oa_row("300000")],
+                "oa": [self._oa_row("1015")],
                 "bank": [
-                    self._bank_row("300000"),
-                    self._bank_income_row("100000"),
-                    self._bank_income_row("200000"),
+                    self._bank_row("1050"),
+                    self._bank_income_row("35"),
                 ],
-                "invoice": [],
+                "invoice": [self._invoice_row("1015")],
             }
         )
 
@@ -145,11 +144,32 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["direction"], "payment")
         self.assertFalse(result["requires_note"])
         self.assertEqual(result["mismatch_fields"], [])
-        self.assertEqual(result["oa_total"], "300000.00")
-        self.assertEqual(result["bank_total"], "300000.00")
-        self.assertEqual(result["oa_amount"], "300000.00")
-        self.assertEqual(result["bank_amount"], "300000.00")
+        self.assertEqual(result["oa_total"], "1015.00")
+        self.assertEqual(result["bank_total"], "1015.00")
+        self.assertEqual(result["invoice_total"], "1015.00")
+        self.assertEqual(result["bank_gross_total"], "1050.00")
+        self.assertEqual(result["bank_contra_total"], "35.00")
+        self.assertEqual(result["bank_net_total"], "1015.00")
+        self.assertEqual(result["oa_amount"], "1015.00")
+        self.assertEqual(result["bank_amount"], "1015.00")
         self.assertEqual(result["amount_delta"], "0.00")
+
+        self.assertIsNone(
+            self.service.workbench_anomaly(
+                {
+                    "oa": [{**self._oa_row("1015"), "id": "oa-1015"}],
+                    "bank": [
+                        {**self._bank_row("1050"), "id": "bank-payment-1050"},
+                        {**self._bank_income_row("35"), "id": "bank-refund-35"},
+                    ],
+                    "invoice": [
+                        {**self._invoice_row(amount), "id": f"invoice-{index}"}
+                        for index, amount in enumerate(("240", "710", "18", "35", "12"))
+                    ],
+                },
+                relation_id="CASE-NET-1015",
+            )
+        )
 
     def test_oa_reconciliation_amount_overrides_header_amount_for_preview_check(self) -> None:
         result = self.service.check(

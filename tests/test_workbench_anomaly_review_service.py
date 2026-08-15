@@ -69,6 +69,10 @@ def payload(decision: str = "accept_paired") -> dict[str, object]:
         "group_id": "case:CASE-1",
         "fingerprint": "a" * 64,
         "decision": decision,
+        "review_classification_codes": [
+            "oa_bank_amount_mismatch",
+            "bank_invoice_amount_mismatch",
+        ],
         "reviewed_item_fingerprints": ["c" * 64, "b" * 64],
     }
 
@@ -97,6 +101,10 @@ def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> N
         "actor_id": "reviewer",
         "decision": "accept_paired",
         "note": "",
+        "review_classification_codes": [
+            "bank_invoice_amount_mismatch",
+            "oa_bank_amount_mismatch",
+        ],
         "reviewed_item_fingerprints": ["b" * 64, "c" * 64],
     }]
 
@@ -122,12 +130,46 @@ def test_keep_unpaired_is_valid_even_when_other_blockers_exist() -> None:
     assert decisions.calls[0]["decision"] == "keep_unpaired"
 
 
+def test_legacy_paired_amount_anomaly_can_be_withdrawn_without_a_classification() -> None:
+    group = anomaly_group()
+    anomaly = group["workbench_anomaly"]
+    assert isinstance(anomaly, dict)
+    anomaly["review_decision"] = "accept_paired"
+    target, decisions = service(group)
+    request = payload("keep_unpaired")
+    request["zone"] = "paired"
+    request["review_classification_codes"] = []
+
+    target.review(request, actor_id="reviewer")
+
+    assert decisions.calls[0]["decision"] == "keep_unpaired"
+    assert decisions.calls[0]["review_classification_codes"] == []
+
+
 def test_review_rejects_stale_fingerprint() -> None:
     target, decisions = service(anomaly_group())
     request = payload()
     request["fingerprint"] = "d" * 64
 
     with pytest.raises(WorkbenchAnomalyReviewConflict, match="已变化"):
+        target.review(request, actor_id="reviewer")
+
+    assert decisions.calls == []
+
+
+def test_review_requires_one_manual_amount_classification_and_keeps_no_anomaly_exclusive() -> None:
+    target, decisions = service(anomaly_group())
+    request = payload()
+    request["review_classification_codes"] = []
+
+    with pytest.raises(ValueError, match="人工金额判断"):
+        target.review(request, actor_id="reviewer")
+
+    request["review_classification_codes"] = [
+        "no_anomaly",
+        "oa_bank_amount_mismatch",
+    ]
+    with pytest.raises(ValueError, match="不能与"):
         target.review(request, actor_id="reviewer")
 
     assert decisions.calls == []
@@ -184,6 +226,7 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
         "fingerprint": "a" * 64,
         "resolution": "accept_paired",
         "reviewed_item_fingerprints": ["b" * 64],
+        "review_classification_codes": ["oa_bank_amount_mismatch"],
         "note": "已核对",
         "updated_by": "reviewer",
         "updated_at": "2026-08-15T08:00:00+08:00",
@@ -195,6 +238,7 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
     assert decisions["a" * 64] == {
         "decision": "accept_paired",
         "reviewed_item_fingerprints": ["b" * 64],
+        "review_classification_codes": ["oa_bank_amount_mismatch"],
         "note": "已核对",
         "reviewed_by": "reviewer",
         "reviewed_at": "2026-08-15T08:00:00+08:00",
@@ -216,6 +260,7 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         actor_id="reviewer",
         decision="accept_paired",
         note="已核对",
+        review_classification_codes=["oa_bank_amount_mismatch"],
         reviewed_item_fingerprints=["b" * 64],
     )
     assert changed["changed"] is True
@@ -229,6 +274,7 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         "version": 1,
         "note": "已核对",
         "reviewed_item_fingerprints": ["b" * 64],
+        "review_classification_codes": ["oa_bank_amount_mismatch"],
     })
     unchanged = PostgresWorkbenchRepository(
         unchanged_connection
@@ -239,6 +285,7 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         actor_id="reviewer",
         decision="accept_paired",
         note="已核对",
+        review_classification_codes=["oa_bank_amount_mismatch"],
         reviewed_item_fingerprints=["b" * 64],
     )
     assert unchanged["changed"] is False
