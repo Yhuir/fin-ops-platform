@@ -15,9 +15,9 @@
 1. 本地 lint、backend、frontend、docs、build 与 diff check。
 2. 提交并推送 remote `main`。
 3. build/upload/候选校验。
-4. maintenance 内 migration 与 exact runtime asset activation。
-5. T+0/T+30 health、worker、queue、canonical audit 和 HTTP SLO。
-6. 保存脱敏 evidence；成功后清理 release 临时文件。
+4. maintenance 内先暂停 OA sync enqueue timer，再执行 migration 与 exact runtime asset activation。
+5. timer 保持 stopped，完成 T+0/T+30 health、worker、queue、canonical audit 和 HTTP SLO。
+6. 保存脱敏 evidence，启动 OA sync enqueue timer；成功后清理 release 临时文件。
 
 Migration 0149 删除旧 projection schema，是 forward-only。执行后禁止自动回滚到依赖旧 schema 的 release；
 失败时保持 maintenance 并用当前代码向前修复。不会删除主数据库。

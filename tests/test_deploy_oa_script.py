@@ -567,6 +567,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("sleep 60", script)
         self.assertNotIn("sleep 240", script)
         self.assertIn("rollback_release_gate", script)
+        self.assertIn("stop_oa_sync_enqueue_timer", script)
+        self.assertIn("start_oa_sync_enqueue_timer", script)
+        install_timer = script.split("install_oa_sync_enqueue_timer() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn('systemctl enable "$timer_unit"', install_timer)
+        self.assertNotIn("enable --now", install_timer)
         self.assertIn("contract-version [--require VERSION]", script)
         self.assertIn("candidate-status <release-name> --json", script)
         self.assertIn("settings-access-control-preflight <release-name>", script)
@@ -574,6 +581,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn('assert_settings_access_control_preflight "$release"', script)
         self.assertIn("previous release lacks $SETTINGS_ACL_CONTRACT", script)
         activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(
+            activate.index("stop_oa_sync_enqueue_timer"),
+            activate.index("systemctl stop fin-ops.service"),
+        )
         self.assertLess(activate.index("systemctl stop fin-ops.service"), activate.index('run_schema_migrations "$src"'))
         self.assertNotIn("install_deploy_control_helper", activate)
         self.assertIn('"release_gate_status": "PASS"', script)

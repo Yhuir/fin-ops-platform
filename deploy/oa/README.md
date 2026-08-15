@@ -97,9 +97,10 @@ Runtime/ACL profile 的激活顺序固定为：
 3. 执行 migration 与 schema check；
 4. 安装当前 worker helper/unit/env，退役 registry 外资产；
 5. 原子切换 `/opt/fin-ops/current`；
-6. 启动四个 worker、dispatcher（如启用）和 API；
-7. 运行 T+0 与 T+30 release checkpoint；
-8. 写入 root-owned、脱敏且带 SHA-256 的 evidence。
+6. 安装并 enable OA sync enqueue timer，但在发布门禁期间保持 stopped；
+7. 启动四个 worker、dispatcher（如启用）和 API；
+8. 运行 T+0 与 T+30 release checkpoint；
+9. 写入 root-owned、脱敏且带 SHA-256 的 evidence，验证成功后再启动 OA sync enqueue timer。
 
 Frontend-only profile 不执行 migration，也不改变 worker registry。
 
@@ -129,6 +130,8 @@ settings maintenance 与 Workbench matching。
 - 没有新产生的退役 projection event。
 
 Release gate 不自动执行真实业务 confirm/withdraw，不伪造业务数据，也不清空失败队列来获得绿色状态。
+候选激活和自动回滚都会先停止 OA sync enqueue timer，避免 `Persistent=true` timer 在 worker 切换窗口创建
+随后失去 lease owner 的 `oa.sync` 任务；timer 只在候选或 previous release 已完成验证后恢复。
 
 ## 生产验证
 

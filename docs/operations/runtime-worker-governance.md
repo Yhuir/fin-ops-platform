@@ -45,12 +45,13 @@ Migration `0149_remove_read_model_runtime.sql` 是 forward-only：删除 `job.re
 
 激活候选 release 时必须：
 
-1. 停止 API、dispatcher 和 worker；
+1. 停止 OA sync enqueue timer，再停止 API、dispatcher 和 worker；
 2. 执行 migration；
 3. 精确删除旧 Workbench generation timer/service/helper 和旧 worker env；
 4. stop/disable registry 外 worker；
-5. 只启动当前四个 worker 与 API；
-6. 运行 canonical page audit、HTTP SLO、health/queue/worker closure。
+5. 安装但暂不启动 OA sync enqueue timer，只启动当前四个 worker 与 API；
+6. 运行 canonical page audit、HTTP SLO、health/queue/worker closure；
+7. T+0/T+30 通过后启动 OA sync enqueue timer；自动回滚同样先验证 previous release，再恢复 timer。
 
 迁移后禁止自动切回依赖旧 schema 的 release。若候选验证失败，保持维护状态，用当前代码向前修复。允许的
 read-model 字样仅限历史 migration/checksum 和负向审计；`retired_projection_event_audit` 发现任何新

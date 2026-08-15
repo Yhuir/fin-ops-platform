@@ -1454,7 +1454,21 @@ install_oa_sync_enqueue_timer() {
   install -m 0644 -o root -g root "$service_src" "$OA_SYNC_ENQUEUE_SERVICE_UNIT"
   install -m 0644 -o root -g root "$timer_src" "$OA_SYNC_ENQUEUE_TIMER_UNIT"
   systemctl daemon-reload
-  systemctl enable --now "$timer_unit"
+  systemctl enable "$timer_unit"
+}
+
+stop_oa_sync_enqueue_timer() {
+  local timer_unit
+  timer_unit="$(basename "$OA_SYNC_ENQUEUE_TIMER_UNIT")"
+  systemctl stop "$timer_unit" >/dev/null 2>&1 || true
+}
+
+start_oa_sync_enqueue_timer() {
+  local service_unit timer_unit
+  service_unit="$(basename "$OA_SYNC_ENQUEUE_SERVICE_UNIT")"
+  timer_unit="$(basename "$OA_SYNC_ENQUEUE_TIMER_UNIT")"
+  systemctl reset-failed "$service_unit" "$timer_unit" >/dev/null 2>&1 || true
+  systemctl start "$timer_unit"
 }
 
 publish_frontend() {
@@ -2426,6 +2440,7 @@ activate_release() {
   elif [[ "$dispatcher_restart_override" != "auto" ]]; then
     die "invalid dispatcher restart override: $dispatcher_restart_override"
   fi
+  stop_oa_sync_enqueue_timer
   systemctl stop fin-ops.service
   if [[ "$release_profile" != "frontend" ]]; then
     systemctl stop fin-ops-rabbitmq-dispatcher.service >/dev/null 2>&1 || true
@@ -3125,6 +3140,9 @@ PY
   fi
   if [[ "$rolled_back" != true ]]; then
     enter_runtime_maintenance
+  elif ! start_oa_sync_enqueue_timer; then
+    rolled_back=false
+    enter_runtime_maintenance
   fi
   write_release_gate_evidence \
     "$candidate" "$previous_release" "$evidence_dir" FAIL "$rolled_back" "$release_profile" "$failure_checkpoint"
@@ -3276,6 +3294,10 @@ PY
   then
     rollback_release_gate \
       "$release" "$previous_release" "$admin_token" "$evidence_dir" evidence_contract "$release_profile"
+  fi
+  if ! start_oa_sync_enqueue_timer; then
+    rollback_release_gate \
+      "$release" "$previous_release" "$admin_token" "$evidence_dir" timer_start "$release_profile"
   fi
   rm -f -- "$profile_report" "$schema_plan_path"
   trap - EXIT
