@@ -25,7 +25,7 @@ export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, 
       onClose={onClose}
       open={open}
       title={title}
-      width={560}
+      width="min(800px, 100vw)"
     >
       <div className="cost-transaction-detail-drawer__body">
         {loading ? (

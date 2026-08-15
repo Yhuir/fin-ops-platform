@@ -44,8 +44,6 @@ export default function CostEntryDetailPanel({ detail }: { detail: CostEntryDeta
           <div><dt>OA 费用类型</dt><dd>{allocation.expenseType || "—"}</dd></div>
           <div><dt>费用内容</dt><dd>{allocation.expenseContent || "—"}</dd></div>
           <div><dt>OA 类型</dt><dd>{allocation.oaApplyType || "—"}</dd></div>
-          <div><dt>OA 单号</dt><dd>{allocation.oaId || "—"}</dd></div>
-          {allocation.expenseItemId ? <div><dt>子付款项 ID</dt><dd>{allocation.expenseItemId}</dd></div> : null}
           <div><dt>申请人</dt><dd>{allocation.oaApplicant || "—"}</dd></div>
           <div><dt>支付账户归属</dt><dd><BankAccountValue value={allocation.paymentAccountLabel || "—"} variant="tag" /></dd></div>
         </dl>
@@ -54,9 +52,8 @@ export default function CostEntryDetailPanel({ detail }: { detail: CostEntryDeta
       <Separator className="cost-detail-separator" />
 
       <section className="cost-detail-section" aria-labelledby="cost-detail-reconciliation-title">
-        <h3 id="cost-detail-reconciliation-title">关联关系校验</h3>
+        <h3 id="cost-detail-reconciliation-title">金额核对</h3>
         <dl className="cost-detail-field-list">
-          <div className="cost-detail-field-row"><dt>关系组</dt><dd>{reconciliation.relationCaseId || "—"}</dd></div>
           <div className="cost-detail-field-row"><dt>OA 归集合计</dt><dd>{formatCostAmount(reconciliation.oaAllocationTotal)}</dd></div>
           <div className="cost-detail-field-row"><dt>关联付款流水合计</dt><dd>{formatCostAmount(reconciliation.bankOutflowTotal)}</dd></div>
           <div className="cost-detail-field-row"><dt>差异</dt><dd>{formatCostAmount(reconciliation.difference)}</dd></div>

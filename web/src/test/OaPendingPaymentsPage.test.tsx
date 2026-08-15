@@ -1484,10 +1484,11 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await user.click(await within(page).findByRole("button", { name: "查看 OA 张三 详情" }));
-    expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
-    const oaDetailTable = await screen.findByRole("grid", { name: "OA详情明细表" });
-    expect(within(oaDetailTable).getByRole("rowheader", { name: "申请人" })).toBeInTheDocument();
-    expect(within(oaDetailTable).getByText("张三")).toBeInTheDocument();
+    const oaDetailDrawer = await screen.findByRole("dialog", { name: "OA详情" });
+    expect(within(oaDetailDrawer).getByRole("heading", { name: "基本信息" })).toBeInTheDocument();
+    expect(within(oaDetailDrawer).getByText("申请人")).toBeInTheDocument();
+    expect(within(oaDetailDrawer).getByText("张三")).toBeInTheDocument();
+    expect(within(oaDetailDrawer).queryByText("分组")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看流水 张三 详情" }));

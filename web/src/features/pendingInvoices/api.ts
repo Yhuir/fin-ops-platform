@@ -953,14 +953,6 @@ function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetail
       value: field.value,
     })).filter((field) => field.label),
   }));
-  if (sections.length === 0) {
-    const fields = Object.entries(payload)
-      .filter(([key, value]) => !["title", "subtitle", "detail_available", "unavailable_reason", "sections"].includes(key) && ["string", "number", "boolean"].includes(typeof value))
-      .map(([key, value]) => ({ label: key, value: String(value) }));
-    if (fields.length > 0) {
-      sections.push({ title: "详情字段", fields });
-    }
-  }
   return {
     title: stringValue(payload.title, target.id),
     subtitle: stringValue(payload.subtitle),

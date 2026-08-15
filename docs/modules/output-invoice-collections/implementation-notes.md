@@ -1,5 +1,11 @@
 # 销项发票收款情况 实施记录
 
+## 2026-08-16 - 发票与关系详情统一公开字段视图
+
+- 详情删除页面私有大卡片/grid renderer，复用共享 HeroUI `AppDrawer`、`Chip`、`StatePanel` 和 800px 紧凑分区 label/value 视图。
+- 红蓝票关系详情只展示发票号码、日期、购方、价税合计和关系数量；`关系模式`、`关系来源`、内部枚举与 ID 不进入 UI。
+- canonical 七个只读 GET、正式关系事实源、收款状态和筛选/导出 I/O 不变；没有新增 backend、数据库、read model、worker、cache 或 fallback。
+
 ## 2026-08-10 月份筛选收敛
 
 - 页面月份筛选删除旧 `MonthPicker`，复用共享 HeroUI“全部 + 年/月”控件；销项发票、收入流水与红蓝票关系的 canonical API I/O 不变。

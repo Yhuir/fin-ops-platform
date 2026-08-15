@@ -159,7 +159,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
       />,
     );
 
-    expect(screen.getByRole("progressbar", { name: "正在加载详情" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("正在加载详情")).getByRole("status")).toBeInTheDocument();
     await waitFor(() => expect(loadDetail).toHaveBeenCalledWith(target));
   });
 

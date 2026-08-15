@@ -224,7 +224,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-transaction-detail-drawer \.finance-drawer__body\s*{[^}]*padding:\s*0/s);
-    expect(css).toMatch(/\.cost-detail-field-row\s*{[^}]*grid-template-columns:\s*112px minmax\(0,\s*1fr\)/s);
+    expect(css).toMatch(/\.cost-detail-field-row\s*{[^}]*grid-template-columns:\s*136px minmax\(0,\s*1fr\)/s);
     expect(css).not.toContain(".cost-detail-modal");
   });
 
@@ -483,6 +483,9 @@ describe("Cost statistics page", () => {
     expect(within(dialog).getByText("支付账户归属")).toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "OA 成本归集" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("OA 单号")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("子付款项 ID")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("关系组")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("heading", { name: "关联付款流水" })).toBeInTheDocument();
     expect(within(dialog).getAllByText("云南溯源科技").length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText("设备货款及材料费").length).toBeGreaterThan(0);

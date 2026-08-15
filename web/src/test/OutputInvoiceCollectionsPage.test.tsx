@@ -236,6 +236,9 @@ describe("销项发票收款情况", () => {
     const relationDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
     expect(within(relationDrawer).getByText("关系数量")).toBeVisible();
     expect(within(relationDrawer).getByText("2")).toBeVisible();
+    expect(within(relationDrawer).queryByText("关系模式")).not.toBeInTheDocument();
+    expect(within(relationDrawer).queryByText("关系来源")).not.toBeInTheDocument();
+    expect(within(relationDrawer).queryByText("output_invoice_reversal")).not.toBeInTheDocument();
 
     await waitFor(() => {
       const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").pathname);

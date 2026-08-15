@@ -6,7 +6,7 @@ type PendingInvoiceDrawerFrameProps = {
   open: boolean;
   title: string;
   closeLabel: string;
-  width?: number;
+  width?: number | string;
   children: ReactNode;
   footer?: ReactNode;
   onClose: () => void;

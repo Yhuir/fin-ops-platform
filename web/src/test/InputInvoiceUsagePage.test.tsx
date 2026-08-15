@@ -463,7 +463,7 @@ describe("Input invoice usage page", () => {
     const button = cssRule(styles, ".input-invoice-usage-button");
     const tableAction = cssRule(styles, ".input-invoice-usage-table-action,\\n.input-invoice-usage-expandable-cell-text__button");
     const drawerBody = cssRule(styles, ".input-invoice-usage-drawer-body");
-    const detailSection = cssRule(styles, ".input-invoice-usage-detail-section,\\n.input-invoice-usage-export-summary,\\n.input-invoice-usage-export-sample");
+    const detailSection = cssRule(styles, ".entity-detail-section");
     const filterTrigger = cssRule(styles, ".input-invoice-usage-filter-menu__trigger");
     const paymentCell = cssRule(styles, ".input-invoice-usage-table-cell--payment");
     const stickyHeader = cssRule(styles, ".finance-table__column");
@@ -482,8 +482,8 @@ describe("Input invoice usage page", () => {
     expect(button).toContain("var(--ease-out-quart)");
     expect(tableAction).toContain("var(--motion-fast)");
     expect(drawerBody).toContain("gap: var(--fp-space-3)");
-    expect(detailSection).toContain("border-top: 1px solid var(--fp-border)");
-    expect(detailSection).toContain("background: transparent");
+    expect(detailSection).toContain("padding: var(--fp-space-3) 0");
+    expect(styles).toMatch(/\.entity-detail-section \+ \.entity-detail-section\s*{[^}]*border-top:\s*1px solid var\(--fp-border\)/s);
     expect(filterTrigger).toContain("var(--motion-fast)");
     expect(paymentCell).toContain("color-mix(in srgb, var(--fp-warning-soft)");
     expect(stickyHeader).toContain("position: sticky");

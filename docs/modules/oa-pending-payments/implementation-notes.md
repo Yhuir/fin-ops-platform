@@ -1,5 +1,11 @@
 # OA待付款核对 实施记录
 
+## 2026-08-16 - OA 详情抽屉统一公开字段视图
+
+- 页面详情复用共享 HeroUI `AppDrawer` 与统一的紧凑分区 label/value 渲染，不再启用抽屉内嵌套表格和 persistent 变体。
+- 只展示申请人、类型、项目、金额、月份、事由、往来方等公开业务字段；`分组字段内容`、`分组 OA 信息`、内部 ID 和原始 payload 不进入 UI。
+- canonical rows/detail API、权限、关联写链和页面状态不变；没有新增数据库、read model、worker、cache 或 fallback。
+
 ## 2026-08-10 - 筛选栏视觉收敛
 
 - 状态切换移除外层遗留白框，月份改用共享 HeroUI“全部 + 年/月”控件，搜索区删除重复容器边框；canonical rows API、写回/关联命令和写后单次 GET 不变。

@@ -1,5 +1,11 @@
 # 进项发票使用情况 实施记录
 
+## 2026-08-16 - OA、流水与发票详情统一公开字段视图
+
+- 三类详情删除模块私有嵌套 FinanceTable/grid renderer，复用共享 HeroUI `AppDrawer`、`Chip`、`StatePanel` 和紧凑分区 label/value 视图，抽屉统一为 800px。
+- API adapter 不再生成“OA 原始字段”“银行原始字段”“关联台证据”和“来源批次/来源链接”；发票货物明细改为结构化公开字段，不拼接为内部调试字符串。
+- rows、relation-details、OA reverse、支付状态、权限和 read model I/O 不变；没有新增数据库、worker、cache 或兼容 fallback。
+
 ## 2026-08-06 - OA 申请人列 workflow 状态
 
 - OA canonical query 合并 completed projection 与 in-progress admission，OA summary 输出 `workflowStatus`。

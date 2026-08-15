@@ -1,5 +1,11 @@
 # 待找发票 实施记录
 
+## 2026-08-16 - OA、流水与发票详情统一公开字段视图
+
+- 三类详情继续通过共享 HeroUI `AppDrawer` 打开，统一为 800px 紧凑分区 label/value 排版；删除嵌套表格、大卡片和页面私有详情渲染分支。
+- 详情只消费 API 已声明的公开 section；删除“无 section 时枚举整个 payload”的旧回退，避免内部字段、原始 payload 或未知新增字段泄漏到 UI。
+- 打印视图沿用既有打印合同，但同样先经过公开字段适配；canonical read、关联命令、筛选、导出和权限 I/O 不变。
+
 ## 2026-08-06 - OA workflow 状态展示
 
 - OA canonical query 合并 completed projection 与 in-progress admission，并输出 `workflow_status`。

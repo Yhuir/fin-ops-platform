@@ -440,8 +440,6 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
     detailField("购买方", camelOrSnake(raw, "buyerName", "buyer_name")),
     detailField("价税合计", camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     detailField("货物或服务", camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
-    detailField("关系模式", camelOrSnake(raw, "relationMode", "relation_mode")),
-    detailField("关系来源", camelOrSnake(raw, "relationSource", "relation_source")),
   ]);
 }
 

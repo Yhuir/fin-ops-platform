@@ -339,12 +339,6 @@ function detailSection(title: string, fields: InputInvoiceUsageDetailResponse["s
   return { title, fields };
 }
 
-function objectEntriesSection(title: string, value: unknown) {
-  const raw = objectValue(value);
-  const fields = Object.entries(raw).map(([key, item]) => detailField(key, item));
-  return fields.length > 0 ? detailSection(title, fields) : null;
-}
-
 function mapDetailSections(value: unknown): InputInvoiceUsageDetailResponse["sections"] {
   return arrayValue(value).map((sectionValue) => {
     const section = objectValue(sectionValue);
@@ -389,32 +383,26 @@ function mapInvoiceDetailResponse(payload: unknown): InputInvoiceUsageDetailResp
       detailField("发票风险等级", camelOrSnake(raw, "riskLevel", "risk_level")),
       detailField("开票人", raw.issuer),
       detailField("备注", raw.remark),
-      detailField("来源批次", camelOrSnake(raw, "sourceBatchId", "source_batch_id")),
     ]),
   ];
 
   const lineItems = arrayValue(camelOrSnake(raw, "lineItems", "line_items"));
   if (lineItems.length > 0) {
-    sections.push(detailSection("货物或应税劳务明细", lineItems.map((item, index) => {
+    sections.push(...lineItems.map((item, index) => {
       const line = objectValue(item);
-      return detailField(`明细 ${index + 1}`, [
-        stringValue(camelOrSnake(line, "taxableItemName", "taxable_item_name")),
-        `规格型号 ${stringValue(camelOrSnake(line, "specificationModel", "specification_model")) || "-"}`,
-        `单位 ${stringValue(line.unit) || "-"}`,
-        `数量 ${stringValue(line.quantity) || "-"}`,
-        `单价 ${stringValue(camelOrSnake(line, "unitPrice", "unit_price")) || "-"}`,
-        `金额 ${stringValue(line.amount) || "-"}`,
-        `税率 ${stringValue(camelOrSnake(line, "taxRate", "tax_rate")) || "-"}`,
-        `税额 ${stringValue(camelOrSnake(line, "taxAmount", "tax_amount")) || "-"}`,
-        `价税合计 ${stringValue(camelOrSnake(line, "totalWithTax", "total_with_tax")) || "-"}`,
-        `备注 ${stringValue(line.remark) || "-"}`,
-      ].join(" / "));
-    })));
-  }
-
-  const sourceLinks = objectEntriesSection("来源链接", camelOrSnake(raw, "sourceLinks", "source_links"));
-  if (sourceLinks) {
-    sections.push(sourceLinks);
+      return detailSection(`货物或应税劳务明细 ${index + 1}`, [
+        detailField("货物或应税劳务名称", camelOrSnake(line, "taxableItemName", "taxable_item_name")),
+        detailField("规格型号", camelOrSnake(line, "specificationModel", "specification_model")),
+        detailField("单位", line.unit),
+        detailField("数量", line.quantity),
+        detailField("单价", camelOrSnake(line, "unitPrice", "unit_price")),
+        detailField("金额", line.amount),
+        detailField("税率", camelOrSnake(line, "taxRate", "tax_rate")),
+        detailField("税额", camelOrSnake(line, "taxAmount", "tax_amount")),
+        detailField("价税合计", camelOrSnake(line, "totalWithTax", "total_with_tax")),
+        detailField("备注", line.remark),
+      ]);
+    }));
   }
 
   return {
@@ -444,10 +432,6 @@ function mapBankDetailResponse(payload: unknown): InputInvoiceUsageDetailRespons
       detailField("备注", raw.remark),
     ]),
   ];
-  const bankTextFields = objectEntriesSection("银行原始字段", camelOrSnake(raw, "bankTextFields", "bank_text_fields"));
-  if (bankTextFields) {
-    sections.push(bankTextFields);
-  }
   return {
     title: "银行流水详情",
     sections,
@@ -478,10 +462,6 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
       detailField("打开链接", camelOrSnake(raw, "openUrl", "open_url")),
     ]),
   ];
-  const detailFields = objectEntriesSection("OA原始字段", camelOrSnake(raw, "detailFields", "detail_fields"));
-  if (detailFields) {
-    sections.push(detailFields);
-  }
   return {
     title: "OA详情",
     detailAvailable: true,
@@ -506,10 +486,6 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
     sections.push(...detailSections);
   } else if (summaries.length > 0) {
     sections.push(detailSection("关联摘要", summaries.map((item, index) => detailField(`${kind} ${index + 1}`, item))));
-  }
-  const relations = arrayValue(raw.relations);
-  if (relations.length > 0) {
-    sections.push(detailSection("关联台证据", relations.map((item, index) => detailField(`关系 ${index + 1}`, item))));
   }
   return {
     title: stringValue(raw.title) || `${kind}关联明细`,
