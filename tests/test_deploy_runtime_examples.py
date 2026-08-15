@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 import unittest
 
 from fin_ops_platform.services.runtime_worker_registry import (
@@ -92,6 +93,13 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertIn("runtime-queue-history-prune", helper)
         self.assertNotIn("read_model_dirty_scopes", helper)
+
+    def test_runtime_queue_prune_is_portable_bash(self) -> None:
+        helper = QUEUE_PRUNE.read_text(encoding="utf-8")
+
+        subprocess.run(["bash", "-n", str(QUEUE_PRUNE)], check=True)
+        self.assertIn("job_schema_size_query=", helper)
+        self.assertNotIn('-Atc \\"', helper)
 
 
 if __name__ == "__main__":
