@@ -65,78 +65,28 @@ def _literal_ilike_pattern(value: str) -> str:
     return f"%{escaped}%"
 
 
-def _compact_anomaly_oa_payload_sql(
+def _anomaly_oa_source_payload_sql(
     completed_alias: str,
     pending_alias: str,
 ) -> str:
-    source_payload = (
+    return (
         f"coalesce({completed_alias}.normalized_payload, "
         f"{pending_alias}.source_payload, '{{}}'::jsonb)"
     )
-    source_identity_aliases = ",\n                ".join(
+
+
+def _anomaly_oa_external_alias_values_sql(source_payload: str) -> str:
+    return ",\n                ".join(
         "nullif(btrim("
         f"{source_payload}{path}->>'{field_name}'"
         "), '')"
         for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
         for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
     )
+
+
+def _anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
     return f"""
-        case when {completed_alias}.row_id is not null or {pending_alias}.oa_id is not null
-        then jsonb_strip_nulls(jsonb_build_object(
-            'expense_items', coalesce((
-                select jsonb_agg(
-                    jsonb_strip_nulls(jsonb_build_object(
-                        'id', coalesce(item.value->>'id', item.value->>'expense_item_id'),
-                        'expense_item_id', item.value->>'expense_item_id',
-                        'row_index', item.value->>'row_index',
-                        'amount', coalesce(
-                            item.value->>'amount',
-                            item.value->>'settlement_amount',
-                            item.value->>'total_with_tax'
-                        ),
-                        'attachment_file_count', item.value->>'attachment_file_count',
-                        'attachment_parse_failed_count', case
-                            when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
-                                then (item.value->>'attachment_parse_failed_count')::integer
-                            else (
-                                select count(*)::integer
-                                from jsonb_array_elements(
-                                    case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
-                                         then item.value->'attachment_artifacts'
-                                         else '[]'::jsonb end
-                                ) artifact(value)
-                                where artifact.value->>'parse_status' = 'parse_failed'
-                            )
-                        end
-                    ))
-                    order by item.ordinality
-                )
-                from jsonb_array_elements(
-                    case when jsonb_typeof({source_payload}->'expense_items') = 'array'
-                         then {source_payload}->'expense_items'
-                         else '[]'::jsonb end
-                ) with ordinality as item(value, ordinality)
-            ), '[]'::jsonb),
-            'source_aliases', {source_payload}->'source_aliases',
-            'oa_row_id', {source_payload}->>'oa_row_id',
-            'oa_id', {source_payload}->>'oa_id',
-            'source_oa_row_id', {source_payload}->>'source_oa_row_id',
-            'object_identity_key', {source_payload}->>'object_identity_key',
-            'source_identity_aliases', to_jsonb(array_remove(array[
-                {source_identity_aliases}
-            ]::text[], null)),
-            'apply_type', coalesce(
-                {source_payload}->>'apply_type',
-                {source_payload}->>'application_type',
-                {source_payload}->>'form_type'
-            )
-        ))
-        else null end
-    """
-
-
-def _compact_anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
-    source_links = f"""
         case
             when jsonb_typeof({invoice_alias}.source_links) = 'array'
                 then {invoice_alias}.source_links
@@ -148,20 +98,6 @@ def _compact_anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
                 then {invoice_alias}.raw_payload->'normalized_payload'->'source_links'
             else '[]'::jsonb
         end
-    """
-    return f"""
-        coalesce((
-            select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
-                'source_type', coalesce(
-                    link.value->>'source_type', link.value->>'type', link.value->>'source'
-                ),
-                'source_expense_item_id', link.value->>'source_expense_item_id',
-                'source_expense_row_index', link.value->>'source_expense_row_index',
-                'derived_from_oa_id', link.value->>'derived_from_oa_id',
-                'source_workbench_row_id', link.value->>'source_workbench_row_id'
-            )))
-            from jsonb_array_elements({source_links}) as link(value)
-        ), '[]'::jsonb)
     """
 
 _COMPLETED_OA_SQL = """
@@ -1080,8 +1016,13 @@ relation_anomaly_members as materialized (
         member.row_type,
         member.row_id,
         case when member.row_type = 'oa' then
-            {_compact_anomaly_oa_payload_sql('completed_oa', 'pending_oa')}
-        else null end as oa_payload,
+            {_anomaly_oa_source_payload_sql('completed_oa', 'pending_oa')}
+        else null end as oa_source_payload,
+        case when member.row_type = 'oa' then coalesce(
+            {_anomaly_oa_source_payload_sql('completed_oa', 'pending_oa')}->>'apply_type',
+            {_anomaly_oa_source_payload_sql('completed_oa', 'pending_oa')}->>'application_type',
+            {_anomaly_oa_source_payload_sql('completed_oa', 'pending_oa')}->>'form_type'
+        ) else null end as oa_apply_type,
         completed_oa.amount as completed_oa_amount,
         pending_oa.amount as pending_oa_amount,
         bank.amount as bank_amount,
@@ -1126,7 +1067,7 @@ relation_anomaly_members as materialized (
             else null
         end as invoice_direction,
         case when member.row_type = 'invoice' then
-            {_compact_anomaly_invoice_source_links_sql('invoice')}
+            {_anomaly_invoice_source_links_sql('invoice')}
         else '[]'::jsonb end as invoice_source_links
     from canonical_groups groups
     join canonical_group_members member
@@ -1157,12 +1098,72 @@ relation_anomaly_members as materialized (
     where groups.group_kind = 'relation'
       and member.row_type in ('oa', 'bank', 'invoice')
 ),
+oa_exact_identity_aliases as materialized (
+    select distinct
+        member.internal_key,
+        member.row_id as oa_row_id,
+        alias.value
+    from relation_anomaly_members member
+    cross join lateral unnest(array[
+        member.row_id,
+        member.oa_source_payload->>'oa_row_id',
+        member.oa_source_payload->>'oa_id',
+        member.oa_source_payload->>'source_oa_row_id',
+        member.oa_source_payload->>'object_identity_key'
+    ]::text[]) alias(value)
+    where member.row_type = 'oa'
+      and nullif(btrim(alias.value), '') is not null
+),
+oa_source_identity_aliases as materialized (
+    select distinct
+        member.internal_key,
+        member.row_id as oa_row_id,
+        alias.value
+    from relation_anomaly_members member
+    cross join lateral jsonb_array_elements_text(
+        case when jsonb_typeof(member.oa_source_payload->'source_aliases') = 'array'
+             then member.oa_source_payload->'source_aliases'
+             else '[]'::jsonb end
+    ) alias(value)
+    where member.row_type = 'oa'
+      and nullif(btrim(alias.value), '') is not null
+),
+oa_external_identity_aliases as materialized (
+    select distinct
+        member.internal_key,
+        member.row_id as oa_row_id,
+        alias.value
+    from relation_anomaly_members member
+    cross join lateral unnest(array[
+        {_anomaly_oa_external_alias_values_sql('member.oa_source_payload')}
+    ]::text[]) alias(value)
+    where member.row_type = 'oa'
+      and nullif(btrim(alias.value), '') is not null
+),
+oa_identity_aliases as materialized (
+    select internal_key, oa_row_id, value
+    from oa_exact_identity_aliases
+    union
+    select internal_key, oa_row_id, value
+    from oa_source_identity_aliases
+    union
+    select internal_key, oa_row_id, regexp_replace(value, '^oa-(exp|pay)-', '')
+    from oa_source_identity_aliases
+    union
+    select internal_key, oa_row_id, value
+    from oa_external_identity_aliases
+    union
+    select internal_key, oa_row_id, 'oa-exp-' || value
+    from oa_external_identity_aliases
+    union
+    select internal_key, oa_row_id, 'oa-pay-' || value
+    from oa_external_identity_aliases
+),
 oa_expense_items as materialized (
     select
         member.internal_key,
         member.case_id,
         member.row_id as oa_row_id,
-        member.oa_payload,
         coalesce(item.value->>'id', item.value->>'expense_item_id') as item_id,
         item.value->>'row_index' as row_index,
         case
@@ -1190,8 +1191,8 @@ oa_expense_items as materialized (
         end as attachment_parse_failed_count
     from relation_anomaly_members member
     cross join lateral jsonb_array_elements(
-        case when jsonb_typeof(member.oa_payload->'expense_items') = 'array'
-             then member.oa_payload->'expense_items'
+        case when jsonb_typeof(member.oa_source_payload->'expense_items') = 'array'
+             then member.oa_source_payload->'expense_items'
              else '[]'::jsonb end
     ) item(value)
     where member.row_type = 'oa'
@@ -1256,42 +1257,16 @@ invoice_item_candidates as materialized (
       on expense.internal_key = invoice.internal_key
      and nullif(invoice.source_expense_item_id, '') is not null
      and invoice.source_expense_row_index = expense.row_index
-     and (
-          split_part(invoice.source_expense_item_id, ':item:', 1) = expense.oa_row_id
-          or split_part(invoice.source_expense_item_id, ':item:', 1)
-                in (
-                    expense.oa_payload->>'oa_row_id',
-                    expense.oa_payload->>'oa_id',
-                    expense.oa_payload->>'source_oa_row_id',
-                    expense.oa_payload->>'object_identity_key'
-                )
-          or exists (
-                select 1
-                from jsonb_array_elements_text(
-                    case when jsonb_typeof(expense.oa_payload->'source_aliases') = 'array'
-                         then expense.oa_payload->'source_aliases'
-                         else '[]'::jsonb end
-                ) alias(value)
-                where split_part(invoice.source_expense_item_id, ':item:', 1)
-                        in (
-                            alias.value,
-                            regexp_replace(alias.value, '^oa-(exp|pay)-', '')
-                        )
-          )
-          or exists (
-                select 1
-                from jsonb_array_elements_text(
-                    case when jsonb_typeof(expense.oa_payload->'source_identity_aliases') = 'array'
-                         then expense.oa_payload->'source_identity_aliases'
-                         else '[]'::jsonb end
-                ) alias(value)
-                where split_part(invoice.source_expense_item_id, ':item:', 1)
-                        in (
-                            alias.value,
-                            'oa-exp-' || alias.value,
-                            'oa-pay-' || alias.value
-                        )
-          )
+     and exists (
+         select 1
+         from oa_identity_aliases alias
+         where alias.internal_key = expense.internal_key
+           and alias.oa_row_id = expense.oa_row_id
+           and alias.value = split_part(
+               invoice.source_expense_item_id,
+               ':item:',
+               1
+           )
      )
 ),
 normalized_invoice_anomaly_facts as materialized (
@@ -1448,26 +1423,12 @@ unassigned_invoice_rows as materialized (
     join normalized_invoice_anomaly_facts invoice
       on invoice.internal_key = expense.internal_key
      and invoice.source_parent_oa_id is not null
-     and (
-          invoice.source_parent_oa_id = expense.oa_row_id
-          or invoice.source_parent_oa_id in (
-              expense.oa_payload->>'oa_row_id',
-              expense.oa_payload->>'oa_id',
-              expense.oa_payload->>'source_oa_row_id',
-              expense.oa_payload->>'object_identity_key'
-          )
-          or exists (
-              select 1
-              from jsonb_array_elements_text(
-                  case when jsonb_typeof(expense.oa_payload->'source_aliases') = 'array'
-                       then expense.oa_payload->'source_aliases'
-                       else '[]'::jsonb end
-              ) alias(value)
-              where invoice.source_parent_oa_id in (
-                  alias.value,
-                  regexp_replace(alias.value, '^oa-(exp|pay)-', '')
-              )
-          )
+     and exists (
+         select 1
+         from oa_identity_aliases alias
+         where alias.internal_key = expense.internal_key
+           and alias.oa_row_id = expense.oa_row_id
+           and alias.value = invoice.source_parent_oa_id
      )
     where not exists (
         select 1
@@ -1550,8 +1511,8 @@ relation_directions as materialized (
     left join lateral (
         select case
             when member.row_type = 'oa'
-             and coalesce(member.oa_payload->>'apply_type', '') like '%%收%%'
-             and coalesce(member.oa_payload->>'apply_type', '') not like '%%付%%'
+             and coalesce(member.oa_apply_type, '') like '%%收%%'
+             and coalesce(member.oa_apply_type, '') not like '%%付%%'
                 then 'receipt'
             when member.row_type = 'oa' then 'payment'
             when member.row_type = 'invoice' then member.invoice_direction
@@ -1787,6 +1748,11 @@ class PostgresWorkbenchPageQueryRepository:
                 transaction.execute(
                     f"set local statement_timeout = '{WORKBENCH_DIRECT_QUERY_TIMEOUT_SECONDS}s'"
                 )
+                # This query is dominated by bounded JSON/array expansion and hash
+                # joins.  PostgreSQL's JIT compilation cost is paid on every page
+                # request and exceeds the execution savings for the current data
+                # shape, so keep it disabled inside this read-only snapshot only.
+                transaction.execute("set local jit = off")
                 # The canonical page spine intentionally materializes bounded fact sets
                 # before it computes exact totals.  PostgreSQL materially overestimates
                 # several CTE cardinalities and otherwise chooses correlated nested

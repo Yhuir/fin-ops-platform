@@ -242,6 +242,11 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 
     assert "relation_anomaly_members" in sql
+    assert "oa_identity_aliases as materialized" in sql
+    assert "jsonb_typeof(member.invoice_source_links)" in sql
+    assert "jsonb_agg" not in sql
+    assert "jsonb_build_object" not in sql
+    assert "oa_payload" not in sql
     assert "latest_anomaly_decisions" in sql
     assert "workbench_anomaly_review" in sql
     assert "digest(" in sql
@@ -263,7 +268,7 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
 
     assert "source_identity_aliases" in sql
     assert "'Mongo文档ID'" in sql
-    assert "'oa-exp-' || alias.value" in sql
+    assert "'oa-exp-' || value" in sql
 
 
 def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> None:

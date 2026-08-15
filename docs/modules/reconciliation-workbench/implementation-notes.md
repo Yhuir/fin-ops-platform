@@ -1629,3 +1629,11 @@
 - 修复仍在现有 direct repository 边界内：一次聚合 active relation member types、一次生成 in-progress OA relation set，并在短只读事务内将 `max_parallel_workers_per_gather` 设为 `0`，让并发 HTTP 公平共享数据库 CPU。没有修改全局 PostgreSQL 配置。
 - compact summary 只保留组级 `amount_check` 和 UI 必需 metadata，前端映射时把组级判断继承给可见行 chip；detail API 继续保留完整身份和诊断 I/O。没有新增表、索引、migration、cache、read model、worker、依赖、fallback 或第二条读取链。
 - 同一生产快照的候选 SQL 只读 `EXPLAIN ANALYZE` 中位数由约 `455ms` 降到约 `332ms`，无并行模式中位数约 `334ms`；最终 authenticated HTTP p95/p99 以本轮发布后的独立生产采样为准。
+
+## 2026-08-15 - 异常判定别名集合化与事务级 JIT 收敛
+
+- 发布前 authenticated HTTP SLO 证明上一轮 compact 后业务链路正确且错误率为 `0`，但 combined initial、paired 和 unpaired 的 p95 仍分别约为 `2332ms`、`1817ms`、`1417ms`，未达到 `1000ms` 合同。App Health 将主要剩余耗时定位到 PostgreSQL anomaly spine 与其后 hydration/serialization，而非连接获取。
+- 根因是同一 relation 的 OA payload 和发票 `source_links` 先被 `jsonb_build_object/jsonb_agg` 重建为临时 JSON，费用项匹配与未分配附件判断再分别展开和扫描相同 alias 数组。新查询直接消费 canonical JSON 字段，按 relation/OA 一次物化 exact、source 和 external identity aliases，两个异常分支复用同一集合；删除临时 JSON 重建和重复相关子查询，不保留旧路径。
+- 生产 PostgreSQL `jit=on`；该请求由有界 JSON/数组展开和 hash join 主导，逐请求 JIT 编译成本高于收益，因此只在 Workbench direct 的 `REPEATABLE READ / READ ONLY` 事务内设置 `jit=off`。全局数据库配置和其它页面事务不受影响。
+- 候选模块在当前生产只读库执行 combined initial 成功，返回 paired/unpaired 各 50 组，异常计数保持 paired `0`、unpaired `30`，单次候选端到端 repository 耗时约 `932ms`。最终并发 HTTP p95/p99 仍以激活 release 后的标准探针为准。
+- 没有新增表、索引、migration、read model、cache、worker、API 字段、状态或分页合同；模块边界和 I/O 不变，因此 boundary 文档无需修改。

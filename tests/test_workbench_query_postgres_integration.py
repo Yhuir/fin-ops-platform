@@ -1172,6 +1172,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             for statement in self.connection.statements
             if statement["operation"] == "execute"
         ]
+        self.assertIn("set local jit = off", executed_sql)
         self.assertIn("set local enable_nestloop = off", executed_sql)
         self.assertIn("set local max_parallel_workers_per_gather = 0", executed_sql)
 
