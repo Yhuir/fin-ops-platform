@@ -285,7 +285,8 @@ class RuntimeMonitoringRepository:
               extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float
                 as oldest_pending_age_seconds
             from job.outbox_events
-            where status in ('pending', 'failed', 'dead_lettered') or publish_status in ('publishing', 'failed')
+            where status in ('pending', 'failed', 'dead_lettered')
+               or (status <> 'done' and publish_status in ('publishing', 'failed'))
             """
         ) or {}
         return {

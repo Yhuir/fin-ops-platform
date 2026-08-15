@@ -392,7 +392,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["publish_failed_count"], 3)
         self.assertIn("from job.outbox_events", normalized_sql)
         self.assertIn("status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
-        self.assertIn("publish_status in ('publishing', 'failed')", normalized_sql)
+        self.assertIn("status <> 'done' and publish_status in ('publishing', 'failed')", normalized_sql)
 
 
 if __name__ == "__main__":
