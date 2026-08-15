@@ -216,6 +216,7 @@
 
 - 影响范围：Mongo OA adapter 的日常报销记录构建、设置页精确附件刷新、铁路电子客票金额解析、OA 附件正式发票 promotion 与 PostgreSQL active source alias read port。
 - 关键决策：进行中 OA 只保留附件引用元数据；所有入口都由 adapter 构建边界强制禁止下载/OCR/evidence/invoice。铁路票价限制为最多两位小数，避免压平文本后吞入下一行长客票号，并升级 parser cache version。promotion 按批量读取 `app.oa_source_aliases.status='active'`，只允许 lifecycle alias 两端共享 canonical invoice；未激活或不同 canonical OA 继续 fail closed。
+- 生产样本补充：历史统一发票来源可能把 `derived_from_oa_id` 保存为 `父OA ID:item:...`。promotion 必须复用 `oa_attachment_parent_oa_id` 先归一父 OA ID，再做 active alias 集合查询和冲突判断；否则已批准的生命周期 alias 仍会被旧 item 级来源误判为跨 OA 冲突。
 - 旧链路删除：移除调用方可通过 `parse_attachment_evidence=True` 强迫进行中流程解析的隐式能力；不新增第二套解析、promotion 或页面 fallback。
 - 数据安全：不改主数据库 schema，不删除 OA 投影、附件 cache 或 canonical invoice；生产历史样本只允许先 dry-run，再对已核验的 active alias 与精确 OA row 执行受控修复。
 - 验证：新增进行中人工刷新、高铁票价长号、active alias promotion 与 repository 单批查询回归；发布后验证目标 144.99 OA 的铁路票进入统一发票池并保留 1 分金额差异 chip，同时附件缺失异常消失。

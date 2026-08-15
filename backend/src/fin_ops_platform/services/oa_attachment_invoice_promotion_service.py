@@ -13,6 +13,7 @@ from fin_ops_platform.services.app_settings_service import (
     OA_ATTACHMENT_INVOICE_PROMOTION_MODES,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_parent_oa_id
 from fin_ops_platform.services.invoice_attachment_recognition_service import (
     CREATE_INVOICE_AND_LINK,
     IGNORE,
@@ -363,7 +364,11 @@ class OAAttachmentInvoicePromotionService:
             for invoice in existing_invoices
             for source_link in list(invoice.source_links or [])
             if str(source_link.get("source_type") or "") == "oa_attachment_invoice"
-            if (existing_oa_id := _clean_text(source_link.get("derived_from_oa_id")))
+            if (
+                existing_oa_id := _clean_text(
+                    oa_attachment_parent_oa_id(source_link.get("derived_from_oa_id"))
+                )
+            )
         )
         resolver = getattr(self._invoice_repository, "resolve_active_oa_source_aliases", None)
         if not callable(resolver):
@@ -384,7 +389,9 @@ class OAAttachmentInvoicePromotionService:
         for source_link in list(invoice.source_links or []):
             if str(source_link.get("source_type") or "") != "oa_attachment_invoice":
                 continue
-            existing_oa_id = _clean_text(source_link.get("derived_from_oa_id"))
+            existing_oa_id = _clean_text(
+                oa_attachment_parent_oa_id(source_link.get("derived_from_oa_id"))
+            )
             canonical_existing_oa_id = _clean_text(oa_source_aliases.get(existing_oa_id or ""))
             canonical_existing_oa_id = canonical_existing_oa_id or existing_oa_id
             if (

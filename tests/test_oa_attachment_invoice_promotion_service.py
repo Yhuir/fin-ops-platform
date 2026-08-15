@@ -236,7 +236,7 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
                 "source_type": "oa_attachment_invoice",
                 "source_id": "ticket.pdf",
                 "batch_id": "",
-                "derived_from_oa_id": "oa-exp-ongoing",
+                "derived_from_oa_id": "oa-exp-ongoing:item:0:historical-fingerprint",
                 "source_expense_item_id": "item-ongoing",
             }
         ]
