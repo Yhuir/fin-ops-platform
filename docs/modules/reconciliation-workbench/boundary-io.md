@@ -99,6 +99,7 @@ requested tenant/scope
 
 - `/groups?exception_bucket=unpaired|paired` 在 SQL group spine 上应用 anomaly fingerprint 和人工决定，精确计数并有界分页；bucket 必须与 zone 相同，前端每次只读取当前 bucket，不得并行读取两区或 drain full-detail pages 后本地合并。
 - SQL 候选分区和分页后 Python hydration 必须复用相同的流水净额口径；`1050` 支出与同关系 `35` 退款收入的银行总额为 `1015`，不得先按 gross `1050` 分入异常区再在 DTO 层改正。
+- 历史 OA 附件 parent identity 必须在 SQL 候选分区与 hydration 两层都通过 OA 外部 identity + 明细 `row_index` 映射到当前 canonical 子付款项；不得让 summary/full 得出不同 zone，也不得按金额或展示顺序猜测。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。
 - detail 读取 latest committed 事实，不接受 `expected_read_model_version`，不构建全 scope group CTE。
 - summary 列表禁止携带 raw payload、OCR/附件全文和完整 detail fields；折叠内容只在用户展开后读取。

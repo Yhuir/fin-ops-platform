@@ -258,6 +258,14 @@ def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:
     assert "member.bank_direction in ('payment', 'receipt')" in sql
 
 
+def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split())
+
+    assert "source_identity_aliases" in sql
+    assert "'Mongo文档ID'" in sql
+    assert "'oa-exp-' || alias.value" in sql
+
+
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:
     connection = _CountingQueryConnection([])
     repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")

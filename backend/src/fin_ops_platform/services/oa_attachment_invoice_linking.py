@@ -21,6 +21,18 @@ OA_SOURCE_ALIAS_FIELD_NAMES = (
     "external_id",
 )
 
+OA_EXTERNAL_SOURCE_ID_FIELD_NAMES = (
+    "Mongo文档ID",
+    "mongo_document_id",
+    "document_id",
+    "_id",
+    "OA单号",
+    "流程请求ID",
+    "oa_number",
+    "request_id",
+    "external_id",
+)
+
 
 def oa_attachment_parent_oa_id(source_id: object) -> str:
     value = str(source_id or "").strip()
@@ -234,12 +246,7 @@ def _append_external_oa_ids(
     *,
     prefixes: set[str],
 ) -> None:
-    for field_name in ("Mongo文档ID", "mongo_document_id", "document_id", "_id"):
-        value = str(container.get(field_name) or "").strip()
-        if value:
-            source_ids.append(value)
-            source_ids.extend(f"{prefix}-{value}" for prefix in prefixes)
-    for field_name in ("OA单号", "流程请求ID", "oa_number", "request_id", "external_id"):
+    for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES:
         value = str(container.get(field_name) or "").strip()
         if value:
             source_ids.append(value)
