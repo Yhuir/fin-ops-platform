@@ -1645,3 +1645,9 @@
 - 根因二：原首屏每区固定装配 `50` 个 group，而单个 group 可含多个 OA 子付款项、流水和发票。在 4 核生产机上这会让并发请求反复装配超出当前视口的 payload。首屏改为每区 `10` 组，保留精确 total、opaque cursor、底部自动续读和服务端全量搜索；不截断 group 成员，不伪造总数。
 - 生产只读候选模块使用同一 snapshot 返回 paired `284`、unpaired `697`、paired exception `0`、unpaired exception `30`。每区 `10` 组时的 20 次/4 并发 repository 样本 p50/p95/p99 约为 `779/975/1067ms`。该数据只用于候选选择，最终验收以激活 release 后的 authenticated HTTP 标准探针为准。
 - 前后端常量、API 长期合同、模块边界、E2E 规格和 HTTP SLO 探针同步修改。没有新增表、索引、migration、read model、cache、worker、依赖、状态或第二条读取链。
+
+## 2026-08-15 - 显式父 OA 银行流水复合同行
+
+- 根因：`buildWorkbenchGroupSourceSegments` 已按 canonical `sourceOaId` 把多条流水归入正确 OA，但 `findAlignedRowIdsBySegment` 仍用 `rows.length === 1` 拒绝所有父 OA 银行 1:N，使生产 `88050 = 64996.69 + 23053.31` 被拆成 OA 主轨和银行残余带。
+- 收口：普通非日常报销父 OA 的多条显式来源流水只有在当前显示完整、金额合法且合计按分等于 OA 时共享现有复合行轨。无来源金额组合、金额不等、日常报销父级流水、多对一和冲突来源继续 fail closed；不恢复 subset-sum。
+- 边界：只修改既有前端纯展示投影并复用 segment/Flex 渲染；API DTO、relation membership、异常状态、selection/action identity、其它页面 I/O、数据库、read model、worker、cache 和依赖均不改变。

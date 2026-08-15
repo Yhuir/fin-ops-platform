@@ -138,6 +138,7 @@ type ApiMockOptions = {
   workbenchWithdrawPreviewError?: boolean;
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
+  workbenchExplicitBankFanoutScenario?: boolean;
   workbenchOaExpenseItemsScenario?: boolean;
   workbenchWithdrawSubmitDelayMs?: number;
 };
@@ -906,6 +907,56 @@ function buildOaExpenseItemsWorkbenchGroup() {
       },
     ],
     can_withdraw: false,
+  };
+}
+
+function buildExplicitBankFanoutWorkbenchGroup() {
+  const rows = linkedWorkbenchRows();
+  const caseId = "CASE-E2E-EXPLICIT-BANK-FANOUT";
+  const oa88050 = {
+    ...rows.oa,
+    id: "oa-bank-fanout-88050",
+    case_id: caseId,
+    applicant: "樊祖芳",
+    amount: "88,050.00",
+  };
+  const oa29350 = {
+    ...rows.oa,
+    id: "oa-bank-fanout-29350",
+    case_id: caseId,
+    applicant: "樊祖芳",
+    amount: "29,350.00",
+  };
+  const bankRow = (id: string, amount: string, sourceOaId: string, tradeTime: string) => ({
+    ...rows.bank,
+    id,
+    case_id: caseId,
+    trade_time: tradeTime,
+    debit_amount: amount,
+    source_oa_id: sourceOaId,
+    source_oa_row_id: sourceOaId,
+  });
+  return {
+    group_id: `case:${caseId}`,
+    group_type: "relation",
+    match_confidence: "high",
+    reason: "browser_e2e_explicit_bank_fanout",
+    oa_rows: [oa88050, oa29350],
+    bank_rows: [
+      bankRow("bank-fanout-64996", "64,996.69", oa88050.id, "2026-04-23 15:28:56"),
+      bankRow("bank-fanout-23053", "23,053.31", oa88050.id, "2026-04-23 11:18:17"),
+      bankRow("bank-fanout-29350", "29,350.00", oa29350.id, "2026-03-27 15:03:31"),
+    ],
+    invoice_rows: [],
+    can_withdraw: true,
+    amount_check: {
+      status: "matched",
+      direction: "payment",
+      bank_amount: "117400.00",
+      oa_amount: "117400.00",
+      amount_delta: "0.00",
+      requires_note: false,
+    },
   };
 }
 
@@ -9406,6 +9457,37 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         });
       }
+      if (options.workbenchExplicitBankFanoutScenario) {
+        const payload = workbenchInitialPayload(
+          relationConfirmed,
+          workbenchExceptionApplied,
+          workbenchRowIgnored,
+        );
+        const groups = [withWorkbenchDetailKey(buildExplicitBankFanoutWorkbenchGroup())];
+        return json(route, {
+          ...payload,
+          summary: {
+            ...payload.summary,
+            oa_count: 2,
+            bank_count: 3,
+            invoice_count: 0,
+            paired_count: groups.length,
+            unpaired_count: 0,
+          },
+          paired: {
+            ...payload.paired,
+            total: groups.length,
+            row_counts: countWorkbenchRows(groups),
+            groups,
+          },
+          unpaired: {
+            ...payload.unpaired,
+            total: 0,
+            row_counts: { oa: 0, bank: 0, invoice: 0 },
+            groups: [],
+          },
+        });
+      }
       if (options.workbenchBankFlowRuleBatchScenario) {
         const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
           && bankFlowRuleBatchStatus === "submitted"
@@ -9746,6 +9828,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           has_more: false,
           next_cursor: null,
           groups: groups.map(withWorkbenchDetailKey),
+        });
+      }
+      if (options.workbenchExplicitBankFanoutScenario) {
+        const zone = url.searchParams.get("zone") === "unpaired" ? "unpaired" : "paired";
+        const groups = zone === "paired" ? [withWorkbenchDetailKey(buildExplicitBankFanoutWorkbenchGroup())] : [];
+        return json(route, {
+          groups,
+          total: groups.length,
+          row_counts: countWorkbenchRows(groups),
+          page_size: Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+          has_more: false,
+          next_cursor: null,
         });
       }
       if (options.workbenchInitialIncompleteRelation && relationConfirmed) {

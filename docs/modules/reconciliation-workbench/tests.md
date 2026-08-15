@@ -335,6 +335,13 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - Performance：测试和 whole-repo scan 保护旧 `assignRowsByAmountFallback` / `findUniqueAmountSubset` 组合枚举不存在；实现只使用已有 DTO 的 Map/Set 线性判断，没有新请求、state/effect、DOM 测量、依赖、read model 或 worker。
 - Workbench month/all schema 升至 v9，旧 v8 generation 与 page cache 必须返回 builder mismatch 并经既有 freshness gateway 重建。
 
+## 2026-08-15 显式父 OA 银行流水复合同行
+
+- Business/display core：`groupDisplayModel.test.ts` 保护普通父 OA 下多条 canonical `sourceOaId` 流水在合计按分等于 OA 时共享复合行轨；金额不等时继续进入 OA 局部残余带。既有无来源金额组合测试继续证明 `64996.69 + 23053.31 = 88050.00` 本身不足以建立同行。
+- Frontend interaction：`RelationGroupGrid.test.tsx` 保护 OA 只渲染一次、两条显式来源流水在同一银行 pane 内各渲染一次、对应 residual 不存在，旁侧单条精确 OA/流水仍保持原行为。
+- Browser/production：复用既有多行 segment/Flex 渲染和生产 `CASE-AUTO-0016` 只读几何验证；不新增 API、状态、请求、DOM 测量、read model、worker、cache、数据库对象或依赖。
+- Performance：布局继续只消费已加载 DTO 并使用现有 source segment 与一次金额求和，复杂度保持 `O(OA + bank + invoice)`；不恢复 subset-sum、日期、顺序或名称推断。
+
 ## 2026-08-03 流水分类与内容高度回归
 
 - Business/service：`test_bank_details_canonical_query.py` 保护 Workbench 目标银行 IDs 通过同一 bounded canonical classifier 得到 effective category 与 `category_resolution_status`，包含人工确认优先级和 SQL 参数边界。

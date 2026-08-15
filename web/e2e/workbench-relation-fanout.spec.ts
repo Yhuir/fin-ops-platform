@@ -6,6 +6,49 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
+  test("aligns an explicitly owned bank fanout with its parent OA", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchExplicitBankFanoutScenario: true,
+    });
+
+    await page.goto("/");
+
+    const segment = page.getByTestId(
+      "candidate-group-segment-paired-case:CASE-E2E-EXPLICIT-BANK-FANOUT-oa-bank-fanout-88050",
+    );
+    const oaPane = page.getByTestId(
+      "candidate-scroll-paired-case:CASE-E2E-EXPLICIT-BANK-FANOUT-oa-bank-fanout-88050-oa",
+    );
+    const bankPane = page.getByTestId(
+      "candidate-scroll-paired-case:CASE-E2E-EXPLICIT-BANK-FANOUT-oa-bank-fanout-88050-bank",
+    );
+    await expect(segment.getByText("88050.00", { exact: true })).toBeVisible();
+    await expect(bankPane.getByText("64996.69", { exact: true })).toBeVisible();
+    await expect(bankPane.getByText("23053.31", { exact: true })).toBeVisible();
+    await expect(bankPane.getByRole("row")).toHaveCount(2);
+    await expect(page.getByTestId(
+      "candidate-group-segment-paired-case:CASE-E2E-EXPLICIT-BANK-FANOUT-oa-bank-fanout-88050:bank:residual",
+    )).toHaveCount(0);
+
+    const [oaBox, bankBox, bankRowBoxes] = await Promise.all([
+      oaPane.boundingBox(),
+      bankPane.boundingBox(),
+      bankPane.getByRole("row").evaluateAll((rows) => rows.map((row) => {
+        const box = row.getBoundingClientRect();
+        return { y: box.y, height: box.height };
+      })),
+    ]);
+    expect(oaBox).not.toBeNull();
+    expect(bankBox).not.toBeNull();
+    expect(bankRowBoxes).toHaveLength(2);
+    expect(Math.abs((bankBox?.height ?? 0) - (oaBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs(
+      bankRowBoxes.reduce((height, row) => height + row.height, 0)
+      - (bankBox?.height ?? 0),
+    )).toBeLessThanOrEqual(4);
+  });
+
   test("aligns an exact daily reimbursement invoice while OA items remain selectable", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

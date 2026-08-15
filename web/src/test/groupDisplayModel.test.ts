@@ -188,6 +188,97 @@ describe("groupDisplayModel time filter", () => {
     ]);
   });
 
+  test("aligns explicitly owned bank fanout when its rows sum to the parent OA", () => {
+    const oa88050 = buildOaRow("oa-exp-88050", "88050");
+    const oa29350 = buildOaRow("oa-exp-29350", "29350");
+    const bank64996 = {
+      ...buildBankRow("bank-64996", "2026-04-23 15:28"),
+      sourceOaId: oa88050.id,
+      amount: "64996.69",
+      tableValues: { direction: "支出", amount: "64996.69" },
+    };
+    const bank23053 = {
+      ...buildBankRow("bank-23053", "2026-04-23 11:18"),
+      sourceOaId: oa88050.id,
+      amount: "23053.31",
+      tableValues: { direction: "支出", amount: "23053.31" },
+    };
+    const bank29350 = {
+      ...buildBankRow("bank-29350", "2026-03-27 15:03"),
+      sourceOaId: oa29350.id,
+      amount: "29350",
+      tableValues: { direction: "支出", amount: "29350" },
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:explicit-bank-fanout",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa88050, oa29350],
+        bank: [bank64996, bank23053, bank29350],
+        invoice: [],
+      },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const segments = layout?.segments ?? [];
+
+    expect(segments.find((segment) => segment.id === oa88050.id)?.rows.bank).toEqual([
+      bank64996,
+      bank23053,
+    ]);
+    expect(segments.find((segment) => segment.id === `${oa88050.id}:bank:residual`)).toBeUndefined();
+    expect(segments.find((segment) => segment.id === oa29350.id)?.rows.bank).toEqual([bank29350]);
+    expect(segments.flatMap((segment) => segment.rows.bank).map((row) => row.id)).toEqual([
+      bank64996.id,
+      bank23053.id,
+      bank29350.id,
+    ]);
+  });
+
+  test("keeps explicitly owned bank fanout residual when its total differs from the parent OA", () => {
+    const oa88050 = buildOaRow("oa-exp-88050", "88050");
+    const siblingOa = buildOaRow("oa-exp-sibling", "100");
+    const bank64000 = {
+      ...buildBankRow("bank-64000", "2026-04-23 15:28"),
+      sourceOaId: oa88050.id,
+      amount: "64000",
+      tableValues: { direction: "支出", amount: "64000" },
+    };
+    const bank23000 = {
+      ...buildBankRow("bank-23000", "2026-04-23 11:18"),
+      sourceOaId: oa88050.id,
+      amount: "23000",
+      tableValues: { direction: "支出", amount: "23000" },
+    };
+    const siblingBank = {
+      ...buildBankRow("bank-sibling", "2026-04-23 10:18"),
+      sourceOaId: siblingOa.id,
+      amount: "100",
+      tableValues: { direction: "支出", amount: "100" },
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:mismatched-explicit-bank-fanout",
+      groupType: "unpaired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa88050, siblingOa],
+        bank: [bank64000, bank23000, siblingBank],
+        invoice: [],
+      },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+
+    expect(layout?.segments.find((segment) => segment.id === oa88050.id)?.rows.bank).toEqual([]);
+    expect(layout?.segments.find((segment) => segment.id === `${oa88050.id}:bank:residual`)?.rows.bank)
+      .toEqual([bank64000, bank23000]);
+  });
+
   test("keeps partial and duplicate source coverage at group level", () => {
     const oa100 = buildOaRow("oa-exp-100", "100.00");
     const oa200 = buildOaRow("oa-exp-200", "200.00");

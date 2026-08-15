@@ -317,8 +317,12 @@ function findAlignedRowIdsBySegment(
     }
     const targetAmount = segmentTargetAmountCents(segment);
     const rowAmounts = rows.map(workbenchComparableAmountCents);
+    const canAlignExplicitBankFanout = paneId === "bank"
+      && rows.length > 1
+      && segment.rows.oa.length === 1
+      && segment.rows.oa[0].displayRole === undefined;
     if (
-      rows.length === 1
+      (rows.length === 1 || canAlignExplicitBankFanout)
       && targetAmount > 0
       && rowAmounts.every((amount) => amount > 0)
       && rowAmounts.reduce((total, amount) => total + amount, 0) === targetAmount

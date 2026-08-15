@@ -1340,6 +1340,65 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(siblingSegment).getByText("云南辰飞机电工程有限公司")).toBeInTheDocument();
   });
 
+  test("renders explicitly owned bank fanout in the same composite band as its parent OA", () => {
+    const oa88050 = createOaRecord("oa-exp-88050", "樊祖芳", "88050");
+    const oa29350 = createOaRecord("oa-exp-29350", "樊祖芳", "29350");
+    const group: WorkbenchRelationGroup = {
+      id: "case:CASE-EXPLICIT-BANK-FANOUT",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa88050, oa29350],
+        bank: [
+          createSourceBankRecord("bank-64996", "64996.69", oa88050.id),
+          createSourceBankRecord("bank-23053", "23053.31", oa88050.id),
+          createSourceBankRecord("bank-29350", "29350", oa29350.id),
+        ],
+        invoice: [],
+      },
+    };
+
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const fanoutSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-EXPLICIT-BANK-FANOUT-oa-exp-88050",
+    );
+    const fanoutBankPane = within(fanoutSegment).getByTestId(
+      "candidate-scroll-paired-case:CASE-EXPLICIT-BANK-FANOUT-oa-exp-88050-bank",
+    );
+    expect(within(fanoutSegment).getByText("88050.00")).toBeInTheDocument();
+    expect(within(fanoutBankPane).getAllByRole("row")).toHaveLength(2);
+    expect(within(fanoutBankPane).getByText("64996.69")).toBeInTheDocument();
+    expect(within(fanoutBankPane).getByText("23053.31")).toBeInTheDocument();
+    expect(screen.queryByTestId(
+      "candidate-group-segment-paired-case:CASE-EXPLICIT-BANK-FANOUT-oa-exp-88050:bank:residual",
+    )).not.toBeInTheDocument();
+
+    const siblingSegment = screen.getByTestId(
+      "candidate-group-segment-paired-case:CASE-EXPLICIT-BANK-FANOUT-oa-exp-29350",
+    );
+    expect(within(siblingSegment).getAllByText("29350.00").length).toBeGreaterThan(1);
+  });
+
   test("aligns unique unlinked exact amounts and keeps sum-matched rows residual", () => {
     const makeBankRow = (id: string, amount: string, counterparty: string): WorkbenchRecord => {
       const baseRecord = createBankRecord();

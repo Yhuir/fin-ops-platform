@@ -65,9 +65,9 @@ canonical fact repositories
 - 页面只使用紧凑三栏：已配对/未配对各自只渲染一套 `WorkbenchZone`，标题、区域搜索、选择汇总与区域动作保持同一工具栏；银行流水的“全部 + 年月”筛选固定在区域标题栏最右侧、栏显示菜单之前，已配对与未配对分别保存筛选状态。栏显示菜单只允许切换 OA、银行流水、进销项发票，至少保留一栏。经典布局、紧凑/经典切换、区域放大/恢复及对应状态和样式已删除，不得恢复并行布局路径。紧凑三栏隐藏横向滚动与还借款日期列，长文本在单元格内直接换行显示，不创建行单元格 hover Popover；银行流水和发票的合法行级动作收进 `···`，OA 仍无行级操作列。
 - OA、银行流水、发票栏默认各自跨越完整关联组高度；同栏有 `N` 条可见记录时由 CSS Flex 等分可用高度，单条记录占满整栏。
 - 单一日常报销父 OA 展开为多个付款项时，只有父 OA 归属、没有费用子项归属的银行流水继续作为整单证据跨越摘要与全部付款项高度，不得被压进父 OA 摘要行。
-- 单条银行流水/非 OA 来源发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。显式 `sourceOaId` / `sourceExpenseItemIds[]` 优先；API 映射必须优先 canonical `source_oa_id` / `source_oa_row_id`，历史 `derived_from_oa_id` 只作兜底，不能覆盖 canonical ownership。OA 附件发票的同行只消费顶层 canonical `source_expense_item_ids[]`，原始 `source_links[]` 只作审计证据；OA 附件缺少 canonical 子付款项来源时进入独立待归属残余带，禁止按金额兜底。显式费用子项 ownership 不以金额相等为前提。其他来源缺少显式 ownership 时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
+- 单条银行流水/非 OA 来源发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。普通父 OA 下有两条或以上银行流水时，只有所有流水都带 canonical `sourceOaId`、当前显示包含完整组成且流水按分合计等于该 OA，才共享一个复合行轨；OA 只渲染一次，流水在轨内等分。显式 `sourceOaId` / `sourceExpenseItemIds[]` 优先；API 映射必须优先 canonical `source_oa_id` / `source_oa_row_id`，历史 `derived_from_oa_id` 只作兜底，不能覆盖 canonical ownership。OA 附件发票的同行只消费顶层 canonical `source_expense_item_ids[]`，原始 `source_links[]` 只作审计证据；OA 附件缺少 canonical 子付款项来源时进入独立待归属残余带，禁止按金额兜底。显式费用子项 ownership 不以金额相等为前提。其他来源缺少显式 ownership 时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
 - 同一费用子项下的所有显式绑定附件发票共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。即使合计金额不等，也保持同行并由异常 chip 表达差异。筛选后缺少任一组成发票时不建立部分复合同行。
-- 其他父 OA 级一对多/多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，以及无显式费用子项归属的 2～6 条金额合计都不建立同行；已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
+- 缺少 canonical ownership、合计不等、显示组成不完整的父 OA 级一对多，以及多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，都不建立同行；无显式来源的 2～6 条金额即使合计相等也不做组合推断。已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
 - 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属附件发票留在独立残余展示带且不得进入父摘要。缺失附件发票的展示位只显示原因明确的异常 chip，不得再叠加历史 `未识别附件` 来源标签。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
 - 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 
