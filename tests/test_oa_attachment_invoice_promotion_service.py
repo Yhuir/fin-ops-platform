@@ -228,6 +228,53 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["affected_invoice_count"], 0)
         self.assertEqual(repository.save_calls, [])
 
+    def test_active_lifecycle_alias_allows_completed_oa_to_reuse_ongoing_invoice(self) -> None:
+        payload = _attachment("26539150014000355216", "145.00", "item-completed", "ticket.pdf")
+        invoice = _invoice(payload)
+        invoice.source_links = [
+            {
+                "source_type": "oa_attachment_invoice",
+                "source_id": "ticket.pdf",
+                "batch_id": "",
+                "derived_from_oa_id": "oa-exp-ongoing",
+                "source_expense_item_id": "item-ongoing",
+            }
+        ]
+        repository = FakeAliasInvoiceRepository(
+            [invoice],
+            aliases={
+                "oa-exp-ongoing": "oa-exp-completed",
+                "oa-exp-completed": "oa-exp-completed",
+            },
+        )
+        service = OAAttachmentInvoicePromotionService(
+            invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+        )
+        record = SimpleNamespace(
+            id="oa-exp-completed",
+            month="2026-06",
+            attachment_invoices=[payload],
+            attachment_evidences=[],
+        )
+
+        report = service.promote_records([record])
+
+        self.assertEqual(report["summary"]["linked_existing_invoice_count"], 1)
+        self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+        self.assertEqual(
+            repository.alias_queries,
+            [{"oa-exp-ongoing", "oa-exp-completed"}],
+        )
+        self.assertIn(
+            "oa-exp-completed",
+            {
+                link.get("derived_from_oa_id")
+                for link in invoice.source_links
+                if link.get("source_type") == "oa_attachment_invoice"
+            },
+        )
+
     def test_links_one_invoice_to_multiple_expense_items_in_the_same_oa(self) -> None:
         first = _attachment("26532000000000000036", "36.00", "item-18-a", "shared.pdf")
         second = {**first, "source_expense_item_id": "item-18-b", "source_expense_row_index": "1"}
@@ -338,7 +385,55 @@ class FakeAtomicInvoiceRepository(FakeInvoiceRepository):
         return list(scope_months)
 
 
+class FakeAliasInvoiceRepository(FakeInvoiceRepository):
+    def __init__(self, invoices: list[Invoice], *, aliases: dict[str, str]) -> None:
+        super().__init__(invoices)
+        self.aliases = dict(aliases)
+        self.alias_queries: list[set[str]] = []
+
+    def resolve_active_oa_source_aliases(self, oa_row_ids: set[str]) -> dict[str, str]:
+        self.alias_queries.append(set(oa_row_ids))
+        return {
+            row_id: self.aliases.get(row_id, row_id)
+            for row_id in oa_row_ids
+        }
+
+
 class PostgresOAAttachmentInvoiceRepositoryTests(unittest.TestCase):
+    def test_resolves_only_active_oa_source_aliases_in_one_query(self) -> None:
+        connection = _FakeAliasQueryConnection(
+            [
+                {
+                    "alias_row_id": "oa-exp-ongoing",
+                    "canonical_row_id": "oa-exp-completed",
+                }
+            ]
+        )
+        repository = PostgresOAAttachmentInvoiceRepository(connection)
+
+        aliases = repository.resolve_active_oa_source_aliases(
+            {"oa-exp-ongoing", "oa-exp-completed", "oa-exp-other"}
+        )
+
+        self.assertEqual(
+            aliases,
+            {
+                "oa-exp-ongoing": "oa-exp-completed",
+                "oa-exp-completed": "oa-exp-completed",
+                "oa-exp-other": "oa-exp-other",
+            },
+        )
+        self.assertEqual(len(connection.fetch_calls), 1)
+        sql, params = connection.fetch_calls[0]
+        self.assertIn("status = 'active'", sql)
+        self.assertEqual(
+            params,
+            (
+                ["oa-exp-completed", "oa-exp-ongoing", "oa-exp-other"],
+                ["oa-exp-completed", "oa-exp-ongoing", "oa-exp-other"],
+            ),
+        )
+
     def test_invoice_write_and_matching_dirty_marker_share_one_transaction(self) -> None:
         transaction = object()
         connection = _FakeTransactionalConnection(transaction)
@@ -380,6 +475,16 @@ class _FakeTransactionalConnection:
 
     def transaction(self) -> "_FakeTransactionContext":
         return _FakeTransactionContext(self._transaction)
+
+
+class _FakeAliasQueryConnection:
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self._rows = list(rows)
+        self.fetch_calls: list[tuple[str, object]] = []
+
+    def fetch_all(self, sql: str, params: object) -> list[dict[str, str]]:
+        self.fetch_calls.append((sql, params))
+        return list(self._rows)
 
 
 class _FakeTransactionContext:

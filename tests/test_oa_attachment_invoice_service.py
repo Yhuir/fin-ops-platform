@@ -157,6 +157,19 @@ RAILWAY_E_TICKET_TEXT = """
 统一社会信用代码:915300007194052520
 """
 
+RAILWAY_E_TICKET_PRICE_PREFIX_TEXT = """
+电子发票（铁路电子客票）
+发票号码:26539150014000355216
+开票日期:2026年06月08日
+大理站 G2842 昆明站
+2026年06月05日 16:00开 01车10F号 二等座
+票价: ¥145.00
+5002401998****1171 黄亮
+电子客票号:50014A4086060497606292026
+购买方名称:云南溯源科技有限公司
+统一社会信用代码:915300007194052520
+"""
+
 OCR_DOCX_CNY_MARKER_TEXT = """
 电子发【普通发票)
 发票号码：26537000000124998164
@@ -527,6 +540,19 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["tax_amount"], "0.00")
         self.assertEqual(invoice["total_with_tax"], "38.00")
         self.assertEqual(invoice["invoice_kind"], "电子发票（铁路电子客票）")
+
+    def test_parse_invoice_text_stops_railway_price_before_following_ticket_number(self) -> None:
+        service = OAAttachmentInvoiceService()
+
+        invoice = service._parse_invoice_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT)
+
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice["invoice_no"], "26539150014000355216")
+        self.assertEqual(invoice["issue_date"], "2026-06-08")
+        self.assertEqual(invoice["net_amount"], "145.00")
+        self.assertEqual(invoice["tax_amount"], "0.00")
+        self.assertEqual(invoice["total_with_tax"], "145.00")
 
     def test_parse_invoice_text_accepts_ocr_y_as_currency_marker(self) -> None:
         service = OAAttachmentInvoiceService()

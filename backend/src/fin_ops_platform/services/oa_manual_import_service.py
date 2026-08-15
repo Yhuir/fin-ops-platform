@@ -137,6 +137,11 @@ class OAManualImportService:
             for row_id in normalized_row_ids
             if row_id not in records_by_id
         ]
+        errors.extend(
+            self._error(record.id, "not_completed", "流程未完成，不能刷新附件")
+            for record in refreshed_records
+            if self._record_status(record) != OA_IMPORT_STATUS_COMPLETED
+        )
         completed_records = [
             record
             for record in refreshed_records

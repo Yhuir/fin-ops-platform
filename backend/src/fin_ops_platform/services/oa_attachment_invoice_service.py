@@ -62,7 +62,7 @@ OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-08-09-strict-document-boundary-v1"
+    PARSER_VERSION = "2026-08-16-railway-ticket-amount-v2"
 
     def __init__(
         self,
@@ -940,7 +940,10 @@ class OAAttachmentInvoiceService:
     def _extract_railway_ticket_amount(self, compact_text: str, currency_amounts: list[str]) -> str:
         if "电子客票" not in compact_text and "铁路" not in compact_text:
             return ""
-        for pattern in (r"¥([0-9]+(?:\.\d+)?)票价", r"票价[:：]?¥([0-9]+(?:\.\d+)?)"):
+        for pattern in (
+            r"¥([0-9]+(?:\.\d{1,2})?)票价",
+            r"票价[:：]?¥([0-9]+(?:\.\d{1,2})?)",
+        ):
             match = re.search(pattern, compact_text)
             if match is not None:
                 return self._normalize_amount_text(match.group(1))

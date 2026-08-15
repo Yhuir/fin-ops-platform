@@ -933,6 +933,10 @@ class MongoOAAdapter(OAAdapter):
             respect_status_settings=respect_status_settings,
         ):
             return []
+        should_parse_attachment_evidence = (
+            parse_attachment_evidence
+            and self._canonical_status_key(data) == OA_IMPORT_STATUS_COMPLETED
+        )
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant and not allow_incomplete_business_fields:
             return []
@@ -994,7 +998,7 @@ class MongoOAAdapter(OAAdapter):
                     contextual_attachment_files,
                     month=record_month,
                 )
-                if parse_attachment_evidence
+                if should_parse_attachment_evidence
                 else {"evidences": [], "invoices": [], "artifacts": []}
             )
             item_attachment_evidences = self._dedupe_attachment_evidences(
@@ -1017,7 +1021,7 @@ class MongoOAAdapter(OAAdapter):
                         source_expense_item_id=expense_item_id,
                     )
                 )
-                if parse_attachment_evidence
+                if should_parse_attachment_evidence
                 else []
             )
             etc_sources.append(item)
@@ -1041,7 +1045,9 @@ class MongoOAAdapter(OAAdapter):
                     "attachment_files": [
                         dict(file_entry)
                         for file_entry in (
-                            item_attachment_files if parse_attachment_evidence else contextual_attachment_files
+                            item_attachment_files
+                            if should_parse_attachment_evidence
+                            else contextual_attachment_files
                         )
                     ],
                     "attachment_evidences": item_attachment_evidences,

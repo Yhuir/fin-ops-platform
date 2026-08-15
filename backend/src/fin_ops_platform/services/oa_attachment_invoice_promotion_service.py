@@ -83,6 +83,10 @@ class OAAttachmentInvoicePromotionService:
             )
 
         existing_invoices = self._load_existing_invoices(candidates)
+        oa_source_aliases = self._resolve_active_oa_source_aliases(
+            candidates,
+            existing_invoices,
+        )
         initial_invoice_ids = {invoice.id for invoice in existing_invoices}
         import_service = ImportNormalizationService(existing_invoices=existing_invoices)
         recognition_service = InvoiceAttachmentRecognitionService(invoice_repository=import_service)
@@ -134,7 +138,11 @@ class OAAttachmentInvoicePromotionService:
                     example_limit=example_limit,
                 )
                 continue
-            if decision.invoice is not None and self._has_source_context_conflict(decision.invoice, candidate):
+            if decision.invoice is not None and self._has_source_context_conflict(
+                decision.invoice,
+                candidate,
+                oa_source_aliases=oa_source_aliases,
+            ):
                 self._record(
                     candidate,
                     action=IGNORE,
@@ -340,14 +348,50 @@ class OAAttachmentInvoicePromotionService:
         mode = str(value or "").strip()
         return mode if mode in OA_ATTACHMENT_INVOICE_PROMOTION_MODES else DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
 
+    def _resolve_active_oa_source_aliases(
+        self,
+        candidates: list[OAAttachmentInvoiceCandidate],
+        existing_invoices: list[Invoice],
+    ) -> dict[str, str]:
+        oa_row_ids = {
+            oa_row_id
+            for candidate in candidates
+            if (oa_row_id := _clean_text(candidate.oa_row_id))
+        }
+        oa_row_ids.update(
+            existing_oa_id
+            for invoice in existing_invoices
+            for source_link in list(invoice.source_links or [])
+            if str(source_link.get("source_type") or "") == "oa_attachment_invoice"
+            if (existing_oa_id := _clean_text(source_link.get("derived_from_oa_id")))
+        )
+        resolver = getattr(self._invoice_repository, "resolve_active_oa_source_aliases", None)
+        if not callable(resolver):
+            return {row_id: row_id for row_id in oa_row_ids}
+        resolved = dict(resolver(oa_row_ids) or {})
+        return {row_id: _clean_text(resolved.get(row_id)) or row_id for row_id in oa_row_ids}
+
     @staticmethod
-    def _has_source_context_conflict(invoice: Invoice, candidate: OAAttachmentInvoiceCandidate) -> bool:
+    def _has_source_context_conflict(
+        invoice: Invoice,
+        candidate: OAAttachmentInvoiceCandidate,
+        *,
+        oa_source_aliases: dict[str, str],
+    ) -> bool:
         incoming_oa_id = _clean_text(candidate.oa_row_id)
+        canonical_incoming_oa_id = _clean_text(oa_source_aliases.get(incoming_oa_id or ""))
+        canonical_incoming_oa_id = canonical_incoming_oa_id or incoming_oa_id
         for source_link in list(invoice.source_links or []):
             if str(source_link.get("source_type") or "") != "oa_attachment_invoice":
                 continue
             existing_oa_id = _clean_text(source_link.get("derived_from_oa_id"))
-            if existing_oa_id and incoming_oa_id and existing_oa_id != incoming_oa_id:
+            canonical_existing_oa_id = _clean_text(oa_source_aliases.get(existing_oa_id or ""))
+            canonical_existing_oa_id = canonical_existing_oa_id or existing_oa_id
+            if (
+                canonical_existing_oa_id
+                and canonical_incoming_oa_id
+                and canonical_existing_oa_id != canonical_incoming_oa_id
+            ):
                 return True
         return False
 

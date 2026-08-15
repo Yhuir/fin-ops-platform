@@ -2567,6 +2567,50 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertIn("_attachment_invoice_source_context", in_progress.expense_items[0]["attachment_files"][0])
         self.assertEqual(adapter.form_load_calls, [("2", "2026-03"), ("32", "2026-03")])
 
+    def test_manual_attachment_refresh_keeps_in_progress_attachment_as_metadata_only(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "胡瑢",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileId": "file-1", "fileName": "进行中附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("in-progress manual refresh must not parse attachments"),
+        ):
+            records = adapter.refresh_application_record_attachments(["oa-exp-3002"])
+
+        self.assertEqual([record.id for record in records], ["oa-exp-3002"])
+        self.assertEqual(records[0].workflow_status, "in_progress")
+        self.assertEqual(records[0].attachment_evidences, [])
+        self.assertEqual(records[0].attachment_artifacts, [])
+        self.assertEqual(records[0].attachment_invoices, [])
+        self.assertEqual(records[0].expense_items[0]["attachment_files"][0]["fileId"], "file-1")
+
     def test_sync_batch_fails_closed_when_mongo_read_is_incomplete(self) -> None:
         adapter = FailingMongoOAAdapter()
 

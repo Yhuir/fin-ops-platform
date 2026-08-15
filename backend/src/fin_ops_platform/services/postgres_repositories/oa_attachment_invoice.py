@@ -20,6 +20,35 @@ class PostgresOAAttachmentInvoiceRepository:
     def save_invoices(self, invoices: list[Any]) -> None:
         PostgresCoreRepository(self._connection).save_invoices(invoices)
 
+    def resolve_active_oa_source_aliases(self, oa_row_ids: set[str]) -> dict[str, str]:
+        normalized_row_ids = sorted(
+            {str(row_id).strip() for row_id in oa_row_ids if str(row_id).strip()}
+        )
+        if not normalized_row_ids:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            select alias_row_id, canonical_row_id
+            from app.oa_source_aliases
+            where status = 'active'
+              and (
+                  alias_row_id = any(%s::text[])
+                  or canonical_row_id = any(%s::text[])
+              )
+            order by alias_row_id
+            """,
+            (normalized_row_ids, normalized_row_ids),
+        )
+        resolved = {row_id: row_id for row_id in normalized_row_ids}
+        for row in rows or []:
+            alias_row_id = str(row.get("alias_row_id") or "").strip()
+            canonical_row_id = str(row.get("canonical_row_id") or "").strip()
+            if not alias_row_id or not canonical_row_id:
+                continue
+            resolved[alias_row_id] = canonical_row_id
+            resolved[canonical_row_id] = canonical_row_id
+        return resolved
+
     def save_invoices_and_mark_matching_dirty(
         self,
         invoices: list[Any],

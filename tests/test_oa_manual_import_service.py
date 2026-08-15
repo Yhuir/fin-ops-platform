@@ -357,6 +357,16 @@ class OAManualImportServiceTests(unittest.TestCase):
 
         self.assertEqual(promoter.row_ids, [])
         self.assertEqual(payload["promotion_summary"], {})
+        self.assertEqual(
+            payload["errors"],
+            [
+                {
+                    "row_id": "oa-exp-progress",
+                    "code": "not_completed",
+                    "message": "流程未完成，不能刷新附件",
+                }
+            ],
+        )
 
     def test_refresh_attachments_reports_canonical_promotion_failure(self) -> None:
         class FailingPromoter:
