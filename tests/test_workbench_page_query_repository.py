@@ -266,6 +266,52 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     assert "'oa-exp-' || alias.value" in sql
 
 
+def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
+
+    assert "all_active_relation_member_rollups as materialized" in sql
+    assert "array_agg(member.row_type order by member.ordinality)" in sql
+    assert "in_progress_oa_relation_ids as materialized" in sql
+    assert "when in_progress_oa.relation_id is not null then 'unpaired'" in sql
+
+
+def test_compact_summary_removes_repeated_internal_row_metadata() -> None:
+    group = {
+        "group_id": "case:CASE-1",
+        "amount_check": {"status": "mismatch", "bank_total": "10.00"},
+        "oa_rows": [
+            {
+                "id": "oa-1",
+                "type": "oa",
+                "relation_amount_check": {"status": "mismatch"},
+                "object_identity_key": "oa-1",
+                "source_identity_aliases": ["legacy-oa-1"],
+                "special_metadata": {
+                    "row_alignment": {"links": []},
+                    "source_batch_id": "batch-1",
+                    "batch_version": 2,
+                },
+            }
+        ],
+        "bank_rows": [],
+        "invoice_rows": [],
+    }
+
+    compact = PostgresWorkbenchPageHydrationRepository._compact_group(group)
+
+    assert compact["amount_check"] == group["amount_check"]
+    assert compact["oa_rows"] == [
+        {
+            "id": "oa-1",
+            "type": "oa",
+            "special_metadata": {
+                "source_batch_id": "batch-1",
+                "batch_version": 2,
+            },
+        }
+    ]
+
+
 def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> None:
     class _CaptureConnection:
         def __init__(self) -> None:

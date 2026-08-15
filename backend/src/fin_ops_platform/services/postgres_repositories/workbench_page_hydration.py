@@ -1477,6 +1477,33 @@ class PostgresWorkbenchPageHydrationRepository:
         )
         if isinstance(compact, dict):
             compact.pop("collapsed_rows", None)
+            for pane in ("oa", "bank", "invoice"):
+                for row in list(compact.get(f"{pane}_rows") or []):
+                    if not isinstance(row, dict):
+                        continue
+                    # Summary pages inherit the relation-level amount check in
+                    # the frontend. Repeating the same payload on every row is
+                    # both redundant and a material transfer/serialization cost.
+                    row.pop("relation_amount_check", None)
+                    for key in (
+                        "object_identity_key",
+                        "object_identity_kind",
+                        "object_identity_source",
+                        "object_identity_confidence",
+                        "source_identity_aliases",
+                    ):
+                        row.pop(key, None)
+                    metadata = row.get("special_metadata")
+                    if isinstance(metadata, dict):
+                        compact_metadata = {
+                            key: metadata[key]
+                            for key in ("relation_mode", "source_batch_id", "batch_version")
+                            if key in metadata
+                        }
+                        if compact_metadata:
+                            row["special_metadata"] = compact_metadata
+                        else:
+                            row.pop("special_metadata", None)
         return compact
 
     @staticmethod

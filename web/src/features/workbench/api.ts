@@ -1455,6 +1455,12 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     bank: group.bank_rows.map(mapRow),
     invoice: group.invoice_rows.map(mapRow),
   };
+  const amountCheck = mapRelationAmountCheck(group.amount_check);
+  if (amountCheck) {
+    ([...rows.oa, ...rows.bank, ...rows.invoice]).forEach((row) => {
+      row.relationAmountCheck ??= amountCheck;
+    });
+  }
   const workbenchAnomaly = mapWorkbenchAnomaly(group.workbench_anomaly);
   decorateOaInvoiceAnomaly(rows, workbenchAnomaly);
   const rawGroupType = String(group.group_type || "").trim();
@@ -1481,7 +1487,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     collapsedRows,
     collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
-    amountCheck: mapRelationAmountCheck(group.amount_check),
+    amountCheck,
     workbenchAnomaly,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     completion: group.completion && typeof group.completion === "object"

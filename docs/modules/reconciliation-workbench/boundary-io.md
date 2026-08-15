@@ -80,6 +80,7 @@ requested tenant/scope
 - `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 50 组首页。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
 - `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`。
+- compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
 - `total` 和 row counts 是当前 query 的精确值；统计发生在 cursor 条件前。cursor 只减少深页排序/hydration，不能把 exact count 伪装成常数复杂度。
 - cursor 绑定 scope、zone、sort、search、filters、exception bucket 的规范化 query hash，并保存完整稳定排序 tuple 与 `group_key` tie-breaker。
 - cursor 是 opaque pagination boundary，不是 MVCC snapshot、read-model version、permission token 或写 CAS。跨 HTTP 请求采用 latest-committed 语义；并发写时页面在 mutation 成功后清空 cursor/selection 并重读首屏。
@@ -171,6 +172,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 当前生产硬合同：authenticated bounded GET 错误为 0，Workbench blocking probe P95 `<=1000ms`、P99 `<=2000ms`，连接池无 timeout/backpressure。
 - 优化目标：P50 `<=600ms`、P95 `<=800ms`、P99 `<=1200ms`；目标未达到时必须如实报告，不能因为低于硬合同就宣称比旧 read model 更快。
 - 每个 endpoint 的 SQL 数量必须有界且无 N+1。当前 direct page repository 的固定业务 SQL 上限（不计 `SET TRANSACTION` / `SET LOCAL` 两条事务控制语句）为：initial `<=9`、groups `<=7`、filter options `=1`、group detail `<=7`、row detail `<=5`、preview `<=6`、exception page `<=8`。这些是防 N+1 的回归上限，不是延迟目标；2026-08 disposable PostgreSQL 小型 fixture 实测 initial `9`、groups `7`、filter options `1`、group detail `7`、row detail `5`、preview `6`，主 candidate SQL 约 `5–16ms`，ETC page hydration 已从 `5` 条合并为 `1` 条。生产验收仍以本节 p95/p99、pool hold time、buffer/temp-spill 和目标规模 EXPLAIN 为准；不得用固定条数替代性能证据。
+- all-scope candidate spine 必须集合式复用 relation member rollup 和 in-progress OA relation set，不得按 relation 重复 correlated scan；请求事务禁用单请求 PostgreSQL gather worker，避免多个相同页面请求争抢数据库 CPU。该执行参数只属于关联台 direct repository 的只读事务，不污染其它页面连接或全局数据库设置。
 - 先重写 query shape，再用测试库 `EXPLAIN (ANALYZE, BUFFERS)` 判断索引；禁止先堆索引或引入第二套物化结构。
 - 生产只运行 bounded authenticated GET 和 plain `EXPLAIN`；不在生产运行 `EXPLAIN ANALYZE`。
 - `month=all + exact total + 任意 substring search` 的成本不可能与数据规模无关。若重写和证据索引后仍不达 SLO，必须显式调整产品合同或重新评估物化读取，不能暗加 Redis/fallback 冒充 direct。

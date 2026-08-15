@@ -13,9 +13,11 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
-    oa_source_identity_aliases_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
+)
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
@@ -71,6 +73,13 @@ def _compact_anomaly_oa_payload_sql(
         f"coalesce({completed_alias}.normalized_payload, "
         f"{pending_alias}.source_payload, '{{}}'::jsonb)"
     )
+    source_identity_aliases = ",\n                ".join(
+        "nullif(btrim("
+        f"{source_payload}{path}->>'{field_name}'"
+        "), '')"
+        for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
+        for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
+    )
     return f"""
         case when {completed_alias}.row_id is not null or {pending_alias}.oa_id is not null
         then jsonb_strip_nulls(jsonb_build_object(
@@ -113,7 +122,9 @@ def _compact_anomaly_oa_payload_sql(
             'oa_id', {source_payload}->>'oa_id',
             'source_oa_row_id', {source_payload}->>'source_oa_row_id',
             'object_identity_key', {source_payload}->>'object_identity_key',
-            'source_identity_aliases', {oa_source_identity_aliases_sql(source_payload)},
+            'source_identity_aliases', to_jsonb(array_remove(array[
+                {source_identity_aliases}
+            ]::text[], null)),
             'apply_type', coalesce(
                 {source_payload}->>'apply_type',
                 {source_payload}->>'application_type',
@@ -505,6 +516,14 @@ all_active_relation_members as materialized (
       with ordinality as member(row_id, row_type, ordinality)
     where relation_shape_guard.guard = 1
 ),
+all_active_relation_member_rollups as materialized (
+    select
+        member.relation_id,
+        array_agg(member.row_type order by member.ordinality)::text[]
+            as normalized_row_types
+    from all_active_relation_members member
+    group by member.relation_id
+),
 scoped_relation_ids as materialized (
     select relation.id
     from all_active_relations relation
@@ -523,14 +542,11 @@ scoped_relation_ids as materialized (
 scoped_relations as materialized (
     select
         relation.*,
-        array(
-            select member.row_type
-            from all_active_relation_members member
-            where member.relation_id = relation.id
-            order by member.ordinality
-        )::text[] as normalized_row_types
+        member_rollup.normalized_row_types
     from all_active_relations relation
     join scoped_relation_ids selected on selected.id = relation.id
+    join all_active_relation_member_rollups member_rollup
+      on member_rollup.relation_id = relation.id
 ),
 needed_keys as materialized (
     select row_type, row_id from scoped_source_keys
@@ -774,6 +790,15 @@ canonical_rows as materialized (
            workflow_status, column_values, external_etc_batch_id
     from etc_summary_candidates
 ),
+in_progress_oa_relation_ids as materialized (
+    select distinct membership.relation_id
+    from all_active_relation_members membership
+    join canonical_rows member
+      on member.pane = membership.row_type
+     and member.row_id = membership.row_id
+    where membership.row_type = 'oa'
+      and member.workflow_status = 'in_progress'
+),
 missing_relation_members as materialized (
     select member.relation_id, member.row_type, member.row_id
     from all_active_relation_members member
@@ -793,14 +818,7 @@ relation_groups as materialized (
         relation.case_id as detail_key,
         'relation'::text as group_kind,
         case
-            when exists (
-                select 1 from canonical_rows member
-                join all_active_relation_members membership
-                  on membership.relation_id = relation.id
-                 and membership.row_type = member.pane
-                 and membership.row_id = member.row_id
-                where member.pane = 'oa' and member.workflow_status = 'in_progress'
-            ) then 'unpaired'
+            when in_progress_oa.relation_id is not null then 'unpaired'
             when coalesce(relation.special_metadata->>'source', '') = 'batch_accounting'
                 then 'paired'
             when 'oa' = any(relation.normalized_row_types)
@@ -848,6 +866,8 @@ relation_groups as materialized (
                  then 'invoice' end
         ], null)::text[] as missing_row_types
     from scoped_relations relation
+    left join in_progress_oa_relation_ids in_progress_oa
+      on in_progress_oa.relation_id = relation.id
     cross join relation_member_guard
     where relation_member_guard.guard = 1
 ),
@@ -1774,6 +1794,10 @@ class PostgresWorkbenchPageQueryRepository:
                 # pg_stat_statements evidence show the hash/merge plan is both stable
                 # and an order of magnitude faster for this repository's query shape.
                 transaction.execute("set local enable_nestloop = off")
+                # The all-scope spine is already set based. Let concurrent HTTP
+                # requests share database CPU instead of starting parallel workers
+                # for each identical page read.
+                transaction.execute("set local max_parallel_workers_per_gather = 0")
                 return operation(
                     PostgresWorkbenchPageQueryRepository(
                         transaction,

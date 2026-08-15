@@ -1622,3 +1622,10 @@
 - 收口：Workbench direct API 改为复数 `source_expense_item_ids[]`；服务与 PostgreSQL exception filter 都按付款项—发票二部图连通分量比较，发票按 ID 去重。前端同样按连通分量渲染，一票多项只出现一次，多票一项保持同带，待归属发票进入独立残余带。
 - 状态：明确区分 `attachment_missing`、`attachment_parse_failed` 和 `attachment_unassigned`，移除旧顶层单值 DTO。缺失/解析失败 chip 可在新窗口打开 OA 日常报销列表；OA 无稳定既有详情 deep-link 合同，因此不使用跨 SPA DOM 自动点击。
 - 性能与边界：无新增 HTTP、read model、worker、cache 或逐行查询；全部发生在既有 direct canonical 批量 SQL及当前页纯内存数据内。父 OA 仍是唯一 relation/action/selection identity。
+
+## 2026-08-15 - direct canonical 列表并发与 payload 收敛
+
+- 生产只读采样显示 paired/unpaired all-scope 主查询在并发四请求时会为每个请求启动 PostgreSQL gather worker，relation zone 判断还会重复扫描相同成员；compact 列表又在每行重复输出组级金额判断、对象身份 aliases 和 detail-only metadata。
+- 修复仍在现有 direct repository 边界内：一次聚合 active relation member types、一次生成 in-progress OA relation set，并在短只读事务内将 `max_parallel_workers_per_gather` 设为 `0`，让并发 HTTP 公平共享数据库 CPU。没有修改全局 PostgreSQL 配置。
+- compact summary 只保留组级 `amount_check` 和 UI 必需 metadata，前端映射时把组级判断继承给可见行 chip；detail API 继续保留完整身份和诊断 I/O。没有新增表、索引、migration、cache、read model、worker、依赖、fallback 或第二条读取链。
+- 同一生产快照的候选 SQL 只读 `EXPLAIN ANALYZE` 中位数由约 `455ms` 降到约 `332ms`，无并行模式中位数约 `334ms`；最终 authenticated HTTP p95/p99 以本轮发布后的独立生产采样为准。

@@ -865,6 +865,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 - 该接口是 Workbench 唯一首屏读入口，在一个短生命 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 `month`、`scope_key`、`summary`、`statistics`、`invoice_inventory`、`paired` 和 `unpaired`。summary、精确计数和两区首页 keys 必须来自同一 candidate spine/snapshot，不得串行重建三次全 scope 事实。
 - 每区 shape 固定为 `groups,total,row_counts,page_size,has_more,next_cursor`。首屏 `page_size=50`，候选 SQL 返回 `page_size+1` keys 判定 `has_more`，再 set-based hydration 只完整装配当前页的 groups。
+- compact summary group 保留唯一的组级 `amount_check`；列表行不重复传输同一 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only `special_metadata`。前端可把组级金额判断继承到可见行用于 chip，完整行级诊断只由 detail 端点返回。
 - `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket` 的明确白名单合同。`cursor` 绑定 scope/zone/search/filter/sort 和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback。
 - `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填白名单 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page_size` 默认 100、最大 200，使用 opaque `cursor`；响应固定为 `options[{value,label,missing}],page_size,has_more,next_cursor`。候选来自完整 eligible group domain，目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。
 - `exception_bucket=unpaired|paired` 必须与请求 zone 相同，并在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 精确筛选/计数；异常抽屉一次只读当前 bucket，展开单组时再惰性读 detail。
@@ -879,7 +880,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 - 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
 - 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。
 
-Workbench row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于 canonical 审计、跨区重复治理和详情解释；前端动作仍以 typed canonical identity 和 preview proof 为准，不得用展示字段推测身份。
+Workbench detail row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于 canonical 审计、跨区重复治理和详情解释；compact summary rows 不重复输出它们。前端动作仍以 typed canonical identity 和 preview proof 为准，不得用展示字段推测身份。
 
 Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的 canonical 事实证据；银行流水或发票行有确定归属时由 page hydration 批量组装，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 暴露。
 

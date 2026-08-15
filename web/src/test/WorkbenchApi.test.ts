@@ -1005,6 +1005,9 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
     expect(group.workbenchAnomaly).toMatchObject({ reviewDecision: "accept_paired" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
+    expect(group.rows.oa[0].relationAmountCheck).toEqual(group.amountCheck);
+    expect(group.rows.bank[0].relationAmountCheck).toEqual(group.amountCheck);
+    expect(group.rows.invoice[0].relationAmountCheck).toEqual(group.amountCheck);
     expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "OA发票金额不一致", amountDelta: "1.00" });
   });
 
