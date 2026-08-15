@@ -719,6 +719,70 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         self.assertNotIn("workbench_anomaly", group)
 
+    def test_relation_display_amount_check_replaces_stale_gross_total_with_net_total(self) -> None:
+        rows = {
+            "oa-1015": {
+                "id": "oa-1015",
+                "type": "oa",
+                "amount": "1015",
+                "object_identity_key": "oa-1015",
+            },
+            "bank-payment": {
+                "id": "bank-payment",
+                "type": "bank",
+                "debit_amount": "1050",
+                "object_identity_key": "bank-payment",
+            },
+            "bank-refund": {
+                "id": "bank-refund",
+                "type": "bank",
+                "credit_amount": "35",
+                "object_identity_key": "bank-refund",
+            },
+            "invoice-1015": {
+                "id": "invoice-1015",
+                "type": "invoice",
+                "invoice_type": "input",
+                "total_with_tax": "1015",
+                "object_identity_key": "invoice-1015",
+            },
+        }
+        relation = {
+            "case_id": "CASE-NET-1015",
+            "row_ids": list(rows),
+            "row_types": ["oa", "bank", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "special_metadata": {"requires_oa": True, "requires_invoice": True},
+            "amount_check": {
+                "status": "mismatch",
+                "oa_total": "1015.00",
+                "bank_total": "1050.00",
+                "invoice_total": "1015.00",
+                "amount_delta": "35.00",
+                "requires_note": True,
+            },
+        }
+
+        payload = self.service.group_payload(
+            "all",
+            rows_by_id=rows,
+            active_relations=[relation],
+        )
+
+        group = payload["paired"]["groups"][0]
+        self.assertNotIn("workbench_anomaly", group)
+        self.assertEqual(group["amount_check"]["status"], "matched")
+        self.assertEqual(group["amount_check"]["bank_gross_total"], "1050.00")
+        self.assertEqual(group["amount_check"]["bank_contra_total"], "35.00")
+        self.assertEqual(group["amount_check"]["bank_total"], "1015.00")
+        self.assertEqual(group["amount_check"]["amount_delta"], "0.00")
+        self.assertFalse(group["amount_check"]["requires_note"])
+        for row_type in ("oa", "bank", "invoice"):
+            for row in group[f"{row_type}_rows"]:
+                self.assertEqual(row["relation_amount_check"]["status"], "matched")
+                self.assertEqual(row["relation_amount_check"]["bank_total"], "1015.00")
+
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
         base_rows = [row_for_fact(fact) for fact in batch.facts]

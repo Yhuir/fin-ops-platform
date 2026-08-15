@@ -211,7 +211,17 @@ class WorkbenchRelationGroupingService:
             row_type: [row for row in rows if str(row.get("type")) == row_type]
             for row_type in ROW_TYPES
         }
-        anomaly = WorkbenchAmountCheckService().workbench_anomaly(
+        amount_check_service = WorkbenchAmountCheckService()
+        relation_amount_check = (
+            deepcopy(relation["amount_check"])
+            if isinstance(relation.get("amount_check"), dict)
+            else None
+        )
+        if relation_amount_check is not None:
+            relation_amount_check.update(amount_check_service.check(rows_by_type))
+            for row in rows:
+                row["relation_amount_check"] = deepcopy(relation_amount_check)
+        anomaly = amount_check_service.workbench_anomaly(
             rows_by_type,
             relation_id=case_id,
         )
@@ -264,8 +274,8 @@ class WorkbenchRelationGroupingService:
             for item in anomaly["items"]:
                 item["display_label"] = item["label"]
             group["workbench_anomaly"] = anomaly
-        if isinstance(relation.get("amount_check"), dict):
-            group["amount_check"] = deepcopy(relation["amount_check"])
+        if relation_amount_check is not None:
+            group["amount_check"] = relation_amount_check
         if isinstance(special_metadata, dict):
             group["special_metadata"] = deepcopy(special_metadata)
         display_tags = self._display_tags(rows, relation)
