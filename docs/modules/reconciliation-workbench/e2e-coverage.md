@@ -13,7 +13,7 @@
 | `RECON-WB-E2E-007` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 写失败不移动；写成功而 refetch 失败时明确提示并避免重复写入 |
 | `RECON-WB-E2E-008` | covered | `web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` 覆盖未配对工具栏精确文案“异常处理”不存在、read-export relation 动作禁用且统一抽屉写动作隐藏 | read-export/full/admin 的读取和 mutation gate；旧人工入口不存在 |
 | `RECON-WB-E2E-009` | covered | `tests/test_workbench_amount_check_service.py`、`tests/test_oa_attachment_invoice_linking.py`、`tests/test_workbench_page_query_repository.py`、`web/e2e/workbench-exception-flow.spec.ts`、`web/src/test/groupDisplayModel.test.ts`、`web/src/test/WorkbenchExceptionDrawer.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 异常默认未配对、退款净额无误报、历史附件归一、多选人工分类/无异常互斥、具体 chip、逐项审阅、accept/keep、已配对异常撤回、主区同步移动与旧 ignore/restore 入口缺席 |
-| `RECON-WB-E2E-010` | covered | `web/e2e/workbench-large-scroll-flow.spec.ts` | 首屏 50 组、滚动自动分页、失败停止/显式重试、跨未加载页全量搜索、详情、选择保持和三栏滚动 |
+| `RECON-WB-E2E-010` | covered | `web/e2e/workbench-large-scroll-flow.spec.ts` | 首屏 10 组、滚动自动分页、失败停止/显式重试、跨未加载页全量搜索、详情、选择保持和三栏滚动 |
 | `RECON-WB-E2E-011` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 网络恢复、重试和幂等提交 |
 | `RECON-WB-E2E-012` | covered | `web/e2e/workbench-stale-error-flow.spec.ts`、`workbench-permissions-flow.spec.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchWriteGate.test.ts` | App Health/OA dirty 写安全 gate、选择区禁用原因和权威 OA 状态恢复；无 page RM version gate |
 | `RECON-WB-E2E-013` | covered | `web/e2e/workbench-cash-special-flow.spec.ts` | paired 现金特殊处理写链路及 barrier |

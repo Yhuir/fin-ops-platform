@@ -128,11 +128,11 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("workbench_initial_all", "/api/workbench?month=all"),
     HttpProbe(
         "workbench_groups_all_paired",
-        "/api/workbench/groups?month=all&zone=paired&page_size=50&detail_level=summary",
+        "/api/workbench/groups?month=all&zone=paired&page_size=10&detail_level=summary",
     ),
     HttpProbe(
         "workbench_groups_all_unpaired",
-        "/api/workbench/groups?month=all&zone=unpaired&page_size=50&detail_level=summary",
+        "/api/workbench/groups?month=all&zone=unpaired&page_size=10&detail_level=summary",
     ),
     HttpProbe(
         "workbench_filter_options_all_paired",

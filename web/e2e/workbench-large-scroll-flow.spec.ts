@@ -92,7 +92,7 @@ test.describe("workbench large dataset browser flow", () => {
 
     const openZone = page.getByTestId("zone-unpaired");
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-013")).toHaveCount(0);
     await expect(openZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
     expect(api.count("GET /api/workbench")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBe(0);
@@ -100,7 +100,7 @@ test.describe("workbench large dataset browser flow", () => {
     await openZone.getByRole("button", { name: "筛选 申请人" }).click();
     const applicantFilter = page.getByRole("dialog", { name: "筛选 申请人" });
     await expect(applicantFilter.getByRole("checkbox", { name: "大数据申请人064" })).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-013")).toHaveCount(0);
     expect(api.count("GET /api/workbench/filter-options")).toBe(1);
     await page.keyboard.press("Escape");
 
@@ -108,10 +108,17 @@ test.describe("workbench large dataset browser flow", () => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-099")).toBeVisible();
-    expect(api.count("GET /api/workbench/groups")).toBe(1);
+    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(1);
+    await openZone.locator(".candidate-grid-body").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-030")).toBeVisible();
+    expect(api.count("GET /api/workbench/groups")).toBe(2);
     expect(groupRequestUrls[0]?.searchParams.get("cursor")).toBeTruthy();
     expect(groupRequestUrls[0]?.searchParams.has("page")).toBe(false);
+    expect(groupRequestUrls[1]?.searchParams.get("cursor")).toBeTruthy();
+    expect(groupRequestUrls[1]?.searchParams.has("page")).toBe(false);
 
     const pairedSearch = page.getByRole("searchbox", { name: "搜索已配对区域" });
     const unpairedSearch = openZone.getByRole("searchbox", { name: "搜索未配对区域" });
@@ -123,9 +130,9 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toHaveCount(0);
     await expect(targetGroup.locator("mark.search-hit", { hasText: "长列表供应商155" })).toBeVisible();
     await expect(pairedSearch).toHaveValue("");
-    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(2);
-    expect(groupRequestUrls[1]?.searchParams.get("search")).toBe("长列表供应商155");
-    expect(groupRequestUrls[1]?.searchParams.has("cursor")).toBe(false);
+    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(3);
+    expect(groupRequestUrls[2]?.searchParams.get("search")).toBe("长列表供应商155");
+    expect(groupRequestUrls[2]?.searchParams.has("cursor")).toBe(false);
 
     await targetGroup.getByRole("row", { name: /长列表供应商155/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
@@ -141,19 +148,19 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(openZone.getByText("已选 1")).toBeVisible();
     await openZone.getByRole("button", { name: "清空搜索" }).click();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
-    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(3);
-    expect(groupRequestUrls[2]?.searchParams.has("search")).toBe(false);
-    expect(groupRequestUrls[2]?.searchParams.has("cursor")).toBe(false);
+    await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(4);
+    expect(groupRequestUrls[3]?.searchParams.has("search")).toBe(false);
+    expect(groupRequestUrls[3]?.searchParams.has("cursor")).toBe(false);
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066")).toBeVisible();
-    expect(api.count("GET /api/workbench/groups")).toBe(4);
-    expect(groupRequestUrls[3]?.searchParams.get("cursor")).toBeTruthy();
-    expect(groupRequestUrls[3]?.searchParams.has("page")).toBe(false);
-    await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("cell").first().click();
-    await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("cell").first().click();
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-012")).toBeVisible();
+    expect(api.count("GET /api/workbench/groups")).toBe(5);
+    expect(groupRequestUrls[4]?.searchParams.get("cursor")).toBeTruthy();
+    expect(groupRequestUrls[4]?.searchParams.has("page")).toBe(false);
+    await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-013").getByRole("cell").first().click();
+    await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-012").getByRole("cell").first().click();
     await expect(openZone.getByText("已选 3")).toBeVisible();
     const confirmButton = openZone.getByRole("button", { name: "确认关联" });
     await expect(confirmButton).toBeEnabled();
@@ -164,7 +171,7 @@ test.describe("workbench large dataset browser flow", () => {
 
     const bankFooter = page.getByTestId("pane-scrollbar-unpaired-bank");
     const bankHeader = page.getByTestId("pane-scroll-head-unpaired-bank");
-    const bankRow = page.getByTestId("candidate-scroll-unpaired-row:bk-large-202603-065-bank");
+    const bankRow = page.getByTestId("candidate-scroll-unpaired-row:bk-large-202603-014-bank");
     await scrollPaneHorizontally(bankFooter);
     await expect.poll(() => bankHeader.evaluate(
       (element) => element.scrollWidth - element.clientWidth - element.scrollLeft,
@@ -196,7 +203,7 @@ test.describe("workbench large dataset browser flow", () => {
     expect(api.count("GET /api/workbench/groups")).toBe(1);
 
     await openZone.getByRole("button", { name: "重试自动加载" }).click();
-    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-013")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     await expect(openZone.getByRole("alert")).toHaveCount(0);
   });

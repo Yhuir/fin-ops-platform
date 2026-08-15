@@ -1637,3 +1637,11 @@
 - 生产 PostgreSQL `jit=on`；该请求由有界 JSON/数组展开和 hash join 主导，逐请求 JIT 编译成本高于收益，因此只在 Workbench direct 的 `REPEATABLE READ / READ ONLY` 事务内设置 `jit=off`。全局数据库配置和其它页面事务不受影响。
 - 候选模块在当前生产只读库执行 combined initial 成功，返回 paired/unpaired 各 50 组，异常计数保持 paired `0`、unpaired `30`，单次候选端到端 repository 耗时约 `932ms`。最终并发 HTTP p95/p99 仍以激活 release 后的标准探针为准。
 - 没有新增表、索引、migration、read model、cache、worker、API 字段、状态或分页合同；模块边界和 I/O 不变，因此 boundary 文档无需修改。
+
+## 2026-08-15 - canonical 异常事实复用与 10 组首屏
+
+- 上一轮发布后的 authenticated HTTP 标准探针为 `1060` 次请求、错误 `0`，但 combined initial / paired / unpaired p95 约为 `2264/1532/1642ms`，三项仍超过 `1000ms` 硬合同。App Health 显示连接获取 p95 低于 `0.04ms`，剩余耗时集中在 PostgreSQL direct query 和当前页 hydration。
+- 根因一：canonical spine 已经读取 OA、流水与发票，异常判定 CTE 却再次 join 同一源表并重复执行发票可见性谓词。现在只在窄 canonical fact 构建时发布异常必需的 OA 金额/别名/费用项、流水金额/方向和发票金额/来源边，anomaly spine 直接复用；删除对 OA、流水和发票源表的第二次扫描，不保留旧路径。
+- 根因二：原首屏每区固定装配 `50` 个 group，而单个 group 可含多个 OA 子付款项、流水和发票。在 4 核生产机上这会让并发请求反复装配超出当前视口的 payload。首屏改为每区 `10` 组，保留精确 total、opaque cursor、底部自动续读和服务端全量搜索；不截断 group 成员，不伪造总数。
+- 生产只读候选模块使用同一 snapshot 返回 paired `284`、unpaired `697`、paired exception `0`、unpaired exception `30`。每区 `10` 组时的 20 次/4 并发 repository 样本 p50/p95/p99 约为 `779/975/1067ms`。该数据只用于候选选择，最终验收以激活 release 后的 authenticated HTTP 标准探针为准。
+- 前后端常量、API 长期合同、模块边界、E2E 规格和 HTTP SLO 探针同步修改。没有新增表、索引、migration、read model、cache、worker、依赖、状态或第二条读取链。

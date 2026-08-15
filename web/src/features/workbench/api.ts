@@ -69,7 +69,7 @@ export type WorkbenchBootstrapProgress = {
   indeterminate: boolean;
 };
 
-export const WORKBENCH_GROUP_PAGE_SIZE = 50;
+export const WORKBENCH_GROUP_PAGE_SIZE = 10;
 
 const workbenchInitialPageRequests = new Map<string, Promise<ApiWorkbenchInitialPayload>>();
 
@@ -1835,7 +1835,7 @@ function mapWorkbenchZonePage(
   return {
     zone,
     page,
-    pageSize: toCount(payload.page_size) || 50,
+    pageSize: toCount(payload.page_size) || WORKBENCH_GROUP_PAGE_SIZE,
     total: toCount(payload.total),
     rowCounts: {
       oa: toCount(payload.row_counts?.oa),

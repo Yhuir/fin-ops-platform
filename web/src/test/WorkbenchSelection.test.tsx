@@ -1699,7 +1699,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: /未配对异常 51 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(await within(drawer).findByText("50 / 51 项")).toBeInTheDocument();
+    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("10 / 51 项");
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 

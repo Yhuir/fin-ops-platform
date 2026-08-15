@@ -4,7 +4,7 @@
 
 ## 2026-08-13 Direct canonical API 与 page runtime 退役
 
-- Repository/SQL：首屏在一个 `REPEATABLE READ READ ONLY` snapshot 中构造一次 scope-first typed group spine，同时得到 summary、inventory、paired/unpaired exact totals 与两区各 50 个 keys；只批量 hydration 可见页。普通 groups 使用 query-bound opaque keyset cursor，facet 一条有界 SQL，detail 只按 case 或 typed identity 窄查。搜索只覆盖展示字段并转义 literal wildcard；非法 scope/filter/sort/status/source/page size/cursor 返回 400。
+- Repository/SQL：首屏在一个 `REPEATABLE READ READ ONLY` snapshot 中构造一次 scope-first typed group spine，同时得到 summary、inventory、paired/unpaired exact totals 与两区各 10 个 keys；只批量 hydration 可见页。普通 groups 使用 query-bound opaque keyset cursor，facet 一条有界 SQL，detail 只按 case 或 typed identity 窄查。搜索只覆盖展示字段并转义 literal wildcard；非法 scope/filter/sort/status/source/page size/cursor 返回 400。
 - Typed identity：页面、preview 与 submit 都以有序 `(row_type,row_id)` 表达成员；同一文本 ID 跨 OA/银行/发票不得冲突或错绑。active relation member array 形状、typed 重复、missing canonical member、completed/pending OA 双源冲突都 fail closed。
 - API/frontend：响应删除 page generation/freshness/version/job；`/api/workbench/refresh-status` 404。mount 使用 combined initial + 独立 OA sync status；区域 search/filter 只重读受影响 zone；异常抽屉 cursor 增量读取，展开才取详情。写成功恰好一次 normal canonical GET，refetch 失败不重试 mutation。
 - Runtime：manifest/App Status/scope 只保留 `workbench_relation`；required worker 精确为 5 个。`workbench.read_model.refresh`、page worker/env、Redis page cache、generation rehydrate/prune/convergence current tooling 全部退役，matching 与 shared relation 保留。
@@ -239,7 +239,7 @@ current runtime gate。
 - 默认 all-scope `/groups` 的 total/row_counts 由同一 direct group spine 精确计算；keyset 只优化深分页，不能把 exact count 伪装成近似值。候选和 hydration 的 SQL 数必须与成员数无关、无 N+1。
 - all-scope 区域搜索、来源、pane/列/时间筛选只扫描 scope-first canonical facts/active formal relations，条件按既有 AND/OR 语义相交；分页只 hydration `page_size` 可见 groups。搜索覆盖展示字段、排除内部 identity/raw payload、转义 ILIKE 通配符并限制 200 字符。
 - 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时只请求受影响 zone，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中折叠明细时仍返回对应关联组，但闭合态只显示摘要，不显示折叠成员且不发详情请求。搜索和非搜索状态下，ETC 发票与流水规则批次都只能由用户显式点击展开；收起后必须恢复摘要，搜索切换期间完成的旧详情请求不得重新展开新结果。
-- 搜索框在首个 combined initial 完成前已可输入时，initial 安装后必须补发该 zone 的权威 direct query；不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
+- 搜索框在首个 combined initial 完成前已可输入时，initial 安装后必须补发该 zone 的权威 direct query；不能只对首屏 10 组做本地高亮并漏掉其它组或折叠明细。
 - 关联台 Audit 绿色结果只绑定本次 immutable canonical snapshot 的 expected-set、typed membership、active relations、异常与关键字段；下一次 dashboard refresh 清除旧结果。matching scope 是独立 domain 诊断，不是页面 GET freshness。
 - matching source-version 回归必须证明 Workbench page direct SQL 不进入 matching provider；bank-flow/no-OA 的独立 read-model provider 只保留自身真实依赖。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。

@@ -8,6 +8,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_query import
     _ANOMALY_STATE_CTES,
     _SCOPED_CANONICAL_GROUPS_CTE,
     PostgresWorkbenchPageQueryRepository,
+    WORKBENCH_GROUP_PAGE_SIZE,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET,
@@ -212,6 +213,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "unpaired_filtered_groups" in sql
     assert "overall_summary" in sql
     assert "invoice_inventory" in sql
+    assert WORKBENCH_GROUP_PAGE_SIZE == 10
+    assert connection.calls[0][1].count(WORKBENCH_GROUP_PAGE_SIZE + 1) == 2
     assert [row["internal_key"] for row in hydrated_batches[0]] == [
         "case:case-1",
         "row:bank:bank-1",
@@ -264,11 +267,23 @@ def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:
 
 
 def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases() -> None:
-    sql = " ".join(_ANOMALY_STATE_CTES.split())
+    canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
+    anomaly_sql = " ".join(_ANOMALY_STATE_CTES.split())
 
-    assert "source_identity_aliases" in sql
-    assert "'Mongo文档ID'" in sql
-    assert "'oa-exp-' || value" in sql
+    assert "source_identity_aliases" in anomaly_sql
+    assert "'Mongo文档ID'" in canonical_sql
+    assert "'oa-exp-' || value" in anomaly_sql
+
+
+def test_anomaly_query_reuses_canonical_source_facts_without_rescanning_sources() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+
+    assert "member.oa_expense_items" in sql
+    assert "member.invoice_source_links" in sql
+    assert "left join app.oa_applications" not in sql
+    assert "left join app.oa_pending_payment_admissions" not in sql
+    assert "left join app.bank_transactions" not in sql
+    assert "left join app.invoices invoice" not in sql
 
 
 def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> None:

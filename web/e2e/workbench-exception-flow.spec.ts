@@ -54,7 +54,7 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.getByText("50 / 51 项")).toBeVisible();
+    await expect(drawer.getByText("10 / 51 项")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
 
@@ -63,7 +63,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     await drawer.getByRole("button", { name: "加载更多异常" }).click();
-    await expect(drawer.getByText("51 项")).toBeVisible();
+    await expect(drawer.getByText("20 / 51 项")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     const loadMoreUrl = groupRequestUrls.find((url) => url.searchParams.has("cursor"));
     expect(loadMoreUrl?.searchParams.get("cursor")).toBeTruthy();

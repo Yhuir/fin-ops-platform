@@ -19,7 +19,7 @@
 
 页面不拥有自动候选、matching decision 或第三种关系状态。确定性引擎满足安全规则时直接通过正式关系命令边界创建 active relation；不满足时不写关系，事实仍保持可见的未配对单行。
 
-已配对区和未配对区三栏的表头下拉不再从浏览器已加载页推导。菜单打开后通过 direct canonical `/api/workbench/filter-options` 读取完整候选域；主表按 50 组的 opaque keyset cursor 分页，候选菜单独立按 100 项 keyset 分页并支持搜索。目标列自己的筛选条件不限制其候选，其余区域搜索、列筛选和时间筛选保持生效。
+已配对区和未配对区三栏的表头下拉不再从浏览器已加载页推导。菜单打开后通过 direct canonical `/api/workbench/filter-options` 读取完整候选域；主表按 10 组的 opaque keyset cursor 分页并在接近底部时自动续读，候选菜单独立按 100 项 keyset 分页并支持搜索。目标列自己的筛选条件不限制其候选，其余区域搜索、列筛选和时间筛选保持生效。
 
 候选菜单使用紧凑的 HeroUI Popover/SearchField/Checkbox 布局并允许长标签自然换行。OA 申请事由直接显示完整文本，不再创建 hover 浮层，避免浮层测量导致表格滚动条抖动。
 

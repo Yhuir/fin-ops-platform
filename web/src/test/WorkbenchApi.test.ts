@@ -39,8 +39,8 @@ import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } fro
 
 const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
-test("keeps the combined initial and subsequent group pages at a 50-group first screen", () => {
-  expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(50);
+test("keeps the combined initial and subsequent group pages at a 10-group first screen", () => {
+  expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(10);
 });
 
 test("does not infer a safe OA write state when the status contract is missing", async () => {

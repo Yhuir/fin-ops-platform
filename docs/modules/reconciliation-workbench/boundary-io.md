@@ -77,7 +77,7 @@ requested tenant/scope
 
 ### 首屏与分页
 
-- `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 50 组首页。
+- `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 10 组首页。精确 total 不变，后续使用 opaque cursor 自动续读。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
 - `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`。
 - compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
