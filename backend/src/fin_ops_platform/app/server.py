@@ -256,6 +256,7 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendin
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
+from fin_ops_platform.services.operation_history_semantics import operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
@@ -1445,20 +1446,22 @@ class Application:
                 actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
                 if request_audit_enabled and actor_id and effective_request_id:
                     try:
+                        page_key = self._audit_page_key_for_route(route_path)
+                        semantics = operation_semantics(method, route_path, page_key=page_key)
                         self._audit_service.record_action(
                             actor_id=actor_id,
-                            action=f"{method.upper()} {route_path}",
-                            entity_type="http_request",
+                            action=semantics.action_code,
+                            entity_type=semantics.object_type,
                             entity_id=effective_request_id,
                             metadata={
                                 "event_type": "operation.completed",
                                 "actor_name": actor_name,
                                 "actor_account": actor_account,
-                                "page_key": self._audit_page_key_for_route(route_path),
+                                "page_key": page_key,
                                 "operation_location": route_path,
                                 "outcome": "success" if request_error is None and status_code < 400 else "failed",
                                 "request_id": effective_request_id,
-                                "summary": f"{method.upper()} {route_path} · HTTP {status_code}",
+                                **semantics.audit_metadata(),
                                 "status_code": status_code,
                             },
                         )
@@ -1558,20 +1561,22 @@ class Application:
             _REQUEST_AUDIT_ACTOR.set((actor_id, actor_name, actor_account))
             if actor_id and request_id and self._audit_service.is_durable:
                 try:
+                    page_key = self._audit_page_key_for_route(route_path)
+                    semantics = operation_semantics(method, route_path, page_key=page_key)
                     self._audit_service.record_action(
                         actor_id=actor_id,
-                        action=f"{method.upper()} {route_path}",
-                        entity_type="http_request",
+                        action=semantics.action_code,
+                        entity_type=semantics.object_type,
                         entity_id=request_id,
                         metadata={
                             "event_type": "operation.requested",
                             "actor_name": actor_name,
                             "actor_account": actor_account,
-                            "page_key": self._audit_page_key_for_route(route_path),
+                            "page_key": page_key,
                             "operation_location": route_path,
                             "outcome": "pending",
                             "request_id": request_id,
-                            "summary": f"{method.upper()} {route_path}",
+                            **semantics.audit_metadata(),
                         },
                     )
                 except Exception as exc:

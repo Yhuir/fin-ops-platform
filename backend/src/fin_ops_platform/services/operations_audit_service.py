@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from fin_ops_platform.services.operation_history_semantics import semantics_from_audit_row
 from fin_ops_platform.services.page_audit_registry import page_audit_registration
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
 
@@ -133,7 +134,7 @@ class OperationsAuditService:
                 "outcome": completed.get("outcome") if completed else latest.get("outcome"),
             }
         )
-        operation["items"] = self._workbench_items(histories)
+        operation["items"] = self._workbench_items(histories, action_code=operation["action_code"])
         operation["reason"] = self._text(latest.get("reason"))
         return operation
 
@@ -213,29 +214,19 @@ class OperationsAuditService:
 
     @classmethod
     def _operation_summary(cls, row: dict[str, Any]) -> dict[str, Any]:
-        action = str(row.get("action") or "")
-        action_labels = {
-            "POST /api/workbench/actions/confirm-link": "确认关联",
-            "POST /api/workbench/actions/cancel-link": "取消关联",
-            "POST /api/workbench/actions/withdraw-link": "撤回关联",
-        }
-        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-        summary = str(payload.get("summary") or "").strip()
-        if summary.startswith(("GET /api/", "POST /api/", "PUT /api/", "PATCH /api/", "DELETE /api/")):
-            summary = ""
+        semantics = semantics_from_audit_row(row)
         return serialize_value(
             {
                 "operation_key": row.get("operation_key"),
-                "event_id": row.get("latest_event_id") or row.get("id"),
-                "request_id": row.get("request_id"),
-                "trace_id": row.get("trace_id"),
-                "object_id": row.get("object_id"),
                 "actor_id": row.get("actor_id"),
                 "actor_name": row.get("actor_name"),
                 "actor_account": row.get("actor_account"),
                 "page_key": row.get("page_key"),
-                "action_label": action_labels.get(action) or summary or "业务操作",
-                "object_type": row.get("object_type"),
+                "action_code": semantics.action_code,
+                "action_label": semantics.action_label,
+                "action_description": semantics.description,
+                "object_type": semantics.object_type,
+                "object_label": semantics.object_label,
                 "started_at": row.get("started_at") or row.get("occurred_at"),
                 "completed_at": row.get("completed_at"),
                 "occurred_at": row.get("occurred_at"),
@@ -244,8 +235,13 @@ class OperationsAuditService:
         )
 
     @classmethod
-    def _workbench_items(cls, histories: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        receipts: list[dict[str, Any]] = []
+    def _workbench_items(
+        cls,
+        histories: list[dict[str, Any]],
+        *,
+        action_code: str,
+    ) -> list[dict[str, Any]]:
+        affected_members: set[tuple[str, str]] = set()
         for history in histories:
             raw = history.get("raw_payload") if isinstance(history.get("raw_payload"), dict) else {}
             normalized = raw.get("normalized_payload") if isinstance(raw.get("normalized_payload"), dict) else {}
@@ -275,18 +271,49 @@ class OperationsAuditService:
                     row_types = [row_type for _row_id, row_type in typed_members]
             if len(row_ids) != len(row_types):
                 continue
-            receipts.extend(
-                {
-                    "item_key": f"item-{len(receipts) + 1}",
-                    "type": str(row_type),
-                    "title": str(row_id),
-                    "secondary": "",
-                    "amount": None,
-                    "date": None,
-                }
+            affected_members.update(
+                (str(row_type).strip(), str(row_id).strip())
                 for row_id, row_type in zip(row_ids, row_types, strict=True)
+                if str(row_id).strip() and str(row_type).strip()
             )
-        return receipts
+        labels = {"oa": "OA", "bank": "银行流水", "invoice": "发票"}
+        counts: dict[str, int] = {}
+        for row_type, _row_id in affected_members:
+            counts[row_type] = counts.get(row_type, 0) + 1
+        paired_actions = {
+            "workbench.relation.confirm",
+            "workbench.advance.confirm",
+            "workbench.cash.confirm_pass_through",
+            "workbench.cash.confirm_ticket",
+        }
+        unpaired_actions = {
+            "workbench.relation.cancel",
+            "workbench.relation.withdraw",
+            "workbench.cash.cancel",
+        }
+        before_status = (
+            "未配对" if action_code in paired_actions else "已配对" if action_code in unpaired_actions else ""
+        )
+        after_status = (
+            "已配对" if action_code in paired_actions else "未配对" if action_code in unpaired_actions else ""
+        )
+        order = {row_type: index for index, row_type in enumerate(labels)}
+        return [
+            {
+                "item_key": f"type-{row_type}",
+                "type": labels.get(row_type, "业务记录"),
+                "title": f"{count} 条{labels.get(row_type, '业务记录')}",
+                "secondary": f"本次操作涉及 {count} 条{labels.get(row_type, '业务记录')}",
+                "amount": None,
+                "date": None,
+                "before_status": before_status,
+                "after_status": after_status,
+            }
+            for row_type, count in sorted(
+                counts.items(),
+                key=lambda item: (order.get(item[0], len(order)), item[0]),
+            )
+        ]
 
     @staticmethod
     def _relation_history_payloads(value: object) -> list[dict[str, Any]]:
@@ -295,33 +322,6 @@ class OperationsAuditService:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
         return []
-
-    @staticmethod
-    def _display_row(row: dict[str, Any]) -> dict[str, Any]:
-        row_type = str(row.get("type") or row.get("source_kind") or "")
-        if row_type == "oa":
-            return {
-                "type": "OA",
-                "title": str(row.get("applicant") or row.get("applicant_name") or "OA申请"),
-                "secondary": str(row.get("project_name") or row.get("reason") or row.get("apply_type") or ""),
-                "amount": row.get("amount"),
-                "date": row.get("application_date") or row.get("apply_date"),
-            }
-        if row_type == "bank":
-            return {
-                "type": "银行流水",
-                "title": str(row.get("counterparty_name") or "未知对手方"),
-                "secondary": str(row.get("category_label") or row.get("summary") or row.get("payment_account_label") or ""),
-                "amount": row.get("amount"),
-                "date": row.get("trade_time") or row.get("txn_date"),
-            }
-        return {
-            "type": "进项发票",
-            "title": str(row.get("seller_name") or "发票"),
-            "secondary": str(row.get("invoice_no") or row.get("digital_invoice_no") or ""),
-            "amount": row.get("total_with_tax") or row.get("amount"),
-            "date": row.get("issue_date") or row.get("invoice_date"),
-        }
 
     @staticmethod
     def _iso(value: Any) -> str:

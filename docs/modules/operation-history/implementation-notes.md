@@ -1,5 +1,13 @@
 # 操作历史实施记录
 
+## 2026-08-16
+
+- 新增单一后端语义注册表，unsafe HTTP 审计不再把 method/route/HTTP status 当作用户操作文案；新记录持久化稳定 action code、动作、对象和说明。
+- 旧 raw HTTP 记录在只读 service 投影为同一套用户语义，不改写 append-only 历史事实。
+- 详情移除 operation/event/request/trace/object 内部标识；关联台选择不再输出 raw row id，只按 OA、银行流水、发票去重汇总数量与状态变化。
+- 删除前端对象类型文案映射和后端三条 route 特判/未使用行详情函数；列表和详情共用后端语义事实源。
+- 沿用 `audit.events`、现有 request 生命周期聚合与 relation history，不新增表、read model、cache、worker 或模板引擎。
+
 ## 2026-08-09
 
 - 复用既有 `audit.events`，不建立第二套日志系统。

@@ -43,17 +43,6 @@ function actorLabel(actor: Pick<OperationHistoryOperation, "actor_id" | "actor_n
   return name && account ? `${name} · ${account}` : name || account || actorId;
 }
 
-function objectLabel(objectType?: string | null) {
-  const labels: Record<string, string> = {
-    bank_transactions: "银行流水",
-    financial_fact_corrections: "事实修正",
-    http_request: "页面操作",
-    invoices: "发票",
-    workbench_pair_relations: "关联关系",
-  };
-  return labels[String(objectType ?? "")] ?? "业务数据";
-}
-
 function outcomeView(outcome: string) {
   if (outcome === "success") return { color: "success" as const, label: "成功" };
   if (outcome === "failed") return { color: "danger" as const, label: "失败" };
@@ -231,7 +220,7 @@ export default function OperationHistoryPage() {
                   <FinanceTableCell columnRole="identity">{actorLabel(row)}</FinanceTableCell>
                   <FinanceTableCell columnRole="account">{pageLabelForKey(row.page_key)}</FinanceTableCell>
                   <FinanceTableCell columnRole="description">{row.action_label}</FinanceTableCell>
-                  <FinanceTableCell columnRole="identity">{objectLabel(row.object_type)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="identity">{row.object_label || "业务记录"}</FinanceTableCell>
                   <FinanceTableCell columnRole="status"><Chip color={outcome.color} size="sm">{outcome.label}</Chip></FinanceTableCell>
                   <FinanceTableCell columnRole="action">
                     <Button aria-label={`查看${row.action_label}详情`} size="sm" variant="tertiary" onPress={() => void openDetail(row)}>详情</Button>
@@ -245,29 +234,27 @@ export default function OperationHistoryPage() {
 
       {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
 
-      <AppDrawer open={selected !== null} title="操作详情" width={720} onClose={closeDetail}>
+      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={closeDetail}>
         {selected ? (
           <div className="operation-history-detail">
-            <dl>
-              <div><dt>操作</dt><dd>{selected.action_label}</dd></div>
-              <div><dt>结果</dt><dd><Chip color={outcomeView(selected.outcome).color} size="sm">{outcomeView(selected.outcome).label}</Chip></dd></div>
+            <div className="operation-history-detail__summary">
+              <div>
+                <span>具体操作</span>
+                <strong>{selected.action_label}</strong>
+                <p>{selected.action_description}</p>
+              </div>
+              <Chip color={outcomeView(selected.outcome).color} size="sm">{outcomeView(selected.outcome).label}</Chip>
+            </div>
+            <dl className="operation-history-detail__metadata">
               <div><dt>操作人</dt><dd>{actorLabel(selected)}</dd></div>
               <div><dt>页面</dt><dd>{pageLabelForKey(selected.page_key)}</dd></div>
-              <div><dt>开始</dt><dd>{formatTime(selected.started_at)}</dd></div>
-              <div><dt>完成</dt><dd>{formatTime(selected.completed_at)}</dd></div>
+              <div><dt>影响对象</dt><dd>{selected.object_label || "业务记录"}</dd></div>
+              <div><dt>处理结果</dt><dd>{outcomeView(selected.outcome).label}</dd></div>
+              <div><dt>开始时间</dt><dd>{formatTime(selected.started_at)}</dd></div>
+              <div><dt>完成时间</dt><dd>{formatTime(selected.completed_at)}</dd></div>
             </dl>
             <section>
-              <h3>审计追踪</h3>
-              <dl>
-                <div><dt>操作标识</dt><dd>{selected.operation_key}</dd></div>
-                {selected.request_id ? <div><dt>请求标识</dt><dd>{selected.request_id}</dd></div> : null}
-                {selected.event_id ? <div><dt>事件标识</dt><dd>{selected.event_id}</dd></div> : null}
-                {selected.object_id ? <div><dt>对象标识</dt><dd>{selected.object_id}</dd></div> : null}
-                {selected.trace_id ? <div><dt>链路标识</dt><dd>{selected.trace_id}</dd></div> : null}
-              </dl>
-            </section>
-            <section>
-              <h3>本次选择与状态变化</h3>
+              <h3>涉及记录</h3>
               {selected.items?.length ? (
                 <FinanceTable ariaLabel="操作明细" minWidth={680}>
                   <FinanceTableHeader>
@@ -282,12 +269,16 @@ export default function OperationHistoryPage() {
                         <FinanceTableCell columnRole="status">{item.type}</FinanceTableCell>
                         <FinanceTableCell columnRole="description"><span className="operation-history-item-title">{item.title}</span>{item.secondary ? <span className="operation-history-item-secondary">{item.secondary}</span> : null}</FinanceTableCell>
                         <FinanceTableCell columnRole="amount">{formatAmount(item.amount)}</FinanceTableCell>
-                        <FinanceTableCell columnRole="status"><span className="operation-history-status-change">{item.before_status}<ArrowRight aria-hidden="true" size={14} />{item.after_status}</span></FinanceTableCell>
+                        <FinanceTableCell columnRole="status">
+                          {item.before_status && item.after_status ? (
+                            <span className="operation-history-status-change">{item.before_status}<ArrowRight aria-hidden="true" size={14} />{item.after_status}</span>
+                          ) : "—"}
+                        </FinanceTableCell>
                       </FinanceTableRow>
                     )}
                   </FinanceTableBody>
                 </FinanceTable>
-              ) : <p className="operation-history-empty-detail">该历史操作没有可展示的业务明细。</p>}
+              ) : <p className="operation-history-empty-detail">这条历史记录未保存可展示的对象明细。</p>}
             </section>
           </div>
         ) : null}

@@ -79,8 +79,7 @@ class OperationsAuditServiceTests(unittest.TestCase):
         repository = FakeOperationsAuditRepository()
         occurred_at = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
         repository.history_rows = [
-            {"operation_key": f"request:request-{index}", "occurred_at": occurred_at}
-            for index in range(1, 4)
+            {"operation_key": f"request:request-{index}", "occurred_at": occurred_at} for index in range(1, 4)
         ]
         service = OperationsAuditService(repository)
 
@@ -165,33 +164,45 @@ class OperationsAuditServiceTests(unittest.TestCase):
                 "payload": {},
             },
         ]
-        repository.relation_history = [{
-            "raw_payload": {"normalized_payload": {
-                "affected_row_ids": ["oa-internal"],
-                "affected_row_types": ["oa"],
-            }}
-        }]
+        repository.relation_history = [
+            {
+                "raw_payload": {
+                    "normalized_payload": {
+                        "affected_row_ids": ["oa-internal"],
+                        "affected_row_types": ["oa"],
+                    }
+                }
+            }
+        ]
 
         operation = OperationsAuditService(repository).get_operation_history("request:request-1")
 
         self.assertIsNotNone(operation)
         assert operation is not None
         self.assertEqual(operation["action_label"], "确认关联")
+        self.assertEqual(operation["action_code"], "workbench.relation.confirm")
+        self.assertEqual(operation["object_label"], "关联关系")
         self.assertEqual(operation["actor_name"], "刘汉金")
         self.assertEqual(
             operation["items"],
             [
                 {
-                    "item_key": "item-1",
-                    "type": "oa",
-                    "title": "oa-internal",
-                    "secondary": "",
+                    "item_key": "type-oa",
+                    "type": "OA",
+                    "title": "1 条OA",
+                    "secondary": "本次操作涉及 1 条OA",
                     "amount": None,
                     "date": None,
+                    "before_status": "未配对",
+                    "after_status": "已配对",
                 }
             ],
         )
+        for internal_field in ("event_id", "request_id", "trace_id", "object_id"):
+            self.assertNotIn(internal_field, operation)
+        self.assertNotIn("oa-internal", str(operation))
         self.assertNotIn("operation_projection", str(operation))
+        self.assertEqual([name for name, _kwargs in repository.calls], ["detail", "relation_history"])
 
     def test_derives_typed_items_from_real_relation_history_shape(self) -> None:
         repository = FakeOperationsAuditRepository()
@@ -226,15 +237,34 @@ class OperationsAuditServiceTests(unittest.TestCase):
             }
         ]
 
-        operation = OperationsAuditService(repository).get_operation_history(
-            "request:request-typed"
-        )
+        operation = OperationsAuditService(repository).get_operation_history("request:request-typed")
 
         assert operation is not None
         self.assertEqual(
             [(item["type"], item["title"]) for item in operation["items"]],
-            [("bank", "same-id"), ("invoice", "same-id")],
+            [("银行流水", "1 条银行流水"), ("发票", "1 条发票")],
         )
+        self.assertNotIn("same-id", str(operation))
+
+    def test_projects_legacy_http_action_to_stable_user_semantics(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        repository.history_rows = [
+            {
+                "operation_key": "request:legacy",
+                "action": "POST /imports/files/confirm",
+                "page_key": "imports.bank-transactions",
+                "object_type": "http_request",
+                "occurred_at": datetime(2026, 8, 9, 10, 6, tzinfo=UTC),
+                "payload": {"summary": "POST /imports/files/confirm · HTTP 202"},
+            }
+        ]
+
+        operation = OperationsAuditService(repository).list_operation_history()["rows"][0]
+
+        self.assertEqual(operation["action_code"], "imports.files.confirm")
+        self.assertEqual(operation["action_label"], "确认文件导入")
+        self.assertEqual(operation["object_label"], "文件导入")
+        self.assertNotIn("/imports/", str(operation))
 
 
 if __name__ == "__main__":

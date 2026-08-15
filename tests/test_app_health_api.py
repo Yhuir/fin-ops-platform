@@ -401,14 +401,27 @@ class AppHealthApiTests(unittest.TestCase):
         response = app.handle_request("PUT", "/api/bank-details/auto-tag-rules", body="{")
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual([event["event_type"] for event in repository.events], [
-            "operation.requested",
-            "operation.completed",
-        ])
+        self.assertEqual(
+            [event["event_type"] for event in repository.events],
+            [
+                "operation.requested",
+                "operation.completed",
+            ],
+        )
         self.assertEqual(repository.events[0]["request_id"], repository.events[1]["request_id"])
         self.assertEqual(repository.events[0]["outcome"], "pending")
         self.assertEqual(repository.events[1]["outcome"], "failed")
         self.assertEqual(repository.events[0]["page_key"], "bank-details")
+        self.assertEqual(repository.events[0]["action"], "bank.auto_tag_rules.update")
+        self.assertEqual(repository.events[1]["action"], "bank.auto_tag_rules.update")
+        self.assertEqual(repository.events[0]["object_type"], "bank_tag_rule")
+        requested_metadata = repository.events[0]["payload"]["metadata"]
+        completed_metadata = repository.events[1]["payload"]["metadata"]
+        self.assertEqual(requested_metadata["action_label"], "保存自动标签规则")
+        self.assertEqual(requested_metadata["object_label"], "流水标签规则")
+        self.assertEqual(completed_metadata["action_label"], "保存自动标签规则")
+        self.assertEqual(repository.events[0]["payload"]["summary"], "保存自动标签规则")
+        self.assertEqual(repository.events[1]["payload"]["summary"], "保存自动标签规则")
         self.assertEqual(repository.events[0]["actor_name"], repository.events[1]["actor_name"])
         self.assertEqual(repository.events[0]["actor_account"], repository.events[1]["actor_account"])
         self.assertTrue(repository.events[0]["actor_name"])

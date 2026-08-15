@@ -7,22 +7,21 @@ export type OperationHistoryItem = {
   secondary?: string | null;
   amount?: string | number | null;
   date?: string | null;
-  before_status: string;
-  after_status: string;
+  before_status?: string | null;
+  after_status?: string | null;
 };
 
 export type OperationHistoryOperation = {
   operation_key: string;
-  event_id?: string | null;
-  request_id?: string | null;
-  trace_id?: string | null;
-  object_id?: string | null;
   actor_id?: string | null;
   actor_name?: string | null;
   actor_account?: string | null;
   page_key?: string | null;
+  action_code: string;
   action_label: string;
+  action_description: string;
   object_type?: string | null;
+  object_label: string;
   started_at: string;
   completed_at?: string | null;
   occurred_at: string;

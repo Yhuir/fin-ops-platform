@@ -22,7 +22,11 @@ test.describe("销项发票自动红蓝票关系", () => {
     const drawer = page.getByRole("dialog", { name: "销项发票详情" });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByText("关系数量", { exact: true }).locator("..")).toContainText("2");
-    await expect(drawer.getByText("output_invoice_reversal")).toHaveCount(2);
+    await expect(drawer.getByText("XSFP-E2E-0001")).toBeVisible();
+    await expect(drawer.getByText("XSFP-E2E-0002")).toBeVisible();
+    await expect(drawer.getByText("12,345.67", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("-12,345.67", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("output_invoice_reversal")).toHaveCount(0);
 
     await drawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     await expect(drawer).toBeHidden();
