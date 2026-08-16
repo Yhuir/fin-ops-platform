@@ -316,7 +316,7 @@
 
 - 目标：将关联台 OA、银行流水、发票详情从居中弹窗改为右侧抽屉，并让详情内容按 OA 待付款核对同类详情的表格样式展示。
 - 影响范围：`web/src/components/workbench/DetailDrawer.tsx`、`web/src/app/styles.css`、关联台详情相关 Vitest 和大数据 Playwright smoke。
-- 关键决策：复用项目公共 `AppDrawer`，不新增 drawer 框架；详情字段仅在前端展示层过滤 Mongo 文档 ID、流程 ID、记录编号、source row id、附件识别/闭环状态等内部字段，后端/API/read model 仍保留这些字段供 OA 附件归属、支付状态和 source binding 使用。
+- 关键决策：复用项目公共 `AppDrawer`，不新增 drawer 框架；详情字段仅在共享前端展示层过滤 Mongo 文档 ID、流程 ID、记录编号、source row id、闭环状态等内部字段。`附件发票识别情况` 是用户可核对的真实 OA 解析结果，允许展示；后端/API 保留其它内部字段供 OA 附件归属、支付状态和 source binding 使用。
 - 文档影响：本次不改变模块边界、API contract、read model、worker、权限或业务状态机；只更新本实施记录。
 - 测试覆盖：更新 `DetailDrawer.test.tsx` 覆盖表格式抽屉与内部字段隐藏；更新 `WorkbenchSelection.test.tsx` 覆盖详情抽屉打开、关闭、Escape 和 OA 附件来源字段过滤；更新 `workbench-large-scroll-flow.spec.ts` 覆盖真实浏览器下详情抽屉打开/关闭后选择状态仍可用。
 - 验证命令：`cd web && npm test -- --run src/test/DetailDrawer.test.tsx src/test/WorkbenchSelection.test.tsx`；`cd web && npm run build`；`cd web && npm run e2e -- e2e/workbench-large-scroll-flow.spec.ts --project=chromium`。

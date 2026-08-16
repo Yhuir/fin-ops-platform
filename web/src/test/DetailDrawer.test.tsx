@@ -47,7 +47,7 @@ describe("DetailDrawer", () => {
     render(<DetailDrawer row={buildOaRow()} loading={false} error={null} onClose={() => undefined} />);
 
     expect(screen.getByRole("dialog", { name: "OA详情" })).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "OA详情明细表" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "基本信息详情" })).toBeInTheDocument();
     expect(screen.getByText("明细摘要")).toBeInTheDocument();
     expect(screen.getByText("交通费 800.00；住宿费 749.00")).toBeInTheDocument();
     expect(screen.getByText("费用内容摘要")).toBeInTheDocument();
@@ -62,7 +62,8 @@ describe("DetailDrawer", () => {
     expect(screen.queryByText("Mongo文档ID")).not.toBeInTheDocument();
     expect(screen.queryByText("6959df8580b0b57ba859605f")).not.toBeInTheDocument();
     expect(screen.queryByText("流程实例ID")).not.toBeInTheDocument();
-    expect(screen.queryByText("附件发票识别情况")).not.toBeInTheDocument();
+    expect(screen.getByText("附件发票识别情况")).toBeInTheDocument();
+    expect(screen.getByText("已解析 2 / 4")).toBeInTheDocument();
     expect(screen.queryByText("付款凭证金额与附件发票金额一致")).not.toBeInTheDocument();
   });
 });

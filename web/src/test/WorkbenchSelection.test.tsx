@@ -363,11 +363,11 @@ describe("Workbench row selection and detail drawer", () => {
     const dialog = await screen.findByRole("dialog", { name: "银行流水详情" });
     expect(dialog).toBeInTheDocument();
     expect(screen.getByText("账号")).toBeInTheDocument();
-    expect(within(dialog).getByText("招商银行")).toBeInTheDocument();
-    expect(within(dialog).getByText("9123")).toBeInTheDocument();
+    expect(within(dialog).getByText("杭州溯源科技有限公司招商银行基本户")).toBeInTheDocument();
     expect(within(dialog).queryByText("招商银行 9123")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
+    expect(within(dialog).getByText("收支方向")).toBeInTheDocument();
+    expect(within(dialog).getByText("支出").closest("[data-slot='chip']")).not.toBeNull();
     expect(oaRow).toHaveAttribute("data-row-state", "related");
     expect(bankRow).toHaveAttribute("data-row-state", "related");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -430,7 +430,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(bankRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
 
     const dialog = screen.getByRole("dialog", { name: "银行流水详情" });
-    expect(within(dialog).getByText("正在加载详情...")).toBeInTheDocument();
+    expect(within(dialog).getByText("正在加载完整详情")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/rows/bk-p-202603-001?month=all&row_type=bank",
       expect.any(Object),

@@ -64,6 +64,13 @@
 - SQL 分类后由 `pending_invoice_status_payload` 再校验；若 SQL 和领域策略分歧则请求失败。
 - 50,003 条本地 PostgreSQL canonical bank rows 和生产 SLO 实测记录在 `implementation-notes.md`；本次未新增 cache、queue、worker、materialized view、索引或依赖。
 
+## 统一详情展示合同
+
+- OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，禁止页面私有打印版、统计概况或嵌套卡片。
+- 单条和多条使用同一公开字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复分区，不输出关系数量、是否多条或内部关系元数据。
+- 仅展示 canonical 详情 API 实际返回且已登记为用户可见的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。发票币种等非事实字段不得用默认值补造。
+- 抽屉打开后按需执行一个有界详情 GET，不按成员 N+1；所有详情时间统一为 `Asia/Shanghai` 的无时区后缀格式。
+
 ## 文件范围
 
 | 层 | 文件或目录 |

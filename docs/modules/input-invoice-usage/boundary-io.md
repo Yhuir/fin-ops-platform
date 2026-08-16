@@ -62,6 +62,13 @@
 - OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
 
+## 统一详情展示合同
+
+- OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，页面不得维护第二套详情 renderer。
+- 单条和多条使用同一公开字段合同；多条只重复 `OA N`、`银行流水 N`、`发票 N` 分区，不输出关系概况、数量、是否多条或内部 case/source 信息。
+- 仅展示 canonical API 实际返回且已登记为用户可见的字段；内部 ID、raw payload、批次字段和推导字段在共享边界过滤。
+- 详情按需一次有界读取，不得逐成员 N+1；时间统一为 `Asia/Shanghai` 的无 `T`/`Z`/offset 格式。
+
 ## 文件范围
 
 | 层 | 文件或目录 |

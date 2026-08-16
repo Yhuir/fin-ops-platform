@@ -30,7 +30,7 @@ import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayCon
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { currentBusinessMonth, currentBusinessYear } from "../features/dateTime";
+import { currentBusinessMonth, currentBusinessYear, formatDateTimeText } from "../features/dateTime";
 import { formatMoney } from "../features/money";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
@@ -1194,7 +1194,7 @@ function TypeCell({
             <span className="bank-internal-transfer-tooltip-title">对应内部往来流水</span>
             <span className="bank-internal-transfer-tooltip-grid">
               <span className="bank-internal-transfer-tooltip-label">时间</span>
-              <span className="bank-internal-transfer-tooltip-value">{counterpart.tradeTime || "-"}</span>
+              <span className="bank-internal-transfer-tooltip-value">{formatDateTimeText(counterpart.tradeTime)}</span>
               <span className="bank-internal-transfer-tooltip-label">账户</span>
               <span className="bank-internal-transfer-tooltip-value">{accountText}</span>
               <span className="bank-internal-transfer-tooltip-label">金额</span>
@@ -2331,7 +2331,7 @@ export default function BankDetailsPage() {
                               {row.counterpartyName}
                             </span>
                             <div className="bank-counterparty-meta-row">
-                              <span className="bank-trade-time-text">{row.tradeTime}</span>
+                              <span className="bank-trade-time-text">{formatDateTimeText(row.tradeTime)}</span>
                               <div className="bank-relation-chip-row">
                                 {row.relationTags.map((tag) => (
                                   <Chip

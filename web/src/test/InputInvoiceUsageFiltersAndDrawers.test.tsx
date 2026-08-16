@@ -185,7 +185,10 @@ describe("InputInvoiceUsageDetailDrawer", () => {
       relationList: {
         title: "关联明细",
         subtitle: "row-001",
-        sections: [{ title: "关联 OA", fields: [{ label: "关系数量", value: 2 }] }],
+        sections: [
+          { title: "OA 1", fields: [{ label: "申请人", value: "张三" }] },
+          { title: "OA 2", fields: [{ label: "申请人", value: "李四" }] },
+        ],
       },
     };
     const loadDetail = vi.fn((target: InputInvoiceUsageDetailTarget) => Promise.resolve(detailByKind[target.kind]));
@@ -230,8 +233,11 @@ describe("InputInvoiceUsageDetailDrawer", () => {
         onClose={() => undefined}
       />,
     );
-    expect(await screen.findByText("关联 OA")).toBeInTheDocument();
-    expect(screen.getByText("关系数量")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "OA 1" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "OA 2" })).toBeInTheDocument();
+    expect(screen.getByText("张三")).toBeInTheDocument();
+    expect(screen.getByText("李四")).toBeInTheDocument();
+    expect(screen.queryByText("关系数量")).not.toBeInTheDocument();
   });
 
   test("hides raw App fields and keeps the title beside the close control", async () => {
@@ -311,8 +317,12 @@ describe("Input invoice usage workflow drawers", () => {
 
     expect(detail.title).toBe("OA关联明细");
     expect(detail.detailAvailable).toBe(true);
-    expect(detail.sections).toHaveLength(2);
-    expect(detail.sections[1].title).toBe("关联摘要");
+    expect(detail.sections).toHaveLength(1);
+    expect(detail.sections[0].title).toBe("OA 1");
+    expect(detail.sections[0].fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "申请人", value: "樊祖芳" }),
+      expect.objectContaining({ label: "金额", value: "100.00" }),
+    ]));
   });
 
   test("OA reverse API mapper uses one-step draft and submitted history contracts", async () => {

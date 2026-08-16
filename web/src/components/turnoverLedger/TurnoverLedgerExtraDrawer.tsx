@@ -8,6 +8,7 @@ import type {
   TurnoverRelationDetail,
 } from "../../features/turnoverLedger/types";
 import { formatMoney, formatNullable } from "./TurnoverLedgerGroupedTable";
+import { formatDateTimeText } from "../../features/dateTime";
 
 function DetailField({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
@@ -226,7 +227,7 @@ export default function TurnoverLedgerExtraDrawer({
                 <SectionTitle>操作记录 / 关系操作</SectionTitle>
                 <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
                   <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`审计记录 ${detail?.auditHistory.length ?? 0} 条`}</span>
-                  {extra.updatedAt ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新于 ${extra.updatedAt}`}</span> : null}
+                  {extra.updatedAt ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新于 ${formatDateTimeText(extra.updatedAt)}`}</span> : null}
                   {extra.updatedBy ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新人 ${extra.updatedBy}`}</span> : null}
                 </div>
               </section>

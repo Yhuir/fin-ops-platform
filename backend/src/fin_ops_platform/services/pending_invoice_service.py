@@ -403,7 +403,7 @@ class PendingInvoiceQueryService:
             "debit_amount": _decimal_to_str(debit_amount),
             "credit_amount": _decimal_to_str(credit_amount),
             "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
-            "currency": transaction.currency or "CNY",
+            "currency": transaction.currency or "",
             "bank_name": bank_identity["bank_name"],
             "bank_short_name": bank_identity["bank_short_name"],
             "account_name": transaction.account_name or "",
@@ -1368,7 +1368,7 @@ class PendingInvoiceQueryService:
             "debit_amount": _decimal_to_str(transaction.amount if transaction.txn_direction == TransactionDirection.OUTFLOW else Decimal("0.00")),
             "credit_amount": _decimal_to_str(transaction.amount if transaction.txn_direction == TransactionDirection.INFLOW else Decimal("0.00")),
             "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
-            "currency": transaction.currency or "CNY",
+            "currency": transaction.currency or "",
             "bank_name": transaction.imported_bank_name or "",
             "account_name": transaction.account_name or "",
             "summary": transaction.summary or "",
@@ -1453,17 +1453,33 @@ class PendingInvoiceQueryService:
             "application_type": record.apply_type,
             "project_name": record.project_name_display or record.project_name,
             "workflow_no": record.case_id or "",
-            "status": record.section,
+            "workflow_status": record.workflow_status or record.section,
             "amount": _decimal_to_str(_decimal_from_text(record.amount)),
-            "month": record.month,
             "counterparty_name": record.counterparty_name,
             "reason": record.reason,
             "expense_type": record.expense_type or "",
-            "expense_content": record.expense_content or record.reason,
+            "expense_content": record.expense_content or "",
+            "completed_at": record.completed_at or "",
             **{str(key): value for key, value in dict(record.detail_fields or {}).items() if value not in (None, "")},
         }
+        sections = [{"title": "基本信息", "fields": _detail_fields(detail)}]
+        for index, item in enumerate(record.expense_items or [], start=1):
+            if not isinstance(item, dict):
+                continue
+            sections.append({
+                "title": f"费用明细 {index}",
+                "fields": _detail_fields({
+                    "project_name": item.get("project_name"),
+                    "amount": item.get("amount"),
+                    "expense_type": item.get("expense_type"),
+                    "expense_content": item.get("expense_content") or item.get("fee_content"),
+                    "expense_description": item.get("fee_description"),
+                    "expense_date": item.get("reimbursement_date"),
+                    "报销附件": item.get("attachment_file_count"),
+                }),
+            })
         return {
-            "title": "打印选择",
+            "title": "OA详情",
             "subtitle": record.apply_type or "OA详情",
             "oa_id": record.id,
             "detail_available": True,
@@ -1477,79 +1493,8 @@ class PendingInvoiceQueryService:
                 "detail_available": True,
             },
             "detail_fields": detail,
-            "oa_print_layout": self._oa_print_layout(record),
-            "sections": [{"title": "OA 原始字段", "fields": _detail_fields(detail)}],
+            "sections": sections,
         }
-
-    def _oa_print_layout(self, record: OAApplicationRecord) -> dict[str, Any]:
-        detail_fields = dict(record.detail_fields or {})
-        application_date = self._detail_text(detail_fields, "申请日期", "applicationDate", "ApplicationDate")
-        payment_method = self._detail_text(detail_fields, "付款方式", "支付方式", "paymentMethod")
-        invoice_kind = self._detail_text(detail_fields, "票据类型", "发票种类", "paymentProof")
-        bank_name = self._detail_text(detail_fields, "开户行", "bank")
-        payee_account = self._detail_text(detail_fields, "收款账号", "开户行账号", "payeeAccount")
-        expense_type = record.expense_type or self._detail_text(detail_fields, "费用类型", "申请类型", "expenseType")
-        amount_text = _decimal_to_str(_decimal_from_text(record.amount))
-        fields = [
-            {"label": "申请人", "value": record.applicant},
-            {"label": "申请日期", "value": application_date},
-            {"label": "申请类型", "value": expense_type},
-            {"label": "支付方式", "value": payment_method},
-            {"label": "发票种类", "value": invoice_kind},
-            {"label": "项目名称", "value": record.project_name_display or record.project_name},
-            {"label": "金额", "value": f"¥ {amount_text}元（大写：{_uppercase_rmb_without_currency(amount_text)}）"},
-            {"label": "收款方", "value": record.counterparty_name},
-            {"label": "开户行", "value": bank_name},
-            {"label": "开户行账号", "value": payee_account},
-            {"label": "申请事由", "value": record.reason},
-            {"label": "电子签名", "value": self._detail_text(detail_fields, "电子签名", "signature") or record.applicant},
-        ]
-        return {
-            "form_title": record.apply_type or "OA详情",
-            "download_label": "打印下载",
-            "fields": fields,
-            "approvals": self._oa_approval_steps(record, application_date=application_date),
-        }
-
-    def _oa_approval_steps(self, record: OAApplicationRecord, *, application_date: str) -> list[dict[str, Any]]:
-        detail_fields = dict(record.detail_fields or {})
-        submitted_at = self._detail_text(detail_fields, "提交时间", "发起时间", "申请提交时间") or application_date
-        steps = [
-            {
-                "title": record.apply_type or "支付申请",
-                "lines": [line for line in (f"{record.applicant}发起流程申请", submitted_at, record.applicant) if line],
-                "signature": record.applicant,
-            }
-        ]
-        approval_rows = detail_fields.get("审批记录") or detail_fields.get("审批意见及评论") or detail_fields.get("approval_records")
-        if isinstance(approval_rows, list):
-            for row in approval_rows:
-                if not isinstance(row, dict):
-                    continue
-                title = self._detail_text(row, "title", "节点", "步骤", "name") or "审批"
-                opinion = self._detail_text(row, "opinion", "意见", "审批意见", "comment")
-                acted_at = self._detail_text(row, "acted_at", "审批时间", "time", "created_at")
-                actor = self._detail_text(row, "actor", "审批人", "user", "name")
-                signature = self._detail_text(row, "signature", "签名") or actor
-                steps.append(
-                    {
-                        "title": title,
-                        "lines": [line for line in (opinion, acted_at, actor) if line],
-                        "signature": signature,
-                    }
-                )
-        return steps
-
-    @staticmethod
-    def _detail_text(values: dict[str, Any], *keys: str) -> str:
-        for key in keys:
-            value = values.get(key)
-            if isinstance(value, (list, dict)):
-                continue
-            text = str(value or "").strip()
-            if text:
-                return text
-        return ""
 
     def export_preview_for_rows(
         self,
@@ -2888,63 +2833,6 @@ def _decimal_to_str(value: Decimal | None) -> str:
     if value is None:
         return "0.00"
     return str(Decimal(value).quantize(Decimal("0.01")))
-
-
-def _uppercase_rmb_without_currency(value: Any) -> str:
-    amount = abs(_decimal_from_text(value))
-    integer_text, fraction_text = f"{amount:.2f}".split(".")
-    units = ["", "拾", "佰", "仟"]
-    section_units = ["", "万", "亿", "兆"]
-    digits = "零壹贰叁肆伍陆柒捌玖"
-
-    def section_to_upper(section: int) -> str:
-        result = ""
-        zero_pending = False
-        for index in range(4):
-            digit = section % 10
-            if digit == 0:
-                if result:
-                    zero_pending = True
-            else:
-                prefix = "零" if zero_pending else ""
-                result = f"{digits[digit]}{units[index]}{prefix}{result}"
-                zero_pending = False
-            section //= 10
-        return result
-
-    integer = int(integer_text)
-    if integer == 0:
-        integer_upper = "零"
-    else:
-        sections: list[str] = []
-        section_index = 0
-        need_zero = False
-        while integer > 0:
-            section = integer % 10000
-            if section == 0:
-                if sections:
-                    need_zero = True
-            else:
-                section_text = section_to_upper(section) + section_units[section_index]
-                if need_zero:
-                    section_text = "零" + section_text
-                    need_zero = False
-                sections.insert(0, section_text)
-            integer //= 10000
-            section_index += 1
-        integer_upper = "".join(sections)
-
-    jiao = int(fraction_text[0])
-    fen = int(fraction_text[1])
-    if jiao == 0 and fen == 0:
-        fraction_upper = "整"
-    else:
-        fraction_upper = ""
-        if jiao:
-            fraction_upper += f"{digits[jiao]}角"
-        if fen:
-            fraction_upper += f"{digits[fen]}分"
-    return f"{integer_upper}元{fraction_upper}"
 
 
 def _reverse_date_key(value: Any) -> str:

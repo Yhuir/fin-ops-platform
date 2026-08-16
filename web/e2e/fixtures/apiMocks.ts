@@ -1211,7 +1211,7 @@ function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "unpaired
       pay_receive_time: `2026-03-${String((index % 27) + 1).padStart(2, "0")} 10:18`,
       remark: `第${index}组长列表流水备注，包含跨栏长文本用于验证滚动后不遮挡操作区`,
       detail_fields: {
-        银行流水编号: `BK-LARGE-${suffix}`,
+        "账户明细编号-交易流水号": `BK-LARGE-${suffix}`,
         大数据场景: `第${index}组银行流水详情`,
       },
     },
@@ -3720,6 +3720,24 @@ function inputInvoiceUsageFilterOptionsPayload() {
 
 function inputInvoiceUsageRelationDetailPayload(kind: string) {
   const relationLabel = kind === "bank" ? "银行流水" : kind === "invoice" ? "发票" : "OA";
+  const summaries = kind === "oa"
+    ? [
+      {
+        applicant_name: "陈秀云",
+        application_type: "费用报销",
+        project_name: "浏览器进项项目",
+        amount: "88.00",
+        workflow_status: "completed",
+      },
+      {
+        applicant_name: "刘际涛",
+        application_type: "支付申请",
+        project_name: "浏览器进项项目",
+        amount: "100.00",
+        workflow_status: "completed",
+      },
+    ]
+    : [];
   return {
     row_id: "input-usage-row-e2e-001",
     invoice_id: "input-invoice-row-e2e-001",
@@ -3727,7 +3745,7 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
     title: `${relationLabel}关联明细`,
     relation_count: 2,
     has_multiple: true,
-    summaries: ["陈秀云 88.00", "刘际涛 100.00"],
+    summaries,
   };
 }
 

@@ -674,32 +674,25 @@ function installPendingInvoiceFetch(options: {
     }
     if (url.pathname === "/api/pending-invoices/oa/oa-001/detail") {
       return new Response(JSON.stringify({
-        title: "打印选择",
+        title: "OA详情",
         subtitle: "支付申请",
         detail_available: true,
-        oa_print_layout: {
-          form_title: "支付申请",
-          download_label: "打印下载",
+        sections: [{
+          title: "基本信息",
           fields: [
             { label: "申请人", value: "李四" },
             { label: "申请日期", value: "2026-05-25" },
-            { label: "申请类型", value: "设备贷款及材料费" },
+            { label: "OA类型", value: "支付申请" },
             { label: "支付方式", value: "银行转账" },
-            { label: "发票种类", value: "增值税专用发票" },
+            { label: "票据类型", value: "增值税专用发票" },
             { label: "项目名称", value: "建设项目" },
-            { label: "金额", value: "¥ 7680.00元（大写：柒仟陆佰捌拾元整）" },
+            { label: "金额", value: "7680.00" },
             { label: "收款方", value: "重庆维诺安工程技术有限公司" },
-            { label: "开户行", value: "交通银行股份有限公司重庆人民路支行" },
-            { label: "开户行账号", value: "500500037015003460594" },
-            { label: "申请事由", value: "压力变送器尾款+底座、堵头4件" },
-            { label: "电子签名", value: "李四" },
+            { label: "收款开户行", value: "交通银行股份有限公司重庆人民路支行" },
+            { label: "收款账号", value: "500500037015003460594" },
+            { label: "事由", value: "压力变送器尾款+底座、堵头4件" },
           ],
-          approvals: [
-            { title: "支付申请", lines: ["李四发起流程申请", "2026-05-25 11:20:27", "李四"], signature: "李四" },
-            { title: "项目负责人审核", lines: ["同意", "2026-05-25 14:51:04", "刘涵静"], signature: "刘涵静" },
-          ],
-        },
-        sections: [],
+        }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/oa/oa-paid-pending/detail") {
@@ -1035,8 +1028,8 @@ describe("Pending invoices page", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument());
 
     await user.click(within(page).getByRole("button", { name: /OA详情 张三/ }));
-    const oaDrawer = await screen.findByRole("dialog", { name: "OA 详情" });
-    expect(within(oaDrawer).getByRole("heading", { name: "OA 详情" })).toBeInTheDocument();
+    const oaDrawer = await screen.findByRole("dialog", { name: "OA详情" });
+    expect(within(oaDrawer).getByRole("heading", { name: "OA详情" })).toBeInTheDocument();
     expect(within(oaDrawer).queryByRole("heading", { name: "张三" })).not.toBeInTheDocument();
     expect(within(oaDrawer).getByText("申请人")).toBeInTheDocument();
     expect(within(oaDrawer).getByText("申请类型")).toBeInTheDocument();
@@ -1301,31 +1294,29 @@ describe("Pending invoices page", () => {
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
     await user.click(within(page).getByRole("button", { name: "查看全部发票关系" }));
-    expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关闭关系明细抽屉" })).toBeInTheDocument();
-    expect(screen.getByRole("grid", { name: "已关联发票" })).toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "历史支付流水" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "已关联 OA" })).not.toBeInTheDocument();
-    expect(await screen.findByText("已付合计")).toBeInTheDocument();
-    expect(screen.getAllByText("1500.00").length).toBeGreaterThan(0);
+    const invoiceRelationDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(within(invoiceRelationDrawer).getByRole("heading", { name: "发票 1" })).toBeInTheDocument();
+    expect(within(invoiceRelationDrawer).getByRole("heading", { name: "发票 2" })).toBeInTheDocument();
     expect(screen.getByText("DIG-002")).toBeInTheDocument();
     expect(screen.getByText("分期供应商二号")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+    expect(screen.queryByText("关系数量")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: /查看全部流水关系/ }));
-    expect(await screen.findByRole("grid", { name: "历史支付流水" })).toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "已关联发票" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "已关联 OA" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+    const bankRelationDrawer = await screen.findByRole("dialog", { name: "银行流水详情" });
+    expect(within(bankRelationDrawer).getByRole("heading", { name: "银行流水 1" })).toBeInTheDocument();
+    expect(within(bankRelationDrawer).getByRole("heading", { name: "银行流水 2" })).toBeInTheDocument();
+    expect(within(bankRelationDrawer).getByText("2026-04-20")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看全部 OA 关系" }));
-    expect(await screen.findByRole("grid", { name: "已关联 OA" })).toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "已关联发票" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("grid", { name: "历史支付流水" })).not.toBeInTheDocument();
+    const oaRelationDrawer = await screen.findByRole("dialog", { name: "OA详情" });
+    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 1" })).toBeInTheDocument();
+    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 2" })).toBeInTheDocument();
     expect(screen.getByText("王五")).toBeInTheDocument();
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
     expect(screen.queryByText("case-old")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
     expect(pendingInvoiceRelationRequests(fetchMock).map((url) => url.searchParams.get("kind"))).toEqual(["invoice", "bank", "oa"]);
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));

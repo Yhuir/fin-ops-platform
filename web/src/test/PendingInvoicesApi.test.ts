@@ -454,16 +454,17 @@ describe("pending invoices and tag settings API mapping", () => {
       }
       if (url.pathname === "/api/pending-invoices/oa/oa_001/detail") {
         return new Response(JSON.stringify({
-          title: "打印选择",
+          title: "OA详情",
           subtitle: "支付申请",
           detail_available: true,
-          oa_print_layout: {
-            form_title: "支付申请",
-            download_label: "打印下载",
-            fields: [{ label: "申请人", value: "杨丽萍" }],
-            approvals: [{ title: "项目负责人审核", lines: ["同意"], signature: "刘涵静" }],
-          },
-          sections: [],
+          sections: [{
+            title: "基本信息",
+            fields: [
+              { label: "申请人", value: "杨丽萍" },
+              { label: "OA类型", value: "支付申请" },
+              { label: "项目名称", value: "云南溯源项目" },
+            ],
+          }],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/pending-invoices/invoice-candidates") {
@@ -569,10 +570,16 @@ describe("pending invoices and tag settings API mapping", () => {
     const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });
     expect(detail).toMatchObject({ title: "DIG-001", sections: [{ title: "发票字段" }] });
     const oaDetail = await api().fetchPendingInvoiceObjectDetail({ kind: "oa", id: "oa_001", rowId: "txn_001" });
-    expect(oaDetail.oaPrintLayout).toMatchObject({
-      formTitle: "支付申请",
-      fields: [{ label: "申请人", value: "杨丽萍" }],
-      approvals: [{ title: "项目负责人审核", signature: "刘涵静" }],
+    expect(oaDetail).toMatchObject({
+      title: "OA详情",
+      sections: [{
+        title: "基本信息",
+        fields: [
+          { label: "申请人", value: "杨丽萍" },
+          { label: "OA类型", value: "支付申请" },
+          { label: "项目名称", value: "云南溯源项目" },
+        ],
+      }],
     });
 
     const candidates = await api().fetchPendingInvoiceCandidates({

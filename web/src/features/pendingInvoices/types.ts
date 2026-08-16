@@ -371,31 +371,12 @@ export type PendingInvoiceDetailSection = {
   fields: PendingInvoiceDetailField[];
 };
 
-export type PendingInvoiceOaPrintField = {
-  label: string;
-  value: string | number | null | undefined;
-};
-
-export type PendingInvoiceOaApproval = {
-  title: string;
-  lines: string[];
-  signature: string;
-};
-
-export type PendingInvoiceOaPrintLayout = {
-  formTitle: string;
-  downloadLabel: string;
-  fields: PendingInvoiceOaPrintField[];
-  approvals: PendingInvoiceOaApproval[];
-};
-
 export type PendingInvoiceObjectDetail = {
   title: string;
   subtitle: string;
   detailAvailable: boolean;
   unavailableReason: string;
   sections: PendingInvoiceDetailSection[];
-  oaPrintLayout?: PendingInvoiceOaPrintLayout;
 };
 
 export type PendingInvoiceCandidateStatus = "available" | "already_related" | "conflict" | (string & {});

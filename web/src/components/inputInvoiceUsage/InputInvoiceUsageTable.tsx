@@ -12,6 +12,7 @@ import type {
   InputInvoiceUsageSortDirection,
 } from "../../features/inputInvoiceUsage/types";
 import { formatMoney } from "../../features/money";
+import { formatDateTimeText } from "../../features/dateTime";
 import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
@@ -587,7 +588,7 @@ export default function InputInvoiceUsageTable({
                           onToggle={() => onToggleCellExpand(row.id, "bank-name")}
                         />
                         <div className="input-invoice-usage-tag-row">
-                          <Tag>{bank.tradeTime || "交易日期为空"}</Tag>
+                          <Tag>{bank.tradeTime ? formatDateTimeText(bank.tradeTime) : "交易日期为空"}</Tag>
                           {bank.detailAvailable && !bankRelationTarget ? (
                             <DetailButton
                               label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}

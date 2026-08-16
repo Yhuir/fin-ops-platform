@@ -234,8 +234,11 @@ describe("销项发票收款情况", () => {
 
     await user.click(screen.getByRole("button", { name: "红蓝票 · 2" }));
     const relationDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
-    expect(within(relationDrawer).getByText("关系数量")).toBeVisible();
-    expect(within(relationDrawer).getByText("2")).toBeVisible();
+    expect(within(relationDrawer).getByRole("heading", { name: "发票 1" })).toBeVisible();
+    expect(within(relationDrawer).getByRole("heading", { name: "发票 2" })).toBeVisible();
+    expect(within(relationDrawer).getByText("XSFP-RED-001")).toBeVisible();
+    expect(within(relationDrawer).getByText("XSFP-BLUE-001")).toBeVisible();
+    expect(within(relationDrawer).queryByText("关系数量")).not.toBeInTheDocument();
     expect(within(relationDrawer).queryByText("关系模式")).not.toBeInTheDocument();
     expect(within(relationDrawer).queryByText("关系来源")).not.toBeInTheDocument();
     expect(within(relationDrawer).queryByText("output_invoice_reversal")).not.toBeInTheDocument();

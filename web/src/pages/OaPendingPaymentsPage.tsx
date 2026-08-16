@@ -15,6 +15,7 @@ import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvo
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatDateTimeText } from "../features/dateTime";
 import {
   fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
@@ -715,7 +716,7 @@ function OaBankLinkDrawer({
               <span className="oa-pending-payments-bank-drawer__row-main">
                 <span className="oa-pending-payments-bank-drawer__counterparty">{row.counterpartyName || "-"}</span>
                 <span className="oa-pending-payments-bank-drawer__tags">
-                  {row.tradeTime ? <span>{row.tradeTime}</span> : null}
+                  {row.tradeTime ? <span>{formatDateTimeText(row.tradeTime)}</span> : null}
                   {row.bankAccount ? <span>{row.bankAccount}</span> : null}
                   <span>{row.relationStatusLabel}</span>
                 </span>

@@ -31,6 +31,7 @@ import {
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
 import { formatMoney } from "../../features/money";
+import { formatDateTimeText } from "../../features/dateTime";
 import { fetchWorkbenchSettings } from "../../features/workbench/api";
 import type {
   ImportBatchType,
@@ -717,7 +718,7 @@ function ImportPreviewDetailTable({
                   <FinanceTableCell columnRole="account" textValue={displayValue(row.accountNo)}>
                     <TruncatedCellText value={displayValue(row.accountNo)} />
                   </FinanceTableCell>
-                  <FinanceTableCell columnRole="date" textValue={displayValue(row.tradeTime)}>{displayValue(row.tradeTime)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="date" textValue={formatDateTimeText(row.tradeTime)}>{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
                   <FinanceTableCell columnRole="direction" textValue={direction}>
                     {direction === "--" ? <EmptyValue value="--" /> : <FinanceDirectionTag direction={direction}>{direction}</FinanceDirectionTag>}
                   </FinanceTableCell>
@@ -1801,7 +1802,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                                 className="import-workflow-issue-row"
                               >
                                 <div className="import-workflow-chip-row">
-                                  <ImportChip color="warning">{displayValue(issue.transactionAt || issue.transactionDate)}</ImportChip>
+                                  <ImportChip color="warning">{formatDateTimeText(issue.transactionAt || issue.transactionDate)}</ImportChip>
                                   <ImportChip>{formatMoney(issue.amount, "--")}</ImportChip>
                                   <ImportChip>{displayValue(issue.vehiclePlate)}</ImportChip>
                                   {issue.invoiceCount ? <ImportChip>{`${issue.invoiceCount} 张`}</ImportChip> : null}

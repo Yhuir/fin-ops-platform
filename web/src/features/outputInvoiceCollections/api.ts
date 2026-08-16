@@ -434,7 +434,7 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
     ]);
   }
   return detailSection(`发票 ${index + 1}`, [
-    detailField("发票号码", camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? camelOrSnake(raw, "displayNo", "display_no")),
+    detailField("发票号码", camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
     detailField("发票代码", camelOrSnake(raw, "invoiceCode", "invoice_code")),
     detailField("开票日期", camelOrSnake(raw, "invoiceDate", "invoice_date") ?? camelOrSnake(raw, "issueDate", "issue_date")),
     detailField("购买方", camelOrSnake(raw, "buyerName", "buyer_name")),
@@ -446,18 +446,12 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
 function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
   const kind = stringValue(raw.kind);
-  const label = kind === "bank" ? "流水" : "销项发票";
   const summaries = arrayValue(raw.summaries);
   const title = kind === "bank" ? "流水详情" : "销项发票详情";
   return {
     title,
     detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
     sections: compactDetailSections([
-      detailSection("关联概况", [
-        detailField("关系类型", label),
-        detailField("关系数量", camelOrSnake(raw, "relationCount", "relation_count")),
-        detailField("是否多条", camelOrSnake(raw, "hasMultiple", "has_multiple") ? "是" : "否"),
-      ]),
       ...summaries.map((item, index) => relationSummarySection(kind, item, index)),
     ]),
   };

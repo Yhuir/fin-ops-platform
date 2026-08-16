@@ -34,6 +34,7 @@ import type {
   OaPendingPaymentSortDirection,
 } from "../../features/oaPendingPayments/types";
 import { formatMoney } from "../../features/money";
+import { formatDateTimeText } from "../../features/dateTime";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import QuerySearch from "../common/QuerySearch";
 
@@ -271,7 +272,7 @@ export default function OaPendingPaymentsTable({
                         <TextLine value={row.oa.projectName} />
                         {row.oa.applicationTime ? (
                           <span className="oa-pending-payments-tag-row">
-                            <TableTag>{row.oa.applicationTime}</TableTag>
+                            <TableTag>{formatDateTimeText(row.oa.applicationTime)}</TableTag>
                           </span>
                         ) : null}
                       </div>
@@ -345,7 +346,7 @@ export default function OaPendingPaymentsTable({
                             />
                           </span>
                           <span className="oa-pending-payments-tag-row">
-                            {row.bankTransaction.tradeTime ? <TableTag>{row.bankTransaction.tradeTime}</TableTag> : null}
+                            {row.bankTransaction.tradeTime ? <TableTag>{formatDateTimeText(row.bankTransaction.tradeTime)}</TableTag> : null}
                           </span>
                         </div>
                         <div className="oa-pending-payments-bank-grid__amount">

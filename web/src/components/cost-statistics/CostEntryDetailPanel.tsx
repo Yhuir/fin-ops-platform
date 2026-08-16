@@ -1,86 +1,65 @@
-import { Chip, Separator } from "@heroui/react";
-
 import type { CostEntryDetail } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
-import BankAccountValue from "../BankAccountValue";
+import EntityDetailContent, {
+  preparePublicDetailSections,
+  type EntityDetailSection,
+} from "../common/EntityDetailContent";
 
 export default function CostEntryDetailPanel({ detail }: { detail: CostEntryDetail }) {
+  return <EntityDetailContent sections={costDetailSections(detail)} />;
+}
+
+function costDetailSections(detail: CostEntryDetail) {
   if (detail.kind === "bank_transaction") {
     const transaction = detail.bankTransaction;
-    const direction = transaction.direction === "收入" ? "收入" : "支出";
-    return (
-      <div className="cost-detail-stack">
-        <section className="cost-detail-section" aria-labelledby="cost-detail-bank-title">
-          <h3 id="cost-detail-bank-title">银行流水概览</h3>
-          <dl className="cost-detail-overview">
-            <div><dt>流水金额</dt><dd className="cost-detail-amount">{formatCostAmount(transaction.amount)}</dd></div>
-            <div>
-              <dt>方向与账户</dt>
-              <dd className="cost-detail-chips">
-                <Chip color={direction === "收入" ? "success" : "danger"} size="sm" variant="soft"><Chip.Label>{direction}</Chip.Label></Chip>
-                <Chip color="default" size="sm" variant="soft"><Chip.Label><BankAccountValue value={transaction.paymentAccountLabel} /></Chip.Label></Chip>
-              </dd>
-            </div>
-            <div><dt>交易时间</dt><dd>{transaction.tradeTime}</dd></div>
-            <div><dt>对方户名</dt><dd>{transaction.counterpartyName || "—"}</dd></div>
-            <div><dt>流水摘要</dt><dd>{transaction.expenseContent || "—"}</dd></div>
-            <div><dt>备注</dt><dd>{transaction.remark || "—"}</dd></div>
-          </dl>
-        </section>
-      </div>
-    );
+    return preparePublicDetailSections([{
+      title: "交易信息",
+      fields: [
+        { label: "交易时间", value: transaction.tradeTime },
+        { label: "收支方向", value: transaction.direction },
+        { label: transaction.direction === "收入" ? "收入金额" : "支出金额", value: formatCostAmount(transaction.amount) },
+        { label: "对方户名", value: transaction.counterpartyName },
+        { label: "银行账户", value: transaction.paymentAccountLabel },
+        { label: "摘要", value: transaction.expenseContent },
+        { label: "备注", value: transaction.remark },
+      ],
+    }]);
   }
 
   const allocation = detail.allocation;
-  const reconciliation = detail.reconciliation;
-  return (
-    <div className="cost-detail-stack">
-      <section className="cost-detail-section" aria-labelledby="cost-detail-allocation-title">
-        <h3 id="cost-detail-allocation-title">OA 成本归集</h3>
-        <dl className="cost-detail-overview">
-          <div><dt>归集金额</dt><dd className="cost-detail-amount">{formatCostAmount(allocation.amount)}</dd></div>
-          <div><dt>OA 完成时间</dt><dd>{allocation.oaCompletedAt || "—"}</dd></div>
-          <div><dt>项目名称</dt><dd>{allocation.projectName || "—"}</dd></div>
-          <div><dt>OA 费用类型</dt><dd>{allocation.expenseType || "—"}</dd></div>
-          <div><dt>费用内容</dt><dd>{allocation.expenseContent || "—"}</dd></div>
-          <div><dt>OA 类型</dt><dd>{allocation.oaApplyType || "—"}</dd></div>
-          <div><dt>申请人</dt><dd>{allocation.oaApplicant || "—"}</dd></div>
-          <div><dt>支付账户归属</dt><dd><BankAccountValue value={allocation.paymentAccountLabel || "—"} variant="tag" /></dd></div>
-        </dl>
-      </section>
-
-      <Separator className="cost-detail-separator" />
-
-      <section className="cost-detail-section" aria-labelledby="cost-detail-reconciliation-title">
-        <h3 id="cost-detail-reconciliation-title">金额核对</h3>
-        <dl className="cost-detail-field-list">
-          <div className="cost-detail-field-row"><dt>OA 归集合计</dt><dd>{formatCostAmount(reconciliation.oaAllocationTotal)}</dd></div>
-          <div className="cost-detail-field-row"><dt>关联付款流水合计</dt><dd>{formatCostAmount(reconciliation.bankOutflowTotal)}</dd></div>
-          <div className="cost-detail-field-row"><dt>差异</dt><dd>{formatCostAmount(reconciliation.difference)}</dd></div>
-          <div className="cost-detail-field-row">
-            <dt>状态</dt>
-            <dd><Chip color={reconciliation.status === "balanced" ? "success" : "warning"} size="sm" variant="soft"><Chip.Label>{reconciliation.status === "balanced" ? "金额一致" : "金额不一致"}</Chip.Label></Chip></dd>
-          </div>
-        </dl>
-      </section>
-
-      <Separator className="cost-detail-separator" />
-
-      <section className="cost-detail-section" aria-labelledby="cost-detail-evidence-title">
-        <h3 id="cost-detail-evidence-title">关联付款流水</h3>
-        <ol className="cost-detail-allocation-list">
-          {detail.paymentEvidence.map((evidence) => (
-            <li key={evidence.transactionId}>
-              <span className="cost-detail-allocation-main">
-                <strong>{evidence.counterpartyName || "未知对方"}</strong>
-                <span>{evidence.tradeTime || "—"} · {evidence.paymentAccountLabel || "未识别账户"}</span>
-              </span>
-              <strong className="cost-detail-allocation-amount">{formatCostAmount(evidence.amount)}</strong>
-              {evidence.remark ? <span className="cost-detail-allocation-content">{evidence.remark}</span> : null}
-            </li>
-          ))}
-        </ol>
-      </section>
-    </div>
-  );
+  const sections: EntityDetailSection[] = [{
+    title: "基本信息",
+    fields: [
+      { label: "金额", value: formatCostAmount(allocation.amount) },
+      { label: "审批完成时间", value: allocation.oaCompletedAt },
+      { label: "项目名称", value: allocation.projectName },
+      { label: "费用类型", value: allocation.expenseType },
+      { label: "费用内容", value: allocation.expenseContent },
+      { label: "OA类型", value: allocation.oaApplyType },
+      { label: "申请人", value: allocation.oaApplicant },
+      { label: "对方户名", value: allocation.counterpartyName },
+      { label: "银行账户", value: allocation.paymentAccountLabel },
+    ],
+  }, {
+    title: "金额核对",
+    fields: [
+      { label: "OA归集合计", value: formatCostAmount(detail.reconciliation.oaAllocationTotal) },
+      { label: "关联付款流水合计", value: formatCostAmount(detail.reconciliation.bankOutflowTotal) },
+      { label: "差异", value: formatCostAmount(detail.reconciliation.difference) },
+      { label: "状态", value: detail.reconciliation.status === "balanced" ? "金额一致" : "金额不一致" },
+    ],
+  }];
+  detail.paymentEvidence.forEach((evidence, index) => {
+    sections.push({
+      title: detail.paymentEvidence.length > 1 ? `银行流水 ${index + 1}` : "关联付款流水",
+      fields: [
+        { label: "交易时间", value: evidence.tradeTime },
+        { label: "对方户名", value: evidence.counterpartyName },
+        { label: "支出金额", value: formatCostAmount(evidence.amount) },
+        { label: "银行账户", value: evidence.paymentAccountLabel },
+        { label: "备注", value: evidence.remark },
+      ],
+    });
+  });
+  return preparePublicDetailSections(sections);
 }

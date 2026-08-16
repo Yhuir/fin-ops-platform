@@ -53,6 +53,13 @@ HTTP GET
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
 - 两类详情使用全站 `AppDrawer` 作为唯一容器；选择行后先打开抽屉，再按 row kind 发起 bank transaction 或 allocation 单次详情 GET。详情的 loading/error/retry 状态不写入 explorer、导出或页级 loading 状态。
 
+## 统一详情展示合同
+
+- OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，禁止页面再包一层圆角卡片或私有详情表。
+- 单条详情和多条详情使用同一字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复单条分区，不输出关系概况、关系数量或“是否多条”。
+- 仅展示 canonical API 实际返回且已登记为用户可见的字段；内部 ID、raw payload、source batch、关系元数据和推导字段必须在共享展示边界过滤。
+- 详情按需加载；一次打开只发起一个有界详情请求，不得逐成员 N+1。所有详情日期时间统一为 `Asia/Shanghai` 的 `YYYY-MM-DD`、`YYYY-MM` 或 `YYYY-MM-DD HH:mm:ss`，不得显示 `T`、`Z` 或 `+08:00`。
+
 ## 文件范围
 
 | 层 | 文件 |

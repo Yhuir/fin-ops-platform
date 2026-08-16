@@ -957,7 +957,7 @@ describe("OA pending payments page", () => {
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__amount")).toHaveTextContent("10000.00");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("中招国际招标有限公司云南分公司");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).not.toHaveTextContent("对方户名：");
-    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("20260105 09:50:25");
+    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("2026-01-05 09:50:25");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("10000.00");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("建设银行 1234");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__summary")).toHaveTextContent("电子转账");

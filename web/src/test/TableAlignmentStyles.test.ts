@@ -62,7 +62,6 @@ describe("finance table alignment styles", () => {
       ".etc-reconciliation-table-container",
       ".input-invoice-usage-rules-table-shell",
       ".output-invoice-collection-rules-table-frame",
-      ".workbench-detail-table-shell",
       ".bank-auto-tag-table-container",
     ];
 

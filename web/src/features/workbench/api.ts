@@ -1286,7 +1286,6 @@ function mapDetailFields(detailFields?: Record<string, unknown>): WorkbenchDetai
 
   const seenLabels = new Set<string>();
   return Object.entries(detailFields)
-    .filter(([label]) => label !== "资金方向")
     .map(([label, value]) => ({
       label: normalizeDetailFieldLabel(label),
       value: toDetailDisplayValue(value),

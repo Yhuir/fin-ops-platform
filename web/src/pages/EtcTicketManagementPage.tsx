@@ -35,6 +35,7 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import EtcBatchProgress from "../features/etc/EtcBatchProgress";
 import { formatMoney } from "../features/money";
+import { formatDateTimeText } from "../features/dateTime";
 import {
   EtcApiError,
   confirmEtcReconciliationTask,
@@ -129,11 +130,11 @@ function splitDateParts(value: string | null | undefined) {
 }
 
 function splitDateTimeParts(value: string | null | undefined) {
-  if (!value) {
+  const formatted = formatDateTimeText(value);
+  if (formatted === "-" || formatted === "—") {
     return { date: "-", time: "" };
   }
-  const [date = "-", rawTime = ""] = value.split("T");
-  const time = rawTime.split(/[.+-]/)[0] ?? "";
+  const [date = "-", time = ""] = formatted.split(" ");
   return { date: date || "-", time };
 }
 

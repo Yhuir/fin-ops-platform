@@ -26,7 +26,6 @@ import type {
   PendingInvoiceIncomeStatusResult,
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
-  PendingInvoiceOaPrintLayout,
   PendingInvoiceOaSummary,
   PendingInvoiceRelationDetail,
   PendingInvoiceRelationDetailKind,
@@ -37,6 +36,7 @@ import type {
   PendingInvoiceSummary,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
+import { formatDateTimeText } from "../dateTime";
 
 type ApiTagDefinition = {
   code?: string | null;
@@ -289,16 +289,6 @@ type ApiDetailPayload = {
   subtitle?: string | null;
   detail_available?: boolean | null;
   unavailable_reason?: string | null;
-  oa_print_layout?: {
-    form_title?: string | null;
-    download_label?: string | null;
-    fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
-    approvals?: Array<{
-      title?: string | null;
-      lines?: unknown[] | null;
-      signature?: string | null;
-    }> | null;
-  } | null;
   sections?: Array<{
     title?: string | null;
     fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
@@ -409,11 +399,7 @@ function formalRelationStatus(value: unknown, fallback: "linked" | "unlinked" = 
 
 function displayDateTime(value: unknown, fallback = "") {
   const text = stringValue(value, fallback);
-  const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
-  if (match) {
-    return `${match[1]} ${match[2]}`;
-  }
-  return text;
+  return text ? formatDateTimeText(text) : fallback;
 }
 
 function numberValue(value: unknown, fallback = 0) {
@@ -959,27 +945,6 @@ function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetail
     detailAvailable: payload.detail_available !== false,
     unavailableReason: stringValue(payload.unavailable_reason),
     sections,
-    oaPrintLayout: mapOaPrintLayout(payload.oa_print_layout),
-  };
-}
-
-function mapOaPrintLayout(value: ApiDetailPayload["oa_print_layout"]): PendingInvoiceOaPrintLayout | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return {
-    formTitle: stringValue(value.form_title, "OA详情"),
-    downloadLabel: stringValue(value.download_label, "打印下载"),
-    fields: (value.fields ?? [])
-      .map((field) => ({ label: stringValue(field.label), value: field.value }))
-      .filter((field) => field.label),
-    approvals: (value.approvals ?? [])
-      .map((approval) => ({
-        title: stringValue(approval.title),
-        lines: stringList(approval.lines),
-        signature: stringValue(approval.signature),
-      }))
-      .filter((approval) => approval.title || approval.lines.length > 0 || approval.signature),
   };
 }
 

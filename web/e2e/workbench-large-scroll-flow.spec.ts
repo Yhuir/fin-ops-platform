@@ -140,7 +140,10 @@ test.describe("workbench large dataset browser flow", () => {
     await targetGroup.getByRole("button", { name: "查看银行流水 长列表供应商155有限公司 详情" }).click();
     const detailDrawer = page.getByRole("dialog", { name: "银行流水详情" });
     await expect(detailDrawer.getByText("银行流水详情", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("第155组银行流水详情")).toBeVisible();
+    await expect(detailDrawer.getByText("账户明细编号-交易流水号", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByText("BK-LARGE-155", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByText("大数据场景", { exact: true })).toHaveCount(0);
+    await expect(detailDrawer.getByText("第155组银行流水详情", { exact: true })).toHaveCount(0);
     await expectVisibleAndUncovered(detailDrawer.getByRole("button", { name: "关闭详情抽屉" }), "detail drawer close button");
     await detailDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     await expect(detailDrawer).toHaveCount(0);

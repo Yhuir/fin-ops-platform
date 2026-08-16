@@ -224,7 +224,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-transaction-detail-drawer \.finance-drawer__body\s*{[^}]*padding:\s*0/s);
-    expect(css).toMatch(/\.cost-detail-field-row\s*{[^}]*grid-template-columns:\s*136px minmax\(0,\s*1fr\)/s);
+    expect(css).toMatch(/\.entity-detail-table \.finance-table__content\s*{[^}]*table-layout:\s*fixed/s);
     expect(css).not.toContain(".cost-detail-modal");
   });
 
@@ -476,13 +476,10 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
-    const detailBankName = within(dialog).getByText("工商银行");
-    expect(detailBankName).toBeInTheDocument();
-    expect(within(dialog).getByText("0001")).toBeInTheDocument();
-    expect(within(dialog).queryByText("工商银行 账户 0001")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("支付账户归属")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("工商银行 账户 0001").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("银行账户").length).toBeGreaterThan(0);
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "OA 成本归集" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "基本信息" })).toBeInTheDocument();
     expect(within(dialog).queryByText("OA 单号")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("子付款项 ID")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("关系组")).not.toBeInTheDocument();
@@ -703,11 +700,8 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "OA 成本归集明细" });
     expectProjectCostDialog("OA 成本归集明细");
     expect(dialog).toBeInTheDocument();
-    const expenseDetailBankName = within(dialog).getByText("招商银行");
-    expect(expenseDetailBankName).toBeInTheDocument();
-    expect(within(dialog).getByText("2201")).toBeInTheDocument();
-    expect(within(dialog).queryByText("招商银行 账户 2201")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("支付账户归属")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("招商银行 账户 2201").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("银行账户").length).toBeGreaterThan(0);
   });
 
   test("bank tag view drills down from primary tag to sub tag to transaction", async () => {

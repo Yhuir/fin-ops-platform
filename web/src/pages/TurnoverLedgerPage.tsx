@@ -14,6 +14,7 @@ import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../comp
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { formatDateTimeText } from "../features/dateTime";
 import { ApiClientError } from "../features/apiClient";
 import {
   confirmTurnoverClosure,
@@ -1269,7 +1270,7 @@ export default function TurnoverLedgerPage() {
                     <span>{item.directionLabel}</span>
                     <span>{formatMoney(String(item.amount.toFixed(2)))}</span>
                   </div>
-                  <span>{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</span>
+                  <span>{formatDateTimeText(row.transactionAt || row.borrowDate || row.repaymentDate)}</span>
                   <span className="turnover-ledger-closure-card__muted">{formatNullable(row.repaymentRemark || row.summaryText)}</span>
                 </div>
               );

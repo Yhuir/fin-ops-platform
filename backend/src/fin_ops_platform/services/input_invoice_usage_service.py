@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
@@ -312,7 +311,7 @@ class InputInvoiceUsageQueryService:
             "bookedDate": transaction.booked_date or "",
             "summary": transaction.summary or "",
             "remark": transaction.remark or "",
-            "currency": transaction.currency or "CNY",
+            "currency": transaction.currency or "",
             "bankTextFields": deepcopy(transaction.bank_text_fields),
             "relations": context.relation_summaries_for_row(transaction.id),
         }
@@ -329,14 +328,16 @@ class InputInvoiceUsageQueryService:
             "applicationType": record.apply_type,
             "projectName": record.project_name_display or record.project_name,
             "workflowNo": record.case_id or "",
-            "status": record.section,
+            "workflowStatus": record.workflow_status or record.section,
             "amount": _money(record.amount),
-            "month": record.month,
             "reason": record.reason,
             "counterpartyName": record.counterparty_name,
+            "completedAt": record.completed_at or "",
+            "expenseType": record.expense_type or "",
+            "expenseContent": record.expense_content or "",
+            "expenseItems": deepcopy(record.expense_items),
             "detailFields": deepcopy(record.detail_fields),
             "openUrl": str(record.detail_fields.get("url") or record.detail_fields.get("open_url") or ""),
-            "raw": _serialize_dataclass(record),
         }
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
@@ -1414,7 +1415,6 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
                     {"label": "项目名称", "value": summary.get("projectName")},
                     {"label": "金额", "value": summary.get("amount")},
                     {"label": "状态", "value": summary.get("status")},
-                    {"label": "关系 case", "value": summary.get("relationCaseId")},
                 ],
             }
             for index, summary in enumerate(typed_summaries, start=1)
@@ -1431,7 +1431,6 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
                     {"label": "银行账户", "value": summary.get("bankAccount")},
                     {"label": "摘要", "value": summary.get("summary")},
                     {"label": "备注", "value": summary.get("remark")},
-                    {"label": "关系 case", "value": summary.get("relationCaseId")},
                 ],
             }
             for index, summary in enumerate(typed_summaries, start=1)
@@ -1446,7 +1445,6 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
                 {"label": "开票日期", "value": summary.get("invoiceDate")},
                 {"label": "价税合计", "value": summary.get("totalWithTax")},
                 {"label": "货物或应税劳务名称", "value": summary.get("taxableItemName")},
-                {"label": "关系 case", "value": summary.get("relationCaseId")},
             ],
         }
         for index, summary in enumerate(typed_summaries, start=1)
@@ -1469,9 +1467,3 @@ def _infer_row_type(row_id: str) -> str:
     if row_id.startswith("oa"):
         return "oa"
     return "invoice"
-
-
-def _serialize_dataclass(value: Any) -> dict[str, Any]:
-    if is_dataclass(value):
-        return asdict(value)
-    return dict(value) if isinstance(value, dict) else {}

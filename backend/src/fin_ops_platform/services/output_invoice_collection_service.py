@@ -492,7 +492,7 @@ class OutputInvoiceCollectionQueryService:
             "bookedDate": transaction.booked_date or "",
             "summary": transaction.summary or "",
             "remark": transaction.remark or "",
-            "currency": transaction.currency or "CNY",
+            "currency": transaction.currency or "",
             "bankTextFields": deepcopy(transaction.bank_text_fields),
             "relations": context.relation_summaries_for_row(transaction.id),
         }

@@ -1,15 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
-import { formatMoney } from "../../features/money";
-import {
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "../common/FinanceTable";
+import EntityDetailContent, {
+  preparePublicDetailSections,
+  type EntityDetailSection,
+} from "../common/EntityDetailContent";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceRelationDrawerProps = {
@@ -20,17 +15,12 @@ type PendingInvoiceRelationDrawerProps = {
   onClose: () => void;
 };
 
-function RelationStatusChip({ status }: { status?: string }) {
-  if (!status) {
-    return null;
-  }
-  const paired = status.trim().toLowerCase() === "linked";
-  return (
-    <span className={`pending-invoices-tag pending-invoices-tag--${paired ? "linked" : "unlinked"}`}>
-      {paired ? "已配对" : "未配对"}
-    </span>
-  );
-}
+const drawerTitles: Record<PendingInvoiceRelationDetailKind, string> = {
+  all: "详情",
+  bank: "银行流水详情",
+  invoice: "发票详情",
+  oa: "OA详情",
+};
 
 export default function PendingInvoiceRelationDrawer({
   open,
@@ -62,7 +52,7 @@ export default function PendingInvoiceRelationDrawer({
       })
       .catch((reason: unknown) => {
         if (active) {
-          setError(reason instanceof Error ? reason.message : "关系明细加载失败");
+          setError(reason instanceof Error ? reason.message : "详情加载失败");
         }
       })
       .finally(() => {
@@ -75,121 +65,78 @@ export default function PendingInvoiceRelationDrawer({
     };
   }, [loadDetail, open, transactionId]);
 
+  const sections = useMemo(
+    () => detail ? relationDetailSections(detail, detailKind) : [],
+    [detail, detailKind],
+  );
+
   return (
     <PendingInvoiceDrawerFrame
-      closeLabel="关闭关系明细抽屉"
+      closeLabel="关闭详情抽屉"
       onClose={onClose}
       open={open}
-      title="关系与支付明细"
+      title={drawerTitles[detailKind]}
+      width="min(800px, 100vw)"
     >
-      {loading ? <LoadingMessage label="正在加载关系明细" text="正在加载关系明细" /> : null}
-      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
-      {detail ? (
-        <>
-          <section className="pending-invoice-metric-grid" aria-label="支付汇总">
-            <Metric label="已付合计" value={formatMoney(detail.paidTotal)} />
-            <Metric label="发票合计" value={formatMoney(detail.invoiceTotal)} />
-            <Metric label="待付金额" value={formatMoney(detail.remainingAmount)} />
-            <Metric label="支付差额" value={formatMoney(detail.differenceAmount)} />
-          </section>
-          {detailKind === "all" || detailKind === "invoice" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
-            <h3 className="pending-invoice-panel__title" id="pending-invoice-related-invoices-title">已关联发票</h3>
-            <FinanceTable ariaLabel="已关联发票" className="pending-invoice-simple-table" minWidth={720}>
-              <FinanceTableHeader>
-                <FinanceTableColumn id="number" isRowHeader columnRole="identity">号码</FinanceTableColumn>
-                <FinanceTableColumn id="counterparty" columnRole="identity">对方</FinanceTableColumn>
-                <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
-                <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
-                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
-              </FinanceTableHeader>
-              <FinanceTableBody>
-                {detail.relatedInvoices.length === 0 ? (
-                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="identity">暂无关联发票。</FinanceTableCell><FinanceTableCell columnRole="identity">-</FinanceTableCell><FinanceTableCell columnRole="date">-</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
-                ) : detail.relatedInvoices.map((invoice) => (
-                  <FinanceTableRow id={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo} key={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo}>
-                    <FinanceTableCell columnRole="identity">{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="identity">{invoice.sellerName || invoice.buyerName || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="date">{invoice.issueDate || "-"}</FinanceTableCell>
-                    <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax)}</FinanceTableCell>
-                    <FinanceTableCell columnRole="status"><RelationStatusChip status={invoice.relationStatus} /></FinanceTableCell>
-                  </FinanceTableRow>
-                ))}
-              </FinanceTableBody>
-            </FinanceTable>
-          </section> : null}
-          {detailKind === "all" || detailKind === "oa" ? <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-oa-title">
-            <h3 className="pending-invoice-panel__title" id="pending-invoice-related-oa-title">已关联 OA</h3>
-            <FinanceTable ariaLabel="已关联 OA" className="pending-invoice-simple-table" minWidth={620}>
-              <FinanceTableHeader>
-                <FinanceTableColumn id="applicant" isRowHeader columnRole="identity">申请人</FinanceTableColumn>
-                <FinanceTableColumn id="type" columnRole="description">类型</FinanceTableColumn>
-                <FinanceTableColumn id="project" columnRole="description">项目</FinanceTableColumn>
-                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
-              </FinanceTableHeader>
-              <FinanceTableBody>
-                {detail.relatedOa.length === 0 ? (
-                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="identity">暂无关联 OA。</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="description">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
-                ) : detail.relatedOa.map((oa) => (
-                  <FinanceTableRow id={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`} key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
-                    <FinanceTableCell columnRole="identity">{oa.applicant || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="description">{oa.applicationType || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="description">{oa.projectName || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="status"><RelationStatusChip status={oa.relationStatus} /></FinanceTableCell>
-                  </FinanceTableRow>
-                ))}
-              </FinanceTableBody>
-            </FinanceTable>
-          </section> : null}
-          {detailKind === "all" || detailKind === "bank" ? <section className="pending-invoice-panel">
-            <FinanceTable ariaLabel="历史支付流水" className="pending-invoice-simple-table" minWidth={620}>
-              <FinanceTableHeader>
-                <FinanceTableColumn id="date" isRowHeader columnRole="date">支付日期</FinanceTableColumn>
-                <FinanceTableColumn id="counterparty" columnRole="identity">对方</FinanceTableColumn>
-                <FinanceTableColumn id="amount" columnRole="amount">金额</FinanceTableColumn>
-                <FinanceTableColumn id="status" columnRole="status">状态</FinanceTableColumn>
-              </FinanceTableHeader>
-              <FinanceTableBody>
-                {detail.paymentRows.length === 0 ? (
-                  <FinanceTableRow id="empty"><FinanceTableCell columnRole="date">暂无历史支付。</FinanceTableCell><FinanceTableCell columnRole="identity">-</FinanceTableCell><FinanceTableCell columnRole="amount">-</FinanceTableCell><FinanceTableCell columnRole="status">-</FinanceTableCell></FinanceTableRow>
-                ) : detail.paymentRows.map((row) => (
-                  <FinanceTableRow id={row.id || row.relationCaseId} key={row.id || row.relationCaseId}>
-                    <FinanceTableCell columnRole="date">{row.tradeTime || "-"}</FinanceTableCell>
-                    <FinanceTableCell columnRole="identity">{row.counterpartyName || "-"}</FinanceTableCell>
-                    <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(row.debitAmount)}</FinanceTableCell>
-                    <FinanceTableCell columnRole="status"><RelationStatusChip status={row.relationStatus} /></FinanceTableCell>
-                  </FinanceTableRow>
-                ))}
-              </FinanceTableBody>
-            </FinanceTable>
-          </section> : null}
-        </>
-      ) : null}
+      <EntityDetailContent
+        emptyMessage="暂无可展示的详情。"
+        error={error}
+        loading={loading}
+        loadingLabel="正在加载详情"
+        sections={sections}
+      />
     </PendingInvoiceDrawerFrame>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="pending-invoice-metric">
-      <div className="pending-invoice-metric__label">{label}</div>
-      <div className="pending-invoice-metric__value">{value}</div>
-    </div>
-  );
-}
-
-function LoadingMessage({ label, text }: { label: string; text: string }) {
-  return (
-    <div aria-label={label} className="pending-invoice-status-message" role="status">
-      <span aria-hidden="true" className="pending-invoice-spinner" />
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function StatusMessage({ children, tone }: { children: string; tone: "danger" | "success" | "info" }) {
-  return (
-    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
-      {children}
-    </div>
-  );
+function relationDetailSections(
+  detail: PendingInvoiceRelationDetail,
+  kind: PendingInvoiceRelationDetailKind,
+) {
+  const sections: EntityDetailSection[] = [];
+  if (kind === "all" || kind === "oa") {
+    detail.relatedOa.forEach((oa, index) => {
+      sections.push({
+        title: detail.relatedOa.length > 1 ? `OA ${index + 1}` : "基本信息",
+        fields: [
+          { label: "OA单号", value: oa.formNo },
+          { label: "申请人", value: oa.applicant },
+          { label: "OA类型", value: oa.applicationType },
+          { label: "项目名称", value: oa.projectName },
+          { label: "流程状态", value: oa.workflowStatus || oa.status },
+        ],
+      });
+    });
+  }
+  if (kind === "all" || kind === "bank") {
+    const rows = detail.paymentRows.length > 0 ? detail.paymentRows : [detail.transactionSummary];
+    rows.forEach((row, index) => {
+      sections.push({
+        title: rows.length > 1 ? `银行流水 ${index + 1}` : "交易信息",
+        fields: [
+          { label: "交易时间", value: row.tradeTime },
+          { label: "对方户名", value: row.counterpartyName },
+          { label: "支出金额", value: row.debitAmount },
+        ],
+      });
+    });
+  }
+  if (kind === "all" || kind === "invoice") {
+    detail.relatedInvoices.forEach((invoice, index) => {
+      sections.push({
+        title: detail.relatedInvoices.length > 1 ? `发票 ${index + 1}` : "基本信息",
+        fields: [
+          { label: "发票号码", value: invoice.invoiceNo },
+          { label: "数电发票号码", value: invoice.digitalInvoiceNo },
+          { label: "发票代码", value: invoice.invoiceCode },
+          { label: "开票日期", value: invoice.issueDate },
+          { label: "销方名称", value: invoice.sellerName },
+          { label: "销方识别号", value: invoice.sellerTaxNo },
+          { label: "购买方名称", value: invoice.buyerName },
+          { label: "价税合计", value: invoice.totalWithTax },
+        ],
+      });
+    });
+  }
+  return preparePublicDetailSections(sections);
 }

@@ -24,13 +24,12 @@ import {
   type OperationHistoryFilters,
   type OperationHistoryOperation,
 } from "../features/operationHistory/api";
+import { formatDateTimeText } from "../features/dateTime";
 
 const EMPTY_FILTERS: OperationHistoryFilters = {};
 
 function formatTime(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+  return formatDateTimeText(value);
 }
 
 function actorLabel(actor: Pick<OperationHistoryOperation, "actor_id" | "actor_name" | "actor_account">) {

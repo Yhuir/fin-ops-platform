@@ -1,6 +1,15 @@
 import { Chip } from "@heroui/react";
 import type { ReactNode } from "react";
 
+import { formatDateTimeText } from "../../features/dateTime";
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "./FinanceTable";
 import StatePanel from "./StatePanel";
 
 export type EntityDetailField = {
@@ -24,11 +33,14 @@ type EntityDetailContentProps = {
 };
 
 const publicLabelAliases: Record<string, string> = {
+  资金方向: "收支方向",
   account_name: "账户名称",
   account_no: "账号",
   account_number: "账号",
   account_last4: "账号后四位",
   amount: "金额",
+  application_date: "申请日期",
+  application_time: "申请时间",
   application_type: "申请类型",
   applicant: "申请人",
   balance: "余额",
@@ -43,13 +55,24 @@ const publicLabelAliases: Record<string, string> = {
   counterparty_bank_name: "对方开户机构",
   counterparty_name: "对方户名",
   credit_amount: "收入金额",
-  currency: "币种",
   debit_amount: "支出金额",
   digital_invoice_no: "数电发票号码",
+  enterprise_serial_no: "企业流水号",
   form_no: "业务单号",
   invoice_code: "发票代码",
+  invoice_date: "开票日期",
+  invoice_kind: "发票票种",
   invoice_no: "发票号码",
+  invoice_source: "发票来源",
+  invoice_status: "发票状态",
+  invoice_type: "发票种类",
   issue_date: "开票日期",
+  completed_at: "审批完成时间",
+  completion_time: "审批完成时间",
+  expense_content: "费用内容",
+  expense_date: "报销日期",
+  expense_description: "费用说明",
+  expense_type: "费用类型",
   payee_account_no: "收款账号",
   payee_bank_name: "收款开户行",
   payee_name: "收款方",
@@ -63,11 +86,21 @@ const publicLabelAliases: Record<string, string> = {
   status: "状态",
   summary: "摘要",
   tax_amount: "税额",
+  tax_classification_code: "税收分类编码",
+  tax_rate: "税率",
+  taxable_item_name: "货物或应税劳务名称",
   total_amount: "金额",
   total_with_tax: "价税合计",
   trade_time: "交易时间",
   voucher_no: "凭证号",
   voucher_type: "凭证类型",
+  amount_without_tax: "不含税金额",
+  is_positive_invoice: "是否正数发票",
+  risk_level: "发票风险等级",
+  specific_business_type: "特定业务类型",
+  issuer: "开票人",
+  workflow_no: "OA单号",
+  workflow_status: "流程状态",
 };
 
 const publicLabels = new Set([
@@ -76,8 +109,10 @@ const publicLabels = new Set([
   "OA申请人",
   "申请类型",
   "类型",
+  "OA类型",
   "报销/支付",
-  "流程号",
+  "OA单号",
+  "流程状态",
   "状态",
   "项目名称",
   "项目",
@@ -85,7 +120,6 @@ const publicLabels = new Set([
   "申请日期",
   "完成时间",
   "金额",
-  "月份",
   "事由",
   "申请事由",
   "往来方",
@@ -118,7 +152,6 @@ const publicLabels = new Set([
   "支出金额",
   "收入金额",
   "余额",
-  "币种",
   "收支方向",
   "摘要",
   "备注",
@@ -155,9 +188,6 @@ const publicLabels = new Set([
   "单位",
   "数量",
   "单价",
-  "关系类型",
-  "关系数量",
-  "是否多条",
   "业务单号",
   "支付方式",
   "支付状态",
@@ -166,7 +196,27 @@ const publicLabels = new Set([
   "收款方",
   "银行流水号",
   "流水标签",
-  "电子签名",
+  "报销金额",
+  "费用类型",
+  "费用内容",
+  "费用说明",
+  "报销日期",
+  "报销附件",
+  "审批完成时间",
+  "明细摘要",
+  "明细金额合计",
+  "费用内容摘要",
+  "附件发票摘要",
+  "附件发票数量",
+  "附件发票识别情况",
+  "附件发票金额合计",
+  "来源附件文件名",
+  "付款凭证数量",
+  "付款凭证金额合计",
+  "金额差异",
+  "OA归集合计",
+  "关联付款流水合计",
+  "差异",
   "打开链接",
 ]);
 
@@ -236,16 +286,25 @@ export default function EntityDetailContent({
       {sections.map((section, sectionIndex) => (
         <section className="entity-detail-section" key={`${section.title}-${sectionIndex}`}>
           <h3 className="entity-detail-section__title">{section.title}</h3>
-          <dl className="entity-detail-list">
-            {section.fields.map((field, fieldIndex) => (
-              <div className="entity-detail-row" key={`${field.label}-${fieldIndex}`}>
-                <dt>{field.label}</dt>
-                <dd className={amountLabels.has(field.label) ? "entity-detail-row__amount" : undefined}>
-                  {renderValue(field)}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <FinanceTable ariaLabel={`${section.title}详情`} className="entity-detail-table" minWidth={0}>
+            <FinanceTableHeader>
+              <FinanceTableColumn id="label" isRowHeader columnRole="identity">字段</FinanceTableColumn>
+              <FinanceTableColumn id="value" columnRole="description">内容</FinanceTableColumn>
+            </FinanceTableHeader>
+            <FinanceTableBody>
+              {section.fields.map((field, fieldIndex) => (
+                <FinanceTableRow id={`${sectionIndex}-${fieldIndex}`} key={`${field.label}-${fieldIndex}`}>
+                  <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
+                  <FinanceTableCell
+                    className={amountLabels.has(field.label) ? "entity-detail-row__amount" : undefined}
+                    columnRole="description"
+                  >
+                    {renderValue(field)}
+                  </FinanceTableCell>
+                </FinanceTableRow>
+              ))}
+            </FinanceTableBody>
+          </FinanceTable>
         </section>
       ))}
     </div>
@@ -278,12 +337,12 @@ export function preparePublicDetailSections(sections: EntityDetailSection[]): En
 function preparePublicField(field: EntityDetailField): EntityDetailField | null {
   const normalized = normalizedLabel(field.label);
   const label = publicLabelAliases[normalized] ?? field.label.trim();
-  if (!isPublicLabel(label, normalized) || looksLikeRawData(field.value)) {
+  if (!isPublicLabel(label, normalized) || looksLikeRawData(field.value) || isEmptyValue(field.value)) {
     return null;
   }
   return {
     label,
-    value: localizedValue(field.value),
+    value: localizedValue(label, field.value),
   };
 }
 
@@ -329,12 +388,19 @@ function normalizedLabel(label: string) {
     .toLowerCase();
 }
 
-function localizedValue(value: EntityDetailField["value"]) {
+function localizedValue(label: string, value: EntityDetailField["value"]) {
   if (typeof value !== "string") {
     return value;
   }
   const text = value.trim();
+  if (timeFieldLabels.has(label)) {
+    return formatDateTimeText(text);
+  }
   return statusLabels[text.toLowerCase()] ?? text;
+}
+
+function isEmptyValue(value: EntityDetailField["value"]) {
+  return value === null || value === undefined || (typeof value === "string" && !value.trim());
 }
 
 function looksLikeRawData(value: EntityDetailField["value"]) {
@@ -356,6 +422,9 @@ const amountLabels = new Set([
   "收入金额",
   "余额",
   "单价",
+  "OA归集合计",
+  "关联付款流水合计",
+  "差异",
 ]);
 
 function renderValue(field: EntityDetailField): ReactNode {
@@ -373,13 +442,24 @@ function renderValue(field: EntityDetailField): ReactNode {
   return value;
 }
 
-const statusFieldLabels = new Set(["状态", "收支方向", "发票状态", "发票风险等级", "是否正数发票"]);
+const statusFieldLabels = new Set(["状态", "流程状态", "收支方向", "发票状态", "发票风险等级", "是否正数发票"]);
+const timeFieldLabels = new Set([
+  "申请时间",
+  "完成时间",
+  "审批完成时间",
+  "交易时间",
+  "入账日期",
+  "记账日期",
+  "申请日期",
+  "开票日期",
+  "报销日期",
+]);
 
 function chipColor(value: string) {
-  if (/收入|正常|有效|已完成|已配对|是/.test(value)) {
+  if (/收入|正常|有效|已完成|已配对|金额一致|是/.test(value)) {
     return "success" as const;
   }
-  if (/支出|异常|风险|未配对|否/.test(value)) {
+  if (/支出|异常|风险|未配对|金额不一致|否/.test(value)) {
     return "warning" as const;
   }
   return "default" as const;

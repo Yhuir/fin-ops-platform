@@ -143,6 +143,13 @@ requested tenant/scope
 - OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。异常 chip 的 OA 跳转使用普通 `<a target="_blank" rel="noopener noreferrer">`，禁止轮询或操纵 OA SPA DOM 自动点击详情。
 - 页面 rows 不写入 session storage/长期 cache。长列表继续分页；DOM virtualization 属于独立前端性能任务，不用 read-model 迁移夹带新框架。
 
+## 统一详情展示合同
+
+- OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，关联台不得再维护私有摘要表或嵌套圆角容器。
+- 单条详情和多条详情使用同一字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复单条分区，不输出关系概况、关系数量或“是否多条”。
+- 仅展示 row detail API 实际返回且已登记为用户可见的 canonical 字段；内部 ID、raw/source 字段、关系元数据和推导字段必须在共享展示边界过滤。
+- 点击先打开抽屉，再执行一个有界 row detail GET；禁止按成员 N+1。所有详情日期时间统一为 `Asia/Shanghai` 的 `YYYY-MM-DD`、`YYYY-MM` 或 `YYYY-MM-DD HH:mm:ss`，不得显示 `T`、`Z` 或 `+08:00`。
+
 ## 共享边界与跨页面隔离
 
 必须保留：
