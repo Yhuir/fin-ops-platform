@@ -39,6 +39,20 @@ test.describe("销项发票收款情况", () => {
     await expect(table.getByText("已被红冲")).toBeVisible();
     await expect(table.getByText("已冲销蓝票")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
+    const multiBankRow = table.getByRole("row", { name: /XSFP-E2E-0003/ });
+    const statusCell = multiBankRow.locator(".output-invoice-collections-table-cell--status");
+    await expect(multiBankRow.getByText("已收款")).toBeVisible();
+    await expect(multiBankRow.getByText("已收 1020032.00")).toBeVisible();
+    await expect(multiBankRow.getByText("待收 0.00")).toBeVisible();
+    await expect(multiBankRow.getByRole("button", { name: "收入流水 · 2" })).toBeVisible();
+    expect(await statusCell.evaluate((cell) => getComputedStyle(cell).display)).toBe("table-cell");
+    expect(await multiBankRow.evaluate((row) => {
+      const status = row.querySelector<HTMLElement>(".output-invoice-collections-table-cell--status");
+      return status ? Math.abs(row.getBoundingClientRect().height - status.getBoundingClientRect().height) : Number.POSITIVE_INFINITY;
+    })).toBeLessThan(1);
+    await expect(table.getByText(/canonical/)).toHaveCount(0);
+    await expect(table.getByText("该蓝字发票已与红字发票建立自动正式关联。")).toHaveCount(0);
+    await expect(table.getByText("该红字发票已与蓝字发票建立自动正式关联。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收款状态规则" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收据编号设置" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "状态/提醒" })).toHaveCount(0);

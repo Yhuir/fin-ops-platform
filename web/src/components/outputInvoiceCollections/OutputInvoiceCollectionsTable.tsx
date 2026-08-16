@@ -262,19 +262,22 @@ function DataRow({
         "output-invoice-collections-table-cell",
         "output-invoice-collections-table-cell--left-border",
         "output-invoice-collections-table-cell--status",
-        "output-invoice-collection-status-cell",
       )} columnRole="status" textValue={row.collectionStatus.label}>
-        <span className={`output-invoice-collection-status output-invoice-collection-status--${statusCode}`}>
-          {row.collectionStatus.label || "待收款"}
-        </span>
-        {row.collectionStatus.reason ? <TextLine muted value={row.collectionStatus.reason} /> : null}
-        {showCollectionAmounts ? (
-          <TextLine
-            muted
-            numeric
-            value={`已收 ${formatMoney(row.collectionStatus.collectedAmount)} / 待收 ${formatMoney(row.collectionStatus.pendingAmount)}`}
-          />
-        ) : null}
+        <div className="output-invoice-collection-status-content">
+          <span className={`output-invoice-collection-status output-invoice-collection-status--${statusCode}`}>
+            {row.collectionStatus.label || "待收款"}
+          </span>
+          {showCollectionAmounts ? (
+            <span className="output-invoice-collection-amounts">
+              <span className="output-invoice-collection-amount output-invoice-collection-amount--collected">
+                已收 {formatMoney(row.collectionStatus.collectedAmount)}
+              </span>
+              <span className="output-invoice-collection-amount output-invoice-collection-amount--pending">
+                待收 {formatMoney(row.collectionStatus.pendingAmount)}
+              </span>
+            </span>
+          ) : null}
+        </div>
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--left-border" columnRole="identity" textValue={bank?.counterpartyName ?? "—"}>
         {bank ? (

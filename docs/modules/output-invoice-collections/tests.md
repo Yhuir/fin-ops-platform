@@ -25,6 +25,9 @@
 - row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。
 - 页面只注册七个 GET route，旧 lifecycle/receipt/manual-red route 返回未匹配。
 - 前端只呈现三组表格，不显示旧按钮、旧抽屉、OA 或收据列。
+- 主表收款状态只显示状态 chip；待收款、部分收款、已收款额外显示绿色“已收”和橘黄色“待收”金额，不展示 `reason` 或 `canonical` 等内部说明。
+- 已被红冲、已冲销蓝票、红票待核对不显示无意义的零收款金额。
+- 状态内容布局不得改变 HeroUI `Table.Cell` 的原生 `table-cell` 行为；多条收入流水撑高整行时，状态背景必须覆盖完整行高。
 - 表格保持有界内部滚动，HeroUI 分页位于 FinanceTable footer；范围选择与搜索保持同一紧凑行且不重叠。
 
 ## 主要测试入口

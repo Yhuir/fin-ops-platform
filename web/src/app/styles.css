@@ -4032,10 +4032,35 @@ textarea {
   line-height: 1.2;
 }
 
-.output-invoice-collection-status-cell {
+.output-invoice-collection-status-content {
   display: grid;
   justify-items: center;
   gap: 4px;
+}
+
+.output-invoice-collection-amounts {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+  font-family: var(--fp-table-data-font);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.output-invoice-collection-amount {
+  white-space: nowrap;
+}
+
+.output-invoice-collection-amount--collected {
+  color: var(--fp-success-strong);
+}
+
+.output-invoice-collection-amount--pending {
+  color: var(--fp-warning);
 }
 
 .output-invoice-collection-status {
