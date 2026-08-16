@@ -129,11 +129,9 @@ type ApiMockOptions = {
   workbenchGroupsFailuresBeforeSuccess?: number;
   workbenchCashSpecialActions?: boolean;
   workbenchExceptionDatasetSize?: number;
-  workbenchInitialExceptionApplied?: boolean;
   workbenchAmountMismatchScenario?: boolean;
   workbenchInitialIncompleteRelation?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
-  workbenchInitialRowIgnored?: boolean;
   workbenchWithdrawPreviewDelayMs?: number;
   workbenchWithdrawPreviewError?: boolean;
   workbenchBankFlowRuleBatchScenario?: boolean;
@@ -1259,32 +1257,9 @@ function largeWorkbenchGroups(zone: WorkbenchZone) {
   return Array.from({ length: total }, (_, index) => buildLargeWorkbenchGroup(index + 1, zone));
 }
 
-function buildUnpairedGroupsWithoutIgnoredInvoice() {
-  return buildUnpairedWorkbenchGroups().filter((group) => group.invoice_rows.length === 0);
-}
-
-function ignoredWorkbenchRows(rowIgnored: boolean) {
-  if (!rowIgnored) {
-    return [];
-  }
-  const invoice = workbenchRows().invoice;
-  return [
-    {
-      ...invoice,
-      ignored: true,
-      handled_exception: false,
-      invoice_bank_relation: { code: "ignored", label: "浏览器忽略发票", tone: "warn" },
-      available_actions: ["detail"],
-      relation_note: "由关联台忽略发票：iv-o-202603-001",
-    },
-  ];
-}
-
 function workbenchGroups(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
   includeCashSpecialActions = false,
   amountMismatchScenario = false,
@@ -1303,9 +1278,6 @@ function workbenchGroups(
   }
   if (relationConfirmed && amountMismatchScenario && amountMismatchDecision !== "accept_paired") {
     return [buildAmountMismatchWorkbenchGroup(amountMismatchDecision)];
-  }
-  if (rowIgnored) {
-    return buildUnpairedGroupsWithoutIgnoredInvoice();
   }
   return relationConfirmed ? [] : buildUnpairedWorkbenchGroups();
 }
@@ -1472,8 +1444,6 @@ function workbenchRowDisplaySearchAliases(row: Record<string, unknown>) {
 
 function workbenchSummary(
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
   amountMismatchScenario = false,
   amountMismatchDecision: WorkbenchAnomalyReviewDecision = null,
@@ -1487,7 +1457,7 @@ function workbenchSummary(
       unpaired_count: 205,
       unpaired_exception_count: 0,
       paired_exception_count: 0,
-      ignored_count: rowIgnored ? 1 : 0,
+      ignored_count: 0,
     };
   }
   return {
@@ -1498,15 +1468,13 @@ function workbenchSummary(
     unpaired_count: relationConfirmed && (!amountMismatchScenario || amountMismatchDecision === "accept_paired") ? 0 : 1,
     unpaired_exception_count: amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0,
     paired_exception_count: amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0,
-    ignored_count: rowIgnored ? 1 : 0,
+    ignored_count: 0,
   };
 }
 
 function workbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
   includeCashSpecialActions = false,
   cursor: string | null = null,
@@ -1519,8 +1487,6 @@ function workbenchGroupsPayload(
   const allGroups = workbenchGroups(
     zone,
     relationConfirmed,
-    exceptionApplied,
-    rowIgnored,
     largeDataset,
     includeCashSpecialActions,
     amountMismatchScenario,
@@ -1556,8 +1522,6 @@ function workbenchGroupsPayload(
 function workbenchFilterOptionsPayload(
   url: URL,
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
 ) {
   const zone: WorkbenchZone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
@@ -1574,7 +1538,7 @@ function workbenchFilterOptionsPayload(
     "invoice:buyerName": "buyer_name",
   };
   const rowKey = `${pane}_rows`;
-  const rows = workbenchGroups(zone, relationConfirmed, exceptionApplied, rowIgnored, largeDataset)
+  const rows = workbenchGroups(zone, relationConfirmed, largeDataset)
     .flatMap((group) => (group as Record<string, unknown>)[rowKey] as Array<Record<string, unknown>> ?? []);
   const values = facet === "time_year"
     ? rows.map((row) => String(row.trade_time ?? row.pay_receive_time ?? "").slice(0, 4))
@@ -1627,8 +1591,6 @@ function bankFlowRuleWorkbenchGroupsPayload(
 function findWorkbenchRow(
   rowId: string,
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
   includeCashSpecialActions = false,
 ) {
@@ -1636,12 +1598,10 @@ function findWorkbenchRow(
     ...workbenchGroups(
       "paired",
       relationConfirmed,
-      exceptionApplied,
-      rowIgnored,
       largeDataset,
       includeCashSpecialActions,
     ),
-    ...workbenchGroups("unpaired", relationConfirmed, exceptionApplied, rowIgnored, largeDataset),
+    ...workbenchGroups("unpaired", relationConfirmed, largeDataset),
   ];
   return groups
     .flatMap((group) => [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows])
@@ -1702,8 +1662,6 @@ function workbenchSettingsPayload(
 
 function workbenchInitialPayload(
   relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
   largeDataset = false,
   includeCashSpecialActions = false,
   zoneSearch: Partial<Record<WorkbenchZone, string>> = {},
@@ -1712,8 +1670,6 @@ function workbenchInitialPayload(
 ) {
   const summary = workbenchSummary(
     relationConfirmed,
-    exceptionApplied,
-    rowIgnored,
     largeDataset,
     amountMismatchScenario,
     amountMismatchDecision,
@@ -1751,8 +1707,6 @@ function workbenchInitialPayload(
     paired: workbenchGroupsPayload(
       "paired",
       relationConfirmed,
-      exceptionApplied,
-      rowIgnored,
       largeDataset,
       includeCashSpecialActions,
       null,
@@ -1765,8 +1719,6 @@ function workbenchInitialPayload(
     unpaired: workbenchGroupsPayload(
       "unpaired",
       relationConfirmed,
-      exceptionApplied,
-      rowIgnored,
       largeDataset,
       includeCashSpecialActions,
       null,
@@ -1815,7 +1767,7 @@ function incompleteRelationGroupsPayload(
 ) {
   const relationGroups = zone === "unpaired" ? [buildIncompleteUnpairedRelationGroup()] : [];
   return {
-    ...workbenchGroupsPayload(zone, true, false, false, false, false, cursor, pageSize),
+    ...workbenchGroupsPayload(zone, true, false, false, cursor, pageSize),
     total: relationGroups.length,
     row_counts: countWorkbenchRows(relationGroups),
     has_more: false,
@@ -6438,93 +6390,6 @@ function withdrawResultPayload() {
   };
 }
 
-function workbenchExceptionPreviewPayload() {
-  return {
-    rule_version: "exception_rules_browser_e2e_v1",
-    scenario: {
-      business_line: "expense",
-      scenario_code: "expense_oa_bank_missing_invoice",
-      scenario_label: "OA和支出流水一致，缺进项发票",
-      confidence: "high",
-      amount_relation: "oa_equals_bank_missing_invoice",
-    },
-    amount_summary: {
-      oa_total: "58000.00",
-      bank_expense_total: "58000.00",
-      bank_income_total: "0.00",
-      input_invoice_total: "0.00",
-      output_invoice_total: "0.00",
-      expense_relation: "oa_equals_bank_missing_invoice",
-    },
-    automatic_actions: [],
-    available_actions: [
-      {
-        action_code: "wait_input_invoice",
-        label: "追进项发票",
-        result_status: "open",
-        required_fields: ["note"],
-        description: "金额已核对，等待后续进项发票补齐。",
-      },
-    ],
-    warnings: [
-      {
-        code: "missing_input_invoice",
-        severity: "warning",
-        message: "当前候选缺进项发票，提交后进入未配对异常。",
-      },
-    ],
-    workflow_projection: {
-      next_status: "processed_exception",
-    },
-    candidate_evidence: [
-      {
-        id: "CASE-202603-101",
-        label: "命中候选分组 CASE-202603-101",
-        detail: "OA 与银行流水金额一致，发票仍需追踪。",
-      },
-    ],
-    can_apply: true,
-  };
-}
-
-function workbenchExceptionApplyResultPayload() {
-  return {
-    success: true,
-    case: {
-      id: "WEX-BROWSER-001",
-      status: "open",
-      scenario_code: "expense_oa_bank_missing_invoice",
-      action_code: "wait_input_invoice",
-    },
-    pair_relation: null,
-    updated_rows: [],
-    affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-    affected_scope_keys: ["2026-03"],
-    message: "已提交统一异常处理。",
-  };
-}
-
-function workbenchExceptionActionResultPayload(action: "cancel_exception" | "ignore_row" | "unignore_row") {
-  const affectedRowIds = action === "ignore_row" || action === "unignore_row"
-    ? ["iv-o-202603-001"]
-    : ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"];
-  const messages = {
-    cancel_exception: "已取消异常处理。",
-    ignore_row: "已忽略 1 条记录。",
-    unignore_row: "已撤回忽略。",
-  };
-  return {
-    success: true,
-    action,
-    month: "all",
-    affected_row_ids: affectedRowIds,
-    exception_case_id: "WEX-BROWSER-001",
-    affected_months: ["2026-03"],
-    affected_scope_keys: ["2026-03"],
-    message: messages[action],
-  };
-}
-
 type WorkbenchCashSpecialAction =
   | "confirm_cash_pass_through"
   | "confirm_cash_ticket_purchase"
@@ -8242,8 +8107,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   const requestBodies = new Map<string, Record<string, unknown>[]>();
   let relationConfirmed = options.workbenchInitialRelationConfirmed === true
     || options.workbenchInitialIncompleteRelation === true;
-  let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
-  let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchAmountMismatchDecision: WorkbenchAnomalyReviewDecision = null;
   let workbenchConfirmSubmitAttempts = 0;
   let workbenchMutationCommitted = false;
@@ -9452,11 +9315,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }
       };
       if (options.workbenchOaExpenseItemsScenario) {
-        const payload = workbenchInitialPayload(
-          relationConfirmed,
-          workbenchExceptionApplied,
-          workbenchRowIgnored,
-        );
+        const payload = workbenchInitialPayload(relationConfirmed);
         const groups = relationConfirmed ? [] : [withWorkbenchDetailKey(buildOaExpenseItemsWorkbenchGroup())];
         return json(route, {
           ...payload,
@@ -9476,11 +9335,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         });
       }
       if (options.workbenchExplicitBankFanoutScenario) {
-        const payload = workbenchInitialPayload(
-          relationConfirmed,
-          workbenchExceptionApplied,
-          workbenchRowIgnored,
-        );
+        const payload = workbenchInitialPayload(relationConfirmed);
         const groups = [withWorkbenchDetailKey(buildExplicitBankFanoutWorkbenchGroup())];
         return json(route, {
           ...payload,
@@ -9568,8 +9423,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       const payload = workbenchInitialPayload(
         relationConfirmed,
-        workbenchExceptionApplied,
-        workbenchRowIgnored,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
         {
@@ -9772,8 +9625,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, workbenchFilterOptionsPayload(
         url,
         relationConfirmed,
-        workbenchExceptionApplied,
-        workbenchRowIgnored,
         options.workbenchLargeDataset === true,
       ));
     }
@@ -9834,8 +9685,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           ...workbenchGroupsPayload(
             zone,
             relationConfirmed,
-            workbenchExceptionApplied,
-            workbenchRowIgnored,
             false,
             false,
             requestedCursor,
@@ -9870,8 +9719,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, workbenchGroupsPayload(
         zone,
         relationConfirmed,
-        workbenchExceptionApplied,
-        workbenchRowIgnored,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
         requestedCursor,
@@ -9898,8 +9745,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           : workbenchGroups(
             zone,
             relationConfirmed,
-            workbenchExceptionApplied,
-            workbenchRowIgnored,
             options.workbenchLargeDataset === true,
             options.workbenchCashSpecialActions === true,
             options.workbenchAmountMismatchScenario === true,
@@ -9922,8 +9767,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const row = findWorkbenchRow(
         rowId,
         relationConfirmed,
-        workbenchExceptionApplied,
-        workbenchRowIgnored,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
       );
@@ -9937,13 +9780,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         return json(route, { error: "workbench_row_type_required" }, 400);
       }
       return json(route, { row });
-    }
-
-    if (path === "/api/workbench/ignored") {
-      return json(route, {
-        month: url.searchParams.get("month") ?? "all",
-        rows: ignoredWorkbenchRows(workbenchRowIgnored),
-      });
     }
 
     if (path === "/api/workbench/settings") {
@@ -10016,43 +9852,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, withdrawResultPayload());
     }
 
-    if (path === "/api/workbench/exception/preview") {
-      return json(route, workbenchExceptionPreviewPayload());
-    }
-
-    if (path === "/api/workbench/exception/apply") {
-      await delay(200);
-      relationConfirmed = false;
-      workbenchRowIgnored = false;
-      workbenchExceptionApplied = true;
-      workbenchMutationCommitted = true;
-      return json(route, workbenchExceptionApplyResultPayload());
-    }
-
-    if (path === "/api/workbench/actions/cancel-exception") {
-      await delay(200);
-      workbenchExceptionApplied = false;
-      relationConfirmed = false;
-      workbenchMutationCommitted = true;
-      return json(route, workbenchExceptionActionResultPayload("cancel_exception"));
-    }
-
-    if (path === "/api/workbench/actions/ignore-row") {
-      await delay(200);
-      workbenchRowIgnored = true;
-      workbenchExceptionApplied = false;
-      relationConfirmed = false;
-      workbenchMutationCommitted = true;
-      return json(route, workbenchExceptionActionResultPayload("ignore_row"));
-    }
-
-    if (path === "/api/workbench/actions/unignore-row") {
-      await delay(200);
-      workbenchRowIgnored = false;
-      workbenchMutationCommitted = true;
-      return json(route, workbenchExceptionActionResultPayload("unignore_row"));
-    }
-
     if (path === "/api/workbench/exceptions/review") {
       await delay(200);
       const body = parseJsonBody(request.postData()) as {
@@ -10077,8 +9876,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/confirm-cash-pass-through") {
       await delay(200);
       relationConfirmed = true;
-      workbenchExceptionApplied = false;
-      workbenchRowIgnored = false;
       workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_pass_through"));
     }
@@ -10086,8 +9883,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/confirm-cash-ticket-purchase") {
       await delay(200);
       relationConfirmed = true;
-      workbenchExceptionApplied = false;
-      workbenchRowIgnored = false;
       workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("confirm_cash_ticket_purchase"));
     }
@@ -10095,8 +9890,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench/actions/cancel-cash-special") {
       await delay(200);
       relationConfirmed = true;
-      workbenchExceptionApplied = false;
-      workbenchRowIgnored = false;
       workbenchMutationCommitted = true;
       return json(route, workbenchCashSpecialResultPayload("cancel_cash_special"));
     }

@@ -269,9 +269,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "/api/workbench/actions/confirm-cash-pass-through",
             "/api/workbench/actions/confirm-cash-ticket-purchase",
             "/api/workbench/actions/cancel-cash-special",
-            "/api/workbench/actions/oa-bank-exception",
             "/api/workbench/actions/confirm-personal-advance-repayment",
-            "/api/workbench/actions/cancel-exception",
         }
         if path in typed_multi_paths:
             row_ids = list(payload.get("row_ids") or [])
@@ -281,14 +279,9 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
         typed_single_paths = {
             "/api/workbench/actions/cancel-link",
-            "/api/workbench/actions/mark-exception",
-            "/api/workbench/actions/ignore-row",
-            "/api/workbench/actions/unignore-row",
         }
         if path in typed_single_paths and payload.get("row_id") is not None:
             payload.setdefault("row_type", app._row_type_for_row_id(str(payload["row_id"])))
-        if path == "/api/workbench/actions/update-bank-exception":
-            payload.setdefault("row_type", "bank")
         if path == "/api/workbench/actions/confirm-link":
             self._ensure_documented_mismatch_confirm_note(payload)
         return app.handle_request("POST", path, json.dumps(payload))
@@ -398,7 +391,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                         "amount": "300000.00",
                         "counterparty_name": "测试员工",
                         "reason": "个人暂借款",
-                        "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        "available_actions": ["detail", "confirm_link"],
                     }
                 ],
                 "bank": [
@@ -410,7 +403,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                         "debit_amount": "300000.00",
                         "credit_amount": "",
                         "counterparty_name": "测试员工",
-                        "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        "available_actions": ["detail", "confirm_link"],
                     },
                     {
                         "id": "bank-personal-advance-in-characterization-001",
@@ -420,7 +413,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                         "debit_amount": "",
                         "credit_amount": "200000.00",
                         "counterparty_name": "测试员工",
-                        "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        "available_actions": ["detail", "confirm_link"],
                     },
                     {
                         "id": "bank-personal-advance-in-characterization-002",
@@ -430,7 +423,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                         "debit_amount": "",
                         "credit_amount": "100000.00",
                         "counterparty_name": "测试员工",
-                        "available_actions": ["detail", "confirm_link", "mark_exception"],
+                        "available_actions": ["detail", "confirm_link"],
                     },
                 ],
                 "invoice": [],
@@ -961,197 +954,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(pair_relation_persist.call_count, 0)
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-STALE-NEW"))
 
-    def test_duplicate_mark_exception_reuses_existing_case_and_replays_success(self) -> None:
-        app = self._build_app()
-        invoice_row_id = self._default_invoice_row_id(app)
-
-        with self._suppress_background_persistence(app):
-            first_response = self._post(
-                app,
-                "/api/workbench/actions/mark-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": invoice_row_id,
-                    "exception_code": "pending_collection",
-                    "comment": "pending once",
-                },
-            )
-            second_response = self._post(
-                app,
-                "/api/workbench/actions/mark-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": invoice_row_id,
-                    "exception_code": "pending_collection",
-                    "comment": "pending twice",
-                },
-            )
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(second_response.status_code, 200, second_response.body)
-        first_payload = _json_response(first_response)
-        second_payload = _json_response(second_response)
-        self.assertEqual(first_payload["exception_case_id"], second_payload["exception_case_id"])
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        case = app._workbench_exception_case_service.snapshot()["cases"][first_payload["exception_case_id"]]
-        self.assertEqual(case["status"], "open")
-
-    def test_legacy_replay_requires_same_typed_identity_not_only_same_text_id(self) -> None:
-        app = self._build_app()
-        app._workbench_exception_case_service.create_case_from_action(
-            rows=[{"id": "same-id", "type": "invoice", "month": "2026-03"}],
-            scenario={
-                "business_line": "invoice",
-                "scenario_code": "invoice_manual_review",
-                "scenario_label": "发票人工复核",
-                "rule_version": "exception_rules_v1",
-            },
-            action={
-                "action_code": "manual_review",
-                "label": "人工复核",
-                "result_status": "open",
-            },
-            amount_summary={},
-            workflow_projection={"state": "OPEN"},
-            actor="tester",
-            payload={"legacy_exception_code": "pending_collection"},
-        )
-        facade = app._workbench_write_facade()
-
-        invoice_replay = facade._legacy_replay_scenario_code(
-            month="2026-03",
-            row_ids=["same-id"],
-            row_types=["invoice"],
-            legacy_payload={"legacy_exception_code": "pending_collection"},
-        )
-        bank_replay = facade._legacy_replay_scenario_code(
-            month="2026-03",
-            row_ids=["same-id"],
-            row_types=["bank"],
-            legacy_payload={"legacy_exception_code": "pending_collection"},
-        )
-
-        self.assertEqual(invoice_replay, "invoice_manual_review")
-        self.assertEqual(bank_replay, "")
-
-    def test_duplicate_exception_apply_is_service_idempotent_at_http_boundary(self) -> None:
-        app = self._build_app()
-        rows = [
-            {"id": "oa-exc-api-001", "type": "oa", "month": "2026-05", "apply_type": "付款申请", "amount": "100.00"},
-            {
-                "id": "bank-exc-api-001",
-                "type": "bank",
-                "month": "2026-05",
-                "debit_amount": "100.00",
-                "credit_amount": "",
-                "summary": "支付供应商",
-            },
-            {
-                "id": "invoice-exc-api-001",
-                "type": "invoice",
-                "month": "2026-05",
-                "issue_date": "2026-05-10",
-                "total_with_tax": "100.00",
-                "invoice_type": "进项发票",
-            },
-        ]
-        request_payload = {
-            "month": "2026-05",
-            "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
-            "row_types": ["oa", "bank", "invoice"],
-            "scenario_code": "expense_all_equal",
-            "action_code": "confirm_closed",
-            "payload": {},
-        }
-
-        app._workbench_page_selection_repository = _FixtureTypedSelectionRepository(rows)
-        app._configure_workbench_exception_application_service()
-        with self._suppress_background_persistence(app):
-            first_response = self._post(app, "/api/workbench/exception/apply", request_payload)
-            second_response = self._post(app, "/api/workbench/exception/apply", request_payload)
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(second_response.status_code, 200, second_response.body)
-        first_payload = _json_response(first_response)
-        second_payload = _json_response(second_response)
-        self.assertFalse(first_payload["idempotent"])
-        self.assertTrue(second_payload["idempotent"])
-        self.assertEqual(first_payload["case"]["id"], second_payload["case"]["id"])
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-
-    def test_stale_confirm_after_ignore_creates_pair_relation_and_leaves_ignored_case_active(self) -> None:
-        app = self._build_app()
-        row_ids = self._default_open_row_ids(app)
-
-        with self._suppress_background_persistence(app):
-            ignore_response = self._post(app, "/api/workbench/actions/ignore-row", {"month": "2026-03", "row_id": row_ids[2]})
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-STALE-CONFIRM"},
-            )
-
-        self.assertEqual(ignore_response.status_code, 200, ignore_response.body)
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-STALE-CONFIRM")
-        self.assertIsNotNone(relation)
-        ignored_case_id = _json_response(ignore_response)["exception_case_id"]
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"][ignored_case_id]["status"], "ignored")
-
-    def test_stale_ignore_after_confirm_keeps_active_relation_and_creates_ignored_case(self) -> None:
-        app = self._build_app()
-        row_ids = self._default_open_row_ids(app)
-
-        with self._suppress_background_persistence(app):
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-STALE-IGNORE"},
-            )
-            ignore_response = self._post(app, "/api/workbench/actions/ignore-row", {"month": "2026-03", "row_id": row_ids[2]})
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(ignore_response.status_code, 200, ignore_response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-STALE-IGNORE")
-        self.assertIsNotNone(relation)
-        ignored_case_id = _json_response(ignore_response)["exception_case_id"]
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"][ignored_case_id]["status"], "ignored")
-
-    def test_ignore_row_with_expected_open_rejects_confirmed_row(self) -> None:
-        app = self._build_app()
-        row_ids = self._default_open_row_ids(app)
-        invoice_row_id = row_ids[2]
-
-        with self._suppress_background_persistence(app) as pair_relation_persist:
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-IGNORE-CONFIRMED"},
-            )
-            ignore_response = self._post(
-                app,
-                "/api/workbench/actions/ignore-row",
-                {
-                    "month": "2026-03",
-                    "row_id": invoice_row_id,
-                    "expected_versions": {f"row:{invoice_row_id}": "unpaired"},
-                },
-            )
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(ignore_response.status_code, 409, ignore_response.body)
-        ignore_payload = _json_response(ignore_response)
-        self.assertEqual(ignore_payload["error"], "workbench_write_conflict")
-        self.assertEqual(ignore_payload["conflict"]["action"], "ignore_row")
-        self.assertIn(ignore_payload["conflict"]["reason"], {"stale_row_status", "stale_relation_identity"})
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-IGNORE-CONFIRMED"))
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
-        self.assertNotIn(
-            workbench_row_identity_key("invoice", invoice_row_id),
-            app._workbench_override_service.snapshot()["row_overrides"],
-        )
-        self.assertEqual(pair_relation_persist.call_count, 1)
-
     def test_stale_cancel_after_replaced_cancels_current_relation_by_row_id(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
@@ -1215,28 +1017,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             ["confirm_link", "confirm_link"],
         )
         self.assertEqual(pair_relation_persist.call_count, 2)
-
-    def test_stale_exception_after_relation_returns_conflict_and_preserves_relation(self) -> None:
-        app = self._build_app()
-        row_ids = self._default_open_row_ids(app)
-
-        with self._suppress_background_persistence(app):
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-STALE-EXCEPTION"},
-            )
-            exception_response = self._post(
-                app,
-                "/api/workbench/actions/mark-exception",
-                {"month": "2026-03", "row_id": row_ids[2], "exception_code": "pending_collection"},
-            )
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(exception_response.status_code, 409, exception_response.body)
-        self.assertEqual(_json_response(exception_response)["error"], "active_pair_relation_conflict")
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-STALE-EXCEPTION"))
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
 
     def test_confirm_link_does_not_call_removed_read_model_scheduler(self) -> None:
         app = self._build_app()
@@ -1898,212 +1678,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CASH-SCHEDULE-FAIL")
         assert relation is not None
         self.assertEqual(relation["special_metadata"]["special_type"], "cash_pass_through")
-
-    def test_duplicate_update_bank_exception_reuses_case_and_reschedules_current_behavior(self) -> None:
-        app = self._build_app()
-        bank_row = self._default_open_rows(app)["bank"]
-
-        first_response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "bank_fee",
-                    "relation_label": "银行手续费",
-                    "comment": "first fee",
-                },
-            )
-        second_response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "bank_fee",
-                    "relation_label": "银行手续费",
-                    "comment": "second fee",
-                },
-        )
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(second_response.status_code, 200, second_response.body)
-        self.assertEqual(_json_response(first_response)["exception_case_id"], _json_response(second_response)["exception_case_id"])
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-
-    def test_update_bank_exception_with_different_legacy_code_keeps_active_case_conflict(self) -> None:
-        app = self._build_app()
-        bank_row = self._default_open_rows(app)["bank"]
-
-        first_response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "bank_fee",
-                    "relation_label": "银行手续费",
-                },
-            )
-        conflicting_response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "other_exception",
-                    "relation_label": "其他异常",
-                },
-        )
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(conflicting_response.status_code, 409, conflicting_response.body)
-        self.assertEqual(_json_response(conflicting_response)["error"], "active_exception_case_conflict")
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-
-    def test_update_bank_exception_after_pair_relation_returns_conflict_current_behavior(self) -> None:
-        app = self._build_app()
-        rows = self._default_open_rows(app)
-        oa_row = rows["oa"]
-        bank_row = rows["bank"]
-
-        with self._suppress_background_persistence(app):
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": [oa_row["id"], bank_row["id"]], "case_id": "CASE-BANK-EXC-CONFLICT"},
-            )
-            exception_response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "bank_fee",
-                    "relation_label": "银行手续费",
-                },
-            )
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(exception_response.status_code, 409, exception_response.body)
-        self.assertEqual(_json_response(exception_response)["error"], "active_pair_relation_conflict")
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-EXC-CONFLICT"))
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
-
-    def test_update_bank_exception_does_not_call_removed_read_model_scheduler(self) -> None:
-        app = self._build_app()
-        bank_row = self._default_open_rows(app)["bank"]
-
-        response = self._post(
-                app,
-                "/api/workbench/actions/update-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_id": bank_row["id"],
-                    "relation_code": "bank_fee",
-                    "relation_label": "银行手续费",
-                },
-        )
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertIn(
-            workbench_row_identity_key("bank", bank_row["id"]),
-            app._workbench_override_service.snapshot()["row_overrides"],
-        )
-
-    def test_duplicate_oa_bank_exception_reuses_case_and_reschedules_current_behavior(self) -> None:
-        app = self._build_app()
-        rows = self._default_open_rows(app)
-        row_ids = [rows["oa"]["id"], rows["bank"]["id"]]
-
-        first_response = self._post(
-                app,
-                "/api/workbench/actions/oa-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_ids": row_ids,
-                    "exception_code": "oa_bank_amount_mismatch",
-                    "exception_label": "金额不一致，继续异常",
-                    "comment": "first mismatch",
-                },
-            )
-        second_response = self._post(
-                app,
-                "/api/workbench/actions/oa-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_ids": row_ids,
-                    "exception_code": "oa_bank_amount_mismatch",
-                    "exception_label": "金额不一致，继续异常",
-                    "comment": "second mismatch",
-                },
-        )
-
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(second_response.status_code, 200, second_response.body)
-        self.assertEqual(_json_response(first_response)["exception_case_id"], _json_response(second_response)["exception_case_id"])
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-
-    def test_oa_bank_exception_after_pair_relation_returns_conflict_and_preserves_relation(self) -> None:
-        app = self._build_app()
-        rows = self._default_open_rows(app)
-        row_ids = [rows["oa"]["id"], rows["bank"]["id"]]
-
-        with self._suppress_background_persistence(app):
-            confirm_response = self._post(
-                app,
-                "/api/workbench/actions/confirm-link",
-                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-OA-BANK-CONFLICT"},
-            )
-            exception_response = self._post(
-                app,
-                "/api/workbench/actions/oa-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_ids": row_ids,
-                    "exception_code": "oa_bank_amount_mismatch",
-                    "exception_label": "金额不一致，继续异常",
-                },
-            )
-
-        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(exception_response.status_code, 409, exception_response.body)
-        self.assertEqual(_json_response(exception_response)["error"], "active_pair_relation_conflict")
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-OA-BANK-CONFLICT"))
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
-
-    def test_oa_bank_exception_does_not_call_removed_read_model_scheduler(self) -> None:
-        app = self._build_app()
-        rows = self._default_open_rows(app)
-        row_ids = [rows["oa"]["id"], rows["bank"]["id"]]
-
-        response = self._post(
-                app,
-                "/api/workbench/actions/oa-bank-exception",
-                {
-                    "month": "2026-03",
-                    "row_ids": row_ids,
-                    "exception_code": "oa_bank_amount_mismatch",
-                    "exception_label": "金额不一致，继续异常",
-                },
-        )
-
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertIn(
-            workbench_row_identity_key("oa", rows["oa"]["id"]),
-            app._workbench_override_service.snapshot()["row_overrides"],
-        )
-        self.assertIn(
-            workbench_row_identity_key("bank", rows["bank"]["id"]),
-            app._workbench_override_service.snapshot()["row_overrides"],
-        )
-
-
-
-
-
 
 class WorkbenchWriteWorkerTriggerCharacterizationTests(unittest.TestCase):
     def test_http_process_never_starts_matching_dirty_scope_worker(self) -> None:

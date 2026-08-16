@@ -99,7 +99,7 @@ function WorkbenchRecordCard({
           </div>
         );
       })}
-      {paneId !== "oa" && !readOnly ? (
+      {paneId === "bank" && !readOnly ? (
         <div className="record-card-compact-actions">
           <RowActions
             compact
@@ -108,7 +108,6 @@ function WorkbenchRecordCard({
             recordType={row.recordType}
             showDetailAction={!isSummaryRow && !showInlineDetail}
             showWorkflowActions={showWorkflowActions}
-            variant={row.actionVariant}
             onAction={(action, event) => {
               event?.stopPropagation();
               onRowAction(row, action);

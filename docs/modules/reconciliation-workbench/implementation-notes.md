@@ -1658,3 +1658,11 @@
 - 收口：抽屉扩大为 `min(1740px, 96vw)`；折叠态只保留三栏摘要、异常计数和展开控制，完整 `RelationGroupGrid` 与审阅动作统一进入展开区。审阅区按“证据 chip / 人工判断 / 决定”排列，窄视口降为两列或单列；只有明细三栏拥有局部横向滚动。删除旧 38% 操作栏、原生 checkbox 和固定 245px 分类宽度。
 - 边界：复用现有 AppDrawer、Disclosure、RelationGroupGrid 与 HeroUI Button/Chip/Checkbox/Select；不新增组件状态源、API、依赖、DOM 测量、全局样式或业务门禁。模块 I/O、异常状态机、权限、数据库与其它页面合同不变。
 - 验证：组件测试新增折叠/展开信息层级和附件 checkbox 审阅；Chromium E2E 新增 1440/1024 几何边界并更新 accept/withdraw 展开步骤；发布后再以生产 authenticated 浏览器检查宽度、滚动、chip 完整性与真实详情惰性加载。
+
+## 2026-08-17 - 人工异常与发票逐行菜单退役
+
+- 产品口径：系统 canonical 规则是异常的唯一创建者；用户只在“异常处理”抽屉中分类并决定进入已配对或留在未配对。发票行仅保留详情入口，确认关联和撤回继续使用区域顶部选择动作。
+- 旧链删除：删除手工异常弹窗、前端 API/types/mocks、发票三点菜单及“忽略/标记异常”动作；后端删除人工异常 application service、facade/route delegation、override/case mutation 和旧 rollback wiring。九个旧人工异常/ignore HTTP 入口统一退役为 `404`，不保留隐藏 fallback。
+- 审计兼容：历史 exception/WEX/ignore 事实不删除，操作历史语义映射继续可读；运行时分区、自动异常检测和 `/api/workbench/exceptions/review` 人工审阅保持唯一现行链路。
+- 合同与性能：invoice `available_actions` 收敛为 `detail`（可正式关联时另有 `confirm_link`）；bank 非异常业务动作不变。删除旧分支减少 DTO、事件 handler 和测试 mock，不增加 SQL、API round-trip、数据库 migration、read model、worker、cache 或依赖。
+- 验证：前端覆盖发票详情存在、三点菜单和“忽略”缺失、自动异常审阅与关系动作回归；后端覆盖旧入口 `404`、当前审阅接口、action contract、rollback/case/query/facade 边界。

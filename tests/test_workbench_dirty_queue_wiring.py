@@ -277,58 +277,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         self.assertFalse(hasattr(app, "_workbench_matching_dirty_scope_service"))
 
-    def test_exception_apply_api_commits_without_write_time_read_model_fanout(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue()
-        app._workbench_reconciliation_dirty_queue = queue
-        rows = [
-            {
-                "id": "oa-exc-api-001",
-                "type": "oa",
-                "month": "2026-05",
-                "apply_type": "付款申请",
-                "amount": "100.00",
-            },
-            {
-                "id": "bank-exc-api-001",
-                "type": "bank",
-                "month": "2026-05",
-                "debit_amount": "100.00",
-                "credit_amount": "",
-                "summary": "支付供应商",
-            },
-            {
-                "id": "invoice-exc-api-001",
-                "type": "invoice",
-                "month": "2026-05",
-                "issue_date": "2026-05-10",
-                "total_with_tax": "100.00",
-                "invoice_type": "进项发票",
-            },
-        ]
-
-        with (
-            patch.object(app, "_resolve_typed_canonical_rows", return_value=rows),
-            patch.object(app, "_workbench_oa_sync_safety_guard", return_value=None),
-        ):
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/exception/apply",
-                json.dumps(
-                    {
-                        "month": "2026-05",
-                        "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
-                        "row_types": ["oa", "bank", "invoice"],
-                        "scenario_code": "expense_all_equal",
-                        "action_code": "confirm_closed",
-                        "payload": {},
-                    }
-                ),
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(queue.mark_calls, [])
-
     def test_api_runtime_has_no_in_process_matching_worker(self) -> None:
         self.assertFalse(hasattr(server_module.Application, "start_workbench_matching_dirty_scope_worker"))
 

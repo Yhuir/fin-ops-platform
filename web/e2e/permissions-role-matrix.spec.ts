@@ -832,8 +832,6 @@ test.describe("permissions browser role matrix", () => {
     }
 
     expect(mutationCalls(api.calls)).toEqual([]);
-    expect(api.count("POST /api/workbench/actions/cancel-exception")).toBe(0);
-    expect(api.count("POST /api/workbench/actions/unignore-row")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
 

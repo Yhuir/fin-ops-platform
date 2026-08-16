@@ -828,3 +828,9 @@ git diff --check
 - 将四张顶部指标卡合并为一个连续汇总带，并把导出筛选、日期和选项收敛为 HeroUI 原生控件；查询、筛选、导出列和金额口径不变。
 - 22 列预览保留 `xl` 复杂财务表例外，避免压缩字段可读性；普通抽屉仍遵守 420/560/720px 阶梯。
 - 删除旧 summary-card 样式，不新增 API、read model、worker、cache 或页面间 I/O。
+
+## 2026-08-17 - 主表格纵向滚动容器修复
+
+- 根因：`.turnover-ledger-table-wrap` 的视口高度限制被后定义的通用 `.finance-table--contained { height: 100%; }` 以相同 specificity 覆盖，容器随表格内容增长，因而没有可滚动溢出区。
+- 修复：把高度限制绑定到同时拥有两个 class 的页面容器 selector，使其优先级高于通用表格样式；继续复用原有 `overflow: auto`，没有新增滚动层、JavaScript 测量或 fixed viewport 常量。
+- 边界：只影响外部往来款主表格 CSS 布局，不改变筛选、展开、选择、导出、API、数据库、read model、worker 或其它页面的 FinanceTable 合同。

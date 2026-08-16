@@ -664,7 +664,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             'tone', 'warn'
                         ),
                         'available_actions', jsonb_build_array(
-                            'detail', 'view_relation', 'cancel_link', 'handle_exception'
+                            'detail', 'view_relation', 'cancel_link'
                         )
                     )) as payload
                 from app.bank_transactions bank
@@ -736,7 +736,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             'tone', 'warn'
                         ),
                         'available_actions', jsonb_build_array(
-                            'detail', 'confirm_link', 'mark_exception', 'ignore'
+                            'detail', 'confirm_link'
                         )
                     )) as payload
                 from app.invoices invoice

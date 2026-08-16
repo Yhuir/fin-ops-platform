@@ -73,12 +73,6 @@ class _TypedFixtureWorkbenchWriteFacade(WorkbenchWriteFacade):
     def cancel_link(self, payload: dict[str, object], **kwargs: object):
         return super().cancel_link(self._typed_single_payload(payload), **kwargs)
 
-    def ignore_row(self, payload: dict[str, object]):
-        return super().ignore_row(self._typed_single_payload(payload))
-
-    def unignore_row(self, payload: dict[str, object]):
-        return super().unignore_row(self._typed_single_payload(payload))
-
     def confirm_personal_advance_repayment(
         self, payload: dict[str, object], **kwargs: object
     ):
@@ -567,7 +561,6 @@ def _new_facade(
     withdraw_uow: object | None = None,
     relation_command_service: object | None = None,
     exception_case_service: object | None = None,
-    override_service: object | None = None,
     live_rows: list[dict[str, object]] | None = None,
     relation_groups: object | None = None,
     withdraw_rows_and_after_relations: object | None = None,
@@ -578,7 +571,6 @@ def _new_facade(
     pair_relation_service: object | None = None,
     bank_transaction_category_codes_for_row_ids: object | None = None,
     bank_flow_rule_tag_rules_payload: object | None = None,
-    list_ignored_rows: object | None = None,
     relation_preview_selection: object | None = None,
     amount_check_for_rows_by_type: object | None = None,
 ) -> WorkbenchWriteFacade:
@@ -652,9 +644,7 @@ def _new_facade(
         relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
             resolved_pair_relation_service
         ),
-        exception_service=object(),
         exception_case_service=exception_case_service or object(),
-        override_service=override_service or object(),
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=normalize_row_ids,
         relation_preview_selection=relation_preview_selection or default_relation_preview_selection,
@@ -670,12 +660,8 @@ def _new_facade(
         withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
         amount_check_for_rows_by_type=amount_check_for_rows_by_type or (lambda _: {}),
         transaction_amount_for_row_id=lambda _: 0,
-        list_ignored_rows=list_ignored_rows or (lambda *_, **__: []),
         save_exception_cases_snapshot=lambda: None,
         persist_pair_relations=lambda **_: None,
-        save_overrides_snapshot=lambda **_: None,
-        restore_exception_write_snapshots=lambda **_: None,
-        restore_exception_override_snapshots=lambda **_: None,
         restore_exception_pair_snapshots=lambda **_: None,
         schedule_pair_relation_persist=lambda **_: None,
         restore_pair_relation_snapshot=lambda *_, **__: None,
@@ -710,101 +696,6 @@ def _session() -> OARequestSession:
 
 
 class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
-    def test_ignore_row_resolves_one_canonical_row_without_building_page_payload(self) -> None:
-        resolver_calls: list[dict[str, object]] = []
-
-        class ExceptionCases:
-            @staticmethod
-            def snapshot() -> dict[str, object]:
-                return {}
-
-            @staticmethod
-            def ignore_row(row: dict[str, object], *, comment: str | None = None) -> dict[str, object]:
-                return {"id": "EX-1", "row_id": row["id"], "comment": comment}
-
-        class Overrides:
-            @staticmethod
-            def snapshot() -> dict[str, object]:
-                return {}
-
-            @staticmethod
-            def ignore_row(
-                *,
-                row: dict[str, object],
-                comment: str | None = None,
-                exception_case_id: str | None = None,
-            ) -> dict[str, object]:
-                return {**row, "ignored": True, "comment": comment, "exception_case_id": exception_case_id}
-
-        def resolve_rows(
-            row_ids: list[str],
-            *,
-            row_types: list[str] | None = None,
-            month_hint: str | None = None,
-        ) -> list[dict[str, object]]:
-            resolver_calls.append(
-                {"row_ids": row_ids, "row_types": row_types, "month_hint": month_hint}
-            )
-            return [{"id": row_ids[0], "type": "invoice", "issue_date": "2026-05-01"}]
-
-        facade = _new_facade(
-            exception_case_service=ExceptionCases(),
-            override_service=Overrides(),
-            resolve_live_rows_direct=resolve_rows,
-        )
-
-        result = facade.ignore_row({"month": "2026-05", "row_id": "invoice-1", "comment": "test"})
-
-        self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(result.payload["affected_row_ids"], ["invoice-1"])
-        self.assertEqual(
-            resolver_calls,
-            [
-                {
-                    "row_ids": ["invoice-1"],
-                    "row_types": ["invoice"],
-                    "month_hint": "2026-05",
-                }
-            ],
-        )
-
-    def test_unignore_row_uses_injected_narrow_ignored_row_loader(self) -> None:
-        loader_calls: list[str] = []
-
-        class ExceptionCases:
-            @staticmethod
-            def snapshot() -> dict[str, object]:
-                return {}
-
-            @staticmethod
-            def unignore_row(row: dict[str, object]) -> dict[str, object]:
-                return {"id": "EX-1", "row_id": row["id"]}
-
-        class Overrides:
-            @staticmethod
-            def snapshot() -> dict[str, object]:
-                return {}
-
-            @staticmethod
-            def unignore_row(*, row: dict[str, object]) -> dict[str, object]:
-                return {**row, "ignored": False}
-
-        def list_ignored_rows(month: str) -> list[dict[str, object]]:
-            loader_calls.append(month)
-            return [{"id": "invoice-1", "type": "invoice", "issue_date": "2026-05-01"}]
-
-        facade = _new_facade(
-            exception_case_service=ExceptionCases(),
-            override_service=Overrides(),
-            list_ignored_rows=list_ignored_rows,
-        )
-
-        result = facade.unignore_row({"month": "2026-05", "row_id": "invoice-1"})
-
-        self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(result.payload["affected_row_ids"], ["invoice-1"])
-        self.assertEqual(loader_calls, ["2026-05"])
-
     def test_confirm_link_command_uses_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
         facade = _new_facade(confirm_uow=uow)
@@ -2063,27 +1954,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 captured["withdraw"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}
                 return object()
 
-        class ActionRoutes:
-            def exception_apply(
-                self,
-                payload: dict[str, object],
-                *,
-                actor_id: str,
-                tenant_id: str,
-                request_id: str | None = None,
-            ) -> object:
-                captured["exception_apply"] = {
-                    "actor_id": actor_id,
-                    "tenant_id": tenant_id,
-                    "request_id": request_id,
-                    "client_actor": payload.get("actor"),
-                }
-                return object()
-
         app._handle_live_workbench_confirm_link = live_confirm
         app._handle_live_workbench_cancel_link = live_cancel
         app._workbench_write_facade = lambda: WithdrawFacade()
-        app._workbench_action_api_routes = ActionRoutes()
         app._workbench_write_response = lambda result: Response(status_code=200, body="{}")
 
         with patch("fin_ops_platform.app.server.resolve_oa_request_session", return_value=session):
@@ -2099,12 +1972,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 request_id="req-cancel",
                 headers={"Authorization": "Bearer token"},
             )
-            exception_apply_response = Application._handle_api_workbench_exception_apply(
-                app,
-                "{}",
-                request_id="req-exception-apply",
-                headers={"Authorization": "Bearer token"},
-            )
             withdraw_response = Application._handle_api_workbench_withdraw_link(
                 app,
                 "{}",
@@ -2115,19 +1982,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(withdraw_response.status_code, 200)
-        self.assertEqual(exception_apply_response.status_code, 200)
         self.assertEqual(captured["confirm"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-confirm"})
         self.assertEqual(captured["cancel"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-cancel"})
         self.assertEqual(captured["withdraw"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-withdraw"})
-        self.assertEqual(
-            captured["exception_apply"],
-            {
-                "actor_id": "oa-user-1",
-                "tenant_id": "default",
-                "request_id": "req-exception-apply",
-                "client_actor": None,
-            },
-        )
 
 
 if __name__ == "__main__":

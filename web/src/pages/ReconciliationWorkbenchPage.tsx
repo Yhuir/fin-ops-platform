@@ -9,7 +9,6 @@ import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
-import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
@@ -31,7 +30,6 @@ import {
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
-  ignoreWorkbenchRow,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
@@ -62,7 +60,6 @@ import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 import type {
   WorkbenchRelationGroup,
   WorkbenchData,
-  WorkbenchExceptionApplyResult,
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
@@ -104,10 +101,6 @@ type WorkbenchActionProgress = {
 };
 
 type WorkbenchActionProgressHandler = (progress: WorkbenchActionProgress) => void;
-
-type WorkbenchExceptionDialogState = {
-  rows: WorkbenchRecord[];
-};
 
 type CashTicketPurchaseDialogState = {
   rows: Array<Pick<WorkbenchRecord, "id" | "recordType">>;
@@ -396,7 +389,6 @@ export default function ReconciliationWorkbenchPage() {
   }>());
   const [exceptionDrawerContentGeneration, setExceptionDrawerContentGeneration] = useState(0);
   const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
-  const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
@@ -777,7 +769,6 @@ export default function ReconciliationWorkbenchPage() {
     relationPreviewRequestKindRef.current = null;
     setRelationPreviewRequestKind(null);
     setRelationPreviewDialog(null);
-    setWorkbenchExceptionDialog(null);
     setCashTicketPurchaseDialog(null);
     exceptionDrawerRequestRef.current?.abort();
     exceptionDrawerRequestRef.current = null;
@@ -1707,22 +1698,6 @@ export default function ReconciliationWorkbenchPage() {
     return true;
   }, [openActionResultDialog, workbenchWriteGate]);
 
-  const openWorkbenchExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    if (rows.length === 0) {
-      openActionResultDialog("请先选择待处理记录。");
-      return;
-    }
-    handleCloseDetail();
-    setWorkbenchExceptionDialog({ rows });
-  }, [ensureCanWriteWorkbench, handleCloseDetail, openActionResultDialog]);
-
-  const handleCloseWorkbenchExceptionDialog = () => {
-    setWorkbenchExceptionDialog(null);
-  };
-
   const executeWorkbenchActionAndReread = useCallback(async ({
     loadingMessage,
     action,
@@ -1779,19 +1754,6 @@ export default function ReconciliationWorkbenchPage() {
     openActionResultDialog(actionErrorMessage(error), "操作失败");
   }, [openActionResultDialog]);
 
-  const handleWorkbenchExceptionApplied = useCallback(async (
-    result: WorkbenchExceptionApplyResult,
-    onProgress: WorkbenchActionProgressHandler,
-  ) => {
-    clearOpenSelection();
-    onProgress({ phase: "rereading", message: "异常处理已写入，正在重新读取关联台...", committed: true });
-    const reread = await rereadWorkbenchAfterCommit();
-    if (!reread) {
-      throw new Error("异常处理已写入，但页面重新读取失败；请勿重复提交，稍后刷新页面确认。");
-    }
-    setLastActionMessage(result.message ?? "已提交统一异常处理。");
-  }, [clearOpenSelection]);
-
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
@@ -1799,36 +1761,6 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-
-    if (action === "confirm-match") {
-      try {
-        await openConfirmPreview(collectCaseRows(row));
-      } catch (error) {
-        openRelationPreviewErrorDialog(error);
-      }
-      return;
-    }
-
-    if (action === "flag-exception") {
-      openWorkbenchExceptionDialog([row]);
-      return;
-    }
-
-    if (action === "ignore-row") {
-      await runBlockingAction({
-        loadingMessage: "正在忽略记录...",
-        action: async () => {
-          const result = await ignoreWorkbenchRow({
-            month: WORKBENCH_VIEW_MONTH,
-            rowId: row.id,
-            rowType: row.recordType,
-            comment: `由关联台忽略发票：${row.id}`,
-          });
-          return result;
-        },
-      });
       return;
     }
 
@@ -1890,16 +1822,10 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (action === "handle-exception") {
-      openWorkbenchExceptionDialog([row]);
-      return;
-    }
   }, [
-    clearOpenSelection,
     collectCaseRows,
     ensureCanWriteWorkbench,
     openActionResultDialog,
-    openWorkbenchExceptionDialog,
     runBlockingAction,
     withdrawBankFlowRuleBatchSummaryRow,
     openRelationPreviewErrorDialog,
@@ -2506,14 +2432,6 @@ export default function ReconciliationWorkbenchPage() {
         onEnsureGroupDetail={ensureExceptionGroupDetail}
         onLoadMore={loadMoreExceptionDrawer}
       />
-      {workbenchExceptionDialog ? (
-        <WorkbenchExceptionModal
-          month={WORKBENCH_VIEW_MONTH}
-          rows={workbenchExceptionDialog.rows}
-          onApplied={handleWorkbenchExceptionApplied}
-          onClose={handleCloseWorkbenchExceptionDialog}
-        />
-      ) : null}
       {cashTicketPurchaseDialog ? (
         <CashTicketPurchaseModal
           defaultCashAmount={cashTicketPurchaseDialog.cashAmount}

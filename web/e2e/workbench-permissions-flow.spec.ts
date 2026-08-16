@@ -7,11 +7,6 @@ const workbenchMutationEndpoints = [
   "POST /api/workbench/actions/confirm-link",
   "POST /api/workbench/actions/withdraw-link/preview",
   "POST /api/workbench/actions/withdraw-link",
-  "POST /api/workbench/exception/preview",
-  "POST /api/workbench/exception/apply",
-  "POST /api/workbench/actions/cancel-exception",
-  "POST /api/workbench/actions/ignore-row",
-  "POST /api/workbench/actions/unignore-row",
   "POST /api/workbench/exceptions/review",
   "POST /api/operation-barrier/status",
 ];

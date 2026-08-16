@@ -783,9 +783,6 @@ describe("Workbench candidate grouping layout", () => {
           { status: 200 },
         );
       }
-      if (url.pathname === "/api/workbench/ignored") {
-        return new Response(JSON.stringify({ month: url.searchParams.get("month") ?? "all", rows: [] }), { status: 200 });
-      }
       if (url.pathname === "/api/workbench/settings") {
         return new Response(
           JSON.stringify({

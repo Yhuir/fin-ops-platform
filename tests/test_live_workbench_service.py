@@ -280,7 +280,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(output_detail["summary_fields"]["购方识别号"], "91530100CLIENT0001")
         self.assertEqual(output_detail["summary_fields"]["购买方名称"], "云南客户有限公司")
         self.assertEqual(output_detail["detail_fields"]["发票号码"], "OUT-001")
-        self.assertIn("ignore", output_row["available_actions"])
+        self.assertEqual(output_row["available_actions"], ["detail", "confirm_link"])
 
     def test_get_rows_detail_uses_direct_lookup_without_rebuilding_cache(self) -> None:
         import_service = ImportNormalizationService()

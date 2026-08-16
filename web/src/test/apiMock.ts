@@ -36,7 +36,6 @@ type MockApiOptions = {
   workbenchLoadDelayMs?: number;
   workbenchBackgroundLoadDelayMs?: number;
   workbenchPrimaryDelayMs?: number;
-  workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
@@ -70,17 +69,11 @@ type MockApiOptions = {
   appHealthSystemAudit?: Record<string, unknown>;
   appHealthSystemAuditStatus?: number;
   appHealthSystemAuditBody?: Record<string, unknown>;
-  workbenchExceptionPreview?: Record<string, unknown>;
-  workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
   workbenchWithdrawPreview?: Record<string, unknown>;
   transformWorkbenchPayload?: (body: Record<string, unknown>) => Record<string, unknown>;
   transformWorkbenchConfirmActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   transformWorkbenchWithdrawActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
-  workbenchExceptionPreviewStatus?: number;
-  workbenchExceptionApplyStatus?: number;
-  workbenchExceptionPreviewDelayMs?: number;
-  workbenchExceptionApplyDelayMs?: number;
   includeOaAttachmentPaymentReceipt?: boolean;
   initialImportPreviewFileNames?: string[];
   initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
@@ -110,46 +103,6 @@ const templateRegistry = [
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function buildDefaultWorkbenchExceptionPreview(rowIds: string[]) {
-  return {
-    rule_version: "exception_rules_v1",
-    scenario: {
-      business_line: "expense",
-      scenario_code: "expense_oa_bank_invoice_equal",
-      scenario_label: "OA、支出流水和进项发票金额一致",
-    },
-    amount_summary: {
-      oa_total: "58000.00",
-      bank_expense_total: "58000.00",
-      bank_income_total: "0.00",
-      input_invoice_total: "58000.00",
-      output_invoice_total: "0.00",
-      relation: "all_equal",
-    },
-    automatic_actions: [],
-    available_actions: [
-      {
-        action_code: "wait_input_invoice",
-        label: "追进项发票",
-        result_status: "open",
-        required_fields: ["note"],
-      },
-    ],
-    warnings: [],
-    workflow_projection: {
-      next_status: "open",
-    },
-    candidate_evidence: [
-      {
-        id: "mock-candidate",
-        label: `已选择 ${rowIds.length} 条记录`,
-        detail: "前端 mock preview 由后端驱动动作清单。",
-      },
-    ],
-    can_apply: true,
-  };
 }
 
 function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBatches"> = {}) {
@@ -1522,7 +1475,7 @@ function buildWorkbenchRowPayload(
             pay_receive_time: "2026-04-05 10:05",
             remark: "差旅报销已闭环",
             repayment_date: null,
-            available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+            available_actions: ["detail", "view_relation", "cancel_link"],
           },
         ],
         invoice: [
@@ -1561,7 +1514,7 @@ function buildWorkbenchRowPayload(
             counterparty_name: "杭州张三广告有限公司",
             reason: "4月品牌投放尾款",
             oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
-            available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+            available_actions: ["detail", "confirm_link"],
           },
         ],
         bank: [
@@ -1578,7 +1531,7 @@ function buildWorkbenchRowPayload(
             pay_receive_time: "2026-04-20 09:15",
             remark: "应付6000，候选 OA-202604-101",
             repayment_date: null,
-            available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+            available_actions: ["detail", "view_relation", "cancel_link"],
           },
           {
             id: "bk-ex-202604-001",
@@ -1595,7 +1548,7 @@ function buildWorkbenchRowPayload(
             pay_receive_time: "2026-04-09 15:30",
             remark: "异常付款，待人工复核",
             repayment_date: null,
-            available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+            available_actions: ["detail", "view_relation", "cancel_link"],
             detail_fields: {
               企业流水号: "SERIAL-EX-001",
             },
@@ -1617,7 +1570,7 @@ function buildWorkbenchRowPayload(
             total_with_tax: "6,000.00",
             invoice_type: "进项专票",
             invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-            available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+            available_actions: ["detail", "confirm_link"],
             detail_fields: {
               发票号码: "INV-202604-101",
             },
@@ -1684,7 +1637,7 @@ function buildWorkbenchRowPayload(
           pay_receive_time: "2026-03-25 14:22",
           remark: "设备采购款，已闭环",
           repayment_date: null,
-          available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+          available_actions: ["detail", "view_relation", "cancel_link"],
         },
       ],
       invoice: [
@@ -1727,7 +1680,7 @@ function buildWorkbenchRowPayload(
           detail_fields: {
             审批完成时间: "2026-03-28 18:10",
           },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
         },
         {
           id: "oa-o-202603-002",
@@ -1745,7 +1698,7 @@ function buildWorkbenchRowPayload(
             附件发票数量: "0",
             附件发票识别情况: "已解析 0 / 6",
           },
-          available_actions: ["detail", "confirm_link", "withdraw_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link", "withdraw_link"],
         },
         {
           id: "oa-o-202603-003",
@@ -1761,7 +1714,7 @@ function buildWorkbenchRowPayload(
           detail_fields: {
             审批完成时间: "2026-03-29 18:10",
           },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
         },
         {
           id: "oa-exp-2035",
@@ -1794,7 +1747,7 @@ function buildWorkbenchRowPayload(
             审批完成时间: "2026-03-04 10:18",
             明细摘要: "付款项 0 48.00，昆明玉溪来回过路费；付款项 1 200.00，加油费",
           },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
         },
         {
           id: "oa-exp-292",
@@ -1811,7 +1764,7 @@ function buildWorkbenchRowPayload(
             审批完成时间: "2026-03-24 11:30",
             明细摘要: "付款项 1 292.00",
           },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
         },
       ],
       bank: [
@@ -1828,7 +1781,7 @@ function buildWorkbenchRowPayload(
           pay_receive_time: "2026-03-28 10:18",
           remark: "设备尾款待进项票",
           repayment_date: null,
-          available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+          available_actions: ["detail", "view_relation", "cancel_link"],
         },
         {
           id: "bk-o-202603-002",
@@ -1843,7 +1796,7 @@ function buildWorkbenchRowPayload(
           pay_receive_time: "2026-03-27 09:40",
           remark: "导入自动打标，待人工核查",
           repayment_date: null,
-          available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+          available_actions: ["detail", "view_relation", "cancel_link"],
         },
         {
           id: "bk-o-202603-003",
@@ -1858,7 +1811,7 @@ function buildWorkbenchRowPayload(
           pay_receive_time: "2026-03-29 10:18",
           remark: "设备尾款存在发票尾差",
           repayment_date: null,
-          available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+          available_actions: ["detail", "view_relation", "cancel_link"],
         },
       ],
       invoice: [
@@ -1878,7 +1831,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "65,540.00",
           invoice_type: "进项专票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           source_expense_item_ids: ["oa-o-202603-001:item:1"],
           source_links: [{
             source_type: "oa_attachment_invoice",
@@ -1909,7 +1862,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "9,999.99",
           invoice_type: "进项专票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           detail_fields: {
             发票号码: "12561049",
           },
@@ -1930,7 +1883,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "25.00",
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           source_expense_item_ids: ["oa-exp-2035:item:0"],
           source_links: [{
             source_type: "oa_attachment_invoice",
@@ -1962,7 +1915,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "23.00",
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           source_expense_item_ids: ["oa-exp-2035:item:0"],
           source_links: [{
             source_type: "oa_attachment_invoice",
@@ -1994,7 +1947,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "200.00",
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           source_expense_item_ids: ["oa-exp-2035:item:1"],
           source_links: [{
             source_type: "oa_attachment_invoice",
@@ -2027,7 +1980,7 @@ function buildWorkbenchRowPayload(
             total_with_tax: "200.00",
             invoice_type: "付款凭证",
             invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-            available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+            available_actions: ["detail", "confirm_link"],
             detail_fields: {
               发票号码: "PAY-OA2035-WXPAY-200",
               derived_from_oa_id: "oa-exp-2035",
@@ -2054,7 +2007,7 @@ function buildWorkbenchRowPayload(
           total_with_tax: "292.00",
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          available_actions: ["detail", "confirm_link"],
           source_expense_item_ids: ["oa-exp-292:item:1"],
           source_links: [{
             source_type: "oa_attachment_invoice",
@@ -2549,57 +2502,6 @@ function createWorkbenchStateStore(options: Pick<MockApiOptions, "includeOaAttac
   };
 }
 
-function createIgnoredRowStore() {
-  const store = new Map<string, RawWorkbenchRow[]>([
-    [
-      "2026-04",
-      [
-        {
-          id: "iv-ignored-202604-001",
-          type: "invoice",
-          case_id: null,
-          seller_tax_no: "91310000999999999X",
-          seller_name: "忽略发票公司",
-          buyer_tax_no: "915300007194052520",
-          buyer_name: "云南溯源科技有限公司",
-          issue_date: "2026-04-03",
-          amount: "1,250.00",
-          tax_rate: "6%",
-          tax_amount: "70.75",
-          total_with_tax: "1,320.75",
-          invoice_type: "进项专票",
-          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-          detail_fields: {
-            发票号码: "INV-IGN-001",
-          },
-          ignored: true,
-        } as unknown as RawWorkbenchRow,
-      ],
-    ],
-  ]);
-  return {
-    get(month: string) {
-      if (month === "all") {
-        return WORKBENCH_STATE_MONTHS.flatMap((candidateMonth) => cloneJson(store.get(candidateMonth) ?? []));
-      }
-      if (!store.has(month)) {
-        store.set(month, []);
-      }
-      return store.get(month)!;
-    },
-    resolveMonthForRow(rowId: string) {
-      for (const month of WORKBENCH_STATE_MONTHS) {
-        const rows = store.get(month) ?? [];
-        if (rows.some((row) => String(row.id) === rowId)) {
-          return month;
-        }
-      }
-      return undefined;
-    },
-  };
-}
-
 function findWorkbenchGroupRows(payload: RawWorkbenchPayload, section: RawWorkbenchSectionKey, rowId: string) {
   const panes: RawWorkbenchPaneKey[] = ["oa", "bank", "invoice"];
   let matchedRow: RawWorkbenchRow | null = null;
@@ -2635,7 +2537,7 @@ function reopenWorkbenchRow(row: RawWorkbenchRow): RawWorkbenchRow {
     return {
       ...row,
       oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
-      available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+      available_actions: ["detail"],
     };
   }
 
@@ -2643,38 +2545,15 @@ function reopenWorkbenchRow(row: RawWorkbenchRow): RawWorkbenchRow {
     return {
       ...row,
       invoice_relation: { code: "pending_invoice_match", label: "待人工确认", tone: "warn" },
-      available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+      available_actions: ["detail", "view_relation", "cancel_link"],
     };
   }
 
   return {
     ...row,
     invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-    available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+    available_actions: ["detail", "confirm_link"],
   };
-}
-
-function moveInvoiceToIgnored(payload: RawWorkbenchPayload, ignoredRows: RawWorkbenchRow[], rowId: string) {
-  const invoiceIndex = payload.unpaired.invoice.findIndex((candidate) => String(candidate.id) === rowId);
-  if (invoiceIndex < 0) {
-    return false;
-  }
-  const [row] = payload.unpaired.invoice.splice(invoiceIndex, 1);
-  ignoredRows.push({
-    ...row,
-    available_actions: ["detail"],
-  });
-  return true;
-}
-
-function restoreIgnoredInvoice(payload: RawWorkbenchPayload, ignoredRows: RawWorkbenchRow[], rowId: string) {
-  const invoiceIndex = ignoredRows.findIndex((candidate) => String(candidate.id) === rowId);
-  if (invoiceIndex < 0) {
-    return false;
-  }
-  const [row] = ignoredRows.splice(invoiceIndex, 1);
-  payload.unpaired.invoice.push(reopenWorkbenchRow(row));
-  return true;
 }
 
 function moveWorkbenchGroup(payload: RawWorkbenchPayload, source: RawWorkbenchSectionKey, target: RawWorkbenchSectionKey, rowId: string) {
@@ -2894,7 +2773,7 @@ function buildWorkbenchDetail(rowId: string) {
         pay_receive_time: "2026-03-25 14:22",
         remark: "设备采购款，已闭环",
         repayment_date: null,
-        available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+        available_actions: ["detail", "view_relation", "cancel_link"],
         summary_fields: {
           资金方向: "支出",
           交易时间: "2026-03-25 14:22",
@@ -2979,7 +2858,7 @@ function buildWorkbenchDetail(rowId: string) {
         total_with_tax: "65,540.00",
         invoice_type: "进项专票",
         invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
-        available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+        available_actions: ["detail", "confirm_link"],
         detail_fields: {
           发票号码: "12561048",
           derived_from_oa_id: "oa-o-202603-001",
@@ -3004,7 +2883,7 @@ function buildWorkbenchDetail(rowId: string) {
       counterparty_name: "未知对方",
       reason: "未知",
       oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
-      available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+      available_actions: ["detail", "confirm_link"],
       summary_fields: {
         申请人: "未知",
         项目名称: "未知项目",
@@ -4717,7 +4596,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
-  const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
   let latestTaxCertifiedPreview: {
     session: {
@@ -5467,15 +5345,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         jobs: cloneJson(backgroundJobs),
       },
     }),
-    "/api/workbench/ignored": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
-      return {
-        body: {
-          month,
-          rows: cloneJson(ignoredRowStore.get(month)),
-        },
-      };
-    },
     "/api/workbench/settings": ({ init, jsonBody }) => {
       if ((init?.method ?? "GET").toUpperCase() === "POST" && jsonBody) {
         const forbiddenAclKeys = [
@@ -7250,81 +7119,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           : body,
       };
     },
-    "/api/workbench/exception/preview": ({ jsonBody }) => {
-      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
-      return {
-        status: options.workbenchExceptionPreviewStatus ?? 200,
-        body: options.workbenchExceptionPreview
-          ? cloneJson(options.workbenchExceptionPreview)
-          : buildDefaultWorkbenchExceptionPreview(rowIds),
-      };
-    },
-    "/api/workbench/exception/apply": ({ jsonBody }) => {
-      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
-      const month = String(jsonBody?.month ?? "");
-      const actionCode = String(jsonBody?.action_code ?? "workbench_exception");
-      const actionLabel = actionCode === "wait_input_invoice" ? "追进项发票" : actionCode;
-      const touchedMonths = new Set(
-        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
-      );
-
-      for (const resolvedMonth of touchedMonths) {
-        const payload = workbenchStateStore.get(resolvedMonth);
-        for (const pane of ["oa", "bank", "invoice"] as const) {
-          payload.unpaired[pane] = payload.unpaired[pane].map((row) => {
-            if (!rowIds.includes(String(row.id))) {
-              return row;
-            }
-            if (row.type === "oa") {
-              return {
-                ...row,
-                handled_exception: true,
-                oa_bank_relation: { code: actionCode, label: actionLabel, tone: "danger" },
-                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-              };
-            }
-            if (row.type === "bank") {
-              return {
-                ...row,
-                handled_exception: true,
-                invoice_relation: { code: actionCode, label: actionLabel, tone: "danger" },
-                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
-              };
-            }
-            return {
-              ...row,
-              handled_exception: true,
-              invoice_bank_relation: { code: actionCode, label: actionLabel, tone: "danger" },
-              available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-            };
-          });
-        }
-      }
-
-      return {
-        status: options.workbenchExceptionApplyStatus ?? 200,
-        body: options.workbenchExceptionApply
-          ? cloneJson(options.workbenchExceptionApply)
-          : {
-              success: true,
-              case: { id: "EXC-MOCK-1" },
-              pair_relation: null,
-              updated_rows: rowIds.map((id) => ({ id })),
-              affected_row_ids: rowIds,
-              message: "已提交统一异常处理。",
-            },
-      };
-    },
-    "/api/workbench/actions/mark-exception": ({ jsonBody }) => ({
-      body: {
-        success: true,
-        action: "mark_exception",
-        month: String(jsonBody?.month ?? ""),
-        affected_row_ids: [jsonBody?.row_id],
-        updated_rows: [{ id: jsonBody?.row_id }],
-        message: "已标记异常。",
-      },
-    }),
     "/api/workbench/actions/cancel-link": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowId = String(jsonBody?.row_id ?? "");
@@ -7337,99 +7131,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           month,
           affected_row_ids: [rowId],
           message: "已取消关联并回退为待处理。",
-        },
-      };
-    },
-    "/api/workbench/actions/update-bank-exception": ({ jsonBody }) => ({
-      body: {
-        success: true,
-        action: "update_bank_exception",
-        month: String(jsonBody?.month ?? ""),
-        affected_row_ids: [jsonBody?.row_id],
-        updated_rows: [{ id: jsonBody?.row_id }],
-        message: "已更新银行异常分类。",
-      },
-    }),
-    "/api/workbench/actions/cancel-exception": ({ jsonBody }) => {
-      const month = String(jsonBody?.month ?? "");
-      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
-      const touchedMonths = new Set(
-        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
-      );
-
-      for (const resolvedMonth of touchedMonths) {
-        const payload = workbenchStateStore.get(resolvedMonth);
-        for (const pane of ["oa", "bank", "invoice"] as const) {
-          payload.unpaired[pane] = payload.unpaired[pane].map((row) => {
-            if (!rowIds.includes(String(row.id))) {
-              return row;
-            }
-            if (row.type === "oa") {
-              return {
-                ...row,
-                handled_exception: false,
-                oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
-                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-              };
-            }
-            if (row.type === "bank") {
-              return {
-                ...row,
-                handled_exception: false,
-                invoice_relation: { code: "pending_invoice_match", label: "待关联设备票", tone: "warn" },
-                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
-              };
-            }
-            return {
-              ...row,
-              handled_exception: false,
-              invoice_bank_relation: { code: "pending_collection", label: "待匹配流水", tone: "warn" },
-              available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-            };
-          });
-        }
-      }
-
-      return {
-        body: {
-          success: true,
-          action: "cancel_exception",
-          month,
-          affected_row_ids: rowIds,
-          updated_rows: rowIds.map((id) => ({ id })),
-          message: `已取消 ${rowIds.length} 条记录的异常处理。`,
-        },
-      };
-    },
-    "/api/workbench/actions/ignore-row": ({ jsonBody }) => {
-      const month = String(jsonBody?.month ?? "");
-      const rowId = String(jsonBody?.row_id ?? "");
-      const resolvedMonth = month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) ?? month : month;
-      moveInvoiceToIgnored(workbenchStateStore.get(resolvedMonth), ignoredRowStore.get(resolvedMonth), rowId);
-      return {
-        body: {
-          success: true,
-          action: "ignore_row",
-          month,
-          affected_row_ids: [rowId],
-          updated_rows: [{ id: rowId }],
-          message: "已忽略 1 条记录。",
-        },
-      };
-    },
-    "/api/workbench/actions/unignore-row": ({ jsonBody }) => {
-      const month = String(jsonBody?.month ?? "");
-      const rowId = String(jsonBody?.row_id ?? "");
-      const resolvedMonth = month === "all" ? ignoredRowStore.resolveMonthForRow(rowId) ?? month : month;
-      restoreIgnoredInvoice(workbenchStateStore.get(resolvedMonth), ignoredRowStore.get(resolvedMonth), rowId);
-      return {
-        body: {
-          success: true,
-          action: "unignore_row",
-          month,
-          affected_row_ids: [rowId],
-          updated_rows: [{ id: rowId }],
-          message: "已撤回忽略 1 条记录。",
         },
       };
     },
@@ -8113,11 +7814,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       url.pathname === "/api/workbench"
       || url.pathname === "/api/workbench/groups"
       || url.pathname === "/api/workbench/filter-options"
-      || url.pathname === "/api/workbench/ignored"
       || url.pathname === "/api/workbench/settings";
     const workbenchSpecificDelay =
       (url.pathname === "/api/workbench" ? options.workbenchPrimaryDelayMs : undefined)
-      ?? (url.pathname === "/api/workbench/ignored" ? options.workbenchIgnoredDelayMs : undefined)
       ?? (url.pathname === "/api/workbench/settings" ? options.workbenchSettingsDelayMs : undefined);
     const workbenchDelay =
       options.workbenchBackgroundLoadDelayMs && workbenchWriteActionCount > 0 && isWorkbenchReadPath
@@ -8138,12 +7837,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     if (importPreviewDelay) {
       await new Promise((resolve) => window.setTimeout(resolve, importPreviewDelay));
     }
-    const workbenchExceptionDelay =
-      (url.pathname === "/api/workbench/exception/preview" ? options.workbenchExceptionPreviewDelayMs : undefined)
-      ?? (url.pathname === "/api/workbench/exception/apply" ? options.workbenchExceptionApplyDelayMs : undefined);
-    if (workbenchExceptionDelay) {
-      await new Promise((resolve) => window.setTimeout(resolve, workbenchExceptionDelay));
-    }
     if (isBinaryLikeResponse(response)) {
       if (options.actionDelayMs && url.pathname.startsWith("/api/workbench/actions/")) {
         await new Promise((resolve) => window.setTimeout(resolve, options.actionDelayMs));
@@ -8152,7 +7845,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     if (
       options.actionDelayMs
-      && (url.pathname.startsWith("/api/workbench/actions/") || url.pathname.startsWith("/api/workbench/exception/"))
+      && url.pathname.startsWith("/api/workbench/actions/")
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, options.actionDelayMs));
     }

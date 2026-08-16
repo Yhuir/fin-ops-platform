@@ -933,22 +933,24 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             MongoOAAdapter._attachment_invoice_cache_parser_version(),
         )
 
-    def test_get_api_workbench_ignored_uses_canonical_override_repository(self) -> None:
-        class CanonicalOverrideRepository:
-            def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
-                self.scope_key = scope_key
-                return [{"id": "bk-sql-ignored-001", "type": "bank"}]
-
+    def test_retired_manual_exception_and_ignore_routes_are_not_exposed(self) -> None:
         app = build_application()
-        repository = CanonicalOverrideRepository()
-        app._workbench_page_selection_repository = repository
+        retired_routes = (
+            ("GET", "/api/workbench/ignored?month=all"),
+            ("POST", "/api/workbench/exception/preview"),
+            ("POST", "/api/workbench/exception/apply"),
+            ("POST", "/api/workbench/actions/mark-exception"),
+            ("POST", "/api/workbench/actions/update-bank-exception"),
+            ("POST", "/api/workbench/actions/oa-bank-exception"),
+            ("POST", "/api/workbench/actions/cancel-exception"),
+            ("POST", "/api/workbench/actions/ignore-row"),
+            ("POST", "/api/workbench/actions/unignore-row"),
+        )
 
-        response = app.handle_request("GET", "/api/workbench/ignored?month=all")
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertEqual(repository.scope_key, "all")
-        self.assertEqual(payload["rows"], [{"id": "bk-sql-ignored-001", "type": "bank"}])
+        for method, path in retired_routes:
+            with self.subTest(method=method, path=path):
+                response = app.handle_request(method, path, body="{}" if method == "POST" else None)
+                self.assertEqual(response.status_code, 404, response.body)
 
     def test_bank_policy_metadata_uses_selected_row_category_before_resolver(self) -> None:
         app = build_application()
@@ -1200,7 +1202,7 @@ def build_personal_advance_repayment_raw_payload(
             "counterparty_name": "测试员工",
             "reason": "个人暂借款",
             "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
-            "available_actions": ["detail", "confirm_link", "mark_exception"],
+            "available_actions": ["detail", "confirm_link"],
             "summary_fields": {"申请人": "测试员工"},
             "detail_fields": {"申请日期": "2026-03-01"},
         }
@@ -1218,7 +1220,7 @@ def build_personal_advance_repayment_raw_payload(
                 "credit_amount": "",
                 "counterparty_name": "测试员工",
                 "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
-                "available_actions": ["detail", "confirm_link", "mark_exception"],
+                "available_actions": ["detail", "confirm_link"],
                 "summary_fields": {"交易时间": "2026-03-02 09:00:00"},
                 "detail_fields": {"摘要": "个人暂借款付款"},
             }
@@ -1235,7 +1237,7 @@ def build_personal_advance_repayment_raw_payload(
                 "credit_amount": amount,
                 "counterparty_name": "测试员工",
                 "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
-                "available_actions": ["detail", "confirm_link", "mark_exception"],
+                "available_actions": ["detail", "confirm_link"],
                 "summary_fields": {"交易时间": f"2026-03-{index + 2:02d} 09:00:00"},
                 "detail_fields": {"摘要": "个人暂借款还款"},
             }
@@ -1251,7 +1253,7 @@ def build_personal_advance_repayment_raw_payload(
                 "seller_name": "测试供应商",
                 "invoice_type": "进项发票",
                 "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
-                "available_actions": ["detail", "confirm_link", "mark_exception"],
+                "available_actions": ["detail", "confirm_link"],
             }
         ]
         if include_invoice
@@ -1334,7 +1336,7 @@ def build_ccb_bank_row(row_id: str, trade_time: str, amount: str) -> dict[str, o
         "counterparty_name": "建设银行可见性测试供应商",
         "payment_account_label": "建设银行 8106",
         "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
-        "available_actions": ["detail", "confirm_link", "mark_exception"],
+        "available_actions": ["detail", "confirm_link"],
         "summary_fields": {"交易时间": trade_time, "账号": "建设银行 8106"},
         "detail_fields": {"交易时间": trade_time, "账号": "建设银行 8106"},
     }

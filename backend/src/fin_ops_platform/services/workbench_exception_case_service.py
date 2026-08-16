@@ -394,68 +394,6 @@ class WorkbenchExceptionCaseService:
         self.append_audit_event(str(case_id), event="reopened", actor=actor, payload={"reason": reason})
         return reopened
 
-    def cancel_exception_cases(
-        self,
-        rows: list[dict[str, Any]],
-        comment: str | None = None,
-    ) -> list[dict[str, Any]]:
-        normalized_rows = self._normalize_rows(rows)
-        case_ids = self.case_ids_for_typed_rows(
-            [row["id"] for row in normalized_rows],
-            [row["type"] for row in normalized_rows],
-        )
-        cancelled: list[dict[str, Any]] = []
-        for case_id in case_ids:
-            case_payload = self._cases.get(case_id)
-            if not isinstance(case_payload, dict) or case_payload.get("status") not in ACTIVE_CASE_STATUSES:
-                continue
-            cancelled.append(self._transition_case(case_payload, action="cancelled", status="cancelled", comment=comment))
-        return cancelled
-
-    def ignore_row(self, row: dict[str, Any], comment: str | None = None) -> dict[str, Any]:
-        normalized_rows = self._normalize_rows([row])
-        normalized_row = normalized_rows[0]
-        if normalized_row["type"] != "invoice":
-            raise ValueError("ignore_row only supports invoice rows.")
-
-        existing_case_ids = self.case_ids_for_typed_rows(
-            [normalized_row["id"]],
-            [normalized_row["type"]],
-        )
-        if existing_case_ids:
-            existing_case = self._cases[existing_case_ids[0]]
-            if existing_case.get("status") == "ignored":
-                return deepcopy(existing_case)
-            raise ValueError(f"row already has an active exception case: {existing_case_ids[0]}")
-
-        definition = EXCEPTION_CASE_DEFINITIONS["pending_collection"]
-        case_payload = self.create_exception_case(
-            rows=[row],
-            exception_code="pending_collection",
-            exception_label=definition["label"],
-            category=definition["category"],
-            comment=comment,
-        )
-        stored_case = self._cases[case_payload["id"]]
-        stored_case["status"] = "ignored"
-        stored_case["history"][0]["action"] = "ignored"
-        return deepcopy(stored_case)
-
-    def unignore_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
-        normalized_row = self._normalize_rows([row])[0]
-        case_ids = self.case_ids_for_typed_rows(
-            [normalized_row["id"]],
-            [normalized_row["type"]],
-        )
-        if not case_ids:
-            return None
-        case_payload = self._cases.get(case_ids[0])
-        if not isinstance(case_payload, dict):
-            return None
-        if case_payload.get("status") != "ignored":
-            raise ValueError(f"row is not ignored by exception case: {case_ids[0]}")
-        return self._transition_case(case_payload, action="unignored", status="cancelled", comment=None)
-
     def case_ids_for_rows(self, row_ids: list[str]) -> list[str]:
         requested = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
         case_ids: list[str] = []

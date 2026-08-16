@@ -201,9 +201,9 @@ class WorkbenchQueryService:
         if row_type == "oa":
             return ["detail"]
         if row_type == "bank":
-            return ["detail", "view_relation", "cancel_link", "handle_exception"]
+            return ["detail", "view_relation", "cancel_link"]
         if row_type == "invoice" and section == "unpaired":
-            return ["detail", "confirm_link", "mark_exception", "ignore"]
+            return ["detail", "confirm_link"]
         return ["detail", "cancel_link"]
 
     def replace_row(self, row_id: str, row: dict[str, Any]) -> None:

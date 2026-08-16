@@ -3,22 +3,17 @@ import { Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 
-import type { WorkbenchActionVariant, WorkbenchRecordType } from "../../features/workbench/types";
+import type { WorkbenchRecordType } from "../../features/workbench/types";
 
 export type WorkbenchInlineAction =
   | "relation-status"
   | "unlink"
-  | "handle-exception"
-  | "confirm-match"
-  | "flag-exception"
-  | "ignore-row"
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special";
 
 type RowActionsProps = {
   recordType: WorkbenchRecordType;
-  variant: WorkbenchActionVariant;
   showWorkflowActions: boolean;
   canMutateData: boolean;
   availableActions: string[];
@@ -30,7 +25,6 @@ type RowActionsProps = {
 
 export default function RowActions({
   recordType,
-  variant,
   showWorkflowActions,
   canMutateData,
   availableActions = [],
@@ -41,7 +35,6 @@ export default function RowActions({
 }: RowActionsProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
-  const canIgnore = availableActions.includes("ignore");
   const canConfirmCashPassThrough = availableActions.includes("confirm_cash_pass_through");
   const canConfirmCashTicketPurchase = availableActions.includes("confirm_cash_ticket_purchase");
   const canCancelCashSpecial = availableActions.includes("cancel_cash_special");
@@ -99,16 +92,10 @@ export default function RowActions({
 
   if (compact) {
     const actions: Array<{ id: WorkbenchInlineAction | "detail"; label: string; warning?: boolean }> = [];
-    if (showDetailAction) actions.push({ id: "detail", label: "详情" });
-    if (canMutateData && canIgnore) actions.push({ id: "ignore-row", label: "忽略", warning: true });
-    if (canMutateData && showWorkflowActions && variant === "confirm-exception") {
-      actions.push({ id: "confirm-match", label: "确认关联" });
-      actions.push({ id: "flag-exception", label: recordType === "invoice" ? "标记异常" : "异常处理", warning: true });
-    }
-    if (canMutateData && showWorkflowActions && variant === "bank-review") {
+    if (recordType === "bank" && showDetailAction) actions.push({ id: "detail", label: "详情" });
+    if (recordType === "bank" && canMutateData && showWorkflowActions) {
       actions.push({ id: "relation-status", label: "关联情况" });
       actions.push({ id: "unlink", label: "取消关联" });
-      actions.push({ id: "handle-exception", label: "异常处理", warning: true });
       if (canConfirmCashPassThrough) actions.push({ id: "confirm-cash-pass-through", label: "确认为过账" });
       if (canConfirmCashTicketPurchase) actions.push({ id: "confirm-cash-ticket-purchase", label: "确认为买票" });
       if (canCancelCashSpecial) actions.push({ id: "cancel-cash-special", label: "取消现金处理", warning: true });
@@ -161,24 +148,7 @@ export default function RowActions({
         </button>
       ) : null}
 
-      {canMutateData && canIgnore ? (
-        <button className="row-action-btn warning" type="button" onClick={handleAction("ignore-row")}>
-          忽略
-        </button>
-      ) : null}
-
-      {canMutateData && showWorkflowActions && variant === "confirm-exception" ? (
-        <>
-          <button className="row-action-btn primary" type="button" onClick={handleAction("confirm-match")}>
-            确认关联
-          </button>
-          <button className="row-action-btn warning" type="button" onClick={handleAction("flag-exception")}>
-            {recordType === "invoice" ? "标记异常" : "异常处理"}
-          </button>
-        </>
-      ) : null}
-
-      {canMutateData && showWorkflowActions && variant === "bank-review" ? (
+      {recordType === "bank" && canMutateData && showWorkflowActions ? (
         <div ref={menuWrapRef} className="row-menu-wrap">
           <button
             aria-expanded={menuOpen}
@@ -203,9 +173,6 @@ export default function RowActions({
                   </button>
                   <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("unlink")}>
                     取消关联
-                  </button>
-                  <button className="row-menu-item warning" role="menuitem" type="button" onClick={handleAction("handle-exception")}>
-                    异常处理
                   </button>
                   {canConfirmCashPassThrough ? (
                     <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("confirm-cash-pass-through")}>

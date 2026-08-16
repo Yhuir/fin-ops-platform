@@ -3,7 +3,6 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Any, Callable
 
-from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
 from fin_ops_platform.services.workbench_anomaly_review_service import (
     WorkbenchAnomalyReviewConflict,
     WorkbenchAnomalyReviewService,
@@ -16,11 +15,9 @@ class WorkbenchActionApiRoutes:
     def __init__(
         self,
         *,
-        exception_service: WorkbenchExceptionApplicationService,
         write_facade_provider: Callable[[], Any],
         anomaly_review_service: WorkbenchAnomalyReviewService | None = None,
     ) -> None:
-        self._exception_service = exception_service
         self._write_facade_provider = write_facade_provider
         self._anomaly_review_service = anomaly_review_service
 
@@ -48,34 +45,6 @@ class WorkbenchActionApiRoutes:
                 "message": str(error),
             }
         return HTTPStatus.OK, result
-
-    def exception_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            preview = self._exception_service.preview(payload)
-        except KeyError as exc:
-            return HTTPStatus.NOT_FOUND, {"error": "workbench_row_not_found", "message": str(exc)}
-        except (TypeError, ValueError) as exc:
-            return HTTPStatus.BAD_REQUEST, {
-                "error": "invalid_workbench_exception_preview_request",
-                "message": str(exc),
-            }
-        return HTTPStatus.OK, preview
-
-    def exception_apply(
-        self,
-        payload: dict[str, Any],
-        *,
-        actor_id: str,
-        tenant_id: str,
-        request_id: str | None = None,
-    ) -> Any:
-        return self._write_facade_provider().apply_exception(
-            payload,
-            actor=actor_id,
-            tenant_id=tenant_id,
-            request_id=request_id,
-            action_name="exception_apply",
-        )
 
     def confirm_link_preview(self, payload: dict[str, Any]) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
@@ -108,9 +77,6 @@ class WorkbenchActionApiRoutes:
             actor_id=actor_id,
             tenant_id=tenant_id,
         )
-
-    def mark_exception(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().mark_exception(payload)
 
     def cancel_link(
         self,
@@ -169,12 +135,6 @@ class WorkbenchActionApiRoutes:
     ) -> Any:
         return self._write_facade_provider().cancel_cash_special(payload, request_id=request_id)
 
-    def update_bank_exception(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().update_bank_exception(payload)
-
-    def oa_bank_exception(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().oa_bank_exception(payload)
-
     def confirm_personal_advance_repayment(
         self,
         payload: dict[str, Any],
@@ -182,12 +142,3 @@ class WorkbenchActionApiRoutes:
         request_id: str | None = None,
     ) -> Any:
         return self._write_facade_provider().confirm_personal_advance_repayment(payload, request_id=request_id)
-
-    def cancel_exception(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().cancel_exception(payload)
-
-    def ignore_row(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().ignore_row(payload)
-
-    def unignore_row(self, payload: dict[str, Any]) -> Any:
-        return self._write_facade_provider().unignore_row(payload)

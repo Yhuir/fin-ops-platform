@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  applyWorkbenchException,
   cancelWorkbenchCashSpecial,
   cancelWorkbenchLink,
   confirmWorkbenchCashPassThrough,
@@ -15,15 +14,11 @@ import {
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   importManualOaRows,
-  ignoreWorkbenchRow,
-  markWorkbenchException,
   previewWorkbenchConfirmLink,
-  previewWorkbenchException,
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
   reviewWorkbenchAnomaly,
-  updateWorkbenchBankException,
   withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -331,7 +326,7 @@ describe("workbench api bank amount mapping", () => {
             oa_rows: [{
               id: "oa-processed",
               type: "oa",
-              available_actions: ["detail", "cancel_exception"],
+              available_actions: ["detail"],
             }],
             bank_rows: [],
             invoice_rows: [],
@@ -502,7 +497,7 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
-  test("keeps typed identity on every remaining Workbench row mutation", async () => {
+  test("keeps typed identity on every supported Workbench row mutation", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(
       new Response(
         JSON.stringify({ success: true, affected_row_ids: ["same-id", "same-id"] }),
@@ -510,34 +505,16 @@ describe("workbench api bank amount mapping", () => {
       ),
     ));
 
-    await markWorkbenchException({
-      month: "all",
-      rowId: "same-id",
-      rowType: "invoice",
-      exceptionCode: "missing_invoice",
-    });
     await cancelWorkbenchLink({
       month: "all",
       rowId: "same-id",
       rowType: "bank",
       idempotencyKey: "typed-cancel-1",
     });
-    await updateWorkbenchBankException({
-      month: "all",
-      rowId: "same-id",
-      rowType: "bank",
-      relationCode: "needs_review",
-      relationLabel: "待复核",
-    });
     await confirmWorkbenchPersonalAdvanceRepayment({
       month: "all",
       rowIds: ["same-id", "same-id"],
       rowTypes: ["oa", "bank"],
-    });
-    await ignoreWorkbenchRow({
-      month: "all",
-      rowId: "same-id",
-      rowType: "invoice",
     });
     await confirmWorkbenchCashPassThrough({
       month: "all",
@@ -561,15 +538,7 @@ describe("workbench api bank amount mapping", () => {
       String(input),
       JSON.parse(String(init?.body)),
     ]));
-    expect(bodiesByPath["/api/workbench/actions/mark-exception"]).toMatchObject({
-      row_id: "same-id",
-      row_type: "invoice",
-    });
     expect(bodiesByPath["/api/workbench/actions/cancel-link"]).toMatchObject({
-      row_id: "same-id",
-      row_type: "bank",
-    });
-    expect(bodiesByPath["/api/workbench/actions/update-bank-exception"]).toMatchObject({
       row_id: "same-id",
       row_type: "bank",
     });
@@ -584,10 +553,6 @@ describe("workbench api bank amount mapping", () => {
         row_types: ["oa", "bank"],
       });
     }
-    expect(bodiesByPath["/api/workbench/actions/ignore-row"]).toMatchObject({
-      row_id: "same-id",
-      row_type: "invoice",
-    });
   });
 
   test("coalesces concurrent identical direct combined initial loads", async () => {
@@ -665,7 +630,7 @@ describe("workbench api bank amount mapping", () => {
                     group_type: "unpaired",
                     match_confidence: "medium",
                     reason: "候选",
-                    oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link", "mark_exception"] }],
+                    oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link"] }],
                     bank_rows: [],
                     invoice_rows: [],
                   },
@@ -720,7 +685,7 @@ describe("workbench api bank amount mapping", () => {
                   group_type: "unpaired",
                   match_confidence: "medium",
                   reason: "候选",
-                  oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link", "mark_exception"] }],
+                  oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail", "confirm_link"] }],
                   bank_rows: [],
                   invoice_rows: [],
                 },
@@ -917,7 +882,7 @@ describe("workbench api bank amount mapping", () => {
                       attachment_file_count: 1,
                     },
                   ],
-                  available_actions: ["detail", "cancel_link", "mark_exception"],
+                  available_actions: ["detail", "cancel_link"],
                 },
               ],
               bank_rows: [
@@ -1591,196 +1556,6 @@ describe("workbench groups summary contract", () => {
     const result = await fetchWorkbenchGroupsPage("all", "paired", null, 50, undefined, { detailLevel: "summary" });
 
     expect(countWorkbenchGroupRows(result.groups[0])).toBe(10);
-  });
-});
-
-describe("workbench exception api", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  test("previewWorkbenchException posts selected rows and maps backend-driven preview", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          rule_version: "exception_rules_v1",
-          scenario: {
-            business_line: "expense",
-            scenario_code: "expense_oa_bank_missing_invoice",
-            scenario_label: "OA和支出流水一致，缺进项发票",
-          },
-          amount_summary: {
-            oa_total: "100000.00",
-            bank_expense_total: "100000.00",
-            bank_income_total: "0.00",
-            input_invoice_total: "0.00",
-            output_invoice_total: "0.00",
-            expense_relation: "oa_equals_bank_missing_invoice",
-            income_relation: "not_applicable",
-          },
-          automatic_actions: [
-            {
-              action_code: "auto_close_when_invoice_arrives",
-              label: "补票后自动闭环",
-              result_status: "closed",
-              required_fields: [],
-            },
-          ],
-          available_actions: [
-            {
-              action_code: "wait_input_invoice",
-              label: "追进项发票",
-              result_status: "open",
-              required_fields: ["note"],
-            },
-          ],
-          warnings: [
-            {
-              code: "candidate_invoice_exists",
-              severity: "warning",
-              message: "已存在补票候选。",
-            },
-          ],
-          workflow_projection: {
-            next_status: "open",
-          },
-          candidate_evidence: [
-            {
-              id: "candidate-1",
-              label: "命中候选分组",
-              detail: "OA 与流水来自同一关系组。",
-            },
-          ],
-          can_apply: true,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
-    const preview = await previewWorkbenchException({
-      month: "all",
-      rowIds: ["oa-1", "bank-1"],
-      rowTypes: ["oa", "bank"],
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/exception/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["oa-1", "bank-1"],
-          row_types: ["oa", "bank"],
-        }),
-      }),
-    );
-    expect(preview).toEqual({
-      ruleVersion: "exception_rules_v1",
-      scenario: {
-        businessLine: "expense",
-        scenarioCode: "expense_oa_bank_missing_invoice",
-        scenarioLabel: "OA和支出流水一致，缺进项发票",
-      },
-      amountSummary: {
-        oaTotal: "100000.00",
-        bankExpenseTotal: "100000.00",
-        bankIncomeTotal: "0.00",
-        inputInvoiceTotal: "0.00",
-        outputInvoiceTotal: "0.00",
-        relation: "oa_equals_bank_missing_invoice",
-      },
-      automaticActions: [
-        {
-          actionCode: "auto_close_when_invoice_arrives",
-          label: "补票后自动闭环",
-          resultStatus: "closed",
-          requiredFields: [],
-        },
-      ],
-      availableActions: [
-        {
-          actionCode: "wait_input_invoice",
-          label: "追进项发票",
-          resultStatus: "open",
-          requiredFields: ["note"],
-        },
-      ],
-      warnings: [
-        {
-          code: "candidate_invoice_exists",
-          severity: "warning",
-          message: "已存在补票候选。",
-        },
-      ],
-      workflowProjection: {
-        nextStatus: "open",
-      },
-      candidateEvidence: [
-        {
-          id: "candidate-1",
-          label: "命中候选分组",
-          detail: "OA 与流水来自同一关系组。",
-        },
-      ],
-      canApply: true,
-    });
-  });
-
-  test("applyWorkbenchException maps the committed direct result without freshness metadata", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          success: true,
-          case: { id: "EXC-1" },
-          pair_relation: { id: "REL-1" },
-          updated_rows: [{ id: "bank-1" }],
-          affected_row_ids: ["bank-1"],
-          affected_scope_keys: ["2026-05"],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
-    const result = await applyWorkbenchException({
-      month: "all",
-      rowIds: ["bank-1"],
-      rowTypes: ["bank"],
-      scenarioCode: "expense_bank_invoice_missing_oa",
-      actionCode: "manual_oa_exempt",
-      payload: {
-        note: "业务确认无需 OA",
-        reason_code: "manual_business_exemption",
-        due_date: "2026-05-31",
-      },
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/exception/apply",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["bank-1"],
-          row_types: ["bank"],
-          scenario_code: "expense_bank_invoice_missing_oa",
-          action_code: "manual_oa_exempt",
-          payload: {
-            note: "业务确认无需 OA",
-            reason_code: "manual_business_exemption",
-            due_date: "2026-05-31",
-          },
-        }),
-      }),
-    );
-    expect(result).toMatchObject({
-      success: true,
-      case: { id: "EXC-1" },
-      pairRelation: { id: "REL-1" },
-      updatedRows: [{ id: "bank-1" }],
-      affectedRowIds: ["bank-1"],
-      affectedScopeKeys: ["2026-05"],
-    });
-    expect(result).not.toHaveProperty("operationBarrierTargets");
   });
 });
 

@@ -83,7 +83,6 @@ export default function PaneTable({
                       canMutateData={canMutateData}
                       recordType={row.recordType}
                       showWorkflowActions
-                      variant={row.actionVariant}
                       onAction={(action, event) => {
                         event?.stopPropagation();
                         onRowAction(row, action);

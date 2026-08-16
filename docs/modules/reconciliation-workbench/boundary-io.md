@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-15
+日期：2026-08-17
 
 ## 职责
 
@@ -18,6 +18,7 @@
 - 不把 OA、银行流水、发票复制成新的统一写模型。
 - 不持久化自动候选、matching decision 或 `open/proposed` 关系状态。
 - 不根据金额、旧 `case_id`、UI metadata 或来源前缀在 route/前端本地推断正式关系。
+- 不提供人工创建异常、逐行“标记异常”或发票“忽略/恢复忽略”入口；异常只能由 canonical 规则产生，再由 `/api/workbench/exceptions/review` 进行人工分类与分区决定。历史人工异常和 ignore/restore 记录只用于审计展示。
 - 不直接写 relation SQL、matching dirty-scope SQL 或 outbox SQL；写入必须进入对应 command/UoW。
 - 不拥有其它页面的读取副本；`workbench-matching` 是独立领域 worker。
 
@@ -126,6 +127,7 @@ requested tenant/scope
 ## 写入与一致性
 
 - 页面是否可写只由 session/permission、global mutation block 和 OA sync safety gate 决定；不再存在 page read-model freshness/version gate。
+- 发票行只提供详情入口，不挂载逐行三点菜单。正式关联与撤回由区域顶部 selection action 负责；自动异常由右侧异常抽屉负责人工审阅。旧 `exception/preview`、`exception/apply`、`mark-exception`、`update-bank-exception`、`oa-bank-exception`、`cancel-exception`、`ignore-row` 和 `unignore-row` HTTP 入口均已退役并返回 `404`，禁止重新引入兼容分支。
 - preview 从 canonical typed selection 一次有界读取所选成员和必要 OA attachment context；不读取完整页面 payload。
 - submit 在 relation UoW 内重读并锁定 canonical rows，验证 exact-set、case owner、版本、preview/topology fingerprint 和幂等。
 - confirm 接受至少两个不同 canonical 成员，允许同类型组合；仅 `amount_check.requires_note=true` 时要求备注。

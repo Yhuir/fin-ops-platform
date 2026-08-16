@@ -519,7 +519,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         payload = service.get_workbench("2026-03")
         invoice_row = payload["unpaired"]["invoice"][0]
 
-        self.assertIn("ignore", invoice_row["available_actions"])
+        self.assertEqual(invoice_row["available_actions"], ["detail", "confirm_link"])
 
     def test_oa_rows_only_expose_detail_in_both_zones(self) -> None:
         service = WorkbenchQueryService()

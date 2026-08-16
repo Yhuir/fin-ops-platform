@@ -134,9 +134,9 @@ class AuthGuardTests(unittest.TestCase):
             )
             write_response = app.handle_request(
                 "POST",
-                "/api/workbench/actions/ignore-row",
+                "/api/workbench/exceptions/review",
                 headers={"Authorization": "Bearer no-access"},
-                body=json.dumps({"row_id": "row-1"}),
+                body=json.dumps({"group_id": "group-1", "decision": "keep_unpaired"}),
             )
 
         self.assertEqual(read_response.status_code, 403)
@@ -240,17 +240,10 @@ class AuthGuardTests(unittest.TestCase):
 
     def test_readonly_export_user_is_rejected_before_all_formerly_unguarded_write_routes(self) -> None:
         write_routes = (
-            ("POST", "/api/workbench/exception/apply"),
-            ("POST", "/api/workbench/actions/mark-exception"),
             ("POST", "/api/workbench/actions/confirm-cash-pass-through"),
             ("POST", "/api/workbench/actions/confirm-cash-ticket-purchase"),
             ("POST", "/api/workbench/actions/cancel-cash-special"),
-            ("POST", "/api/workbench/actions/update-bank-exception"),
-            ("POST", "/api/workbench/actions/oa-bank-exception"),
             ("POST", "/api/workbench/actions/confirm-personal-advance-repayment"),
-            ("POST", "/api/workbench/actions/cancel-exception"),
-            ("POST", "/api/workbench/actions/ignore-row"),
-            ("POST", "/api/workbench/actions/unignore-row"),
             ("POST", "/api/workbench/exceptions/review"),
             ("POST", "/imports/files/preview"),
             ("POST", "/imports/files/confirm"),
@@ -294,7 +287,6 @@ class AuthGuardTests(unittest.TestCase):
 
     def test_readonly_export_user_keeps_read_only_post_contracts(self) -> None:
         read_routes = (
-            "/api/workbench/exception/preview",
             "/api/workbench/actions/confirm-link/preview",
             "/api/workbench/actions/withdraw-link/preview",
             "/api/pending-invoices/invoice-candidates/batch",
@@ -340,9 +332,9 @@ class AuthGuardTests(unittest.TestCase):
             with patch.object(app, "_load_json_body", side_effect=AssertionError("body parsed")):
                 json_response = app.handle_request(
                     "POST",
-                    "/api/workbench/actions/ignore-row",
+                    "/api/workbench/exceptions/review",
                     headers=headers,
-                    body='{"row_id":"row-1"}',
+                    body='{"group_id":"group-1","decision":"keep_unpaired"}',
                 )
             with patch.object(app, "_load_multipart_body", side_effect=AssertionError("body parsed")):
                 multipart_response = app.handle_request(

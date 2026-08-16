@@ -90,7 +90,7 @@ describe("Workbench columns and inline actions", () => {
           amount: "49.50",
           counterparty: "弥勒市豪荟酒店",
           actionVariant: "detail-only",
-          availableActions: ["detail", "ignore"],
+          availableActions: ["detail"],
           detailFields: [],
           tableValues: {
             sellerName: "弥勒市豪荟酒店",
@@ -407,8 +407,7 @@ describe("Workbench columns and inline actions", () => {
     expect(screen.queryByText("待找流水与发票")).not.toBeInTheDocument();
   });
 
-  test("renders inline detail actions while keeping other row actions in the compact menu", async () => {
-    const user = userEvent.setup();
+  test("renders invoice detail actions without the retired compact action menu", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -438,9 +437,8 @@ describe("Workbench columns and inline actions", () => {
     expect(within(bankRow as HTMLElement).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
     expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
-    const openInvoiceActions = within(openInvoiceRow as HTMLElement).getByRole("button", { name: "更多操作" });
-    await user.click(openInvoiceActions);
-    expect(screen.getByRole("menuitem", { name: "忽略" })).toBeInTheDocument();
+    expect(within(openInvoiceRow as HTMLElement).queryByRole("button", { name: "更多操作" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "忽略" })).not.toBeInTheDocument();
   });
 
   test("renders compact two-line datetime tags in bank rows", async () => {

@@ -26,35 +26,29 @@ class StateStoreStub:
 
 
 class WorkbenchPairRelationRollbackRestoreServiceTests(unittest.TestCase):
-    def test_restore_replaces_pair_relation_service_reconfigures_and_saves_snapshot(self) -> None:
+    def test_restore_replaces_pair_relation_service_and_saves_snapshot(self) -> None:
         state_store = StateStoreStub()
         replaced: list[WorkbenchPairRelationService] = []
-        configured: list[str] = []
         snapshot = self._snapshot("CASE-ROLLBACK-001")
         service = WorkbenchPairRelationRollbackRestoreService(
             state_store=state_store,
             replace_pair_relation_service=replaced.append,
-            configure_exception_application_service=lambda: configured.append("configured"),
         )
 
         service.restore(snapshot, changed_case_ids=["CASE-ROLLBACK-001"])
 
-        self.assertEqual(configured, ["configured"])
         self.assertEqual(state_store.saved[0]["changed_case_ids"], ["CASE-ROLLBACK-001"])
         self.assertIsNotNone(replaced[0].get_active_relation_by_case_id("CASE-ROLLBACK-001"))
 
     def test_restore_swallows_state_store_failure_after_replacing_service(self) -> None:
         replaced: list[WorkbenchPairRelationService] = []
-        configured: list[str] = []
         service = WorkbenchPairRelationRollbackRestoreService(
             state_store=StateStoreStub(fail=True),
             replace_pair_relation_service=replaced.append,
-            configure_exception_application_service=lambda: configured.append("configured"),
         )
 
         service.restore(self._snapshot("CASE-ROLLBACK-002"), changed_case_ids=["CASE-ROLLBACK-002"])
 
-        self.assertEqual(configured, ["configured"])
         self.assertIsNotNone(replaced[0].get_active_relation_by_case_id("CASE-ROLLBACK-002"))
 
     @staticmethod

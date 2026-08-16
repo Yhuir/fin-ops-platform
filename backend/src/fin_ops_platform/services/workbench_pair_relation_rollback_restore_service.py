@@ -11,11 +11,9 @@ class WorkbenchPairRelationRollbackRestoreService:
         *,
         state_store: Any | None,
         replace_pair_relation_service: Callable[[WorkbenchPairRelationService], None],
-        configure_exception_application_service: Callable[[], None],
     ) -> None:
         self._state_store = state_store
         self._replace_pair_relation_service = replace_pair_relation_service
-        self._configure_exception_application_service = configure_exception_application_service
 
     def restore(
         self,
@@ -25,7 +23,6 @@ class WorkbenchPairRelationRollbackRestoreService:
     ) -> None:
         restored_service = WorkbenchPairRelationService.from_snapshot(snapshot)
         self._replace_pair_relation_service(restored_service)
-        self._configure_exception_application_service()
         if self._state_store is None:
             return
         try:

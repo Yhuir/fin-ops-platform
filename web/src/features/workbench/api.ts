@@ -1,17 +1,7 @@
 import type {
-  WorkbenchExceptionAction,
-  WorkbenchExceptionApplyPayload,
-  WorkbenchExceptionApplyResult,
-  WorkbenchExceptionCandidateEvidence,
-  WorkbenchExceptionPreview,
-  WorkbenchExceptionPreviewPayload,
-  WorkbenchExceptionWarning,
-} from "./exceptionTypes";
-import type {
   WorkbenchActionVariant,
   WorkbenchRelationGroup,
   WorkbenchDetailField,
-  IgnoredWorkbenchData,
   BankAccountMapping,
   WorkbenchPaneRows,
   WorkbenchRecord,
@@ -313,11 +303,6 @@ type ApiWorkbenchOaSyncStatus = {
   version?: number | null;
 };
 
-type ApiIgnoredWorkbenchPayload = {
-  month: string;
-  rows: ApiWorkbenchRow[];
-};
-
 type ApiWorkbenchSettings = {
   projects: {
     active: Array<{
@@ -469,7 +454,6 @@ type ApiWorkbenchRelationAmountCheck = {
   requiresNote?: boolean | null;
 };
 
-const WORKBENCH_EXCEPTION_APPLY_TIMEOUT_MS = 12_000;
 
 type ApiWorkbenchAmountSummary = {
   before?: {
@@ -528,96 +512,6 @@ export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "affectedScop
   affectedScopeKeys: string[];
 };
 
-type ApiWorkbenchExceptionScenario = {
-  business_line?: string;
-  businessLine?: string;
-  scenario_code?: string;
-  scenarioCode?: string;
-  scenario_label?: string;
-  scenarioLabel?: string;
-  confidence?: string;
-  required_objects?: unknown[];
-  requiredObjects?: unknown[];
-  amount_relation?: string;
-  amountRelation?: string;
-};
-
-type ApiWorkbenchExceptionAmountSummary = {
-  oa_total?: unknown;
-  oaTotal?: unknown;
-  bank_expense_total?: unknown;
-  bankExpenseTotal?: unknown;
-  bank_income_total?: unknown;
-  bankIncomeTotal?: unknown;
-  input_invoice_total?: unknown;
-  inputInvoiceTotal?: unknown;
-  output_invoice_total?: unknown;
-  outputInvoiceTotal?: unknown;
-  relation?: unknown;
-  expense_relation?: unknown;
-  expenseRelation?: unknown;
-  income_relation?: unknown;
-  incomeRelation?: unknown;
-};
-
-type ApiWorkbenchExceptionAction = {
-  action_code?: string;
-  actionCode?: string;
-  label?: string;
-  result_status?: string;
-  resultStatus?: string;
-  required_fields?: unknown[];
-  requiredFields?: unknown[];
-  description?: string;
-};
-
-type ApiWorkbenchExceptionWarning = {
-  code?: string;
-  severity?: string;
-  message?: string;
-  label?: string;
-};
-
-type ApiWorkbenchExceptionCandidateEvidence = {
-  id?: string;
-  label?: string;
-  detail?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type ApiWorkbenchExceptionPreview = {
-  rule_version?: string;
-  ruleVersion?: string;
-  scenario?: ApiWorkbenchExceptionScenario;
-  amount_summary?: ApiWorkbenchExceptionAmountSummary;
-  amountSummary?: ApiWorkbenchExceptionAmountSummary;
-  automatic_actions?: ApiWorkbenchExceptionAction[];
-  automaticActions?: ApiWorkbenchExceptionAction[];
-  available_actions?: ApiWorkbenchExceptionAction[];
-  availableActions?: ApiWorkbenchExceptionAction[];
-  warnings?: ApiWorkbenchExceptionWarning[];
-  workflow_projection?: Record<string, unknown>;
-  workflowProjection?: Record<string, unknown>;
-  candidate_evidence?: ApiWorkbenchExceptionCandidateEvidence[];
-  candidateEvidence?: ApiWorkbenchExceptionCandidateEvidence[];
-  can_apply?: boolean;
-  canApply?: boolean;
-};
-
-type ApiWorkbenchExceptionApplyResult = {
-  success?: boolean;
-  case?: Record<string, unknown> | null;
-  pair_relation?: Record<string, unknown> | null;
-  pairRelation?: Record<string, unknown> | null;
-  updated_rows?: Array<Record<string, unknown>>;
-  updatedRows?: Array<Record<string, unknown>>;
-  affected_row_ids?: unknown[];
-  affectedRowIds?: unknown[];
-  affected_scope_keys?: unknown[];
-  affectedScopeKeys?: unknown[];
-  message?: string;
-};
-
 type ConfirmLinkPayload = {
   month: string;
   rowIds: string[];
@@ -644,14 +538,6 @@ type RelationPreviewPayload = {
   rowTypes: WorkbenchRecordType[];
 };
 
-type MarkExceptionPayload = {
-  month: string;
-  rowId: string;
-  rowType: WorkbenchRecordType;
-  exceptionCode: string;
-  comment?: string;
-};
-
 type CancelLinkPayload = {
   month: string;
   rowId: string;
@@ -660,27 +546,11 @@ type CancelLinkPayload = {
   idempotencyKey: string;
 };
 
-type UpdateBankExceptionPayload = {
-  month: string;
-  rowId: string;
-  rowType: WorkbenchRecordType;
-  relationCode: string;
-  relationLabel: string;
-  comment?: string;
-};
-
 type ConfirmPersonalAdvanceRepaymentPayload = {
   month: string;
   rowIds: string[];
   rowTypes: WorkbenchRecordType[];
   note?: string;
-};
-
-type IgnoreRowPayload = {
-  month: string;
-  rowId: string;
-  rowType: WorkbenchRecordType;
-  comment?: string;
 };
 
 type WorkbenchAnomalyReviewPayload = {
@@ -1118,9 +988,6 @@ function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): Wor
       return "detail-only";
     }
     return "bank-review";
-  }
-  if (availableActions.includes("confirm_link") || availableActions.includes("mark_exception")) {
-    return "confirm-exception";
   }
   return "detail-only";
 }
@@ -1646,127 +1513,6 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
         : "unknown",
       mismatchFields: (amountSummary.mismatch_fields ?? []).map((field) => String(field)),
     },
-  };
-}
-
-function cleanWorkbenchExceptionStringList(value: unknown[] | undefined) {
-  return (value ?? [])
-    .map((item) => String(item).trim())
-    .filter(Boolean);
-}
-
-function camelizeKey(key: string) {
-  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-}
-
-function camelizeUnknown(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(camelizeUnknown);
-  }
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entryValue]) => [camelizeKey(key), camelizeUnknown(entryValue)]),
-  );
-}
-
-function mapWorkbenchExceptionAction(action: ApiWorkbenchExceptionAction): WorkbenchExceptionAction {
-  const mapped: WorkbenchExceptionAction = {
-    actionCode: String(action.actionCode ?? action.action_code ?? "").trim(),
-    label: String(action.label ?? action.actionCode ?? action.action_code ?? "").trim(),
-    resultStatus: String(action.resultStatus ?? action.result_status ?? "open").trim() || "open",
-    requiredFields: cleanWorkbenchExceptionStringList(action.requiredFields ?? action.required_fields),
-  };
-  if (typeof action.description === "string" && action.description.trim()) {
-    mapped.description = action.description.trim();
-  }
-  return mapped;
-}
-
-function mapWorkbenchExceptionWarning(warning: ApiWorkbenchExceptionWarning): WorkbenchExceptionWarning {
-  return {
-    code: String(warning.code ?? "").trim(),
-    severity: String(warning.severity ?? "warning").trim() || "warning",
-    message: String(warning.message ?? warning.label ?? "").trim(),
-  };
-}
-
-function mapWorkbenchExceptionEvidence(
-  evidence: ApiWorkbenchExceptionCandidateEvidence,
-): WorkbenchExceptionCandidateEvidence {
-  const mapped: WorkbenchExceptionCandidateEvidence = {
-    id: typeof evidence.id === "string" && evidence.id.trim() ? evidence.id.trim() : undefined,
-    label: String(evidence.label ?? evidence.id ?? "关系证据").trim(),
-  };
-  if (typeof evidence.detail === "string" && evidence.detail.trim()) {
-    mapped.detail = evidence.detail.trim();
-  }
-  if (evidence.metadata && typeof evidence.metadata === "object") {
-    mapped.metadata = camelizeUnknown(evidence.metadata) as Record<string, unknown>;
-  }
-  return mapped;
-}
-
-function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): WorkbenchExceptionPreview {
-  const scenario = payload.scenario ?? {};
-  const amountSummary = payload.amountSummary ?? payload.amount_summary ?? {};
-  const requiredObjects = cleanWorkbenchExceptionStringList(scenario.requiredObjects ?? scenario.required_objects);
-  const mappedScenario = {
-    businessLine: String(scenario.businessLine ?? scenario.business_line ?? "").trim(),
-    scenarioCode: String(scenario.scenarioCode ?? scenario.scenario_code ?? "").trim(),
-    scenarioLabel: String(scenario.scenarioLabel ?? scenario.scenario_label ?? "").trim(),
-  };
-  if (typeof scenario.confidence === "string" && scenario.confidence.trim()) {
-    Object.assign(mappedScenario, { confidence: scenario.confidence.trim() });
-  }
-  if (requiredObjects.length > 0) {
-    Object.assign(mappedScenario, { requiredObjects });
-  }
-  if (typeof (scenario.amountRelation ?? scenario.amount_relation) === "string") {
-    Object.assign(mappedScenario, { amountRelation: String(scenario.amountRelation ?? scenario.amount_relation).trim() });
-  }
-  const businessLine = mappedScenario.businessLine;
-  const relationValue =
-    amountSummary.relation
-    ?? (businessLine === "income" ? amountSummary.incomeRelation ?? amountSummary.income_relation : undefined)
-    ?? (businessLine === "expense" ? amountSummary.expenseRelation ?? amountSummary.expense_relation : undefined)
-    ?? amountSummary.expenseRelation
-    ?? amountSummary.expense_relation
-    ?? amountSummary.incomeRelation
-    ?? amountSummary.income_relation;
-  return {
-    ruleVersion: String(payload.ruleVersion ?? payload.rule_version ?? "").trim(),
-    scenario: mappedScenario,
-    amountSummary: {
-      oaTotal: toDisplayValue(amountSummary.oaTotal ?? amountSummary.oa_total, "0.00"),
-      bankExpenseTotal: toDisplayValue(amountSummary.bankExpenseTotal ?? amountSummary.bank_expense_total, "0.00"),
-      bankIncomeTotal: toDisplayValue(amountSummary.bankIncomeTotal ?? amountSummary.bank_income_total, "0.00"),
-      inputInvoiceTotal: toDisplayValue(amountSummary.inputInvoiceTotal ?? amountSummary.input_invoice_total, "0.00"),
-      outputInvoiceTotal: toDisplayValue(amountSummary.outputInvoiceTotal ?? amountSummary.output_invoice_total, "0.00"),
-      relation: toDisplayValue(relationValue, "unknown"),
-    },
-    automaticActions: (payload.automaticActions ?? payload.automatic_actions ?? []).map(mapWorkbenchExceptionAction),
-    availableActions: (payload.availableActions ?? payload.available_actions ?? []).map(mapWorkbenchExceptionAction),
-    warnings: (payload.warnings ?? []).map(mapWorkbenchExceptionWarning),
-    workflowProjection: camelizeUnknown(payload.workflowProjection ?? payload.workflow_projection ?? {}) as Record<string, unknown>,
-    candidateEvidence: (payload.candidateEvidence ?? payload.candidate_evidence ?? []).map(mapWorkbenchExceptionEvidence),
-    canApply: payload.canApply ?? payload.can_apply ?? true,
-  };
-}
-
-function mapWorkbenchExceptionApplyResult(
-  payload: ApiWorkbenchExceptionApplyResult,
-): WorkbenchExceptionApplyResult {
-  return {
-    success: payload.success === true,
-    case: payload.case ?? null,
-    pairRelation: payload.pairRelation ?? payload.pair_relation ?? null,
-    updatedRows: payload.updatedRows ?? payload.updated_rows ?? [],
-    affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
-    affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
-      .filter((scopeKey) => scopeKey !== "all"),
-    message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
 }
 
@@ -2717,33 +2463,6 @@ export async function fetchWorkbenchInitialPage(
   };
 }
 
-export async function fetchIgnoredWorkbenchRowsWithProgress(
-  month: string,
-  signal?: AbortSignal,
-  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
-): Promise<IgnoredWorkbenchData> {
-  const payload = await requestJsonWithByteProgress<ApiIgnoredWorkbenchPayload>(`/api/workbench/ignored?month=${month}`, {
-    signal,
-    onProgress: onProgress
-      ? (loadedBytes, totalBytes) => {
-        const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
-        onProgress({
-          label: "正在同步已忽略数据",
-          loadedBytes,
-          totalBytes,
-          percent: resolvedPercent,
-          indeterminate: totalBytes <= 0,
-        });
-      }
-      : undefined,
-  });
-
-  return {
-    month: payload.month,
-    rows: payload.rows.map(mapRow),
-  };
-}
-
 export async function fetchWorkbenchSettingsWithProgress(
   signal?: AbortSignal,
   onProgress?: (progress: WorkbenchBootstrapProgress) => void,
@@ -2764,10 +2483,6 @@ export async function fetchWorkbenchSettingsWithProgress(
       : undefined,
   });
   return mapWorkbenchSettings(payload);
-}
-
-export async function fetchIgnoredWorkbenchRows(month: string, signal?: AbortSignal): Promise<IgnoredWorkbenchData> {
-  return fetchIgnoredWorkbenchRowsWithProgress(month, signal);
 }
 
 export async function fetchWorkbenchSettings(signal?: AbortSignal): Promise<WorkbenchSettings> {
@@ -3260,43 +2975,6 @@ export async function previewWorkbenchWithdrawLink(
   return mapRelationPreview(result);
 }
 
-export async function previewWorkbenchException(
-  payload: WorkbenchExceptionPreviewPayload,
-): Promise<WorkbenchExceptionPreview> {
-  const result = await requestJson<ApiWorkbenchExceptionPreview>("/api/workbench/exception/preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_ids: payload.rowIds,
-      row_types: payload.rowTypes,
-    }),
-  });
-  return mapWorkbenchExceptionPreview(result);
-}
-
-export async function applyWorkbenchException(
-  payload: WorkbenchExceptionApplyPayload,
-): Promise<WorkbenchExceptionApplyResult> {
-  const result = await requestJsonWithTimeout<ApiWorkbenchExceptionApplyResult>(
-    "/api/workbench/exception/apply",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        month: payload.month,
-        row_ids: payload.rowIds,
-        row_types: payload.rowTypes,
-        scenario_code: payload.scenarioCode,
-        action_code: payload.actionCode,
-        payload: payload.payload,
-      }),
-    },
-    WORKBENCH_EXCEPTION_APPLY_TIMEOUT_MS,
-  );
-  return mapWorkbenchExceptionApplyResult(result);
-}
-
 export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promise<WorkbenchActionResult> {
   const requestBody: {
     month: string;
@@ -3333,21 +3011,6 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   return mapWorkbenchActionResult(result);
 }
 
-export async function markWorkbenchException(payload: MarkExceptionPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/mark-exception", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_id: payload.rowId,
-      row_type: payload.rowType,
-      exception_code: payload.exceptionCode,
-      comment: payload.comment,
-    }),
-  });
-  return mapWorkbenchActionResult(result);
-}
-
 export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<WorkbenchActionResult> {
   const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-link", {
     method: "POST",
@@ -3363,22 +3026,6 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<W
   return mapWorkbenchActionResult(result);
 }
 
-export async function updateWorkbenchBankException(payload: UpdateBankExceptionPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/update-bank-exception", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_id: payload.rowId,
-      row_type: payload.rowType,
-      relation_code: payload.relationCode,
-      relation_label: payload.relationLabel,
-      comment: payload.comment,
-    }),
-  });
-  return mapWorkbenchActionResult(result);
-}
-
 export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmPersonalAdvanceRepaymentPayload): Promise<WorkbenchActionResult> {
   const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-personal-advance-repayment", {
     method: "POST",
@@ -3388,20 +3035,6 @@ export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmP
       row_ids: payload.rowIds,
       row_types: payload.rowTypes,
       note: payload.note,
-    }),
-  });
-  return mapWorkbenchActionResult(result);
-}
-
-export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<WorkbenchActionResult> {
-  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/ignore-row", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_id: payload.rowId,
-      row_type: payload.rowType,
-      comment: payload.comment,
     }),
   });
   return mapWorkbenchActionResult(result);

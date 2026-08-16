@@ -12,8 +12,7 @@ class RouteAccessPolicyTests(unittest.TestCase):
             ("GET", "/api/workbench/settings/data-reset/preview?action=reset_bank_transactions"),
             ("GET", "/api/workbench/settings/data-reset/jobs/active"),
             ("HEAD", "/api/workbench"),
-            ("OPTIONS", "/api/workbench/actions/ignore-row"),
-            ("POST", "/api/workbench/exception/preview"),
+            ("OPTIONS", "/api/workbench/exceptions/review"),
             ("POST", "/api/workbench/actions/confirm-link/preview"),
             ("POST", "/api/workbench/actions/withdraw-link/preview"),
             ("POST", "/api/pending-invoices/invoice-candidates/batch"),
@@ -27,7 +26,7 @@ class RouteAccessPolicyTests(unittest.TestCase):
 
     def test_every_other_unsafe_request_requires_mutation(self) -> None:
         for method, route_path in (
-            ("POST", "/api/workbench/actions/ignore-row"),
+            ("POST", "/api/workbench/exceptions/review"),
             ("POST", "/imports/files/preview"),
             ("PUT", "/api/pending-invoices/rules"),
             ("PATCH", "/api/etc/reconciliation-tasks/task-1/items/item-1"),

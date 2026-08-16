@@ -1,6 +1,6 @@
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
-export type WorkbenchActionVariant = "detail-only" | "bank-review" | "confirm-exception";
+export type WorkbenchActionVariant = "detail-only" | "bank-review";
 
 export type WorkbenchDetailField = {
   label: string;
@@ -245,7 +245,7 @@ export const openRecords = {
       status: "无对应流水（还没付钱）",
       amount: "58,000.00",
       counterparty: "智能工厂设备商",
-      actionVariant: "confirm-exception",
+      actionVariant: "detail-only",
       tableValues: {
         applicant: "陈涛",
         projectName: "智能工厂项目",
@@ -270,7 +270,7 @@ export const openRecords = {
       status: "待处理",
       amount: "1,320.00",
       counterparty: "交通出行",
-      actionVariant: "confirm-exception",
+      actionVariant: "detail-only",
       tableValues: {
         applicant: "周颖",
         projectName: "项目支持",
@@ -371,7 +371,7 @@ export const openRecords = {
       status: "待收款",
       amount: "90,000.00",
       counterparty: "智能工厂客户",
-      actionVariant: "confirm-exception",
+      actionVariant: "detail-only",
       tableValues: {
         sellerTaxId: "91310000MA1K8A001X",
         sellerName: "溯源科技有限公司",
@@ -413,7 +413,7 @@ export const openRecords = {
       status: "待付款",
       amount: "9,800.00",
       counterparty: "办公耗材商",
-      actionVariant: "confirm-exception",
+      actionVariant: "detail-only",
       tableValues: {
         sellerTaxId: "91330108MA27B4011D",
         sellerName: "办公耗材商",

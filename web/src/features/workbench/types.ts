@@ -13,21 +13,7 @@ export type WorkbenchSourceKind =
   | "oa_attachment_unknown"
   | (string & {});
 
-export type {
-  WorkbenchExceptionAction,
-  WorkbenchExceptionAmountSummary,
-  WorkbenchExceptionApplyPayload,
-  WorkbenchExceptionApplyResult,
-  WorkbenchExceptionBusinessLine,
-  WorkbenchExceptionCandidateEvidence,
-  WorkbenchExceptionPreview,
-  WorkbenchExceptionPreviewPayload,
-  WorkbenchExceptionResultStatus,
-  WorkbenchExceptionScenario,
-  WorkbenchExceptionWarning,
-} from "./exceptionTypes";
-
-export type WorkbenchActionVariant = "detail-only" | "bank-review" | "confirm-exception";
+export type WorkbenchActionVariant = "detail-only" | "bank-review";
 
 export type WorkbenchDetailField = {
   label: string;
@@ -437,11 +423,6 @@ export type WorkbenchGroupsPageResult = {
   zone: WorkbenchZoneId;
   groups: WorkbenchRelationGroup[];
   page: WorkbenchZonePageInfo;
-};
-
-export type IgnoredWorkbenchData = {
-  month: string;
-  rows: WorkbenchRecord[];
 };
 
 export type WorkbenchAccessRole = "full_access" | "read_export_only";

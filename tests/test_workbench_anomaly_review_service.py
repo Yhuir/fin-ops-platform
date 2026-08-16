@@ -178,7 +178,6 @@ def test_review_requires_one_manual_amount_classification_and_keeps_no_anomaly_e
 def test_review_route_returns_stable_bad_request_contract() -> None:
     target, _decisions = service(anomaly_group())
     routes = WorkbenchActionApiRoutes(
-        exception_service=object(),  # type: ignore[arg-type]
         write_facade_provider=lambda: object(),
         anomaly_review_service=target,
     )
@@ -290,48 +289,3 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
     )
     assert unchanged["changed"] is False
     assert unchanged_connection.execute_calls == []
-
-
-def test_exception_apply_uses_authenticated_actor_instead_of_client_payload() -> None:
-    captured: dict[str, object] = {}
-
-    class WriteFacade:
-        def apply_exception(
-            self,
-            request_payload: dict[str, object],
-            *,
-            actor: str,
-            tenant_id: str,
-            request_id: str | None,
-            action_name: str,
-        ) -> object:
-            captured.update({
-                "payload": request_payload,
-                "actor": actor,
-                "tenant_id": tenant_id,
-                "request_id": request_id,
-                "action_name": action_name,
-            })
-            return object()
-
-    routes = WorkbenchActionApiRoutes(
-        exception_service=object(),  # type: ignore[arg-type]
-        write_facade_provider=WriteFacade,
-        anomaly_review_service=object(),  # type: ignore[arg-type]
-    )
-    spoofed = {"actor": "spoofed-user", "confirmed_by": "spoofed-confirmed-by"}
-
-    routes.exception_apply(
-        spoofed,
-        actor_id="YNSYLP005",
-        tenant_id="default",
-        request_id="req-exception-apply",
-    )
-
-    assert captured == {
-        "payload": spoofed,
-        "actor": "YNSYLP005",
-        "tenant_id": "default",
-        "request_id": "req-exception-apply",
-        "action_name": "exception_apply",
-    }

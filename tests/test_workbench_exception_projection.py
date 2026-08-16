@@ -15,7 +15,7 @@ def oa_row(row_id: str = "oa-001") -> dict[str, object]:
         "amount": "120.00",
         "counterparty_name": "云上客户",
         "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
-        "available_actions": ["detail", "confirm_link", "mark_exception"],
+        "available_actions": ["detail", "confirm_link"],
         "summary_fields": {"OA和流水关联情况": "待找流水与发票", "备注": ""},
         "detail_fields": {"备注": ""},
     }
@@ -29,7 +29,7 @@ def bank_row(row_id: str = "bk-001") -> dict[str, object]:
         "credit_amount": "",
         "counterparty_name": "云上客户",
         "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
-        "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"],
+        "available_actions": ["detail", "view_relation", "cancel_link"],
         "summary_fields": {"和发票关联情况": "待匹配"},
         "detail_fields": {"备注": ""},
     }
@@ -46,7 +46,7 @@ def invoice_row(row_id: str = "iv-001") -> dict[str, object]:
             "label": "待匹配流水",
             "tone": "warn",
         },
-        "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
+        "available_actions": ["detail", "confirm_link"],
         "detail_fields": {"备注": ""},
     }
 
@@ -78,7 +78,7 @@ class WorkbenchExceptionProjectionServiceTests(unittest.TestCase):
         self.assertEqual(override["exception_case_id"], "WEX-000001")
         self.assertEqual(override["relation"]["code"], "wait_input_invoice")
         self.assertEqual(override["relation"]["tone"], "danger")
-        self.assertEqual(override["available_actions"], ["detail", "cancel_exception"])
+        self.assertEqual(override["available_actions"], ["detail"])
         self.assertTrue(override["handled_exception"])
         self.assertEqual(override["detail_note"], "缺进项发票，等待补票")
         self.assertEqual(override["scenario"]["code"], "expense_oa_bank_missing_input_invoice_equal")
@@ -145,20 +145,24 @@ class WorkbenchOverrideProjectionTests(unittest.TestCase):
         self.assertNotIn("ignored", service.apply_to_row(invoice_row("same-id")))
 
     def test_same_text_id_overrides_remain_independent_across_panes(self) -> None:
-        service = WorkbenchOverrideService()
+        service = WorkbenchOverrideService.from_snapshot(
+            {
+                "row_overrides": {
+                    workbench_row_identity_key("bank", "same-id"): {
+                        "case_id": "WEX-BANK",
+                        "exception_case_id": "WEX-BANK",
+                        "relation": {"code": "bank_fee", "label": "银行手续费", "tone": "warn"},
+                    },
+                    workbench_row_identity_key("invoice", "same-id"): {
+                        "case_id": "WEX-INVOICE",
+                        "exception_case_id": "WEX-INVOICE",
+                        "ignored": True,
+                    },
+                }
+            }
+        )
         bank = bank_row("same-id")
         invoice = invoice_row("same-id")
-
-        service.update_bank_exception(
-            row=bank,
-            relation_code="bank_fee",
-            relation_label="银行手续费",
-            exception_case_id="WEX-BANK",
-        )
-        service.ignore_row(
-            row=invoice,
-            exception_case_id="WEX-INVOICE",
-        )
 
         snapshot = service.snapshot()["row_overrides"]
         self.assertEqual(
@@ -172,14 +176,7 @@ class WorkbenchOverrideProjectionTests(unittest.TestCase):
         self.assertNotIn("ignored", service.apply_to_row(bank))
         self.assertEqual(service.apply_to_row(invoice)["exception_case_id"], "WEX-INVOICE")
         self.assertTrue(service.apply_to_row(invoice)["ignored"])
-
-        service.unignore_row(row=invoice)
-
-        self.assertEqual(
-            service.apply_to_row(bank)["invoice_relation"]["code"],
-            "bank_fee",
-        )
-        self.assertFalse(service.apply_to_row(invoice)["ignored"])
+        self.assertEqual(service.apply_to_row(bank)["invoice_relation"]["code"], "bank_fee")
 
     def test_oa_rows_only_expose_detail_in_both_zones(self) -> None:
         service = WorkbenchOverrideService()
@@ -187,55 +184,6 @@ class WorkbenchOverrideProjectionTests(unittest.TestCase):
         self.assertEqual(service.available_actions("oa", "paired"), ["detail"])
         self.assertEqual(service.available_actions("oa", "unpaired"), ["detail"])
         self.assertEqual(service.apply_to_row(oa_row())["available_actions"], ["detail"])
-
-    def test_apply_exception_projection_and_clear_restores_base_row_display(self) -> None:
-        service = WorkbenchOverrideService()
-        row = oa_row()
-        case_payload = {
-            "id": "WEX-000003",
-            "status": "open",
-            "row_ids": ["oa-001"],
-            "scenario_code": "expense_only_oa",
-            "scenario_label": "只有 OA",
-            "resolution": {"action_code": "wait_bank_payment", "action_label": "等待支出流水"},
-            "comment": "等待付款",
-        }
-
-        updated_rows = service.apply_exception_projection(case_payload, [row])
-
-        self.assertEqual(service.projection_version, EXCEPTION_PROJECTION_VERSION)
-        self.assertEqual(updated_rows[0]["case_id"], "WEX-000003")
-        self.assertEqual(updated_rows[0]["oa_bank_relation"]["code"], "wait_bank_payment")
-        self.assertEqual(updated_rows[0]["available_actions"], ["detail"])
-        self.assertEqual(updated_rows[0]["detail_fields"]["备注"], "等待付款")
-        self.assertEqual(updated_rows[0]["summary_fields"]["备注"], "等待付款")
-
-        cleared_row_ids = service.clear_projection_for_case("WEX-000003")
-        restored = service.apply_to_row(row)
-
-        self.assertEqual(cleared_row_ids, ["oa-001"])
-        self.assertNotIn("case_id", restored)
-        self.assertEqual(restored["oa_bank_relation"]["code"], "pending_match")
-        self.assertEqual(restored["available_actions"], ["detail"])
-
-    def test_legacy_override_survives_projection_clear(self) -> None:
-        service = WorkbenchOverrideService()
-        row = bank_row()
-        updated = service.update_bank_exception(
-            row=row,
-            relation_code="bank_missing_oa_fee",
-            relation_label="费用类银行流水缺OA",
-            comment="旧异常",
-            exception_case_id="WEX-LEGACY-001",
-        )
-
-        cleared_row_ids = service.clear_projection_for_case("WEX-LEGACY-001")
-        after_clear = service.apply_to_row(row)
-
-        self.assertEqual(cleared_row_ids, [])
-        self.assertEqual(updated["invoice_relation"]["code"], "bank_missing_oa_fee")
-        self.assertEqual(after_clear["invoice_relation"]["code"], "bank_missing_oa_fee")
-        self.assertTrue(after_clear["handled_exception"])
 
     def test_apply_relation_projection_and_clear_by_relation_case(self) -> None:
         service = WorkbenchOverrideService()

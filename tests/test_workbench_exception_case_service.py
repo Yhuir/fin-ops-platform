@@ -185,104 +185,6 @@ class WorkbenchExceptionCaseServiceTests(unittest.TestCase):
         self.assertEqual(case["resolution"]["action_code"], "legacy_confirmed")
         self.assertEqual(restored.case_ids_for_rows(["oa-001", "bank-001"]), ["WEX-000001"])
 
-    def test_cancel_exception_cases_marks_cases_cancelled_and_clears_row_index(self) -> None:
-        service = WorkbenchExceptionCaseService()
-        service.create_exception_case(
-            rows=[
-                {"id": "oa-001", "type": "oa", "month": "2026-03"},
-                {"id": "bank-001", "type": "bank", "month": "2026-03"},
-            ],
-            exception_code="oa_missing_bank",
-            exception_label="OA缺流水",
-            category="oa_bank",
-        )
-
-        cancelled_cases = service.cancel_exception_cases(
-            rows=[{"id": "oa-001", "type": "oa"}, {"id": "bank-001", "type": "bank"}],
-            comment="误处理",
-        )
-
-        self.assertEqual([case["id"] for case in cancelled_cases], ["WEX-000001"])
-        self.assertEqual(cancelled_cases[0]["status"], "cancelled")
-        self.assertEqual(cancelled_cases[0]["history"][-1]["action"], "cancelled")
-        self.assertEqual(cancelled_cases[0]["history"][-1]["comment"], "误处理")
-        self.assertEqual(service.case_ids_for_rows(["oa-001", "bank-001"]), [])
-        self.assertEqual(service.snapshot()["row_case_index"], {})
-
-    def test_cancel_exception_cases_does_not_cancel_same_text_id_in_another_pane(self) -> None:
-        service = WorkbenchExceptionCaseService()
-        oa_case = service.create_exception_case(
-            rows=[{"id": "same-id", "type": "oa", "month": "2026-03"}],
-            exception_code="manual_review",
-            exception_label="人工复核",
-            category="manual",
-        )
-        bank_case = service.create_exception_case(
-            rows=[{"id": "same-id", "type": "bank", "month": "2026-03"}],
-            exception_code="bank_fee",
-            exception_label="银行手续费",
-            category="bank",
-        )
-
-        cancelled = service.cancel_exception_cases(
-            rows=[{"id": "same-id", "type": "bank"}],
-        )
-
-        self.assertEqual([case["id"] for case in cancelled], [bank_case["id"]])
-        self.assertEqual(service.get_case(bank_case["id"])["status"], "cancelled")
-        self.assertEqual(service.get_case(oa_case["id"])["status"], "confirmed")
-        self.assertEqual(
-            service.case_ids_for_typed_rows(["same-id"], ["oa"]),
-            [oa_case["id"]],
-        )
-
-    def test_ignore_and_unignore_invoice_case_status_and_row_index(self) -> None:
-        service = WorkbenchExceptionCaseService()
-
-        ignored_case = service.ignore_row(
-            {"id": "invoice-001", "type": "invoice", "month": "2026-05"},
-            comment="暂不处理",
-        )
-
-        self.assertEqual(ignored_case["id"], "WEX-000001")
-        self.assertEqual(ignored_case["status"], "ignored")
-        self.assertEqual(ignored_case["exception_code"], "pending_collection")
-        self.assertEqual(ignored_case["category"], "invoice")
-        self.assertEqual(service.case_ids_for_rows(["invoice-001"]), ["WEX-000001"])
-
-        unignored_case = service.unignore_row({"id": "invoice-001", "type": "invoice"})
-
-        self.assertEqual(unignored_case["id"], "WEX-000001")
-        self.assertEqual(unignored_case["status"], "cancelled")
-        self.assertEqual(unignored_case["history"][-1]["action"], "unignored")
-        self.assertEqual(service.case_ids_for_rows(["invoice-001"]), [])
-        self.assertEqual(service.snapshot()["row_case_index"], {})
-
-    def test_ignore_and_unignore_do_not_reuse_same_text_id_from_oa_pane(self) -> None:
-        service = WorkbenchExceptionCaseService()
-        oa_case = service.create_exception_case(
-            rows=[{"id": "same-id", "type": "oa", "month": "2026-05"}],
-            exception_code="manual_review",
-            exception_label="人工复核",
-            category="manual",
-        )
-
-        ignored_case = service.ignore_row(
-            {"id": "same-id", "type": "invoice", "month": "2026-05"}
-        )
-        unignored_case = service.unignore_row(
-            {"id": "same-id", "type": "invoice"}
-        )
-
-        self.assertNotEqual(ignored_case["id"], oa_case["id"])
-        self.assertEqual(unignored_case["id"], ignored_case["id"])
-        self.assertEqual(unignored_case["status"], "cancelled")
-        self.assertEqual(service.get_case(oa_case["id"])["status"], "confirmed")
-        self.assertEqual(
-            service.case_ids_for_typed_rows(["same-id"], ["oa"]),
-            [oa_case["id"]],
-        )
-
     def test_snapshot_round_trip_preserves_cases_counter_and_index(self) -> None:
         service = WorkbenchExceptionCaseService()
         first = service.create_exception_case(
@@ -291,7 +193,12 @@ class WorkbenchExceptionCaseServiceTests(unittest.TestCase):
             exception_label="人工复核",
             category="manual",
         )
-        service.ignore_row({"id": "invoice-001", "type": "invoice", "month": "2026-04"})
+        second = service.create_exception_case(
+            rows=[{"id": "invoice-001", "type": "invoice", "month": "2026-04"}],
+            exception_code="pending_collection",
+            exception_label="待匹配流水",
+            category="invoice",
+        )
 
         snapshot = service.snapshot()
         snapshot["cases"][first["id"]]["status"] = "mutated"
@@ -309,10 +216,7 @@ class WorkbenchExceptionCaseServiceTests(unittest.TestCase):
         self.assertEqual(restored_snapshot["case_counter"], 3)
         self.assertEqual(restored_snapshot["cases"]["WEX-000001"]["status"], "confirmed")
         self.assertEqual(restored_snapshot["row_case_index"]["oa\x1foa-001"], "WEX-000001")
-        self.assertEqual(
-            restored_snapshot["row_case_index"]["invoice\x1finvoice-001"],
-            "WEX-000002",
-        )
+        self.assertEqual(restored_snapshot["row_case_index"]["invoice\x1finvoice-001"], second["id"])
         self.assertEqual(third["id"], "WEX-000003")
 
 

@@ -10,7 +10,6 @@ _READ_ONLY_POST_ROUTES = frozenset(
         "/api/tax-offset/calculate",
         "/api/workbench/actions/confirm-link/preview",
         "/api/workbench/actions/withdraw-link/preview",
-        "/api/workbench/exception/preview",
         "/imports/invoices/manual/recognize",
     }
 )

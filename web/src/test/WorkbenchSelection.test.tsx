@@ -1784,10 +1784,9 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("initial workbench rows render before slow ignored and settings requests finish", async () => {
+  test("initial workbench rows render before slow settings request finishes", async () => {
     installMockApiFetch({
       workbenchPrimaryDelayMs: 20,
-      workbenchIgnoredDelayMs: 3000,
       workbenchSettingsDelayMs: 3000,
     });
     renderWorkbenchPage();
@@ -1972,9 +1971,8 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("row ignore keeps the invoice type when another pane has the same source id", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
+  test("invoice rows keep detail access without the retired more-actions menu", async () => {
+    installMockApiFetch({
       transformWorkbenchPayload: withTypedIdentityCollision,
     });
     renderWorkbenchPage();
@@ -1983,23 +1981,8 @@ describe("Workbench row selection and detail drawer", () => {
     const invoiceRow = await within(unpairedZone).findByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
     });
-    await user.click(within(invoiceRow).getByRole("button", { name: "更多操作" }));
-    await user.click(screen.getByRole("menuitem", { name: "忽略" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workbench/actions/ignore-row",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            month: "all",
-            row_id: "shared-cross-pane-id",
-            row_type: "invoice",
-            comment: "由关联台忽略发票：shared-cross-pane-id",
-          }),
-        }),
-      );
-    });
+    expect(within(invoiceRow).queryByRole("button", { name: "更多操作" })).not.toBeInTheDocument();
+    expect(within(invoiceRow).getByRole("button", { name: /查看发票.*详情/ })).toBeInTheDocument();
   });
 
   test("unpaired relation actions distinguish one exact formal relation from additions and multiple relations", async () => {

@@ -156,21 +156,6 @@ class WorkbenchOverrideService:
 
         return payload
 
-    def apply_exception_projection(
-        self,
-        case_payload: dict[str, Any],
-        rows: list[dict[str, Any]],
-        *,
-        candidate_evidence: list[dict[str, Any]] | None = None,
-    ) -> list[dict[str, Any]]:
-        projection = self._projection_service.project_exception_case(
-            case_payload,
-            rows,
-            candidate_evidence=candidate_evidence,
-        )
-        self._apply_projection_overrides(projection, rows=rows)
-        return [self.apply_to_row(row) for row in rows]
-
     def apply_relation_projection(
         self,
         relation_payload: dict[str, Any],
@@ -242,130 +227,6 @@ class WorkbenchOverrideService:
             updated_rows.append(self.apply_to_row(row))
         return updated_rows
 
-    def mark_exception(
-        self,
-        *,
-        row: dict[str, Any],
-        exception_code: str,
-        comment: str | None = None,
-        exception_case_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._set_override(row, {
-            "case_id": exception_case_id,
-            "exception_case_id": exception_case_id,
-            "relation": {
-                "code": exception_code,
-                "label": comment or "待人工处理",
-                "tone": "danger",
-            },
-            "available_actions": self.available_actions(str(row["type"]), "unpaired"),
-            "detail_note": comment or exception_code,
-            "handled_exception": True,
-        })
-        return self.apply_to_row(row)
-
-    def update_bank_exception(
-        self,
-        *,
-        row: dict[str, Any],
-        relation_code: str,
-        relation_label: str,
-        comment: str | None = None,
-        exception_case_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._set_override(row, {
-            "case_id": exception_case_id,
-            "exception_case_id": exception_case_id,
-            "relation": {
-                "code": relation_code,
-                "label": relation_label,
-                "tone": "danger",
-            },
-            "available_actions": self.available_actions("bank", "unpaired"),
-            "detail_note": comment or relation_label,
-            "handled_exception": True,
-        })
-        return self.apply_to_row(row)
-
-    def apply_oa_bank_exception(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        exception_code: str,
-        exception_label: str,
-        comment: str | None = None,
-        exception_case_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        updated_rows: list[dict[str, Any]] = []
-        detail_note = comment or exception_label
-        for row in rows:
-            row_type = str(row.get("type"))
-            if row_type not in {"oa", "bank"}:
-                raise ValueError("oa_bank_exception only supports oa and bank rows.")
-            self._set_override(row, {
-                "case_id": exception_case_id,
-                "exception_case_id": exception_case_id,
-                "relation": {
-                    "code": exception_code,
-                    "label": exception_label,
-                    "tone": "danger",
-                },
-                "available_actions": self.available_actions(row_type, "unpaired"),
-                "detail_note": detail_note,
-                "handled_exception": True,
-            })
-            updated_rows.append(self.apply_to_row(row))
-        return updated_rows
-
-    def ignore_row(
-        self,
-        *,
-        row: dict[str, Any],
-        comment: str | None = None,
-        exception_case_id: str | None = None,
-    ) -> dict[str, Any]:
-        self._set_override(row, {
-            "case_id": exception_case_id,
-            "exception_case_id": exception_case_id,
-            "relation": self.pending_relation(str(row["type"])),
-            "available_actions": ["detail"],
-            "detail_note": comment or "已忽略",
-            "ignored": True,
-            "handled_exception": False,
-        })
-        return self.apply_to_row(row)
-
-    def unignore_row(self, *, row: dict[str, Any]) -> dict[str, Any]:
-        self._set_override(row, {
-            "case_id": None,
-            "exception_case_id": None,
-            "relation": self.pending_relation(str(row["type"])),
-            "available_actions": self.available_actions(str(row["type"]), "unpaired"),
-            "detail_note": "已撤回忽略",
-            "auto_close_suppressed": True,
-            "ignored": False,
-            "handled_exception": False,
-        })
-        return self.apply_to_row(row)
-
-    def cancel_exception(self, *, rows: list[dict[str, Any]], comment: str | None = None) -> list[dict[str, Any]]:
-        updated_rows: list[dict[str, Any]] = []
-        detail_note = comment or "已取消异常处理"
-        for row in rows:
-            row_type = str(row["type"])
-            self._set_override(row, {
-                "case_id": None,
-                "exception_case_id": None,
-                "relation": self.pending_relation(row_type),
-                "available_actions": self.available_actions(row_type, "unpaired"),
-                "detail_note": detail_note,
-                "auto_close_suppressed": True,
-                "handled_exception": False,
-                "ignored": False,
-            })
-            updated_rows.append(self.apply_to_row(row))
-        return updated_rows
-
     @staticmethod
     def relation_field_name(row_type: str) -> str:
         return {
@@ -391,9 +252,9 @@ class WorkbenchOverrideService:
         if row_type == "oa":
             return ["detail"]
         if row_type == "bank":
-            return ["detail", "view_relation", "cancel_link", "handle_exception"]
+            return ["detail", "view_relation", "cancel_link"]
         if row_type == "invoice" and section == "unpaired":
-            return ["detail", "confirm_link", "mark_exception", "ignore"]
+            return ["detail", "confirm_link"]
         return ["detail", "cancel_link"]
 
     def _next_case_id(self) -> str:

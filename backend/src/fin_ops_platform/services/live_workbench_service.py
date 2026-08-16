@@ -589,10 +589,10 @@ class LiveWorkbenchService:
     def _available_actions(row_type: str, section: str) -> list[str]:
         if row_type == "bank":
             if section == "unpaired":
-                return ["detail", "view_relation", "cancel_link", "handle_exception"]
+                return ["detail", "view_relation", "cancel_link"]
             return ["detail"]
         if row_type == "invoice" and section == "unpaired":
-            return ["detail", "confirm_link", "mark_exception", "ignore"]
+            return ["detail", "confirm_link"]
         return ["detail"]
 
     @staticmethod

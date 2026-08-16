@@ -1449,40 +1449,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_exception_preview_mapping_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        if not route_class:
-            violations.append("modern Workbench action route owner is missing")
-        for marker in (
-            "def exception_preview",
-            "WorkbenchExceptionApplicationService",
-            "workbench_row_not_found",
-            "invalid_workbench_exception_preview_request",
-        ):
-            if marker not in route_class:
-                violations.append(f"exception preview route owner is missing marker {marker}")
-
-        handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_exception_preview")
-        if "_workbench_action_api_routes.exception_preview(payload)" not in handler_source:
-            violations.append("server.py exception preview wrapper does not delegate to the route owner")
-        for forbidden in (
-            "_workbench_exception_application_service.preview",
-            "workbench_row_not_found",
-            "invalid_workbench_exception_preview_request",
-        ):
-            if forbidden in handler_source:
-                violations.append(f"server.py exception preview wrapper still owns {forbidden}")
-
-        self.assertEqual(violations, [])
-
     def test_pending_invoice_read_export_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -1697,50 +1663,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_exception_apply_mapping_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def exception_apply",
-            "write_facade_provider",
-            "apply_exception",
-            "actor_id",
-            "exception_apply",
-        ):
-            if marker not in route_class:
-                violations.append(f"exception apply route owner is missing marker {marker}")
-
-        handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_exception_apply")
-        if "_workbench_action_api_routes.exception_apply(" not in handler_source:
-            violations.append("server.py exception apply wrapper does not delegate to the route owner")
-        if "actor_id=actor_id" not in handler_source:
-            violations.append("server.py exception apply wrapper does not inject the authenticated actor")
-        if "tenant_id=tenant_id" not in handler_source:
-            violations.append("server.py exception apply wrapper does not inject the authenticated tenant")
-        if "_workbench_write_auth_context(headers, session=access_session)" not in handler_source:
-            violations.append("server.py exception apply wrapper does not enforce the authenticated write boundary")
-        if "_workbench_oa_sync_safety_guard(payload)" not in handler_source:
-            violations.append("server.py exception apply wrapper no longer preserves the freshness guard")
-        if "_workbench_write_response(result)" not in handler_source:
-            violations.append("server.py exception apply wrapper no longer preserves write response mapping")
-        for forbidden in (
-            "_workbench_write_facade().apply_exception",
-            "payload.get(\"confirmed_by\")",
-            "payload.get(\"actor\")",
-            "action_name=\"exception_apply\"",
-        ):
-            if forbidden in handler_source:
-                violations.append(f"server.py exception apply wrapper still owns {forbidden}")
-
-        self.assertEqual(violations, [])
-
     def test_workbench_confirm_link_preview_mapping_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -1816,41 +1738,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py confirm-link live handler no longer preserves write response mapping")
         if "_workbench_write_facade().confirm_link" in live_source:
             violations.append("server.py confirm-link live handler still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_mark_exception_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def mark_exception",
-            ".mark_exception(",
-        ):
-            if marker not in route_class:
-                violations.append(f"mark-exception route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_mark_exception")
-        for marker in (
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_handle_live_workbench_mark_exception(payload)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py mark-exception wrapper no longer preserves marker {marker}")
-
-        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_mark_exception")
-        if "_workbench_action_api_routes.mark_exception(payload)" not in live_source:
-            violations.append("server.py mark-exception live handler does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in live_source:
-            violations.append("server.py mark-exception live handler no longer preserves write response mapping")
-        if "_workbench_write_facade().mark_exception" in live_source:
-            violations.append("server.py mark-exception live handler still calls the write facade directly")
 
         self.assertEqual(violations, [])
 
@@ -2014,84 +1901,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_update_bank_exception_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def update_bank_exception",
-            ".update_bank_exception(",
-        ):
-            if marker not in route_class:
-                violations.append(f"update-bank-exception route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_update_bank_exception")
-        for marker in (
-            "_load_json_body(body)",
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_workbench_action_api_routes.update_bank_exception(payload)",
-            "_workbench_write_response(result)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py update-bank-exception wrapper no longer preserves marker {marker}")
-        if "_workbench_write_facade().update_bank_exception" in wrapper_source:
-            violations.append("server.py update-bank-exception wrapper still calls the write facade directly")
-
-        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_update_bank_exception")
-        if "_workbench_action_api_routes.update_bank_exception(payload)" not in live_source:
-            violations.append("server.py update-bank-exception live handler does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in live_source:
-            violations.append("server.py update-bank-exception live handler no longer preserves write response mapping")
-        if "_workbench_write_facade().update_bank_exception" in live_source:
-            violations.append("server.py update-bank-exception live handler still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_bank_exception_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def oa_bank_exception",
-            ".oa_bank_exception(",
-        ):
-            if marker not in route_class:
-                violations.append(f"OA-bank exception route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_oa_bank_exception")
-        for marker in (
-            "_load_json_body(body)",
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_workbench_action_api_routes.oa_bank_exception(payload)",
-            "_workbench_write_response(result)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py OA-bank exception wrapper no longer preserves marker {marker}")
-        if "_workbench_write_facade().oa_bank_exception" in wrapper_source:
-            violations.append("server.py OA-bank exception wrapper still calls the write facade directly")
-
-        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_oa_bank_exception")
-        if "_workbench_action_api_routes.oa_bank_exception(payload)" not in live_source:
-            violations.append("server.py OA-bank exception live handler does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in live_source:
-            violations.append("server.py OA-bank exception live handler no longer preserves write response mapping")
-        if "_workbench_write_facade().oa_bank_exception" in live_source:
-            violations.append("server.py OA-bank exception live handler still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
     def test_workbench_personal_advance_repayment_delegation_is_owned_by_action_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2133,122 +1942,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("server.py personal advance repayment live handler no longer preserves write response mapping")
         if "_workbench_write_facade().confirm_personal_advance_repayment" in live_source:
             violations.append("server.py personal advance repayment live handler still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_cancel_exception_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def cancel_exception",
-            ".cancel_exception(",
-        ):
-            if marker not in route_class:
-                violations.append(f"cancel-exception route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_exception")
-        for marker in (
-            "_load_json_body(body)",
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_handle_live_workbench_cancel_exception(payload)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py cancel-exception wrapper no longer preserves marker {marker}")
-        if "_live_workbench_service.has_rows_for_month(month)" in wrapper_source:
-            violations.append("server.py cancel-exception wrapper still contains the no-op live service branch")
-        if "_workbench_write_facade().cancel_exception" in wrapper_source:
-            violations.append("server.py cancel-exception wrapper still calls the write facade directly")
-
-        live_source = _function_source(server_tree, server_source, "_handle_live_workbench_cancel_exception")
-        if "_workbench_action_api_routes.cancel_exception(payload)" not in live_source:
-            violations.append("server.py cancel-exception live handler does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in live_source:
-            violations.append("server.py cancel-exception live handler no longer preserves write response mapping")
-        if "_workbench_write_facade().cancel_exception" in live_source:
-            violations.append("server.py cancel-exception live handler still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_ignore_row_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def ignore_row",
-            ".ignore_row(",
-        ):
-            if marker not in route_class:
-                violations.append(f"ignore-row route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_ignore_row")
-        for marker in (
-            "_load_json_body(body)",
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_handle_workbench_ignore_row_payload(payload)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py ignore-row wrapper no longer preserves marker {marker}")
-        if "_workbench_write_facade().ignore_row" in wrapper_source:
-            violations.append("server.py ignore-row wrapper still calls the write facade directly")
-
-        helper_source = _function_source(server_tree, server_source, "_handle_workbench_ignore_row_payload")
-        if "_workbench_action_api_routes.ignore_row(payload)" not in helper_source:
-            violations.append("server.py ignore-row helper does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in helper_source:
-            violations.append("server.py ignore-row helper no longer preserves write response mapping")
-        if "_workbench_write_facade().ignore_row" in helper_source:
-            violations.append("server.py ignore-row helper still calls the write facade directly")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_unignore_row_delegation_is_owned_by_action_route_owner(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        route_path = APP_ROOT / "routes_workbench_actions.py"
-        route_source = route_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        violations: list[str] = []
-
-        route_class = _class_source(route_tree, route_source, "WorkbenchActionApiRoutes")
-        for marker in (
-            "def unignore_row",
-            ".unignore_row(",
-        ):
-            if marker not in route_class:
-                violations.append(f"unignore-row route owner is missing marker {marker}")
-
-        wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_unignore_row")
-        for marker in (
-            "_load_json_body(body)",
-            "_workbench_oa_sync_safety_guard(payload)",
-            "_handle_workbench_unignore_row_payload(payload)",
-        ):
-            if marker not in wrapper_source:
-                violations.append(f"server.py unignore-row wrapper no longer preserves marker {marker}")
-        if "_workbench_write_facade().unignore_row" in wrapper_source:
-            violations.append("server.py unignore-row wrapper still calls the write facade directly")
-
-        helper_source = _function_source(server_tree, server_source, "_handle_workbench_unignore_row_payload")
-        if "_workbench_action_api_routes.unignore_row(payload)" not in helper_source:
-            violations.append("server.py unignore-row helper does not delegate to the route owner")
-        if "_workbench_write_response(result)" not in helper_source:
-            violations.append("server.py unignore-row helper no longer preserves write response mapping")
-        if "_workbench_write_facade().unignore_row" in helper_source:
-            violations.append("server.py unignore-row helper still calls the write facade directly")
 
         self.assertEqual(violations, [])
 
@@ -6002,7 +5695,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/workbench_pair_relation_service.py",
             "backend/src/fin_ops_platform/services/workbench_override_service.py",
             "backend/src/fin_ops_platform/services/workbench_exception_case_service.py",
-            "backend/src/fin_ops_platform/services/workbench_exception_application_service.py",
             "backend/src/fin_ops_platform/services/workbench_exception_projection.py",
             "backend/src/fin_ops_platform/services/workbench_exception_classifier.py",
             "backend/src/fin_ops_platform/services/workbench_exception_rules.py",
@@ -6133,23 +5825,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ]
         self.assertEqual(violations, [])
 
-    def test_workbench_write_facade_exposes_exception_write_entrypoints(self) -> None:
+    def test_workbench_write_facade_does_not_restore_retired_exception_write_entrypoints(self) -> None:
         from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
 
-        expected_methods = {
+        retired_methods = {
             "apply_exception",
             "mark_exception",
             "cancel_exception",
             "ignore_row",
             "unignore_row",
         }
-        missing_methods = [
+        restored_methods = [
             method_name
-            for method_name in sorted(expected_methods)
-            if not callable(getattr(WorkbenchWriteFacade, method_name, None))
+            for method_name in sorted(retired_methods)
+            if callable(getattr(WorkbenchWriteFacade, method_name, None))
         ]
 
-        self.assertEqual(missing_methods, [])
+        self.assertEqual(restored_methods, [])
 
     def test_external_oa_mysql_client_is_confined_to_role_sync_adapter(self) -> None:
         allowed_paths = {

@@ -395,7 +395,6 @@ from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port
     WorkbenchConfirmLinkContextRelationReadPort,
 )
 from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
-from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rollback_restore_service import (
@@ -897,7 +896,6 @@ class Application:
             if self._state_store is not None and oa_adapter is not None
             else None
         )
-        self._configure_workbench_exception_application_service()
         self._live_workbench_service = LiveWorkbenchService(
             self._import_service,
             self._matching_service,
@@ -1059,7 +1057,6 @@ class Application:
         self._workbench_group_detail_api_routes = self._build_workbench_group_detail_api_routes()
         self._workbench_row_detail_api_routes = self._build_workbench_row_detail_api_routes()
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
-            exception_service=self._workbench_exception_application_service,
             write_facade_provider=self._workbench_write_facade,
             anomaly_review_service=self._workbench_anomaly_review_service,
         )
@@ -1272,18 +1269,6 @@ class Application:
     def _cost_statistics_query(self) -> CostStatisticsQueryService:
         self._ensure_cost_statistics_application_services()
         return self._cost_statistics_query_service
-
-    def _configure_workbench_exception_application_service(self) -> None:
-        self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
-            row_provider=lambda month, row_ids, row_types: self._resolve_typed_canonical_rows(
-                row_ids,
-                row_types,
-                month_hint=month,
-            ),
-            case_service=self._workbench_exception_case_service,
-            source_versions_provider=self._workbench_matching_source_versions,
-            relation_command_service=self._workbench_relation_command_service(),
-        )
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._runtime_bootstrap_state())
@@ -1781,9 +1766,6 @@ class Application:
             return self._etc_invoice_routes().route(method, route_path, query, body)
         if method == "GET" and route_path == "/api/session/me":
             return self._handle_api_session_me(headers)
-        if method == "GET" and route_path == "/api/workbench/ignored":
-            month = query.get("month", [None])[0]
-            return self._handle_api_workbench_ignored(month)
         if route_path == "/api/workbench/settings" or route_path.startswith("/api/workbench/settings/"):
             settings_response = self._settings_routes().route(
                 method,
@@ -1801,15 +1783,6 @@ class Application:
                 row_id,
                 month=query.get("month", [None])[0],
                 row_type=query.get("row_type", [None])[0],
-            )
-        if method == "POST" and route_path == "/api/workbench/exception/preview":
-            return self._handle_api_workbench_exception_preview(body)
-        if method == "POST" and route_path == "/api/workbench/exception/apply":
-            return self._handle_api_workbench_exception_apply(
-                body,
-                request_id=request_id,
-                headers=headers,
-                access_session=access_session,
             )
         if method == "POST" and route_path == "/api/workbench/exceptions/review":
             return self._handle_api_workbench_anomaly_review(
@@ -1844,8 +1817,6 @@ class Application:
                 status=response.status_code,
             )
             return response
-        if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
-            return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
             response = self._handle_api_workbench_cancel_link(
                 body,
@@ -1895,18 +1866,8 @@ class Application:
             return self._handle_api_workbench_confirm_cash_ticket_purchase(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-cash-special":
             return self._handle_api_workbench_cancel_cash_special(body, request_id=request_id)
-        if method == "POST" and route_path == "/api/workbench/actions/update-bank-exception":
-            return self._handle_api_workbench_update_bank_exception(body)
-        if method == "POST" and route_path == "/api/workbench/actions/oa-bank-exception":
-            return self._handle_api_workbench_oa_bank_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-personal-advance-repayment":
             return self._handle_api_workbench_confirm_personal_advance_repayment(body, request_id=request_id)
-        if method == "POST" and route_path == "/api/workbench/actions/cancel-exception":
-            return self._handle_api_workbench_cancel_exception(body)
-        if method == "POST" and route_path == "/api/workbench/actions/ignore-row":
-            return self._handle_api_workbench_ignore_row(body)
-        if method == "POST" and route_path == "/api/workbench/actions/unignore-row":
-            return self._handle_api_workbench_unignore_row(body)
         if route_path == "/api/tax-offset" or route_path.startswith("/api/tax-offset/"):
             tax_offset_response = self._tax_offset_routes().route(method, route_path, query, body, headers)
             if tax_offset_response is not None:
@@ -2100,7 +2061,6 @@ class Application:
                 "/api/batch-accounting/submit",
                 "/api/batch-accounting/{relation_id}/withdraw",
                 "/api/session/me",
-                "/api/workbench/ignored",
                 "/api/workbench/settings",
                 "/api/workbench/settings/oa/manual-search",
                 "/api/workbench/settings/oa/manual-search/refresh-attachments",
@@ -2110,17 +2070,9 @@ class Application:
                 "/api/workbench/settings/data-reset/jobs/active",
                 "/api/workbench/settings/data-reset/jobs/{job_id}",
                 "/api/workbench/rows/{row_id}",
-                "/api/workbench/exception/preview",
-                "/api/workbench/exception/apply",
                 "/api/workbench/actions/confirm-link",
-                "/api/workbench/actions/mark-exception",
                 "/api/workbench/actions/cancel-link",
-                "/api/workbench/actions/update-bank-exception",
-                "/api/workbench/actions/oa-bank-exception",
                 "/api/workbench/actions/confirm-personal-advance-repayment",
-                "/api/workbench/actions/cancel-exception",
-                "/api/workbench/actions/ignore-row",
-                "/api/workbench/actions/unignore-row",
                 "/api/tax-offset",
                 "/api/tax-offset/summary",
                 "/api/tax-offset/certified-import/preview",
@@ -2372,9 +2324,7 @@ class Application:
             relation_special_metadata_mutation_port=WorkbenchWriteRelationSpecialMetadataMutationPort(
                 self._workbench_pair_relation_service
             ),
-            exception_service=self._workbench_exception_application_service,
             exception_case_service=self._workbench_exception_case_service,
-            override_service=self._workbench_override_service,
             next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
             relation_preview_selection=self._workbench_query_facade().relation_preview_selection,
@@ -2390,12 +2340,8 @@ class Application:
             withdraw_rows_and_after_relations=self._withdraw_rows_and_after_relations,
             amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
             transaction_amount_for_row_id=self._workbench_transaction_amount_for_row_id,
-            list_ignored_rows=self._list_workbench_ignored_rows_for_write,
             save_exception_cases_snapshot=self._save_workbench_exception_cases_snapshot,
             persist_pair_relations=self._persist_workbench_pair_relations,
-            save_overrides_snapshot=self._save_workbench_overrides_snapshot,
-            restore_exception_write_snapshots=self._restore_workbench_exception_write_snapshots,
-            restore_exception_override_snapshots=self._restore_workbench_exception_override_snapshots,
             restore_exception_pair_snapshots=self._restore_workbench_exception_pair_snapshots,
             schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
             restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
@@ -2961,19 +2907,6 @@ class Application:
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
         return self._json_response(result.status_code, result.payload)
 
-    def _restore_workbench_exception_write_snapshots(
-        self,
-        *,
-        previous_exception_snapshot: dict[str, object],
-        previous_pair_snapshot: dict[str, object],
-        previous_override_snapshot: dict[str, object],
-    ) -> None:
-        self._workbench_exception_rollback_restore_service().restore_write_snapshots(
-            previous_exception_snapshot=previous_exception_snapshot,
-            previous_pair_snapshot=previous_pair_snapshot,
-            previous_override_snapshot=previous_override_snapshot,
-        )
-
     def _restore_workbench_exception_pair_snapshots(
         self,
         *,
@@ -2988,31 +2921,14 @@ class Application:
     def _workbench_transaction_amount_for_row_id(self, row_id: str) -> object:
         return self._import_service.get_transaction(row_id).amount
 
-    def _restore_workbench_exception_override_snapshots(
-        self,
-        *,
-        previous_exception_snapshot: dict[str, object],
-        previous_override_snapshot: dict[str, object],
-    ) -> None:
-        self._workbench_exception_rollback_restore_service().restore_override_snapshots(
-            previous_exception_snapshot=previous_exception_snapshot,
-            previous_override_snapshot=previous_override_snapshot,
-        )
-
     def _workbench_exception_rollback_restore_service(self) -> WorkbenchExceptionRollbackRestoreService:
         return WorkbenchExceptionRollbackRestoreService(
-            state_store=self._state_store,
             replace_exception_case_service=self._replace_workbench_exception_case_service,
             replace_pair_relation_service=self._replace_workbench_pair_relation_service,
-            replace_override_service=self._replace_workbench_override_service,
-            configure_exception_application_service=self._configure_workbench_exception_application_service,
         )
 
     def _replace_workbench_exception_case_service(self, service: WorkbenchExceptionCaseService) -> None:
         self._workbench_exception_case_service = service
-
-    def _replace_workbench_override_service(self, service: WorkbenchOverrideService) -> None:
-        self._workbench_override_service = service
 
     def _restore_workbench_pair_relation_snapshot(
         self,
@@ -3029,7 +2945,6 @@ class Application:
         return WorkbenchPairRelationRollbackRestoreService(
             state_store=self._state_store,
             replace_pair_relation_service=self._replace_workbench_pair_relation_service,
-            configure_exception_application_service=self._configure_workbench_exception_application_service,
         )
 
     def _replace_workbench_pair_relation_service(self, service: WorkbenchPairRelationService) -> None:
@@ -5851,27 +5766,6 @@ class Application:
             payload["details"] = exc.details
         return self._json_response(exc.status_code, payload)
 
-    def _handle_api_workbench_ignored(self, month: str | None) -> Response:
-        current_month = normalize_workbench_scope_key(month)
-        repository = getattr(self, "_workbench_page_selection_repository", None)
-        list_ignored_rows = getattr(repository, "list_workbench_ignored_rows", None)
-        if not callable(list_ignored_rows):
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "workbench_query_unavailable",
-                    "scope_key": current_month,
-                    "message": "Workbench canonical ignored-row repository is not configured.",
-                },
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "month": current_month,
-                "rows": self._serialize_value(list_ignored_rows(scope_key=current_month)),
-            },
-        )
-
     def _finalize_workbench_settings_event(self, event: dict[str, Any]) -> None:
         if event.get("tags_changed"):
             self._finalize_bank_transaction_tag_settings_update(event)
@@ -6247,51 +6141,6 @@ class Application:
         status, preview = self._workbench_action_api_routes.confirm_link_preview(payload)
         return self._json_response(status, preview)
 
-    def _handle_api_workbench_exception_preview(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        status, response_payload = self._workbench_action_api_routes.exception_preview(payload)
-        return self._json_response(status, response_payload)
-
-    def _handle_api_workbench_exception_apply(
-        self,
-        body: str | None,
-        *,
-        request_id: str | None = None,
-        headers: dict[str, str] | None = None,
-        access_session: OARequestSession | None = None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        auth_context = self._workbench_write_auth_context(headers, session=access_session)
-        if isinstance(auth_context, Response):
-            return auth_context
-        actor_id, tenant_id = auth_context
-        result = self._workbench_action_api_routes.exception_apply(
-            payload,
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-            request_id=request_id,
-        )
-        return self._workbench_write_response(result)
-
-    def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        return self._handle_live_workbench_mark_exception(payload)
-
     def _handle_api_workbench_cancel_link(
         self,
         body: str | None,
@@ -6347,7 +6196,6 @@ class Application:
         actor_id, tenant_id = auth_context
         if not isinstance(getattr(self, "_workbench_action_api_routes", None), WorkbenchActionApiRoutes):
             self._workbench_action_api_routes = WorkbenchActionApiRoutes(
-                exception_service=getattr(self, "_workbench_exception_application_service", None),
                 write_facade_provider=self._workbench_write_facade,
                 anomaly_review_service=getattr(self, "_workbench_anomaly_review_service", None),
             )
@@ -6404,26 +6252,6 @@ class Application:
         result = self._workbench_action_api_routes.cancel_cash_special(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
-    def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        result = self._workbench_action_api_routes.update_bank_exception(payload)
-        return self._workbench_write_response(result)
-
-    def _handle_api_workbench_oa_bank_exception(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        result = self._workbench_action_api_routes.oa_bank_exception(payload)
-        return self._workbench_write_response(result)
-
     def _handle_api_workbench_confirm_personal_advance_repayment(
         self,
         body: str | None,
@@ -6438,33 +6266,6 @@ class Application:
             return safety_error
         result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
         return self._workbench_write_response(result)
-
-    def _handle_api_workbench_cancel_exception(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        return self._handle_live_workbench_cancel_exception(payload)
-
-    def _handle_api_workbench_ignore_row(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        return self._handle_workbench_ignore_row_payload(payload)
-
-    def _handle_api_workbench_unignore_row(self, body: str | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        safety_error = self._workbench_oa_sync_safety_guard(payload)
-        if safety_error is not None:
-            return safety_error
-        return self._handle_workbench_unignore_row_payload(payload)
 
     def _get_or_build_tax_offset_month_payload(self, month: str) -> dict[str, object]:
         return self._tax_offset_query().get_month_payload(month)
@@ -7126,10 +6927,6 @@ class Application:
         )
         return self._workbench_write_response(result)
 
-    def _handle_live_workbench_mark_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.mark_exception(payload)
-        return self._workbench_write_response(result)
-
     def _handle_live_workbench_cancel_link(
         self,
         payload: dict[str, object],
@@ -7155,14 +6952,6 @@ class Application:
         result = self._workbench_action_api_routes.withdraw_link(payload, request_id=request_id)
         return self._workbench_write_response(result)
 
-    def _handle_live_workbench_update_bank_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.update_bank_exception(payload)
-        return self._workbench_write_response(result)
-
-    def _handle_live_workbench_oa_bank_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.oa_bank_exception(payload)
-        return self._workbench_write_response(result)
-
     def _handle_live_workbench_confirm_personal_advance_repayment(
         self,
         payload: dict[str, object],
@@ -7170,18 +6959,6 @@ class Application:
         request_id: str | None = None,
     ) -> Response:
         result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
-        return self._workbench_write_response(result)
-
-    def _handle_live_workbench_cancel_exception(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.cancel_exception(payload)
-        return self._workbench_write_response(result)
-
-    def _handle_workbench_ignore_row_payload(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.ignore_row(payload)
-        return self._workbench_write_response(result)
-
-    def _handle_workbench_unignore_row_payload(self, payload: dict[str, object]) -> Response:
-        result = self._workbench_action_api_routes.unignore_row(payload)
         return self._workbench_write_response(result)
 
     def _postgres_oa_projection_repository(self) -> object | None:
@@ -8361,23 +8138,12 @@ class Application:
             page += 1
         return rows
 
-    def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
-        if self._state_store is None:
-            return
-        self._state_store.save_workbench_overrides(
-            self._workbench_override_service.snapshot(),
-            changed_row_ids=changed_row_ids,
-        )
-
     def _save_workbench_exception_cases_snapshot(self) -> None:
         if self._state_store is None:
             return
         self._state_store.save_workbench_exception_cases(
             self._workbench_exception_case_service.snapshot(),
         )
-
-    def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
-        self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
 
     def _serialize_file_session(self, session: object) -> dict[str, object]:
         files = []
@@ -8449,14 +8215,6 @@ class Application:
         )
         return True
 
-
-    def _list_workbench_ignored_rows_for_write(self, month: str) -> list[dict[str, object]]:
-        repository = getattr(self, "_workbench_page_selection_repository", None)
-        list_ignored_rows = getattr(repository, "list_workbench_ignored_rows", None)
-        if not callable(list_ignored_rows):
-            raise RuntimeError("Workbench ignored-row repository is not configured.")
-        scope_key = normalize_workbench_scope_key(month)
-        return self._serialize_value(list_ignored_rows(scope_key=scope_key))
 
     def _retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
         cutoff_month = cutoff_date.strftime("%Y-%m")

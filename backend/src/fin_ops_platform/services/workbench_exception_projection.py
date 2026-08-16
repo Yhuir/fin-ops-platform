@@ -424,11 +424,7 @@ class WorkbenchExceptionProjectionService:
 
     @staticmethod
     def _case_available_actions(status: str) -> list[str]:
-        if status in IGNORED_CASE_STATUSES:
-            return ["detail", "unignore"]
-        if status in CLOSED_CASE_STATUSES:
-            return ["detail", "reopen_exception"]
-        return ["detail", "cancel_exception"]
+        return ["detail"]
 
     @staticmethod
     def _group_metadata_from_case(

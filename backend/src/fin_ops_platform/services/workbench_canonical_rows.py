@@ -818,7 +818,7 @@ class WorkbenchCanonicalRowsBuilder:
             "summary": row.get("summary"),
             "remark": row.get("remark"),
             "project_id": row.get("project_id"),
-            "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"],
+            "available_actions": ["detail", "view_relation", "cancel_link"],
             "summary_fields": {
                 "交易时间": _date_text(row.get("trade_time") or row.get("txn_date")),
                 "借方发生额": str(debit_amount or "") or "—",
@@ -971,7 +971,7 @@ class WorkbenchCanonicalRowsBuilder:
             "source_attachment_name": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_name"),
             "source_expense_item_ids": source_expense_item_ids,
             "source_expense_row_index": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_row_index"),
-            "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
+            "available_actions": ["detail", "confirm_link"],
             "summary_fields": {
                 "销方识别号": row.get("seller_tax_no") or "—",
                 "销方名称": row.get("seller_name") or "—",

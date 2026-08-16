@@ -6143,7 +6143,7 @@ textarea {
   white-space: nowrap;
 }
 
-.turnover-ledger-table-wrap {
+.turnover-ledger-table-wrap.finance-table--contained {
   height: clamp(520px, calc(100dvh - 244px), 720px);
   min-height: 0;
   overflow: hidden;

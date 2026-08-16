@@ -58,11 +58,6 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 relation_mode="manual_confirmed",
                 created_by="tester",
             )
-            app._workbench_override_service.mark_exception(
-                row={"id": "bk-reset-001", "type": "bank"},
-                exception_code="manual_review",
-            )
-
             result = app._settings_data_reset_service.execute(RESET_BANK_TRANSACTIONS_ACTION)
             persisted = app._state_store.load()
 
