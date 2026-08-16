@@ -52,7 +52,6 @@ describe("finance table alignment styles", () => {
       ".app-health-section",
       ".app-health-inventory-panel",
       ".import-workflow-panel--table",
-      ".import-workflow-detail-shell",
       ".tax-panel",
       ".settings-native-table-shell",
       ".settings-project-column",

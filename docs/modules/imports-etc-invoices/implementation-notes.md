@@ -246,3 +246,11 @@
 - ZIP I/O：一次 preview 只构建一次安全 manifest，解析结果复用于 matcher、allowlist、filtered/full audit；嵌套 ZIP 原始路径不变，展示路径兼容票根 GB18030 文件名。
 - UI：复用 HeroUI 原生 `Alert`/`Chip`，在原预览区紧凑展示缺失行程、缺票数、缺失金额和每条处理提示；未新增卡片、海报区或新交互层。
 - 安全边界：确认导入仍只创建 durable import job，不调用 OA 附件上传或 OA 草稿；本轮生产验证只允许 GET、preview contract 和性能探针，不提交真实导入或 OA 草稿。
+
+## 2026-08-17 - ETC 导入紧凑统计与按需明细
+
+- ETC 导入页保留唯一必要前置条件：已确认且可导入的对账任务选择，以及 ZIP 上传和异步确认。没有可用任务时只显示一个紧凑阻断状态和“前往 ETC 对账”入口，不再铺开全部不可用历史任务。
+- 右栏统一展示“本次识别 / 本次将处理 / 本次不处理”三个互斥统计，并以次要标签补充 `APP 内已存在` 数量；固定满足 `本次识别 = 本次将处理 + 本次不处理`。
+- 删除旧预览成功解释、session 标识、七项审计汇总和常驻预览宽表；缺失行程、缺票、匹配阻塞和文件级错误只在用户打开 HeroUI 右侧抽屉时展示。
+- ETC 继续走专用 `/api/etc/import/preview` 与 durable confirm job；未新增 API、worker、read model、缓存、数据库表或兼容链。
+- Browser 回归覆盖 ready task、紧凑统计、按需明细、stale preview、对账任务变化、confirm failure、后台 job 和下游 canonical 页面隔离。

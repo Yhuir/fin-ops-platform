@@ -315,3 +315,11 @@
 - 候选发布门禁最终定位到历史正式 row：去重恢复工具把被删除副本的唯一 `created` owner 转为 `duplicate_skipped`，并写入专用 reclassification reason；Page Audit 之前只登记三类 runtime replay reason，因此即使该 row 与 keeper 的 statement position 相同，仍会被误报为 `unregistered_decision_reason`。
 - reclassification reason 现与三类 runtime replay reason 在共享导入审计合同中分开登记。Page Audit 对两类 provenance 都执行相同的账户、秒级时间、方向、金额、余额、币种证明；任一字段漂移继续阻断。普通 preview、confirm 与 stale gate 仍只接受三类 runtime replay reason，repair reason 不获得运行时导入例外。
 - 没有新增 API、表、worker、read model、fallback 或第二条导入链；改动只修正历史正式 row 的只读审计解释。
+
+## 2026-08-17 - 导入工作区紧凑统计与按需明细
+
+- 银行流水导入页保留上传文件、逐文件账户选择、条件字段映射和异步确认；右栏只展示“本次识别 / 本次将处理 / 本次不处理”三个互斥统计，并以次要标签补充 `APP 内已存在` 数量。
+- 删除旧七项审计汇总带、预览成功解释、常驻文件宽表与常驻重复/未导入明细表；逐文件解析状态收敛为紧凑结果行。
+- 重复项和未处理项复用现有 review API，仅在用户打开 HeroUI 右侧抽屉后加载；预览完成到抽屉打开前不发起 detail request，不新增 API、worker、read model、缓存或第二条写链。
+- 统计口径固定为 `本次识别 = 本次将处理 + 本次不处理`；`APP 内已存在` 可能与其它不处理原因交叠，不参与该等式。
+- Browser 回归覆盖预览、按需加载、文件损坏、账户冲突、慢预览锁定、stale/confirm failure、异步确认及下游页面隔离。

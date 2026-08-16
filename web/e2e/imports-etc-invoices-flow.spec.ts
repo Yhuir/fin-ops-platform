@@ -135,24 +135,19 @@ async function previewEtcZipFiles(page: Page, recordLatency?: OperationLatencyRe
       const previewResponse = waitForEtcPreview(page);
       await previewButton.click();
       await mark("apiLatencyMs", previewResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已完成 2 个 ETC zip 文件预览。")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "ETC导入预览结果" })).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel("本次识别 4")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByLabel("本次将处理 2")).toBeVisible());
     });
   } else {
     await previewButton.click();
   }
 
-  await expect(page.getByText("已完成 2 个 ETC zip 文件预览。")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "ETC导入预览" })).toBeVisible();
-  await expect(page.getByText("etc_import_session_e2e_001")).toBeVisible();
-  await expect(page.getByLabel("审计汇总 原始 4")).toBeVisible();
-  await expect(page.getByLabel("审计汇总 可导入 2")).toBeVisible();
-  await expect(page.getByText("将导入 2 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeVisible();
-  await expect(page.getByRole("grid", { name: "ETC导入预览结果" })).toBeVisible();
-  await expect(page.getByText("ETC-2026-005")).toBeVisible();
-  await expect(page.getByText("新发票待导入")).toBeVisible();
-  await expect(page.getByText("补充凭证匹配")).toBeVisible();
-  await expect(page.getByText("XML 解析失败")).toBeVisible();
+  await expect(page.getByLabel("本次识别 4")).toBeVisible();
+  await expect(page.getByLabel("本次将处理 2")).toBeVisible();
+  await expect(page.getByLabel("本次不处理 2")).toBeVisible();
+  await expect(page.getByText("etc_import_session_e2e_001")).toHaveCount(0);
+  await expect(page.getByRole("grid", { name: "ETC导入预览结果" })).toHaveCount(0);
+  await expect(page.getByText("已完成 2 个 ETC zip 文件预览。")).toHaveCount(0);
 }
 
 test.describe("ETC invoice import browser flow", () => {
@@ -165,6 +160,13 @@ test.describe("ETC invoice import browser flow", () => {
     expect(api.count("GET /api/etc/reconciliation-tasks/ready-for-import")).toBeGreaterThan(0);
     expect(api.count("POST /api/etc/import/preview")).toBe(1);
     expect(api.count("POST /imports/files/preview")).toBe(0);
+    await page.getByRole("button", { name: "查看未处理明细" }).click();
+    await expect(page.getByRole("grid", { name: "ETC导入预览结果" })).toBeVisible();
+    await expect(page.getByText("ETC-2026-005")).toBeVisible();
+    await expect(page.getByText("新发票待导入")).toBeVisible();
+    await expect(page.getByText("补充凭证匹配")).toBeVisible();
+    await expect(page.getByText("XML 解析失败")).toBeVisible();
+    await page.getByRole("button", { name: "关闭抽屉" }).click();
 
     await recordLatency({
       operationId: "imports-etc-invoices.confirm-import",
@@ -345,7 +347,7 @@ test.describe("ETC invoice import browser flow", () => {
     });
 
     await expect(page.getByText("对账任务已更新，请重新预览 ETC zip 后再确认导入。")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "ETC导入预览" })).toHaveCount(0);
+    await expect(page.getByLabel("本次识别 4")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "开始预览" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
     await expect(page.getByText("已开始后台导入")).toHaveCount(0);

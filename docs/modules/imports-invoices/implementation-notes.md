@@ -291,3 +291,11 @@
 - 修复后 PostgreSQL 仍是唯一 durable 事实源；同一 API 进程直接把已验证 owner 的本地 session 与 preview batch 同步为 `reverted`，仅当请求落到不持有该 preview 的其它进程或本地状态不一致时才执行原有快照恢复。
 - 不新增 API、表、read model、worker 或并行写链；测试锁定同进程常规路径不得调用全量运行态重载。
 - 人工录入的 import file 是逻辑会话记录，不伪造不存在的 JPG/PDF/Excel 对象。页面 Audit 仅对精确 `manual_invoice_entry` 模板免除物理对象、URI、哈希和字节数证明；file/session/batch/row/canonical/source-link/job 的其余合同继续完整校验，普通文件导入仍必须具备对象与哈希。
+
+## 2026-08-17 - 导入工作区紧凑统计与按需明细
+
+- 发票导入页保留上传文件、逐文件进/销项方向、条件字段映射、人工录入入口和异步确认；右栏只展示“本次识别 / 本次将处理 / 本次不处理”三个互斥统计，并以次要标签补充 `APP 内已存在` 数量。
+- 删除旧七项审计汇总带、预览成功解释、常驻文件宽表与常驻重复/未导入明细表；逐文件解析状态收敛为紧凑结果行。
+- 重复项和未处理项复用现有 review API，仅在用户打开 HeroUI 右侧抽屉后加载；预览完成到抽屉打开前不发起 detail request，不新增 API、worker、read model、缓存或第二条写链。
+- 统计口径固定为 `本次识别 = 本次将处理 + 本次不处理`；`APP 内已存在` 可能与其它不处理原因交叠，不参与该等式。
+- Browser 回归覆盖预览、按需加载、损坏文件部分确认、慢预览锁定、stale/confirm failure、异步确认与下游 canonical 页面隔离。

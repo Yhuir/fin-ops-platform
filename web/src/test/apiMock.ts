@@ -7518,6 +7518,38 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       });
     }
+    const importReviewRowsMatch = url.pathname.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);
+    if (importReviewRowsMatch) {
+      const kind = url.searchParams.get("kind") === "unimported" ? "unimported" : "duplicates";
+      return jsonResponse({
+        body: {
+          rows: kind === "duplicates"
+            ? [{
+                file_id: "import_file_0001",
+                file_name: latestImportSession.files[0]?.file_name ?? "一月发票.xlsx",
+                row_no: 2,
+                duplicate_type: "duplicate_in_file",
+                record_type: "invoice",
+                decision: "skipped",
+                decision_reason: "duplicate_in_file",
+                invoice_no: "26532000000000000001",
+              }]
+            : [{
+                file_id: "import_file_0001",
+                file_name: latestImportSession.files[0]?.file_name ?? "一月发票.xlsx",
+                row_no: 3,
+                record_type: "invoice",
+                decision: "manual_review",
+                decision_reason: "missing_required_field",
+                invoice_no: "26532000000000000002",
+              }],
+          total: 1,
+          offset: Number(url.searchParams.get("offset") ?? 0),
+          limit: Number(url.searchParams.get("limit") ?? 100),
+          has_more: false,
+        },
+      });
+    }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });
     }
