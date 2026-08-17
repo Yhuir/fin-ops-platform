@@ -617,20 +617,21 @@ def test_grouped_filter_contract_rejects_legacy_flat_values() -> None:
 
 
 def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> None:
+    applicant_connection = _QueryConnection(
+        [
+            {
+                "row_id": "oa-1",
+                "column_values": {
+                    "applicationType": "支付申请",
+                    "workflowStatus": "completed",
+                    "applicant": "杨丽萍",
+                },
+                "oa_expense_items": [],
+            }
+        ]
+    )
     applicant_repository = PostgresWorkbenchPageQueryRepository(
-        _QueryConnection(
-            [
-                {
-                    "row_id": "oa-1",
-                    "column_values": {
-                        "applicationType": "支付申请",
-                        "workflowStatus": "completed",
-                        "applicant": "杨丽萍",
-                    },
-                    "oa_expense_items": [],
-                }
-            ]
-        ),
+        applicant_connection,
         tenant_id="test-tenant",
     )
     applicant = applicant_repository._filter_options(
@@ -660,6 +661,8 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
             "group": "申请人",
         },
     ]
+    assert "from filter_option_anomaly_groups groups" in applicant_connection.sql
+    assert applicant_connection.params[4] == "oa"
 
     project_repository = PostgresWorkbenchPageQueryRepository(
         _QueryConnection(
@@ -783,6 +786,8 @@ def test_bank_grouped_options_use_account_mapping_and_canonical_tag(
             "group": "流水标签",
         },
     ]
+    assert "from filter_option_anomaly_groups groups" in connection.sql
+    assert connection.params[4] == "bank"
 
 
 def test_bank_tag_filter_resolves_only_canonical_matching_rows(
@@ -823,3 +828,5 @@ def test_bank_tag_filter_resolves_only_canonical_matching_rows(
         exception_bucket=None,
     ) == ["bank-1"]
     assert "bankTag:" not in str(connection.params)
+    assert "from filter_option_anomaly_groups groups" in connection.sql
+    assert connection.params[4] == "bank"

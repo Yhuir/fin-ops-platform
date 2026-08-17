@@ -1821,6 +1821,23 @@ anomaly_states as materialized (
 )
 """
 
+# A filter option can only be emitted by a group containing the target pane.
+# Keep the effective-group contract unchanged, while avoiding anomaly work for
+# groups that cannot contribute any option to the current request.
+_FILTER_OPTION_ANOMALY_STATE_CTES = f"""
+filter_option_anomaly_groups as materialized (
+    select groups.*
+    from canonical_groups groups
+    where exists (
+        select 1
+        from canonical_group_members target_member
+        where target_member.internal_key = groups.internal_key
+          and target_member.row_type = %s
+    )
+),
+{_ANOMALY_STATE_CTES.replace("canonical_groups groups", "filter_option_anomaly_groups groups")}
+"""
+
 _EFFECTIVE_GROUPS_CTES = """
 effective_groups as materialized (
     select
@@ -2480,7 +2497,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_ANOMALY_STATE_CTES},
+            {_FILTER_OPTION_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select
@@ -3135,6 +3152,7 @@ class PostgresWorkbenchPageQueryRepository:
                 [
                     *self._scope_params(normalized_scope),
                     *search_params,
+                    normalized_pane,
                     *where_params,
                     normalized_pane,
                     *member_filter_params,
@@ -3213,7 +3231,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_ANOMALY_STATE_CTES},
+            {_FILTER_OPTION_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key
@@ -3235,6 +3253,7 @@ class PostgresWorkbenchPageQueryRepository:
                 [
                     *self._scope_params(scope_key),
                     *search_params,
+                    pane,
                     *where_params,
                     pane,
                     *member_filter_params,
@@ -3717,7 +3736,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_ANOMALY_STATE_CTES},
+            {_FILTER_OPTION_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key
@@ -3736,6 +3755,7 @@ class PostgresWorkbenchPageQueryRepository:
                 [
                     *self._scope_params(scope_key),
                     *search_params,
+                    "bank",
                     *where_params,
                     *member_filter_params,
                 ]
