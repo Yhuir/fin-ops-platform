@@ -159,7 +159,7 @@ extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前�
 open relation A
   -> abort previous editor GET controller
   -> create active editor context {relationId=A, controller}
-  -> detail + extra GET 并行
+  -> 单次 relation detail GET，同时取得 relation、bank rows、audit、extra
 open relation B / close / page inactive / unmount
   -> active editor A 立即失效并 abort
   -> A 的 success/error/finally 因 context identity 不匹配而不得写 UI
@@ -170,6 +170,8 @@ save
 ```
 
 Abort 只减少无效 I/O；正确性以 active editor object identity guard 为准。初始 GET 完成前，或 extra/关系 mutation 进行中，输入、保存和关系动作必须 disabled；写请求进行中关闭入口也 disabled，避免产生服务器已提交但用户误认为已取消的不确定状态。
+
+relation detail 必须对当前 canonical bank rows 动态生成的 suggested relation 可用，并只输出可 JSON 序列化的页面 DTO。extra PUT 的 stale 判断只能在写 UoW 的同一事务内读取当前 `updated_at`；不得恢复事务外 `current_extra_reader` 或保存后 `row_provider` 页面回读。
 
 ## UI 状态
 

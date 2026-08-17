@@ -242,16 +242,13 @@ test.describe("turnover ledger browser flow", () => {
         "GET",
         "/api/turnover-ledger/relations/turnover_rel_e2e_expense",
       ));
-      const extraResponse = page.waitForResponse(responseFor(
-        "GET",
-        "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra",
-      ));
       await table.getByRole("button", { name: `编辑流水 ${turnoverFlowLabels.expense}` }).click();
       expect((await mark("apiLatencyMs", detailResponse)).status()).toBe(200);
-      expect((await extraResponse).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
       await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存补充信息" })).toBeDisabled());
     });
+    await expect(drawer.getByText("2026-05-03 10:00:00")).toBeVisible();
+    expect(api.count("GET /api/turnover-ledger/relations/turnover_rel_e2e_expense/extra")).toBe(0);
 
     await drawer.getByLabel("利率值").fill("0.070000");
     await expect(drawer.getByRole("button", { name: "保存补充信息" })).toBeEnabled();
@@ -301,7 +298,6 @@ test.describe("turnover ledger browser flow", () => {
         return;
       }
       const relationId = relationMatch[1];
-      const isExtra = Boolean(relationMatch[2]);
       if (method === "PUT") {
         putRequests.push({ path, body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown> });
         await route.fulfill({
@@ -324,24 +320,25 @@ test.describe("turnover ledger browser flow", () => {
       try {
         await route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify(isExtra ? {
-            relation_id: relationId,
-            interest_rate_type: "annual",
-            interest_rate_value: relationId.endsWith("income") ? "0.050000" : "0.060000",
-            interest_paid_amount: "10.00",
-            interest_paid_date: "2026-05-05",
-            interest_payment_method: "转账",
-            note: relationId.endsWith("income") ? "B 的浏览器补充信息" : "A 的过期浏览器补充信息",
-            updated_at: relationId.endsWith("income")
-              ? "2026-06-17T09:10:00+08:00"
-              : "2026-06-17T09:00:00+08:00",
-          } : {
+          body: JSON.stringify({
             relation: {
               relation_id: relationId,
               status: "confirmed",
               status_label: "流水",
             },
             bank_rows: [],
+            extra: {
+              relation_id: relationId,
+              interest_rate_type: "annual",
+              interest_rate_value: relationId.endsWith("income") ? "0.050000" : "0.060000",
+              interest_paid_amount: "10.00",
+              interest_paid_date: "2026-05-05",
+              interest_payment_method: "转账",
+              note: relationId.endsWith("income") ? "B 的浏览器补充信息" : "A 的过期浏览器补充信息",
+              updated_at: relationId.endsWith("income")
+                ? "2026-06-17T09:10:00+08:00"
+                : "2026-06-17T09:00:00+08:00",
+            },
             audit_history: [],
           }),
         });
@@ -365,7 +362,7 @@ test.describe("turnover ledger browser flow", () => {
       (button as HTMLButtonElement).click();
     });
     await expect(drawer.getByLabel("备注")).toHaveValue("B 的浏览器补充信息");
-    await expect.poll(() => delayedExpenseRequestsFinished).toBe(2);
+    await expect.poll(() => delayedExpenseRequestsFinished).toBe(1);
     await expect(drawer.getByLabel("备注")).toHaveValue("B 的浏览器补充信息");
 
     await drawer.getByLabel("备注").fill("只保存浏览器 B");

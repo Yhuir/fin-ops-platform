@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_DEFINITIONS,
@@ -29,6 +30,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
+BUSINESS_TIME_ZONE = ZoneInfo("Asia/Shanghai")
 TURNOVER_LEDGER_SCHEMA_VERSION = "2026-07-turnover-ledger-v11"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
@@ -77,7 +79,7 @@ class TurnoverLedgerService:
         self._extra_service = extra_service
         self._selected_tag_codes_provider = selected_tag_codes_provider
         self._workbench_relation_source_provider = workbench_relation_source_provider
-        self._today_provider = today_provider or date.today
+        self._today_provider = today_provider or self._business_today
 
     def list_ledger(
         self,
@@ -285,20 +287,77 @@ class TurnoverLedgerService:
         normalized_relation_id = str(relation_id or "").strip()
         bank_rows = self._bank_rows()
         rows_by_id = {str(row.get("id") or ""): row for row in bank_rows}
-        for relation in self._relation_service.relations():
+        relations = self._relation_service.relations()
+        if not any(
+            str(relation.get("relation_id") or "") == normalized_relation_id
+            for relation in relations
+        ):
+            relations = self._relation_service.rebuild_from_bank_rows(bank_rows)
+        for relation in relations:
             if str(relation.get("relation_id") or "") != normalized_relation_id:
                 continue
             row_payload = self._row_payload(relation, rows_by_id)
+            if row_payload is None:
+                break
+            relation_payload = {
+                **row_payload,
+                "source": str(relation.get("source") or ""),
+                "version": int(relation.get("version") or 0),
+                "principal_row_ids": [
+                    str(row_id)
+                    for row_id in list(relation.get("principal_row_ids") or [])
+                    if str(row_id) in rows_by_id
+                ],
+                "settlement_row_ids": [
+                    str(row_id)
+                    for row_id in list(relation.get("settlement_row_ids") or [])
+                    if str(row_id) in rows_by_id
+                ],
+            }
             return {
-                "relation": relation,
+                "relation": relation_payload,
                 "row": row_payload,
                 "bank_rows": [
-                    rows_by_id[row_id]
+                    self._bank_row_detail_payload(rows_by_id[row_id])
                     for row_id in list(relation.get("bank_row_ids") or [])
                     if row_id in rows_by_id
                 ],
+                "extra": self._extra_for_relation(normalized_relation_id),
             }
         raise KeyError(normalized_relation_id)
+
+    def _bank_row_detail_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+        direction = self._direction(row)
+        amount = self._row_amount(row)
+        imported_bank_name = str(row.get("imported_bank_name") or row.get("bank_name") or "").strip()
+        imported_bank_last4 = str(
+            row.get("imported_bank_last4")
+            or row.get("account_last4")
+            or str(row.get("account_no") or "")[-4:]
+            or ""
+        ).strip()
+        bank_account_label = " ".join(
+            part for part in (imported_bank_name, imported_bank_last4) if part
+        )
+        return {
+            "id": self._row_id(row),
+            "trade_time": self._transaction_at(row),
+            "counterparty_name": str(
+                row.get("counterparty_name") or row.get("counterparty_name_raw") or ""
+            ).strip(),
+            "direction": direction,
+            "direction_label": "收" if direction == "inflow" else "支",
+            "amount": self._format_money(amount),
+            "debit_amount": self._format_money(amount if direction == "outflow" else ZERO),
+            "credit_amount": self._format_money(amount if direction == "inflow" else ZERO),
+            "bank_account_label": bank_account_label,
+            "imported_bank_name": imported_bank_name,
+            "imported_bank_last4": imported_bank_last4,
+            "summary": str(row.get("summary") or "").strip(),
+            "remark": str(row.get("remark") or "").strip(),
+            "purpose": str(row.get("purpose") or "").strip(),
+            "category_label": str(row.get("category_label") or "").strip(),
+        }
 
     def selected_bank_rows(self) -> list[dict[str, Any]]:
         """Return the currently selected turnover rows with canonical category facts."""
@@ -709,12 +768,19 @@ class TurnoverLedgerService:
         ]
         borrow_direction, repayment_direction = self._money_directions(business_type)
         lot_ids_by_bank_row_id: dict[str, list[str]] = {}
+        loan_days_by_principal_row_id: dict[str, int | None] = {}
         for lot in allocation_lots:
             lot_id = str(lot.get("lot_id") or "").strip()
             if not lot_id:
                 continue
+            principal_bank_row_id = str(lot.get("principal_bank_row_id") or "").strip()
+            if principal_bank_row_id:
+                raw_loan_days = lot.get("loan_days")
+                loan_days_by_principal_row_id[principal_bank_row_id] = (
+                    int(raw_loan_days) if raw_loan_days is not None else None
+                )
             for bank_row_id in [
-                lot.get("principal_bank_row_id"),
+                principal_bank_row_id,
                 *list(lot.get("settlement_bank_row_ids") or []),
             ]:
                 normalized = str(bank_row_id or "").strip()
@@ -768,6 +834,11 @@ class TurnoverLedgerService:
                     "bank_account_labels": self._bank_account_labels([bank_row]),
                     "summary_text": self._summary_text([bank_row]),
                     "repayment_remark": self._summary_text([bank_row]) if flow_side == "settlement" else "",
+                    "loan_days": (
+                        loan_days_by_principal_row_id.get(bank_row_id)
+                        if flow_side == "principal"
+                        else None
+                    ),
                     "allocation_status": self._allocation_status(allocated_lot_ids),
                     "allocated_lot_ids": allocated_lot_ids,
                     "bank_row_ids": [bank_row_id],
@@ -1282,6 +1353,10 @@ class TurnoverLedgerService:
         except ValueError:
             return None
         return max((end - start).days, 0)
+
+    @staticmethod
+    def _business_today() -> date:
+        return datetime.now(BUSINESS_TIME_ZONE).date()
 
     @staticmethod
     def _loan_days(relation: dict[str, Any]) -> int | None:

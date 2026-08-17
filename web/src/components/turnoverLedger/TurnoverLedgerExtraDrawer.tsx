@@ -24,7 +24,9 @@ function cleanText(value: unknown) {
 }
 
 function flowDate(row: TurnoverLedgerGroupedRow | null) {
-  return cleanText(row?.transactionAt) || cleanText(row?.borrowDate) || cleanText(row?.repaymentDate) || "";
+  return formatDateTimeText(
+    cleanText(row?.transactionAt) || cleanText(row?.borrowDate) || cleanText(row?.repaymentDate),
+  );
 }
 
 function flowDirectionLabel(row: TurnoverLedgerGroupedRow | null) {
@@ -95,13 +97,16 @@ export default function TurnoverLedgerExtraDrawer({
   onConfirm: () => void;
   onWithdraw: () => void;
 }) {
-  const relation = row;
+  const relation = detail?.relation ?? null;
   const canConfirm = canMutateData && relation?.status === "suggested";
   const canWithdraw = canMutateData && relation?.status === "confirmed";
   const busy = loading || saving || mutating;
   const editingDisabled = busy || !canMutateData || Boolean(error);
-  const counterpartyName = cleanText(row?.counterpartyName) || cleanText(detail?.bankRows[0]?.counterpartyName) || "-";
-  const familyLabel = cleanText(row?.familyLabel) || "-";
+  const counterpartyName = cleanText(row?.counterpartyName)
+    || cleanText(relation?.counterpartyName)
+    || cleanText(detail?.bankRows[0]?.counterpartyName)
+    || "-";
+  const familyLabel = cleanText(row?.familyLabel) || cleanText(relation?.familyLabel) || "-";
   const dateText = flowDate(row);
   const bankAccountLabels = row?.bankAccountLabels?.length ? row.bankAccountLabels : (
     detail?.bankRows.map((bankRow) => bankRow.bankAccountLabel).filter(Boolean) ?? []
@@ -144,10 +149,10 @@ export default function TurnoverLedgerExtraDrawer({
             <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--info" role="status">正在加载关系详情和补充信息。</div>
           ) : null}
           {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
-          {relation ? (
+          {row ? (
             <>
               <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
-                <span className="turnover-ledger-chip turnover-ledger-chip--filled">{relation.statusLabel || relation.status || "-"}</span>
+                <span className="turnover-ledger-chip turnover-ledger-chip--filled">{relation?.statusLabel || relation?.status || "-"}</span>
                 <span className={`turnover-ledger-chip turnover-ledger-chip--outline ${flowDirectionLabel(row) === "支" ? "turnover-ledger-chip--expense" : "turnover-ledger-chip--income"}`}>
                   {flowDirectionLabel(row)}
                 </span>
@@ -163,10 +168,10 @@ export default function TurnoverLedgerExtraDrawer({
                   <DetailField label="对方户名" value={counterpartyName} />
                   <DetailField label="往来类别" value={familyLabel} />
                   <DetailField label="流水日期" value={dateText} />
-                  <DetailField label="往来发生" value={formatMoney(relation.borrowAmount)} />
-                  <DetailField label="结清发生" value={formatMoney(relation.repaymentAmount)} />
-                  <DetailField label="借款天数" value={relation.loanDays} />
-                  <DetailField label="应还利息" value={relation.accruedInterest ? formatMoney(relation.accruedInterest) : "-"} />
+                  <DetailField label="往来发生" value={formatMoney(row.borrowAmount)} />
+                  <DetailField label="结清发生" value={formatMoney(row.repaymentAmount)} />
+                  <DetailField label="借款天数" value={row.loanDays} />
+                  <DetailField label="应还利息" value={row.accruedInterest ? formatMoney(row.accruedInterest) : "-"} />
                 </div>
                 {(detail?.bankRows ?? []).length > 0 ? (
                   <div className="turnover-ledger-extra-bank-list">

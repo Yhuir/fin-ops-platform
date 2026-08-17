@@ -8,7 +8,6 @@ import {
   fetchTurnoverLedger,
   fetchTurnoverLedgerExportPreview,
   fetchTurnoverLedgerGrouped,
-  fetchTurnoverRelationExtra,
   fetchTurnoverRelationDetail,
   saveTurnoverLedgerTagSelection,
   saveTurnoverBankRowTags,
@@ -252,6 +251,17 @@ describe("turnover ledger API", () => {
               remark: "借入",
             },
           ],
+          extra: {
+            relation_id: "rel-001",
+            interest_rate_type: "annual",
+            interest_rate_value: "0.060000",
+            interest_paid_amount: "0.00",
+            interest_paid_date: null,
+            interest_payment_method: "",
+            note: "详情内补充信息",
+            updated_at: "2026-05-11T10:00:00+08:00",
+            updated_by: "user",
+          },
           audit_history: [{ action: "generated", note: "system" }],
         }), { headers: { "Content-Type": "application/json" } });
       }
@@ -316,6 +326,11 @@ describe("turnover ledger API", () => {
       summary: "暂借款 / 借入",
     });
     expect(detail.auditHistory[0]).toEqual({ action: "generated", note: "system" });
+    expect(detail.extra).toMatchObject({
+      relationId: "rel-001",
+      interestRateType: "annual",
+      note: "详情内补充信息",
+    });
 
     await expect(confirmTurnoverRelation({ bankRowIds: ["bank-001"], note: "确认归并" })).resolves.toMatchObject({
       relationId: "rel-confirmed",
@@ -807,7 +822,7 @@ describe("turnover ledger API", () => {
     expect(ledger.groups[0].allocationLots).toEqual([]);
   });
 
-  test("maps extra GET and PUT payloads", async () => {
+  test("maps extra PUT payload without a duplicate row readback", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (init?.method === "PUT") {
@@ -835,34 +850,11 @@ describe("turnover ledger API", () => {
             updated_at: "2026-05-12T10:00:00+08:00",
             updated_by: "user",
           },
-          row: {
-            relation_id: "rel-001",
-            borrow_amount: "2000.00",
-            accrued_interest: "9.67",
-          },
         }), { headers: { "Content-Type": "application/json" } });
       }
-      return new Response(JSON.stringify({
-        relation_id: "rel-001",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.060000",
-        interest_paid_amount: "0.00",
-        interest_paid_date: null,
-        interest_payment_method: "",
-        note: "旧备注",
-        updated_at: "2026-05-11T10:00:00+08:00",
-        updated_by: "user",
-      }), { headers: { "Content-Type": "application/json" } });
+      throw new Error(`Unexpected request ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
-
-    await expect(fetchTurnoverRelationExtra("rel-001")).resolves.toMatchObject({
-      relationId: "rel-001",
-      interestRateType: "annual",
-      interestRateValue: "0.060000",
-      interestPaidAmount: "0.00",
-      note: "旧备注",
-    });
 
     const saved = await saveTurnoverRelationExtra("rel-001", {
       interestRateType: "monthly",
@@ -876,7 +868,7 @@ describe("turnover ledger API", () => {
       },
     });
     expect(saved.extra.interestRateType).toBe("monthly");
-    expect(saved.row?.accruedInterest).toBe("9.67");
+    expect(saved).not.toHaveProperty("row");
   });
 
   test("maps export preview and downloads xlsx as Blob without JSON parsing", async () => {

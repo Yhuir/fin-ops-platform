@@ -1,6 +1,6 @@
 # 外部往来款管理模块边界与 I/O
 
-日期：2026-08-14
+日期：2026-08-18
 
 ## 模块化状态
 
@@ -35,6 +35,7 @@
 | 有效分类和标签准入 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、`app.app_settings` | 复用 Bank Details canonical classifier 的 set-based SQL 与 `AppSettingsService` 的无 I/O 选择映射；同一快照只返回当前选中 tag codes 的流水，query service 不复制匹配规则 |
 | 统一配对关系 | `app.workbench_pair_relations` | 仅按本页实际银行 row ids 做 bounded overlap 查询；active relation 是关联台与外部往来款共同事实源 |
 | Turnover 自有关系和 extras | `app.turnover_relations`、`app.turnover_ledger_extras` | 保留通用 suggested/confirmed relation 与页面补充字段的现有业务语义 |
+| 关系详情抽屉 | `GET /api/turnover-ledger/relations/{id}` | 同一个 canonical snapshot 返回 relation、页面 row、JSON-safe bank rows、audit 和 extra；抽屉不得再并行请求独立 extra GET。动态 suggested relation 即使尚未持久化也必须由当前 canonical bank rows 重建后解析，不能因为列表先生成、详情后读取而 404 |
 | 页面 Audit | admin-only page audit API | 与页面一样直接审计 canonical facts；检查 relation member shape、银行成员存在性、active case 唯一性和手工 Turnover relation 成员存在性，不读取投影/dirty/outbox |
 | 闭环流水选择校验 | 页面 grouped `flow_rows[*].selection_version` + 当前 `bank_row_ids` | 正式页面只提交 `turnover_bank_row_selection:<legacy/source id>`；写 UoW 在同一事务内按精确 IDs 一次重读 canonical 银行事实、有效分类、当前规则版本和往来语义，并复用页面 GET 的分类映射与行映射。旧 category-only 版本键直接拒绝，不再拼接 import DTO 与独立 source proof |
 | 确认/撤回/标签/extra 写操作 | `TurnoverLedgerWriteFacade` / UoW / adapters | 只提交 canonical relation/category/settings/extra/event/audit；标签 effective category 变化与既有 active 普通 relation requirement/history 使用同一 UoW transaction，外层提交后才发布 changed-case 进程镜像；成功响应不携带页面 freshness target，不产生跨页 fan-out |
@@ -44,6 +45,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；当前页只提交与 `{family,page}` 一致的最新请求响应，旧请求即使晚返回也不得覆盖新页。页面 grouped DTO 保留 `summary_row` 与 `flow_rows`，不传输未被页面消费的 `allocation_lots` / `lot_rows`；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
+| 流水日期与借款天数 | 前端详情抽屉 | 日期统一按 `Asia/Shanghai` 展示为 `YYYY-MM-DD HH:mm:ss`，不显示 ISO 时区后缀。本金流水输出对应 FIFO lot 的 `loan_days`：未结清按业务今天计算，已结清按该本金 lot 的结清日计算；结算流水不重复显示借款天数 |
 | `flow_rows[*].selection_version` | 正式闭环提交 | 由银行事实 `updated_at`、有效分类版本/规则版本和往来 role/action/family 共同生成；缺失任何必要语义时不输出，前端禁止提交。它是当前选择快照的 CAS token，不是新的 read model generation |
 | 导出 grouped payload | XLSX export owner | 复用同一 canonical query，但明确包含 normalized `allocation_lots` / `lot_rows`，保证导出财务字段不因页面瘦身而丢失。 |
 | 统一配对与结算状态 | 外部往来款页面 | 每个 active canonical case 必须独立校验完整且唯一的 bank members、同一业务语义、现金差额和 `principal-settlement` 余额。非零 active case 输出 `cash_pair_linked=true` / `paired_unsettled=true` 及待还/待收余额；只有现金差额和业务余额都为零才输出 `cash_closure_linked=true`。relation mode/source 不得替代计算证明 |
@@ -102,6 +104,7 @@
 - 前端 stale/refreshing polling 和 API freshness DTO
 - 写 API 的 `turnover_ledger_invalidated` 兼容字段
 - 闭环写前通过 `Application._turnover_bank_transaction_rows_by_ids(...)` 读取旧 ImportService 全量 DTO，再与 `turnover_bank_row_selection_proofs(...)` 独立拼接版本证据的双读链；生产闭环只保留同一事务、同一 canonical query/mapping 的精确选择读取
+- extra 抽屉并行读取 `relation detail + relation extra`、extra PUT 后通过 `row_provider` 再读页面行、request boundary 通过 `current_extra_reader` 在事务外做版本判断的旧链；当前只保留一次 relation detail GET，extra PUT 返回已保存 extra，版本判断在写 UoW 同一事务内读取并锁定 extra 行
 
 历史 migration 和历史实施记录不构成 runtime 链路，也不能作为当前架构依据。
 

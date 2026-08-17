@@ -2517,8 +2517,6 @@ class Application:
             replace_snapshot=support.replace_turnover_ledger_extra_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             extra_service=self._turnover_ledger_extra_service,
-            row_provider=self._turnover_ledger_relation_extra_row_provider,
-            current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra,
             postgres_extra_repository_factory=PostgresWorkbenchRepository,
             postgres_idempotency_store_factory=self._turnover_ledger_relation_extra_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_relation_extra_local_idempotency_store,
@@ -2801,17 +2799,6 @@ class Application:
         if facade is None:
             return None
         return facade
-
-    def _turnover_ledger_relation_extra_row_provider(
-        self,
-        *,
-        relation_id: str,
-        extra: dict[str, object],
-    ) -> dict[str, object]:
-        detail = self._turnover_ledger_api_routes.get_relation(relation_id)
-        row = dict(detail.get("row") or {})
-        row.update(TurnoverLedgerApiRoutes._row_extra_fields(extra))
-        return row
 
     def _workbench_write_idempotency_store(self, attribute_name: str, connection: object) -> object:
         idempotency_store = getattr(self, attribute_name, None)
@@ -6843,7 +6830,7 @@ class Application:
     def _turnover_ledger_relation_extra_request_boundary_facade(self) -> TurnoverLedgerRelationExtraRequestBoundaryFacade:
         return TurnoverLedgerRelationExtraRequestBoundaryFacade(
             facade_provider=self._turnover_ledger_relation_extra_write_facade,
-            current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra,
+            relation_detail_provider=self._turnover_ledger_api_routes.get_relation,
         )
 
     @staticmethod

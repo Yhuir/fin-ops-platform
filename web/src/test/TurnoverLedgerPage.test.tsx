@@ -855,19 +855,17 @@ function installTurnoverLedgerFetch(options: {
             summary: "暂借款",
           },
         ],
+        extra: {
+          relation_id: "rel-personal-1",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "10.00",
+          interest_paid_date: "2026-05-05",
+          interest_payment_method: "转账",
+          note: "页面内维护备注",
+          updated_at: "2026-05-11T10:00:00+08:00",
+        },
         audit_history: [],
-      });
-    }
-    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && method === "GET") {
-      return Response.json({
-        relation_id: "rel-personal-1",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.060000",
-        interest_paid_amount: "10.00",
-        interest_paid_date: "2026-05-05",
-        interest_payment_method: "转账",
-        note: "页面内维护备注",
-        updated_at: "2026-05-11T10:00:00+08:00",
       });
     }
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && method === "PUT") {
@@ -896,19 +894,17 @@ function installTurnoverLedgerFetch(options: {
             summary: "个人暂借款：待还款",
           },
         ],
+        extra: {
+          relation_id: "rel-jiaxiaohua",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "10.00",
+          interest_paid_date: "2026-05-05",
+          interest_payment_method: "转账",
+          note: "页面内维护备注",
+          updated_at: "2026-05-12T10:00:00+08:00",
+        },
         audit_history: [],
-      });
-    }
-    if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && method === "GET") {
-      return Response.json({
-        relation_id: "rel-jiaxiaohua",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.060000",
-        interest_paid_amount: "10.00",
-        interest_paid_date: "2026-05-05",
-        interest_payment_method: "转账",
-        note: "页面内维护备注",
-        updated_at: "2026-05-12T10:00:00+08:00",
       });
     }
     if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && method === "PUT") {
@@ -1804,16 +1800,16 @@ describe("Turnover ledger page", () => {
 
   test("keeps the active relation form when an aborted older response resolves after a newer editor", async () => {
     const user = userEvent.setup();
-    const olderExtra = deferredResponse();
+    const olderDetail = deferredResponse();
     const baseFetch = installTurnoverLedgerFetch({
       groupedPayloads: [groupedPayloadWithFlowRelation("all", "bank-jia-income-200000", "rel-personal-1")],
     });
     let olderSignal: AbortSignal | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && init?.method === "GET") {
+      if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1" && init?.method === "GET") {
         olderSignal = init.signal ?? null;
-        return olderExtra.promise;
+        return olderDetail.promise;
       }
       return baseFetch(input, init);
     });
@@ -1837,17 +1833,22 @@ describe("Turnover ledger page", () => {
     expect(olderSignal?.aborted).toBe(true);
 
     await act(async () => {
-      olderExtra.resolve(Response.json({
-        relation_id: "rel-personal-1",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.990000",
-        interest_paid_amount: "999.00",
-        interest_paid_date: "2026-05-01",
-        interest_payment_method: "旧关系",
-        note: "A 的过期补充信息",
-        updated_at: "2026-05-10T10:00:00+08:00",
+      olderDetail.resolve(Response.json({
+        relation: groupedPayload("personal").groups[0].rows[0],
+        bank_rows: [],
+        audit_history: [],
+        extra: {
+          relation_id: "rel-personal-1",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.990000",
+          interest_paid_amount: "999.00",
+          interest_paid_date: "2026-05-01",
+          interest_payment_method: "旧关系",
+          note: "A 的过期补充信息",
+          updated_at: "2026-05-10T10:00:00+08:00",
+        },
       }));
-      await olderExtra.promise;
+      await olderDetail.promise;
     });
     expect(within(drawer).getByLabelText("备注")).toHaveValue("页面内维护备注");
 
@@ -1875,18 +1876,18 @@ describe("Turnover ledger page", () => {
 
   test("ignores an older request failure and finalizer while the active relation is still loading", async () => {
     const user = userEvent.setup();
-    const olderExtra = deferredResponse();
-    const activeExtra = deferredResponse();
+    const olderDetail = deferredResponse();
+    const activeDetail = deferredResponse();
     const baseFetch = installTurnoverLedgerFetch({
       groupedPayloads: [groupedPayloadWithFlowRelation("all", "bank-jia-income-200000", "rel-personal-1")],
     });
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && init?.method === "GET") {
-        return olderExtra.promise;
+      if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1" && init?.method === "GET") {
+        return olderDetail.promise;
       }
-      if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && init?.method === "GET") {
-        return activeExtra.promise;
+      if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua" && init?.method === "GET") {
+        return activeDetail.promise;
       }
       return baseFetch(input, init);
     });
@@ -1904,7 +1905,7 @@ describe("Turnover ledger page", () => {
     });
 
     await act(async () => {
-      olderExtra.reject(new Error("A 的过期请求失败"));
+      olderDetail.reject(new Error("A 的过期请求失败"));
       await Promise.resolve();
     });
     expect(within(drawer).getByText("正在加载关系详情和补充信息。")).toBeInTheDocument();
@@ -1912,17 +1913,22 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getByLabelText("备注")).toBeDisabled();
 
     await act(async () => {
-      activeExtra.resolve(Response.json({
-        relation_id: "rel-jiaxiaohua",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.060000",
-        interest_paid_amount: "10.00",
-        interest_paid_date: "2026-05-05",
-        interest_payment_method: "转账",
-        note: "B 的有效补充信息",
-        updated_at: "2026-05-12T10:00:00+08:00",
+      activeDetail.resolve(Response.json({
+        relation: groupedPayload("personal").groups[1].summary_row,
+        bank_rows: [],
+        audit_history: [],
+        extra: {
+          relation_id: "rel-jiaxiaohua",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "10.00",
+          interest_paid_date: "2026-05-05",
+          interest_payment_method: "转账",
+          note: "B 的有效补充信息",
+          updated_at: "2026-05-12T10:00:00+08:00",
+        },
       }));
-      await activeExtra.promise;
+      await activeDetail.promise;
     });
     await waitFor(() => expect(within(drawer).getByLabelText("备注")).toHaveValue("B 的有效补充信息"));
     expect(within(drawer).queryByText("正在加载关系详情和补充信息。")).not.toBeInTheDocument();
@@ -1930,14 +1936,14 @@ describe("Turnover ledger page", () => {
 
   test("aborts and invalidates a pending editor request when the drawer closes", async () => {
     const user = userEvent.setup();
-    const pendingExtra = deferredResponse();
+    const pendingDetail = deferredResponse();
     const baseFetch = installTurnoverLedgerFetch();
     let pendingSignal: AbortSignal | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && init?.method === "GET") {
+      if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua" && init?.method === "GET") {
         pendingSignal = init.signal ?? null;
-        return pendingExtra.promise;
+        return pendingDetail.promise;
       }
       return baseFetch(input, init);
     });
@@ -1955,8 +1961,13 @@ describe("Turnover ledger page", () => {
     expect(pendingSignal?.aborted).toBe(true);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑流水补充信息" })).not.toBeInTheDocument());
     await act(async () => {
-      pendingExtra.resolve(Response.json({ relation_id: "rel-jiaxiaohua", note: "不应重新出现" }));
-      await pendingExtra.promise;
+      pendingDetail.resolve(Response.json({
+        relation: groupedPayload("personal").groups[1].summary_row,
+        bank_rows: [],
+        audit_history: [],
+        extra: { relation_id: "rel-jiaxiaohua", note: "不应重新出现" },
+      }));
+      await pendingDetail.promise;
     });
     expect(screen.queryByRole("dialog", { name: "编辑流水补充信息" })).not.toBeInTheDocument();
   });

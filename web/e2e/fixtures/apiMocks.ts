@@ -9681,26 +9681,24 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             summary: "浏览器 e2e 归还借款",
           },
         ],
+        extra: {
+          relation_id: "turnover_rel_e2e_expense",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "10.00",
+          interest_paid_date: "2026-05-05",
+          interest_payment_method: "转账",
+          note: "浏览器 e2e 补充信息",
+          updated_at: "2026-06-17T09:00:00+08:00",
+        },
         audit_history: [],
       });
     }
 
-    if (path === "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra") {
-      if (request.method() === "PUT") {
-        return json(route, {
-          relation_id: "turnover_rel_e2e_expense",
-          extra: parseJsonBody(request.postData()),
-        });
-      }
+    if (path === "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra" && request.method() === "PUT") {
       return json(route, {
         relation_id: "turnover_rel_e2e_expense",
-        interest_rate_type: "annual",
-        interest_rate_value: "0.060000",
-        interest_paid_amount: "10.00",
-        interest_paid_date: "2026-05-05",
-        interest_payment_method: "转账",
-        note: "浏览器 e2e 补充信息",
-        updated_at: "2026-06-17T09:00:00+08:00",
+        extra: parseJsonBody(request.postData()),
       });
     }
 

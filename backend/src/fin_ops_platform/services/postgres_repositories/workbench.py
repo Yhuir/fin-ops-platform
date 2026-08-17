@@ -439,6 +439,21 @@ class PostgresWorkbenchRepository:
             return {}
         return {"extras": {str(row.get("key")): row_payload(row, "extra_payload", "raw_payload") for row in rows}}
 
+    def load_turnover_ledger_extra_for_update(self, ledger_key: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select ledger_key as key, extra_payload, raw_payload
+            from app.turnover_ledger_extras
+            where ledger_key = %s
+            for update
+            """,
+            (str(ledger_key or "").strip(),),
+        )
+        if not row:
+            return None
+        payload = row_payload(row, "extra_payload", "raw_payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
     def save_turnover_ledger_extras(self, snapshot: dict[str, Any]) -> None:
         extras = snapshot.get("extras") if isinstance(snapshot, dict) else None
         for ledger_key, payload in iter_mapping(extras):

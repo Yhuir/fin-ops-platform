@@ -53,6 +53,16 @@ class TurnoverLedgerExtraRepositoryAdapter:
         repository = self._repository_factory(transaction)
         repository.save_turnover_ledger_extras({"extras": {relation_id: dict(extra)}})
 
+    def current_updated_at(self, relation_id: str, *, transaction: Any) -> str:
+        repository = self._repository_factory(transaction)
+        loader = getattr(repository, "load_turnover_ledger_extra_for_update", None)
+        if not callable(loader):
+            raise RuntimeError(
+                "turnover extra repository must expose load_turnover_ledger_extra_for_update."
+            )
+        extra = loader(str(relation_id or "").strip())
+        return str(extra.get("updated_at") or "") if isinstance(extra, dict) else ""
+
 
 class TurnoverLedgerTagSelectionSettingsAdapter:
     def __init__(
@@ -628,8 +638,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
         extra_service: Any,
-        row_provider: Callable[..., dict[str, object] | None],
-        current_extra_reader: Callable[[str], dict[str, object]],
         postgres_extra_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
@@ -639,8 +647,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
         self._extra_service = extra_service
-        self._row_provider = row_provider
-        self._current_extra_reader = current_extra_reader
         self._postgres_extra_repository_factory = postgres_extra_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
@@ -672,7 +678,7 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
             stale_precondition_port=TurnoverLedgerRelationExtraStalePreconditionPort(
-                current_extra_reader=self._current_extra_reader
+                extra_repository=extra_repository
             ),
             idempotency_store=idempotency_store,
         )
@@ -681,7 +687,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             extra_normalizer=TurnoverLedgerExtraNormalizerAdapter(
                 extra_service=self._extra_service,
             ),
-            row_provider=self._row_provider,
         )
 
 
@@ -996,11 +1001,10 @@ class TurnoverLedgerBankRowSelectionPort:
                 )
 
 class TurnoverLedgerRelationExtraStalePreconditionPort:
-    def __init__(self, *, current_extra_reader: Callable[[str], dict[str, object]]) -> None:
-        self._current_extra_reader = current_extra_reader
+    def __init__(self, *, extra_repository: Any) -> None:
+        self._extra_repository = extra_repository
 
     def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
-        _ = transaction
         for raw_key, expected_value in dict(expected_versions or {}).items():
             key = str(raw_key)
             if not key.startswith("turnover_relation_extra:"):
@@ -1008,11 +1012,10 @@ class TurnoverLedgerRelationExtraStalePreconditionPort:
             relation_id = key.removeprefix("turnover_relation_extra:").strip()
             if not relation_id:
                 continue
-            current_payload = self._current_extra_reader(relation_id)
-            current_extra = current_payload.get("extra") if isinstance(current_payload, dict) else None
-            current_updated_at = ""
-            if isinstance(current_extra, dict):
-                current_updated_at = str(current_extra.get("updated_at") or "")
+            current_updated_at = self._extra_repository.current_updated_at(
+                relation_id,
+                transaction=transaction,
+            )
             if str(expected_value or "") != current_updated_at:
                 raise TurnoverLedgerWritePreconditionError(
                     error_code="turnover_relation_extra_conflict",
@@ -1129,22 +1132,15 @@ class TurnoverLedgerBankRowTagsRequestBoundaryFacade:
         return payload
 
 
-class TurnoverLedgerRelationExtraRequestBoundaryError(ValueError):
-    def __init__(self, *, status_code: int, error_code: str, message: str) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.error_code = error_code
-
-
 class TurnoverLedgerRelationExtraRequestBoundaryFacade:
     def __init__(
         self,
         *,
         facade_provider: Callable[[], Any],
-        current_extra_reader: Callable[[str], dict[str, object]],
+        relation_detail_provider: Callable[[str], dict[str, object]],
     ) -> None:
         self._facade_provider = facade_provider
-        self._current_extra_reader = current_extra_reader
+        self._relation_detail_provider = relation_detail_provider
 
     def update_relation_extra_from_request(
         self,
@@ -1160,20 +1156,7 @@ class TurnoverLedgerRelationExtraRequestBoundaryFacade:
         idempotency_key = str(
             normalized_payload.get("idempotency_key") or normalized_payload.get("idempotencyKey") or ""
         ).strip() or None
-        if isinstance(expected_versions, dict):
-            expected_key = f"turnover_relation_extra:{relation_id}"
-            if expected_key in expected_versions:
-                current_payload = self._current_extra_reader(relation_id)
-                current_extra = current_payload.get("extra") if isinstance(current_payload, dict) else None
-                current_updated_at = ""
-                if isinstance(current_extra, dict):
-                    current_updated_at = str(current_extra.get("updated_at") or "")
-                if str(expected_versions.get(expected_key) or "") != current_updated_at:
-                    raise TurnoverLedgerRelationExtraRequestBoundaryError(
-                        status_code=409,
-                        error_code="turnover_relation_extra_conflict",
-                        message="往来款补充信息已更新，请刷新后重试。",
-                    )
+        self._relation_detail_provider(relation_id)
         facade = self._facade_provider()
         if facade is None:
             raise RuntimeError("turnover relation extra write facade is unavailable.")
@@ -2096,6 +2079,16 @@ class TurnoverLedgerLocalExtraRepository:
                 "extras": extras,
             }
         )
+
+    def current_updated_at(self, relation_id: str, *, transaction: Any) -> str:
+        _ = transaction
+        normalized_relation_id = str(relation_id or "").strip()
+        for extra in list(dict(self._extras_snapshot_provider() or {}).get("extras") or []):
+            if not isinstance(extra, dict):
+                continue
+            if str(extra.get("relation_id") or "").strip() == normalized_relation_id:
+                return str(extra.get("updated_at") or "")
+        return ""
 
 
 class TurnoverLedgerLocalRelationConnection:

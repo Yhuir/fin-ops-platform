@@ -24,7 +24,6 @@ import {
   fetchTurnoverLedgerGrouped,
   fetchTurnoverLedgerTagSelection,
   fetchTurnoverRelationDetail,
-  fetchTurnoverRelationExtra,
   saveTurnoverLedgerTagSelection,
   saveTurnoverRelationExtra,
   withdrawTurnoverClosure,
@@ -724,16 +723,13 @@ export default function TurnoverLedgerPage() {
     setExtraDirty(false);
     setExtraForm(extraFromRow(normalizedRow));
     setDetailLoading(true);
-    Promise.all([
-      fetchTurnoverRelationDetail(normalizedRow.relationId, editorContext.controller.signal),
-      fetchTurnoverRelationExtra(normalizedRow.relationId, editorContext.controller.signal),
-    ])
-      .then(([nextDetail, nextExtra]) => {
+    fetchTurnoverRelationDetail(normalizedRow.relationId, editorContext.controller.signal)
+      .then((nextDetail) => {
         if (activeExtraEditorRef.current !== editorContext || editorContext.controller.signal.aborted) {
           return;
         }
         setDetail(nextDetail);
-        setExtraForm(nextExtra);
+        setExtraForm(nextDetail.extra);
       })
       .catch((caught: unknown) => {
         if (
@@ -844,10 +840,12 @@ export default function TurnoverLedgerPage() {
       || savingExtra
       || mutatingRelation
       || editorContext.relationId !== selectedRow.relationId
+      || !detail
+      || editorContext.relationId !== detail.relation.relationId
     ) {
       return;
     }
-    const targetRow = selectedRow;
+    const targetRelation = detail.relation;
     let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: kind === "confirm" ? "正在确认往来归并..." : "正在撤销往来归并...",
@@ -855,8 +853,8 @@ export default function TurnoverLedgerPage() {
         setMutatingRelation(true);
         try {
           const mutationResult = kind === "confirm"
-            ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
-            : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
+            ? await confirmTurnoverRelation({ bankRowIds: targetRelation.bankRowIds })
+            : await withdrawTurnoverRelation({ relationId: targetRelation.relationId });
           setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,

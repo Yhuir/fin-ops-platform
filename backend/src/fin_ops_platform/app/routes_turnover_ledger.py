@@ -17,7 +17,6 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationValidationError,
 )
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
-    TurnoverLedgerRelationExtraRequestBoundaryError,
     TurnoverLedgerWithdrawRequestBoundaryError,
     TurnoverLedgerWritePreconditionError,
 )
@@ -334,11 +333,6 @@ class TurnoverLedgerApiRoutes:
             )
         except KeyError:
             return self._unknown_relation_response()
-        except TurnoverLedgerRelationExtraRequestBoundaryError as exc:
-            return self._respond(
-                exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
-            )
         except TurnoverLedgerWritePreconditionError as exc:
             return self._respond(
                 exc.status_code,
@@ -802,10 +796,12 @@ class TurnoverLedgerApiRoutes:
         return self._query_service.get_relation_detail(relation_id)
 
     def get_relation_extra(self, relation_id: str) -> dict[str, object]:
-        self.get_relation(relation_id)
-        extra = self._extra_service.get(relation_id)
-        if extra is None:
-            extra = InMemoryTurnoverLedgerExtraService._default_extra(str(relation_id or "").strip())
+        detail = self.get_relation(relation_id)
+        extra = detail.get("extra")
+        if not isinstance(extra, dict) or not extra:
+            extra = InMemoryTurnoverLedgerExtraService._default_extra(
+                str(relation_id or "").strip()
+            )
         return {"extra": extra}
 
     def update_relation_extra(

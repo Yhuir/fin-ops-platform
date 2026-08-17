@@ -284,7 +284,6 @@ export type SaveTurnoverLedgerExtraRequest = Partial<
 
 export type SaveTurnoverLedgerExtraResponse = {
   extra: TurnoverLedgerExtra;
-  row: TurnoverLedgerGroupedRow | null;
 };
 
 export type TurnoverLedgerExportRow = {
@@ -346,6 +345,7 @@ export type TurnoverBankRow = {
 export type TurnoverRelationDetail = {
   relation: TurnoverLedgerRow;
   bankRows: TurnoverBankRow[];
+  extra: TurnoverLedgerExtra;
   auditHistory: Array<Record<string, unknown>>;
 };
 

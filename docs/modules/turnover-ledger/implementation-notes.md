@@ -1,5 +1,13 @@
 # 外部往来款管理 实施记录
 
+## 2026-08-18 - 流水补充信息抽屉详情链修复
+
+- 真实原因：列表可展示的 suggested relation 只在列表计算中动态生成，详情接口却只查已持久化 relation，导致部分编辑按钮打开后 404；另一些 canonical bank rows 含日期对象，详情直接透传后 JSON 序列化 500。前端同时请求 detail 与 extra，任一失败都会让整个抽屉报错。
+- 修复边界：relation detail 在已持久化关系不存在时从同一 canonical snapshot 动态重建，并输出明确的 JSON-safe relation/bank row DTO；extra 合并到同一详情响应。日期统一按上海业务时区格式化，本金 flow row 复用 FIFO lot 的实时/结清借款天数。
+- 旧代码删除：删除前端独立 extra GET、extra PUT 后 `row_provider` 页面回读、request boundary 事务外 `current_extra_reader` 版本判断及专用错误类型。stale precondition 改由 UoW 同一事务内的 extra repository `FOR UPDATE` 读取。
+- 性能与隔离：打开抽屉由两次 canonical GET 降为一次；保存响应不再重建页面行。未新增表、migration、read model、worker、queue、cache、跨页 fan-out 或数据库备份。
+- 测试：后端覆盖动态 relation、JSON 序列化、flow 借款天数和事务内版本读取；前端组件/Browser 覆盖单次 detail GET、日期展示、请求中止、A→B 乱序、OCC 冲突、保存与一次当前页 reload。
+
 ## 2026-08-14 - 闭环选择版本双读污染清理
 
 - 真实原因：外部往来页面 GET 已从 PostgreSQL canonical facts 直读，但确认闭环的 stale precondition 仍走旧 `Application._turnover_bank_transaction_rows_by_ids(...)`，先读取 ImportService 全量 DTO，再用独立 `turnover_bank_row_selection_proofs(...)` 拼接银行/分类证据。GET 与 POST 的字段、分类规则版本和往来语义 owner 不同，`_current_rows` 无法稳定重建同一选择版本，因此未发生真实数据变更也会误报 409。

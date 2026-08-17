@@ -1,6 +1,6 @@
 # 外部往来款管理测试矩阵
 
-日期：2026-08-14
+日期：2026-08-18
 
 ## 影响面
 
@@ -42,8 +42,11 @@
 - 列表固定请求 `page_size=50`；121 组 fixture 必须依次请求 `page=1/2/3`，第 51、101、121 组可见且旧页行被替换。
 - GET 失败可由普通刷新恢复；写成功后的 reload 失败不伪装写失败。
 - relation A 的 detail/extra 请求在 relation B 打开后即使忽略 abort 并晚返回，也不能改写 B 的 form/detail/error/loading。
+- 抽屉打开只能发送一次 relation detail GET；详情必须内含 extra，动态 suggested relation 不得 404，bank row DTO 必须可 JSON 序列化；不得恢复独立 extra GET。
+- 流水日期不得显示 `+8`/`+08:00` 等时区后缀；本金 flow row 的借款天数必须随业务日期更新，已结清 lot 固定到结清日，结算 flow row 为 `null`。
 - extra drawer 关闭、页面停用或卸载后，pending editor GET 必须 abort，后续回调不能恢复旧抽屉。
 - extra 保存只允许 active context、selected row、form 的 relation id 完全一致；PUT 必须携带 `turnover_relation_extra:<id>` 的 `expected_versions`。
+- extra stale precondition 必须在写事务内通过 repository 锁定读取当前 `updated_at`；PUT 成功只返回 extra，不通过页面 query owner 二次读取 row。
 - initial GET 和保存/关系 mutation 期间输入与相关动作 disabled；409 保留用户 form 和 dirty，不 reload、不显示成功。
 - runtime registry、RabbitMQ dispatch、deploy env、App Status 和 manifest 均无 Turnover worker/read model/event。
 
@@ -58,7 +61,6 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_turnover_workbench_integration \
   tests.test_audit_page_canonical_data_tool \
   tests.test_runtime_worker_registry \
-  tests.test_read_model_manifest \
   tests.test_platform_runtime_boundary_guards
 
 PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_postgres_integration

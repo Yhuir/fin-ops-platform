@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from hashlib import sha1
+import json
 import unittest
 
 from fin_ops_platform.domain.enums import TransactionDirection
@@ -1233,6 +1234,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
             [(row["flow_direction"], row["flow_amount"]) for row in flow_rows],
             [("income", "200000.00"), ("income", "100000.00"), ("expense", "300000.00")],
         )
+        self.assertEqual([row["loan_days"] for row in flow_rows], [28, 28, None])
         repayment_flow_rows = [
             row
             for row in flow_rows
@@ -1292,6 +1294,23 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(second_lot["repayment_date"], "2026-03-04")
         self.assertEqual(second_lot["loan_days"], 60)
         self.assertEqual(second_lot["accrued_interest"], "1972.60")
+
+        self.assertEqual([row["loan_days"] for row in group["flow_rows"]], [28, 60, None])
+
+    def test_relation_detail_rebuilds_dynamic_relation_and_returns_json_safe_rows(self) -> None:
+        ledger_service, _relation_service, _category_service = self._service()
+        relation_id = self._relation_id("txn-borrow-in", "txn-borrow-repaid")
+
+        detail = ledger_service.get_relation_detail(relation_id)
+
+        self.assertEqual(detail["relation"]["relation_id"], relation_id)
+        self.assertEqual(
+            detail["relation"]["bank_row_ids"],
+            ["txn-borrow-in", "txn-borrow-repaid"],
+        )
+        self.assertTrue(all(isinstance(row["trade_time"], str) for row in detail["bank_rows"]))
+        self.assertIn("extra", detail)
+        json.dumps(detail)
 
     def test_grouped_ledger_summary_uses_actual_flow_outflow_when_repayment_exceeds_principal(self) -> None:
         ledger_service = self._lot_grouped_service(

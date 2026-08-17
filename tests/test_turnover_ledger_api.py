@@ -231,7 +231,6 @@ class _RelationExtraWriteFacadeRecorder:
                 "note": payload.get("note"),
                 "updated_by": actor_id,
             },
-            "row": {"relation_id": relation_id, "note": payload.get("note")},
         }
 
 
@@ -2895,20 +2894,17 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             restored_payload = json.loads(restored_response.body)
             reloaded_app = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
-            reloaded_app._turnover_ledger_service._category_provider = None
-            reloaded_response = reloaded_app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
-            reloaded_payload = json.loads(reloaded_response.body)
+            reloaded_payload = reloaded_app._turnover_ledger_extra_service.get(relation_id)
 
         self.assertEqual(get_response.status_code, 200)
         self.assertEqual(json.loads(get_response.body)["extra"]["interest_rate_type"], "none")
         self.assertEqual(put_response.status_code, 200)
         self.assertEqual(put_payload["extra"]["interest_rate_value"], "0.060000")
         self.assertEqual(put_payload["extra"]["note"], "页面维护备注")
-        self.assertEqual(put_payload["row"]["relation_id"], relation_id)
+        self.assertNotIn("row", put_payload)
         self.assertEqual(restored_response.status_code, 200)
         self.assertEqual(restored_payload["extra"]["interest_paid_amount"], "120.50")
-        self.assertEqual(reloaded_response.status_code, 200)
-        self.assertEqual(reloaded_payload["extra"]["note"], "页面维护备注")
+        self.assertEqual(reloaded_payload["note"], "页面维护备注")
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.enqueued, [])
 
@@ -3118,7 +3114,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("facade = self._relation_extra_request_boundary_provider()", source)
         self.assertIn("result = facade.update_relation_extra_from_request(", source)
-        self.assertIn("except TurnoverLedgerRelationExtraRequestBoundaryError as exc:", source)
+        self.assertNotIn("TurnoverLedgerRelationExtraRequestBoundaryError", source)
         self.assertNotIn('expected_versions = payload.get("expected_versions")', source)
         self.assertNotIn(
             'idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None',
@@ -3128,17 +3124,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("self._turnover_ledger_read_facade.get_relation_extra(relation_id)", source)
         self.assertNotIn('"turnover_relation_extra_conflict"', source)
 
-    def test_relation_extra_request_boundary_facade_wires_current_extra_reader_and_write_facade(self) -> None:
+    def test_relation_extra_request_boundary_facade_wires_relation_detail_provider_and_write_facade(self) -> None:
         source = inspect.getsource(Application._turnover_ledger_relation_extra_request_boundary_facade)
 
         self.assertIn("TurnoverLedgerRelationExtraRequestBoundaryFacade(", source)
         self.assertIn("facade_provider=self._turnover_ledger_relation_extra_write_facade", source)
-        self.assertIn("current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra", source)
+        self.assertIn("relation_detail_provider=self._turnover_ledger_api_routes.get_relation", source)
+        self.assertNotIn("current_extra_reader", source)
 
     def test_relation_extra_request_boundary_fails_fast_without_write_facade(self) -> None:
         facade = TurnoverLedgerRelationExtraRequestBoundaryFacade(
             facade_provider=lambda: None,
-            current_extra_reader=lambda _relation_id: {"extra": {}},
+            relation_detail_provider=lambda relation_id: {"relation": {"relation_id": relation_id}},
         )
 
         with self.assertRaisesRegex(RuntimeError, "turnover relation extra write facade is unavailable"):
@@ -3205,13 +3202,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "target no clear")
-        self.assertEqual(payload["row"]["relation_id"], relation_id)
+        self.assertNotIn("row", payload)
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_relation_extra_facade_override_skips_legacy_best_effort_side_effects(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
             facade = _RelationExtraWriteFacadeRecorder()
             app._turnover_ledger_relation_extra_write_facade_override = facade  # type: ignore[attr-defined]
 
@@ -3223,20 +3223,20 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "PUT",
-                "/api/turnover-ledger/relations/turnover_rel_facade/extra",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
                 body=json.dumps({"note": "facade path"}),
             )
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "facade path")
-        self.assertEqual(payload["row"], {"relation_id": "turnover_rel_facade", "note": "facade path"})
+        self.assertNotIn("row", payload)
         self.assertNotIn("turnover_ledger_invalidated", payload)
         self.assertEqual(
             facade.calls,
             [
                 {
-                    "relation_id": "turnover_rel_facade",
+                    "relation_id": relation_id,
                     "payload": {"note": "facade path"},
                     "actor_id": "test_finops_user",
                     "tenant_id": "default",
@@ -3249,12 +3249,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_relation_extra_handler_override_passes_expected_versions_and_idempotency_key(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_rows(app, transaction_ids)
+            relation_id = json.loads(app.handle_request("GET", "/api/turnover-ledger").body)["rows"][0]["relation_id"]
             facade = _RelationExtraWriteFacadeRecorder()
             app._turnover_ledger_relation_extra_write_facade_override = facade  # type: ignore[attr-defined]
 
             response = app.handle_request(
                 "PUT",
-                "/api/turnover-ledger/relations/turnover_rel_facade/extra",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
                 body=json.dumps(
                     {
                         "note": "handler boundary",
@@ -3272,7 +3275,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             facade.calls,
             [
                 {
-                    "relation_id": "turnover_rel_facade",
+                    "relation_id": relation_id,
                     "payload": {
                         "note": "handler boundary",
                         "expected_versions": {"custom_scope": "v1"},

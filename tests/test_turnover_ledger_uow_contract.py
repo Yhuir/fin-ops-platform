@@ -98,11 +98,17 @@ class _RecordingRelationRepository:
 
 
 class _RecordingExtraRepository:
-    def __init__(self) -> None:
+    def __init__(self, *, updated_at: str = "") -> None:
         self.extras: list[dict[str, object]] = []
+        self.updated_at = updated_at
+        self.current_reads: list[dict[str, object]] = []
 
     def save_extra(self, extra: dict[str, object], *, transaction: object) -> None:
         self.extras.append({"extra": dict(extra), "transaction": transaction})
+
+    def current_updated_at(self, relation_id: str, *, transaction: object) -> str:
+        self.current_reads.append({"relation_id": relation_id, "transaction": transaction})
+        return self.updated_at
 
 
 class _RecordingSettingsPort:
@@ -349,21 +355,28 @@ class _RecordingIdempotencyStore:
 
 
 class _RecordingTurnoverExtraSnapshotRepository:
-    def __init__(self) -> None:
+    def __init__(self, *, current_extra: dict[str, object] | None = None) -> None:
         self.saved_snapshots: list[dict[str, object]] = []
+        self.current_extra = dict(current_extra or {})
+        self.loaded_for_update: list[str] = []
 
     def save_turnover_ledger_extras(self, snapshot: dict[str, object]) -> None:
         self.saved_snapshots.append(dict(snapshot))
 
+    def load_turnover_ledger_extra_for_update(self, relation_id: str) -> dict[str, object] | None:
+        self.loaded_for_update.append(relation_id)
+        return dict(self.current_extra) if self.current_extra else None
+
 
 class _RecordingRepositoryFactory:
-    def __init__(self) -> None:
+    def __init__(self, *, current_extra: dict[str, object] | None = None) -> None:
         self.transactions: list[object] = []
         self.repositories: list[_RecordingTurnoverExtraSnapshotRepository] = []
+        self.current_extra = dict(current_extra or {})
 
     def __call__(self, transaction: object) -> _RecordingTurnoverExtraSnapshotRepository:
         self.transactions.append(transaction)
-        repository = _RecordingTurnoverExtraSnapshotRepository()
+        repository = _RecordingTurnoverExtraSnapshotRepository(current_extra=self.current_extra)
         self.repositories.append(repository)
         return repository
 
@@ -694,19 +707,6 @@ def _tag_selection_settings_payload() -> dict[str, object]:
             "selected_tag_codes": ["external_rule_borrow_out", "external_rule_repaid"],
         },
     }
-
-
-class _RecordingRelationExtraRowProvider:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def __call__(self, *, relation_id: str, extra: dict[str, object]) -> dict[str, object]:
-        self.calls.append({"relation_id": relation_id, "extra": dict(extra)})
-        return {
-            "relation_id": relation_id,
-            "note": extra.get("note"),
-            "interest_rate_type": extra.get("interest_rate_type", "none"),
-        }
 
 
 class _RecordingRelationExtraNormalizer:
@@ -3039,10 +3039,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             replace_snapshot=lambda _snapshot: None,
             emit_persistence_warning=lambda **_kwargs: None,
             extra_service=SimpleNamespace(),
-            row_provider=lambda **_kwargs: {"relation_id": "turnover_rel_1"},
-            current_extra_reader=lambda _relation_id: {
-                "extra": {"relation_id": "turnover_rel_1", "updated_at": "2026-06-03T00:00:00+00:00"}
-            },
             postgres_extra_repository_factory=lambda _transaction: _RecordingExtraRepository(),
             postgres_idempotency_store_factory=lambda _connection: InMemoryWorkbenchIdempotencyRepository(),
             local_idempotency_store_provider=InMemoryWorkbenchIdempotencyRepository,
@@ -3072,35 +3068,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
 
-    def test_relation_extra_write_facade_uses_row_provider_without_http_coupling(self) -> None:
+    def test_relation_extra_write_facade_returns_only_saved_extra_without_query_readback(self) -> None:
         uow, _deps = self._build_uow()
-        row_provider = _RecordingRelationExtraRowProvider()
-        facade = self._write_facade_class()(uow=uow, row_provider=row_provider)
+        facade = self._write_facade_class()(uow=uow)
 
         result = facade.update_relation_extra(
             relation_id="turnover_rel_1",
-            payload={"note": "row provider note"},
+            payload={"note": "single write result"},
             actor_id="finance-user",
             tenant_id="default",
             scope_keys=["all"],
         )
 
-        self.assertEqual(
-            row_provider.calls,
-            [
-                {
-                    "relation_id": "turnover_rel_1",
-                    "extra": {
-                        "note": "row provider note",
-                        "relation_id": "turnover_rel_1",
-                        "updated_by": "finance-user",
-                    },
-                }
-            ],
-        )
-        self.assertEqual(result["extra"]["note"], "row provider note")
-        self.assertEqual(result["row"]["relation_id"], "turnover_rel_1")
-        self.assertEqual(result["row"]["note"], "row provider note")
+        self.assertEqual(result["extra"]["note"], "single write result")
+        self.assertNotIn("row", result)
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
 
@@ -3133,26 +3114,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertNotIn("unknown", saved_extra)
         self.assertEqual(result["extra"], saved_extra)
 
-    def test_relation_extra_write_facade_row_provider_receives_normalized_extra(self) -> None:
+    def test_relation_extra_write_facade_removed_row_provider_constructor_contract(self) -> None:
         uow, _deps = self._build_uow()
-        normalizer = _RecordingRelationExtraNormalizer()
-        row_provider = _RecordingRelationExtraRowProvider()
-        facade = self._write_facade_class()(
-            uow=uow,
-            extra_normalizer=normalizer,
-            row_provider=row_provider,
-        )
 
-        result = facade.update_relation_extra(
-            relation_id="turnover_rel_1",
-            payload={"note": "raw note"},
-            actor_id="finance-user",
-            tenant_id="default",
-            scope_keys=["all"],
-        )
-
-        self.assertEqual(row_provider.calls[0]["extra"]["note"], "normalized:raw note")
-        self.assertEqual(result["row"]["note"], "normalized:raw note")
+        with self.assertRaises(TypeError):
+            self._write_facade_class()(uow=uow, row_provider=lambda **_kwargs: {})
 
     def test_relation_extra_write_facade_normalization_error_prevents_save_and_outbox(self) -> None:
         uow, deps = self._build_uow()
@@ -3188,6 +3154,21 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             factory.repositories[0].saved_snapshots,
             [{"extras": {"turnover_rel_1": {"relation_id": "turnover_rel_1", "note": "adapter note"}}}],
         )
+
+    def test_relation_extra_repository_adapter_reads_current_version_in_supplied_transaction(self) -> None:
+        module = self._write_adapters_module()
+        adapter_class = getattr(module, "TurnoverLedgerExtraRepositoryAdapter")
+        factory = _RecordingRepositoryFactory(
+            current_extra={"relation_id": "turnover_rel_1", "updated_at": "2026-06-03T00:00:00+00:00"}
+        )
+        transaction = _RecordingTransaction()
+        adapter = adapter_class(repository_factory=factory)
+
+        current_updated_at = adapter.current_updated_at("turnover_rel_1", transaction=transaction)
+
+        self.assertEqual(current_updated_at, "2026-06-03T00:00:00+00:00")
+        self.assertEqual(factory.transactions, [transaction])
+        self.assertEqual(factory.repositories[0].loaded_for_update, ["turnover_rel_1"])
 
     def test_relation_extra_repository_adapter_rejects_application_god_object(self) -> None:
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerExtraRepositoryAdapter")

@@ -33,13 +33,11 @@ class TurnoverLedgerWriteFacade:
         self,
         *,
         uow: Any,
-        row_provider: Callable[..., dict[str, object]] | None = None,
         extra_normalizer: Callable[..., dict[str, object]] | None = None,
         app_settings_service: Any | None = None,
         tag_selection_normalizer: Callable[..., dict[str, object]] | None = None,
     ) -> None:
         self._uow = uow
-        self._row_provider = row_provider
         self._extra_normalizer = extra_normalizer or self._default_extra_normalizer
         self._tag_selection_normalizer = tag_selection_normalizer
         if self._tag_selection_normalizer is None and app_settings_service is not None:
@@ -94,10 +92,7 @@ class TurnoverLedgerWriteFacade:
 
         def handler(context: Any) -> dict[str, object]:
             context.extra_repository.save_extra(extra, transaction=context.transaction)
-            result: dict[str, object] = {"extra": dict(extra)}
-            if self._row_provider is not None:
-                result["row"] = self._row_provider(relation_id=relation_id, extra=dict(extra))
-            return result
+            return {"extra": dict(extra)}
 
         return self._uow.run(command, handler)
 

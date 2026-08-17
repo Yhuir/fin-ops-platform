@@ -304,6 +304,7 @@ type ApiTurnoverRelationDetail = {
   relation?: ApiTurnoverLedgerRow;
   row?: ApiTurnoverLedgerRow;
   bank_rows?: ApiTurnoverBankRow[];
+  extra?: ApiTurnoverLedgerExtra;
   audit_history?: Array<Record<string, unknown>>;
 };
 
@@ -936,20 +937,9 @@ export async function fetchTurnoverRelationDetail(
   return {
     relation: mapRow(payload.row ?? payload.relation ?? { relation_id: relationId }),
     bankRows: (payload.bank_rows ?? []).map(mapBankRow),
+    extra: mapExtra(payload.extra ?? { relation_id: relationId }, relationId),
     auditHistory: payload.audit_history ?? [],
   };
-}
-
-export async function fetchTurnoverRelationExtra(
-  relationId: string,
-  signal?: AbortSignal,
-): Promise<TurnoverLedgerExtra> {
-  const payload = await requestJson<ApiTurnoverLedgerExtra | { extra?: ApiTurnoverLedgerExtra }>(
-    `/api/turnover-ledger/relations/${encodeURIComponent(relationId)}/extra`,
-    { method: "GET", signal },
-  );
-  const extra = (payload as { extra?: ApiTurnoverLedgerExtra }).extra ?? (payload as ApiTurnoverLedgerExtra);
-  return mapExtra(extra, relationId);
 }
 
 export async function saveTurnoverRelationExtra(
@@ -992,7 +982,6 @@ export async function saveTurnoverRelationExtra(
   );
   return {
     extra: mapExtra(payload.extra ?? { relation_id: relationId }, relationId),
-    row: payload.row ? mapGroupedRow(payload.row) : null,
   };
 }
 
