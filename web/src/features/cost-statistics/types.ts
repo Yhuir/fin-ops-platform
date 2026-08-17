@@ -35,6 +35,7 @@ export type CostExplorerEntryRow = {
   expenseContent: string;
   amount: string;
   counterpartyName: string;
+  oaApplicant: string;
   paymentAccountLabel: string;
   remark: string;
   bankTagCode: string;

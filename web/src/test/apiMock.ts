@@ -3406,6 +3406,7 @@ type CostProjectRow = {
   expense_content: string;
   amount: string;
   counterparty_name: string;
+  oa_applicant?: string;
   payment_account_label: string;
   bank_tag_code?: string;
   bank_tag_label?: string;
@@ -3461,6 +3462,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "PLC 模块采购",
         amount: "10,000.00",
         counterparty_name: "昆明设备供应商",
+        oa_applicant: "张三、李四",
         payment_account_label: "工商银行 账户 0001",
       },
       {
@@ -3471,6 +3473,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "PLC 模块采购",
         amount: "2,500.00",
         counterparty_name: "昆明设备供应商",
+        oa_applicant: "王五",
         payment_account_label: "工商银行 账户 0001",
       },
       {
@@ -3481,6 +3484,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "项目现场往返交通",
         amount: "860.00",
         counterparty_name: "云南航空",
+        oa_applicant: "赵六",
         payment_account_label: "招商银行 账户 2201",
       },
     ],
@@ -3493,6 +3497,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "现场调试服务",
         amount: "5,200.00",
         counterparty_name: "昆明运维服务商",
+        oa_applicant: "钱七",
         payment_account_label: "建设银行 账户 1388",
       },
     ],
@@ -3507,6 +3512,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "项目办公室租赁",
         amount: "4,800.00",
         counterparty_name: "云南冶金集团股份有限公司",
+        oa_applicant: "周八",
         payment_account_label: "平安银行 账户 8821",
       },
       {
@@ -3517,6 +3523,7 @@ const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>
         expense_content: "项目办公室租赁",
         amount: "4,800.00",
         counterparty_name: "云南冶金集团股份有限公司",
+        oa_applicant: "周八",
         payment_account_label: "平安银行 账户 8821",
       },
     ],
@@ -3586,6 +3593,7 @@ const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
       counterparty_name: "昆明设备供应商",
       payment_account_label: "工商银行 账户 0001",
       remark: "设备配件款",
+      oa_applicant: "王五",
       summary_fields: {
         交易时间: "2026-03-12 08:40:12",
         对方户名: "昆明设备供应商",
@@ -3612,6 +3620,7 @@ const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
       counterparty_name: "云南航空",
       payment_account_label: "招商银行 账户 2201",
       remark: "项目交通费",
+      oa_applicant: "赵六",
       summary_fields: {
         交易时间: "2026-03-18 17:02:09",
         对方户名: "云南航空",
@@ -3638,6 +3647,7 @@ const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
       counterparty_name: "昆明运维服务商",
       payment_account_label: "建设银行 账户 1388",
       remark: "项目调试服务费",
+      oa_applicant: "钱七",
       summary_fields: {
         交易时间: "2026-03-20 15:11:02",
         对方户名: "昆明运维服务商",
@@ -3664,6 +3674,7 @@ const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
       counterparty_name: "云南冶金集团股份有限公司",
       payment_account_label: "平安银行 账户 8821",
       remark: "办公室租赁费",
+      oa_applicant: "周八",
       summary_fields: {
         交易时间: "2026-04-02 09:15:08",
         对方户名: "云南冶金集团股份有限公司",
@@ -3690,6 +3701,7 @@ const costStatisticsEntryFixtures: Record<string, CostEntryFixture> = {
       counterparty_name: "云南冶金集团股份有限公司",
       payment_account_label: "平安银行 账户 8821",
       remark: "办公室租赁费",
+      oa_applicant: "周八",
       summary_fields: {
         交易时间: "2026-04-16 09:15:08",
         对方户名: "云南冶金集团股份有限公司",
@@ -3798,6 +3810,7 @@ function buildCostStatisticsExplorerPayload(
         expense_type: row.expense_type,
         expense_content: row.expense_content,
         amount: row.amount,
+        oa_applicant: row.oa_applicant ?? "",
         counterparty_name: row.counterparty_name,
         payment_account_label: row.payment_account_label,
         remark: costStatisticsEntryFixtures[row.transaction_id]?.transaction.remark ?? "",
@@ -4211,7 +4224,7 @@ function buildCostStatisticsAllocationPayload(allocationId: string) {
         amount: sourceRow.amount,
         counterparty_name: sourceRow.counterparty_name,
         payment_account_label: sourceRow.payment_account_label,
-        oa_applicant: transaction.oa_applicant ?? "测试申请人",
+        oa_applicant: transaction.oa_applicant ?? "",
       },
       payment_evidence: [{
         transaction_id: transactionId,
@@ -4333,6 +4346,7 @@ function buildFilteredCostTimeRows({
           expense_type: row.expense_type,
           expense_content: row.expense_content,
           amount: row.amount,
+          oa_applicant: row.oa_applicant ?? "",
           counterparty_name: row.counterparty_name,
           payment_account_label: row.payment_account_label,
         })),
@@ -4497,13 +4511,13 @@ function buildCostStatisticsExportPreviewPayload({
         "发票关联明细",
         "异常与未闭环",
       ],
-      columns: ["时间", "费用类型", "金额", "费用内容", "对方户名", "支付账户"],
+      columns: ["时间", "费用类型", "金额", "费用内容", "申请/报销人", "支付账户"],
       rows: rows.map((row) => [
         row.trade_time,
         row.expense_type,
         row.amount,
         row.expense_content,
-        row.counterparty_name,
+        row.oa_applicant ?? "",
         row.payment_account_label,
       ]),
     };
@@ -4532,13 +4546,13 @@ function buildCostStatisticsExportPreviewPayload({
         sheet_count: 1,
       },
       sheet_names: ["按费用类型统计"],
-      columns: ["时间", "项目名称", "金额", "费用内容", "对方户名", "支付账户"],
+      columns: ["时间", "项目名称", "金额", "费用内容", "申请/报销人", "支付账户"],
       rows: rows.map((row) => [
         row.trade_time,
         row.project_name,
         row.amount,
         row.expense_content,
-        row.counterparty_name,
+        row.oa_applicant ?? "",
         row.payment_account_label,
       ]),
     };

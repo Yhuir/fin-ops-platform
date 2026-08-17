@@ -39,6 +39,7 @@ type ApiCostExplorerEntryRow = {
   expense_content: string;
   amount: string;
   counterparty_name: string;
+  oa_applicant: string;
   payment_account_label: string;
   remark: string;
   bank_tag_code?: string | null;
@@ -275,6 +276,7 @@ function mapCostExplorerEntryRow(row: ApiCostExplorerEntryRow): CostExplorerEntr
     expenseContent: row.expense_content,
     amount: row.amount,
     counterpartyName: row.counterparty_name,
+    oaApplicant: row.oa_applicant,
     paymentAccountLabel: row.payment_account_label,
     remark: row.remark,
     ...bankTagFields(row),

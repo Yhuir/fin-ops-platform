@@ -47,6 +47,7 @@ HTTP GET
 - OA 成本归集在 policy 边界使用明确完成状态和 `approved_at`；进行中或无完成时间 OA 在聚合前排除，因此 `project / bank / expense_type` 的 summary、facets、rows、allocation detail 和导出使用同一口径。`time / bank_tag` 仍是纯银行事实视图，不受 OA 流程状态影响。
 - 同一 relation 只有一个付款账户时归入该账户；多个账户或账户不明时归入 `混合支付账户`。同一 OA 归集单元出现在多个 active relation 时整次响应报冲突，不能重复计入。
 - `project / bank / expense_type`、allocation detail 和导出共享同一归集结果；关联付款流水只是证据，不作为右栏归集金额。`time / bank_tag` 与 bank transaction detail 共享未拆分银行事实。
+- `project / bank / expense_type` 统一输出 `oa_applicant`：支付申请取 canonical 申请人，日常报销取 canonical 报销成员；页面和导出标题统一为“申请/报销人”。缺失值保持空字符串，禁止回退为对方户名、“—”或其他伪造内容。`expense_type` 视图同时展示项目名与申请/报销人。
 - `time` 行只映射银行交易时间、对方户名、标签、方向、金额、银行账户和流水摘要，不用 OA 占位值伪装项目或费用类型。
 - 主标签和子标签复用同一个“仅支出、混合、仅收入、零金额”排序键；同组再按总金额、笔数和标签名稳定排序。
 - 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。

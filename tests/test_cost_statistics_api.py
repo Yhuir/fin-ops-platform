@@ -91,6 +91,8 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         time_row = time_payload["rows"][0]
+        self.assertEqual(time_row["counterparty_name"], "昆明设备供应商")
+        self.assertEqual(time_row["oa_applicant"], "")
         paths = {
             "time": "/api/cost-statistics/explorer?scope=2026-03&view=time",
             "project": (
@@ -131,6 +133,8 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(page["rows"][0]["project_name"], "云南溯源科技")
+        self.assertEqual(page["rows"][0]["oa_applicant"], "刘际涛")
+        self.assertEqual(page["rows"][0]["counterparty_name"], "昆明设备供应商")
         self.assertEqual(
             page["rows"][0]["expense_type"],
             "设备货款及材料费",
@@ -145,6 +149,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail["kind"], "oa_allocation")
         self.assertEqual(detail["allocation"]["project_name"], "云南溯源科技")
         self.assertEqual(detail["allocation"]["amount"], "1250.00")
+        self.assertEqual(detail["allocation"]["oa_applicant"], "刘际涛")
         self.assertEqual(detail["payment_evidence"][0]["transaction_id"], self.bank_id)
         self.assertEqual(detail["reconciliation"]["relation_case_id"], "CASE-COST-DIRECT-001")
 
@@ -245,6 +250,7 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_daily_reimbursement_items_drive_views_detail_and_export(self) -> None:
         daily_oa = replace(
             self.oa,
+            applicant="报销成员甲",
             apply_type="日常报销",
             project_name="项目A；项目B",
             expense_type="交通费；住宿费",
@@ -279,6 +285,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(project_page["row_count"], 1)
         self.assertEqual(project_page["rows"][0]["amount"], "500.00")
+        self.assertEqual(project_page["rows"][0]["oa_applicant"], "报销成员甲")
         self.assertNotIn(
             "多项目",
             {
@@ -295,6 +302,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(detail["allocation"]["project_name"], "项目A")
         self.assertEqual(detail["allocation"]["amount"], "500.00")
+        self.assertEqual(detail["allocation"]["oa_applicant"], "报销成员甲")
         self.assertEqual(detail["payment_evidence"][0]["amount"], "1250.00")
 
         status, preview = self._json(
@@ -304,6 +312,31 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(preview["summary"]["total_amount"], "750.00")
+        applicant_column = preview["columns"].index("申请/报销人")
+        self.assertEqual(preview["rows"][0][applicant_column], "报销成员甲")
+
+    def test_missing_oa_applicant_stays_empty_without_fake_fallback(self) -> None:
+        oa_without_applicant = replace(
+            self.oa,
+            applicant="",
+            detail_fields={
+                "项目编号": "P-001",
+                "费用类型": "设备货款及材料费",
+                "费用内容": "PLC 模块采购",
+            },
+        )
+        self.app._cost_statistics_canonical_repository._oa_rows_by_ids_provider = (  # noqa: SLF001
+            lambda _row_ids: [oa_without_applicant]
+        )
+
+        status, payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_scope=all&project_name=云南溯源科技"
+            "&expense_type=设备货款及材料费"
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["rows"][0]["oa_applicant"], "")
 
     def test_next_request_observes_relation_withdrawal_without_refresh_job(self) -> None:
         before_status, before = self._json(
@@ -343,6 +376,8 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(preview["summary"]["row_count"], 1)
+        applicant_column = preview["columns"].index("申请/报销人")
+        self.assertEqual(preview["rows"][0][applicant_column], "刘际涛")
 
         response = self._get(
             "/api/cost-statistics/export"
@@ -356,6 +391,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
         self.assertIn("OA成本归集明细", workbook.sheetnames)
+        detail_sheet = workbook["OA成本归集明细"]
+        self.assertEqual(detail_sheet["D1"].value, "申请/报销人")
+        self.assertEqual(detail_sheet["D2"].value, "刘际涛")
 
     def test_each_api_request_loads_exactly_one_snapshot(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001

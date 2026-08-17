@@ -560,7 +560,7 @@ def _serialize_bank_row(row: dict[str, Any]) -> dict[str, Any]:
             row.get("payment_account_label")
         ),
         "remark": _clean_text(row.get("remark")),
-        "oa_applicant": "—",
+        "oa_applicant": "",
         **bank_tag_context_from_row(row),
     }
 
@@ -658,8 +658,7 @@ def _oa_cost_context(
         "expense_content": expense_content,
         "oa_applicant": _clean_text(
             row.get("applicant") or detail_fields.get("申请人")
-        )
-        or "—",
+        ),
         "counterparty_name": _clean_text(row.get("counterparty_name")),
         "allocation_amount": allocation_amount,
     }, ""
@@ -718,7 +717,9 @@ def _oa_expense_item_cost_context(
             or _clean_text(item.get("reason"))
             or expense_type
         ),
-        "oa_applicant": _clean_text(row.get("applicant") or detail_fields.get("申请人")) or "—",
+        "oa_applicant": _clean_text(
+            row.get("applicant") or detail_fields.get("申请人")
+        ),
         "counterparty_name": _clean_text(row.get("counterparty_name")),
         "allocation_amount": amount,
     }, ""

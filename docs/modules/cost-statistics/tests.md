@@ -6,10 +6,10 @@
 | --- | --- | --- |
 | 业务核心 | `tests/test_cost_statistics_policy.py` | 支付申请当前金额、日常报销逐子付款项、三 OA/两流水、单/多账户、OA 完成时间范围、无效单元可见排除、重复归集冲突、收入隔离、银行事实视图 |
 | Repository | `tests/test_cost_statistics_canonical_repository.py` | 单事务 repeatable-read、OA `approved_at` 范围下推、bank-flow 跳过 OA I/O、跨范围关系成员完整性、bank query 不读取未消费 payload、账户解析器每个 snapshot 只构造一次 |
-| Service/API | `tests/test_cost_statistics_api.py` | 五种视图、bank transaction/allocation 两类详情、关系撤回、导出、错误、标签保存后重新读取、后续请求跳过全局统计、query 长度/游标合同 |
+| Service/API | `tests/test_cost_statistics_api.py` | 五种视图、OA 申请人/报销成员归一、缺失申请人不伪造、bank transaction/allocation 两类详情、关系撤回、预览/导出字段、错误、标签保存后重新读取、后续请求跳过全局统计、query 长度/游标合同 |
 | Audit | `tests/test_cost_statistics_page_audit.py`、`tests/test_audit_page_canonical_data_tool.py` | 直接事实源合同与关系成员完整性 |
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` | 首次加载、五视图、OA 成本归集文案和金额列、两类详情 endpoint/抽屉、付款证据、局部 loading/error/retry、范围切换、搜索、自动分页、导出及银行事实视图回归 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` | 首次加载、五视图、三种 OA 视图的申请/报销人、时间/标签视图的真实对方户名、OA 成本归集文案和金额列、两类详情 endpoint/抽屉、付款证据、局部 loading/error/retry、范围切换、搜索、自动分页、导出及银行事实视图回归 |
 
 ## 候选发布门禁
 

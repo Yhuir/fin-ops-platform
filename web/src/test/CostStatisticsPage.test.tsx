@@ -457,6 +457,8 @@ describe("Cost statistics page", () => {
 
     const transactionTable = screen.getByRole("grid", { name: "项目 OA 成本归集明细表" });
     expectProjectCostTable("项目 OA 成本归集明细表");
+    expect(within(transactionTable).getByRole("columnheader", { name: "申请/报销人" })).toBeInTheDocument();
+    expect(within(transactionTable).getByText("张三、李四")).toBeInTheDocument();
     const projectTransactionTrigger = await within(transactionTable).findByRole("button", {
       name: "查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55 10000.00",
     });
@@ -689,6 +691,8 @@ describe("Cost statistics page", () => {
 
     const transactionTable = screen.getByRole("grid", { name: "按费用类型 OA 成本归集明细表" });
     expectProjectCostTable("按费用类型 OA 成本归集明细表");
+    expect(within(transactionTable).getByRole("columnheader", { name: "项目名 / 申请/报销人" })).toBeInTheDocument();
+    expect(within(transactionTable).getByText("赵六")).toBeInTheDocument();
     const transactionTime = await within(transactionTable).findByText("2026-03-18 17:02:09");
     expect(transactionTime).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).getByText("云南溯源科技")).toBeInTheDocument();
@@ -853,6 +857,8 @@ describe("Cost statistics page", () => {
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
     const transactionTable = screen.getByRole("grid", { name: "银行 OA 成本归集明细表" });
     expectProjectCostTable("银行 OA 成本归集明细表");
+    expect(within(transactionTable).getByRole("columnheader", { name: "申请/报销人" })).toBeInTheDocument();
+    expect(within(transactionTable).getByText("张三、李四")).toBeInTheDocument();
     expect(
       await within(transactionTable).findByRole("button", { name: "查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55 10000.00" }),
     ).toBeInTheDocument();

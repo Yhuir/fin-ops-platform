@@ -172,6 +172,7 @@ describe("Cost statistics export API", () => {
           expense_content: "项目现场往返交通",
           amount: "145.00",
           counterparty_name: "陈佳玉",
+          oa_applicant: "报销成员甲",
           payment_account_label: "建行 8106",
           remark: "报销",
           bank_tag_code: "travel_transport",
@@ -204,6 +205,7 @@ describe("Cost statistics export API", () => {
       bankTagPrimaryLabel: "差旅交通",
       bankTagSubLabel: "交通费",
       bankTagLabelPath: ["差旅交通", "交通费"],
+      oaApplicant: "报销成员甲",
     });
   });
 

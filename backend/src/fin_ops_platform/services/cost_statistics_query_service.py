@@ -368,7 +368,7 @@ class CostStatisticsQueryService:
                 "费用类型",
                 "金额",
                 "费用内容",
-                "对方户名",
+                "申请/报销人",
                 "支付账户",
             ]
             rows = [
@@ -378,7 +378,7 @@ class CostStatisticsQueryService:
                     entry["expense_type"],
                     _plain_money(entry["amount_decimal"]),
                     entry["expense_content"],
-                    entry["counterparty_name"],
+                    entry["oa_applicant"],
                     entry["payment_account_label"],
                 ]
                 for entry in entries
@@ -403,7 +403,7 @@ class CostStatisticsQueryService:
                 "资金方向",
                 "金额",
                 "费用内容",
-                "对方户名",
+                "申请/报销人",
                 "支付账户",
             ]
             rows = [
@@ -413,7 +413,7 @@ class CostStatisticsQueryService:
                     entry["direction"],
                     _plain_money(entry["amount_decimal"]),
                     entry["expense_content"],
-                    entry["counterparty_name"],
+                    entry["oa_applicant"],
                     entry["payment_account_label"],
                 ]
                 for entry in entries
@@ -642,7 +642,7 @@ class CostStatisticsQueryService:
                     "金额",
                     "费用内容",
                     "资金方向",
-                    "对方户名",
+                    "申请/报销人",
                     "支付账户",
                 ],
                 (
@@ -652,7 +652,7 @@ class CostStatisticsQueryService:
                         _plain_money(entry["amount_decimal"]),
                         entry["expense_content"],
                         entry["direction"],
-                        entry["counterparty_name"],
+                        entry["oa_applicant"],
                         entry["payment_account_label"],
                     ]
                     for entry in entries
@@ -941,9 +941,8 @@ class CostStatisticsQueryService:
             ).strip(),
             "remark": str(raw_row.get("remark") or "").strip(),
             "oa_applicant": str(
-                raw_row.get("oa_applicant") or "—"
-            ).strip()
-            or "—",
+                raw_row.get("oa_applicant") or ""
+            ).strip(),
             "bank_tag_code": str(
                 raw_row.get("bank_tag_code") or ""
             ).strip(),
@@ -1182,7 +1181,7 @@ class CostStatisticsQueryService:
             "OA完成时间",
             "归集单元ID",
             "资金方向",
-            "对方户名",
+            "申请/报销人",
             "支付账户",
             "归集金额",
             "备注",
@@ -1274,7 +1273,7 @@ class CostStatisticsQueryService:
                     entry["trade_time"],
                     entry["entry_id"],
                     entry["direction"],
-                    entry["counterparty_name"],
+                    entry["oa_applicant"],
                     entry["payment_account_label"],
                     _plain_money(entry["amount_decimal"]),
                     entry["remark"],

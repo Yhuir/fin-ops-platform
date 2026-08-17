@@ -210,13 +210,28 @@ function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
   );
 }
 
-function EntryIdentity({ label, occurredAt }: { label: string; occurredAt: string }) {
+function EntryIdentity({
+  label,
+  occurredAt,
+  secondaryLabel,
+}: {
+  label: string;
+  occurredAt: string;
+  secondaryLabel?: string;
+}) {
   const formattedTradeTime = formatCostTradeTime(occurredAt);
   return (
     <span className="cost-transaction-identity grid min-w-0 justify-items-start gap-1.5">
-      <span className="max-w-full text-left font-extrabold leading-5 text-[var(--fp-text)] [overflow-wrap:anywhere]">
-        {label || "--"}
-      </span>
+      {label ? (
+        <span className="max-w-full text-left font-extrabold leading-5 text-[var(--fp-text)] [overflow-wrap:anywhere]">
+          {label}
+        </span>
+      ) : null}
+      {secondaryLabel ? (
+        <span className="max-w-full text-left text-xs font-semibold leading-4 text-[var(--fp-text-muted)] [overflow-wrap:anywhere]">
+          {secondaryLabel}
+        </span>
+      ) : null}
       <time
         className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-xs font-semibold leading-none text-[var(--fp-text-muted)] tabular-nums"
         dateTime={occurredAt}
@@ -1452,36 +1467,54 @@ export default function CostStatisticsPage() {
   );
 
   const entryColumns = useMemo<CostStatisticsTableColumn<CostExplorerEntryRow>[]>(
-    () => [
-      viewMode === "expenseType"
+    () => {
+      const isBankFactView = viewMode === "time" || viewMode === "bankTag";
+      const identityColumn: CostStatisticsTableColumn<CostExplorerEntryRow> = viewMode === "expenseType"
         ? {
             key: "projectName",
-            header: "项目名",
+            header: "项目名 / 申请/报销人",
             flex: 1.15,
-            getTextValue: (row) => `${row.projectName} ${formatCostTradeTime(row.occurredAt)}`,
-            render: (row) => <EntryIdentity label={row.projectName} occurredAt={row.occurredAt} />,
+            getTextValue: (row) => `${row.projectName} ${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
+            render: (row) => (
+              <EntryIdentity
+                label={row.projectName}
+                secondaryLabel={row.oaApplicant}
+                occurredAt={row.occurredAt}
+              />
+            ),
           }
-        : {
-            key: "counterpartyName",
-            header: "对方户名",
-            flex: 1.15,
-            getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.occurredAt)}`,
-            render: (row) => <EntryIdentity label={row.counterpartyName} occurredAt={row.occurredAt} />,
-          },
-      {
-        key: "amount",
-        header: viewMode === "time" || viewMode === "bankTag" ? "金额" : "归集金额",
-        width: 180,
-        cellClassName: "cost-table-cell-money",
-        render: (row) => ({
-          amount: formatCostAmount(row.amount),
-          direction: row.direction,
-          paymentAccountLabel: row.paymentAccountLabel,
-          toneByDirection: viewMode === "bankTag",
-        }),
-      },
-      { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
-    ],
+        : isBankFactView
+          ? {
+              key: "counterpartyName",
+              header: "对方户名",
+              flex: 1.15,
+              getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.occurredAt)}`,
+              render: (row) => <EntryIdentity label={row.counterpartyName} occurredAt={row.occurredAt} />,
+            }
+          : {
+              key: "oaApplicant",
+              header: "申请/报销人",
+              flex: 1.15,
+              getTextValue: (row) => `${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
+              render: (row) => <EntryIdentity label={row.oaApplicant} occurredAt={row.occurredAt} />,
+            };
+      return [
+        identityColumn,
+        {
+          key: "amount",
+          header: isBankFactView ? "金额" : "归集金额",
+          width: 180,
+          cellClassName: "cost-table-cell-money",
+          render: (row) => ({
+            amount: formatCostAmount(row.amount),
+            direction: row.direction,
+            paymentAccountLabel: row.paymentAccountLabel,
+            toneByDirection: viewMode === "bankTag",
+          }),
+        },
+        { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
+      ];
+    },
     [viewMode],
   );
 
