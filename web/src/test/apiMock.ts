@@ -2241,8 +2241,11 @@ function mockWorkbenchRowMatchesPaneFilters(
         continue;
       }
       const rowValues = mockWorkbenchColumnValues(row, pane, columnKey);
-      const matchesSelectedValues = pane === "bank" && columnKey === "amount"
-        ? selectedValues.every((value) => rowValues.includes(value))
+      const groupedColumn = (pane === "bank" && columnKey === "amount")
+        || (pane === "oa" && ["applicant", "projectName"].includes(columnKey));
+      const matchesSelectedValues = groupedColumn
+        ? Array.from(new Set(selectedValues.map((value) => value.split(":", 1)[0]))).every((prefix) =>
+          selectedValues.some((value) => value.startsWith(`${prefix}:`) && rowValues.includes(value)))
         : selectedValues.some((value) => rowValues.includes(value));
       if (!matchesSelectedValues) {
         return false;
@@ -2270,7 +2273,46 @@ function normalizeMockWorkbenchSelectedValues(value: unknown) {
 
 function mockWorkbenchColumnValues(row: Record<string, unknown>, pane: RawWorkbenchPaneKey, columnKey: string) {
   if (pane === "bank" && columnKey === "amount") {
-    return [mockWorkbenchBankDirection(row), stringValue(row.payment_account_label)].filter(Boolean);
+    const direction = mockWorkbenchBankDirection(row);
+    const account = stringValue(row.payment_account_label);
+    const accountLast4 = account.match(/(\d{4})\s*$/)?.[1] ?? "";
+    return [
+      direction === "支出" ? "direction:expense" : direction === "收入" ? "direction:income" : "",
+      accountLast4 ? `account:${accountLast4}` : "",
+      stringValue(row.category_code) ? `bankTag:${stringValue(row.category_code)}` : "",
+    ].filter(Boolean);
+  }
+  if (pane === "oa" && columnKey === "applicant") {
+    const rawType = stringValue(row.apply_type);
+    const applicationType = rawType === "payment_request"
+      ? "支付申请"
+      : rawType === "expense_claim"
+        ? "日常报销"
+        : rawType;
+    return [
+      applicationType ? `oaType:${applicationType}` : "",
+      stringValue(row.workflow_status) ? `workflow:${stringValue(row.workflow_status)}` : "",
+      stringValue(row.applicant) ? `applicant:${stringValue(row.applicant)}` : "applicant:__workbench_missing__",
+    ].filter(Boolean);
+  }
+  if (pane === "oa" && columnKey === "projectName") {
+    const rawItems = Array.isArray(row.expense_items) ? row.expense_items : [];
+    const values = rawItems.flatMap((item) => {
+      const expense = objectValue(item);
+      const project = stringValue(expense.project_name) || stringValue(expense.projectName);
+      const expenseType = stringValue(expense.expense_type) || stringValue(expense.expenseType);
+      return [
+        project ? `project:${project}` : "project:__workbench_missing__",
+        expenseType ? `expenseType:${expenseType}` : "",
+      ].filter(Boolean);
+    });
+    if (values.length > 0) return values;
+    const project = stringValue(row.project_name_display) || stringValue(row.project_name);
+    const expenseType = stringValue(row.expense_type);
+    return [
+      project ? `project:${project}` : "project:__workbench_missing__",
+      expenseType ? `expenseType:${expenseType}` : "",
+    ].filter(Boolean);
   }
 
   const valueByColumn: Record<string, string> = pane === "oa"
@@ -2297,6 +2339,42 @@ function mockWorkbenchColumnValues(row: Record<string, unknown>, pane: RawWorkbe
 
   const value = valueByColumn[columnKey];
   return value ? [value] : [];
+}
+
+function mockWorkbenchFilterOption(value: string, row?: Record<string, unknown>) {
+  if (!value.includes(":")) {
+    return {
+      value,
+      label: value === "__workbench_missing__" ? "未填写" : value,
+      missing: value === "__workbench_missing__",
+    };
+  }
+  const [prefix, rawLabel = ""] = value.split(":", 2);
+  const groupByPrefix: Record<string, string> = {
+    direction: "收支方向",
+    account: "银行账户",
+    bankTag: "流水标签",
+    oaType: "OA 类型",
+    workflow: "流程状态",
+    applicant: "申请人",
+    expenseType: "OA 费用类型",
+    project: "项目名称",
+  };
+  const label = prefix === "direction"
+    ? rawLabel === "expense" ? "支出" : "收入"
+    : prefix === "account"
+      ? stringValue(row?.payment_account_label) || rawLabel
+      : prefix === "bankTag"
+        ? stringValue(row?.category_label) || rawLabel
+    : prefix === "workflow"
+      ? rawLabel === "completed" ? "已完成" : "进行中"
+      : rawLabel === "__workbench_missing__" ? "未填写" : rawLabel;
+  return {
+    value,
+    label,
+    missing: rawLabel === "__workbench_missing__",
+    group: groupByPrefix[prefix],
+  };
 }
 
 function mockWorkbenchRelationLabel(row: Record<string, unknown>, pane: RawWorkbenchPaneKey) {
@@ -4975,7 +5053,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         columnFilters,
         timeFilters,
       ));
-      const values = new Map<string, { value: string; label: string; missing: boolean }>();
+      const values = new Map<string, { value: string; label: string; missing: boolean; group?: string }>();
       groups.forEach((group) => {
         groupRowsForMockPane(group, pane)
           .filter((row) => mockWorkbenchRowMatchesPaneFilters(row, pane, columnFilters[pane], timeFilters[pane]))
@@ -4984,17 +5062,21 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               ? [String(mockWorkbenchTimeValue(row, pane) ?? "").slice(0, 4)].filter((value) => /^\d{4}$/.test(value))
               : mockWorkbenchColumnValues(row, pane, column);
             const normalizedValues = rawValues.length > 0 ? rawValues : ["__workbench_missing__"];
-            normalizedValues.forEach((value) => values.set(value, {
-              value,
-              label: value === "__workbench_missing__" ? "未填写" : value,
-              missing: value === "__workbench_missing__",
-            }));
+            normalizedValues.forEach((value) => values.set(value, mockWorkbenchFilterOption(value, row)));
           });
       });
       const optionSearch = normalizeMockWorkbenchText(url.searchParams.get("option_search") ?? "");
+      const groupRank = new Map([
+        ["收支方向", 0], ["银行账户", 1], ["流水标签", 2],
+        ["OA 类型", 0], ["流程状态", 1], ["申请人", 2],
+        ["OA 费用类型", 0], ["项目名称", 1],
+      ]);
       const optionsList = Array.from(values.values())
         .filter((option) => !optionSearch || normalizeMockWorkbenchText(option.label).includes(optionSearch))
-        .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+        .sort((left, right) => (
+          (groupRank.get(left.group ?? "") ?? 0) - (groupRank.get(right.group ?? "") ?? 0)
+          || left.label.localeCompare(right.label, "zh-CN")
+        ));
       return {
         body: {
           options: optionsList.slice(offset, offset + pageSize),

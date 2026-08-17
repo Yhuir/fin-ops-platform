@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-17
+日期：2026-08-18
 
 ## 职责
 
@@ -48,7 +48,7 @@ ReconciliationWorkbenchPage
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
 | anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 missing / parse_failed / unassigned 附件异常。付款关系的流水金额按同一正式关系内 `支出合计 - 收入/退款合计` 计算净额，不能把退款收入丢弃后误报。任一异常默认阻断进入已配对区；人工 `review_classification_codes[]` 与 `accept_paired|keep_unpaired` 决定共同绑定当前 bundle fingerprint，输入变化后自动失效。系统异常证据与人工分类必须分字段保存。历史 ignore/restore、WEX/row-ignore 只保留审计，不重新进入页面分区。 |
-| list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。所有字符串和集合有界，SQL 参数化。 |
+| list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。复合列只接受 `direction/account/bankTag`、`oaType/workflow/applicant`、`expenseType/project` 类型前缀；所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
 ## Direct SQL 合同
@@ -93,8 +93,9 @@ requested tenant/scope
 - `%`、`_`、反斜杠按 literal escape；金额先 canonicalize 后比较 numeric，日期使用显式表达式。
 - 任一成员命中返回完整 group；不得只返回命中行。
 - 同列多值 OR，不同列/不同 pane AND；同一 pane 的多个列条件必须由同一 member 满足。
-- 银行金额复合筛选内，方向值 OR、付款账号值 OR；两类同时存在时彼此 AND。
-- `GET /api/workbench/filter-options` 保留其它条件、移除目标列自身条件，从 eligible groups 直接 distinct；`未填写` sentinel 统一。
+- 银行金额复合筛选内，方向、付款账号、canonical 流水标签各自 OR，三类同时存在时彼此 AND，且必须由同一 bank member 满足。账号展示读取既有 `bank_account_mappings`；流水标签候选与过滤只对当前 eligible bank ids 批量复用银行明细 canonical 分类 owner，不复制分类规则。
+- OA 申请人复合筛选的 OA 类型、流程状态、申请人各自 OR、跨组 AND，并由同一 OA member 满足。OA 项目复合筛选的费用类型与项目名称各自 OR、跨组 AND，并由同一 `expense_items[]` 元素满足；只有没有子项时才读取父 OA 顶层字段。
+- `GET /api/workbench/filter-options` 保留其它条件、移除目标列自身条件，从 eligible groups 直接生成候选；`未填写` sentinel 统一。三个复合菜单返回带类型前缀的 `value` 和可选 `group`，旧无前缀复合值拒绝，不保留旧解析分支。
 - options 按 `(label,value)` cursor 分页，默认 100、最大 200，返回 `options,page_size,has_more,next_cursor`；不计算无用 total，不读取当前浏览器已加载 rows，也不使用 Redis fallback。
 
 ### 异常与详情
@@ -114,7 +115,7 @@ requested tenant/scope
 | --- | --- | --- |
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
-| filter options | 表头菜单 | `options[{value,label,missing}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins。 |
+| filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
 | OA expense/invoice display | 前端 | OA row 的 compact DTO 输出顶层 canonical `expense_type`，同时输出 `expense_items[]`，其中每项直接携带 canonical `expense_type`；直接 OA 行和日常报销子付款项都在“项目名称”单元格第二行用 Chip 显示真实费用类型，缺失时不显示占位或“其他”，且不得增加逐行 API。OA attachment invoice 输出复数 canonical `source_expense_item_ids[]`。前端只用该顶层数组建立来源图，`source_links[]` 仅保留为审计证据；一张发票只出现一次，无 canonical item 来源的 OA 附件发票只能进入独立待归属残余带，禁止按金额兜底，也不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |

@@ -592,6 +592,8 @@ function workbenchRows() {
       applicant: "陈涛",
       project_name: "智能工厂项目",
       apply_type: "供应商付款申请",
+      workflow_status: "completed",
+      expense_type: "固定资产",
       amount: "58,000.00",
       counterparty_name: "智能工厂设备商",
       reason: "设备尾款待支付",
@@ -825,18 +827,21 @@ function buildOaExpenseItemsWorkbenchGroup() {
           id: "oa-exp-2035:item:0",
           row_index: "0",
           project_name: "曲靖维护项目",
+          expense_type: "交通费",
           amount: "48.00",
         },
         {
           id: "oa-exp-2035:item:1",
           row_index: "1",
           project_name: "云南溯源科技",
+          expense_type: "车辆使用费",
           amount: "200.00",
         },
         {
           id: "oa-exp-2035:item:2",
           row_index: "2",
           project_name: "大理卷烟厂余热综合利用项目",
+          expense_type: "固定资产",
           amount: "76.80",
         },
       ],
@@ -1190,7 +1195,7 @@ function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "unpaired
       id: `oa-large-202603-${suffix}`,
       case_id: caseId,
       applicant: `大数据申请人${suffix}`,
-      project_name: `长列表项目第${index}组`,
+      project_name: `2024年-2027年玉溪卷烟厂动力车间供配电、复烤二车间能源系统维护项目（第${index}组）`,
       amount,
       counterparty_name: supplier,
       reason: `第${index}组设备服务尾款，备注文本较长用于验证列宽和横向滚动稳定性`,
@@ -1541,21 +1546,74 @@ function workbenchFilterOptionsPayload(
   const rowKey = `${pane}_rows`;
   const rows = workbenchGroups(zone, relationConfirmed, largeDataset)
     .flatMap((group) => (group as Record<string, unknown>)[rowKey] as Array<Record<string, unknown>> ?? []);
+  const groupedOptions: Array<{ value: string; label: string; missing: boolean; group?: string }> = [];
+  const pushGrouped = (value: string, label: string, group: string) => {
+    if (value && label) groupedOptions.push({ value, label, missing: false, group });
+  };
+  if (facet === "column" && pane === "bank" && column === "amount") {
+    rows.forEach((row) => {
+      const direction = row.debit_amount ? "expense" : "income";
+      pushGrouped(`direction:${direction}`, direction === "expense" ? "支出" : "收入", "收支方向");
+      const accountLabel = String(row.payment_account_label ?? "").trim();
+      const last4 = accountLabel.match(/(\d{4})\s*$/)?.[1] ?? "";
+      pushGrouped(`account:${last4}`, accountLabel, "银行账户");
+      const categoryCode = String(row.category_code ?? "").trim();
+      const categoryPath = Array.isArray(row.category_label_path)
+        ? row.category_label_path.map(String).filter(Boolean).join(" / ")
+        : "";
+      pushGrouped(`bankTag:${categoryCode}`, categoryPath || String(row.category_label ?? ""), "流水标签");
+    });
+  } else if (facet === "column" && pane === "oa" && column === "applicant") {
+    rows.forEach((row) => {
+      const rawApplicationType = String(row.apply_type ?? "").trim();
+      const applicationType = ["payment_request", "供应商付款申请"].includes(rawApplicationType)
+        ? "支付申请"
+        : rawApplicationType === "expense_claim"
+          ? "日常报销"
+          : rawApplicationType;
+      const workflow = String(row.workflow_status ?? "completed").trim();
+      const applicant = String(row.applicant ?? "").trim();
+      pushGrouped(`oaType:${applicationType}`, applicationType, "OA 类型");
+      pushGrouped(`workflow:${workflow}`, workflow === "completed" ? "已完成" : "进行中", "流程状态");
+      pushGrouped(`applicant:${applicant}`, applicant, "申请人");
+    });
+  } else if (facet === "column" && pane === "oa" && column === "projectName") {
+    rows.forEach((row) => {
+      const items = Array.isArray(row.expense_items) && row.expense_items.length > 0
+        ? row.expense_items as Array<Record<string, unknown>>
+        : [row];
+      items.forEach((item) => {
+        const expenseType = String(item.expense_type ?? "").trim();
+        const project = String(item.project_name ?? "").trim();
+        pushGrouped(`expenseType:${expenseType}`, expenseType, "OA 费用类型");
+        pushGrouped(`project:${project}`, project, "项目名称");
+      });
+    });
+  }
   const values = facet === "time_year"
     ? rows.map((row) => String(row.trade_time ?? row.pay_receive_time ?? "").slice(0, 4))
-    : pane === "bank" && column === "amount"
-      ? rows.map((row) => String(row.debit_amount ?? row.credit_amount ?? row.amount ?? ""))
+    : groupedOptions.length > 0
+      ? []
       : rows.map((row) => String(row[fieldByTarget[`${pane}:${column}`] ?? column] ?? ""));
   const search = (url.searchParams.get("option_search") ?? "").trim().toLocaleLowerCase("zh-CN");
-  const options = Array.from(new Set(values))
-    .filter(Boolean)
-    .filter((value) => !search || value.toLocaleLowerCase("zh-CN").includes(search))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  const groupRank = new Map([
+    ["收支方向", 0], ["银行账户", 1], ["流水标签", 2],
+    ["OA 类型", 0], ["流程状态", 1], ["申请人", 2],
+    ["OA 费用类型", 0], ["项目名称", 1],
+  ]);
+  const options = (groupedOptions.length > 0
+    ? Array.from(new Map(groupedOptions.map((option) => [option.value, option])).values())
+    : Array.from(new Set(values)).filter(Boolean).map((value) => ({ value, label: value, missing: false })))
+    .filter((option) => !search || option.label.toLocaleLowerCase("zh-CN").includes(search))
+    .sort((left, right) => (
+      (groupRank.get(left.group ?? "") ?? 0) - (groupRank.get(right.group ?? "") ?? 0)
+      || left.label.localeCompare(right.label, "zh-CN")
+    ));
   const pageSize = Math.max(1, Number.parseInt(url.searchParams.get("page_size") ?? "100", 10) || 100);
   const cursorPrefix = `workbench-option:${zone}:${pane}:${facet}:${column}:`;
   const start = parseWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
   return {
-    options: options.slice(start, start + pageSize).map((value) => ({ value, label: value, missing: false })),
+    options: options.slice(start, start + pageSize),
     page_size: pageSize,
     has_more: start + pageSize < options.length,
     next_cursor: nextWorkbenchCursor(cursorPrefix, start, pageSize, options.length),

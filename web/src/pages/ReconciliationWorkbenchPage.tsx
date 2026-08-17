@@ -393,7 +393,7 @@ export default function ReconciliationWorkbenchPage() {
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
-    version: 2,
+    version: 3,
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -403,7 +403,7 @@ export default function ReconciliationWorkbenchPage() {
   const openDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "openDisplayState",
-    version: 2,
+    version: 3,
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",

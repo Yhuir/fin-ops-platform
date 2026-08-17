@@ -11,6 +11,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text,
     text_list,
 )
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
     pending_oa_application_date_sql,
@@ -58,6 +61,21 @@ WORKBENCH_SOURCE_KINDS = frozenset(
         "etc_invoice_summary",
     }
 )
+
+_COMPOSITE_FILTER_OPTION_GROUPS = {
+    ("bank", "amount"): (("direction", "收支方向"), ("account", "银行账户"), ("bankTag", "流水标签")),
+    ("oa", "applicant"): (("oaType", "OA 类型"), ("workflow", "流程状态"), ("applicant", "申请人")),
+    ("oa", "projectName"): (("expenseType", "OA 费用类型"), ("project", "项目名称")),
+}
+
+
+def _grouped_filter_values(values: list[str], prefix: str) -> list[str]:
+    marker = f"{prefix}:"
+    return [value[len(marker) :] for value in values if value.startswith(marker)]
+
+
+def _grouped_filter_token(prefix: str, value: object) -> str:
+    return f"{prefix}:{str(value or '').strip()}"
 
 
 def _literal_ilike_pattern(value: str) -> str:
@@ -169,6 +187,14 @@ requested_scope as (
         %s::text as scope_key,
         case when %s::text = 'all' then null else %s::date end as scope_month,
         %s::text as tenant_id
+),
+requested_settings as materialized (
+    select coalesce((
+        select settings.settings_payload
+        from app.app_settings settings
+        where settings.settings_key = 'app_settings'
+        limit 1
+    ), '{{}}'::jsonb) as settings_payload
 ),
 visible_invoice_facts as materialized (
     select
@@ -520,10 +546,20 @@ oa_candidate_facts as materialized (
             'applicant', oa.applicant,
             'applicationTime', oa.application_date::text,
             'projectName', oa.project_name,
-            'applicationType', coalesce(
+            'applicationType', case lower(coalesce(
                 oa.normalized_payload->>'apply_type',
-                oa.normalized_payload#>>'{{detail_fields,申请类型}}'
-            ),
+                oa.normalized_payload#>>'{{detail_fields,申请类型}}',
+                ''
+            ))
+                when 'payment_request' then '支付申请'
+                when '供应商付款申请' then '支付申请'
+                when 'expense_claim' then '日常报销'
+                else coalesce(
+                    oa.normalized_payload->>'apply_type',
+                    oa.normalized_payload#>>'{{detail_fields,申请类型}}'
+                )
+            end,
+            'expenseType', nullif(btrim(oa.normalized_payload->>'expense_type'), ''),
             'counterparty', coalesce(
                 oa.normalized_payload->>'counterparty_name',
                 oa.normalized_payload#>>'{{detail_fields,往来单位}}'
@@ -580,11 +616,22 @@ oa_candidate_facts as materialized (
             'applicant', admission.applicant,
             'applicationTime', {pending_oa_application_time_sql('admission')},
             'projectName', coalesce(admission.project_name_display, admission.project_name),
-            'applicationType', coalesce(
+            'applicationType', case lower(coalesce(
                 admission.source_payload->>'apply_type',
                 admission.source_payload->>'application_type',
-                admission.source_payload->>'form_type'
-            ),
+                admission.source_payload->>'form_type',
+                ''
+            ))
+                when 'payment_request' then '支付申请'
+                when '供应商付款申请' then '支付申请'
+                when 'expense_claim' then '日常报销'
+                else coalesce(
+                    admission.source_payload->>'apply_type',
+                    admission.source_payload->>'application_type',
+                    admission.source_payload->>'form_type'
+                )
+            end,
+            'expenseType', nullif(btrim(admission.source_payload->>'expense_type'), ''),
             'counterparty', admission.source_payload->>'counterparty_name',
             'reconciliationStatus', '待关联',
             'workflowStatus', 'in_progress'
@@ -658,16 +705,17 @@ bank_candidates as materialized (
                 else '收入'
             end,
             'counterparty', bank.counterparty_name_raw,
+            'accountLast4', right(bank.account_no, 4),
             'paymentAccount', concat_ws(
                 ' ',
-                case
+                coalesce(account_mapping.bank_name, case
                     when bank.account_no like '6225%%' then '招商银行'
                     when bank.account_no like '6222%%' then '工商银行'
                     when bank.account_no like '6217%%' then '建设银行'
                     when bank.account_no like '6228%%' then '农业银行'
                     when bank.account_no like '6214%%' then '中国银行'
                     else '未识别银行'
-                end,
+                end),
                 case
                     when bank.account_name like '%%基本%%' then '基本户'
                     when bank.account_name like '%%一般%%' then '一般户'
@@ -706,6 +754,22 @@ bank_candidates as materialized (
     join needed_keys needed
       on needed.row_type = 'bank'
      and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+    cross join requested_settings settings
+    left join lateral (
+        select coalesce(
+            nullif(btrim(mapping.value->>'bank_name'), ''),
+            nullif(btrim(mapping.value->>'bankName'), '')
+        ) as bank_name
+        from jsonb_array_elements(
+            case
+                when jsonb_typeof(settings.settings_payload->'bank_account_mappings') = 'array'
+                    then settings.settings_payload->'bank_account_mappings'
+                else '[]'::jsonb
+            end
+        ) mapping(value)
+        where nullif(btrim(mapping.value->>'last4'), '') = right(bank.account_no, 4)
+        limit 1
+    ) account_mapping on true
     where bank.status <> 'deleted'
 ),
 requested_invoice_hard_identities as materialized (
@@ -2133,6 +2197,16 @@ class PostgresWorkbenchPageQueryRepository:
             prefix=zone,
             search=normalized_search,
         )
+        bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
+            scope_key=scope_key,
+            zone=zone,
+            status=normalized_status,
+            source_kind=normalized_source_kind,
+            search=normalized_search,
+            column_filters=normalized_columns,
+            time_filters=normalized_times,
+            exception_bucket=exception_bucket,
+        )
         where_sql, where_params = self._group_filters(
             zone=zone,
             status=normalized_status,
@@ -2142,6 +2216,7 @@ class PostgresWorkbenchPageQueryRepository:
             column_filters=normalized_columns,
             time_filters=normalized_times,
             exception_bucket=exception_bucket,
+            bank_tag_row_ids=bank_tag_row_ids,
         )
         normalized_query = {
             "scope_key": scope_key,
@@ -2375,6 +2450,16 @@ class PostgresWorkbenchPageQueryRepository:
             prefix="groups",
             search=normalized_search,
         )
+        bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
+            scope_key=normalized_scope,
+            zone=normalized_zone,
+            status=normalized_status,
+            source_kind=normalized_source_kind,
+            search=normalized_search,
+            column_filters=normalized_columns,
+            time_filters=normalized_times,
+            exception_bucket=normalized_exception_bucket,
+        )
         where_sql, where_params = self._group_filters(
             zone=normalized_zone,
             status=normalized_status,
@@ -2384,6 +2469,7 @@ class PostgresWorkbenchPageQueryRepository:
             column_filters=normalized_columns,
             time_filters=normalized_times,
             exception_bucket=normalized_exception_bucket,
+            bank_tag_row_ids=bank_tag_row_ids,
         )
         cursor_sql, cursor_params = self._group_cursor_filter(
             decoded_cursor,
@@ -2938,6 +3024,16 @@ class PostgresWorkbenchPageQueryRepository:
             prefix="options",
             search=normalized_search,
         )
+        bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
+            scope_key=normalized_scope,
+            zone=normalized_zone,
+            status=normalized_status,
+            source_kind=normalized_source_kind,
+            search=normalized_search,
+            column_filters=normalized_columns,
+            time_filters=normalized_times,
+            exception_bucket=normalized_exception_bucket,
+        )
         where_sql, where_params = self._group_filters(
             zone=normalized_zone,
             status=normalized_status,
@@ -2947,19 +3043,29 @@ class PostgresWorkbenchPageQueryRepository:
             column_filters=normalized_columns,
             time_filters=normalized_times,
             exception_bucket=normalized_exception_bucket,
+            bank_tag_row_ids=bank_tag_row_ids,
         )
+        if (normalized_pane, normalized_column) in _COMPOSITE_FILTER_OPTION_GROUPS:
+            return self._composite_filter_options(
+                scope_key=normalized_scope,
+                zone=normalized_zone,
+                pane=normalized_pane,
+                column=str(normalized_column),
+                option_search=normalized_option_search,
+                page_size=normalized_page_size,
+                decoded_cursor=decoded_cursor,
+                query_hash=query_hash,
+                cursor_sort=cursor_sort,
+                search_ctes=search_ctes,
+                search_params=search_params,
+                where_sql=where_sql,
+                where_params=where_params,
+                column_filters=normalized_columns,
+                time_filters=normalized_times,
+                bank_tag_row_ids=bank_tag_row_ids,
+            )
         if normalized_facet == "time_year":
             value_sql = "to_char(member.sort_date, 'YYYY')"
-            lateral_sql = ""
-        elif normalized_pane == "bank" and normalized_column == "amount":
-            value_sql = "facet_source.facet_value"
-            lateral_sql = """
-                cross join lateral (
-                    values
-                        (nullif(btrim(member.column_values->>'direction'), '')),
-                        (nullif(btrim(member.column_values->>'paymentAccount'), ''))
-                ) facet_source(facet_value)
-            """
         else:
             assert normalized_column is not None
             value_sql = (
@@ -2968,7 +3074,6 @@ class PostgresWorkbenchPageQueryRepository:
                 f"then '{WORKBENCH_FILTER_MISSING_VALUE}' "
                 f"else btrim(member.column_values->>'{normalized_column}') end"
             )
-            lateral_sql = ""
         member_filter_sql, member_filter_params = self._target_member_filters(
             pane=normalized_pane,
             column_filters=normalized_columns,
@@ -3007,7 +3112,6 @@ class PostgresWorkbenchPageQueryRepository:
                 from canonical_group_members member
                 join filtered_groups groups
                   on groups.internal_key = member.internal_key
-                {lateral_sql}
                 where member.row_type = %s
                   {member_filter_sql}
             ),
@@ -3073,6 +3177,230 @@ class PostgresWorkbenchPageQueryRepository:
             "facet": normalized_facet,
             "column": normalized_column,
             "page_size": normalized_page_size,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "options": options,
+        }
+
+    def _composite_filter_options(
+        self,
+        *,
+        scope_key: str,
+        zone: str,
+        pane: str,
+        column: str,
+        option_search: str,
+        page_size: int,
+        decoded_cursor: WorkbenchPageCursor | None,
+        query_hash: str,
+        cursor_sort: str,
+        search_ctes: str,
+        search_params: list[Any],
+        where_sql: str,
+        where_params: list[Any],
+        column_filters: dict[str, dict[str, list[str]]],
+        time_filters: dict[str, dict[str, str]],
+        bank_tag_row_ids: list[str] | None,
+    ) -> dict[str, Any]:
+        member_filter_sql, member_filter_params = self._target_member_filters(
+            pane=pane,
+            column_filters=column_filters,
+            time_filters=time_filters,
+            alias="member",
+            bank_tag_row_ids=bank_tag_row_ids,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            {search_ctes}
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
+            filtered_groups as materialized (
+                select groups.internal_key
+                from effective_groups groups
+                where {where_sql}
+            )
+            select distinct on (member.row_id)
+                member.row_id,
+                member.column_values,
+                member.oa_expense_items
+            from canonical_group_members member
+            join filtered_groups groups
+              on groups.internal_key = member.internal_key
+            where member.row_type = %s
+              {member_filter_sql}
+            order by member.row_id
+            """,
+            tuple(
+                [
+                    *self._scope_params(scope_key),
+                    *search_params,
+                    *where_params,
+                    pane,
+                    *member_filter_params,
+                ]
+            ),
+        )
+        groups = dict(_COMPOSITE_FILTER_OPTION_GROUPS[(pane, column)])
+        ranks = {
+            prefix: rank
+            for rank, (prefix, _label) in enumerate(
+                _COMPOSITE_FILTER_OPTION_GROUPS[(pane, column)]
+            )
+        }
+        by_value: dict[str, dict[str, Any]] = {}
+
+        def add_option(prefix: str, raw_value: object, label: object | None = None) -> None:
+            value = str(raw_value or "").strip()
+            display_label = str(label if label is not None else value).strip()
+            if not value or value in WORKBENCH_FILTER_PLACEHOLDERS or not display_label:
+                return
+            token = _grouped_filter_token(prefix, value)
+            by_value[token] = {
+                "value": token,
+                "label": display_label,
+                "missing": value == WORKBENCH_FILTER_MISSING_VALUE,
+                "group": groups[prefix],
+                "rank": ranks[prefix],
+            }
+
+        if pane == "bank":
+            for row in rows:
+                values = row.get("column_values")
+                values = values if isinstance(values, dict) else {}
+                direction = str(values.get("direction") or "").strip()
+                if direction == "支出":
+                    add_option("direction", "expense", "支出")
+                elif direction == "收入":
+                    add_option("direction", "income", "收入")
+                add_option(
+                    "account",
+                    values.get("accountLast4"),
+                    values.get("paymentAccount"),
+                )
+            row_ids = [
+                row_id
+                for row in rows
+                if (row_id := str(row.get("row_id") or "").strip())
+            ]
+            if row_ids:
+                settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(
+                    self._connection
+                )
+                projections = (
+                    PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+                        self._connection,
+                        settings=settings,
+                        transaction_ids=row_ids,
+                        tenant_id=self._tenant_id,
+                    )
+                )
+                for projection in projections.values():
+                    label_path = [
+                        str(item).strip()
+                        for item in list(projection.get("category_label_path") or [])
+                        if str(item).strip()
+                    ]
+                    add_option(
+                        "bankTag",
+                        projection.get("category_code"),
+                        " / ".join(label_path)
+                        or projection.get("category_label"),
+                    )
+        elif column == "applicant":
+            for row in rows:
+                values = row.get("column_values")
+                values = values if isinstance(values, dict) else {}
+                add_option("oaType", values.get("applicationType"))
+                workflow = str(values.get("workflowStatus") or "").strip()
+                if workflow:
+                    add_option(
+                        "workflow",
+                        workflow,
+                        {"completed": "已完成", "in_progress": "进行中"}.get(
+                            workflow,
+                            workflow,
+                        ),
+                    )
+                applicant = str(values.get("applicant") or "").strip()
+                add_option(
+                    "applicant",
+                    applicant or WORKBENCH_FILTER_MISSING_VALUE,
+                    applicant or "未填写",
+                )
+        else:
+            for row in rows:
+                values = row.get("column_values")
+                values = values if isinstance(values, dict) else {}
+                expense_items = row.get("oa_expense_items")
+                expense_items = expense_items if isinstance(expense_items, list) else []
+                if expense_items:
+                    for item in expense_items:
+                        if not isinstance(item, dict):
+                            continue
+                        project = str(
+                            item.get("project_name") or item.get("projectName") or ""
+                        ).strip()
+                        expense_type = str(
+                            item.get("expense_type") or item.get("expenseType") or ""
+                        ).strip()
+                        add_option("expenseType", expense_type)
+                        add_option(
+                            "project",
+                            project or WORKBENCH_FILTER_MISSING_VALUE,
+                            project or "未填写",
+                        )
+                else:
+                    project = str(values.get("projectName") or "").strip()
+                    add_option("expenseType", values.get("expenseType"))
+                    add_option(
+                        "project",
+                        project or WORKBENCH_FILTER_MISSING_VALUE,
+                        project or "未填写",
+                    )
+
+        normalized_search = option_search.casefold()
+        ordered = [
+            option
+            for option in by_value.values()
+            if not normalized_search
+            or normalized_search in str(option["label"]).casefold()
+            or normalized_search in str(option["group"]).casefold()
+        ]
+        ordered.sort(key=lambda option: (option["rank"], option["label"], option["value"]))
+        if decoded_cursor is not None:
+            ordered = [
+                option
+                for option in ordered
+                if (f"{option['rank']:02d}|{option['label']}", option["value"])
+                > (decoded_cursor.value, decoded_cursor.group_key)
+            ]
+        visible = ordered[:page_size]
+        has_more = len(ordered) > page_size
+        options = [
+            {key: value for key, value in option.items() if key != "rank"}
+            for option in visible
+        ]
+        next_cursor = None
+        if has_more and visible:
+            last = visible[-1]
+            next_cursor = encode_workbench_page_cursor(
+                WorkbenchPageCursor(
+                    query_hash=query_hash,
+                    sort=cursor_sort,
+                    missing=False,
+                    value=f"{last['rank']:02d}|{last['label']}",
+                    group_key=str(last["value"]),
+                )
+            )
+        return {
+            "month": scope_key,
+            "scope_key": scope_key,
+            "zone": zone,
+            "pane": pane,
+            "facet": "column",
+            "column": column,
+            "page_size": page_size,
             "has_more": has_more,
             "next_cursor": next_cursor,
             "options": options,
@@ -3267,6 +3595,7 @@ class PostgresWorkbenchPageQueryRepository:
         time_filters: dict[str, dict[str, str]],
         exception_bucket: str | None = None,
         search_hit_name: str | None = None,
+        bank_tag_row_ids: list[str] | None = None,
     ) -> tuple[str, list[Any]]:
         clauses = ["groups.zone = %s"]
         params: list[Any] = [zone]
@@ -3307,42 +3636,21 @@ class PostgresWorkbenchPageQueryRepository:
             time_filter = time_filters.get(pane)
             if not pane_filters and not time_filter:
                 continue
-            member_clauses = ["filter_member.internal_key = groups.internal_key", "filter_member.row_type = %s"]
-            member_params: list[Any] = [pane]
-            for column, values in sorted(pane_filters.items()):
-                if not values:
-                    continue
-                if pane == "bank" and column == "amount":
-                    directions = [value for value in values if value in {"支出", "收入"}]
-                    accounts = [value for value in values if value not in {"支出", "收入"}]
-                    if directions:
-                        member_clauses.append("filter_member.column_values->>'direction' = any(%s::text[])")
-                        member_params.append(directions)
-                    if accounts:
-                        member_clauses.append("filter_member.column_values->>'paymentAccount' = any(%s::text[])")
-                        member_params.append(accounts)
-                    continue
-                value_clauses: list[str] = []
-                concrete_values = [
-                    value for value in values if value != WORKBENCH_FILTER_MISSING_VALUE
-                ]
-                if concrete_values:
-                    value_clauses.append("filter_member.column_values->>%s = any(%s::text[])")
-                    member_params.extend([column, concrete_values])
-                if WORKBENCH_FILTER_MISSING_VALUE in values:
-                    value_clauses.append(
-                        "coalesce(nullif(btrim(filter_member.column_values->>%s), ''), '') "
-                        "in ('', '--', '—')"
-                    )
-                    member_params.append(column)
-                if value_clauses:
-                    member_clauses.append("(" + " or ".join(value_clauses) + ")")
-            start_date, end_date = workbench_time_range(time_filter)
-            if start_date and end_date:
-                member_clauses.append(
-                    "filter_member.sort_date >= %s::date and filter_member.sort_date < %s::date"
+            filter_clauses, filter_params = (
+                PostgresWorkbenchPageQueryRepository._member_filter_clauses(
+                    pane=pane,
+                    pane_filters=pane_filters,
+                    time_filter=time_filter,
+                    alias="filter_member",
+                    bank_tag_row_ids=bank_tag_row_ids,
                 )
-                member_params.extend([start_date, end_date])
+            )
+            member_clauses = [
+                "filter_member.internal_key = groups.internal_key",
+                "filter_member.row_type = %s",
+                *filter_clauses,
+            ]
+            member_params: list[Any] = [pane, *filter_params]
             clauses.append(
                 "exists (select 1 from canonical_group_members filter_member where "
                 + " and ".join(member_clauses)
@@ -3350,6 +3658,114 @@ class PostgresWorkbenchPageQueryRepository:
             )
             params.extend(member_params)
         return " and ".join(clauses), params
+
+    def _resolve_bank_tag_filter_row_ids(
+        self,
+        *,
+        scope_key: str,
+        zone: str,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+        column_filters: dict[str, dict[str, list[str]]],
+        time_filters: dict[str, dict[str, str]],
+        exception_bucket: str | None,
+    ) -> list[str] | None:
+        selected_codes = _grouped_filter_values(
+            column_filters.get("bank", {}).get("amount", []),
+            "bankTag",
+        )
+        if not selected_codes:
+            return None
+        filters_without_tags = {
+            pane: {column: list(values) for column, values in pane_filters.items()}
+            for pane, pane_filters in column_filters.items()
+        }
+        bank_filters = filters_without_tags.get("bank", {})
+        amount_values = [
+            value
+            for value in bank_filters.get("amount", [])
+            if not value.startswith("bankTag:")
+        ]
+        if amount_values:
+            bank_filters["amount"] = amount_values
+        else:
+            bank_filters.pop("amount", None)
+        if not bank_filters:
+            filters_without_tags.pop("bank", None)
+        search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
+            prefix="bank_tag_candidates",
+            search=search,
+        )
+        where_sql, where_params = self._group_filters(
+            zone=zone,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+            search_hit_name=search_hit_name,
+            column_filters=filters_without_tags,
+            time_filters=time_filters,
+            exception_bucket=exception_bucket,
+        )
+        member_filter_sql, member_filter_params = self._target_member_filters(
+            pane="bank",
+            column_filters=filters_without_tags,
+            time_filters=time_filters,
+            alias="member",
+        )
+        candidate_rows = self._connection.fetch_all(
+            f"""
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            {search_ctes}
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
+            filtered_groups as materialized (
+                select groups.internal_key
+                from effective_groups groups
+                where {where_sql}
+            )
+            select distinct member.row_id
+            from canonical_group_members member
+            join filtered_groups groups
+              on groups.internal_key = member.internal_key
+            where member.row_type = 'bank'
+              {member_filter_sql}
+            order by member.row_id
+            """,
+            tuple(
+                [
+                    *self._scope_params(scope_key),
+                    *search_params,
+                    *where_params,
+                    *member_filter_params,
+                ]
+            ),
+        )
+        candidate_ids = [
+            row_id
+            for row in candidate_rows
+            if (row_id := str(row.get("row_id") or "").strip())
+        ]
+        if not candidate_ids:
+            return []
+        settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(
+            self._connection
+        )
+        projections = (
+            PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+                self._connection,
+                settings=settings,
+                transaction_ids=candidate_ids,
+                tenant_id=self._tenant_id,
+            )
+        )
+        selected = set(selected_codes)
+        return [
+            row_id
+            for row_id in candidate_ids
+            if str((projections.get(row_id) or {}).get("category_code") or "")
+            in selected
+        ]
 
     @staticmethod
     def _source_search_hit_ctes(
@@ -3514,23 +3930,143 @@ class PostgresWorkbenchPageQueryRepository:
         column_filters: dict[str, dict[str, list[str]]],
         time_filters: dict[str, dict[str, str]],
         alias: str,
+        bank_tag_row_ids: list[str] | None = None,
     ) -> tuple[str, list[Any]]:
+        clauses, params = PostgresWorkbenchPageQueryRepository._member_filter_clauses(
+            pane=pane,
+            pane_filters=column_filters.get(pane, {}),
+            time_filter=time_filters.get(pane),
+            alias=alias,
+            bank_tag_row_ids=bank_tag_row_ids,
+        )
+        return ("and " + " and ".join(clauses), params) if clauses else ("", [])
+
+    @staticmethod
+    def _member_filter_clauses(
+        *,
+        pane: str,
+        pane_filters: dict[str, list[str]],
+        time_filter: dict[str, str] | None,
+        alias: str,
+        bank_tag_row_ids: list[str] | None,
+    ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
-        for column, values in sorted(column_filters.get(pane, {}).items()):
+        for column, values in sorted(pane_filters.items()):
             if not values:
                 continue
             if pane == "bank" and column == "amount":
-                directions = [value for value in values if value in {"支出", "收入"}]
-                accounts = [value for value in values if value not in {"支出", "收入"}]
+                direction_keys = _grouped_filter_values(values, "direction")
+                directions = [
+                    direction
+                    for key in direction_keys
+                    if (direction := {"expense": "支出", "income": "收入"}.get(key))
+                ]
+                accounts = _grouped_filter_values(values, "account")
+                bank_tags = _grouped_filter_values(values, "bankTag")
                 if directions:
                     clauses.append(f"{alias}.column_values->>'direction' = any(%s::text[])")
                     params.append(directions)
                 if accounts:
-                    clauses.append(
-                        f"{alias}.column_values->>'paymentAccount' = any(%s::text[])"
-                    )
+                    clauses.append(f"{alias}.column_values->>'accountLast4' = any(%s::text[])")
                     params.append(accounts)
+                if bank_tags:
+                    if bank_tag_row_ids is None:
+                        raise ValueError("bank tag filters require canonical row resolution.")
+                    if bank_tag_row_ids:
+                        clauses.append(f"{alias}.row_id = any(%s::text[])")
+                        params.append(bank_tag_row_ids)
+                    else:
+                        clauses.append("false")
+                continue
+            if pane == "oa" and column == "applicant":
+                grouped_columns = (
+                    ("oaType", "applicationType"),
+                    ("workflow", "workflowStatus"),
+                    ("applicant", "applicant"),
+                )
+                for prefix, source_column in grouped_columns:
+                    selected = _grouped_filter_values(values, prefix)
+                    concrete = [
+                        value
+                        for value in selected
+                        if value != WORKBENCH_FILTER_MISSING_VALUE
+                    ]
+                    selected_clauses: list[str] = []
+                    if concrete:
+                        selected_clauses.append(
+                            f"{alias}.column_values->>'{source_column}' = any(%s::text[])"
+                        )
+                        params.append(concrete)
+                    if WORKBENCH_FILTER_MISSING_VALUE in selected:
+                        selected_clauses.append(
+                            f"coalesce(nullif(btrim({alias}.column_values->>'{source_column}'), ''), '') "
+                            "in ('', '--', '—')"
+                        )
+                    if selected_clauses:
+                        clauses.append("(" + " or ".join(selected_clauses) + ")")
+                continue
+            if pane == "oa" and column == "projectName":
+                projects = _grouped_filter_values(values, "project")
+                expense_types = _grouped_filter_values(values, "expenseType")
+                item_clauses: list[str] = []
+                parent_clauses: list[str] = []
+                item_params: list[Any] = []
+                parent_params: list[Any] = []
+                if projects:
+                    concrete_projects = [
+                        value
+                        for value in projects
+                        if value != WORKBENCH_FILTER_MISSING_VALUE
+                    ]
+                    item_project_clauses: list[str] = []
+                    parent_project_clauses: list[str] = []
+                    if concrete_projects:
+                        item_project_clauses.append(
+                            "coalesce(nullif(btrim(expense.value->>'project_name'), ''), "
+                            "nullif(btrim(expense.value->>'projectName'), '')) = any(%s::text[])"
+                        )
+                        parent_project_clauses.append(
+                            f"{alias}.column_values->>'projectName' = any(%s::text[])"
+                        )
+                        item_params.append(concrete_projects)
+                        parent_params.append(concrete_projects)
+                    if WORKBENCH_FILTER_MISSING_VALUE in projects:
+                        item_project_clauses.append(
+                            "coalesce(nullif(btrim(expense.value->>'project_name'), ''), "
+                            "nullif(btrim(expense.value->>'projectName'), ''), '') = ''"
+                        )
+                        parent_project_clauses.append(
+                            f"coalesce(nullif(btrim({alias}.column_values->>'projectName'), ''), '') "
+                            "in ('', '--', '—')"
+                        )
+                    item_clauses.append("(" + " or ".join(item_project_clauses) + ")")
+                    parent_clauses.append(
+                        "(" + " or ".join(parent_project_clauses) + ")"
+                    )
+                if expense_types:
+                    item_clauses.append(
+                        "coalesce(nullif(btrim(expense.value->>'expense_type'), ''), "
+                        "nullif(btrim(expense.value->>'expenseType'), '')) = any(%s::text[])"
+                    )
+                    parent_clauses.append(
+                        f"{alias}.column_values->>'expenseType' = any(%s::text[])"
+                    )
+                    item_params.append(expense_types)
+                    parent_params.append(expense_types)
+                if item_clauses:
+                    clauses.append(
+                        "((jsonb_typeof(" + alias + ".oa_expense_items) = 'array' "
+                        "and jsonb_array_length(" + alias + ".oa_expense_items) > 0 "
+                        "and exists (select 1 from jsonb_array_elements(" + alias
+                        + ".oa_expense_items) expense(value) where "
+                        + " and ".join(item_clauses)
+                        + ")) or ((jsonb_typeof(" + alias + ".oa_expense_items) <> 'array' "
+                        "or jsonb_array_length(" + alias + ".oa_expense_items) = 0) and "
+                        + " and ".join(parent_clauses)
+                        + "))"
+                    )
+                    params.extend([*item_params, *parent_params])
                 continue
             concrete_values = [
                 value for value in values if value != WORKBENCH_FILTER_MISSING_VALUE
@@ -3547,13 +4083,13 @@ class PostgresWorkbenchPageQueryRepository:
                 params.append(column)
             if value_clauses:
                 clauses.append("(" + " or ".join(value_clauses) + ")")
-        start_date, end_date = workbench_time_range(time_filters.get(pane))
+        start_date, end_date = workbench_time_range(time_filter)
         if start_date and end_date:
             clauses.append(
                 f"{alias}.sort_date >= %s::date and {alias}.sort_date < %s::date"
             )
             params.extend([start_date, end_date])
-        return ("and " + " and ".join(clauses), params) if clauses else ("", [])
+        return clauses, params
 
     @staticmethod
     def _group_sort(sort: str | None) -> tuple[str, str, str]:

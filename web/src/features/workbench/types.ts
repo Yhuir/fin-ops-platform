@@ -347,6 +347,7 @@ export type WorkbenchFilterOption = {
   value: string;
   label: string;
   missing: boolean;
+  group?: string;
 };
 
 export type WorkbenchFilterOptionsPage = {

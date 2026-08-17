@@ -8,7 +8,7 @@ import {
   SearchField,
   Spinner,
 } from "@heroui/react";
-import { memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useRef, useState } from "react";
 
 import type {
   WorkbenchFilterOption,
@@ -163,7 +163,7 @@ function WorkbenchColumnFilterMenu({
         </svg>
       </PopoverTrigger>
       <PopoverContent
-        className="column-filter-popover"
+        className={`column-filter-popover${paneId === "oa" && columnKey === "projectName" ? " column-filter-popover--wide" : ""}`}
         containerPadding={12}
         maxHeight={380}
         offset={8}
@@ -183,18 +183,23 @@ function WorkbenchColumnFilterMenu({
             ) : null}
             {!loading && error ? <div className="column-filter-state error" role="alert">{error}</div> : null}
             {!loading && !error && options.length === 0 ? <div className="column-filter-state">暂无可选项</div> : null}
-            {options.map((option) => (
-              <Checkbox
-                className="column-filter-option"
-                isSelected={selectedValues.includes(option.value)}
-                key={option.value}
-                onChange={(selected) => handleToggleValue(option.value, selected)}
-                slot={null}
-              >
-                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                <span>{option.label}</span>
-              </Checkbox>
-            ))}
+            {options.map((option, index) => {
+              const showGroup = Boolean(option.group) && option.group !== options[index - 1]?.group;
+              return (
+                <Fragment key={option.value}>
+                  {showGroup ? <div className="column-filter-option-group">{option.group}</div> : null}
+                  <Checkbox
+                    className="column-filter-option"
+                    isSelected={selectedValues.includes(option.value)}
+                    onChange={(selected) => handleToggleValue(option.value, selected)}
+                    slot={null}
+                  >
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                    <span>{option.label}</span>
+                  </Checkbox>
+                </Fragment>
+              );
+            })}
             {hasMore ? (
               <Button isDisabled={loading} onPress={() => void handleLoadMore()} size="sm" variant="tertiary">
                 {loading ? "加载中" : "加载更多"}

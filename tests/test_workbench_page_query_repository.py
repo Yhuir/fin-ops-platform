@@ -4,6 +4,9 @@ from typing import Any
 
 import pytest
 
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
     _ANOMALY_STATE_CTES,
     _SCOPED_CANONICAL_GROUPS_CTE,
@@ -19,6 +22,7 @@ from fin_ops_platform.services.workbench_canonical_rows import (
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
+    normalize_workbench_column_filters,
 )
 from fin_ops_platform.services.workbench_page_cursor import (
     decode_workbench_page_cursor,
@@ -454,6 +458,10 @@ def test_scope_spine_prunes_relation_candidates_then_rechecks_typed_membership()
     assert "bank.raw_payload::text" not in normalized
     assert "invoice.raw_payload::text" not in normalized
     assert "searchable_text" not in normalized
+    assert "requested_settings as materialized" in normalized
+    assert "settings.settings_payload->'bank_account_mappings'" in normalized
+    assert "'accountlast4', right(bank.account_no, 4)" in normalized
+    assert "when '供应商付款申请' then '支付申请'" in normalized
 
 
 def test_page_grouping_preserves_cross_pane_same_textual_id() -> None:
@@ -552,8 +560,13 @@ def test_filter_sql_escapes_literal_search_and_preserves_and_or_semantics() -> N
         search="100%_\\",
         search_hit_name=search_hit_name,
         column_filters={
-            "oa": {"applicant": ["张三", WORKBENCH_FILTER_MISSING_VALUE]},
-            "bank": {"amount": ["支出", "招商银行 基本户 1234"]},
+            "oa": {
+                "applicant": [
+                    "applicant:张三",
+                    f"applicant:{WORKBENCH_FILTER_MISSING_VALUE}",
+                ]
+            },
+            "bank": {"amount": ["direction:expense", "account:1234"]},
         },
         time_filters={"invoice": {"mode": "year", "year": "2026"}},
     )
@@ -563,8 +576,250 @@ def test_filter_sql_escapes_literal_search_and_preserves_and_or_semantics() -> N
     assert "test_source_search_hits" in search_ctes
     assert r"%100\%\_\\%" in search_params
     assert "direction' = any" in where_sql
-    assert "paymentAccount' = any" in where_sql
+    assert "accountLast4' = any" in where_sql
     assert " or " in where_sql
     assert "invoice" in params
     assert "2026-01-01" in params
     assert "2027-01-01" in params
+
+
+def test_grouped_filter_contract_rejects_legacy_flat_values() -> None:
+    with pytest.raises(ValueError, match="unsupported grouped option"):
+        normalize_workbench_column_filters({"bank": {"amount": ["支出"]}})
+
+    assert normalize_workbench_column_filters(
+        {
+            "oa": {
+                "applicant": ["oaType:支付申请", "workflow:completed"],
+                "projectName": ["expenseType:交通费", "project:大理项目"],
+            },
+            "bank": {
+                "amount": [
+                    "direction:expense",
+                    "account:8106",
+                    "bankTag:expense-project",
+                ]
+            },
+        }
+    ) == {
+        "oa": {
+            "applicant": ["oaType:支付申请", "workflow:completed"],
+            "projectName": ["expenseType:交通费", "project:大理项目"],
+        },
+        "bank": {
+            "amount": [
+                "account:8106",
+                "bankTag:expense-project",
+                "direction:expense",
+            ]
+        },
+    }
+
+
+def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> None:
+    applicant_repository = PostgresWorkbenchPageQueryRepository(
+        _QueryConnection(
+            [
+                {
+                    "row_id": "oa-1",
+                    "column_values": {
+                        "applicationType": "支付申请",
+                        "workflowStatus": "completed",
+                        "applicant": "杨丽萍",
+                    },
+                    "oa_expense_items": [],
+                }
+            ]
+        ),
+        tenant_id="test-tenant",
+    )
+    applicant = applicant_repository._filter_options(
+        scope_key="all",
+        zone="unpaired",
+        pane="oa",
+        facet="column",
+        column="applicant",
+    )
+    assert applicant["options"] == [
+        {
+            "value": "oaType:支付申请",
+            "label": "支付申请",
+            "missing": False,
+            "group": "OA 类型",
+        },
+        {
+            "value": "workflow:completed",
+            "label": "已完成",
+            "missing": False,
+            "group": "流程状态",
+        },
+        {
+            "value": "applicant:杨丽萍",
+            "label": "杨丽萍",
+            "missing": False,
+            "group": "申请人",
+        },
+    ]
+
+    project_repository = PostgresWorkbenchPageQueryRepository(
+        _QueryConnection(
+            [
+                {
+                    "row_id": "oa-1",
+                    "column_values": {"projectName": "多个项目"},
+                    "oa_expense_items": [
+                        {"project_name": "大理项目", "expense_type": "交通费"},
+                        {"project_name": "曲靖项目", "expense_type": "车辆使用费"},
+                    ],
+                }
+            ]
+        ),
+        tenant_id="test-tenant",
+    )
+    project = project_repository._filter_options(
+        scope_key="all",
+        zone="unpaired",
+        pane="oa",
+        facet="column",
+        column="projectName",
+    )
+    assert [option["group"] for option in project["options"]] == [
+        "OA 费用类型",
+        "OA 费用类型",
+        "项目名称",
+        "项目名称",
+    ]
+    assert {option["value"] for option in project["options"]} == {
+        "expenseType:交通费",
+        "expenseType:车辆使用费",
+        "project:大理项目",
+        "project:曲靖项目",
+    }
+
+
+def test_project_and_expense_type_share_one_oa_expense_item() -> None:
+    clauses, params = PostgresWorkbenchPageQueryRepository._member_filter_clauses(
+        pane="oa",
+        pane_filters={
+            "projectName": ["project:大理项目", "expenseType:交通费"]
+        },
+        time_filter=None,
+        alias="member",
+        bank_tag_row_ids=None,
+    )
+
+    assert len(clauses) == 1
+    assert "jsonb_array_elements(member.oa_expense_items)" in clauses[0]
+    assert " and " in clauses[0]
+    assert params == [
+        ["大理项目"],
+        ["交通费"],
+        ["大理项目"],
+        ["交通费"],
+    ]
+
+
+def test_bank_grouped_options_use_account_mapping_and_canonical_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BankOptionConnection(_QueryConnection):
+        def fetch_one(
+            self, _sql: str, _params: tuple[Any, ...] = ()
+        ) -> dict[str, object]:
+            return {"settings_payload": {"bank_account_mappings": []}}
+
+    connection = _BankOptionConnection(
+        [
+            {
+                "row_id": "bank-1",
+                "column_values": {
+                    "direction": "支出",
+                    "accountLast4": "8106",
+                    "paymentAccount": "建设银行 基本户 8106",
+                },
+                "oa_expense_items": [],
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        PostgresBankDetailsCanonicalQueryRepository,
+        "workbench_category_projection_rows",
+        lambda *_args, **_kwargs: {
+            "bank-1": {
+                "category_code": "expense-project",
+                "category_label": "员工报销",
+                "category_label_path": ["项目开销", "员工报销"],
+            }
+        },
+    )
+    payload = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )._filter_options(
+        scope_key="all",
+        zone="unpaired",
+        pane="bank",
+        facet="column",
+        column="amount",
+    )
+
+    assert payload["options"] == [
+        {
+            "value": "direction:expense",
+            "label": "支出",
+            "missing": False,
+            "group": "收支方向",
+        },
+        {
+            "value": "account:8106",
+            "label": "建设银行 基本户 8106",
+            "missing": False,
+            "group": "银行账户",
+        },
+        {
+            "value": "bankTag:expense-project",
+            "label": "项目开销 / 员工报销",
+            "missing": False,
+            "group": "流水标签",
+        },
+    ]
+
+
+def test_bank_tag_filter_resolves_only_canonical_matching_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BankTagConnection(_QueryConnection):
+        def fetch_one(
+            self, _sql: str, _params: tuple[Any, ...] = ()
+        ) -> dict[str, object]:
+            return {"settings_payload": {}}
+
+    connection = _BankTagConnection([{"row_id": "bank-1"}, {"row_id": "bank-2"}])
+    monkeypatch.setattr(
+        PostgresBankDetailsCanonicalQueryRepository,
+        "workbench_category_projection_rows",
+        lambda *_args, **_kwargs: {
+            "bank-1": {"category_code": "expense-project"},
+            "bank-2": {"category_code": "income-refund"},
+        },
+    )
+    repository = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )
+
+    assert repository._resolve_bank_tag_filter_row_ids(
+        scope_key="all",
+        zone="unpaired",
+        status=None,
+        source_kind=None,
+        search=None,
+        column_filters={
+            "bank": {
+                "amount": ["direction:expense", "bankTag:expense-project"]
+            }
+        },
+        time_filters={},
+        exception_bucket=None,
+    ) == ["bank-1"]
+    assert "bankTag:" not in str(connection.params)

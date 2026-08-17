@@ -15,6 +15,11 @@ WORKBENCH_FILTER_PLACEHOLDERS = frozenset({"", "--", "—"})
 WORKBENCH_FILTER_VALUE_MAX_LENGTH = 200
 WORKBENCH_FILTER_VALUES_PER_COLUMN_MAX = 20
 WORKBENCH_FILTER_VALUES_TOTAL_MAX = 80
+WORKBENCH_COMPOSITE_FILTER_PREFIXES = {
+    ("oa", "applicant"): frozenset({"oaType", "workflow", "applicant"}),
+    ("oa", "projectName"): frozenset({"expenseType", "project"}),
+    ("bank", "amount"): frozenset({"direction", "account", "bankTag"}),
+}
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
     "oa": frozenset(
         {
@@ -114,6 +119,19 @@ def normalize_workbench_column_filters(
                     f"column_filters.{pane}.{column} values must be at most "
                     f"{WORKBENCH_FILTER_VALUE_MAX_LENGTH} characters."
                 )
+            allowed_prefixes = WORKBENCH_COMPOSITE_FILTER_PREFIXES.get((pane, column))
+            if allowed_prefixes:
+                invalid = [
+                    item
+                    for item in normalized
+                    if ":" not in item
+                    or item.split(":", 1)[0] not in allowed_prefixes
+                    or not item.split(":", 1)[1]
+                ]
+                if invalid:
+                    raise ValueError(
+                        f"column_filters.{pane}.{column} contains an unsupported grouped option."
+                    )
             if not normalized:
                 continue
             if total_values + len(normalized) > WORKBENCH_FILTER_VALUES_TOTAL_MAX:
@@ -205,6 +223,7 @@ def workbench_time_range(value: dict[str, str] | None) -> tuple[str | None, str 
 
 __all__ = [
     "WORKBENCH_ALLOWED_FILTER_COLUMNS",
+    "WORKBENCH_COMPOSITE_FILTER_PREFIXES",
     "WORKBENCH_FILTER_MISSING_VALUE",
     "WORKBENCH_FILTER_OPTION_COLUMNS",
     "normalize_workbench_column_filters",

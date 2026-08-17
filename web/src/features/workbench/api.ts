@@ -269,6 +269,7 @@ type ApiWorkbenchFilterOptionsPayload = {
     value?: string | null;
     label?: string | null;
     missing?: boolean | null;
+    group?: string | null;
   }>;
 };
 
@@ -2307,6 +2308,7 @@ export async function fetchWorkbenchFilterOptions(
         value: String(option.value ?? "").trim(),
         label: String(option.label ?? option.value ?? "").trim(),
         missing: option.missing === true,
+        group: String(option.group ?? "").trim() || undefined,
       }))
       .filter((option) => option.value && option.label),
     pageSize: Math.max(1, Number(payload.page_size) || 100),

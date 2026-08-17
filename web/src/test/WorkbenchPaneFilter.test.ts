@@ -391,7 +391,7 @@ describe("Workbench pane display model", () => {
     state.activePaneId = "bank";
     state.searchQuery = "建行";
     state.filtersByPaneAndColumn.bank = {
-      amount: ["支出"],
+      amount: ["direction:expense"],
     };
 
     const displayGroups = buildWorkbenchDisplayGroups(groups, state);
@@ -449,13 +449,86 @@ describe("Workbench pane display model", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";
     state.filtersByPaneAndColumn.bank = {
-      amount: ["支出", "建行 8106"],
+      amount: ["direction:expense", "account:8106"],
     };
 
     const displayGroups = buildWorkbenchDisplayGroups(groups, state);
 
     expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-filter-values"]);
     expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
+  });
+
+  test("matches bank direction, account, and canonical tag on the same row", () => {
+    const taggedRow = {
+      ...buildRow("bank-tagged", "bank", {
+        direction: "支出",
+        paymentAccount: "建设银行 基本户 8106",
+      }),
+      categoryCode: "expense-project",
+    };
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.filtersByPaneAndColumn.bank = {
+      amount: ["direction:expense", "account:8106", "bankTag:expense-project"],
+    };
+
+    expect(buildWorkbenchDisplayGroups([{
+      id: "bank-tagged-group",
+      groupType: "unpaired",
+      matchConfidence: "medium",
+      reason: "test",
+      rows: { oa: [], bank: [taggedRow], invoice: [] },
+    }], state)).toHaveLength(1);
+  });
+
+  test("matches OA type, workflow status, and applicant on the same row", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.filtersByPaneAndColumn.oa = {
+      applicant: ["oaType:支付申请", "workflow:completed", "applicant:杨丽萍"],
+    };
+    const row = buildRow("oa-payment", "oa", {
+      applicationType: "供应商付款申请",
+      workflowStatus: "completed",
+      applicant: "杨丽萍",
+    });
+
+    expect(buildWorkbenchDisplayGroups([{
+      id: "oa-payment-group",
+      groupType: "unpaired",
+      matchConfidence: "medium",
+      reason: "test",
+      rows: { oa: [row], bank: [], invoice: [] },
+    }], state)).toHaveLength(1);
+  });
+
+  test("requires project and expense type on the same OA expense item", () => {
+    const crossItemRow = {
+      ...buildRow("oa-cross-items", "oa", { projectName: "多个项目" }),
+      expenseItems: [
+        { id: "item-1", rowIndex: "1", projectName: "大理项目", expenseType: "材料费", amount: "10.00" },
+        { id: "item-2", rowIndex: "2", projectName: "曲靖项目", expenseType: "交通费", amount: "20.00" },
+      ],
+    };
+    const matchingRow = {
+      ...buildRow("oa-same-item", "oa", { projectName: "多个项目" }),
+      expenseItems: [
+        { id: "item-1", rowIndex: "1", projectName: "大理项目", expenseType: "交通费", amount: "30.00" },
+      ],
+    };
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.filtersByPaneAndColumn.oa = {
+      projectName: ["project:大理项目", "expenseType:交通费"],
+    };
+    const groups: WorkbenchRelationGroup[] = [crossItemRow, matchingRow].map((row) => ({
+      id: `group:${row.id}`,
+      groupType: "unpaired",
+      matchConfidence: "medium",
+      reason: "test",
+      rows: { oa: [row], bank: [], invoice: [] },
+    }));
+
+    expect(buildWorkbenchDisplayGroups(groups, state).map((group) => group.id)).toEqual([
+      "group:oa-same-item",
+    ]);
   });
 
   test("matches any selected value within an ordinary scalar column", () => {
@@ -497,7 +570,7 @@ describe("Workbench pane display model", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "oa";
     state.filtersByPaneAndColumn.oa = {
-      applicant: ["陈涛", "孙敏"],
+      applicant: ["applicant:陈涛", "applicant:孙敏"],
     };
 
     expect(buildWorkbenchDisplayGroups(groups, state).map((group) => group.id)).toEqual(["oa-chen", "oa-sun"]);

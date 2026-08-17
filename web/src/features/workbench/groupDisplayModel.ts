@@ -791,8 +791,13 @@ function matchesWorkbenchRow(
       return true;
     }
     if (row.recordType === "bank" && columnKey === "amount") {
-      const rowValues = resolveBankAmountFilterValues(row);
-      return selectedValues.every((value) => rowValues.includes(value));
+      return matchesBankAmountFilters(row, selectedValues);
+    }
+    if (row.recordType === "oa" && columnKey === "applicant") {
+      return matchesOaApplicantFilters(row, selectedValues);
+    }
+    if (row.recordType === "oa" && columnKey === "projectName") {
+      return matchesOaProjectFilters(row, selectedValues);
     }
     const currentValue = row.tableValues[columnKey] ?? "";
     return selectedValues.some((value) => value === currentValue);
@@ -806,19 +811,71 @@ function getWorkbenchGroupPaneRowsForCriteria(group: WorkbenchRelationGroup, pan
   ];
 }
 
-function resolveBankAmountFilterValues(row: WorkbenchRecord) {
-  const values: string[] = [];
-  const direction = row.tableValues.direction;
-  const paymentAccount = row.tableValues.paymentAccount;
+function groupedFilterValues(selectedValues: string[], prefix: string) {
+  const marker = `${prefix}:`;
+  return selectedValues
+    .filter((value) => value.startsWith(marker))
+    .map((value) => value.slice(marker.length));
+}
 
-  if (direction && direction !== "--" && direction !== "—") {
-    values.push(direction);
+function matchesEverySelectedGroup(
+  selectedValues: string[],
+  matchers: Record<string, (value: string) => boolean>,
+) {
+  const recognizedCount = Object.keys(matchers).reduce(
+    (count, prefix) => count + groupedFilterValues(selectedValues, prefix).length,
+    0,
+  );
+  if (recognizedCount !== selectedValues.length) {
+    return false;
   }
-  if (paymentAccount && paymentAccount !== "--" && paymentAccount !== "—") {
-    values.push(paymentAccount);
-  }
+  return Object.entries(matchers).every(([prefix, matcher]) => {
+    const values = groupedFilterValues(selectedValues, prefix);
+    return values.length === 0 || values.some(matcher);
+  });
+}
 
-  return values;
+function matchesBankAmountFilters(row: WorkbenchRecord, selectedValues: string[]) {
+  const accountLast4 = row.tableValues.paymentAccount.match(/(\d{4})\s*$/)?.[1] ?? "";
+  return matchesEverySelectedGroup(selectedValues, {
+    direction: (value) => (
+      (value === "expense" && row.tableValues.direction === "支出")
+      || (value === "income" && row.tableValues.direction === "收入")
+    ),
+    account: (value) => value === accountLast4,
+    bankTag: (value) => value === row.categoryCode,
+  });
+}
+
+function matchesOaApplicantFilters(row: WorkbenchRecord, selectedValues: string[]) {
+  const rawApplicationType = row.tableValues.applicationType;
+  const applicationType = ["payment_request", "供应商付款申请"].includes(rawApplicationType)
+    ? "支付申请"
+    : rawApplicationType === "expense_claim"
+      ? "日常报销"
+      : rawApplicationType;
+  return matchesEverySelectedGroup(selectedValues, {
+    oaType: (value) => value === applicationType,
+    workflow: (value) => value === row.tableValues.workflowStatus,
+    applicant: (value) => value === "__workbench_missing__"
+      ? !row.tableValues.applicant || ["--", "—"].includes(row.tableValues.applicant)
+      : value === row.tableValues.applicant,
+  });
+}
+
+function matchesOaProjectFilters(row: WorkbenchRecord, selectedValues: string[]) {
+  const items = row.expenseItems?.length
+    ? row.expenseItems
+    : [{
+      projectName: row.tableValues.projectName,
+      expenseType: row.expenseType ?? "",
+    }];
+  return items.some((item) => matchesEverySelectedGroup(selectedValues, {
+    expenseType: (value) => value === (item.expenseType ?? ""),
+    project: (value) => value === "__workbench_missing__"
+      ? !item.projectName || ["--", "—"].includes(item.projectName)
+      : value === item.projectName,
+  }));
 }
 
 function normalizeWorkbenchSearchText(value: string) {

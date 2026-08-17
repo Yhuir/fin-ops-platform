@@ -13467,6 +13467,10 @@ body.column-layout-dragging {
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
 }
 
+.column-filter-popover--wide {
+  width: min(420px, calc(100vw - 24px));
+}
+
 .column-filter-dialog {
   display: grid;
   gap: 6px;
@@ -13495,7 +13499,7 @@ body.column-layout-dragging {
   overflow: auto;
 }
 
-.column-filter-option {
+.column-filter-popover label.column-filter-option {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
@@ -13505,15 +13509,32 @@ body.column-layout-dragging {
   border-radius: 6px;
   color: #243b53;
   font-size: 12px;
+  height: max-content !important;
+  block-size: max-content !important;
+  white-space: normal;
 }
 
-.column-filter-option > span {
+.column-filter-popover label.column-filter-option > span {
   min-width: 0;
   overflow-wrap: anywhere;
   line-height: 1.35;
 }
 
-.column-filter-option:hover {
+.column-filter-option-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-top: 4px;
+  padding: 5px 2px 3px;
+  border-bottom: 1px solid #e5ebf2;
+  background: #ffffff;
+  color: #64748b;
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.column-filter-popover label.column-filter-option:hover {
   background: #f1f5f9;
 }
 

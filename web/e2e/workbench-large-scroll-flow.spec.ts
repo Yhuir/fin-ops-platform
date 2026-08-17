@@ -45,6 +45,60 @@ async function scrollPaneHorizontally(scrollbar: Locator) {
 }
 
 test.describe("workbench large dataset browser flow", () => {
+  test("shows grouped bank, applicant, and project filters without overlapping long labels", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchLargeDataset: true,
+    });
+    await page.goto("/");
+
+    const zone = page.getByTestId("zone-unpaired");
+    await expect(zone).toBeVisible();
+
+    await zone.getByRole("button", { name: "筛选 金额" }).click();
+    const bankMenu = page.getByRole("dialog", { name: "筛选 金额" });
+    await expect(bankMenu.getByText("收支方向", { exact: true })).toBeVisible();
+    await expect(bankMenu.getByText("银行账户", { exact: true })).toBeVisible();
+    await expect(bankMenu.getByText("流水标签", { exact: true })).toBeVisible();
+    await expect(bankMenu.getByRole("checkbox", { name: "建设银行 1102" })).toBeVisible();
+    const bankTag = bankMenu.getByRole("checkbox", { name: "成本 / 设备款" });
+    await bankTag.scrollIntoViewIfNeeded();
+    await expect(bankTag).toBeVisible();
+    await expect(bankMenu.getByText(/未识别银行|未识别账户/)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    await zone.getByRole("button", { name: "筛选 申请人" }).click();
+    const applicantMenu = page.getByRole("dialog", { name: "筛选 申请人" });
+    await expect(applicantMenu.getByText("OA 类型", { exact: true })).toBeVisible();
+    await expect(applicantMenu.getByText("流程状态", { exact: true })).toBeVisible();
+    await expect(applicantMenu.getByText("申请人", { exact: true })).toBeVisible();
+    await expect(applicantMenu.getByRole("checkbox", { name: "支付申请" })).toBeVisible();
+    await expect(applicantMenu.getByRole("checkbox", { name: "已完成" })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await zone.getByRole("button", { name: "筛选 项目名称" }).click();
+    const projectMenu = page.getByRole("dialog", { name: "筛选 项目名称" });
+    await expect(projectMenu.getByText("OA 费用类型", { exact: true })).toBeVisible();
+    await expect(projectMenu.getByText("项目名称", { exact: true })).toBeVisible();
+    await expect(projectMenu.getByRole("checkbox", { name: "固定资产" })).toBeVisible();
+    const geometry = await projectMenu.evaluate((element) => {
+      const popover = element.closest(".column-filter-popover");
+      const options = Array.from(element.querySelectorAll<HTMLElement>(".column-filter-option"));
+      const rects = options.map((option) => option.getBoundingClientRect());
+      return {
+        width: popover?.getBoundingClientRect().width ?? 0,
+        maxHeight: Math.max(...rects.map((rect) => rect.height)),
+        minHeight: Math.min(...rects.map((rect) => rect.height)),
+        overlaps: rects.some((rect, index) => index > 0 && rect.top < rects[index - 1].bottom - 0.5),
+      };
+    });
+    expect(geometry.width).toBeGreaterThanOrEqual(400);
+    expect(geometry.minHeight).toBeGreaterThanOrEqual(27.5);
+    expect(geometry.maxHeight).toBeGreaterThan(36);
+    expect(geometry.overlaps).toBe(false);
+  });
+
   test("keeps narrow-screen overflow inside the workbench panes", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installDeterministicApiMocks(page, {

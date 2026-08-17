@@ -1009,7 +1009,7 @@ describe("workbench api bank amount mapping", () => {
       detailLevel: "summary",
       filtersByPaneAndColumn: {
         bank: {
-          amount: ["支出", "建行 8106"],
+          amount: ["direction:expense", "account:8106"],
           counterparty: ["云南溯源科技有限公司"],
         },
       },
@@ -1035,7 +1035,7 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("detail_level")).toBe("summary");
     expect(url.searchParams.get("exception_bucket")).toBe("unpaired");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
-      bank: { amount: ["建行 8106", "支出"], counterparty: ["云南溯源科技有限公司"] },
+      bank: { amount: ["account:8106", "direction:expense"], counterparty: ["云南溯源科技有限公司"] },
     });
     expect(JSON.parse(url.searchParams.get("time_filters") ?? "{}")).toEqual({
       bank: { mode: "month", month: "2026-04" },
@@ -1049,8 +1049,8 @@ describe("workbench api bank amount mapping", () => {
         has_more: true,
         next_cursor: "filter-cursor-2",
         options: [
-          { value: "杨丽萍", label: "杨丽萍", missing: false },
-          { value: "__workbench_missing__", label: "未填写", missing: true },
+          { value: "applicant:杨丽萍", label: "杨丽萍", missing: false, group: "申请人" },
+          { value: "applicant:__workbench_missing__", label: "未填写", missing: true, group: "申请人" },
         ],
       }), { status: 200, headers: { "Content-Type": "application/json" } }),
     );
@@ -1063,7 +1063,7 @@ describe("workbench api bank amount mapping", () => {
       cursor: "filter-cursor-1",
     }, {
       search: "1320",
-      filtersByPaneAndColumn: { oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] } },
+      filtersByPaneAndColumn: { oa: { applicant: ["applicant:杨丽萍"], projectName: ["project:大理项目"] } },
       timeFilterByPane: { bank: { mode: "year", year: "2026" } },
     });
 
@@ -1077,14 +1077,14 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("cursor")).toBe("filter-cursor-1");
     expect(url.searchParams.get("page_size")).toBe("100");
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
-      oa: { applicant: ["杨丽萍"], projectName: ["大理项目"] },
+      oa: { applicant: ["applicant:杨丽萍"], projectName: ["project:大理项目"] },
     });
     expect(result).toMatchObject({
       hasMore: true,
       nextCursor: "filter-cursor-2",
       options: [
-        { value: "杨丽萍", label: "杨丽萍", missing: false },
-        { value: "__workbench_missing__", label: "未填写", missing: true },
+        { value: "applicant:杨丽萍", label: "杨丽萍", missing: false, group: "申请人" },
+        { value: "applicant:__workbench_missing__", label: "未填写", missing: true, group: "申请人" },
       ],
     });
   });
@@ -1183,13 +1183,13 @@ describe("workbench api bank amount mapping", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";
     state.filtersByPaneAndColumn.bank = {
-      amount: ["支出", "建行 8106"],
+      amount: ["direction:expense", "account:8106"],
     };
     state.timeFilterByPane.bank = { mode: "year", year: "2026" };
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
       filtersByPaneAndColumn: {
-        bank: { amount: ["支出", "建行 8106"] },
+        bank: { amount: ["direction:expense", "account:8106"] },
       },
       timeFilterByPane: {
         bank: { mode: "year", year: "2026" },
