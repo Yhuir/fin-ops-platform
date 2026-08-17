@@ -864,6 +864,7 @@ describe("workbench api bank amount mapping", () => {
                   applicant: "张三",
                   apply_time: "2026-08-12 16:11:07+08",
                   amount: "100.00",
+                  expense_type: "交通费",
                   expense_items: [
                     {
                       id: "oa-paired:item:0",
@@ -941,6 +942,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa[0]).toMatchObject({
       actionVariant: "detail-only",
       availableActions: ["detail"],
+      expenseType: "交通费",
       tableValues: { applicationTime: "2026-08-12 16:11:07" },
     });
     expect(group.rows.oa[0].expenseItems).toEqual([

@@ -317,6 +317,43 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaRow as HTMLElement).queryByText("完全关联")).not.toBeInTheDocument();
   });
 
+  test("renders the canonical expense type below the project name for a regular OA row", () => {
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columns={[{ key: "projectName", label: "项目名称", track: "minmax(192px, 192fr)", minWidth: 192 }]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="oa"
+        row={{
+          id: "oa-expense-type-1",
+          recordType: "oa",
+          expenseType: "交通费",
+          label: "日常报销",
+          status: "待处理",
+          statusCode: "pending",
+          statusTone: "warn",
+          exceptionHandled: false,
+          amount: "144.99",
+          counterparty: "--",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            projectName: "大理卷烟厂余热综合利用项目",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="unpaired"
+      />,
+    );
+
+    expect(screen.getByText("大理卷烟厂余热综合利用项目")).toBeInTheDocument();
+    expect(screen.getByText("交通费", { selector: ".oa-expense-type-chip *" })).toBeInTheDocument();
+  });
+
   test("does not render process or evidence tags in the OA project cell", () => {
     render(
       <WorkbenchRecordCard

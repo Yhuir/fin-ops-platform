@@ -105,6 +105,7 @@ type ApiWorkbenchRow = {
   project_name?: string | null;
   project_name_display?: string | null;
   project_names?: string[] | null;
+  expense_type?: string | null;
   expense_items?: Array<{
     id?: string | null;
     row_index?: string | number | null;
@@ -1220,6 +1221,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     sourceOaId: resolveWorkbenchRowSourceOaId(row),
     sourceExpenseItemIds: resolveWorkbenchRowSourceExpenseItemIds(row),
     expenseItems: mapExpenseItems(row.expense_items),
+    expenseType: toDisplayValue(row.expense_type, "") || undefined,
     label: rowLabel(row),
     status: rowRelation(row)?.label ?? "待处理",
     statusCode: rowRelation(row)?.code ?? "pending",
