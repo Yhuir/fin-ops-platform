@@ -3327,6 +3327,13 @@ class PostgresWorkbenchPageQueryRepository:
                         or projection.get("category_label"),
                     )
         elif column == "applicant":
+            # These are fixed user-facing filter dimensions, not data-derived
+            # suggestions. Keep all four choices available even when the
+            # current zone happens to contain only one type or workflow state.
+            add_option("oaType", "支付申请", "支付申请")
+            add_option("oaType", "日常报销", "日常报销")
+            add_option("workflow", "completed", "已完成")
+            add_option("workflow", "in_progress", "进行中")
             for row in rows:
                 values = row.get("column_values")
                 values = values if isinstance(values, dict) else {}

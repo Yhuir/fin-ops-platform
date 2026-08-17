@@ -43,7 +43,7 @@
 | `RECON-WB-E2E-012` | App Health write safety / OA dirty gate | P1 | `overall.write_safety.blocks_mutations=true` 或 OA dirty/refreshing 时禁写，并在已选择记录的操作区说明禁用原因；OA 状态恢复后按权威 OA status 自动恢复，不引入 Workbench generation/version gate。 |
 | `RECON-WB-E2E-013` | 已配对现金流水特殊处理 | P1 | full-access 用户可从已配对银行流水更多菜单执行 `确认为过账`、`确认为买票` 和 `取消现金处理`；买票弹窗必须校验买票成本和项目名称；三个 mutation 都必须携带完整 group row ids，成功后只重跑当前页 GET、零 operation barrier，并且不能出现隐藏错误、浏览器异常或 stale UI。 |
 | `RECON-WB-E2E-014` | 关联台金额与 OA 完成时间搜索 | P1 | `202`、`202.0`、`202.00`、`￥202.00`、`¥202.00` 命中同一完整关系组；OA 申请日期和完成时间都可命中。搜索不改变 group membership、异常状态或选择状态。 |
-| `RECON-WB-E2E-015` | 三组复合表头筛选与长项目名布局 | P1 | 银行金额菜单显示收支方向、已映射银行账户和 canonical 流水标签，不把已配置账户显示为“未识别”；OA 申请人菜单显示 OA 类型、流程状态和申请人；项目菜单显示 OA 费用类型和项目名称。项目菜单宽度至少 400px，长名称换行后选项随内容增高，相邻选项不得重叠。 |
+| `RECON-WB-E2E-015` | 三组复合表头筛选与长项目名布局 | P1 | 银行金额菜单显示收支方向、已映射银行账户和 canonical 流水标签，不把已配置账户显示为“未识别”；OA 申请人菜单在已配对与未配对区均固定显示“支付申请 / 日常报销”“已完成 / 进行中”，并显示实际申请人；项目菜单显示 OA 费用类型和项目名称。项目菜单宽度至少 400px，长名称换行后选项随内容增高，相邻选项不得重叠。 |
 
 ## 不属于本地 deterministic E2E 的风险
 

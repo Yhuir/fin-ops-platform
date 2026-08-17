@@ -650,8 +650,20 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
             "group": "OA 类型",
         },
         {
+            "value": "oaType:日常报销",
+            "label": "日常报销",
+            "missing": False,
+            "group": "OA 类型",
+        },
+        {
             "value": "workflow:completed",
             "label": "已完成",
+            "missing": False,
+            "group": "流程状态",
+        },
+        {
+            "value": "workflow:in_progress",
+            "label": "进行中",
             "missing": False,
             "group": "流程状态",
         },

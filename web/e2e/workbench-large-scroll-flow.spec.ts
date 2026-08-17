@@ -74,7 +74,9 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(applicantMenu.getByText("流程状态", { exact: true })).toBeVisible();
     await expect(applicantMenu.getByText("申请人", { exact: true })).toBeVisible();
     await expect(applicantMenu.getByRole("checkbox", { name: "支付申请" })).toBeVisible();
+    await expect(applicantMenu.getByRole("checkbox", { name: "日常报销" })).toBeVisible();
     await expect(applicantMenu.getByRole("checkbox", { name: "已完成" })).toBeVisible();
+    await expect(applicantMenu.getByRole("checkbox", { name: "进行中" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await zone.getByRole("button", { name: "筛选 项目名称" }).click();

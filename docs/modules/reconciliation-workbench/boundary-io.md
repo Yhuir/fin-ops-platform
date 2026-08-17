@@ -94,7 +94,7 @@ requested tenant/scope
 - 任一成员命中返回完整 group；不得只返回命中行。
 - 同列多值 OR，不同列/不同 pane AND；同一 pane 的多个列条件必须由同一 member 满足。
 - 银行金额复合筛选内，方向、付款账号、canonical 流水标签各自 OR，三类同时存在时彼此 AND，且必须由同一 bank member 满足。账号展示读取既有 `bank_account_mappings`；流水标签候选与过滤只对当前 eligible bank ids 批量复用银行明细 canonical 分类 owner，不复制分类规则。
-- OA 申请人复合筛选的 OA 类型、流程状态、申请人各自 OR、跨组 AND，并由同一 OA member 满足。OA 项目复合筛选的费用类型与项目名称各自 OR、跨组 AND，并由同一 `expense_items[]` 元素满足；只有没有子项时才读取父 OA 顶层字段。
+- OA 申请人复合筛选固定提供“支付申请 / 日常报销”和“已完成 / 进行中”，申请人姓名仍来自当前候选域；OA 类型、流程状态、申请人各自 OR、跨组 AND，并由同一 OA member 满足。OA 项目复合筛选的费用类型与项目名称各自 OR、跨组 AND，并由同一 `expense_items[]` 元素满足；只有没有子项时才读取父 OA 顶层字段。
 - `GET /api/workbench/filter-options` 保留其它条件、移除目标列自身条件，从 eligible groups 直接生成候选；`未填写` sentinel 统一。三个复合菜单返回带类型前缀的 `value` 和可选 `group`，旧无前缀复合值拒绝，不保留旧解析分支。
 - options 按 `(label,value)` cursor 分页，默认 100、最大 200，返回 `options,page_size,has_more,next_cursor`；不计算无用 total，不读取当前浏览器已加载 rows，也不使用 Redis fallback。
 

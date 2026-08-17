@@ -1564,6 +1564,10 @@ function workbenchFilterOptionsPayload(
       pushGrouped(`bankTag:${categoryCode}`, categoryPath || String(row.category_label ?? ""), "流水标签");
     });
   } else if (facet === "column" && pane === "oa" && column === "applicant") {
+    pushGrouped("oaType:支付申请", "支付申请", "OA 类型");
+    pushGrouped("oaType:日常报销", "日常报销", "OA 类型");
+    pushGrouped("workflow:completed", "已完成", "流程状态");
+    pushGrouped("workflow:in_progress", "进行中", "流程状态");
     rows.forEach((row) => {
       const rawApplicationType = String(row.apply_type ?? "").trim();
       const applicationType = ["payment_request", "供应商付款申请"].includes(rawApplicationType)
