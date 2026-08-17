@@ -1032,7 +1032,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                                     "row_index": 0,
                                     "detailProjectName": "dali-project",
                                     "detailReimbursementAmount": "144.99",
-                                    "category": "s4",
+                                    "purposeType": "s4",
                                     "feeContent": "大理出差返回昆明车费",
                                     "detailReimbursementDate": "2026-06-08",
                                 }
@@ -1068,13 +1068,15 @@ class MongoOAAdapterTests(unittest.TestCase):
                             "Reimbursement Personnel": "胡瑢",
                             "titleName": "日常报销",
                             "processId": "1964",
-                            "reimbursementType": "withdraw_expense",
+                            "detailReimbursementType": "withdraw_expense",
                             "schedule": [
                                 {
                                     "row_index": 0,
                                     "detailProjectName": "yx-project",
                                     "detailReimbursementAmount": "135",
-                                    "detailReimbursementType": "withdraw_expense",
+                                    "purposeType": "unknown_expense_code",
+                                    "category": "s4",
+                                    "feeType": "s4",
                                     "feeContent": "玉溪德力西买材料",
                                     "detailReimbursementDate": "2025-10-02",
                                 }

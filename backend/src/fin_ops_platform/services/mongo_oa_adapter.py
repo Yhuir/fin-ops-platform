@@ -68,43 +68,7 @@ ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
 )
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
-EXPENSE_TYPE_CANDIDATE_KEYS = (
-    "category",
-    "feeType",
-    "expenseType",
-    "costType",
-    "typeOfExpense",
-    "expenseCategory",
-    "feeCategory",
-    "costCategory",
-    "expenseKind",
-    "feeKind",
-    "costKind",
-    "detailExpenseType",
-    "detailFeeType",
-    "detailCostType",
-    "detailTypeOfExpense",
-    "detailExpenseCategory",
-    "detailFeeCategory",
-    "detailCostCategory",
-    "detailExpenseKind",
-    "detailFeeKind",
-    "detailCostKind",
-    "reimbursementType",
-    "detailReimbursementType",
-    "费用类型",
-    "费用类别",
-    "费用归类",
-    "费用科目",
-    "费用项目",
-    "费用名称",
-    "报销类型",
-    "支出类型",
-    "支出类别",
-    "开支类型",
-    "开支类别",
-    "科目",
-)
+EXPENSE_TYPE_CANDIDATE_KEYS = ("purposeType",)
 
 STANDARD_EXPENSE_TYPES = tuple(label for _code, label in OA_APPLICATION_TYPE_OPTIONS)
 

@@ -220,3 +220,11 @@
 - 旧链路删除：移除调用方可通过 `parse_attachment_evidence=True` 强迫进行中流程解析的隐式能力；不新增第二套解析、promotion 或页面 fallback。
 - 数据安全：不改主数据库 schema，不删除 OA 投影、附件 cache 或 canonical invoice；生产历史样本只允许先 dry-run，再对已核验的 active alias 与精确 OA row 执行受控修复。
 - 验证：新增进行中人工刷新、高铁票价长号、active alias promotion 与 repository 单批查询回归；发布后验证目标 144.99 OA 的铁路票进入统一发票池并保留 1 分金额差异 chip，同时附件缺失异常消失。
+
+## 2026-08-17 OA 费用类型真实字段收口
+
+- 生产事实：目标日常报销 `oa-exp-2290` 的子付款项费用类型来自 `schedule[].purposeType='s4'`，而 `data.detailReimbursementType='withdraw_expense'` 是报销业务类型，不是费用类型。
+- 修复：Mongo OA adapter 只读取真实 `purposeType`；移除无生产事实依据的候选字段以及 `reimbursementType` / `detailReimbursementType` 费用类型污染链，未知枚举仍保持空值，禁止回退为“其他”。
+- 同批生产字段覆盖审计确认：`schedule[].purposeType` 覆盖 2,642 条 OA；`schedule[].category` 与 `schedule[].feeType` 覆盖数均为 0。因此直接读取面只保留 `purposeType`，避免猜测字段在未来静默覆盖真实费用类型。
+- 存量：`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-08-17-expense-purpose-type-v7`，由既有 durable `oa.sync` worker 幂等重投；不新增表、read model、worker、缓存或同步链路。
+- 下游：统一 canonical `expense_type` 继续供关联台项目列第二行 chip、OA 详情和成本统计消费；下游页面不得重新猜测或回退费用类型。
