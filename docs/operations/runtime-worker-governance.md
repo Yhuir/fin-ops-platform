@@ -10,6 +10,8 @@
 - systemd 只运行 registry 的四个 instance：`oa-sync`、`workbench-matching`、`import`、
   `settings-maintenance`。
 - `finops-deploy-control` 和 `finops-ensure-runtime-workers` 是生产部署控制面；不要手写第二份 worker 清单。
+- Worker helper 在启动检查前原子规范化既有 per-worker env：保留业务吞吐参数，队列固定为 PostgreSQL，
+  删除遗留 RabbitMQ/Redis 覆盖；发现 env 是符号链接时 fail closed。
 
 ## 运行检查
 

@@ -1,5 +1,20 @@
 # Runtime Worker 实施记录
 
+## 2026-08-17 - 生产 per-worker env 退役迁移闭环
+
+- 目标：修复 runtime 已移除 RabbitMQ 后，生产已有 `oa-sync`/`import` per-worker env 仍以
+  `FIN_OPS_QUEUE_BACKEND=rabbitmq` 覆盖公共 PostgreSQL 配置，导致候选启动检查失败的问题。
+- 影响范围：Worker ensure helper、deploy control 的 app-specific RabbitMQ 资产清理、部署 helper 合同、测试与
+  运维文档；不改变四个 Worker 的业务责任、durable queue schema、API、主数据库或共享 RabbitMQ broker。
+- 关键决策：保留已有 Worker 的 poll/lease/timeout/吞吐调优；在 registration check 前原子重写 queue backend 为
+  PostgreSQL，并删除 per-worker `FIN_OPS_RABBITMQ_*`/`FIN_OPS_REDIS_*` 覆盖。旧 dispatcher、topology、monitoring
+  与各历史 RabbitMQ worker env 只按已知 app-specific 精确路径删除，不操作共享 broker。
+- 旧逻辑清理：补齐生产实际存在的旧 RabbitMQ env 与备份文件清单；部署合同拒绝未包含退役迁移能力的旧 Worker
+  helper，避免发布再次由旧控制面启动错误 transport。
+- 数据安全：本次不创建数据库备份、不执行数据修复、不删除或重建主数据库。
+- 验证：shell syntax、部署合同测试、runtime exact-set/queue 测试、全量 backend/frontend/E2E、候选 release gate、
+  production readiness、worker registration/heartbeat、queue closure 与 HTTP SLO。
+
 ## 2026-08-17 - PostgreSQL 单传输与四 Worker 收敛
 
 - required instance 保持精确四个：`oa-sync`、`workbench-matching`、`import`、`settings-maintenance`；长任务仍留在后台 Worker，不塞回 API，也不引入 Celery、Kafka 或 Temporal。

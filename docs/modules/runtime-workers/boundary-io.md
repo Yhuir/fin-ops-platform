@@ -46,6 +46,10 @@ API route -> application service -> durable queue/domain repository
 - Matching queue：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_matching_queue.py`
 - Deploy helper：`deploy/oa/bin/finops-ensure-runtime-workers.sh`
 
+Deploy helper 会保留已有实例的吞吐、lease、timeout 与 poll 调优，但在 registration check 之前原子迁移
+per-worker env：`FIN_OPS_QUEUE_BACKEND` 固定为 `postgres`，删除该实例遗留的 `FIN_OPS_RABBITMQ_*` 与
+`FIN_OPS_REDIS_*` 覆盖。公共 API cache 环境不属于此迁移范围。
+
 ## 验证
 
 - Registry/command/health：`tests/test_runtime_worker_registry.py`、`tests/test_runtime_worker.py`。

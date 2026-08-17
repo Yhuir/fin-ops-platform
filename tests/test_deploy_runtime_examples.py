@@ -80,6 +80,31 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         for relative_path in retired_paths:
             self.assertFalse((REPO_ROOT / relative_path).exists(), relative_path)
 
+    def test_activation_removes_known_app_specific_rabbitmq_runtime_assets(self) -> None:
+        script = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        retire = script[
+            script.index("retire_removed_runtime_assets() {") : script.index(
+                "assert_root_owned_private_file() {"
+            )
+        ]
+        retired_env_names = (
+            "fin-ops.rabbitmq-dispatcher.env",
+            "fin-ops.rabbitmq-monitoring.env",
+            "fin-ops.rabbitmq-topology.env",
+            "fin-ops.rabbitmq-worker.env",
+            "fin-ops.worker.bank-detail-rabbitmq.env",
+            "fin-ops.worker.cost-tax-rabbitmq.env",
+            "fin-ops.worker.file-migration-rabbitmq.env",
+            "fin-ops.worker.import-rabbitmq.env",
+            "fin-ops.worker.search-pending-rabbitmq.env",
+            "fin-ops.worker.workbench-rabbitmq.env",
+            "fin-ops.worker-import-rabbitmq.env",
+            "fin-ops.worker.oa-sync-rabbitmq.env",
+        )
+
+        for env_name in retired_env_names:
+            self.assertIn(env_name, retire)
+
     def test_runtime_queue_prune_has_no_projection_state_dependency(self) -> None:
         helper = QUEUE_PRUNE.read_text(encoding="utf-8")
 

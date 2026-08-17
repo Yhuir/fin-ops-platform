@@ -1055,8 +1055,20 @@ retire_removed_runtime_assets() {
     "$ENV_DIR/fin-ops.worker.workbench.env" \
     "$ENV_DIR/fin-ops.worker.workbench-relation.env" \
     "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env" \
+    "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env.bak.20260526144711" \
+    "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env.bak-import-fact-20260528190525" \
+    "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env.bak-invoice-lifecycle" \
+    "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env.bak-invoice-lifecycle-3" \
+    "$ENV_DIR/fin-ops.rabbitmq-monitoring.env" \
     "$ENV_DIR/fin-ops.rabbitmq-topology.env" \
     "$ENV_DIR/fin-ops.rabbitmq-worker.env" \
+    "$ENV_DIR/fin-ops.worker.bank-detail-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.cost-tax-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.cost-tax-rabbitmq.env.bak-20260528204437" \
+    "$ENV_DIR/fin-ops.worker.file-migration-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.import-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.search-pending-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.workbench-rabbitmq.env" \
     "$ENV_DIR/fin-ops.worker-import-rabbitmq.env" \
     "$ENV_DIR/fin-ops.worker.oa-sync-rabbitmq.env"
   for legacy_service in fin-ops-rabbitmq-dispatcher.service fin-ops-rabbitmq-topology.service; do

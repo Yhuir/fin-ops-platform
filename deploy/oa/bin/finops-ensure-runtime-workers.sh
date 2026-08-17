@@ -84,6 +84,44 @@ migrate_legacy_worker_poll_interval() {
   fi
 }
 
+migrate_retired_worker_runtime_env() {
+  local worker="$1"
+  local target_file temporary_file
+  target_file="$env_dir/fin-ops.worker.${worker}.env"
+  [ -f "$target_file" ] || return 0
+  [ ! -L "$target_file" ] || fail "worker env must not be a symlink: $target_file"
+
+  temporary_file="$(mktemp "$env_dir/.fin-ops.worker.${worker}.env.XXXXXX")"
+  if ! awk '
+    BEGIN { queue_backend_written = 0 }
+    /^FIN_OPS_(RABBITMQ|REDIS)_[A-Z0-9_]*=/ { next }
+    /^FIN_OPS_QUEUE_BACKEND=/ {
+      if (!queue_backend_written) {
+        print "FIN_OPS_QUEUE_BACKEND=postgres"
+        queue_backend_written = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!queue_backend_written) {
+        print "FIN_OPS_QUEUE_BACKEND=postgres"
+      }
+    }
+  ' "$target_file" > "$temporary_file"; then
+    rm -f -- "$temporary_file"
+    fail "failed to migrate retired worker runtime env: $target_file"
+  fi
+
+  chown --reference="$target_file" "$temporary_file"
+  chmod --reference="$target_file" "$temporary_file"
+  if cmp -s "$target_file" "$temporary_file"; then
+    rm -f -- "$temporary_file"
+    return 0
+  fi
+  mv -f -- "$temporary_file" "$target_file"
+}
+
 check_worker_registration() {
   local worker="$1"
   local check_args
@@ -140,6 +178,7 @@ fi
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
+  migrate_retired_worker_runtime_env "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

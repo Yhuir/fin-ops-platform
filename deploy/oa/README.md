@@ -36,6 +36,10 @@ API 与 worker 共用：
 实例专属 env 仅放 worker 自己的 transport/poll/lease 配置，不复制数据库或 OA secret。文件必须是
 root-owned，secret 文件 mode `0600`，不得打印到 terminal、evidence 或仓库。
 
+激活时 Worker helper 会保留实例现有的 poll/lease/timeout/吞吐调优，同时原子移除 per-worker env 中遗留的
+RabbitMQ/Redis 覆盖并强制 `FIN_OPS_QUEUE_BACKEND=postgres`。这一步发生在 registration check 与服务启动前，
+防止旧环境值把当前 Worker 重新接回已退役 transport。
+
 生产必须使用 PostgreSQL storage backend、独立 migrator 凭据、只读 OA Mongo adapter、启用 OA role sync。
 唯一权限 selector 是 `FIN_OPS_OA_REQUIRED_PERMISSION`；以下历史 admission env 必须缺席：
 

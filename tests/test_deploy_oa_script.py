@@ -222,6 +222,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("runtime worker ensure helper is missing or not executable", remote_script)
         self.assertIn("runtime worker ensure helper does not use runtime worker manifest", remote_script)
         self.assertIn("runtime worker ensure helper does not refresh worker unit templates", remote_script)
+        self.assertIn(
+            "runtime worker ensure helper does not retire per-worker RabbitMQ and Redis overrides",
+            remote_script,
+        )
         self.assertNotIn("runtime worker ensure helper does not migrate Workbench scope split", remote_script)
         self.assertIn("runtime worker ensure helper does not validate worker registrations", remote_script)
         self.assertNotIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
@@ -417,6 +421,20 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("oa-sync workbench workbench-matching", script)
         self.assertNotIn("case \"$1\" in", script)
         self.assertIn("fin-ops-worker@${worker}.service", script)
+
+    def test_runtime_worker_ensure_migrates_retired_transport_and_cache_overrides(self) -> None:
+        script = ENSURE_WORKERS_SCRIPT_PATH.read_text()
+
+        self.assertIn("migrate_retired_worker_runtime_env", script)
+        self.assertIn('/^FIN_OPS_(RABBITMQ|REDIS)_[A-Z0-9_]*=/ { next }', script)
+        self.assertIn('print "FIN_OPS_QUEUE_BACKEND=postgres"', script)
+        self.assertIn('[ ! -L "$target_file" ]', script)
+        self.assertIn('chown --reference="$target_file" "$temporary_file"', script)
+        self.assertIn('chmod --reference="$target_file" "$temporary_file"', script)
+        self.assertLess(
+            script.index('migrate_retired_worker_runtime_env "$worker"'),
+            script.index('check_worker_registration "$worker"'),
+        )
 
     def test_systemd_worker_template_uses_registry_registration_contract(self) -> None:
         template = (Path(__file__).resolve().parents[1] / "deploy/oa/systemd/fin-ops-worker@.service.example").read_text()
