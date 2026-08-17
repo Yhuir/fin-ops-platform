@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import re
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-import hashlib
-import json
-import os
 from pathlib import Path
-import re
 from time import monotonic
 from typing import Any, Callable, Protocol
 from urllib.parse import quote_plus
@@ -32,9 +32,9 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
     attachment_invoice_cache_parser_version,
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.oa_draft_prefill import OA_APPLICATION_TYPE_OPTIONS
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 KEY_NORMALIZE_RE = re.compile(r"[\s_\-:/\\()（）【】\[\]·,.，。]+")
@@ -105,22 +105,9 @@ EXPENSE_TYPE_CANDIDATE_KEYS = (
     "科目",
 )
 
-STANDARD_EXPENSE_TYPES: tuple[str, ...] = (
-    "设备货款及材料费",
-    "人工费/劳务费/服务费",
-    "住宿费",
-    "招待费（餐费、烟酒等）",
-    "交通费",
-    "车辆使用费（汽油、过路、保险、维修、税费等）车辆维修",
-    "运费/邮费/杂费",
-    "房屋使用费（户租、水电、维修、车位、屋业等）",
-    "经营/办公费用",
-    "财务费用",
-    "借款",
-    "还款",
-    "其他",
-    "固定资产",
-)
+STANDARD_EXPENSE_TYPES = tuple(label for _code, label in OA_APPLICATION_TYPE_OPTIONS)
+
+STANDARD_EXPENSE_TYPE_BY_CODE = dict(OA_APPLICATION_TYPE_OPTIONS)
 
 STANDARD_EXPENSE_TYPE_BY_NORMALIZED_KEY = {
     KEY_NORMALIZE_RE.sub("", expense_type).lower(): expense_type for expense_type in STANDARD_EXPENSE_TYPES
@@ -131,7 +118,8 @@ EXPENSE_TYPE_INFERENCE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("借款", ("借款", "借入", "借支", "暂借", "借出")),
     ("财务费用", ("利息", "手续费", "结息", "贷款", "还息", "财务费", "贴现", "银行")),
     ("房屋使用费（户租、水电、维修、车位、屋业等）", ("房租", "租金", "水电", "水费", "电费", "物业", "物管", "屋业", "车位", "办公室")),
-    ("车辆使用费（汽油、过路、保险、维修、税费等）车辆维修", ("汽油", "加油", "过路", "etc", "保险", "车险", "车辆维修", "维修费", "养护", "车位费", "税费", "审车", "年检")),
+    ("车辆维修", ("车辆维修", "维修费", "养护")),
+    ("车辆使用费（汽油、过路、保险、维修、税费等）", ("汽油", "加油", "过路", "etc", "保险", "车险", "车位费", "税费", "审车", "年检")),
     ("交通费", ("交通", "差旅", "机票", "火车", "高铁", "打车", "滴滴", "出行", "往返")),
     ("住宿费", ("住宿", "酒店", "宾馆", "旅馆", "客栈")),
     ("招待费（餐费、烟酒等）", ("招待", "餐费", "用餐", "烟酒", "酒水", "会务餐")),
@@ -1031,7 +1019,7 @@ class MongoOAAdapter(OAAdapter):
                     "expense_item_id": expense_item_id,
                     "project_name": project_name,
                     "amount": item_amount,
-                    "expense_type": expense_type or "—",
+                    "expense_type": expense_type,
                     "expense_content": expense_content or "—",
                     "fee_content": fee_content,
                     "fee_description": fee_description,
@@ -1106,7 +1094,7 @@ class MongoOAAdapter(OAAdapter):
             )
         project_name_summary = "；".join(real_project_names) or "--"
         project_name_display = self._project_name_display(real_project_names)
-        expense_type_summary = "；".join(expense_types_summary) or "—"
+        expense_type_summary = "；".join(expense_types_summary)
         expense_content_summary = "；".join(expense_contents_summary) or self._first_text(data, "notes") or "—"
         reimbursement_date_range = self._date_range_text(reimbursement_dates)
 
@@ -1126,8 +1114,8 @@ class MongoOAAdapter(OAAdapter):
             "金额来源": "主表总金额" if amount_source == "header" else "明细合计",
             "项目名称汇总": project_name_summary,
             "项目名称列表": list(real_project_names),
-            "费用类型": expense_type_summary,
-            "费用类型汇总": expense_type_summary,
+            "费用类型": expense_type_summary or "—",
+            "费用类型汇总": expense_type_summary or "—",
             "费用内容": expense_content_summary,
             "费用内容摘要": expense_content_summary,
             "报销日期范围": reimbursement_date_range or "—",
@@ -2736,6 +2724,9 @@ class MongoOAAdapter(OAAdapter):
         text = clean_string(value)
         if not text:
             return ""
+        by_code = STANDARD_EXPENSE_TYPE_BY_CODE.get(text)
+        if by_code:
+            return by_code
         return STANDARD_EXPENSE_TYPE_BY_NORMALIZED_KEY.get(self._normalize_key(text), "")
 
     def _find_text_by_normalized_keys(self, value: Any, normalized_keys: set[str]) -> str:
@@ -2762,7 +2753,7 @@ class MongoOAAdapter(OAAdapter):
         for expense_type, keywords in EXPENSE_TYPE_INFERENCE_RULES:
             if any(keyword.lower() in combined for keyword in keywords):
                 return expense_type
-        return "其他"
+        return ""
 
     @staticmethod
     def _normalize_key(value: Any) -> str:

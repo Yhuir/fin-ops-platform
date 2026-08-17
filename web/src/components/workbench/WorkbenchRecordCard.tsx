@@ -673,6 +673,11 @@ function renderOaProjectValue(
       <span className="compound-cell-primary cell-text-value cell-text-value-full">
         {highlightSearchText(projectName, searchQuery)}
       </span>
+      {row.displayRole === "expense-claim-item" && row.expenseType ? (
+        <Chip className="oa-expense-type-chip" color="default" size="sm" variant="soft">
+          {highlightSearchText(row.expenseType, searchQuery)}
+        </Chip>
+      ) : null}
     </span>
   );
 }

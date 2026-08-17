@@ -1128,6 +1128,7 @@ describe("Workbench candidate grouping layout", () => {
           rowIndex: "2",
           projectName: "曲靖项目",
           amount: "60.00",
+          expenseType: "住宿费",
           feeContent: "住宿费",
           feeDescription: "曲靖住宿",
         },
@@ -1204,6 +1205,7 @@ describe("Workbench candidate grouping layout", () => {
     );
     expect(within(invoiceItem).getByText("曲靖项目")).toBeInTheDocument();
     expect(within(invoiceItem).getAllByText("60.00").length).toBeGreaterThan(1);
+    expect(within(invoiceItem).getByText("住宿费", { selector: ".oa-expense-type-chip *" })).toBeInTheDocument();
     expect(within(invoiceItem).getByText("费用内容：住宿费；费用说明：曲靖住宿")).toBeInTheDocument();
     expect(within(invoiceItem).getByText("曲靖市麒麟区捌陆捌商务酒店")).toBeInTheDocument();
 
@@ -1221,8 +1223,8 @@ describe("Workbench candidate grouping layout", () => {
     const parentOa = {
       ...createOaRecord("oa-exp-same-project", "吴云江", "66.00"),
       expenseItems: [
-        { id: "oa-exp-same-project:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00" },
-        { id: "oa-exp-same-project:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
+        { id: "oa-exp-same-project:item:0", rowIndex: "0", projectName: "曲靖项目", amount: "33.00", expenseType: "交通费" },
+        { id: "oa-exp-same-project:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00", expenseType: "住宿费" },
       ],
     };
     const group: WorkbenchRelationGroup = {
@@ -1237,6 +1239,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(layout?.segments).toHaveLength(3);
     expect(layout?.segments[0]?.rows.oa[0]?.tableValues.projectName).toBe("多个明细 · 2");
     expect(layout?.segments.slice(1).map((segment) => segment.rows.oa[0]?.amount)).toEqual(["33.00", "33.00"]);
+    expect(layout?.segments.slice(1).map((segment) => segment.rows.oa[0]?.expenseType)).toEqual(["交通费", "住宿费"]);
   });
 
   test("keeps a partial attachment invoice source at group level inside a multi-OA group", () => {

@@ -9,19 +9,18 @@ from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
 from fin_ops_platform.services.bank_settings import bank_accounts_from_settings_payload
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
+    normalize_oa_attachment_expense_item_ids,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
     text_list,
     without_keys,
 )
-from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
-    normalize_oa_attachment_expense_item_ids,
-)
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
 )
-
 
 # One relation lookup, one batch read per present canonical pane, one settings
 # lookup, one set-based ETC summary read, overrides, and anomaly decisions.  The
@@ -426,6 +425,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                     'expense_item_id', item.value->>'expense_item_id',
                                     'row_index', item.value->>'row_index',
                                     'project_name', item.value->>'project_name',
+                                    'expense_type', item.value->>'expense_type',
                                     'amount', coalesce(
                                         item.value->>'amount',
                                         item.value->>'settlement_amount',
@@ -517,6 +517,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                     'expense_item_id', item.value->>'expense_item_id',
                                     'row_index', item.value->>'row_index',
                                     'project_name', item.value->>'project_name',
+                                    'expense_type', item.value->>'expense_type',
                                     'amount', coalesce(
                                         item.value->>'amount',
                                         item.value->>'settlement_amount',

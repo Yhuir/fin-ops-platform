@@ -6,7 +6,6 @@ from threading import RLock
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import (
     ETC_BATCH_SOURCE,
     ETC_BATCH_TAG,
@@ -16,7 +15,7 @@ from fin_ops_platform.services.oa_adapter import (
     build_attachment_invoice_detail_fields,
     detect_etc_batch_metadata,
 )
-
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND = "oa_attachment_payment_receipt"
@@ -569,6 +568,7 @@ class WorkbenchQueryService:
                     "row_index": str(item.get("row_index") or "").strip(),
                     "project_name": str(item.get("project_name") or "—").strip() or "—",
                     "amount": str(item.get("amount") or "").strip(),
+                    "expense_type": str(item.get("expense_type") or "").strip(),
                     "fee_content": str(item.get("fee_content") or "").strip(),
                     "fee_description": str(item.get("fee_description") or "").strip(),
                     "attachment_file_count": str(item.get("attachment_file_count") or "0").strip(),

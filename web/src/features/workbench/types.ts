@@ -30,6 +30,7 @@ export type WorkbenchExpenseItem = {
   rowIndex: string;
   projectName: string;
   amount: string;
+  expenseType?: string;
   feeContent?: string;
   feeDescription?: string;
   attachmentFileCount?: number;
@@ -111,6 +112,7 @@ export type WorkbenchRecord = {
   sourceExpenseItemIds?: string[];
   externalUrl?: string;
   expenseItems?: WorkbenchExpenseItem[];
+  expenseType?: string;
   displayRole?: "expense-claim-summary" | "expense-claim-item";
   label: string;
   status: string;

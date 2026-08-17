@@ -117,7 +117,7 @@ requested tenant/scope
 | filter options | 表头菜单 | `options[{value,label,missing}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
-| OA expense/invoice display | 前端 | OA row 输出 `expense_items[]`，OA attachment invoice 输出复数 canonical `source_expense_item_ids[]`。前端只用该顶层数组建立来源图，`source_links[]` 仅保留为审计证据；一张发票只出现一次，无 canonical item 来源的 OA 附件发票只能进入独立待归属残余带，禁止按金额兜底，也不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
+| OA expense/invoice display | 前端 | OA row 输出 `expense_items[]`，其中每项直接携带 canonical `expense_type`；日常报销子付款项在“项目名称”单元格第二行用 Chip 显示真实费用类型，缺失时不显示占位或“其他”，且不得增加逐行 API。OA attachment invoice 输出复数 canonical `source_expense_item_ids[]`。前端只用该顶层数组建立来源图，`source_links[]` 仅保留为审计证据；一张发票只出现一次，无 canonical item 来源的 OA 附件发票只能进入独立待归属残余带，禁止按金额兜底，也不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |

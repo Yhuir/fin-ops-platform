@@ -13646,6 +13646,16 @@ body.column-layout-dragging {
   letter-spacing: 0.01em;
 }
 
+.oa-expense-type-chip {
+  max-width: 100%;
+}
+
+.oa-expense-type-chip [data-slot="chip-label"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .candidate-group-collapse-control {
   max-width: 100%;
   min-height: 24px;

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
+import unittest
 from dataclasses import asdict
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
-import unittest
 
 from fin_ops_platform.app import server as server_module
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -255,6 +255,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
         self.assertEqual(len(item_insert), 1)
         self.assertEqual(len(attachment_inserts), 2)
+        self.assertIsNone(item_insert[0][4])
         app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
         self.assertEqual(app_insert[0][6], "completed")
         self.assertEqual(app_insert[0][9], "2026-05-05 16:30:00+08:00")

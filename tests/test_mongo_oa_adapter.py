@@ -2,10 +2,9 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
-from pymongo.errors import ServerSelectionTimeoutError
-
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from pymongo.errors import ServerSelectionTimeoutError
 
 
 class MemoryAttachmentInvoiceCache:
@@ -422,14 +421,14 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.amount, "139")
         self.assertEqual(reimbursement.amount_source, "detail_sum")
         self.assertEqual(reimbursement.reason, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
-        self.assertEqual(reimbursement.expense_type, "其他；运费/邮费/杂费")
+        self.assertEqual(reimbursement.expense_type, "运费/邮费/杂费")
         self.assertEqual(reimbursement.expense_content, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
         self.assertEqual(reimbursement.detail_fields["明细数量"], "2")
         self.assertEqual(reimbursement.detail_fields["明细金额合计"], "139")
         self.assertEqual(reimbursement.detail_fields["金额来源"], "明细合计")
         self.assertEqual(reimbursement.detail_fields["项目名称汇总"], "云南溯源科技；玉烟维护项目")
         self.assertEqual(reimbursement.detail_fields["项目名称列表"], ["云南溯源科技", "玉烟维护项目"])
-        self.assertEqual(reimbursement.detail_fields["费用类型汇总"], "其他；运费/邮费/杂费")
+        self.assertEqual(reimbursement.detail_fields["费用类型汇总"], "运费/邮费/杂费")
         self.assertEqual(reimbursement.detail_fields["费用内容摘要"], "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
         self.assertEqual(reimbursement.detail_fields["报销日期范围"], "2026-01-06 至 2026-03-11")
         self.assertEqual(
@@ -454,7 +453,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                     "row_index": "0",
                     "project_name": "云南溯源科技",
                     "amount": "127",
-                    "expense_type": "其他",
+                    "expense_type": "",
                     "expense_content": "角磨机（刘晓宇申请）",
                     "fee_content": "角磨机（刘晓宇申请）",
                     "fee_description": "生产工具采购",
@@ -1013,6 +1012,47 @@ class MongoOAAdapterTests(unittest.TestCase):
         payment = records[0]
         self.assertEqual(payment.expense_type, "房屋使用费（户租、水电、维修、车位、屋业等）")
         self.assertEqual(payment.detail_fields["费用类型"], "房屋使用费（户租、水电、维修、车位、屋业等）")
+
+    def test_expense_claim_maps_oa_expense_type_enum_code_without_fallback(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-2290",
+                        "form_id": "32",
+                        "modifiedTime": "2026-08-14T08:46:03",
+                        "data": {
+                            "ApplicationDate": "2026-06-08",
+                            "Reimbursement Personnel": "黄亮",
+                            "titleName": "日常报销",
+                            "processId": "2290",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "dali-project",
+                                    "detailReimbursementAmount": "144.99",
+                                    "feeType": "s4",
+                                    "feeContent": "大理出差返回昆明车费",
+                                    "detailReimbursementDate": "2026-06-08",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "dali-project", "data": {"name": "大理卷烟厂余热综合利用项目"}},
+            ],
+        )
+
+        records = adapter.list_application_records("2026-06")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.expense_type, "交通费")
+        self.assertEqual(reimbursement.detail_fields["费用类型"], "交通费")
+        self.assertEqual(reimbursement.expense_items[0]["expense_type"], "交通费")
 
     def test_expense_claim_ignores_internal_reimbursement_enum_and_keeps_standard_expense_type(self) -> None:
         adapter = StubMongoOAAdapter(

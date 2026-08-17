@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import fields
 from datetime import date, datetime
-import re
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
@@ -19,8 +19,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
     reconcile_oa_attachment_cache_identity_sources,
 )
 
-
-OA_PROJECTION_SYNC_VERSION = "2026-08-14-approved-at-v4"
+OA_PROJECTION_SYNC_VERSION = "2026-08-17-expense-type-enum-v5"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",
@@ -512,7 +511,7 @@ class PostgresOAProjectionRepository:
                     record.id,
                     self._form_id_for_record(record),
                     row_id,
-                    text(payload.get("item_type") or payload.get("expense_type") or record.expense_type),
+                    text(payload.get("item_type") or payload.get("expense_type")),
                     text(payload.get("item_no") or payload.get("row_index") or str(index)),
                     decimal_text(
                         _first_present(

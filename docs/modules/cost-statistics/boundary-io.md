@@ -43,7 +43,7 @@ HTTP GET
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
 - 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
-- `CostStatisticsPolicy` 将支付申请当前金额作为一个 OA 归集单元，将日常报销的 canonical `expense_items` 逐项作为归集单元。金额、项目或费用类型缺失时明确排除并返回质量统计；禁止回退到流水金额、报销表头、按比例、顺序或子集猜测。
+- `CostStatisticsPolicy` 将支付申请当前金额作为一个 OA 归集单元，将日常报销的 canonical `expense_items` 逐项作为归集单元。金额、项目或费用类型缺失时明确排除并返回质量统计；费用类型必须来自 OA 显式枚举或已有确定性文本规则，未知值保持缺失，禁止改写成“其他”。同时禁止回退到流水金额、报销表头、按比例、顺序或子集猜测。
 - OA 成本归集在 policy 边界使用明确完成状态和 `approved_at`；进行中或无完成时间 OA 在聚合前排除，因此 `project / bank / expense_type` 的 summary、facets、rows、allocation detail 和导出使用同一口径。`time / bank_tag` 仍是纯银行事实视图，不受 OA 流程状态影响。
 - 同一 relation 只有一个付款账户时归入该账户；多个账户或账户不明时归入 `混合支付账户`。同一 OA 归集单元出现在多个 active relation 时整次响应报冲突，不能重复计入。
 - `project / bank / expense_type`、allocation detail 和导出共享同一归集结果；关联付款流水只是证据，不作为右栏归集金额。`time / bank_tag` 与 bank transaction detail 共享未拆分银行事实。

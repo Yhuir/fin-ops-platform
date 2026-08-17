@@ -110,6 +110,7 @@ type ApiWorkbenchRow = {
     row_index?: string | number | null;
     project_name?: string | null;
     amount?: string | number | null;
+    expense_type?: string | null;
     fee_content?: string | null;
     fee_description?: string | null;
     attachment_file_count?: string | number | null;
@@ -1260,6 +1261,7 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       rowIndex: String(item.row_index ?? "").trim(),
       projectName: toDisplayValue(item.project_name),
       amount: toWorkbenchAmountDisplayValue(item.amount),
+      expenseType: toDisplayValue(item.expense_type, "") || undefined,
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
       attachmentFileCount: toCount(item.attachment_file_count),
