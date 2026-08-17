@@ -44,7 +44,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
+| `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`payment_status` 候选排除自身状态条件后聚合，并按规则字典补齐零数量状态，选择状态不得缩减候选词表 |
 | relation/details | drawer | row/invoice/bank 按 canonical id 定向读取，不存在返回 404；OA 详情按 canonical OA id 返回 `detailAvailable=true|false`，不可用时保持 200 的既有 drawer 合同 |
 | OA 申请人列 | frontend | 使用 HeroUI 原生 chip 显示真实申请类型与“已完成/进行中”；不得从 linked/unlinked 关系状态推断流程状态 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
@@ -58,6 +58,7 @@
 - 每个页面读请求开启一个 `REPEATABLE READ READ ONLY` transaction。
 - rows、summary、statistics、facets 和用于组装当前页的 facts 都在该 transaction 中读取。
 - rows/summary/facets 复用一次 materialized canonical CTE；付款规则从同一 request snapshot 交给有界行装配，禁止逐行重读 `app_settings`。整个请求最多 8 条批量 SQL statement，数量不随当前页行数或 relation 数增长。
+- 支付状态的 self-excluding facet 在同一 SQL statement、同一 canonical CTE snapshot 内计算；禁止为保持完整候选额外请求 `/filter-options` 或增加数据库往返。
 - 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
 - OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。

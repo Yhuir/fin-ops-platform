@@ -252,7 +252,9 @@ test.describe("input invoice usage browser flow", () => {
 
     const compositeMenu = page.getByRole("menu", { name: "OA / OA申请人组合筛选" });
     await page.getByRole("button", { name: "筛选 OA / OA申请人" }).click();
-    const applicantOption = compositeMenu.getByRole("menuitemcheckbox", { name: /陈秀云 \d+/ });
+    const applicantOption = compositeMenu
+      .locator("label.input-invoice-usage-filter-menu__item")
+      .filter({ hasText: /陈秀云 \d+/ });
     await expect(applicantOption).toBeVisible();
     const applicantRowsPromise = waitForInputInvoiceUsageRows(page);
     await applicantOption.click();
@@ -273,7 +275,9 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("button", { name: "筛选 销方名称" }).click();
-      await mark("finalSettledLatencyMs", expect(sellerMenu.getByRole("menuitemcheckbox", { name: /页外供应商 1/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(
+        sellerMenu.locator("label.input-invoice-usage-filter-menu__item").filter({ hasText: /页外供应商 1/ }),
+      ).toBeVisible());
     });
 
     let filteredRowsResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageRows>> | undefined;
@@ -283,7 +287,7 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const filteredRowsPromise = waitForInputInvoiceUsageRows(page);
-      await sellerMenu.getByRole("menuitemcheckbox", { name: /页外供应商 1/ }).click();
+      await sellerMenu.locator("label.input-invoice-usage-filter-menu__item").filter({ hasText: /页外供应商 1/ }).click();
       filteredRowsResponse = await mark("apiLatencyMs", filteredRowsPromise);
       await mark("finalSettledLatencyMs", expect(page.getByText("1-1 / 1")).toBeVisible());
     });

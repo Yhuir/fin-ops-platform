@@ -1,5 +1,5 @@
 import { ArrowUpDown, Filter, Info } from "lucide-react";
-import { ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
+import { Checkbox, ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useId, useMemo, useState } from "react";
 
@@ -245,19 +245,17 @@ function CompositeFilterMenu({
                       </div>
                     ) : null}
                     {column.options.map((option) => (
-                      <button
-                        aria-checked={selected.has(option.value)}
+                      <Checkbox
+                        aria-label={option.count === undefined ? option.label : `${option.label} ${option.count}`}
                         className="input-invoice-usage-filter-menu__item"
+                        isSelected={selected.has(option.value)}
                         key={`${column.field}:${option.value}`}
-                        onClick={() => toggle(column.field, option.value)}
-                        role="menuitemcheckbox"
-                        type="button"
+                        onChange={() => toggle(column.field, option.value)}
+                        slot={null}
                       >
-                        <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
-                          {selected.has(option.value) ? "✓" : ""}
-                        </span>
+                        <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                         <span>{option.count === undefined ? option.label : `${option.label} ${option.count}`}</span>
-                      </button>
+                      </Checkbox>
                     ))}
                   </div>
                 );
@@ -405,7 +403,7 @@ export default function InputInvoiceUsageTable({
   };
 
   return (
-    <div className="input-invoice-usage-table-frame">
+    <div className="finance-page-table-frame input-invoice-usage-table-frame">
       <FinanceTable
         ariaLabel="进项发票使用情况表"
         className="input-invoice-usage-table input-invoice-usage-table-shell"

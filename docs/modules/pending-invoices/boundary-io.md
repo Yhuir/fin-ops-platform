@@ -51,6 +51,7 @@
 | 发票栏 | 前端 | 有发票号码/日期即表达已有发票关系，不再重复显示“已配对” chip |
 | invoice candidates | 前端选择已有发票抽屉 | 服务端过滤、排序、分页；固定两次 SELECT；返回 candidate/bank relation status 与关联流水数 |
 | loading/empty/error | 前端可观察状态 | loading、合法空集、错误可区分；没有 refreshing/stale UI 或轮询 |
+| table frame | 前端布局 | 与进项发票使用情况、销项发票收款情况、OA 待付款核对共用 `finance-page-table-frame` 有界高度和 contained 内部滚动，不创建页面私有高度分支 |
 
 ## 一致性、查询与性能
 

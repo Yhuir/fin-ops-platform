@@ -92,7 +92,18 @@ class InputInvoiceUsageCanonicalQueryService:
                 month=month,
                 filters=parsed_filters,
             )
-            payload["filterOptions"] = list(options.get("fields") or [])
+            status_options = self._row_assembler.filter_options(
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                month=month,
+                filters=_filters_without_field(parsed_filters, "payment_status"),
+            )
+            payload["filterOptions"] = _replace_filter_option_field(
+                list(options.get("fields") or []),
+                list(status_options.get("fields") or []),
+                field="payment_status",
+            )
             payload["statistics"] = _input_statistics_from_rows(
                 list(payload.get("rows") or [])
             )
@@ -503,6 +514,39 @@ def _filter_options(
     counts: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     return [{**item, "options": list(counts.get(str(item["field"]), []))} for item in config]
+
+
+def _filters_without_field(
+    filters: list[dict[str, Any]],
+    field: str,
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in filters
+        if str(item.get("field") or "") != field
+    ]
+
+
+def _replace_filter_option_field(
+    fields: list[dict[str, Any]],
+    replacement_fields: list[dict[str, Any]],
+    *,
+    field: str,
+) -> list[dict[str, Any]]:
+    replacement = next(
+        (
+            item
+            for item in replacement_fields
+            if str(item.get("field") or "") == field
+        ),
+        None,
+    )
+    if replacement is None:
+        return fields
+    return [
+        replacement if str(item.get("field") or "") == field else item
+        for item in fields
+    ]
 
 
 def _dedupe_objects(values: list[Any]) -> list[Any]:

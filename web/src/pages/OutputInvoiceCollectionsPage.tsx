@@ -157,6 +157,7 @@ export default function OutputInvoiceCollectionsPage() {
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => setKeywordDraft(query.keyword), [query.keyword]);
 
@@ -189,6 +190,7 @@ export default function OutputInvoiceCollectionsPage() {
     fetchOutputInvoiceCollectionRows({ ...rowsRequest, signal })
       .then((payload) => {
         if (requestId !== requestIdRef.current) return;
+        hasLoadedRef.current = true;
         setRows(payload.rows);
         setTotal(payload.pagination.total);
         setStatistics(payload.statistics ?? null);
@@ -197,11 +199,13 @@ export default function OutputInvoiceCollectionsPage() {
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) return;
-        setRows([]);
-        setTotal(0);
-        setStatistics(null);
-        setFilterConfigs([]);
-        setFilterOptions({});
+        if (mode === "reset") {
+          setRows([]);
+          setTotal(0);
+          setStatistics(null);
+          setFilterConfigs([]);
+          setFilterOptions({});
+        }
         setError(caught instanceof Error ? caught.message : "销项发票收款情况加载失败，请稍后重试。");
       })
       .finally(() => {
@@ -214,7 +218,7 @@ export default function OutputInvoiceCollectionsPage() {
   useEffect(() => {
     if (!active) return undefined;
     const controller = new AbortController();
-    loadRows("reset", controller.signal);
+    loadRows(hasLoadedRef.current ? "refresh" : "reset", controller.signal);
     return () => controller.abort();
   }, [active, activationGeneration, loadRows]);
 
@@ -368,6 +372,7 @@ export default function OutputInvoiceCollectionsPage() {
                 page={query.page}
                 pageSize={query.pageSize}
                 rows={rows}
+                refreshing={refreshing}
                 sortDirection={query.sortDirection}
                 sortField={query.sortField}
                 total={total}

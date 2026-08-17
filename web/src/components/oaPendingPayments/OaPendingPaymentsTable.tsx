@@ -165,7 +165,10 @@ export default function OaPendingPaymentsTable({
   const configsByField = useMemo(() => new Map(filterConfigs.map((config) => [config.field, config])), [filterConfigs]);
 
   return (
-    <div className="oa-pending-payments-table-frame" data-testid="oa-pending-payments-table-frame">
+    <div
+      className="finance-page-table-frame oa-pending-payments-table-frame"
+      data-testid="oa-pending-payments-table-frame"
+    >
       <div className="oa-pending-payments-table-toolbar">
         <QuerySearch
           ariaLabel="搜索OA待付款核对"

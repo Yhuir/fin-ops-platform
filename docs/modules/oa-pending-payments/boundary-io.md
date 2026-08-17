@@ -53,6 +53,7 @@
 | canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot；混合关系写回金额只合计 outflow |
 | formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
+| table frame | frontend | 与进项发票使用情况、销项发票收款情况、待找发票共用 `finance-page-table-frame` 有界高度和 contained 内部滚动；本页工具栏仍占用 frame 的独立首行 |
 
 ## Snapshot 与查询责任
 

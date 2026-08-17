@@ -123,8 +123,10 @@ test.describe("销项发票收款情况", () => {
     await page.goto("/output-invoice-collections");
     await page.getByRole("button", { name: "筛选 状态" }).click();
     const menu = page.getByRole("menu", { name: "状态筛选与排序" });
-    const reversedOption = menu.getByRole("menuitemcheckbox", { name: "已被红冲 1" });
+    const statusOptions = menu.locator("label.output-invoice-collection-filter-menu__item");
+    const reversedOption = statusOptions.filter({ hasText: "已被红冲 1" });
     await expect(reversedOption).toBeVisible();
+    await expect(statusOptions).toHaveCount(6);
 
     const filteredRowsPromise = page.waitForResponse(rowsResponse);
     await reversedOption.click();
@@ -132,6 +134,8 @@ test.describe("销项发票收款情况", () => {
     expect(JSON.parse(decodeURIComponent(filteredRowsUrl.searchParams.get("filters") ?? "[]"))).toEqual([
       { field: "collection_status", operator: "in", values: ["reversed_by_red"] },
     ]);
+    await expect(statusOptions).toHaveCount(6);
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /XSFP-E2E-0002/ })).toHaveCount(0);
   });

@@ -278,8 +278,32 @@ const rowsPayload = {
     red_invoice_count: 2,
   },
   pagination: { page: 1, page_size: 20, total: 6 },
-  filter_config: [],
-  filter_options: [],
+  filter_config: [
+    {
+      field: "collection_status",
+      label: "收款状态",
+      mode: "enum_multi",
+      sortable: true,
+      operators: ["in"],
+    },
+  ],
+  filter_options: [
+    {
+      field: "collection_status",
+      label: "收款状态",
+      mode: "enum_multi",
+      sortable: true,
+      operators: ["in"],
+      options: [
+        { value: "reversed_by_red", label: "已被红冲", count: 1 },
+        { value: "reverses_blue", label: "已冲销蓝票", count: 1 },
+        { value: "unmatched_red", label: "红票待核对", count: 1 },
+        { value: "collected", label: "已收款", count: 1 },
+        { value: "partial_collected", label: "部分收款", count: 1 },
+        { value: "pending_collection", label: "待收款", count: 1 },
+      ],
+    },
+  ],
 };
 
 function jsonResponse(payload: unknown, status = 200) {
@@ -383,6 +407,36 @@ describe("销项发票收款情况", () => {
     expect(within(table).queryByText("已由红字发票冲销。")).not.toBeInTheDocument();
     expect(within(table).queryByText("已冲销对应蓝字发票。")).not.toBeInTheDocument();
     expect(within(table).queryByText("红字发票尚未形成唯一、确定的蓝字发票配对关系。")).not.toBeInTheDocument();
+  });
+
+  test("筛选收款状态时保留完整候选并只在原表格内刷新", async () => {
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+
+    const tableBefore = await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    await user.click(within(tableBefore).getByRole("button", { name: "筛选 状态" }));
+    const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
+    const allStatusLabels = ["已被红冲 1", "已冲销蓝票 1", "红票待核对 1", "已收款 1", "部分收款 1", "待收款 1"];
+    allStatusLabels.forEach((label) => {
+      expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
+    });
+
+    await user.click(within(menu).getByRole("checkbox", { name: "已收款 1" }));
+
+    await waitFor(() => {
+      const rowRequests = fetchMock.mock.calls
+        .map(([input]) => new URL(String(input), "http://localhost"))
+        .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
+      expect(rowRequests.length).toBeGreaterThanOrEqual(2);
+      expect(rowRequests.at(-1)?.searchParams.get("filters")).toContain("collection_status");
+    });
+
+    expect(document.querySelector('[aria-label="销项发票收款情况表"]')).toBe(tableBefore);
+    allStatusLabels.forEach((label) => {
+      expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
+    });
   });
 
   test("详情只读取统一事实源与正式关联关系", async () => {

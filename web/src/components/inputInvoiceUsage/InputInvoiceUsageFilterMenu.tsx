@@ -1,4 +1,4 @@
-import { PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
+import { Checkbox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger } from "@heroui/react";
 import { ArrowDown, ArrowUp, Filter } from "lucide-react";
 import type { ReactNode } from "react";
 import { useId, useMemo, useState } from "react";
@@ -113,19 +113,17 @@ export default function InputInvoiceUsageFilterMenu({
                   <div className="input-invoice-usage-filter-menu__divider" role="separator" />
                   {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
                   {options.map((option) => (
-                    <button
+                    <Checkbox
                       key={option.value}
-                      aria-checked={selectedSet.has(option.value)}
+                      aria-label={optionLabel(option)}
                       className="input-invoice-usage-filter-menu__item"
-                      onClick={() => toggleMulti(option.value)}
-                      role="menuitemcheckbox"
-                      type="button"
+                      isSelected={selectedSet.has(option.value)}
+                      onChange={() => toggleMulti(option.value)}
+                      slot={null}
                     >
-                      <span aria-hidden="true" className="input-invoice-usage-filter-menu__checkmark">
-                        {selectedSet.has(option.value) ? "✓" : ""}
-                      </span>
+                      <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                       <span>{optionLabel(option)}</span>
-                    </button>
+                    </Checkbox>
                   ))}
                 </>
               ) : null}

@@ -453,7 +453,7 @@ export default function PendingInvoicesTable({
   }
 
   return (
-    <div className="pending-invoices-table-frame">
+    <div className="finance-page-table-frame pending-invoices-table-frame">
       <FinanceTable
         ariaLabel="待找发票四区表"
         className="pending-invoices-table pending-invoices-table-shell"

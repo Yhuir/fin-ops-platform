@@ -183,9 +183,20 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_ids=invoice_ids,
                 row_id=row_id,
             )
+            status_where_sql, status_where_params = _where_sql(
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=_filters_without_field(filters, "payment_status"),
+                field_sql=_INPUT_FIELDS,
+                invoice_ids=invoice_ids,
+                row_id=row_id,
+            )
             filtered_sql = (
                 f"{cte}, filtered_rows as materialized "
-                f"(select * from final_rows {where_sql})"
+                f"(select * from final_rows {where_sql}), "
+                f"status_option_rows as materialized "
+                f"(select * from final_rows {status_where_sql})"
             )
             order_sql = _order_sql(
                 sort_field=sort_field,
@@ -259,7 +270,6 @@ class PostgresInputInvoiceUsageQueryRepository:
                             ('tax_rate', tax_rate),
                             ('specific_business_type', specific_business_type),
                             ('taxable_item_name', taxable_item_name),
-                            ('payment_status', status_code),
                             ('oa_applicant', oa_applicant),
                             ('oa_application_type', oa_application_type),
                             ('oa_project_name', oa_project_name),
@@ -270,6 +280,14 @@ class PostgresInputInvoiceUsageQueryRepository:
                     ) facet(field, value)
                     where nullif(facet.value, '') is not null
                     group by facet.field, facet.value
+                    union all
+                    select
+                        'payment_status'::text,
+                        status_code,
+                        count(*)::bigint
+                    from status_option_rows
+                    where nullif(status_code, '') is not null
+                    group by status_code
                 )
                 select
                     coalesce(
@@ -297,7 +315,13 @@ class PostgresInputInvoiceUsageQueryRepository:
                         '[]'::jsonb
                     ) as facet_rows
                 """,
-                (*base_params, *where_params, page_size, offset),
+                (
+                    *base_params,
+                    *where_params,
+                    *status_where_params,
+                    page_size,
+                    offset,
+                ),
             ) or {}
             group_rows = _dict_rows(page_result.get("group_rows"))
             summary_row = _dict_value(page_result.get("summary_row"))
@@ -353,7 +377,11 @@ class PostgresInputInvoiceUsageQueryRepository:
                 ),
                 "oaReverseBatchCount": int(reverse_row.get("batch_count") or 0),
             },
-            facet_counts=_facet_counts(facet_rows, status_labels=labels),
+            facet_counts=_facet_counts(
+                facet_rows,
+                status_labels=labels,
+                status_field="payment_status",
+            ),
             payment_status_labels=labels,
             payment_status_rules=payment_settings,
         )
@@ -446,9 +474,19 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 field_sql=_OUTPUT_FIELDS,
                 row_id=row_id,
             )
+            status_where_sql, status_where_params = _where_sql(
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=_filters_without_field(filters, "collection_status"),
+                field_sql=_OUTPUT_FIELDS,
+                row_id=row_id,
+            )
             filtered_sql = (
                 f"{cte}, filtered_rows as materialized "
-                f"(select * from final_rows {where_sql})"
+                f"(select * from final_rows {where_sql}), "
+                f"status_option_rows as materialized "
+                f"(select * from final_rows {status_where_sql})"
             )
             order_sql = _order_sql(
                 sort_field=sort_field,
@@ -531,12 +569,19 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                             ('tax_rate', tax_rate),
                             ('specific_business_type', specific_business_type),
                             ('taxable_item_name', taxable_item_name),
-                            ('collection_status', status_code),
                             ('bank_counterparty_name', bank_counterparty_name),
                             ('bank_name', bank_name)
                     ) facet(field, value)
                     where nullif(facet.value, '') is not null
                     group by facet.field, facet.value
+                    union all
+                    select
+                        'collection_status'::text,
+                        status_code,
+                        count(*)::bigint
+                    from status_option_rows
+                    where nullif(status_code, '') is not null
+                    group by status_code
                 )
                 select
                     coalesce(
@@ -574,7 +619,13 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         '[]'::jsonb
                     ) as supporting_group_rows
                 """,
-                (*base_params, *where_params, page_size, offset),
+                (
+                    *base_params,
+                    *where_params,
+                    *status_where_params,
+                    page_size,
+                    offset,
+                ),
             ) or {}
             group_rows = _dict_rows(page_result.get("group_rows"))
             summary_row = _dict_value(page_result.get("summary_row"))
@@ -628,7 +679,11 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 "uncollectedInvoiceCount": max(0, invoice_count - collected),
                 "redInvoiceCount": int(summary_row.get("red_invoice_count") or 0),
             },
-            facet_counts=_facet_counts(facet_rows, status_labels=status_labels),
+            facet_counts=_facet_counts(
+                facet_rows,
+                status_labels=status_labels,
+                status_field="collection_status",
+            ),
             payment_status_labels={},
         )
 
@@ -1439,6 +1494,17 @@ def _where_sql(
     )
 
 
+def _filters_without_field(
+    filters: list[dict[str, Any]],
+    field: str,
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in filters
+        if str(item.get("field") or "") != field
+    ]
+
+
 def _order_sql(
     *,
     sort_field: str,
@@ -1681,12 +1747,17 @@ def _facet_counts(
     rows: list[dict[str, Any]],
     *,
     status_labels: dict[str, str],
+    status_field: str,
 ) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
+    status_counts: dict[str, int] = {}
     for row in rows:
         field = str(row.get("field") or "")
         value = str(row.get("value") or "")
         if not field or not value:
+            continue
+        if field == status_field:
+            status_counts[value] = int(row.get("option_count") or 0)
             continue
         label = status_labels.get(value, value)
         if field == "bank_direction":
@@ -1698,6 +1769,23 @@ def _facet_counts(
                 "count": int(row.get("option_count") or 0),
             }
         )
+    result[status_field] = [
+        {
+            "value": value,
+            "label": label,
+            "count": status_counts.get(value, 0),
+        }
+        for value, label in status_labels.items()
+    ]
+    result[status_field].extend(
+        {
+            "value": value,
+            "label": value,
+            "count": count,
+        }
+        for value, count in sorted(status_counts.items())
+        if value not in status_labels
+    )
     return result
 
 

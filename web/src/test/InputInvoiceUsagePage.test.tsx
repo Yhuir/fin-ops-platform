@@ -433,10 +433,10 @@ describe("Input invoice usage page", () => {
         || sourceByPath["src/components/inputInvoiceUsage/ExpandableCellText.tsx"].includes("expandable-cell-text")
         ? null
         : "ExpandableCellText.tsx should use project/lucide controls instead of MUI icons",
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemcheckbox\"")
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("Checkbox.Control")
         && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
         ? null
-        : "InputInvoiceUsageFilterMenu.tsx should preserve checkbox/radio menu semantics",
+        : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer for the right drawer shape",
@@ -456,7 +456,7 @@ describe("Input invoice usage page", () => {
 
   test("keeps premium compact table, drawer, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
-    const tableFrame = cssRule(styles, ".input-invoice-usage-table-frame");
+    const tableFrame = cssRule(styles, ".finance-page-table-frame");
     const tableShell = cssRule(styles, ".input-invoice-usage-table-shell");
     const table = cssRule(styles, ".input-invoice-usage-table .finance-table__content");
     const containedScroll = cssRule(styles, ".finance-table--contained .finance-table__scroll");
@@ -657,7 +657,7 @@ describe("Input invoice usage page", () => {
     });
 
     await user.click(within(page).getByRole("button", { name: "筛选 销方名称" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: /云南长文本供应商科技发展有限公司第一分公司/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /云南长文本供应商科技发展有限公司第一分公司/ }));
     await waitFor(() => {
       const request = rowsRequests(fetchMock).at(-1);
       const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
@@ -666,8 +666,8 @@ describe("Input invoice usage page", () => {
     await user.keyboard("{Escape}");
 
     await user.click(within(page).getByRole("button", { name: "筛选 OA / OA申请人" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: /樊祖芳/ }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: /支付申请/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /樊祖芳/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /支付申请/ }));
     await waitFor(() => {
       const request = rowsRequests(fetchMock).at(-1);
       const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
@@ -677,8 +677,8 @@ describe("Input invoice usage page", () => {
     await user.keyboard("{Escape}");
 
     await user.click(within(page).getByRole("button", { name: "筛选 金额" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: /交通银行 3847/ }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: /支出/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /交通银行 3847/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /支出/ }));
     await waitFor(() => {
       const request = rowsRequests(fetchMock).at(-1);
       const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));

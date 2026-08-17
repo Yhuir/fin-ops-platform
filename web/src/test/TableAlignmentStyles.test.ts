@@ -27,11 +27,16 @@ describe("finance table alignment styles", () => {
     expectDeclaration(".finance-table", /border-radius:\s*0/);
     expectDeclaration(".finance-table", /background:\s*var\(--fp-surface\)/);
     expectDeclaration(".finance-table", /padding:\s*0/);
+    expectDeclaration(".finance-page-table-frame", /height:\s*clamp\(600px, calc\(100dvh - 132px\), 1080px\)/);
+    expectDeclaration(".finance-page-table-frame", /overflow:\s*hidden/);
     expectDeclaration(".finance-table__scroll", /overflow-x:\s*auto/);
     expectDeclaration(".finance-table--contained", /height:\s*100%/);
     expectDeclaration(".finance-table--contained .finance-table__scroll", /overflow:\s*auto/);
     expectDeclaration(".finance-table--contained .finance-table__scroll", /overscroll-behavior:\s*contain/);
     expectDeclaration(".finance-table--contained .finance-table__scroll", /scrollbar-gutter:\s*stable/);
+    expectDeclaration(".finance-page-table-frame .finance-table--contained", /grid-template-rows:\s*minmax\(0, 1fr\) auto/);
+    expectDeclaration(".finance-page-table-frame .finance-table--contained", /overflow:\s*hidden/);
+    expectDeclaration(".finance-page-table-frame .finance-table--contained .finance-table__scroll", /height:\s*auto/);
     expectDeclaration(".finance-table__content", /min-width:\s*var\(--finance-table-min-width/);
     expectDeclaration(".finance-table__row", /min-height:\s*var\(--fp-table-row-height\)/);
     expectDeclaration(".finance-table__row", /transition:[^;]*background-color var\(--motion-fast\) var\(--ease-standard\)/);
@@ -73,6 +78,10 @@ describe("finance table alignment styles", () => {
   });
 
   test("aligns cells by column role instead of globally centering every table cell", () => {
+    expectDeclaration(".output-invoice-collections-table-column-heading", /width:\s*100%/);
+    expectDeclaration(".output-invoice-collections-table-header-stack", /justify-content:\s*center/);
+    expectDeclaration(".output-invoice-collections-table-header-stack", /text-align:\s*center/);
+
     expectDeclaration(".finance-table__cell[data-column-role=\"identity\"]", /text-align:\s*left/);
     expectDeclaration(".finance-table__cell[data-column-role=\"account\"]", /text-align:\s*left/);
     expectDeclaration(".finance-table__cell[data-column-role=\"description\"]", /text-align:\s*left/);

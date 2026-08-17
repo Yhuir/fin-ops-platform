@@ -10,7 +10,7 @@
 | 2. Service/repository | 适用 | canonical query、固定查询边界、关系组装、支出流水排除、详情与导出 |
 | 3. API contract | 适用 | 七个 GET、权限、非法参数、404、错误映射、旧 mutation route 不存在 |
 | 4. Read model/cache/worker | 不新增运行时覆盖 | 页面不使用 read model/cache/worker；boundary guard 保护旧链路不回归 |
-| 5. Frontend interaction | 适用 | loading/empty/error、三组表头、六种 chip、筛选、刷新、详情、导出、旧 UI 缺失 |
+| 5. Frontend interaction | 适用 | loading/empty/error、三组居中表头、六种 chip、完整状态候选、原表格局部刷新、内部滚动、详情、导出、旧 UI 缺失 |
 | 6. E2E 业务流 | 适用 | canonical rows、自动红蓝票展示、详情、搜索、导出、暂时失败恢复、零 mutation |
 | 7. 既有功能回归 | 适用 | Workbench 普通匹配不受影响、红票不误匹配、权限矩阵和其他发票页面合同不变 |
 
@@ -29,6 +29,7 @@
 - 已被红冲、已冲销蓝票、红票待核对不显示无意义的零收款金额。
 - 状态内容布局不得改变 HeroUI `Table.Cell` 的原生 `table-cell` 行为；多条收入流水撑高整行时，状态背景必须覆盖完整行高。
 - 表格保持有界内部滚动，HeroUI 分页位于 FinanceTable footer；范围选择与搜索保持同一紧凑行且不重叠。
+- 状态筛选后的 `/rows` 仍返回六种完整状态候选；前端交互测试锁定同一 table DOM 节点，防止恢复整表 skeleton/unmount 刷新。
 
 ## 主要测试入口
 

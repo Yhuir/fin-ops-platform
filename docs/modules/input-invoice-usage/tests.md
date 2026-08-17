@@ -19,7 +19,7 @@
 - canonical repository 只查询 canonical tables 和 `app.workbench_pair_relations status='active'`。
 - 不查询 `read_model.input_invoice_usage_*`、`read_model.workbench_relation_*` 或 `read_model.invoice_lifecycle_*`。
 - 一个页面 snapshot 最多 8 条批量 SQL statement，无逐行 N+1；rows/summary/facets 只计算一次 materialized canonical CTE。
-- `/rows` 同时返回 rows/summary/statistics/filter options，前端不请求 `/filter-options`。
+- `/rows` 同时返回 rows/summary/statistics/filter options，前端不请求 `/filter-options`；支付状态筛选只约束 rows，不约束自身候选词表，全部规则状态（含零数量）持续可见。
 - relation details、export 和 OA reverse preview 不回退旧 page repository。
 - OA 详情按 rows DTO 的 canonical `oa.id` 直接读取 completed/in-progress OA projection；测试必须禁止把该 id 送入发票使用行 hash 查询。
 - OA summary 从 completed/in-progress canonical source 输出 `workflowStatus`，OA 申请人列显示 HeroUI workflow chip。

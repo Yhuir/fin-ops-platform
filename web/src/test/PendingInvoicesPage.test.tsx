@@ -1013,7 +1013,7 @@ describe("Pending invoices page", () => {
 
     expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*padding:\s*var\(--fp-space-4\) var\(--fp-space-5\)/s);
     expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*height:\s*clamp\(600px, calc\(100dvh - 144px\), 840px\)/s);
+    expect(css).toMatch(/\.finance-page-table-frame\s*{[^}]*height:\s*clamp\(600px, calc\(100dvh - 132px\), 1080px\)/s);
     expect(css).not.toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:/s);
     expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.finance-table--contained \.finance-table__scroll\s*{[^}]*overflow:\s*auto;[^}]*overscroll-behavior:\s*contain/s);

@@ -6361,6 +6361,9 @@ function outputInvoiceCollectionFilterOptionsPayload() {
         options: [
           { value: "reversed_by_red", label: "已被红冲", count: 1 },
           { value: "reverses_blue", label: "已冲销蓝票", count: 1 },
+          { value: "unmatched_red", label: "红票待核对", count: 0 },
+          { value: "collected", label: "已收款", count: 0 },
+          { value: "partial_collected", label: "部分收款", count: 0 },
           { value: "pending_collection", label: "待收款", count: 1 },
         ],
       },

@@ -193,6 +193,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("join relation_members neighbour", sql)
         self.assertIn("bool_or(", sql)
         self.assertIn("filtered_rows as materialized", sql)
+        self.assertIn("status_option_rows as materialized", sql)
         self.assertIn("jsonb_agg(", sql)
         self.assertNotIn("read_model.input_invoice_usage", sql)
         self.assertNotIn("read_model.workbench_relation", sql)
@@ -235,6 +236,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("receipt_status", sql)
         self.assertNotIn("oa_applications", sql)
         self.assertIn("filtered_rows as materialized", sql)
+        self.assertIn("status_option_rows as materialized", sql)
         self.assertIn("page_supporting_keys as", sql)
         self.assertIn("supporting_group_rows as", sql)
         self.assertEqual(sql.count("with recursive"), 1)
@@ -243,6 +245,58 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("read_model.output_invoice_collection", sql)
         self.assertNotIn("read_model.workbench_relation", sql)
         self.assertNotIn("read_model.invoice_lifecycle", sql)
+
+    def test_input_payment_status_facets_exclude_only_their_own_filter(self) -> None:
+        connection = RecordingConnection()
+        repository = PostgresInputInvoiceUsageQueryRepository(connection)
+
+        repository.load_page(
+            page=1,
+            page_size=20,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            month=None,
+            filters=[
+                {"field": "seller_name", "operator": "in", "values": ["供应商甲"]},
+                {"field": "payment_status", "operator": "in", "values": ["paid"]},
+            ],
+            sort_field="invoice_date",
+            sort_direction="desc",
+            tenant_id="tenant-a",
+        )
+
+        sql = "\n".join(connection.transactions[0].statements)
+        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 2)
+        self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
+
+    def test_output_collection_status_facets_exclude_only_their_own_filter(self) -> None:
+        connection = RecordingConnection()
+        repository = PostgresOutputInvoiceCollectionQueryRepository(connection)
+
+        repository.load_page(
+            page=1,
+            page_size=20,
+            keyword=None,
+            invoice_date_from=None,
+            invoice_date_to=None,
+            month=None,
+            filters=[
+                {"field": "buyer_name", "operator": "in", "values": ["客户甲"]},
+                {
+                    "field": "collection_status",
+                    "operator": "in",
+                    "values": ["collected"],
+                },
+            ],
+            sort_field="invoice_date",
+            sort_direction="desc",
+            tenant_id="tenant-a",
+        )
+
+        sql = "\n".join(connection.transactions[0].statements)
+        self.assertEqual(sql.count("buyer_name = any(%s::text[])"), 2)
+        self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
 
     def test_output_row_lookup_hashes_the_same_group_key_as_list_rows(self) -> None:
         output_connection = RecordingConnection()
@@ -493,7 +547,9 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             status_labels={
                 "pending_collection": "待收款",
                 "reversed_by_red": "已被红冲",
+                "collected": "已收款",
             },
+            status_field="collection_status",
         )
 
         self.assertEqual(
@@ -501,6 +557,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             [
                 {"value": "pending_collection", "label": "待收款", "count": 1},
                 {"value": "reversed_by_red", "label": "已被红冲", "count": 2},
+                {"value": "collected", "label": "已收款", "count": 0},
             ],
         )
         self.assertNotIn("receipt_status", counts)

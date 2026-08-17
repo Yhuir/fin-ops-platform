@@ -56,10 +56,10 @@ describe("Input invoice usage workflow primitive targets", () => {
     });
     const sourceByPath = Object.fromEntries(inputInvoiceUsageWorkflowSourceFiles.map((path) => [path, readWebSource(path)]));
     const missingPrimitiveTargets = [
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemcheckbox\"")
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("Checkbox.Control")
         && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
         ? null
-        : "InputInvoiceUsageFilterMenu.tsx should preserve menuitemcheckbox and menuitemradio semantics",
+        : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer",
@@ -102,8 +102,8 @@ describe("InputInvoiceUsageFilterMenu", () => {
     await user.click(screen.getByRole("button", { name: "筛选 支付状态" }));
     const menu = await screen.findByRole("menu", { name: "支付状态筛选与排序" });
 
-    expect(within(menu).getByRole("menuitemcheckbox", { name: "待处理 8" })).toBeChecked();
-    expect(within(menu).getByRole("menuitemcheckbox", { name: "现金往来 2" })).not.toBeChecked();
+    expect(within(menu).getByRole("checkbox", { name: "待处理 8" })).toBeChecked();
+    expect(within(menu).getByRole("checkbox", { name: "现金往来 2" })).not.toBeChecked();
     expect(within(menu).queryByText("已付款")).not.toBeInTheDocument();
 
     await user.click(within(menu).getByRole("menuitem", { name: "全选" }));

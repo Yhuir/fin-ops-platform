@@ -39,7 +39,7 @@
 | Rendered table | 页面 | 不修改业务数据 |
 | UI events | 页面 callbacks | 只回传用户交互 |
 | Persisted UI state | page session | 不跨页面污染 |
-| Contained scroll surface | 页面布局 | 只滚动当前表格，表头固定，不把滚动链传递给页面或相邻栏 |
+| Contained scroll surface | 页面布局 | `finance-page-table-frame` 统一提供 `clamp(600px, calc(100dvh - 132px), 1080px)` 有界高度；内部 grid 将滚动区与 footer 分行，只滚动当前表格，表头固定，不把滚动链传递给页面或相邻栏 |
 | Header overlay surface | HeroUI Portal | 固定表头内的筛选菜单必须通过 Portal 脱离滚动裁切层，并保留页面业务筛选 callback |
 
 ## 持久化与投影

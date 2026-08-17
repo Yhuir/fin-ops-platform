@@ -43,7 +43,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions` |
+| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
 | `GET /filter-options` | 页面/兼容调用 | 返回同一 canonical facets；不读取缓存或 read model |
 | invoice/bank detail | 详情抽屉 | 按 canonical id 定向读取；不存在返回 404 |
 | relation detail | 详情抽屉 | 只支持 `kind=bank|invoice` |
@@ -70,10 +70,12 @@ row 顶层只包含：
 
 - 一个页面请求使用一个 `REPEATABLE READ READ ONLY` snapshot。
 - repository set-based 完成筛选、排序、分页和聚合；service 只组装当前页有界 DTO。
+- 收款状态的 self-excluding facet 与当前页 rows 共用一个 SQL statement 和同一 canonical CTE snapshot，不增加 API 或数据库往返。
 - SQL 数量不得随当前页行数、关系数量或红蓝票数量线性增长。
 - 自动红蓝票关系必须确定性、幂等；歧义时不创建关系。
 - 页面不通过 Redis/read model 提速；只有真实慢查询证据才增加索引或缓存。
 - API 错误必须 fail closed，不回退已删除的 lifecycle/receipt/read-model 路径。
+- 首次加载可显示 skeleton；后续筛选、排序、分页和手动刷新保留现有 HeroUI FinanceTable DOM，只更新表格内容，刷新失败保留上一份成功结果并显示错误。
 
 ## 统一详情展示合同
 

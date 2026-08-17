@@ -30,6 +30,7 @@ type OutputInvoiceCollectionsTableProps = {
   page: number;
   pageSize: number;
   total: number;
+  refreshing?: boolean;
   sortField: string;
   sortDirection: OutputInvoiceCollectionSortDirection | "";
   filters: OutputInvoiceCollectionFilter[];
@@ -89,6 +90,7 @@ export default function OutputInvoiceCollectionsTable({
   page,
   pageSize,
   total,
+  refreshing = false,
   sortField,
   sortDirection,
   filters,
@@ -109,7 +111,10 @@ export default function OutputInvoiceCollectionsTable({
   const currentFilter = (field: string) => filters.find((filter) => filter.field === field);
 
   return (
-    <div className="output-invoice-collections-table-frame">
+    <div
+      aria-busy={refreshing}
+      className="finance-page-table-frame output-invoice-collections-table-frame"
+    >
       <FinanceTable
         ariaLabel="销项发票收款情况表"
         className="output-invoice-collections-table"
@@ -145,7 +150,7 @@ export default function OutputInvoiceCollectionsTable({
                   <span aria-hidden={!column.groupLabel} className="output-invoice-collections-table-column-group">
                     {column.groupLabel ?? "\u00a0"}
                   </span>
-                  <span className={cx("output-invoice-collections-table-header-stack", column.align === "right" && "output-invoice-collections-table-header-stack--right")}>
+                  <span className="output-invoice-collections-table-header-stack">
                     {column.field && config ? (
                       <OutputInvoiceCollectionFilterMenu
                         currentFilter={currentFilter(column.field) as OutputInvoiceCollectionFilterValue | null}

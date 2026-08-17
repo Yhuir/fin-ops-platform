@@ -5,7 +5,9 @@ from typing import Any
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     _dedupe_objects,
     _filter_options,
+    _filters_without_field,
     _first,
+    _replace_filter_option_field,
     _validate_temporal_query,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -94,7 +96,19 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 filters=parsed_filters,
                 tenant_id=tenant_id,
             )
-            payload["filterOptions"] = list(options.get("fields") or [])
+            status_options = self._row_assembler.filter_options(
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                month=month,
+                filters=_filters_without_field(parsed_filters, "collection_status"),
+                tenant_id=tenant_id,
+            )
+            payload["filterOptions"] = _replace_filter_option_field(
+                list(options.get("fields") or []),
+                list(status_options.get("fields") or []),
+                field="collection_status",
+            )
             payload["statistics"] = _local_statistics(list(payload.get("rows") or []))
             return payload
         snapshot = self._repository.load_page(
