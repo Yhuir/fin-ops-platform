@@ -110,9 +110,8 @@ class FakeRuntimeRepository:
     def dashboard_outbox_metric(self) -> dict[str, object]:
         return {
             "pending_count": 3,
-            "publishing_count": 1,
+            "processing_count": 1,
             "failed_count": 2,
-            "publish_failed_count": 1,
             "oldest_pending_age_seconds": 42.0,
             "status": "available",
         }
@@ -121,13 +120,11 @@ class FakeRuntimeRepository:
         return [
             {
                 "event_type": "oa.sync",
-                "queue": "finops.oa.sync",
-                "messages": None,
-                "unacked": None,
-                "consumers": None,
-                "dlq_messages": None,
-                "status": "unknown",
-                "warning_code": "rabbitmq_metrics_unavailable",
+                "queue": "job.outbox_events",
+                "pending_count": 3,
+                "processing_count": 1,
+                "failed_count": 2,
+                "status": "available",
             }
         ]
 
@@ -186,8 +183,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(endpoints["GET /api/workbench"]["database_duration_ms"]["p99"], 310.0)
         self.assertNotIn("GET /api/search", endpoints)
         self.assertEqual(payload["runtime_performance"]["outbox"]["pending_count"], 3)
-        self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
-        self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
+        self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "available")
+        self.assertNotIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
 
     def test_worker_warning_stays_row_level_only(self) -> None:
         class RuntimeRepository(FakeRuntimeRepository):
@@ -276,16 +273,15 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(payload["data_inventory"]["import_events"], [])
         self.assertIn("import_events_unknown", payload["freshness"]["warnings"])
 
-    def test_default_dashboard_runtime_metrics_do_not_block_on_rabbitmq_management(self) -> None:
+    def test_default_dashboard_runtime_metrics_use_postgres_only(self) -> None:
         class RuntimeOnlyConnection(FakeDashboardConnection):
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized and "pending_count" in normalized:
                     return {
                         "pending_count": 0,
-                        "publishing_count": 0,
+                        "processing_count": 0,
                         "failed_count": 0,
-                        "publish_failed_count": 0,
                         "oldest_pending_age_seconds": None,
                     }
                 return super().fetch_one(sql, params)
@@ -296,6 +292,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return []
+                if "from job.outbox_events" in normalized:
+                    return []
                 return super().fetch_all(sql, params)
 
         service = OperationsDashboardService(
@@ -305,20 +303,18 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
         payload = service.build_payload()
 
-        self.assertTrue(payload["runtime_performance"]["queues"])
-        self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")
-        self.assertIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
+        self.assertEqual(payload["runtime_performance"]["queues"], [])
+        self.assertNotIn("rabbitmq_metrics_unavailable", payload["freshness"]["warnings"])
 
-    def test_runtime_repository_outputs_unknown_queue_rows_when_rabbitmq_metrics_unavailable(self) -> None:
+    def test_runtime_repository_outputs_postgres_queue_rows(self) -> None:
         class EmptyConnection:
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized and "pending_count" in normalized:
                     return {
                         "pending_count": 0,
-                        "publishing_count": 0,
+                        "processing_count": 0,
                         "failed_count": 0,
-                        "publish_failed_count": 0,
                         "oldest_pending_age_seconds": None,
                     }
                 raise AssertionError(sql)
@@ -326,23 +322,26 @@ class OperationsDashboardServiceTests(unittest.TestCase):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
                 if "from job.outbox_events" in normalized:
-                    return []
+                    return [
+                        {
+                            "event_type": "oa.sync",
+                            "pending_count": 2,
+                            "processing_count": 1,
+                            "failed_count": 0,
+                        }
+                    ]
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return []
                 raise AssertionError(sql)
 
-        class UnavailableRabbitMq:
-            def summary(self) -> dict[str, object]:
-                return {"rabbitmq_management_configured": False}
-
-        repository = RuntimeMonitoringRepository(EmptyConnection(), rabbitmq_metrics_provider=UnavailableRabbitMq())
+        repository = RuntimeMonitoringRepository(EmptyConnection())
 
         queue_rows = repository.dashboard_queue_metrics()
 
-        self.assertGreaterEqual(len(queue_rows), 1)
-        self.assertEqual(queue_rows[0]["messages"], None)
-        self.assertEqual(queue_rows[0]["status"], "unknown")
-        self.assertEqual(queue_rows[0]["warning_code"], "rabbitmq_metrics_unavailable")
+        self.assertEqual(len(queue_rows), 1)
+        self.assertEqual(queue_rows[0]["queue"], "job.outbox_events")
+        self.assertEqual(queue_rows[0]["pending_count"], 2)
+        self.assertEqual(queue_rows[0]["status"], "available")
 
     def test_runtime_repository_reports_missing_and_stale_required_workers(self) -> None:
         class WorkerConnection:
@@ -359,7 +358,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     ]
                 raise AssertionError(sql)
 
-        repository = RuntimeMonitoringRepository(WorkerConnection(), rabbitmq_metrics_provider=object())
+        repository = RuntimeMonitoringRepository(WorkerConnection())
 
         worker_rows = {row["worker_kind"]: row for row in repository.dashboard_worker_metrics()}
 
@@ -377,9 +376,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 self.sql = sql
                 return {
                     "pending_count": 0,
-                    "publishing_count": 0,
+                    "processing_count": 2,
                     "failed_count": 0,
-                    "publish_failed_count": 3,
                     "oldest_pending_age_seconds": None,
                 }
 
@@ -389,10 +387,10 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         payload = repository.dashboard_outbox_metric()
 
         normalized_sql = " ".join(connection.sql.lower().split())
-        self.assertEqual(payload["publish_failed_count"], 3)
+        self.assertEqual(payload["processing_count"], 2)
         self.assertIn("from job.outbox_events", normalized_sql)
-        self.assertIn("status in ('pending', 'failed', 'dead_lettered')", normalized_sql)
-        self.assertIn("status <> 'done' and publish_status in ('publishing', 'failed')", normalized_sql)
+        self.assertIn("status in ('pending', 'processing', 'failed', 'dead_lettered')", normalized_sql)
+        self.assertNotIn("publish_status", normalized_sql)
 
 
 if __name__ == "__main__":

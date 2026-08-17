@@ -17,7 +17,7 @@
 - `backend-refactor/target-architecture.md`：Python-first 目标架构、组件边界和技术取舍。
 - `backend-refactor/module-refactor-plan.md`：模块拆分、职责、验收顺序和测试门禁。
 - `backend-refactor/runtime-call-chain.md`：静态调用链、动态运行时序和优化规则。
-- `backend-refactor/read-model-and-external-services.md`：Read Model、Redis、RabbitMQ、PostgreSQL、OA Mongo 和对象存储契约。
+- `backend-refactor/read-model-and-external-services.md`：历史 Read Model/外部服务演进记录；当前 Worker 以 PostgreSQL 单传输合同为准。
 - `backend-refactor/migration-roadmap.md`：分阶段重构路线、merge 策略和回滚口径。
 - `backend-refactor/ai-execution-rules.md`：Codex/Gemini 执行 prompt 时必须遵守的状态、测试和分支规则。
 - `backend-refactor/migration-state-log.md`：AI 状态机，记录 prompt 完成度、验证结果和下一步上下文。

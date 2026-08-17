@@ -6,19 +6,6 @@ from unittest.mock import Mock, patch
 from fin_ops_platform.tools import runtime_sync_closure_gate as gate
 
 
-def clean_rabbitmq_queues() -> dict[str, dict[str, object]]:
-    return {
-        event_type: {
-            "queue": f"finops.{event_type}",
-            "messages": 0,
-            "unacked": 0,
-            "consumers": 1,
-            "dead_letter_messages": 0,
-        }
-        for event_type in gate.rabbitmq_dispatch_event_types()
-    }
-
-
 class FakeRuntimeMonitoringRepository:
     def __init__(self, _connection) -> None:
         pass
@@ -27,29 +14,15 @@ class FakeRuntimeMonitoringRepository:
         return {
             "queue_backlog": {},
             "failed_jobs": 0,
-            "rabbitmq_unpublished_backlog": 0,
-            "rabbitmq_publishing_backlog": 0,
-            "rabbitmq_publish_failed_backlog": 0,
             "missing_required_worker_count": 0,
             "stale_required_worker_count": 0,
             "mismatched_required_worker_count": 0,
             "worker_metrics": [
                 {"worker_kind": "workbench", "status": "ok", "required": True}
             ],
-            "rabbitmq_management_configured": True,
-            "rabbitmq_queue_depth": 0,
-            "rabbitmq_unacked_messages": 0,
-            "rabbitmq_dlq_count": 0,
-            "rabbitmq_queues": clean_rabbitmq_queues(),
+            "critical_failed_outbox_count": 0,
+            "pending_outbox_events_by_scope": [],
         }
-
-
-class FakeRuntimeQueueRepository:
-    def __init__(self, _connection) -> None:
-        pass
-
-    def reconcile_completed_publish_states(self) -> int:
-        return 0
 
 
 class EmptyRuntimeMonitoringRepository:
@@ -60,63 +33,23 @@ class EmptyRuntimeMonitoringRepository:
         return {}
 
 
-class BackloggedRabbitMqRuntimeMonitoringRepository:
+class BackloggedPostgresRuntimeMonitoringRepository:
     def __init__(self, _connection) -> None:
         pass
 
     def ready_health_summary(self) -> dict[str, object]:
         summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
-        queues = summary["rabbitmq_queues"]
-        assert isinstance(queues, dict)
-        summary["rabbitmq_queue_depth"] = 1
-        queues["oa.sync.requested"] = {
-            "queue": "finops.oa.sync.requested",
-            "messages": 1,
-            "unacked": 0,
-            "consumers": 1,
-            "dead_letter_messages": 0,
-        }
+        summary["queue_backlog"] = {"pending": 1}
+        summary["pending_outbox_events_by_scope"] = [
+            {
+                "event_type": "oa.sync",
+                "status": "pending",
+                "scope_type": "oa",
+                "scope_key": "all",
+                "count": 1,
+            }
+        ]
         return summary
-
-
-class TerminalPublishRace:
-    def __init__(self) -> None:
-        self.publishing = 0
-        self.reconciliations = 0
-        self.samples = 0
-
-
-class TerminalPublishRaceQueueRepository:
-    def __init__(self, connection: TerminalPublishRace) -> None:
-        self._connection = connection
-
-    def reconcile_completed_publish_states(self) -> int:
-        self._connection.reconciliations += 1
-        reconciled = self._connection.publishing
-        self._connection.publishing = 0
-        return reconciled
-
-
-class TerminalPublishRaceMonitoringRepository:
-    def __init__(self, connection: TerminalPublishRace) -> None:
-        self._connection = connection
-
-    def ready_health_summary(self) -> dict[str, object]:
-        self._connection.samples += 1
-        if self._connection.samples == 1:
-            self._connection.publishing = 1
-        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
-        summary["rabbitmq_publishing_backlog"] = self._connection.publishing
-        return summary
-
-
-class RecurrentTerminalPublishRaceQueueRepository:
-    def __init__(self, connection: TerminalPublishRace) -> None:
-        self._connection = connection
-
-    def reconcile_completed_publish_states(self) -> int:
-        self._connection.reconciliations += 1
-        return 1
 
 
 class RequiredWorkerOverrideMonitoringRepository(FakeRuntimeMonitoringRepository):
@@ -466,7 +399,6 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
 class RuntimeSyncClosureGateTests(unittest.TestCase):
     def setUp(self) -> None:
         patchers = [
-            patch.object(gate, "RuntimeQueueRepository", FakeRuntimeQueueRepository),
             patch.object(
                 gate.health_ready_payload_probe,
                 "collect_health_ready_payload",
@@ -497,45 +429,15 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_missing_rabbitmq_management_metrics_prevents_runtime_closure(self) -> None:
-        blockers = gate._runtime_blockers(
-            {
-                "queue_backlog": {},
-                "rabbitmq_management_configured": False,
-            }
-        )
-
-        self.assertEqual(blockers, {"rabbitmq_management_configured": False})
-
-    def test_runtime_blockers_require_every_dispatch_queue_consumer(self) -> None:
+    def test_runtime_blockers_reject_postgres_queue_failures(self) -> None:
         summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
-        event_types = gate.rabbitmq_dispatch_event_types()
-        queues = summary["rabbitmq_queues"]
-        assert isinstance(queues, dict)
-        queues.pop(event_types[0])
-        metrics = queues[event_types[1]]
-        assert isinstance(metrics, dict)
-        metrics["consumers"] = 0
+        summary["queue_backlog"] = {"failed": 3, "dead_lettered": 2}
+        summary["critical_failed_outbox_count"] = 5
 
         blockers = gate._runtime_blockers(summary)
 
-        self.assertEqual(blockers["rabbitmq_queue_metrics_missing"], [event_types[0]])
-        self.assertEqual(
-            blockers["rabbitmq_queues_without_consumers"],
-            [event_types[1]],
-        )
-
-    def test_runtime_blockers_reject_all_durable_publish_backlogs(self) -> None:
-        summary = FakeRuntimeMonitoringRepository(None).ready_health_summary()
-        summary["rabbitmq_unpublished_backlog"] = 1
-        summary["rabbitmq_publishing_backlog"] = 2
-        summary["rabbitmq_publish_failed_backlog"] = 3
-
-        blockers = gate._runtime_blockers(summary)
-
-        self.assertEqual(blockers["rabbitmq_unpublished_backlog"], 1)
-        self.assertEqual(blockers["rabbitmq_publishing_backlog"], 2)
-        self.assertEqual(blockers["rabbitmq_publish_failed_backlog"], 3)
+        self.assertEqual(blockers["queue_backlog"], {"failed": 3, "dead_lettered": 2})
+        self.assertEqual(blockers["critical_failed_outbox_count"], 5)
 
     def test_rejects_unknown_gate_profile(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported release gate profile"):
@@ -676,11 +578,11 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             "strict_current_release",
         )
 
-    def test_runtime_health_preserves_per_queue_diagnostics(self) -> None:
+    def test_runtime_health_preserves_postgres_queue_diagnostics(self) -> None:
         with patch.object(
             gate,
             "RuntimeMonitoringRepository",
-            BackloggedRabbitMqRuntimeMonitoringRepository,
+            BackloggedPostgresRuntimeMonitoringRepository,
         ):
             check = gate._runtime_health_check(
                 object(),
@@ -689,61 +591,7 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             )
 
         self.assertEqual(check.status, gate.FAIL)
-        queue = check.payload["snapshot"]["rabbitmq_queues"]
-        self.assertEqual(
-            queue["oa.sync.requested"]["messages"],
-            1,
-        )
-
-    def test_runtime_health_reconciles_terminal_publish_race(self) -> None:
-        connection = TerminalPublishRace()
-        with patch.object(
-            gate,
-            "RuntimeQueueRepository",
-            TerminalPublishRaceQueueRepository,
-        ), patch.object(
-            gate,
-            "RuntimeMonitoringRepository",
-            TerminalPublishRaceMonitoringRepository,
-        ):
-            check = gate._runtime_health_check(
-                connection,
-                timeout_seconds=1,
-                poll_interval_seconds=0.05,
-            )
-
-        self.assertEqual(check.status, gate.PASS)
-        self.assertEqual(connection.samples, 3)
-        self.assertEqual(connection.reconciliations, 3)
-        self.assertEqual(check.payload["reconciled_completed_publish_states"], 1)
-        self.assertEqual(check.payload["clean_samples_after_reconciliation"], 1)
-        self.assertIs(check.payload["terminal_publish_reconciliation_stable"], True)
-
-    def test_runtime_health_rejects_continuously_recreated_terminal_publish_race(
-        self,
-    ) -> None:
-        connection = TerminalPublishRace()
-        with patch.object(
-            gate,
-            "RuntimeQueueRepository",
-            RecurrentTerminalPublishRaceQueueRepository,
-        ), patch.object(
-            gate,
-            "RuntimeMonitoringRepository",
-            FakeRuntimeMonitoringRepository,
-        ):
-            check = gate._runtime_health_check(
-                connection,
-                timeout_seconds=0,
-                poll_interval_seconds=0.05,
-            )
-
-        self.assertEqual(check.status, gate.FAIL)
-        self.assertIn(
-            "terminal_publish_reconciliation_not_stable",
-            check.payload["blockers"],
-        )
-        self.assertIs(check.payload["terminal_publish_reconciliation_stable"], False)
+        self.assertEqual(check.payload["snapshot"]["queue_backlog"], {"pending": 1})
 
     def test_full_gate_passes_without_automatic_business_mutation(self) -> None:
         with patch.object(

@@ -13,7 +13,7 @@
 | Runtime worker registry | `runtime_worker_registry.py`、`runtime_worker_manifest.py` | worker/env/event/heartbeat/App Health 必须同步 |
 | Nginx 同域路径 | `deploy/oa/nginx.fin-ops.conf.example` | `/fin-ops/` SPA 和 `/fin-ops-api/`、`/fin-ops/api/` API proxy 不能互相吞路由 |
 | Health/readiness | `/health`、`/health/ready` | release 激活后必须等 API 和 required workers ready |
-| Runtime env/secrets | `deploy/oa/env/*.example`、systemd drop-ins | DSN、secrets、migrator env、RabbitMQ/Redis/OA env 不能泄露或错用 |
+| Runtime env/secrets | `deploy/oa/env/*.example`、systemd drop-ins | DSN、secrets、migrator env、OA env 不能泄露或错用；业务 Worker 不依赖 Redis/RabbitMQ |
 | Backup/rollback | operations docs、deploy helper cleanup/active refs | 本地只能保护脚本契约；真实备份恢复要 staging/生产 runbook |
 
 ## 场景覆盖清单
@@ -28,18 +28,18 @@
 | release metadata 绑定 migration count/head/fingerprint；pending migration 在 stop 前要求 exact previous-code/candidate-schema evidence；迁移后回滚复用同一证据，缺失时 maintenance + forward repair | `tests/test_deploy_oa_script.py::test_release_archive_accepts_frontend_assets_under_configured_base_path`、`test_release_gate_blocks_unproven_schema_rollback_before_services_stop` | 2026-08-09 新增 |
 | 候选 gate 读取旧 stable system audit 时，以候选 registry + summary + 完整逐页 proof 严格验真；部分 registry 字段、漏页和顺序漂移失败关闭 | `tests/test_write_operation_e2e_smoke.py` | 2026-07-31 更新 |
 | 旧 stable HTTP 审计仅因旧页面审计实现失败时，候选 gate 用候选代码执行同库只读审计；HTTP 鉴权、transport 或 payload contract 失败不得触发该路径 | `tests/test_runtime_sync_closure_gate.py` | 2026-08-08 更新 |
-| runtime convergence 先协调 terminal publish 并取得干净样本，canonical audit 最后执行 | `tests/test_runtime_sync_closure_gate.py` | 2026-07-31 更新 |
+| runtime convergence 先等待 PostgreSQL durable queue 终态并取得干净样本，canonical audit 最后执行 | `tests/test_runtime_sync_closure_gate.py` | 2026-08-17 更新 |
 | release 激活后先等 `/health/ready`，再检查公网 session API route JSON proxy | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | no-activate 只上传和校验，不激活、不清理、不启动 worker ensure | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | legacy-current 覆盖式发布入口已移除，CLI 不接受 `--mode` 且脚本无 legacy archive/remote script | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | deploy-control helper 使用 `/etc/fin-ops` secret contract、migration env、drop-in reset、worker readiness | `tests/test_deploy_oa_script.py` | 已覆盖 |
 | exact candidate 自动分类 frontend/runtime/ACL，普通发布只读取 005，ACL 自动要求专项 preflight | `tests/test_deploy_oa_script.py::test_release_gate_profile_is_automatic_and_fail_safe`、`test_frontend_release_gate_is_005_only_and_skips_runtime_audits` | 2026-08-03 新增 |
-| 纯前端门禁只执行 pre/T+0 ready/session/dist/shell/asset，不运行 RabbitMQ apply、runtime closure、page audit 或 T+60/T+300 | `tests/test_deploy_oa_script.py::test_frontend_release_gate_is_005_only_and_skips_runtime_audits` | 2026-08-03 新增 |
+| 纯前端门禁只执行 pre/T+0 ready/session/dist/shell/asset，不运行 runtime closure、page audit 或 T+60/T+300 | `tests/test_deploy_oa_script.py::test_frontend_release_gate_is_005_only_and_skips_runtime_audits` | 2026-08-17 更新 |
 | 一次性 retired env/OA binding cutover 已退出稳态链并删除历史 SQL | `tests/test_deploy_oa_script.py::test_release_gate_steady_state_rejects_retired_env_without_rewriting_files`、`test_retired_role_binding_cleanup_is_deleted_and_user_sync_stays_member_scoped` | 2026-08-03 新增 |
 | runtime worker ensure 从 manifest 派生 required workers/env/check command | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
 | Workbench direct cutover 在 stop 前保存 exact page-worker env；previous rollback 在 ensure/start 前恢复且禁止 example fallback/迁移；backup 仅在 candidate final evidence 或 rollback checkpoint PASS 后删除 | `tests/test_deploy_oa_script.py::test_workbench_page_worker_env_backup_restores_exact_bytes_without_secret_output`、`test_runtime_worker_helper_refuses_example_fallback_for_required_restored_env`、`tests/test_deploy_runtime_examples.py::test_workbench_page_worker_env_has_exact_cutover_and_rollback_lifecycle` | 2026-08-13 新增 |
 | Nginx SPA fallback、assets 404/cache、index no-store、API proxy 顺序 | `tests/test_deploy_oa_nginx_config.py` | 已覆盖 |
-| RabbitMQ dispatcher/env examples 覆盖 registry events | `tests/test_deploy_runtime_examples.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
+| app 专属 RabbitMQ units/env/topology 与 Worker Redis 依赖已删除，部署清单严格等于 4 个 required workers | `tests/test_deploy_runtime_examples.py`、`tests/test_runtime_worker_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | 2026-08-17 更新 |
 | `/health/ready` 不执行重 self-test，暴露 runtime infrastructure contract | `tests/test_app.py`、`tests/test_app_postgres_mode.py` | 已覆盖 |
 
 ## 七类测试适用性
@@ -47,9 +47,9 @@
 | 类别 | 是否适用 | 当前测试入口 | 当前结论 | 缺口等级 | 维护要求 |
 | --- | --- | --- | --- | --- | --- |
 | 1. Business core unit tests | 不直接适用 | N/A | deploy 模块没有业务金额/状态规则；核心规则是脚本/环境契约 | N/A | 若新增发布策略算法或 release retention 规则，补脚本级 unit tests |
-| 2. Service-layer tests | 适用 | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 deploy helper、worker registry、env examples、RabbitMQ dispatch contract | 无 P0 | 修改 helper/systemd/env/worker manifest 时必须补 |
+| 2. Service-layer tests | 适用 | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 deploy helper、worker registry、4 个 env/systemd examples 与 PostgreSQL queue contract | 无 P0 | 修改 helper/systemd/env/worker manifest 时必须补 |
 | 3. API contract tests | 间接适用 | `tests/test_app.py`、`tests/test_app_postgres_mode.py`、`tests/test_deploy_oa_script.py` | 覆盖 `/health/ready` 和 session route proxy smoke 脚本契约 | 无 P0 | 修改 health/session/Nginx path 时补 route contract |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 worker manifest、read model event、RabbitMQ dispatcher env、runtime boundary | P1 | 真 systemd/RabbitMQ/Redis/worker drain 需要 staging |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 worker manifest、PostgreSQL durable queue、heartbeat 与 runtime boundary | P1 | 真 systemd/PostgreSQL queue/worker drain 需要 staging |
 | 5. Frontend component and interaction tests | 间接适用 | `scripts/verify.sh frontend`、`scripts/verify.sh e2e`、nightly CI | deploy 不改页面；通过全量 Vitest/build 和 Playwright app shell smoke 防旧页面破坏 | P1 | 更多真实浏览器/OA iframe/缓存刷新需 smoke |
 | 6. End-to-end business-flow integration tests | 适用但本地有限 | deploy release script tests + health tests | 覆盖发布脚本顺序，不执行真实 SSH/systemd/migration | P1 | 真实 release -> migration -> restart -> worker ready -> App Health 绿灯需 staging/生产前 smoke |
 | 7. Existing feature regression tests | 适用 | `scripts/verify.sh all`、nightly CI、全量测试 | 保证部署/CI 改动不会漏跑旧模块测试，并防止开发机 legacy app Mongo 旧状态破坏 clean 回归入口 | 无 P0 | 改验证入口时必须保护 backend/frontend/browser e2e/docs 都仍被 all 覆盖 |
@@ -58,7 +58,7 @@
 
 | 日期 | 失败模式 | 回归测试 | 验证 |
 | --- | --- | --- | --- |
-| 2026-08-13 | Workbench direct cutover 删除 live page-worker env 后，previous rollback 的 ensure 可能从 example 重建默认 env，丢失生产 transport/tuning 并导致 queue consumer closure 失败；若安装 previous 旧 helper，还会丢失 exact-env guard | `test_workbench_page_worker_env_backup_restores_exact_bytes_without_secret_output`、`test_runtime_worker_helper_refuses_example_fallback_for_required_restored_env`、`test_workbench_page_worker_env_has_exact_cutover_and_rollback_lifecycle` | `bash -n deploy/oa/bin/finops-deploy-control.sh && bash -n deploy/oa/bin/finops-ensure-runtime-workers.sh`；`PYTHONPATH=backend/src:. python3 -m pytest -q tests/test_deploy_runtime_examples.py tests/test_deploy_oa_script.py tests/test_runtime_worker_registry.py tests/test_runtime_queue.py tests/test_runtime_monitoring.py tests/test_rabbitmq_runtime.py` |
+| 2026-08-13 | Workbench direct cutover 删除 live page-worker env 后，previous rollback 的 ensure 可能从 example 重建默认 env，丢失生产 transport/tuning 并导致 queue consumer closure 失败；若安装 previous 旧 helper，还会丢失 exact-env guard | `test_workbench_page_worker_env_backup_restores_exact_bytes_without_secret_output`、`test_runtime_worker_helper_refuses_example_fallback_for_required_restored_env`、`test_workbench_page_worker_env_has_exact_cutover_and_rollback_lifecycle` | `bash -n deploy/oa/bin/finops-deploy-control.sh && bash -n deploy/oa/bin/finops-ensure-runtime-workers.sh`；`PYTHONPATH=backend/src:. python3 -m pytest -q tests/test_deploy_runtime_examples.py tests/test_deploy_oa_script.py tests/test_runtime_worker_registry.py tests/test_runtime_queue.py tests/test_runtime_monitoring.py` |
 | 2026-08-13 | 默认 HTTP 门禁只读 paired groups，且 page worker 停止后的 T+0/T+60/T+300 没有动态证明旧 event/scope、projection table/statement 零增量，也没有绑定 candidate commit 的 Redis page-cache source/runtime-owner 缺席证据 | `test_default_workbench_probes_are_unique_direct_canonical_reads`、`test_release_gate_proves_retired_workbench_page_runtime_zero_delta_across_candidate_window`、`test_retired_workbench_page_runtime_window_not_required_evidence_is_executable`、`test_retired_workbench_page_runtime_observer_passes_zero_delta_and_rejects_drift` | `PYTHONPATH=backend/src:. python3 -m pytest -q tests/test_http_slo_probe.py tests/test_deploy_runtime_examples.py tests/test_deploy_oa_script.py`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-08-03 | 一次性 005/006 ACL cutover 被硬编码进每次发布，导致普通功能也要求 006、写 env/OA、等待 T+300 | `test_release_gate_profile_is_automatic_and_fail_safe`、`test_frontend_release_gate_is_005_only_and_skips_runtime_audits`、`test_release_gate_auto_escalates_acl_without_requiring_006` | `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script -v`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-08-09 | forward-only migration 后自动回滚只切换旧 binary、不回退 schema，可能形成旧代码 + 新 schema 并把失败误报为恢复成功 | `test_release_gate_blocks_unproven_schema_rollback_before_services_stop`、release metadata schema contract assertions | `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script -v`；`bash -n deploy/oa/bin/finops-deploy-control.sh` |
@@ -113,12 +113,12 @@ bash scripts/verify.sh docs
 - nightly 调用 `bash scripts/verify.sh all`，覆盖全量后端 unittest、前端 Vitest、前端 build、Playwright browser smoke 和 docs。
 - `tests/test_nightly_ci.py` 保护 workflow 和 verify script 不被改成漏跑。
 - `scripts/verify.sh backend` / `all` 使用临时 `FIN_OPS_DATA_DIR` 做 clean app check；`runtime-check` 才读取当前配置 runtime。
-- nightly 仍不能证明真实 SSH、sudo、systemd、PostgreSQL migration、Redis/RabbitMQ、Nginx live config 和 OA cookie 行为。
+- nightly 仍不能证明真实 SSH、sudo、systemd、PostgreSQL migration/queue、Nginx live config、OA cookie，以及 API 进程可选 Redis cache 的行为。
 
 ## 未测风险
 
 - 真实服务器 SSH/sudo 权限、root-owned helper 安装、systemd drop-in、worker restart 和 journal 日志只靠 staging/生产前 smoke。
-- PostgreSQL migration、备份/PITR、对象存储、Redis/RabbitMQ 真连接和大生产库 worker drain 不由本地 unittest 证明。
+- PostgreSQL migration/queue、备份/PITR、对象存储、API 可选 Redis cache 和大生产库 worker drain 不由本地 unittest 证明。
 - Nginx live config 可能与仓库 example 偏离，必须在服务器上 `nginx -T` 或实际 route smoke。
 - GitHub Actions 是否在远端仓库启用、secret/cache 配置和权限需要在 GitHub 侧确认。
 - 浏览器真实缓存、OA iframe cookie、下载和移动端布局仍由真实浏览器 smoke 覆盖。

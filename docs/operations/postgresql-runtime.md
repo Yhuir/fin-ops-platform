@@ -49,5 +49,5 @@ dead-lettered 和 active lease 不得清理。普通 VACUUM 只使空间可复�
 - `/health/ready`、pool/connection/query metrics；
 - canonical page/system audit；
 - authenticated HTTP p95/p99；
-- worker/outbox/RabbitMQ closure；
+- worker/PostgreSQL outbox closure；
 - 退役事件和 schema 的负向审计。

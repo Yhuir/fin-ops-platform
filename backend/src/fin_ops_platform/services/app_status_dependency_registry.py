@@ -18,6 +18,5 @@ APP_STATUS_DEPENDENCY_REGISTRY: dict[str, AppStatusDependencyDefinition] = {
     "postgres": AppStatusDependencyDefinition("postgres", "PostgreSQL"),
     "redis": AppStatusDependencyDefinition("redis", "Redis", critical=False),
     "object_storage": AppStatusDependencyDefinition("object_storage", "对象存储", critical=False),
-    "rabbitmq": AppStatusDependencyDefinition("rabbitmq", "RabbitMQ", critical=False),
     "oa_mongo": AppStatusDependencyDefinition("oa_mongo", "OA MongoDB"),
 }

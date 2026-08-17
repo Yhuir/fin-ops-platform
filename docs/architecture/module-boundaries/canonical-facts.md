@@ -1,6 +1,6 @@
 # Canonical Facts 边界合同
 
-本文记录业务唯一真相的模块化边界。这里的 canonical facts 指 PostgreSQL 中代表业务事实本体的 `app.*` 表，不包括派生 read model、Redis cache、RabbitMQ message、frontend domain event、local pickle、full snapshot、`state:*` JSON 或 Mongo app snapshot。
+本文记录业务唯一真相的模块化边界。这里的 canonical facts 指 PostgreSQL 中代表业务事实本体的 `app.*` 表，不包括派生 read model、Redis cache、frontend domain event、local pickle、full snapshot、`state:*` JSON 或 Mongo app snapshot。
 
 ## 目标
 
@@ -19,7 +19,7 @@
 | 外部事实 | OA Mongo、Excel/PDF/ZIP、银行导出文件 | 外部系统或导入文件 | app 只读接入或导入，不写外部原始库。 |
 | Canonical facts | `app.invoices`、`app.bank_transactions`、`app.workbench_pair_relations` | 现有业务模块 | 业务唯一真相，写入必须经过 owner 边界。 |
 | Runtime/audit facts | `job.outbox_events`、`job.background_jobs`、attempt/heartbeat、`audit.events`、`audit.external_control_evidence*` | runtime-workers / permissions-and-audit | 描述任务、审计和外部 complete-snapshot 对照证据，不替代业务事实；外部 manifest 不允许由 App canonical rows 反向生成后自证。 |
-| Cache / transport / UI hints | Redis、RabbitMQ、frontend event | runtime/UI | 只做缓存、唤醒、传输或刷新提示。 |
+| Cache / UI hints | Redis、frontend event | API/UI | 只做会话/有界缓存或界面提示，不参与 Worker 任务传输。 |
 
 ## 全局规则
 
@@ -29,7 +29,7 @@
 4. 其它模块需要写入时，必须调用 owner 的 command service、application service、facade、UoW 或明确 adapter。
 5. 其它模块需要读取时，优先使用 owner 暴露的 read facade、query service 或 repository port；直接 SQL 读取必须写入对应模块 `boundary-io.md` 的允许路径。
 6. 生产 API/worker 主路径不得把 legacy full snapshot、local pickle、`state:*` JSON、Mongo app snapshot 或 GridFS fallback 当作业务事实源。
-7. `read_model.*`、Redis cache、RabbitMQ message 和前端 domain event 不得反向成为业务事实源。
+7. `read_model.*`、Redis cache 和前端 domain event 不得反向成为业务事实源。
 8. 同事务 writer 只为明确 domain job 写 outbox；页面 GET 和普通跨页刷新不得写任务。
 9. repair、migration、audit、rollback 工具可以读取或修复 facts，但必须有 dry-run、审计、回滚策略和明确 owner，且不得成为生产主链路。
 10. `app.bank_transactions` 与 `app.invoices` 的身份、金额、日期、账户等受保护事实不得静默覆盖或删除；修正必须在同一数据库事务设置 actor/reason，并追加 `app.financial_fact_corrections` 与 `audit.events`。缺少 reason 时数据库拒绝写入。

@@ -19,7 +19,6 @@ def healthy_dependencies() -> dict[str, dict[str, object]]:
     return {
         "postgres": {"status": "ready"},
         "redis": {"status": "ready"},
-        "rabbitmq": {"status": "ready"},
         "oa": {"status": "ready"},
     }
 

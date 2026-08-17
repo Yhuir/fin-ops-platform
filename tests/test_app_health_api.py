@@ -60,9 +60,8 @@ class FakeOperationsDashboardConnection:
         if "from job.outbox_events" in normalized and "pending_count" in normalized:
             return {
                 "pending_count": 0,
-                "publishing_count": 0,
+                "processing_count": 0,
                 "failed_count": 0,
-                "publish_failed_count": 0,
                 "oldest_pending_age_seconds": None,
             }
         if "max_pending_age_seconds" in normalized:

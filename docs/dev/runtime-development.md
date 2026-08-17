@@ -1,6 +1,6 @@
 # Runtime 开发入口
 
-本文维护 PostgreSQL durable queue、read model freshness、worker、runtime bootstrap、Redis/RabbitMQ 和对象存储的开发边界。
+本文维护 PostgreSQL durable queue、worker、runtime bootstrap、API Redis 使用和对象存储的开发边界。
 
 ## Production lightweight bootstrap
 
@@ -9,27 +9,26 @@
 - legacy snapshot / app Mongo 旧路径只作为迁移观察期回滚、shadow-read 或审计工具，不作为新增事实源。
 - `scripts/verify.sh backend` 和 `scripts/verify.sh all` 使用临时 `FIN_OPS_DATA_DIR` 做 clean app check，保护代码启动契约不受开发机 legacy app Mongo 残留影响；当前配置 runtime 状态必须用 `scripts/verify.sh runtime-check` 显式检查。
 
-## Read model 查询边界
+## 页面查询边界
 
-- 查询必须通过 freshness/status/enqueue 边界。
-- stale/missing/unavailable 不应在请求线程里临时 live rebuild 后伪装 fresh。
-- API 应返回 `read_model_status`、`refreshing`、`stale`、`job`、`source_version` 等页面可解释字段。
-- Redis 只能缓存 fresh gate 后的 payload。
+- 页面 API 直接读取 canonical PostgreSQL facts，不通过 page projection/read model Worker。
+- API 不在 GET 中 enqueue、轮询或临时 rebuild。
+- Redis 仅限 API 会话或明确的有界缓存，不参与 Worker claim/complete。
 
 ## Durable queue 和 outbox
 
-- read model refresh 的事实源是 PostgreSQL durable queue。
-- 标准入队入口是 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer。
-- 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
-- RabbitMQ 只能作为可选 transport/wakeup，不能成为状态事实源。
+- 通用后台事件的唯一任务传输和状态事实源是 PostgreSQL durable queue。
+- 标准入队入口是 owner service/repository 的已登记 durable job/event 方法或事务内 writer。
+- 业务 service 不直接 SQL 写 `job.outbox_events`。
+- 不增加 RabbitMQ、Redis 或进程内线程作为第二任务通道。
 
 ## Worker registry
 
-新增 worker/read model refresh 时必须同步：
+新增 worker/event 时必须同步：
 
 - registry 名称、scope、handler 和 health 暴露。
 - manifest/systemd env 或部署脚本。
-- freshness/status/enqueue 行为。
+- claim/retry/idempotency/heartbeat 行为。
 - 相关 service/API/worker 测试。
 - `../app-architecture/runtime-and-ownership.md` 与 `../operations/runtime-worker-governance.md`。
 

@@ -3,25 +3,18 @@ set -Eeuo pipefail
 
 RELEASE_ROOT="${FINOPS_RELEASE_ROOT:-/opt/fin-ops/releases}"
 API_PYTHON="${FINOPS_API_PYTHON:-/opt/fin-ops/venv/bin/python}"
-WORKER_PYTHON="${FINOPS_WORKER_PYTHON:-/opt/fin-ops/rabbitmq-runtime/20260522-224452/venv/bin/python}"
+WORKER_PYTHON="${FINOPS_WORKER_PYTHON:-/opt/fin-ops/venv/bin/python}"
 ENV_DIR="${FINOPS_ENV_DIR:-/etc/fin-ops}"
 API_DROPIN_DIR="${FINOPS_API_DROPIN_DIR:-/etc/systemd/system/fin-ops.service.d}"
 WORKER_DROPIN_DIR="${FINOPS_WORKER_DROPIN_DIR:-/etc/systemd/system/fin-ops-worker@.service.d}"
-DISPATCHER_DROPIN_DIR="${FINOPS_DISPATCHER_DROPIN_DIR:-/etc/systemd/system/fin-ops-rabbitmq-dispatcher.service.d}"
 API_DROPIN="$API_DROPIN_DIR/99-deploy-release.conf"
 WORKER_DROPIN="$WORKER_DROPIN_DIR/99-deploy-release.conf"
-DISPATCHER_DROPIN="$DISPATCHER_DROPIN_DIR/99-deploy-release.conf"
 FRONTEND_DIR="${FINOPS_FRONTEND_DIR:-/www/wwwroot/fin-ops/dist}"
 LEGACY_CURRENT_DIR="${FINOPS_LEGACY_CURRENT_DIR:-/opt/fin-ops/current}"
 LEGACY_CURRENT_ARCHIVE_DIR="${FINOPS_LEGACY_CURRENT_ARCHIVE_DIR:-/opt/fin-ops/legacy-current-archives}"
 COMMON_ENV="$ENV_DIR/fin-ops.common.env"
 SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
-RABBITMQ_TOPOLOGY_ENV="${FINOPS_RABBITMQ_TOPOLOGY_ENV:-$ENV_DIR/fin-ops.rabbitmq-topology.env}"
-RABBITMQ_MONITORING_ENV="${FINOPS_RABBITMQ_MONITORING_ENV:-$ENV_DIR/fin-ops.rabbitmq-monitoring.env}"
-RABBITMQ_WORKER_ENV="${FINOPS_RABBITMQ_WORKER_ENV:-$ENV_DIR/fin-ops.rabbitmq-worker.env}"
-RABBITMQ_DISPATCHER_ENV="${FINOPS_RABBITMQ_DISPATCHER_ENV:-$ENV_DIR/fin-ops.rabbitmq-dispatcher.env}"
-RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT="${FINOPS_RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT:-/opt/fin-ops/backups/rabbitmq-worker-cutover}"
 DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
 WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
@@ -61,8 +54,6 @@ commands:
   settings-access-control-post-deploy <release-name> --http-tokens-stdin --json
                                       verify the approved production ACL flow and restore the probe account
   repair-active-api-runtime            restore the API drop-in for exactly the active release
-  rabbitmq-required-worker-cutover <release-name>
-                                      switch exactly the required RabbitMQ-eligible workers, drain queues, rollback on failure
   release-gate-activate <release-name>
                                       auto-select frontend/runtime/ACL gate and activate exact release
   workbench-audit-identity <release-name> [args]
@@ -118,7 +109,7 @@ commands:
                                       repair strict import facts through the canonical PostgreSQL boundary
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer
-  restart                              restart API, active workers, and active dispatcher
+  restart                              restart API and active workers
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
   cleanup-releases [--keep N] [--dry-run]
@@ -944,18 +935,6 @@ required_worker_instances() {
     "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
 }
 
-rabbitmq_required_worker_instances() {
-  local src="$1"
-  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --rabbitmq-required-instances
-}
-
-rabbitmq_dispatch_event_types() {
-  local src="$1"
-  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --rabbitmq-dispatch-event-types
-}
-
 known_worker_services() {
   {
     all_worker_services
@@ -1036,7 +1015,6 @@ stop_runtime_worker_services_for_activation() {
 
 enter_runtime_maintenance() {
   systemctl stop fin-ops.service >/dev/null 2>&1 || true
-  systemctl stop fin-ops-rabbitmq-dispatcher.service >/dev/null 2>&1 || true
   stop_runtime_worker_services_for_activation >/dev/null 2>&1 || true
 }
 
@@ -1065,7 +1043,7 @@ retire_unregistered_worker_services() {
 }
 
 retire_removed_runtime_assets() {
-  local generation_service generation_timer
+  local generation_service generation_timer legacy_service legacy_dir
   generation_service="$(basename "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT")"
   generation_timer="$(basename "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT")"
   systemctl disable --now "$generation_timer" >/dev/null 2>&1 || true
@@ -1075,7 +1053,20 @@ retire_removed_runtime_assets() {
     "$PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT" \
     "$PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT" \
     "$ENV_DIR/fin-ops.worker.workbench.env" \
-    "$ENV_DIR/fin-ops.worker.workbench-relation.env"
+    "$ENV_DIR/fin-ops.worker.workbench-relation.env" \
+    "$ENV_DIR/fin-ops.rabbitmq-dispatcher.env" \
+    "$ENV_DIR/fin-ops.rabbitmq-topology.env" \
+    "$ENV_DIR/fin-ops.rabbitmq-worker.env" \
+    "$ENV_DIR/fin-ops.worker-import-rabbitmq.env" \
+    "$ENV_DIR/fin-ops.worker.oa-sync-rabbitmq.env"
+  for legacy_service in fin-ops-rabbitmq-dispatcher.service fin-ops-rabbitmq-topology.service; do
+    systemctl disable --now "$legacy_service" >/dev/null 2>&1 || true
+    systemctl reset-failed "$legacy_service" >/dev/null 2>&1 || true
+    rm -f -- "/etc/systemd/system/$legacy_service"
+    legacy_dir="/etc/systemd/system/$legacy_service.d"
+    rm -f -- "$legacy_dir/99-deploy-release.conf"
+    rmdir "$legacy_dir" >/dev/null 2>&1 || true
+  done
   systemctl daemon-reload
 }
 
@@ -1109,35 +1100,6 @@ if not stat.S_ISDIR(metadata.st_mode) or path.is_symlink():
 if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
     raise SystemExit(f"private runtime evidence directory must be root-owned with mode 0700: {path}")
 PY
-}
-
-sync_rabbitmq_dispatcher_event_types() {
-  local src="$1"
-  local event_types temporary
-  [[ -e "$RABBITMQ_DISPATCHER_ENV" || -L "$RABBITMQ_DISPATCHER_ENV" ]] || return 0
-  assert_root_owned_runtime_env "$RABBITMQ_DISPATCHER_ENV"
-  event_types="$(rabbitmq_dispatch_event_types "$src" | tr ' ' ',')"
-  event_types="${event_types//$'\n'/}"
-  [[ -n "$event_types" ]] || die "target release has no RabbitMQ dispatcher event types"
-  temporary="$(mktemp "$ENV_DIR/.fin-ops.rabbitmq-dispatcher.env.XXXXXX")"
-  if ! awk -v value="$event_types" '
-      BEGIN { replaced = 0 }
-      /^RABBITMQ_DISPATCH_EVENT_TYPES=/ {
-        if (!replaced) print "RABBITMQ_DISPATCH_EVENT_TYPES=" value
-        replaced = 1
-        next
-      }
-      { print }
-      END {
-        if (!replaced) print "RABBITMQ_DISPATCH_EVENT_TYPES=" value
-      }
-    ' "$RABBITMQ_DISPATCHER_ENV" >"$temporary" \
-    || ! chown --reference="$RABBITMQ_DISPATCHER_ENV" "$temporary" \
-    || ! chmod --reference="$RABBITMQ_DISPATCHER_ENV" "$temporary" \
-    || ! mv -f "$temporary" "$RABBITMQ_DISPATCHER_ENV"; then
-    rm -f -- "$temporary"
-    die "failed to synchronize the live RabbitMQ dispatcher allowlist"
-  fi
 }
 
 assert_runtime_env_prerequisites() {
@@ -1362,7 +1324,6 @@ write_api_dropin() {
 EnvironmentFile=
 EnvironmentFile=$COMMON_ENV
 EnvironmentFile=$SECRETS_ENV
-EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-monitoring.env
 Environment=PYTHONPATH=$src/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 WorkingDirectory=$src
@@ -1382,24 +1343,6 @@ WorkingDirectory=$src
 Environment=PYTHONPATH=$src/backend/src
 ExecStart=
 ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.worker --worker-id \${FIN_OPS_WORKER_ID} --registration \${FIN_OPS_WORKER_INSTANCE} --worker-instance \${FIN_OPS_WORKER_INSTANCE} \$FIN_OPS_WORKER_ARGS --lock-timeout-seconds \${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds \${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds \${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts \${FIN_OPS_WORKER_MAX_ATTEMPTS} --max-events-per-iteration \${FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION}
-DROPIN
-}
-
-write_dispatcher_dropin() {
-  local src="$1"
-  [[ -d "$DISPATCHER_DROPIN_DIR" || -f /etc/systemd/system/fin-ops-rabbitmq-dispatcher.service ]] || return 0
-  mkdir -p "$DISPATCHER_DROPIN_DIR"
-  cat > "$DISPATCHER_DROPIN" <<DROPIN
-[Service]
-WorkingDirectory=$src
-EnvironmentFile=
-EnvironmentFile=$COMMON_ENV
-EnvironmentFile=$SECRETS_ENV
-EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-dispatcher.env
-Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.05
-Environment=PYTHONPATH=$src/backend/src
-ExecStart=
-ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds \${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS}
 DROPIN
 }
 
@@ -1493,7 +1436,6 @@ publish_frontend() {
 
 restart_services() {
   local worker_services="${1:-}"
-  local restart_dispatcher="${2:-auto}"
   if [[ -z "$worker_services" ]]; then
     worker_services="$(active_worker_services)"
   fi
@@ -1504,11 +1446,6 @@ restart_services() {
     [[ -n "$svc" ]] || continue
     systemctl restart "$svc"
   done <<<"$worker_services"
-  if [[ "$restart_dispatcher" == "true" ]] \
-    || { [[ "$restart_dispatcher" == "auto" ]] \
-      && systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; }; then
-    systemctl restart fin-ops-rabbitmq-dispatcher.service
-  fi
 }
 
 wait_required_workers_ready() {
@@ -1577,163 +1514,14 @@ assert_root_owned_runtime_env() {
     || die "runtime env must not be group/world writable: $path"
 }
 
-write_rabbitmq_transport_env() {
-  local path="$1"
-  local temporary="${path}.rabbitmq-cutover.$$"
-  if ! awk '!/^FIN_OPS_QUEUE_BACKEND=/' "$path" >"$temporary" \
-    || ! printf '%s\n' 'FIN_OPS_QUEUE_BACKEND=rabbitmq' >>"$temporary" \
-    || ! chown --reference="$path" "$temporary" \
-    || ! chmod --reference="$path" "$temporary" \
-    || ! mv -f "$temporary" "$path"; then
-    rm -f -- "$temporary"
-    return 1
-  fi
-}
-
-restore_rabbitmq_worker_envs() {
-  local backup_dir="$1"
-  local instances="$2"
-  local instance path
-  for instance in $instances; do
-    path="$ENV_DIR/fin-ops.worker.$instance.env"
-    cp -a -- "$backup_dir/$(basename "$path")" "$path"
-  done
-  for instance in $instances; do
-    systemctl restart "fin-ops-worker@$instance.service"
-  done
-}
-
-wait_rabbitmq_required_queues_drained() {
-  local src="$1"
-  local event_types="$2"
-  local timeout="${FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS:-600}"
-  local deadline status_json readiness_status=1
-  [[ "$timeout" =~ ^[0-9]+$ ]] || die "invalid FINOPS_RABBITMQ_CUTOVER_TIMEOUT_SECONDS: $timeout"
-  deadline=$((SECONDS + timeout))
-  status_json=""
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    readiness_status=0
-    status_json="$(
-      set -a
-      # shellcheck disable=SC1090
-      source "$COMMON_ENV"
-      # shellcheck disable=SC1090
-      source "$SECRETS_ENV"
-      [[ -r "$RABBITMQ_MONITORING_ENV" ]] || exit 1
-      # shellcheck disable=SC1090
-      source "$RABBITMQ_MONITORING_ENV"
-      set +a
-      EXPECTED_EVENT_TYPES="$event_types" \
-      PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-      "$API_PYTHON" - <<'PY'
-import json
-import os
-import sys
-
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-
-connection = PostgresConnection(PostgresSettings.from_env())
-runtime = RuntimeMonitoringRepository(connection).ready_health_summary()
-queues = runtime.get("rabbitmq_queues")
-if not isinstance(queues, dict):
-    sys.exit(1)
-expected = tuple(os.environ.get("EXPECTED_EVENT_TYPES", "").split())
-missing = [event_type for event_type in expected if not isinstance(queues.get(event_type), dict)]
-without_consumers = [
-    event_type
-    for event_type in expected
-    if isinstance(queues.get(event_type), dict)
-    and int(queues[event_type].get("consumers") or 0) <= 0
-]
-payload = {
-    "missing_queue_metrics": missing,
-    "queues_without_consumers": without_consumers,
-    "rabbitmq_queue_depth": int(runtime.get("rabbitmq_queue_depth") or 0),
-    "rabbitmq_unacked_messages": int(runtime.get("rabbitmq_unacked_messages") or 0),
-    "rabbitmq_dlq_count": int(runtime.get("rabbitmq_dlq_count") or 0),
-}
-print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-ready = (
-    not missing
-    and not without_consumers
-    and payload["rabbitmq_queue_depth"] == 0
-    and payload["rabbitmq_unacked_messages"] == 0
-    and payload["rabbitmq_dlq_count"] == 0
-    and not runtime.get("rabbitmq_metric_error")
-)
-sys.exit(0 if ready else 2)
-PY
-    )" || readiness_status="$?"
-    case "$readiness_status" in
-      0)
-        printf 'RabbitMQ required queues drained: %s\n' "$status_json"
-        return 0
-        ;;
-      2)
-        health="$status_json"
-        ;;
-      *)
-        ;;
-    esac
-    sleep 2
-  done
-  printf 'RabbitMQ required queues did not drain within %s seconds: %s\n' "$timeout" "$status_json" >&2
-  return 1
-}
-
-rabbitmq_required_worker_cutover() {
-  local release="${1:-}"
-  [[ -n "$release" && "$#" -eq 1 ]] || die "rabbitmq-required-worker-cutover accepts only release name"
-  local src instances event_types backup_dir instance path
-  src="$(release_src "$release")"
-  assert_root_owned_runtime_env "$RABBITMQ_WORKER_ENV"
-  grep -Eq '^RABBITMQ_URL=.+$' "$RABBITMQ_WORKER_ENV" \
-    || die "missing RABBITMQ_URL in $RABBITMQ_WORKER_ENV"
-  ! grep -Eq '^FIN_OPS_QUEUE_BACKEND=' "$RABBITMQ_WORKER_ENV" \
-    || die "shared RabbitMQ env must not define FIN_OPS_QUEUE_BACKEND: $RABBITMQ_WORKER_ENV"
-  instances="$(rabbitmq_required_worker_instances "$src")"
-  event_types="$(rabbitmq_dispatch_event_types "$src")"
-  [[ -n "$instances" ]] || die "registry returned no required RabbitMQ worker instances"
-  [[ -n "$event_types" ]] || die "registry returned no RabbitMQ dispatcher event types"
-  for instance in $instances; do
-    path="$ENV_DIR/fin-ops.worker.$instance.env"
-    assert_root_owned_runtime_env "$path"
-  done
-  backup_dir="$RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  install -d -m 0700 "$RABBITMQ_WORKER_CUTOVER_BACKUP_ROOT" "$backup_dir"
-  for instance in $instances; do
-    path="$ENV_DIR/fin-ops.worker.$instance.env"
-    cp -a -- "$path" "$backup_dir/$(basename "$path")"
-  done
-  if ! (
-    set -Eeuo pipefail
-    for instance in $instances; do
-      write_rabbitmq_transport_env "$ENV_DIR/fin-ops.worker.$instance.env" || exit 1
-    done
-    for instance in $instances; do
-      systemctl restart "fin-ops-worker@$instance.service" || exit 1
-    done
-    wait_required_workers_ready || exit 1
-    wait_rabbitmq_required_queues_drained "$src" "$event_types" || exit 1
-  ); then
-    restore_rabbitmq_worker_envs "$backup_dir" "$instances"
-    wait_required_workers_ready
-    die "RabbitMQ worker cutover failed; original worker env files were restored from $backup_dir"
-  fi
-  printf 'RabbitMQ worker cutover passed; rollback backup retained at %s\n' "$backup_dir"
-}
-
 status() {
   systemctl is-active fin-ops.service || true
-  systemctl is-active fin-ops-rabbitmq-dispatcher.service || true
   active_worker_services | while read -r svc; do
     [[ -n "$svc" ]] || continue
     printf '%s ' "$svc"
     systemctl is-active "$svc" || true
   done
   systemctl show fin-ops.service -p EnvironmentFiles -p WorkingDirectory -p ExecStart --no-pager
-  systemctl show fin-ops-rabbitmq-dispatcher.service -p EnvironmentFiles -p WorkingDirectory -p ExecStart --no-pager || true
   active_worker_services | while read -r svc; do
     [[ -n "$svc" ]] || continue
     systemctl show "$svc" -p EnvironmentFiles -p WorkingDirectory -p Environment --no-pager || true
@@ -1743,7 +1531,6 @@ status() {
 active_release_names() {
   {
     systemctl show fin-ops.service -p WorkingDirectory -p ExecStart -p Environment --no-pager || true
-    systemctl show fin-ops-rabbitmq-dispatcher.service -p WorkingDirectory -p ExecStart -p Environment --no-pager || true
     active_worker_services | while read -r svc; do
       [[ -n "$svc" ]] || continue
       systemctl show "$svc" -p WorkingDirectory -p ExecStart -p Environment --no-pager || true
@@ -1753,7 +1540,7 @@ active_release_names() {
 
 cleanup_dropins() {
   local dir
-  for dir in "$API_DROPIN_DIR" "$WORKER_DROPIN_DIR" "$DISPATCHER_DROPIN_DIR"; do
+  for dir in "$API_DROPIN_DIR" "$WORKER_DROPIN_DIR"; do
     [[ -d "$dir" ]] || continue
     [[ -f "$dir/99-deploy-release.conf" ]] || die "missing active deploy drop-in: $dir/99-deploy-release.conf"
     find "$dir" -maxdepth 1 -type f -name '*.conf' ! -name '99-deploy-release.conf' -print -delete
@@ -2423,36 +2210,21 @@ bank_transaction_category_repair() {
 activate_release() {
   local release="$1"
   local release_profile="${2:-runtime}"
-  local dispatcher_restart_override="${3:-auto}"
-  local src active_workers dispatcher_was_active=false
+  local src active_workers
   [[ "$release_profile" == "frontend" || "$release_profile" == "runtime" || "$release_profile" == "acl" ]] \
     || die "unsupported activation profile: $release_profile"
   src="$(release_src "$release")"
   assert_runtime_env_contract
   active_workers="$(active_worker_services)"
-  if [[ "$dispatcher_restart_override" == "true" ]]; then
-    dispatcher_was_active=true
-  elif [[ "$dispatcher_restart_override" == "false" ]]; then
-    dispatcher_was_active=false
-  elif [[ "$dispatcher_restart_override" == "auto" ]] \
-    && systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; then
-    dispatcher_was_active=true
-  elif [[ "$dispatcher_restart_override" != "auto" ]]; then
-    die "invalid dispatcher restart override: $dispatcher_restart_override"
-  fi
   stop_oa_sync_enqueue_timer
   systemctl stop fin-ops.service
-  if [[ "$release_profile" != "frontend" ]]; then
-    systemctl stop fin-ops-rabbitmq-dispatcher.service >/dev/null 2>&1 || true
-  fi
   stop_runtime_worker_services_for_activation
   retire_removed_runtime_assets
   if [[ "$release_profile" == "frontend" ]]; then
     write_api_dropin "$src"
     write_worker_dropin "$src"
-    write_dispatcher_dropin "$src"
     publish_frontend "$src"
-    restart_services "$active_workers" "$dispatcher_was_active"
+    restart_services "$active_workers"
     wait_required_workers_ready
     status
     return 0
@@ -2464,16 +2236,14 @@ activate_release() {
     "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release"
   install_runtime_worker_helper "$src"
   retire_unregistered_worker_services "$src"
-  sync_rabbitmq_dispatcher_event_types "$src"
   archive_legacy_current
   write_api_dropin "$src"
   write_worker_dropin "$src"
-  write_dispatcher_dropin "$src"
   ensure_runtime_workers "$src"
   install_runtime_queue_history_retention "$src"
   install_oa_sync_enqueue_timer "$src"
   publish_frontend "$src"
-  restart_services "" "$dispatcher_was_active"
+  restart_services
   wait_required_workers_ready
   status
 }
@@ -2642,7 +2412,7 @@ release_gate_checkpoint() {
   local evidence_dir="$4"
   local profile="${5:-full}"
   local verification_release="${6:-$release}"
-  local src verification_src checkpoint_dir rabbit_report domain_report closure_report inventory_report runtime_report
+  local src verification_src checkpoint_dir domain_report closure_report inventory_report runtime_report
   local required_worker_instance
   local -a closure_args
   [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
@@ -2650,29 +2420,12 @@ release_gate_checkpoint() {
   src="$(release_src "$release")"
   verification_src="$(release_src "$verification_release")"
   checkpoint_dir="$evidence_dir/$label"
-  rabbit_report="$checkpoint_dir/rabbitmq-topology.json"
   domain_report="$checkpoint_dir/domain-contract-audit.json"
   closure_report="$checkpoint_dir/runtime-sync-closure.json"
   inventory_report="$checkpoint_dir/worker-inventory.json"
   runtime_report="$checkpoint_dir/runtime-health.json"
   install -d -m 0700 "$checkpoint_dir"
   worker_inventory_report "$src" "$inventory_report"
-  (
-    set -a
-    # shellcheck disable=SC1090
-    source "$COMMON_ENV"
-    # shellcheck disable=SC1090
-    source "$SECRETS_ENV"
-    [[ -r "$RABBITMQ_TOPOLOGY_ENV" ]] \
-      || die "RabbitMQ topology env is missing or unreadable: $RABBITMQ_TOPOLOGY_ENV"
-    # shellcheck disable=SC1090
-    source "$RABBITMQ_TOPOLOGY_ENV"
-    set +a
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
-    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-    cd "$verification_src"
-    "$API_PYTHON" -m fin_ops_platform.app.rabbitmq_topology --apply >"$rabbit_report"
-  ) || true
   (
     set -a
     # shellcheck disable=SC1090
@@ -2691,10 +2444,6 @@ release_gate_checkpoint() {
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
-    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
-      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
-    # shellcheck disable=SC1090
-    source "$RABBITMQ_MONITORING_ENV"
     set +a
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
@@ -2725,10 +2474,6 @@ release_gate_checkpoint() {
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
-    [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
-      || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
-    # shellcheck disable=SC1090
-    source "$RABBITMQ_MONITORING_ENV"
     set +a
     export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     "$API_PYTHON" - "$runtime_report" <<'PY'
@@ -2747,9 +2492,8 @@ Path(sys.argv[1]).write_text(
 )
 PY
   ) || true
-  # A healthy dispatcher can legitimately own one short-lived publishing row
-  # while the authenticated probe is still generating runtime traffic.  Give
-  # only that transient state a bounded drain window; failed/dead-lettered work
+  # Authenticated probes can enqueue short-lived PostgreSQL work. Give only
+  # pending/processing rows a bounded drain window; failed/dead-lettered work
   # remain immediate checkpoint failures.
   if [[ "$profile" == "stability" ]]; then
     local drain_attempt
@@ -2760,10 +2504,8 @@ import os
 
 payload = json.load(open(os.environ["RUNTIME_REPORT"], encoding="utf-8"))
 queue = payload.get("queue_backlog") or {}
-publish = payload.get("rabbitmq_publish_status") or {}
 failed_or_dead = sum(int(queue.get(key) or 0) for key in ("failed", "dead_lettered"))
 active = sum(int(queue.get(key) or 0) for key in ("pending", "processing"))
-active += int(publish.get("publishing") or 0)
 raise SystemExit(0 if active == 0 or failed_or_dead > 0 else 1)
 PY
       then
@@ -2776,10 +2518,6 @@ PY
         source "$COMMON_ENV"
         # shellcheck disable=SC1090
         source "$SECRETS_ENV"
-        [[ -r "$RABBITMQ_MONITORING_ENV" ]] \
-          || die "RabbitMQ monitoring env is missing or unreadable: $RABBITMQ_MONITORING_ENV"
-        # shellcheck disable=SC1090
-        source "$RABBITMQ_MONITORING_ENV"
         set +a
         export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
         "$API_PYTHON" - "$runtime_report" <<'PY'
@@ -2803,7 +2541,6 @@ PY
   RELEASE_NAME="$release" \
   CHECKPOINT_LABEL="$label" \
   CHECKPOINT_PROFILE="$profile" \
-  RABBIT_REPORT="$rabbit_report" \
   DOMAIN_REPORT="$domain_report" \
   CLOSURE_REPORT="$closure_report" \
   INVENTORY_REPORT="$inventory_report" \
@@ -2825,27 +2562,10 @@ def load(name):
         return {"status": "invalid", "path": str(path), "error": str(exc)}
 
 inventory = load("INVENTORY_REPORT")
-rabbit = load("RABBIT_REPORT")
 domain = load("DOMAIN_REPORT")
 closure = load("CLOSURE_REPORT")
 runtime = load("RUNTIME_REPORT")
 closure_checks = closure.get("checks", []) if isinstance(closure, dict) else []
-runtime_checks = [
-    check
-    for check in closure_checks
-    if isinstance(check, dict)
-    and str(check.get("name") or "").startswith("runtime_health")
-]
-terminal_publish_reconciliation_count = sum(
-    int((check.get("payload") or {}).get("reconciled_completed_publish_states") or 0)
-    for check in runtime_checks
-    if isinstance(check.get("payload"), dict)
-)
-terminal_publish_reconciliation_stable = all(
-    (check.get("payload") or {}).get("terminal_publish_reconciliation_stable") is True
-    for check in runtime_checks
-    if isinstance(check.get("payload"), dict)
-)
 closure_failures = []
 for check in closure_checks:
     if not isinstance(check, dict) or check.get("status") == "pass":
@@ -2914,36 +2634,19 @@ page_canonical_audit_ready = (
 profile = os.environ["CHECKPOINT_PROFILE"]
 page_canonical_audit_required = True
 queue_backlog = runtime.get("queue_backlog", {}) if isinstance(runtime, dict) else {}
-publish_status = runtime.get("rabbitmq_publish_status", {}) if isinstance(runtime, dict) else {}
 pending = (
     sum(int(queue_backlog.get(status) or 0) for status in ("pending", "processing"))
     if isinstance(queue_backlog, dict)
     else -1
 )
-publishing = int(publish_status.get("publishing") or 0) if isinstance(publish_status, dict) else -1
 failed = int(queue_backlog.get("failed") or 0) if isinstance(queue_backlog, dict) else -1
-durable_dead_letters = int(queue_backlog.get("dead_lettered") or 0) if isinstance(queue_backlog, dict) else -1
-rabbitmq_metrics_ready = (
-    isinstance(runtime, dict)
-    and runtime.get("rabbitmq_management_configured") is True
-    and not runtime.get("rabbitmq_metric_error")
-    and "rabbitmq_dlq_count" in runtime
-)
-rabbitmq_dead_letters = int(runtime.get("rabbitmq_dlq_count") or 0) if rabbitmq_metrics_ready else -1
-dead_letters = (
-    durable_dead_letters + rabbitmq_dead_letters
-    if durable_dead_letters >= 0 and rabbitmq_dead_letters >= 0
-    else -1
-)
+dead_letters = int(queue_backlog.get("dead_lettered") or 0) if isinstance(queue_backlog, dict) else -1
 passed = (
     inventory.get("status") == "PASS"
-    and rabbit.get("status") == "applied"
     and domain.get("status") == "pass"
     and closure.get("status") == "pass"
     and (page_canonical_audit_ready or not page_canonical_audit_required)
-    and rabbitmq_metrics_ready
     and pending == 0
-    and publishing == 0
     and failed == 0
     and dead_letters == 0
 )
@@ -2955,23 +2658,17 @@ payload = {
     "checked_at": datetime.now(UTC).isoformat(),
     "component_statuses": {
         "worker_inventory": inventory.get("status"),
-        "rabbitmq_topology": rabbit.get("status"),
         "domain_contract_audit": domain.get("status"),
         "runtime_sync_closure": closure.get("status"),
         "page_canonical_audit": page_canonical_audit.get("status"),
-        "rabbitmq_metrics": "pass" if rabbitmq_metrics_ready else "fail",
+        "postgres_queue": "pass" if pending == 0 and failed == 0 and dead_letters == 0 else "fail",
     },
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
     "registered_workers": inventory.get("registered_workers") or [],
     "pending_outbox_count": pending,
-    "publishing_outbox_count": publishing,
     "failed_outbox_count": failed,
-    "durable_dead_letter_count": durable_dead_letters,
-    "rabbitmq_dead_letter_count": rabbitmq_dead_letters,
     "dead_letter_count": dead_letters,
-    "terminal_publish_reconciliation_count": terminal_publish_reconciliation_count,
-    "terminal_publish_reconciliation_stable": terminal_publish_reconciliation_stable,
     "runtime_sync_closure_failed_checks": [
         failure.get("name") for failure in closure_failures
     ],
@@ -2979,7 +2676,6 @@ payload = {
     "page_canonical_audit": page_canonical_audit,
     "reports": {
         "worker_inventory": os.environ["INVENTORY_REPORT"],
-        "rabbitmq_topology": os.environ["RABBIT_REPORT"],
         "domain_contract_audit": os.environ["DOMAIN_REPORT"],
         "runtime_health": os.environ["RUNTIME_REPORT"],
         "runtime_sync_closure": os.environ["CLOSURE_REPORT"],
@@ -3043,16 +2739,7 @@ payload = {
     "required_worker_not_ready": int(latest.get("required_worker_not_ready", -1)),
     "registered_workers": latest.get("registered_workers") or [],
     "pending_outbox_count": int(latest.get("pending_outbox_count", -1)),
-    "publishing_outbox_count": int(latest.get("publishing_outbox_count", -1)),
     "dead_letter_delta": final_dlq - pre_dlq,
-    "terminal_publish_reconciliation_count": sum(
-        int(checkpoint.get("terminal_publish_reconciliation_count") or 0)
-        for checkpoint in checkpoints.values()
-    ),
-    "terminal_publish_reconciliation_stable": all(
-        checkpoint.get("terminal_publish_reconciliation_stable") is True
-        for checkpoint in checkpoints.values()
-    ),
     "page_canonical_audit_status": (
         t0_page_audit.get("status")
         if isinstance(t0_page_audit, dict)
@@ -3078,19 +2765,10 @@ rollback_release_gate() {
   local failure_checkpoint="$5"
   local release_profile="$6"
   local rolled_back=false
-  local dispatcher_was_active=false dispatcher_state_path
   local schema_plan_path="$evidence_dir/schema-compatibility-plan.json"
   local schema_evidence_required=false
   local schema_rollback_supported=true
   cat "$evidence_dir/$failure_checkpoint/checkpoint.json" >&2 || true
-  dispatcher_state_path="$evidence_dir/dispatcher-was-active"
-  if [[ -f "$dispatcher_state_path" ]] \
-    && [[ "$(tr -d '[:space:]' <"$dispatcher_state_path")" == "true" ]]; then
-    dispatcher_was_active=true
-  elif [[ ! -f "$dispatcher_state_path" ]] \
-    && systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; then
-    dispatcher_was_active=true
-  fi
   enter_runtime_maintenance
   if [[ -f "$schema_plan_path" ]]; then
     schema_evidence_required="$("$API_PYTHON" - "$schema_plan_path" <<'PY'
@@ -3129,7 +2807,7 @@ PY
       "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
     die "release gate failed at $failure_checkpoint; previous release lacks $SETTINGS_ACL_CONTRACT, production remains in maintenance for forward repair"
   fi
-  if (activate_release "$previous_release" "$release_profile" "$dispatcher_was_active"); then
+  if (activate_release "$previous_release" "$release_profile"); then
     if [[ "$release_profile" == "frontend" ]]; then
       release_gate_frontend_checkpoint \
         "$previous_release" rollback "$admin_token" "$evidence_dir" && rolled_back=true
@@ -3197,12 +2875,6 @@ PY
   evidence_dir="$RELEASE_GATE_EVIDENCE_ROOT/$release"
   [[ ! -e "$evidence_dir" ]] || die "release gate evidence already exists: $evidence_dir"
   install -d -m 0700 "$evidence_dir"
-  if systemctl is-active --quiet fin-ops-rabbitmq-dispatcher.service; then
-    printf '%s\n' true >"$evidence_dir/dispatcher-was-active"
-  else
-    printf '%s\n' false >"$evidence_dir/dispatcher-was-active"
-  fi
-  chmod 0600 "$evidence_dir/dispatcher-was-active"
   install -m 0600 "$profile_report" "$evidence_dir/profile.json"
   install -m 0600 "$schema_plan_path" "$evidence_dir/schema-compatibility-plan.json"
   if [[ "$release_profile" == "frontend" ]]; then
@@ -3270,9 +2942,7 @@ elif profile in {"runtime", "acl"}:
     required.update(
         {
             "pending_outbox_count": 0,
-            "publishing_outbox_count": 0,
             "dead_letter_delta": 0,
-            "terminal_publish_reconciliation_stable": True,
             "page_canonical_audit_status": "pass",
             "queue_stable_after_30_seconds": True,
         }
@@ -3341,10 +3011,6 @@ case "$cmd" in
   repair-active-api-runtime)
     shift
     repair_active_api_runtime "$@"
-    ;;
-  rabbitmq-required-worker-cutover)
-    shift
-    rabbitmq_required_worker_cutover "$@"
     ;;
   release-gate-activate)
     shift

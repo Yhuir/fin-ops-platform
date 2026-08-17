@@ -161,6 +161,7 @@ EXPECTED_MIGRATIONS = [
     "0147_bank_relation_requirement_scope_retry.sql",
     "0148_retire_workbench_matching_progress_jobs.sql",
     "0149_remove_read_model_runtime.sql",
+    "0150_remove_rabbitmq_transport.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -319,7 +320,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 150)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 151)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -421,6 +422,29 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("created_at desc", sql)
         self.assertIn("id desc", sql)
         self.assertIn("include (status, publish_status, updated_at, last_error, publish_last_error)", sql)
+
+    def test_rabbitmq_transport_removal_preserves_postgres_outbox_contract(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0150_remove_rabbitmq_transport.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        for column in (
+            "publish_status",
+            "published_at",
+            "publish_attempt_count",
+            "publish_last_error",
+            "next_publish_at",
+            "publish_locked_by",
+            "publish_locked_at",
+            "rabbitmq_exchange",
+            "rabbitmq_routing_key",
+            "rabbitmq_message_id",
+            "publish_confirmed_at",
+        ):
+            self.assertIn(f"drop column if exists {column}", sql)
+        self.assertIn("create or replace view job.runtime_outbox_envelope_v1", sql)
+        self.assertIn("include (status, updated_at, last_error)", sql)
+        self.assertNotIn("include (status, publish_status", sql)
 
     def test_turnover_ledger_relation_delta_index_matches_query_contract(self) -> None:
         sql = (

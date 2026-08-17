@@ -6,8 +6,8 @@
 | `WORKER-E2E-002` | durable item 的 pending/processing/done/retry/dead-letter 可观测且可恢复。 | PostgreSQL 是状态事实源。 |
 | `WORKER-E2E-003` | App read model runtime 保持为 0。 | 无 refresh event/worker/manifest/readiness/projection schema。 |
 | `WORKER-E2E-004` | 领域/integration 依赖未满足时有界 defer，不放大 failure。 | retry、superseded 和 shutdown release 正确。 |
-| `WORKER-E2E-005` | RabbitMQ consumer 先锁定 PostgreSQL item，再 ack envelope。 | broker 不成为业务事实源。 |
+| `WORKER-E2E-005` | 四个 Worker 直接从各自 PostgreSQL durable queue/table claim。 | 无 RabbitMQ/Redis 运行时依赖或第二状态机。 |
 | `WORKER-E2E-006` | runtime health gate 证明 exact release、queue/DLQ、4 workers、0 legacy event 正常。 | T0 与 T+30 gate 通过。 |
-| `WORKER-E2E-007` | 真实 systemd/RabbitMQ/PostgreSQL 长时间运行可验证。 | 本地 mock 不替代生产 smoke。 |
+| `WORKER-E2E-007` | 真实 systemd/PostgreSQL 长时间运行可验证。 | 本地 mock 不替代生产 smoke。 |
 
-失败时不得清理有效业务 item 或恢复旧 page worker 来制造通过。RabbitMQ 不可用时，PostgreSQL durable state 必须保留；forward-only migration 生效后只能向前修复。
+失败时不得清理有效业务 item 或恢复旧 page worker/transport 来制造通过；forward-only migration 生效后只能向前修复。

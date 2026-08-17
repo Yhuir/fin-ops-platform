@@ -8,7 +8,7 @@
 - Admin App Health dashboard 与 canonical page/system audit。
 - API endpoint duration、DB duration、connection acquire、SQL execute/fetch、query count、payload size。
 - OA sync、background jobs、PostgreSQL outbox、worker heartbeat。
-- RabbitMQ publish backlog、queue depth、unacked、DLQ（启用时）。
+- PostgreSQL outbox/domain queue pending、processing、failed、dead-lettered 与 oldest age。
 - 退役 projection event 负向审计。
 
 ## 必须告警
@@ -16,7 +16,7 @@
 - `/health/ready` 非 200 或 payload 不完整/过慢。
 - required worker missing/stale/mismatch；required exact-set 不是四个当前 instance。
 - outbox pending age 持续增长、failed/dead-lettered 非零并增长。
-- RabbitMQ publish failed、DLQ 增长或 eligible queue 没有 consumer。
+- PostgreSQL failed/dead-letter 增长或 eligible queue 没有新鲜 required worker。
 - 核心 GET p95 > 1000ms 或 p99 > 2000ms、5xx、HTML fallback、连接池等待或 query count 异常。
 - OA Mongo/同步连续失败、PostgreSQL canonical commit 失败、import/reset job 失败。
 - 任意新 `%.read_model.refresh` event，或 runtime 访问已退役 projection schema/worker/env/timer。
@@ -36,13 +36,11 @@ projection 遮盖无界 SQL。生产普通巡检用 authenticated bounded GET �
 
 ## Queue 与 worker 指标
 
-- outbox：pending、processing、failed、dead-lettered、oldest age、publish status。
+- outbox：pending、processing、failed、dead-lettered、oldest age。
 - worker：instance/kind/registration、heartbeat lag、attempt/retry/terminal failure。
-- RabbitMQ：publisher confirm latency、unpublished/publish-failed backlog、queue depth/unacked/DLQ。
 - matching：domain scope pending/processing/failed 与 source-version convergence。
 
-RabbitMQ 只补充 transport 证据，不能替代 PostgreSQL outbox/job 状态。不得删除失败行、伪造 heartbeat 或清空
-DLQ 来获得绿色状态。
+不得删除 PostgreSQL 失败行、伪造 heartbeat 或清空 dead-letter 来获得绿色状态。
 
 ## Canonical audit
 

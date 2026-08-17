@@ -32,7 +32,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
         for table in (
-            "job.read_model_dirty_scopes",
             "job.runtime_event_attempts",
             "job.runtime_worker_heartbeats",
         ):
@@ -43,20 +42,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(exists, "t", table)
 
     def test_ready_health_summary_executes_authoritative_blocker_queries(self) -> None:
-        class RabbitMqMetricsUnavailable:
-            @staticmethod
-            def summary() -> dict[str, object]:
-                return {"rabbitmq_metric_error": "integration_test_skipped"}
-
-        summary = RuntimeMonitoringRepository(
-            self.connection,
-            rabbitmq_metrics_provider=RabbitMqMetricsUnavailable(),
-        ).ready_health_summary()
+        summary = RuntimeMonitoringRepository(self.connection).ready_health_summary()
 
         self.assertIn("critical_failed_outbox_count", summary)
-        self.assertIn("critical_failed_dirty_scope_count", summary)
-        self.assertIn("critical_stale_dirty_scope_count", summary)
-        self.assertEqual(set(summary["critical_read_models"]), {"workbench_relation"})
+        self.assertIn("queue_backlog", summary)
+        self.assertIn("worker_metrics", summary)
 
     def test_outbox_events_runtime_columns_exist(self) -> None:
         columns = (
@@ -72,17 +62,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             "trace_id",
             "max_attempts",
             "dead_lettered_at",
-            "publish_status",
-            "published_at",
-            "publish_attempt_count",
-            "publish_last_error",
-            "next_publish_at",
-            "publish_locked_by",
-            "publish_locked_at",
-            "rabbitmq_exchange",
-            "rabbitmq_routing_key",
-            "rabbitmq_message_id",
-            "publish_confirmed_at",
         )
         column_list = ", ".join(f"'{column}'" for column in columns)
         count = fetch_scalar(
@@ -187,18 +166,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         expected_constraints = {
             "outbox_events_attempts_nonnegative_chk",
             "outbox_events_attempt_count_mirror_chk",
-            "outbox_events_publish_attempt_count_nonnegative_chk",
             "outbox_events_event_type_nonempty_chk",
             "outbox_events_tenant_id_nonempty_chk",
             "outbox_events_payload_object_chk",
             "outbox_events_raw_payload_object_chk",
             "outbox_events_runtime_lock_pair_chk",
             "outbox_events_processing_lock_required_chk",
-            "outbox_events_publish_lock_pair_chk",
-            "outbox_events_publishing_lock_required_chk",
             "outbox_events_terminal_processed_at_chk",
             "outbox_events_dead_letter_timestamp_chk",
-            "outbox_events_published_timestamps_chk",
         }
         rows = self.connection.fetch_all(
             """
@@ -218,10 +193,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             "negative_attempts": """
                 insert into job.outbox_events(event_type, attempts)
                 values ('runtime.integration.invalid-attempts', -1);
-            """,
-            "negative_publish_attempts": """
-                insert into job.outbox_events(event_type, publish_attempt_count)
-                values ('runtime.integration.invalid-publish-attempts', -1);
             """,
             "empty_event_type": """
                 insert into job.outbox_events(event_type)
@@ -247,14 +218,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 insert into job.outbox_events(event_type, status)
                 values ('runtime.integration.invalid-processing-lock', 'processing');
             """,
-            "partial_publish_lock": """
-                insert into job.outbox_events(event_type, publish_locked_by)
-                values ('runtime.integration.invalid-publish-lock', 'publisher-a');
-            """,
-            "publishing_without_lock": """
-                insert into job.outbox_events(event_type, publish_status)
-                values ('runtime.integration.invalid-publishing-lock', 'publishing');
-            """,
             "terminal_without_timestamp": """
                 insert into job.outbox_events(event_type, status)
                 values ('runtime.integration.invalid-terminal-timestamp', 'done');
@@ -266,10 +229,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                     'dead_lettered',
                     clock_timestamp()
                 );
-            """,
-            "published_without_timestamps": """
-                insert into job.outbox_events(event_type, publish_status)
-                values ('runtime.integration.invalid-publish-timestamps', 'published');
             """,
         }
 
@@ -345,11 +304,12 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertIn("pending", predicate)
         self.assertNotIn("processing", predicate)
 
-    def test_outbox_envelope_view_exposes_rabbitmq_safe_fields(self) -> None:
-        event = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="workbench_relation",
+    def test_outbox_envelope_view_exposes_postgres_queue_fields(self) -> None:
+        event = self.runtime_queue.enqueue(
+            event_type="runtime.integration.requested",
+            scope_type="runtime-integration",
             scope_key="all",
-            reason="integration-test",
+            payload={"reason": "integration-test"},
             priority="high",
             trace_id="trace-integration",
         )
@@ -364,8 +324,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
               priority,
               trace_id,
               schema_version,
-              publish_status,
-              publish_attempt_count,
               payload
             from job.runtime_outbox_envelope_v1
             where event_id = %s
@@ -374,16 +332,14 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(row["event_id"], event.event_id)
-        self.assertEqual(row["event_type"], "workbench_relation.read_model.refresh")
-        self.assertEqual(row["scope_type"], "workbench_relation")
+        self.assertEqual(row["event_type"], "runtime.integration.requested")
+        self.assertEqual(row["scope_type"], "runtime-integration")
         self.assertEqual(row["scope_key"], "all")
         self.assertEqual(row["source_version"], event.source_version)
         self.assertEqual(row["priority"], "high")
         self.assertEqual(row["trace_id"], "trace-integration")
         self.assertEqual(row["schema_version"], 1)
-        self.assertEqual(row["publish_status"], "unpublished")
-        self.assertEqual(row["publish_attempt_count"], 0)
-        self.assertEqual(row["payload"]["source_version"], event.source_version)
+        self.assertEqual(row["payload"]["reason"], "integration-test")
 
     def test_active_refresh_remains_true_after_outbox_completion_until_dirty_scope_completes(self) -> None:
         event = self.runtime_queue.enqueue_read_model_refresh(

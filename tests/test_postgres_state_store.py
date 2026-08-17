@@ -342,7 +342,7 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertEqual(summary["postgres_status"], "ready")
         self.assertIn("queue_backlog", runtime)
         self.assertIn("worker_metrics", runtime)
-        self.assertEqual(runtime["rabbitmq_metric_error"], "ready_health_rabbitmq_metrics_skipped")
+        self.assertNotIn("rabbitmq_metric_error", runtime)
         self.assertNotIn("read_model_refresh_by_key", runtime)
         self.assertNotIn("workbench_read_model", runtime)
         self.assertNotIn("slow_refresh_event_samples", executed_sql)

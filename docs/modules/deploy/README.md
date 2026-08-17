@@ -70,7 +70,7 @@ bash scripts/verify.sh all
 
 - `release-gate-profile` 比较 exact candidate 与当前唯一 active release 的实际包内容，自动判定 `frontend`、`runtime`、`acl`；没有手工 profile 或 skip 参数，无法证明纯前端时 fail-safe 为 `runtime`。
 - 三类发布都要求 exact SHA/fingerprint、strict runtime env、required worker inventory、`YNSYLP005` admin session、原子激活和 release evidence；标准激活不读取或要求 `YNSYLP006`。
-- `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行 RabbitMQ topology apply、全页面 canonical audit、read-model smoke 或 T+60/T+300 等待。切换前固定捕获已通过 preflight 的 active worker 集合，切换与回退都必须重启同一集合，不得在 stop 之后重新从 active 状态推导。
+- `frontend` 只执行 pre/T+0 的 ready、005 session、公开 shell/asset、发布目录哈希和 active release 检查，不执行全页面 canonical audit、runtime closure 或 T+60/T+300 等待。切换前固定捕获已通过 preflight 的 active worker 集合，切换与回退都必须重启同一集合，不得在 stop 之后重新从 active 状态推导。
 - `runtime` 保留 production-equivalent pre/T+0/T+60/T+300；`acl` 使用相同的 005-only 门禁，并在失败后保持 maintenance、仅允许 forward repair。
 - `RELEASE.json.schema_contract` 绑定候选 migration count/head/fingerprint。无 pending migration 时沿用原快速路径；有 pending migration 时只接受与 exact candidate、exact previous、PostgreSQL major、全部中间 schema heads 及固定写操作矩阵一致的 root-owned evidence。候选失败后若该证据缺失或漂移，禁止激活 previous binary，生产保持 maintenance 并 forward repair。
 - 三项 retired admission env 和 legacy admin env 已完成一次性清理；稳态发布只读断言它们缺席。历史 OA non-dedicated binding cleanup/rollback SQL 与激活代码已经删除，migration 0132/0133 作为不可变历史保留。
@@ -83,12 +83,12 @@ bash scripts/verify.sh all
 部署改动不能只看脚本本身，必须列出影响面：
 
 - 发布包：backend、web/dist、scripts、deploy/oa、`RELEASE.json`。
-- 运行时：PostgreSQL DSN、migration-only DSN、Redis、RabbitMQ、S3/MinIO、OA integration env。
-- systemd：API、worker template、RabbitMQ dispatcher/topology、drop-in reset `EnvironmentFile=`。
+- 运行时：PostgreSQL DSN、migration-only DSN、API Redis（如启用）、S3/MinIO、OA integration env。
+- systemd：API、四个 registry worker、worker template、drop-in reset `EnvironmentFile=`。
 - worker：required/optional worker 矩阵来自 registry/manifest，不能在 runbook 维护第二份清单。
 - Nginx：`/fin-ops/` SPA、`/fin-ops-api/` API、`/fin-ops/api/` relative API、assets cache、index no-store。
 - readiness：`/health/ready` 是发布 readiness 边界；systemd active 不等于 release ready。
-- App Health：worker missing/stale/mismatch、dirty scopes、RabbitMQ backlog、PostgreSQL runtime unavailable 必须可观测。
+- App Health：worker missing/stale/mismatch、PostgreSQL queue backlog/dead-letter、runtime unavailable 必须可观测。
 - 权限/session：发布后 `/api/session/me` 必须保持 JSON API，不能被 SPA fallback 吃掉。
 - 数据安全：发布前备份、migration、rollback/PITR、runtime config 需要 staging 或生产 runbook，不能只靠 unittest。
 - ACL 安全：真正的鉴权、权限 route/service、OA role sync 或 ACL migration 变更才分类为 `acl`；标准激活仍只验证 005、strict env、migration/CHECK、数据库 guard 与完整 runtime closure。005/006 双身份 preflight/post-deploy 保留为显式专项验收工具，不再是任何发布的激活前置条件。
@@ -99,7 +99,7 @@ bash scripts/verify.sh all
 
 - 修改 `scripts/deploy_oa.py`、`scripts/deploy-oa.sh`、`scripts/verify.sh` 或 nightly workflow。
 - 修改 `finops-deploy-control`、`finops-ensure-runtime-workers`、systemd/env/Nginx 模板。
-- 新增 worker、read model refresh event、RabbitMQ dispatch event、runtime dependency 或 required env。
+- 新增 worker、durable event、runtime dependency 或 required env。
 - 修改 `/health`、`/health/ready`、App Health/App Status、session route 或 OA 同域路径。
 - 修改 PostgreSQL migration、backup/rollback、runtime secret、部署用户 sudo contract。
 - 线上或手工发现部署、CI、worker readiness、Nginx proxy/cache、release rollback 相关 bug。

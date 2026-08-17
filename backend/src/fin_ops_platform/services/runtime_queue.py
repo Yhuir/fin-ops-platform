@@ -6,12 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresTransaction
-from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
-
-
 PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
-PUBLISH_STATUS_VALUES = {"unpublished", "publishing", "published", "failed"}
-DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = rabbitmq_dispatch_event_types()
 
 
 @dataclass(frozen=True)
@@ -31,11 +26,6 @@ class RuntimeQueueEvent:
     source_version: int | None = None
     priority: str = "normal"
     trace_id: str | None = None
-    publish_status: str = "unpublished"
-    publish_attempt_count: int = 0
-    rabbitmq_exchange: str | None = None
-    rabbitmq_routing_key: str | None = None
-    rabbitmq_message_id: str | None = None
 
     @property
     def attempt_count(self) -> int:
@@ -69,90 +59,17 @@ def _is_unique_violation_error(exc: Exception) -> bool:
 @dataclass(frozen=True)
 class RuntimeQueueSettings:
     backend: str = "postgres"
-    rabbitmq_url: str | None = None
-    rabbitmq_vhost: str | None = None
-    rabbitmq_exchange: str = "finops.events"
-    rabbitmq_queue_prefix: str = "finops"
-    rabbitmq_dead_letter_exchange: str = "finops.events.dlx"
-    rabbitmq_prefetch: int = 10
-    rabbitmq_publish_confirm: bool = True
-    rabbitmq_publish_timeout_seconds: int = 10
-    rabbitmq_heartbeat_seconds: int = 60
-    rabbitmq_consumer_postgres_drain_interval_seconds: float = 0.05
-    rabbitmq_blocked_connection_timeout_seconds: int = 300
-    rabbitmq_management_url: str | None = None
-    rabbitmq_management_username: str | None = None
-    rabbitmq_management_password: str | None = None
-    rabbitmq_management_timeout_seconds: int = 2
-    rabbitmq_shadow_publish: bool = False
-    rabbitmq_dispatch_event_types: tuple[str, ...] = DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> RuntimeQueueSettings:
         source = os.environ if env is None else env
         backend = str(source.get("FIN_OPS_QUEUE_BACKEND") or "postgres").strip().lower() or "postgres"
-        if backend not in {"postgres", "rabbitmq"}:
-            raise RuntimeQueueDataError("FIN_OPS_QUEUE_BACKEND must be postgres or rabbitmq.")
-        return cls(
-            backend=backend,
-            rabbitmq_url=str(source.get("RABBITMQ_URL") or "").strip() or None,
-            rabbitmq_vhost=str(source.get("RABBITMQ_VHOST") or "").strip() or None,
-            rabbitmq_exchange=str(source.get("RABBITMQ_EXCHANGE") or "finops.events").strip() or "finops.events",
-            rabbitmq_queue_prefix=str(source.get("RABBITMQ_QUEUE_PREFIX") or "finops").strip().rstrip(".") or "finops",
-            rabbitmq_dead_letter_exchange=str(source.get("RABBITMQ_DEAD_LETTER_EXCHANGE") or "finops.events.dlx").strip()
-            or "finops.events.dlx",
-            rabbitmq_prefetch=_positive_int(source.get("RABBITMQ_PREFETCH"), default=10, name="RABBITMQ_PREFETCH"),
-            rabbitmq_publish_confirm=_bool(source.get("RABBITMQ_PUBLISH_CONFIRM"), default=True),
-            rabbitmq_publish_timeout_seconds=_positive_int(
-                source.get("RABBITMQ_PUBLISH_TIMEOUT_SECONDS"),
-                default=10,
-                name="RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
-            ),
-            rabbitmq_heartbeat_seconds=_positive_int(source.get("RABBITMQ_HEARTBEAT_SECONDS"), default=60, name="RABBITMQ_HEARTBEAT_SECONDS"),
-            rabbitmq_consumer_postgres_drain_interval_seconds=_positive_float(
-                source.get("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS"),
-                default=0.05,
-                name="RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS",
-            ),
-            rabbitmq_blocked_connection_timeout_seconds=_positive_int(
-                source.get("RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS"),
-                default=300,
-                name="RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS",
-            ),
-            rabbitmq_management_url=str(source.get("RABBITMQ_MANAGEMENT_URL") or "").strip() or None,
-            rabbitmq_management_username=str(source.get("RABBITMQ_MANAGEMENT_USERNAME") or "").strip() or None,
-            rabbitmq_management_password=str(source.get("RABBITMQ_MANAGEMENT_PASSWORD") or "").strip() or None,
-            rabbitmq_management_timeout_seconds=_positive_int(
-                source.get("RABBITMQ_MANAGEMENT_TIMEOUT_SECONDS"),
-                default=2,
-                name="RABBITMQ_MANAGEMENT_TIMEOUT_SECONDS",
-            ),
-            rabbitmq_shadow_publish=_bool(source.get("RABBITMQ_SHADOW_PUBLISH"), default=False),
-            rabbitmq_dispatch_event_types=_event_type_tuple(
-                source.get("RABBITMQ_DISPATCH_EVENT_TYPES"),
-                default=DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES,
-                name="RABBITMQ_DISPATCH_EVENT_TYPES",
-            ),
-        )
+        if backend != "postgres":
+            raise RuntimeQueueDataError("FIN_OPS_QUEUE_BACKEND must be postgres.")
+        return cls()
 
     def summary(self) -> dict[str, Any]:
-        return {
-            "queue_backend": self.backend,
-            "rabbitmq_configured": bool(self.rabbitmq_url),
-            "rabbitmq_vhost": self.rabbitmq_vhost,
-            "rabbitmq_exchange": self.rabbitmq_exchange,
-            "rabbitmq_queue_prefix": self.rabbitmq_queue_prefix,
-            "rabbitmq_dead_letter_exchange": self.rabbitmq_dead_letter_exchange,
-            "rabbitmq_prefetch": self.rabbitmq_prefetch,
-            "rabbitmq_publish_confirm": self.rabbitmq_publish_confirm,
-            "rabbitmq_publish_timeout_seconds": self.rabbitmq_publish_timeout_seconds,
-            "rabbitmq_heartbeat_seconds": self.rabbitmq_heartbeat_seconds,
-            "rabbitmq_consumer_postgres_drain_interval_seconds": self.rabbitmq_consumer_postgres_drain_interval_seconds,
-            "rabbitmq_blocked_connection_timeout_seconds": self.rabbitmq_blocked_connection_timeout_seconds,
-            "rabbitmq_management_configured": bool(self.rabbitmq_management_url),
-            "rabbitmq_shadow_publish": self.rabbitmq_shadow_publish,
-            "rabbitmq_dispatch_event_types": list(self.rabbitmq_dispatch_event_types),
-        }
+        return {"queue_backend": self.backend}
 
 
 class RuntimeQueueRepository:
@@ -398,12 +315,7 @@ class RuntimeQueueRepository:
                     schema_version,
                     source_version,
                     priority,
-                    trace_id,
-                    publish_status,
-                    publish_attempt_count,
-                    rabbitmq_exchange,
-                    rabbitmq_routing_key,
-                    rabbitmq_message_id
+                    trace_id
                 from job.outbox_events
                 where id = %s
                 """,
@@ -476,284 +388,11 @@ class RuntimeQueueRepository:
                     schema_version,
                     source_version,
                     priority,
-                    trace_id,
-                    publish_status,
-                    publish_attempt_count,
-                    rabbitmq_exchange,
-                    rabbitmq_routing_key,
-                    rabbitmq_message_id
+                    trace_id
                 """,
                 params,
             )
         return _event_from_row(row) if row is not None else None
-
-    @staticmethod
-    def _reconcile_completed_publish_states_in_transaction(
-        transaction: PostgresTransaction,
-    ) -> int:
-        return transaction.execute(
-            """
-                update job.outbox_events
-                set
-                    publish_status = 'published',
-                    published_at = coalesce(published_at, now()),
-                    publish_confirmed_at = coalesce(publish_confirmed_at, now()),
-                    publish_last_error = null,
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    rabbitmq_message_id = coalesce(rabbitmq_message_id, id::text),
-                    updated_at = now(),
-                    raw_payload = jsonb_set(
-                        coalesce(raw_payload, '{}'::jsonb),
-                        '{rabbitmq_publish_recovery}',
-                        jsonb_build_object(
-                            'reason',
-                            'terminal_event_already_completed',
-                            'recovered_at',
-                            now()
-                        ),
-                        true
-                    )
-                where status = 'done'
-                  and publish_status = 'publishing'
-            """,
-        )
-
-    def reconcile_completed_publish_states(self) -> int:
-        with self._connection.transaction() as transaction:
-            return self._reconcile_completed_publish_states_in_transaction(transaction)
-
-    def claim_publishable_events(
-        self,
-        *,
-        publisher_id: str,
-        event_types: Iterable[str] | None = None,
-        lock_timeout_seconds: int = 300,
-        limit: int = 100,
-    ) -> list[RuntimeQueueEvent]:
-        normalized_limit = max(1, int(limit))
-        event_type_list = list(event_types or [])
-        event_type_filter = ""
-        params: tuple[Any, ...]
-        if event_type_list:
-            event_type_filter = "and event_type = any(%s)"
-            params = (publisher_id, lock_timeout_seconds, event_type_list, normalized_limit)
-        else:
-            params = (publisher_id, lock_timeout_seconds, normalized_limit)
-
-        with self._connection.transaction() as transaction:
-            self._reconcile_completed_publish_states_in_transaction(transaction)
-            rows = transaction.fetch_all(
-                f"""
-                update job.outbox_events
-                set
-                    publish_status = 'publishing',
-                    publish_locked_by = %s,
-                    publish_locked_at = now(),
-                    publish_attempt_count = publish_attempt_count + 1,
-                    publish_last_error = null,
-                    updated_at = now()
-                from (
-                    select id
-                    from job.outbox_events
-                    where status = 'pending'
-                      and available_at <= now()
-                      and next_publish_at <= now()
-                      and (
-                          publish_status in ('unpublished', 'failed')
-                          or (
-                              publish_status = 'publishing'
-                              and publish_locked_at < now() - (%s * interval '1 second')
-                          )
-                      )
-                      {event_type_filter}
-                    order by
-                        case priority
-                            when 'urgent' then 3
-                            when 'high' then 2
-                            when 'normal' then 1
-                            else 0
-                        end desc,
-                        next_publish_at,
-                        available_at,
-                        created_at,
-                        id
-                    limit %s
-                    for update skip locked
-                ) candidate
-                where job.outbox_events.id = candidate.id
-                returning
-                    job.outbox_events.id::text as event_id,
-                    job.outbox_events.tenant_id,
-                    job.outbox_events.event_type,
-                    job.outbox_events.aggregate_type,
-                    job.outbox_events.aggregate_id,
-                    job.outbox_events.scope_type,
-                    job.outbox_events.scope_key,
-                    job.outbox_events.dedupe_key,
-                    job.outbox_events.payload,
-                    job.outbox_events.attempts,
-                    job.outbox_events.status,
-                    job.outbox_events.schema_version,
-                    job.outbox_events.source_version,
-                    job.outbox_events.priority,
-                    job.outbox_events.trace_id,
-                    job.outbox_events.publish_status,
-                    job.outbox_events.publish_attempt_count,
-                    job.outbox_events.rabbitmq_exchange,
-                    job.outbox_events.rabbitmq_routing_key,
-                    job.outbox_events.rabbitmq_message_id
-                """,
-                params,
-            )
-        return [_event_from_row(row) for row in rows]
-
-    def mark_published(
-        self,
-        event_id: str,
-        *,
-        publisher_id: str,
-        exchange: str,
-        routing_key: str,
-        message_id: str,
-        confirm_latency_ms: float | None = None,
-    ) -> bool:
-        result_payload = {
-            "exchange": exchange,
-            "routing_key": routing_key,
-            "message_id": message_id,
-        }
-        if confirm_latency_ms is not None:
-            result_payload["confirm_latency_ms"] = round(float(confirm_latency_ms), 3)
-        with self._connection.transaction() as transaction:
-            row = transaction.fetch_one(
-                """
-                update job.outbox_events
-                set
-                    publish_status = 'published',
-                    published_at = now(),
-                    publish_confirmed_at = now(),
-                    publish_last_error = null,
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    rabbitmq_exchange = %s,
-                    rabbitmq_routing_key = %s,
-                    rabbitmq_message_id = %s,
-                    updated_at = now(),
-                    raw_payload = jsonb_set(
-                        coalesce(raw_payload, '{}'::jsonb),
-                        '{rabbitmq_publish}',
-                        %s::jsonb,
-                        true
-                    )
-                where id = %s
-                  and (
-                      (
-                          publish_status = 'publishing'
-                          and publish_locked_by = %s
-                      )
-                      or (
-                          status = 'done'
-                          and publish_status = 'published'
-                          and rabbitmq_message_id = %s
-                      )
-                  )
-                returning id
-                """,
-                (
-                    exchange,
-                    routing_key,
-                    message_id,
-                    self._json_param(result_payload),
-                    event_id,
-                    publisher_id,
-                    message_id,
-                ),
-            )
-        return row is not None
-
-    def mark_publish_failed(
-        self,
-        event_id: str,
-        *,
-        publisher_id: str,
-        error: str,
-        retry_delay_seconds: int = 60,
-    ) -> bool:
-        normalized_error = str(error or "").strip() or "rabbitmq_publish_failed"
-        with self._connection.transaction() as transaction:
-            row = transaction.fetch_one(
-                """
-                update job.outbox_events
-                set
-                    publish_status = 'failed',
-                    publish_last_error = %s,
-                    next_publish_at = now() + (%s * interval '1 second'),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    updated_at = now(),
-                    raw_payload = jsonb_set(
-                        coalesce(raw_payload, '{}'::jsonb),
-                        '{rabbitmq_publish_failure}',
-                        jsonb_build_object('error', %s::text, 'retry_delay_seconds', %s::integer),
-                        true
-                    )
-                where id = %s
-                  and publish_status = 'publishing'
-                  and publish_locked_by = %s
-                returning id
-                """,
-                (normalized_error, retry_delay_seconds, normalized_error, retry_delay_seconds, event_id, publisher_id),
-            )
-        return row is not None
-
-    def reset_publish_state(self, event_id: str, *, reason: str = "manual_republish") -> bool:
-        normalized_reason = str(reason or "").strip() or "manual_republish"
-        with self._connection.transaction() as transaction:
-            row = transaction.fetch_one(
-                """
-                update job.outbox_events
-                set
-                    publish_status = 'unpublished',
-                    published_at = null,
-                    publish_last_error = null,
-                    next_publish_at = now(),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    rabbitmq_exchange = null,
-                    rabbitmq_routing_key = null,
-                    rabbitmq_message_id = null,
-                    publish_confirmed_at = null,
-                    updated_at = now(),
-                    raw_payload = jsonb_set(
-                        coalesce(raw_payload, '{}'::jsonb),
-                        '{rabbitmq_republish}',
-                        jsonb_build_object('reason', %s, 'requested_at', now()),
-                        true
-                    )
-                where id = %s
-                  and status = 'pending'
-                returning id
-                """,
-                (normalized_reason, event_id),
-            )
-        return row is not None
-
-    def runtime_control_status(self) -> dict[str, Any]:
-        with self._connection.transaction() as transaction:
-            row = transaction.fetch_one(
-                """
-                select settings_payload
-                from app.app_settings
-                where settings_key = 'runtime:rabbitmq_control'
-                """
-            )
-        payload = (row or {}).get("settings_payload") if row else {}
-        return payload if isinstance(payload, dict) else {}
-
-    def is_runtime_control_paused(self, component: str) -> bool:
-        key = f"{str(component or '').strip()}_paused"
-        return bool(self.runtime_control_status().get(key))
 
     def ack_event(self, event_id: str, worker_id: str, result_payload: dict[str, Any] | None = None) -> bool:
         return self.complete(event_id, worker_id, result_payload=result_payload)
@@ -810,11 +449,6 @@ class RuntimeQueueRepository:
                     status = 'pending',
                     last_error = %s,
                     available_at = now() + (%s * interval '1 second'),
-                    publish_status = 'unpublished',
-                    publish_last_error = null,
-                    next_publish_at = now() + (%s * interval '1 second'),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
                     updated_at = now(),
                     locked_by = null,
                     locked_at = null
@@ -823,7 +457,7 @@ class RuntimeQueueRepository:
                   and locked_by = %s
                 returning id
             """
-            params = (error, retry_delay_seconds, retry_delay_seconds, event_id, worker_id)
+            params = (error, retry_delay_seconds, event_id, worker_id)
         else:
             sql = """
                 update job.outbox_events
@@ -871,11 +505,6 @@ class RuntimeQueueRepository:
                     status = case when attempts >= %s then 'dead_lettered' else 'pending' end,
                     last_error = %s,
                     available_at = case when attempts >= %s then available_at else now() + (%s * interval '1 second') end,
-                    publish_status = case when attempts >= %s then publish_status else 'unpublished' end,
-                    publish_last_error = case when attempts >= %s then publish_last_error else null end,
-                    next_publish_at = case when attempts >= %s then next_publish_at else now() + (%s * interval '1 second') end,
-                    publish_locked_by = null,
-                    publish_locked_at = null,
                     processed_at = case when attempts >= %s then now() else processed_at end,
                     dead_lettered_at = case when attempts >= %s then now() else dead_lettered_at end,
                     updated_at = now(),
@@ -895,10 +524,6 @@ class RuntimeQueueRepository:
             params = (
                 max_attempts,
                 error,
-                max_attempts,
-                retry_delay_seconds,
-                max_attempts,
-                max_attempts,
                 max_attempts,
                 retry_delay_seconds,
                 max_attempts,
@@ -945,16 +570,6 @@ class RuntimeQueueRepository:
                     status = 'pending',
                     attempts = 0,
                     available_at = now(),
-                    publish_status = 'unpublished',
-                    published_at = null,
-                    publish_last_error = null,
-                    next_publish_at = now(),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    rabbitmq_exchange = null,
-                    rabbitmq_routing_key = null,
-                    rabbitmq_message_id = null,
-                    publish_confirmed_at = null,
                     last_error = null,
                     processed_at = null,
                     dead_lettered_at = null,
@@ -1076,16 +691,6 @@ class RuntimeQueueRepository:
                 set
                     status = 'pending',
                     available_at = now(),
-                    publish_status = 'unpublished',
-                    published_at = null,
-                    publish_last_error = null,
-                    next_publish_at = now(),
-                    publish_locked_by = null,
-                    publish_locked_at = null,
-                    rabbitmq_exchange = null,
-                    rabbitmq_routing_key = null,
-                    rabbitmq_message_id = null,
-                    publish_confirmed_at = null,
                     locked_by = null,
                     locked_at = null,
                     attempts = greatest(coalesce(event.attempts, 0) - 1, 0),
@@ -1369,11 +974,6 @@ class RuntimeQueueRepository:
                     set
                         status = 'pending',
                         available_at = now() + (%s::double precision * interval '1 second'),
-                        publish_status = 'unpublished',
-                        publish_last_error = null,
-                        next_publish_at = now() + (%s::double precision * interval '1 second'),
-                        publish_locked_by = null,
-                        publish_locked_at = null,
                         locked_by = null,
                         locked_at = null,
                         attempts = greatest(coalesce(attempts, 0) - 1, 0),
@@ -1405,7 +1005,6 @@ class RuntimeQueueRepository:
                     returning id::text as event_id
                     """,
                     (
-                        normalized_delay_seconds,
                         normalized_delay_seconds,
                         normalized_reason,
                         normalized_delay_seconds,
@@ -1846,11 +1445,6 @@ def _event_from_row(row: dict[str, Any]) -> RuntimeQueueEvent:
         source_version=_optional_int(row.get("source_version")),
         priority=_normalize_priority(row.get("priority") or "normal"),
         trace_id=_optional_str(row.get("trace_id")),
-        publish_status=_normalize_publish_status(row.get("publish_status") or "unpublished"),
-        publish_attempt_count=int(row.get("publish_attempt_count") or 0),
-        rabbitmq_exchange=_optional_str(row.get("rabbitmq_exchange")),
-        rabbitmq_routing_key=_optional_str(row.get("rabbitmq_routing_key")),
-        rabbitmq_message_id=_optional_str(row.get("rabbitmq_message_id")),
     )
 
 
@@ -1922,48 +1516,8 @@ def _retention_summary(rows: Iterable[dict[str, Any]], *, key_field: str, count_
     return {"total_count": total_count, "counts_by_key": counts}
 
 
-def _positive_float(raw: Any, *, default: float, name: str) -> float:
-    if raw is None or str(raw).strip() == "":
-        return default
-    try:
-        value = float(str(raw).strip())
-    except ValueError as exc:
-        raise RuntimeQueueDataError(f"{name} must be a number.") from exc
-    if value <= 0:
-        raise RuntimeQueueDataError(f"{name} must be positive.")
-    return value
-
-
-def _bool(raw: Any, *, default: bool) -> bool:
-    if raw is None or str(raw).strip() == "":
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _event_type_tuple(raw: Any, *, default: tuple[str, ...], name: str) -> tuple[str, ...]:
-    if raw is None or str(raw).strip() == "":
-        return default
-    values = tuple(part.strip() for part in str(raw).replace(";", ",").split(",") if part.strip())
-    if not values:
-        raise RuntimeQueueDataError(f"{name} must include at least one event type.")
-    unsupported = sorted(set(values) - set(default))
-    if unsupported:
-        raise RuntimeQueueDataError(
-            f"{name} contains event types outside the active runtime registry: "
-            f"{', '.join(unsupported)}."
-        )
-    return values
-
-
 def _normalize_priority(value: Any) -> str:
     normalized = str(value or "normal").strip().lower() or "normal"
     if normalized not in PRIORITY_VALUES:
         raise RuntimeQueueDataError(f"priority must be one of {sorted(PRIORITY_VALUES)}.")
-    return normalized
-
-
-def _normalize_publish_status(value: Any) -> str:
-    normalized = str(value or "unpublished").strip().lower() or "unpublished"
-    if normalized not in PUBLISH_STATUS_VALUES:
-        raise RuntimeQueueDataError(f"publish_status must be one of {sorted(PUBLISH_STATUS_VALUES)}.")
     return normalized

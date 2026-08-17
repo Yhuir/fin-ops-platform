@@ -73,7 +73,7 @@ FIN_OPS_BACKEND_ENV_FILE=/path/to/local.env ./scripts/start-backend.sh
 
 需要让本地和服务器都启用 Redis runtime helper 时，服务器 systemd env 和本地私有 env 都应配置 `FIN_OPS_REDIS_URL`。本地通常使用 SSH tunnel，例如 `redis://:password@127.0.0.1:16379/0`。
 
-RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同构验收仍应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。未来测试 RabbitMQ 时也必须同时配置 PostgreSQL，因为 worker 只从 PostgreSQL outbox 读取真实任务。
+Worker 本地与生产都只使用 PostgreSQL durable queue/domain table；不要配置 `FIN_OPS_QUEUE_BACKEND` 或 RabbitMQ 变量。Redis 若用于 API 会话/缓存，也不得注入 Worker。
 
 生产级本地验收应先跑 runtime check：
 

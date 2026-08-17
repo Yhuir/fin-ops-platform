@@ -50,14 +50,6 @@ GRIDFS_REF_PREFIX = "gridfs://"
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-class _ReadyHealthRabbitMqMetricsUnavailable:
-    def summary(self) -> dict[str, object]:
-        return {
-            "rabbitmq_management_configured": False,
-            "rabbitmq_metric_error": "ready_health_rabbitmq_metrics_skipped",
-        }
-
-
 def _default_app_settings_payload() -> dict[str, Any]:
     return {
         "completed_project_ids": [],
@@ -199,10 +191,7 @@ class PostgresStateStore:
         else:
             summary = {"postgres_status": "unknown"}
         try:
-            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(
-                self._connection,
-                rabbitmq_metrics_provider=_ReadyHealthRabbitMqMetricsUnavailable(),
-            ).ready_health_summary()
+            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(self._connection).ready_health_summary()
         except Exception as exc:  # pragma: no cover - readiness should degrade instead of blocking probes.
             summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
         return summary

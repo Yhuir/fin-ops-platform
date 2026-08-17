@@ -50,7 +50,7 @@
 - deploy-control helper 必须使用 `/etc/fin-ops/fin-ops.common.env`、`fin-ops.secrets.env` 和 migration-only env；API/worker 不允许直接加载 migrator env 或旧 `/root` env。
 - required worker 矩阵从 `runtime_worker_manifest` / registry 派生；deploy runbook 和 helper 不维护第二份硬编码清单。
 - 发布成功不能只看 systemd active；必须等 `/health/ready`、required worker readiness 和公网 session API JSON proxy。
-- 本地自动化保护脚本、workflow、模板和 registry 契约；真实 SSH/sudo/systemd/PostgreSQL migration/Nginx live config/Redis/RabbitMQ/浏览器缓存必须由 staging 或生产前 smoke 证明。
+- 本地自动化保护脚本、workflow、模板和 registry 契约；真实 SSH/sudo/systemd/PostgreSQL migration/queue、Nginx live config、API 可选 Redis cache 和浏览器缓存必须由 staging 或生产前 smoke 证明。
 - runtime env 事实源是 `deploy/oa/env/*.env.example` 和生产 `/etc/fin-ops/*` split env；旧单文件 `deploy/oa/fin_ops.env.example` 已移除。
 
 ## 历史记录

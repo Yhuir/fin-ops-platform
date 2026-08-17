@@ -27,7 +27,7 @@
 
 ### Runtime infrastructure
 
-- outbox pending/publishing/failed、dirty scopes pending/processing/failed、RabbitMQ publish/queue/DLQ、worker heartbeat lag、worker kind/event mismatch 都是 runtime facts。
+- outbox pending/processing/failed/dead-lettered、领域队列状态、worker heartbeat lag、worker kind/event mismatch 都是 runtime facts。
 - worker `missing` / `stale` / `mismatched` 由 registry 和 heartbeat 推导，不由 systemd active 推导。
 - `/api/app-health.app_status.runtime_summary` 是 App Status hover 的整体状态摘要：read models 统计 `fresh/refreshing/stale/missing/failed/unavailable/issue_count/scope_issue_count`，workers 统计 `required/ready/idle/working/stale/missing/mismatched/unavailable/issue_count`，queue 统计 `pending/processing/failed/backlog`。worker `working/running/processing` 表示正在工作，不计入 issue；warning、stale、missing、mismatch、unavailable 才计入 issue。
 - readiness backfill 只能从真实 projection 计算；禁止把 missing 批量写成 fresh。

@@ -18,7 +18,7 @@ runtime-check
           Run app check against the current configured runtime state.
 infra-smoke
           Run runtime and canonical API smoke tooling checks. If real staging
-          PostgreSQL/RabbitMQ env vars are present, also run real infra preflight.
+          When PostgreSQL test env vars are present, also run real infrastructure preflight.
           Always print the production external gate input preflight without secrets.
 settings-acl-postgres
           Run settings ACL persistence and canonical migration tests against a visibly disposable PostgreSQL database.
@@ -186,19 +186,10 @@ run_infra_smoke() {
   PYTHONPATH=backend/src python3 -m unittest \
     tests.test_runtime_sync_closure_gate \
     tests.test_production_external_gate_preflight \
-    tests.test_rabbitmq_staging_preflight \
     tests.test_runtime_infrastructure_postgres_integration \
-    tests.test_rabbitmq_integration \
     -v
 
   PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.production_external_gate_preflight --json
-
-  if [[ -n "${FIN_OPS_TEST_DATABASE_URL:-}" && -n "${RABBITMQ_TEST_URL:-}" ]]; then
-    PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
-      --json
-  else
-    echo "Skipping RabbitMQ staging preflight; FIN_OPS_TEST_DATABASE_URL and/or RABBITMQ_TEST_URL are not set." >&2
-  fi
 }
 
 target="${1:-all}"

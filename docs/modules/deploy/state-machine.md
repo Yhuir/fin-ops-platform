@@ -77,7 +77,7 @@
 | `refreshing` | dirty scope pending/processing | 发布后允许短暂 yellow，但需要 drain |
 | `stale` | worker heartbeat stale、source/schema mismatch | App Health busy/blocked；禁止忽略 |
 | `failed` | worker/job/dirty scope failed | 进入 App Health attention；需要 inspect/retry/repair |
-| `unavailable` | PostgreSQL/Redis/RabbitMQ/OA/Nginx 不可用 | 部署 smoke 失败，按 dependency 排障 |
+| `unavailable` | PostgreSQL/必要 Redis/OA/Nginx 不可用 | 部署 smoke 失败，按 dependency 排障 |
 
 ## 失败恢复
 

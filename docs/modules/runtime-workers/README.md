@@ -13,7 +13,7 @@ Worker 不依赖 `Application`、`app.server`、`app.auth` 或 HTTP response。�
 - `import`：durable import job。
 - `settings-maintenance`：数据重置与关系要求重算等受控维护任务。
 
-App read model runtime 已整体退役，不存在 `read_model_key` registration、refresh event、freshness/readiness worker 或 projection owner。PostgreSQL 通用 outbox/attempt/heartbeat、import job 和 Workbench matching dirty scopes 继续作为各自任务事实源；RabbitMQ 只负责可选 wakeup/transport。
+App read model runtime 已整体退役，不存在 `read_model_key` registration、refresh event、freshness/readiness worker 或 projection owner。PostgreSQL 通用 outbox/attempt/heartbeat、import job 和 Workbench matching dirty scopes 继续作为各自任务事实源，也是四个 Worker 唯一的任务传输与状态边界。Worker 不依赖 RabbitMQ 或 Redis。
 
 页面性能只由 canonical query API 合同衡量：每个核心 probe p95 `<=1000ms`、p99 `<=2000ms`、错误为 0。不得恢复页面 worker/cache/projection 绕过慢查询。
 

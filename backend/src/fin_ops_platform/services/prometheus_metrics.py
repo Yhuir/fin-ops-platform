@@ -86,35 +86,12 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
         "missing_required_worker_count",
         "stale_required_worker_count",
         "mismatched_required_worker_count",
-        "rabbitmq_unpublished_backlog",
-        "rabbitmq_publish_failed_backlog",
-        "rabbitmq_dispatcher_lag_seconds",
-        "rabbitmq_queue_depth",
-        "rabbitmq_unacked_messages",
-        "rabbitmq_consumer_count",
-        "rabbitmq_dlq_count",
-        "rabbitmq_oldest_message_age_seconds",
-        "rabbitmq_publish_confirm_sample_limit",
+        "critical_failed_outbox_count",
     ):
         writer.gauge(
             f"finops_{name}",
             _help_text(name),
             runtime.get(name),
-        )
-
-    for status, count in _mapping(runtime.get("rabbitmq_publish_status")).items():
-        writer.gauge(
-            "finops_rabbitmq_publish_events",
-            "Pending RabbitMQ dispatch publish status counts.",
-            count,
-            {"publish_status": str(status)},
-        )
-    for quantile, value in _percentiles(runtime.get("rabbitmq_publish_confirm_latency_ms")).items():
-        writer.gauge(
-            "finops_rabbitmq_publish_confirm_latency_ms",
-            "RabbitMQ publisher confirm latency percentiles in milliseconds.",
-            value,
-            {"quantile": quantile},
         )
 
     for row in _list_of_mappings(runtime.get("worker_metrics")):

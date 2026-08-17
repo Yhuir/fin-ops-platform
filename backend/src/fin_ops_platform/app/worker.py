@@ -44,10 +44,8 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice impor
     PostgresOAAttachmentInvoiceRepository,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
-from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
-from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import (
     DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
     RuntimeWorker,
@@ -118,10 +116,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = None
         postgres_configuration_error = str(exc)
     queue_settings = RuntimeQueueSettings.from_env()
-    registration = _apply_registration_args(args, queue_settings=queue_settings)
+    registration = _apply_registration_args(args)
     connection = PostgresConnection(settings) if settings is not None else None
     queue = RuntimeQueueRepository(connection) if connection is not None else SimpleNamespace()
-    redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
     config = RuntimeWorkerConfig(
         worker_id=args.worker_id or RuntimeWorkerConfig().worker_id,
         worker_instance=args.worker_instance or getattr(registration, "instance_name", None),
@@ -250,19 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "postgres": settings.redacted_database_url if settings is not None else "unconfigured",
                     "postgres_config_error": postgres_configuration_error,
                     "queue_backend": queue_settings.backend,
-                    "rabbitmq_configured": bool(queue_settings.rabbitmq_url),
-                    "rabbitmq_exchange": queue_settings.rabbitmq_exchange,
-                    "rabbitmq_event_routes": {
-                        event_type: {
-                            "queue": route.queue,
-                            "routing_key": route.routing_key,
-                            "dead_letter_queue": route.dead_letter_queue,
-                        }
-                        for event_type, route in rabbitmq_event_routes(queue_settings).items()
-                        if event_type in config.event_types
-                    },
-                    "redis_enabled": redis_helper.enabled,
-                    "runtime_transport": "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres",
+                    "runtime_transport": "postgres",
                     "worker_instance": args.worker_instance or getattr(registration, "instance_name", None),
                     "worker_kind": config.worker_kind,
                     "event_types": config.event_types,
@@ -310,19 +295,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             daemon=True,
         ).start()
 
-    worker = RuntimeWorker(queue_repository=queue, config=config, redis_helper=redis_helper, handlers=handlers)
-    if queue_settings.backend == "rabbitmq":
-        event_types = list(config.event_types or sorted(handlers))
-        consumer = RabbitMqConsumer(
-            settings=queue_settings,
-            queue_repository=queue,
-            worker=worker,
-            worker_id=config.worker_id,
-            event_types=event_types,
-            lock_timeout_seconds=config.lock_timeout_seconds,
-        )
-        consumer.consume_forever()
-        return 0
+    worker = RuntimeWorker(queue_repository=queue, config=config, handlers=handlers)
     worker.run_forever()
     return 0
 
@@ -346,8 +319,6 @@ def _infer_worker_kind(args: argparse.Namespace) -> str:
 
 def _apply_registration_args(
     args: argparse.Namespace,
-    *,
-    queue_settings: RuntimeQueueSettings,
 ) -> RuntimeWorkerRegistration | None:
     if not args.registration:
         return None
@@ -367,8 +338,7 @@ def _apply_registration_args(
     args.worker_kind = registration.worker_kind
     for flag in registration.handler_flags:
         setattr(args, _argparse_attr_name(flag), True)
-    transport = "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres"
-    args.event_type = list(worker_claim_event_types(registration, transport=transport))
+    args.event_type = list(worker_claim_event_types(registration))
     args.claim_scope_key = list(registration.claim_scope_keys)
     args.exclude_claim_scope_key = list(registration.exclude_claim_scope_keys)
     return registration
@@ -381,10 +351,7 @@ def _registration_check_payload(registration: RuntimeWorkerRegistration | None) 
         "instance_name": registration.instance_name,
         "worker_kind": registration.worker_kind,
         "required": registration.required,
-        "rabbitmq_eligible": registration.rabbitmq_eligible,
         "event_types": list(registration.event_types),
-        "postgres_claim_event_types": list(registration.claim_event_types(transport="postgres")),
-        "rabbitmq_claim_event_types": list(registration.claim_event_types(transport="rabbitmq")),
         "claim_scope_keys": list(registration.claim_scope_keys),
         "exclude_claim_scope_keys": list(registration.exclude_claim_scope_keys),
         "handler_flags": list(registration.handler_flags),

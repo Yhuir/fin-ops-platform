@@ -161,6 +161,7 @@ EXPECTED_MIGRATION_FILES = [
     "0147_bank_relation_requirement_scope_retry.sql",
     "0148_retire_workbench_matching_progress_jobs.sql",
     "0149_remove_read_model_runtime.sql",
+    "0150_remove_rabbitmq_transport.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

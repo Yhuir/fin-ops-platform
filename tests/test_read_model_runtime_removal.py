@@ -5,7 +5,6 @@ import unittest
 
 from fin_ops_platform.services.runtime_worker_registry import (
     RUNTIME_WORKER_REGISTRY,
-    rabbitmq_dispatch_event_types,
 )
 
 
@@ -37,8 +36,13 @@ class ReadModelRuntimeRemovalTests(unittest.TestCase):
             [registration.instance_name for registration in RUNTIME_WORKER_REGISTRY],
             ["oa-sync", "workbench-matching", "import", "settings-maintenance"],
         )
+        event_types = {
+            event_type
+            for registration in RUNTIME_WORKER_REGISTRY
+            for event_type in registration.event_types
+        }
         self.assertFalse(
-            any(event_type.endswith(".read_model.refresh") for event_type in rabbitmq_dispatch_event_types())
+            any(event_type.endswith(".read_model.refresh") for event_type in event_types)
         )
 
     def test_http_and_frontend_contracts_have_no_projection_freshness_fields(self) -> None:

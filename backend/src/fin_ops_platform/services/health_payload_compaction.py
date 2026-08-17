@@ -16,16 +16,6 @@ _RUNTIME_KEEP_KEYS = (
     "mismatched_required_worker_count",
     "failed_jobs",
     "critical_failed_outbox_count",
-    "rabbitmq_publish_status",
-    "rabbitmq_unpublished_backlog",
-    "rabbitmq_publish_failed_backlog",
-    "rabbitmq_dispatcher_lag_seconds",
-    "rabbitmq_publish_confirm_latency_ms",
-    "rabbitmq_queue_depth",
-    "rabbitmq_unacked_messages",
-    "rabbitmq_consumer_count",
-    "rabbitmq_dlq_count",
-    "rabbitmq_metric_error",
     "redis_hit_count",
     "redis_miss_count",
 )
@@ -33,7 +23,6 @@ _RUNTIME_KEEP_KEYS = (
 _RUNTIME_SUMMARY_KEYS = (
     "worker_metrics",
     "pending_outbox_events_by_scope",
-    "rabbitmq_queues",
 )
 
 _WORKER_SAMPLE_KEYS = (

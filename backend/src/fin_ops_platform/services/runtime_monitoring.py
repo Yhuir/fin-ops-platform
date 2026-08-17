@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.rabbitmq_runtime import rabbitmq_event_routes
-from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker_registry import registration_by_worker_kind, worker_registrations
 
 
@@ -41,11 +39,10 @@ def readiness_blockers(
 
 
 class RuntimeMonitoringRepository:
-    """Monitoring for the durable outbox, RabbitMQ, and registered workers."""
+    """Monitoring for the durable PostgreSQL queue and registered workers."""
 
-    def __init__(self, connection: Any, rabbitmq_metrics_provider: Any | None = None) -> None:
+    def __init__(self, connection: Any) -> None:
         self._connection = connection
-        self._rabbitmq_metrics_provider = rabbitmq_metrics_provider
 
     def app_status_runtime_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
         try:
@@ -69,18 +66,13 @@ class RuntimeMonitoringRepository:
               coalesce(scope_key, raw_payload->>'scope_key', aggregate_id, '') as scope_key,
               case
                 when status in ('failed', 'dead_lettered') then status
-                when publish_status = 'failed' then 'publish_failed'
-                when publish_status = 'publishing' then 'publishing'
                 else status
               end as status,
               count(*)::bigint as count,
               max(last_error) as last_error,
               max(updated_at)::text as updated_at
             from job.outbox_events
-            where (
-                status in ('pending', 'processing', 'failed', 'dead_lettered')
-                or (status <> 'done' and publish_status in ('publishing', 'failed'))
-              )
+            where status in ('pending', 'processing', 'failed', 'dead_lettered')
             group by event_type, 2, 3, 4
             """
         )
@@ -166,7 +158,6 @@ class RuntimeMonitoringRepository:
             if row.get("required") and row.get("warning_code") in {"worker_kind_mismatch", "worker_event_type_mismatch"}
         )
         queue_backlog = outbox_summary["queue_backlog"]
-        publish_status = outbox_summary["publish_status"]
         return {
             "queue_backlog": queue_backlog,
             "failed_jobs": int(queue_backlog.get("failed", 0)) + int(queue_backlog.get("dead_lettered", 0)),
@@ -177,38 +168,25 @@ class RuntimeMonitoringRepository:
             "missing_required_worker_count": missing_count,
             "stale_required_worker_count": stale_count,
             "mismatched_required_worker_count": mismatched_count,
-            "rabbitmq_publish_status": publish_status,
-            "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
-            "rabbitmq_publishing_backlog": int(publish_status.get("publishing", 0)),
-            "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
-            "rabbitmq_dispatcher_lag_seconds": outbox_summary["max_unpublished_age_seconds"],
-            **self._rabbitmq_metrics(),
             "critical_failed_outbox_count": outbox_summary["critical_failed_outbox_count"],
             "pending_outbox_events_by_scope": outbox_summary["pending_outbox_events_by_scope"],
         }
 
     def _ready_outbox_summary(self) -> dict[str, Any]:
-        dispatch_types = list(_rabbitmq_dispatch_event_types())
         row = self._connection.fetch_one(
             """
             /* ready_outbox_snapshot */
             with current_events as materialized (
-              select event_type, status, publish_status,
+              select event_type, status,
                      coalesce(scope_type, raw_payload->>'scope_type', aggregate_type, '') as scope_type,
                      coalesce(scope_key, raw_payload->>'scope_key', aggregate_id, '') as scope_key,
                      created_at, attempts, last_error
               from job.outbox_events
-              where status <> 'done' or publish_status = 'publishing'
+              where status <> 'done'
             ),
             queue_counts as (
               select status, count(*)::bigint as count
               from current_events where status <> 'done' group by status
-            ),
-            publish_counts as (
-              select publish_status, count(*)::bigint as count
-              from current_events
-              where (status = 'pending' or publish_status = 'publishing') and event_type = any(%s)
-              group by publish_status
             ),
             scope_rows as (
               select event_type, status, scope_type, scope_key, count(*)::bigint as count,
@@ -224,27 +202,18 @@ class RuntimeMonitoringRepository:
               coalesce((select jsonb_object_agg(status, count) from queue_counts), '{}'::jsonb) as queue_backlog,
               (select extract(epoch from max(now() - created_at))::float from current_events where status = 'pending')
                 as max_pending_age_seconds,
-              coalesce((select jsonb_object_agg(publish_status, count) from publish_counts), '{}'::jsonb)
-                as publish_status,
-              (select extract(epoch from max(now() - created_at))::float from current_events
-                where status = 'pending' and event_type = any(%s)
-                  and publish_status in ('unpublished', 'failed')) as max_unpublished_age_seconds,
               coalesce((select jsonb_agg(to_jsonb(scope_rows)) from scope_rows), '[]'::jsonb)
                 as pending_outbox_events_by_scope,
               (select count(*)::bigint from current_events where status in ('failed', 'dead_lettered'))
                 as critical_failed_outbox_count
             """,
-            (dispatch_types, dispatch_types),
         )
         payload = row if isinstance(row, dict) else {}
         queue_payload = payload.get("queue_backlog") if isinstance(payload.get("queue_backlog"), dict) else {}
-        publish_payload = payload.get("publish_status") if isinstance(payload.get("publish_status"), dict) else {}
         scope_rows = payload.get("pending_outbox_events_by_scope") if isinstance(payload.get("pending_outbox_events_by_scope"), list) else []
         return {
             "queue_backlog": {str(key): int(value or 0) for key, value in queue_payload.items()},
             "max_pending_age_seconds": payload.get("max_pending_age_seconds"),
-            "publish_status": {str(key): int(value or 0) for key, value in publish_payload.items()},
-            "max_unpublished_age_seconds": payload.get("max_unpublished_age_seconds"),
             "critical_failed_outbox_count": int(payload.get("critical_failed_outbox_count") or 0),
             "pending_outbox_events_by_scope": [
                 {
@@ -262,65 +231,51 @@ class RuntimeMonitoringRepository:
             ],
         }
 
-    def _rabbitmq_metrics(self) -> dict[str, Any]:
-        provider = self._rabbitmq_metrics_provider
-        if provider is None:
-            try:
-                from fin_ops_platform.services.rabbitmq_runtime import RabbitMqManagementMetrics
-
-                provider = RabbitMqManagementMetrics(RuntimeQueueSettings.from_env())
-            except Exception as exc:
-                return {"rabbitmq_metric_error": str(exc) or exc.__class__.__name__}
-        summary = provider.summary()
-        return summary if isinstance(summary, dict) else {}
-
     def dashboard_outbox_metric(self) -> dict[str, Any]:
         row = self._connection.fetch_one(
             """
             select
               count(*) filter (where status = 'pending')::bigint as pending_count,
-              count(*) filter (where publish_status = 'publishing')::bigint as publishing_count,
+              count(*) filter (where status = 'processing')::bigint as processing_count,
               count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
-              count(*) filter (where publish_status = 'failed')::bigint as publish_failed_count,
               extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float
                 as oldest_pending_age_seconds
             from job.outbox_events
-            where status in ('pending', 'failed', 'dead_lettered')
-               or (status <> 'done' and publish_status in ('publishing', 'failed'))
+            where status in ('pending', 'processing', 'failed', 'dead_lettered')
             """
         ) or {}
         return {
             "pending_count": _optional_int(row.get("pending_count")),
-            "publishing_count": _optional_int(row.get("publishing_count")),
+            "processing_count": _optional_int(row.get("processing_count")),
             "failed_count": _optional_int(row.get("failed_count")),
-            "publish_failed_count": _optional_int(row.get("publish_failed_count")),
             "oldest_pending_age_seconds": _optional_float(row.get("oldest_pending_age_seconds")),
             "status": "available",
         }
 
     def dashboard_queue_metrics(self) -> list[dict[str, Any]]:
-        routes = rabbitmq_event_routes(RuntimeQueueSettings.from_env())
-        summary = self._rabbitmq_metrics()
-        queues = summary.get("rabbitmq_queues") if isinstance(summary, dict) else None
-        metric_error = summary.get("rabbitmq_metric_error") if isinstance(summary, dict) else None
-        metrics_available = isinstance(queues, dict) and not metric_error
-        rows: list[dict[str, Any]] = []
-        for event_type, route in routes.items():
-            queue_metric = queues.get(event_type) if metrics_available else None
-            queue_payload = queue_metric if isinstance(queue_metric, dict) else {}
-            rows.append(
-                {
-                    "event_type": event_type,
-                    "queue": route.queue,
-                    "messages": _optional_int(queue_payload.get("messages")) if metrics_available else None,
-                    "unacked": _optional_int(queue_payload.get("unacked")) if metrics_available else None,
-                    "consumers": _optional_int(queue_payload.get("consumers")) if metrics_available else None,
-                    "dlq_messages": _optional_int(queue_payload.get("dead_letter_messages")) if metrics_available else None,
-                    "status": "available" if metrics_available else "unknown",
-                    **({} if metrics_available else {"warning_code": "rabbitmq_metrics_unavailable"}),
-                }
-            )
-        return rows
+        rows = self._connection.fetch_all(
+            """
+            select event_type,
+                   count(*) filter (where status = 'pending')::bigint as pending_count,
+                   count(*) filter (where status = 'processing')::bigint as processing_count,
+                   count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count
+            from job.outbox_events
+            where status in ('pending', 'processing', 'failed', 'dead_lettered')
+            group by event_type
+            order by event_type
+            """
+        )
+        return [
+            {
+                "event_type": str(row.get("event_type") or ""),
+                "queue": "job.outbox_events",
+                "pending_count": _optional_int(row.get("pending_count")),
+                "processing_count": _optional_int(row.get("processing_count")),
+                "failed_count": _optional_int(row.get("failed_count")),
+                "status": "available",
+            }
+            for row in rows
+        ]
 
     def dashboard_worker_metrics(self, *, worker_instances: set[str] | None = None) -> list[dict[str, Any]]:
         normalized_instances = {str(instance).strip() for instance in set(worker_instances or set()) if str(instance).strip()}
@@ -378,7 +333,7 @@ class RuntimeMonitoringRepository:
                         "heartbeat_lag_seconds": None,
                         "required": True,
                         "expected_event_types": list(registration.event_types),
-                        "expected_transport": "rabbitmq_or_postgres" if registration.rabbitmq_eligible else "postgres",
+                        "expected_transport": "postgres",
                         "status": "missing",
                         "warning_code": "required_worker_missing",
                     }
@@ -402,13 +357,6 @@ class RuntimeMonitoringRepository:
         return worker_rows
 
 
-def _rabbitmq_dispatch_event_types() -> tuple[str, ...]:
-    try:
-        return RuntimeQueueSettings.from_env().rabbitmq_dispatch_event_types
-    except Exception:
-        return DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
-
-
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
@@ -428,9 +376,8 @@ def _optional_float(value: object) -> float | None:
 
 
 def _max_app_outbox_status(left: str, right: str) -> str:
-    normalized = "failed" if right in {"publish_failed", "failed", "dead_lettered"} else right
-    normalized = "publishing" if normalized == "processing" else normalized
-    rank = {"ready": 0, "pending": 1, "publishing": 2, "failed": 3}
+    normalized = "failed" if right in {"failed", "dead_lettered"} else right
+    rank = {"ready": 0, "pending": 1, "processing": 2, "failed": 3}
     return normalized if rank.get(normalized, 0) > rank.get(left, 0) else left
 
 
@@ -464,8 +411,6 @@ def _worker_metric_row(row: dict[str, Any], *, registration: Any | None, require
         warning_code = "worker_kind_mismatch"
     elif registration is not None and configured_event_types and tuple(configured_event_types) not in {
         tuple(registration.event_types),
-        registration.claim_event_types(transport="postgres"),
-        registration.claim_event_types(transport="rabbitmq"),
     }:
         warning_code = "worker_event_type_mismatch"
     elif is_stale:
@@ -482,11 +427,7 @@ def _worker_metric_row(row: dict[str, Any], *, registration: Any | None, require
         "required": required,
         "expected_event_types": expected_event_types,
         "configured_event_types": configured_event_types,
-        "expected_transport": "rabbitmq_or_postgres"
-        if registration is not None and registration.rabbitmq_eligible
-        else "postgres"
-        if registration is not None
-        else "unknown",
+        "expected_transport": "postgres" if registration is not None else "unknown",
         "status": "stale" if is_stale else "mismatch" if warning_code else "available",
     }
     if warning_code:

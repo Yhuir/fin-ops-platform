@@ -27,7 +27,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
-from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
+from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from tests.external_evidence_test_support import manifest_payload
 
 
@@ -113,11 +113,10 @@ def _dashboard_payload() -> dict[str, object]:
             "outbox": {
                 "status": "available",
                 "pending_count": 0,
-                "publishing_count": 0,
+                "processing_count": 0,
                 "failed_count": 0,
-                "publish_failed_count": 0,
             },
-            "queues": [{"status": "unknown", "warning_code": "rabbitmq_metrics_unavailable"}],
+            "queues": [],
             "workers": [
                 {
                     "worker_instance": registration.instance_name,
@@ -129,7 +128,7 @@ def _dashboard_payload() -> dict[str, object]:
                 for registration in worker_registrations(required_only=True)
             ],
         },
-        "freshness": {"warnings": ["rabbitmq_metrics_unavailable"]},
+        "freshness": {"warnings": []},
     }
 
 
@@ -359,9 +358,8 @@ class AppHealthSystemAuditTests(unittest.TestCase):
             "status": "unknown",
             "warning_code": "outbox_metrics_unavailable",
             "pending_count": None,
-            "publishing_count": None,
+            "processing_count": None,
             "failed_count": None,
-            "publish_failed_count": None,
         }
 
         report = repository.audit_system(

@@ -7,7 +7,6 @@ from psycopg.types.json import Jsonb
 
 from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.runtime_queue import (
-    DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES,
     RuntimeQueueDataError,
     RuntimeQueueEvent,
     RuntimeQueueRepository,
@@ -87,73 +86,11 @@ def event_row(**overrides: object) -> dict[str, object]:
 
 
 class RuntimeQueueRepositoryTests(unittest.TestCase):
-    def test_settings_default_to_postgres_and_parse_registered_rabbitmq_boundary(self) -> None:
+    def test_settings_default_to_postgres_and_reject_other_backends(self) -> None:
         self.assertEqual(RuntimeQueueSettings.from_env({}).backend, "postgres")
-        self.assertEqual(RuntimeQueueSettings.from_env({}).rabbitmq_dispatch_event_types, DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
-        self.assertEqual(
-            set(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES),
-            {
-                "oa.sync",
-                "import.process.requested",
-            },
-        )
-
-        settings = RuntimeQueueSettings.from_env(
-            {
-                "FIN_OPS_QUEUE_BACKEND": "rabbitmq",
-                "RABBITMQ_URL": "amqp://rabbitmq.internal",
-                "RABBITMQ_VHOST": "/finops",
-                "RABBITMQ_EXCHANGE": "finops.events",
-                "RABBITMQ_QUEUE_PREFIX": "finops.runtime",
-                "RABBITMQ_DEAD_LETTER_EXCHANGE": "finops.events.dlx",
-                "RABBITMQ_PREFETCH": "25",
-                "RABBITMQ_PUBLISH_CONFIRM": "false",
-                "RABBITMQ_PUBLISH_TIMEOUT_SECONDS": "7",
-                "RABBITMQ_HEARTBEAT_SECONDS": "30",
-                "RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS": "120",
-                "RABBITMQ_MANAGEMENT_URL": "http://rabbitmq.internal:15672",
-                "RABBITMQ_MANAGEMENT_USERNAME": "monitor",
-                "RABBITMQ_MANAGEMENT_PASSWORD": "secret",
-                "RABBITMQ_MANAGEMENT_TIMEOUT_SECONDS": "3",
-                "RABBITMQ_SHADOW_PUBLISH": "true",
-                "RABBITMQ_DISPATCH_EVENT_TYPES": "import.process.requested,oa.sync",
-            }
-        )
-
-        self.assertEqual(settings.backend, "rabbitmq")
-        self.assertEqual(settings.rabbitmq_url, "amqp://rabbitmq.internal")
-        self.assertEqual(settings.rabbitmq_vhost, "/finops")
-        self.assertEqual(settings.rabbitmq_exchange, "finops.events")
-        self.assertEqual(settings.rabbitmq_queue_prefix, "finops.runtime")
-        self.assertEqual(settings.rabbitmq_dead_letter_exchange, "finops.events.dlx")
-        self.assertEqual(settings.rabbitmq_prefetch, 25)
-        self.assertFalse(settings.rabbitmq_publish_confirm)
-        self.assertEqual(settings.rabbitmq_publish_timeout_seconds, 7)
-        self.assertEqual(settings.rabbitmq_heartbeat_seconds, 30)
-        self.assertEqual(settings.rabbitmq_blocked_connection_timeout_seconds, 120)
-        self.assertEqual(settings.rabbitmq_management_url, "http://rabbitmq.internal:15672")
-        self.assertEqual(settings.rabbitmq_management_username, "monitor")
-        self.assertEqual(settings.rabbitmq_management_password, "secret")
-        self.assertEqual(settings.rabbitmq_management_timeout_seconds, 3)
-        self.assertTrue(settings.rabbitmq_shadow_publish)
-        self.assertEqual(
-            settings.rabbitmq_dispatch_event_types,
-            ("import.process.requested", "oa.sync"),
-        )
-
-    def test_settings_reject_dispatch_events_outside_active_runtime_registry(self) -> None:
-        for unsupported_event_type in (
-            "workbench.read_model.refresh",
-            "unregistered.runtime.event",
-        ):
-            with self.subTest(unsupported_event_type=unsupported_event_type):
-                with self.assertRaises(RuntimeQueueDataError) as context:
-                    RuntimeQueueSettings.from_env(
-                        {"RABBITMQ_DISPATCH_EVENT_TYPES": unsupported_event_type}
-                    )
-
-                self.assertIn("outside the active runtime registry", str(context.exception))
-                self.assertIn(unsupported_event_type, str(context.exception))
+        self.assertEqual(RuntimeQueueSettings.from_env({}).summary(), {"queue_backend": "postgres"})
+        with self.assertRaisesRegex(RuntimeQueueDataError, "must be postgres"):
+            RuntimeQueueSettings.from_env({"FIN_OPS_QUEUE_BACKEND": "rabbitmq"})
 
     def test_event_envelope_contains_only_routing_identity_and_version(self) -> None:
         event = RuntimeQueueEvent(
@@ -323,7 +260,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("event_type = any(%s)", normalized_sql)
         self.assertEqual(params, ("worker-1", "event-1", 300, ["invoice.imported"]))
 
-    def test_claim_event_by_id_honors_scope_filters_for_rabbitmq_consumers(self) -> None:
+    def test_claim_event_by_id_honors_scope_filters(self) -> None:
         transaction = FakeTransaction(rows=[event_row(status="processing", attempts=1, scope_key="all")])
         repository = RuntimeQueueRepository(FakeConnection(transaction))
 
@@ -361,116 +298,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
         self.assertIn("event_type = any(%s)", normalized_sql)
         self.assertEqual(params, ("worker-1", "event-1", 180, ["invoice.imported"]))
-
-    def test_claim_publishable_events_uses_publish_status_and_skip_locked(self) -> None:
-        transaction = FakeTransaction(rows=[[event_row(status="pending", publish_status="publishing", publish_attempt_count=2)]])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        events = repository.claim_publishable_events(
-            publisher_id="publisher-1",
-            event_types=["workbench_relation.read_model.refresh"],
-            lock_timeout_seconds=120,
-            limit=10,
-        )
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].publish_status, "publishing")
-        self.assertEqual(events[0].publish_attempt_count, 2)
-        recovery_method, recovery_sql, recovery_params = transaction.calls[0]
-        self.assertEqual(recovery_method, "execute")
-        normalized_recovery_sql = " ".join(recovery_sql.lower().split())
-        self.assertIn("status = 'done'", normalized_recovery_sql)
-        self.assertIn("publish_status = 'publishing'", normalized_recovery_sql)
-        self.assertIn("publish_status = 'published'", normalized_recovery_sql)
-        self.assertIn("terminal_event_already_completed", normalized_recovery_sql)
-        self.assertNotIn("publish_locked_at is null", normalized_recovery_sql)
-        self.assertNotIn("publish_locked_at < now()", normalized_recovery_sql)
-        self.assertEqual(recovery_params, ())
-        _, sql, params = transaction.calls[1]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("publish_status = 'publishing'", normalized_sql)
-        self.assertIn("publish_attempt_count = publish_attempt_count + 1", normalized_sql)
-        self.assertIn("publish_status in ('unpublished', 'failed')", normalized_sql)
-        self.assertIn("for update skip locked", normalized_sql)
-        self.assertEqual(params, ("publisher-1", 120, ["workbench_relation.read_model.refresh"], 10))
-
-    def test_reconcile_completed_publish_states_is_explicit_and_idempotent(self) -> None:
-        transaction = FakeTransaction(counts=[28])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        reconciled = repository.reconcile_completed_publish_states()
-
-        self.assertEqual(reconciled, 28)
-        method, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertEqual(method, "execute")
-        self.assertIn("status = 'done'", normalized_sql)
-        self.assertIn("publish_status = 'publishing'", normalized_sql)
-        self.assertIn("publish_status = 'published'", normalized_sql)
-        self.assertNotIn("publish_locked_at is null", normalized_sql)
-        self.assertNotIn("publish_locked_at < now()", normalized_sql)
-        self.assertEqual(params, ())
-        self.assertEqual(transaction.outcomes, ["commit"])
-
-    def test_mark_published_accepts_owned_lock_or_reconciled_terminal_event(self) -> None:
-        transaction = FakeTransaction(rows=[{"id": "event-1"}])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        self.assertTrue(
-            repository.mark_published(
-                "event-1",
-                publisher_id="publisher-1",
-                exchange="finops.events",
-                routing_key="workbench_relation.read_model.refresh",
-                message_id="event-1",
-                confirm_latency_ms=12.3456,
-            )
-        )
-
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("publish_status = 'published'", normalized_sql)
-        self.assertIn("publish_confirmed_at = now()", normalized_sql)
-        self.assertIn("publish_status = 'publishing'", normalized_sql)
-        self.assertIn("publish_locked_by = %s", normalized_sql)
-        self.assertIn("status = 'done'", normalized_sql)
-        self.assertIn("publish_status = 'published'", normalized_sql)
-        self.assertIn("rabbitmq_message_id = %s", normalized_sql)
-        self.assertEqual(params[0:3], ("finops.events", "workbench_relation.read_model.refresh", "event-1"))
-        self.assertEqual(params[-3:], ("event-1", "publisher-1", "event-1"))
-
-    def test_mark_publish_failed_schedules_publish_retry(self) -> None:
-        transaction = FakeTransaction(rows=[{"id": "event-1"}])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        self.assertTrue(
-            repository.mark_publish_failed(
-                "event-1",
-                publisher_id="publisher-1",
-                error="broker down",
-                retry_delay_seconds=45,
-            )
-        )
-
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("publish_status = 'failed'", normalized_sql)
-        self.assertIn("next_publish_at = now() + (%s * interval '1 second')", normalized_sql)
-        self.assertIn("jsonb_build_object('error', %s::text, 'retry_delay_seconds', %s::integer)", normalized_sql)
-        self.assertEqual(params, ("broker down", 45, "broker down", 45, "event-1", "publisher-1"))
-
-    def test_reset_publish_state_marks_pending_event_unpublished(self) -> None:
-        transaction = FakeTransaction(rows=[{"id": "event-1"}])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        self.assertTrue(repository.reset_publish_state("event-1", reason="operator"))
-
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("publish_status = 'unpublished'", normalized_sql)
-        self.assertIn("rabbitmq_republish", normalized_sql)
-        self.assertIn("status = 'pending'", normalized_sql)
-        self.assertEqual(params, ("operator", "event-1"))
 
     def test_claim_next_candidate_includes_stale_processing_events(self) -> None:
         transaction = FakeTransaction(rows=[event_row(status="processing", attempts=3)])
@@ -584,7 +411,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("where id = %s", normalized_retry_sql)
         self.assertIn("status = 'processing'", normalized_retry_sql)
         self.assertIn("locked_by = %s", normalized_retry_sql)
-        self.assertEqual(retry_params, ("temporary", 30, 30, "event-1", "worker-1"))
+        self.assertEqual(retry_params, ("temporary", 30, "event-1", "worker-1"))
 
         permanent_transaction = FakeTransaction(rows=[event_row(status="failed")])
         permanent_repository = RuntimeQueueRepository(FakeConnection(permanent_transaction))
@@ -637,7 +464,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("manual_requeue", normalized_sql)
         self.assertIn("attempts = 0", normalized_sql)
         self.assertNotIn("attempt_count =", normalized_sql)
-        self.assertIn("publish_status = 'unpublished'", normalized_sql)
         self.assertIn("jsonb_build_object('reason', %s::text, 'requeued_at', now())", normalized_sql)
         self.assertEqual(params, ("operator_repair", "event-1"))
 
@@ -666,7 +492,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         rows = repository.release_stale_processing_events(
             stale_after_seconds=300,
             limit=25,
-            reason="rabbitmq_stale_processing_repair",
+            reason="stale_processing_repair",
             event_types=["workbench_relation.read_model.refresh"],
         )
 
@@ -681,8 +507,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("pending.status = 'pending'", normalized_sql)
         self.assertIn("for update skip locked", normalized_sql)
         self.assertIn("status = 'pending'", normalized_sql)
-        self.assertIn("publish_status = 'unpublished'", normalized_sql)
-        self.assertIn("next_publish_at = now()", normalized_sql)
         self.assertIn("attempts = greatest(coalesce(event.attempts, 0) - 1, 0)", normalized_sql)
         self.assertIn("operator_stale_processing_release", normalized_sql)
         self.assertIn("previous_locked_by", normalized_sql)
@@ -693,7 +517,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 300,
                 ["workbench_relation.read_model.refresh"],
                 25,
-                "rabbitmq_stale_processing_repair",
+                "stale_processing_repair",
                 300,
             ),
         )
@@ -705,7 +529,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         rows = repository.resolve_superseded_processing_events(
             stale_after_seconds=300,
             limit=25,
-            reason="rabbitmq_stale_processing_superseded",
+            reason="stale_processing_superseded",
             event_types=["workbench_relation.read_model.refresh"],
         )
 
@@ -725,7 +549,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 300,
                 ["workbench_relation.read_model.refresh"],
                 25,
-                "rabbitmq_stale_processing_superseded",
+                "stale_processing_superseded",
                 300,
             ),
         )
@@ -776,7 +600,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("order by coalesce(source_version, 0) desc", normalized_cover_sql)
         self.assertIn("status = 'pending'", normalized_sql)
         self.assertIn("available_at = now() + (%s::double precision * interval '1 second')", normalized_sql)
-        self.assertIn("next_publish_at = now() + (%s::double precision * interval '1 second')", normalized_sql)
         self.assertIn("attempts = greatest(coalesce(attempts, 0) - 1, 0)", normalized_sql)
         self.assertIn("runtime_defer", normalized_sql)
         self.assertIn("'delay_seconds', %s::double precision", normalized_sql)
@@ -800,7 +623,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(
             defer_params,
             (
-                0.25,
                 0.25,
                 "workbench_relation_read_model_not_fresh",
                 0.25,
@@ -1066,7 +888,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("available_at = now() + (%s * interval '1 second')", normalized_sql)
         self.assertIn("status = 'processing'", normalized_sql)
         self.assertIn("locked_by = %s", normalized_sql)
-        self.assertEqual(params, ("temporary", 45, 45, "event-1", "worker-1"))
+        self.assertEqual(params, ("temporary", 45, "event-1", "worker-1"))
 
     def test_backlog_summary_returns_counts_and_pending_age(self) -> None:
         transaction = FakeTransaction(

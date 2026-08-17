@@ -13,7 +13,7 @@
 - 本地目标验证：修改某个模块时，优先运行 `docs/modules/<module>/tests.md` 中列出的模块命令。
 - 统一本地验证：运行 `bash scripts/verify.sh all`，覆盖后端、前端 Vitest/build、deterministic Playwright browser smoke 和文档检查。
 - Nightly CI：每天自动运行后端全量 unittest、前端 Vitest、前端 build、Playwright browser smoke 和文档检查。
-- 发布前验证：涉及生产数据、read model、worker、OA、Redis/RabbitMQ/PostgreSQL runtime 或部署资产时，按模块文档和运维文档补充 dry-run、staging 或生产只读 smoke。
+- 发布前验证：涉及生产数据、read model、worker、OA、PostgreSQL runtime、API 可选 Redis cache 或部署资产时，按模块文档和运维文档补充 dry-run、staging 或生产只读 smoke。
 - 真实基础设施验证：涉及 read model / worker 最新状态时，优先运行 `bash scripts/verify.sh infra-smoke`；默认只做安全 dry-run / preflight。需要真正 enqueue 并等待 worker drain 时，必须显式设置 `FIN_OPS_INFRA_SMOKE_APPLY=1`，并只在 staging 或已批准的生产窗口使用。
 
 ## 统一验证入口
@@ -32,7 +32,7 @@ bash scripts/verify.sh docs
 bash scripts/verify.sh infra-smoke
 ```
 
-`infra-smoke` 是真实基础设施 gate 的统一入口。默认本地没有 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL` 时，它运行 read model SLO、runtime sync closure gate、write-operation SLO、RabbitMQ staging preflight 工具的契约测试，并跳过真实连接；设置真实 staging PostgreSQL 后会追加 `read_model_slo_smoke --critical-only` 的 dry-run scope discovery，不会写入 queue；只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才追加 `--apply`，真正 enqueue refresh events 并等待 worker drain。设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 operation profile 后，会对最近真实业务写入产生的 durable outbox events 运行只读 `write_operation_slo_audit`；设置 `FIN_OPS_TEST_DATABASE_URL` + `RABBITMQ_TEST_URL` 时还会运行 RabbitMQ staging preflight。它不会被 `verify.sh all` 默认执行。
+`infra-smoke` 是真实基础设施 gate 的统一入口。默认本地没有 `FIN_OPS_TEST_DATABASE_URL` 时，它运行 read model SLO、runtime sync closure gate 和 write-operation SLO 的契约测试，并跳过真实连接；设置真实 staging PostgreSQL 后会追加 `read_model_slo_smoke --critical-only` 的 dry-run scope discovery，不会写入 queue；只有同时设置 `FIN_OPS_INFRA_SMOKE_APPLY=1` 时才追加 `--apply`，真正 enqueue refresh events 并等待 4 个 required workers drain。设置 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed` 等 operation profile 后，会对最近真实业务写入产生的 durable outbox events 运行只读 `write_operation_slo_audit`。它不会被 `verify.sh all` 默认执行。
 
 生产外部 gate 前先运行只读输入预检；`bash scripts/verify.sh infra-smoke` 默认也会输出这份预检报告：
 
@@ -97,15 +97,15 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增 OA pending rows/detail non-fresh Browser 覆盖：rows `read_model_status=refreshing` 时显示刷新诊断而不显示真实空态，detail 202 时 drawer 显示“详情暂不可用”。
 
-本轮新增 OA 待付款 rows 临时失败恢复 Browser 覆盖：首屏 `/api/oa-pending-payments/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态；点击刷新后等待 rows 200/fresh，业务行和分页恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 OA Mongo/MySQL、PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+本轮新增 OA 待付款 rows 临时失败恢复 Browser 覆盖：首屏 `/api/oa-pending-payments/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态；点击刷新后等待 rows 200/fresh，业务行和分页恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 OA Mongo/MySQL、PostgreSQL durable queue/systemd worker drain。
 
-本轮新增成本统计 explorer 临时失败恢复 Browser 覆盖：首屏 `/api/cost-statistics/explorer?month=2026-03&project_scope=active` 暂时 503 时显示“成本统计数据加载暂时失败，请刷新后重试。”，不显示普通空态、不渲染按时间表、不允许打开导出中心；点击刷新后等待 explorer 200/fresh，按时间成本流水和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty / export 防伪成功风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 或真实网络中断恢复。
+本轮新增成本统计 explorer 临时失败恢复 Browser 覆盖：首屏 `/api/cost-statistics/explorer?month=2026-03&project_scope=active` 暂时 503 时显示“成本统计数据加载暂时失败，请刷新后重试。”，不显示普通空态、不渲染按时间表、不允许打开导出中心；点击刷新后等待 explorer 200/fresh，按时间成本流水和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty / export 防伪成功风险，不替代真实 PostgreSQL durable queue/systemd worker drain 或真实网络中断恢复。
 
-本轮新增批量账务 GET 临时失败恢复 Browser 覆盖：首屏 `/api/batch-accounting` 暂时 503 时显示“批量账务数据加载暂时失败，请刷新后重试。”，不显示普通“当前年份暂无批量账务流水”空态；点击刷新后等待列表 200/fresh，批量账务银行行、可关联 OA 表和未选择时禁用的提交按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 或真实网络中断恢复。
+本轮新增批量账务 GET 临时失败恢复 Browser 覆盖：首屏 `/api/batch-accounting` 暂时 503 时显示“批量账务数据加载暂时失败，请刷新后重试。”，不显示普通“当前年份暂无批量账务流水”空态；点击刷新后等待列表 200/fresh，批量账务银行行、可关联 OA 表和未选择时禁用的提交按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain 或真实网络中断恢复。
 
-本轮新增外部往来 grouped ledger 临时失败恢复 Browser 覆盖：首屏 `/api/turnover-ledger` 暂时 503 时显示“往来款台账加载暂时失败，请刷新后重试。”，不显示普通“暂无往来款台账”空态；点击 `刷新台账` 后等待列表 200/fresh，外部往来 grouped table、云南建设有限公司行和未选择时禁用的确认闭环按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 或真实网络中断恢复。
+本轮新增外部往来 grouped ledger 临时失败恢复 Browser 覆盖：首屏 `/api/turnover-ledger` 暂时 503 时显示“往来款台账加载暂时失败，请刷新后重试。”，不显示普通“暂无往来款台账”空态；点击 `刷新台账` 后等待列表 200/fresh，外部往来 grouped table、云南建设有限公司行和未选择时禁用的确认闭环按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain 或真实网络中断恢复。
 
-本轮新增免 OA 流水批次 list 临时失败恢复 Browser 覆盖：首屏 `/api/no-oa-bank-batches` 暂时 503 时显示“免OA流水批次加载暂时失败，请刷新后重试。”，不显示普通“当前标签下暂无流水”空态；点击 `刷新` 后等待列表 200/fresh，主/子标签、建设银行流水表和未选择时禁用的提交按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实网络中断恢复或 mutation 级失败恢复。
+本轮新增免 OA 流水批次 list 临时失败恢复 Browser 覆盖：首屏 `/api/no-oa-bank-batches` 暂时 503 时显示“免OA流水批次加载暂时失败，请刷新后重试。”，不显示普通“当前标签下暂无流水”空态；点击 `刷新` 后等待列表 200/fresh，主/子标签、建设银行流水表和未选择时禁用的提交按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain、真实网络中断恢复或 mutation 级失败恢复。
 
 本轮新增 ETC 票据 business-batches 临时失败恢复 Browser 覆盖：首屏 `/api/etc/business-batches` 暂时 503 时显示“ETC业务批次加载暂时失败，请刷新后重试。”，不显示普通“无匹配批次。”空态；点击 `刷新` 后等待列表 200，未提交业务批次、ETC 发票明细和提交 OA 入口恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险；submitted reset/delete 已由后续 Browser 覆盖，不替代真实对象存储/Nginx 上传中断、真实 OA、真实 worker drain 或 import confirm 等后续 Browser/staging 风险。
 
@@ -139,7 +139,7 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增 ETC 票据管理 Spec-first Browser 校准：`etc-tickets-flow` 在真实 Chromium 中覆盖未提交业务批次首屏、business-batches 首屏 GET 暂时失败后刷新恢复、ETC 发票明细、未提交 business batch delete 暂时失败后不误删且可重试、已提交 business batch reset/delete 暂时失败后不误删已提交行/不改计数且可重试、source file delete 暂时失败后不误删且可重试、ticket-root source upload 暂时失败后不伪上传且可重试、创建 OA 草稿、单次 `oa-draft` mutation、OA draft 暂时失败后不伪成功并可重试、OA 提交确认、单次 `manual-oa-status` mutation、manual status 暂时失败后不切已提交 bucket 并可重试、已提交 bucket、人工确认已提交状态和严格浏览器错误捕获；delete、source file delete、ticket-root upload、OA 草稿创建和人工确认成功后都会检查页面没有残留操作失败/同步失败/read model 失败等可见错误提示。该证据覆盖 `ETC-TICKET-E2E-001..006` 和本地 `NETWORK-RECOVERY` false-empty/delete/submitted reset/source file delete/source upload/OA draft/manual status mutation 子链路；大 ZIP、Workbench summary 和历史 migration 由组件/API/后端覆盖，真实 ZIP/对象存储/OA/worker drain 和其它 mutation 级失败恢复仍走 `infra-smoke` / staging gate。
 
-本轮新增 App Health Spec-first Browser 校准：`app-shell` 在真实 Chromium 中覆盖 admin shell/dashboard、read-export admin-only gate、forbidden session gate、expired session gate、dashboard protected API 零调用和严格浏览器错误捕获；expired session 的 `/api/session/me` 预期 401 resource error 作为认证 gate 例外，其它 console/page/request/dialog error 仍会失败。该证据覆盖 `APP-HEALTH-E2E-001..004`；App Status overview、runtime/readiness/worker/queue/ready、bounded polling 和 registry completeness 由组件/API/service/tool tests 覆盖，真实 PostgreSQL/RabbitMQ/Redis/systemd/Nginx/OA iframe/大库 metrics 仍走 `infra-smoke` / staging gate。
+本轮新增 App Health Spec-first Browser 校准：`app-shell` 在真实 Chromium 中覆盖 admin shell/dashboard、read-export admin-only gate、forbidden session gate、expired session gate、dashboard protected API 零调用和严格浏览器错误捕获；expired session 的 `/api/session/me` 预期 401 resource error 作为认证 gate 例外，其它 console/page/request/dialog error 仍会失败。该证据覆盖 `APP-HEALTH-E2E-001..004`；App Status overview、runtime/readiness/worker/queue/ready、bounded polling 和 registry completeness 由组件/API/service/tool tests 覆盖，真实 PostgreSQL/systemd/Nginx/OA iframe/大库 metrics 仍走 `infra-smoke` / staging gate。
 
 本轮新增权限与审计 shared Spec-first 校准：`permissions-role-matrix` 在真实 Chromium 中覆盖 `read_export_only` 全页面可读零 mutation、settings/tax/三类 import/no-OA 高风险入口禁用或隐藏、关联台列顺序拖拽 settings 保存入口、关联台现金处理行级菜单、银行分类确认、银行人工待分类、银行自动标签、pending invoices 选择已有发票/收入状态/规则保存、进项支付规则、进项 OA reverse、销项收款规则/收据历史、OA pending confirm/link-bank/支出流水无需开票规则、batch accounting submit 与 submitted bucket withdraw、turnover tag/closure/extra 入口、ETC submit/new/delete/source file 上传/确认对账/人工核对处理代表性写入口只读 gate、`full_access` 普通业务入口与 admin-only gate、`admin` 高风险入口和严格浏览器错误捕获，并扫描 read-export 首屏和 opener registry 已打开动态区域的 visible enabled 写控件，若保存/提交/确认导入/撤回/删除/关联/写回/拖动列等高风险动作仍可点会失败。进项 OA reverse 的 preview 是 read-like POST 例外，但 OA draft、batch 和 manual status durable write endpoint 仍断言零调用。该证据覆盖 `PERM-E2E-001..002`、`PERM-E2E-004..005`、`PERM-E2E-009`，并推进 `PERM-E2E-003`；API/audit/secret contract 由后端测试覆盖。`tests/test_permissions_write_entry_inventory.py` 已自动校验新增 page registry route 必须进入写入口 inventory 和 read-export role matrix、`covered-*` inventory row 必须引用 Browser E2E 证据、role matrix opener id 必须在 inventory 登记。`PERM-E2E-003` 仍为 partial，因为尚未由 role matrix 自动打开的所有页面特定抽屉/弹窗、真实 OA role sync、真实代理下载 header 和生产审计 smoke 不能写成本地 covered。
 
@@ -171,7 +171,7 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增销项收款列表 Browser 覆盖：fresh 首屏后依次验证 keyword search、发票号码排序、收款状态 enum 筛选、发票号码 text 筛选和 page-size 切换，每一步都断言 rows URL contract、可见行同步、零 mutation 和无浏览器错误。
 
-本轮新增销项收款 rows 临时失败恢复 Browser 覆盖：首屏 `/api/output-invoice-collections/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态，`筛选内容导出` 禁用；点击刷新后等待 rows 200/fresh，业务行、分页和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+本轮新增销项收款 rows 临时失败恢复 Browser 覆盖：首屏 `/api/output-invoice-collections/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态，`筛选内容导出` 禁用；点击刷新后等待 rows 200/fresh，业务行、分页和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain。
 
 本轮新增销项收款状态保存暂时失败恢复 Browser 覆盖：第一次 `PUT /api/output-invoice-collections/rows/{id}/collection-status` 返回 503 时，`状态/提醒` drawer 保持打开并显示“收款状态保存暂时失败，请重试。”，手动状态、状态备注和提醒备注草稿保持，`collection-reminder` endpoint 零调用，rows 不提前刷新且不伪装 `待冲红`；第二次保存成功后才刷新 rows 并清除失败文案。该证据覆盖本地 mutation 级 `NETWORK-RECOVERY` 的状态/提醒子链路，不替代 receipt create/void/reissue 暂时失败、真实 worker drain 或真实多用户 expectedVersion 冲突。
 
@@ -183,7 +183,7 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增进项发票使用 rows 和 relation detail 非 fresh Browser 覆盖：rows `read_model_status=refreshing/stale` 时显示刷新诊断，不显示普通空态、旧行或空表；relation detail `read_model_status=stale/refreshing` 时 drawer 显示“详情暂不可用”，不长期 loading、不展示旧明细、不泄露 stale reason；全程零 mutation 且无浏览器错误。
 
-本轮新增进项发票使用 rows 临时失败恢复 Browser 覆盖：首屏 `/api/input-invoice-usage/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态，`筛选内容导出` 禁用；点击刷新后等待 rows 200/fresh，业务行、分页和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
+本轮新增进项发票使用 rows 临时失败恢复 Browser 覆盖：首屏 `/api/input-invoice-usage/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态，`筛选内容导出` 禁用；点击刷新后等待 rows 200/fresh，业务行、分页和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain。
 
 本轮新增进项发票使用列表 Browser 覆盖：fresh rows 首屏锁定 `page_size=20`，filter-options 包含当前页外供应商证明筛选项不从当前页伪造，销方筛选、开票日期排序和 page-size 切换都断言 rows URL contract、可见行同步、零 mutation 和无浏览器错误。
 
@@ -210,7 +210,7 @@ cd web
 npm run e2e:smoke
 ```
 
-这类测试应优先覆盖用户可见业务流、导航、弹窗、下载、iframe、焦点、滚动、大表格、网络恢复和跨页面同步。真实 PostgreSQL/RabbitMQ/Redis/systemd worker/OA Mongo/对象存储不属于默认本地 mock e2e，应通过 staging、只读生产 smoke 或显式 runtime gate 补充。
+这类测试应优先覆盖用户可见业务流、导航、弹窗、下载、iframe、焦点、滚动、大表格、网络恢复和跨页面同步。真实 PostgreSQL durable queue/systemd worker/OA Mongo/对象存储不属于默认本地 mock e2e，应通过 staging、只读生产 smoke 或显式 runtime gate 补充。
 
 ## 文档变更检查
 

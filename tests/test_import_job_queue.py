@@ -295,7 +295,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
             self.assertTrue(app._import_job_processing_enabled())  # noqa: SLF001
 
         with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "inline"}):
-            with self.assertRaisesRegex(RuntimeError, "must be postgres or rabbitmq"):
+            with self.assertRaisesRegex(RuntimeError, "must be postgres"):
                 app._import_processing_backend()  # noqa: SLF001
 
     def test_invoice_relation_scope_helpers_split_input_and_output_file_months(self) -> None:
@@ -436,7 +436,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertIn("available_at = now()", normalized_sql)
         self.assertEqual(params, ("retry_pending", "transient", "job-1", "worker-1"))
 
-    def test_enqueue_process_requested_keeps_rabbitmq_envelope_small(self) -> None:
+    def test_enqueue_process_requested_keeps_queue_envelope_small(self) -> None:
         repository = ImportJobRepository(FakeConnection(FakeTransaction()))
         queue = FakeRuntimeQueue()
 
@@ -507,30 +507,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.retryable, [])
         self.assertEqual(repository.failed[0][4], "processor_failed")
 
-    def test_worker_check_exposes_import_job_handler_and_route(self) -> None:
-        stdout = StringIO()
-        with patch.dict(
-            os.environ,
-            {
-                "DATABASE_URL": "postgresql://fin_ops:secret@127.0.0.1:5432/fin_ops",
-                "FIN_OPS_QUEUE_BACKEND": "rabbitmq",
-                "RABBITMQ_URL": "amqp://rabbitmq.internal",
-            },
-            clear=True,
-        ), redirect_stdout(stdout):
-            exit_code = worker_app.main(["--check", "--enable-import-job-processing"])
-
-        self.assertEqual(exit_code, 0)
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(payload["worker_kind"], "import-job")
-        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
-        self.assertEqual(payload["handlers"], [IMPORT_PROCESS_REQUESTED_EVENT])
-        self.assertEqual(
-            payload["rabbitmq_event_routes"][IMPORT_PROCESS_REQUESTED_EVENT]["queue"],
-            "finops.import.process.requested",
-        )
-        self.assertNotIn("import.fact.changed", payload["rabbitmq_event_routes"])
-
     def test_worker_check_claims_only_import_process_requested_in_postgres_mode(self) -> None:
         stdout = StringIO()
         with patch.dict(
@@ -565,7 +541,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         import_jobs = FakeApplicationImportJobRepository()
         app._runtime_repositories = SimpleNamespace(  # noqa: SLF001
             queue_repository=queue,
-            queue_settings=SimpleNamespace(backend="rabbitmq"),
+            queue_settings=SimpleNamespace(backend="postgres"),
         )
         app._import_job_repository = import_jobs  # noqa: SLF001
         preview_body, preview_headers = build_multipart_payload(
@@ -580,7 +556,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         )
         session_id = json.loads(preview_response.body)["session"]["id"]
 
-        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "rabbitmq"}):
+        with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "postgres"}):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/tax-offset/certified-import/confirm",

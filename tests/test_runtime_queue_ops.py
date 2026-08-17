@@ -35,8 +35,8 @@ class FakeConnection:
                 "event_type": "workbench_relation.read_model.refresh",
                 "scope_type": "workbench_relation",
                 "scope_key": "all",
-                "publish_status": "failed",
-                "publish_last_error": "broker down",
+                "status": "failed",
+                "last_error": "processing failed",
             }
         ]
 
@@ -197,31 +197,6 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         payload = stdout.getvalue()
         self.assertIn('"updated_at": "2026-06-04 12:00:00+00:00"', payload)
 
-    def test_replay_unpublished_dry_run_lists_candidates_without_update(self) -> None:
-        connection = FakeConnection()
-
-        result = runtime_queue_ops._replay_unpublished(connection, limit=25, execute=False)
-
-        self.assertEqual(result["mode"], "dry-run")
-        self.assertEqual(result["candidate_count"], 1)
-        self.assertEqual(connection.execute_calls, [])
-        sql, params = connection.fetch_all_calls[0]
-        self.assertIn("publish_status in ('unpublished', 'failed')", " ".join(sql.lower().split()))
-        self.assertEqual(params, (25,))
-
-    def test_replay_unpublished_execute_resets_publish_state(self) -> None:
-        connection = FakeConnection()
-
-        result = runtime_queue_ops._replay_unpublished(connection, limit=10, execute=True)
-
-        self.assertEqual(result["mode"], "execute")
-        self.assertEqual(result["updated"], 1)
-        sql, params = connection.execute_calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("publish_status = 'unpublished'", normalized_sql)
-        self.assertIn("next_publish_at = now()", normalized_sql)
-        self.assertEqual(params, (["00000000-0000-0000-0000-000000000001"],))
-
     def test_prune_history_cli_defaults_to_dry_run_repository_boundary(self) -> None:
         connection = FakeConnection()
         repository = FakeRuntimeQueueRepository()
@@ -339,7 +314,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             event_types=["workbench_relation.read_model.refresh"],
-            reason="rabbitmq_stale_processing_repair",
+            reason="operator_stale_processing_repair",
             execute=False,
         )
 
@@ -374,7 +349,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             event_types=["workbench_relation.read_model.refresh"],
-            reason="rabbitmq_stale_processing_repair",
+            reason="operator_stale_processing_repair",
             execute=True,
         )
 
@@ -387,7 +362,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "stale_after_seconds": 300,
                     "limit": 25,
-                    "reason": "rabbitmq_stale_processing_repair",
+                    "reason": "operator_stale_processing_repair",
                     "event_types": ("workbench_relation.read_model.refresh",),
                 }
             ],
@@ -414,7 +389,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             event_types=["workbench_relation.read_model.refresh"],
-            reason="rabbitmq_stale_processing_superseded",
+            reason="operator_stale_processing_superseded",
             execute=False,
         )
 
@@ -450,7 +425,7 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             stale_after_seconds=300,
             limit=25,
             event_types=["workbench_relation.read_model.refresh"],
-            reason="rabbitmq_stale_processing_superseded",
+            reason="operator_stale_processing_superseded",
             execute=True,
         )
 
@@ -463,24 +438,11 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                 {
                     "stale_after_seconds": 300,
                     "limit": 25,
-                    "reason": "rabbitmq_stale_processing_superseded",
+                    "reason": "operator_stale_processing_superseded",
                     "event_types": ("workbench_relation.read_model.refresh",),
                 }
             ],
         )
-
-    def test_set_control_flag_writes_app_settings_control_key(self) -> None:
-        connection = FakeConnection()
-
-        result = runtime_queue_ops._set_control_flag(connection, component="dispatcher", paused=True)
-
-        self.assertEqual(result, {"settings_key": "runtime:rabbitmq_control", "dispatcher_paused": True})
-        sql, params = connection.execute_calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("insert into app.app_settings", normalized_sql)
-        self.assertIn("on conflict (settings_key) do update", normalized_sql)
-        self.assertEqual(params[0], "runtime:rabbitmq_control")
-        self.assertEqual(params[1], {"dispatcher_paused": True})
 
 
 if __name__ == "__main__":

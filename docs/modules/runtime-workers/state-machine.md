@@ -21,7 +21,7 @@ pending -> processing -> done
 ```
 
 - 通用 runtime event 以 `job.outbox_events` 为事实源；import 与 matching 使用各自 PostgreSQL durable queue/table。
-- RabbitMQ publish success 不等于 job done；consumer 必须回 PostgreSQL claim/complete。
+- Worker 直接在 PostgreSQL durable queue 上 claim/complete；不存在 broker publish/ack 的第二状态机。
 - stale processing 只能通过受控 queue ops 释放；不能伪造 done。
 - App 页面 GET 不 enqueue、不等待这些状态，也不从它们推导财务 payload。
 
@@ -35,4 +35,4 @@ pending -> processing -> done
 
 ## 发布与恢复
 
-Deploy 先停止/禁用 registry 外实例，再确认 4 个 required workers heartbeat、通用 outbox/领域队列、RabbitMQ/DLQ 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope；生效后不回滚到依赖旧 schema 的 release，只能向前修复。
+Deploy 先停止/禁用 registry 外实例和已知 RabbitMQ 遗留 unit/env，再确认 4 个 required workers heartbeat、通用 outbox/领域队列的 PostgreSQL backlog/dead-letter 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope；migration `0150_remove_rabbitmq_transport.sql` forward-only 删除 outbox 的 RabbitMQ 发布列、索引和约束。生效后不回滚到依赖旧 schema 的 release，只能向前修复。

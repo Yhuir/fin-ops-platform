@@ -4,7 +4,7 @@
 
 - `local-development.md`：本地依赖、启动和检查。
 - `codebase-development.md`：后端、前端、代码组织和新增功能开发流程。
-- `runtime-development.md`：PostgreSQL durable queue、read model freshness、worker、runtime bootstrap、Redis/RabbitMQ 和对象存储开发边界。
+- `runtime-development.md`：PostgreSQL durable queue、worker、runtime bootstrap、API Redis 和对象存储开发边界。
 - `testing.md`：测试和验证命令。
 - `nightly-ci.md`：nightly CI、统一验证入口和失败处理规则。
 - `spec-first-e2e-audit.md`：Browser e2e / Playwright 的 Spec-first 审计规则。

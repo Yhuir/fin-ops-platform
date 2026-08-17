@@ -84,16 +84,6 @@ migrate_legacy_worker_poll_interval() {
   fi
 }
 
-migrate_rabbitmq_worker_drain_interval() {
-  local target_file="$env_dir/fin-ops.rabbitmq-worker.env"
-  [ -f "$target_file" ] || return 0
-  if grep -q '^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=' "$target_file"; then
-    sed -i -E 's/^RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=.*/RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05/' "$target_file"
-  else
-    printf '\nRABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS=0.05\n' >> "$target_file"
-  fi
-}
-
 check_worker_registration() {
   local worker="$1"
   local check_args
@@ -142,7 +132,6 @@ fi
 install -d -m 0755 "$systemd_dir"
 install -d -m 0750 -o root -g fin-ops "$env_dir"
 install_if_changed "$worker_template" "$worker_unit" 0644 root:root
-migrate_rabbitmq_worker_drain_interval
 
 if [ -z "$required_workers" ]; then
   required_workers="$(runtime_worker_manifest --required-instances)"

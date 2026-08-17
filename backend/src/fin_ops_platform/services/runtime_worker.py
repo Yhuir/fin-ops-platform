@@ -78,12 +78,10 @@ class RuntimeWorker:
         queue_repository: Any,
         config: RuntimeWorkerConfig,
         handlers: dict[str, RuntimeEventHandler] | None = None,
-        redis_helper: Any | None = None,
     ) -> None:
         self._queue = queue_repository
         self._config = config
         self._handlers = dict(handlers or {})
-        self._redis_helper = redis_helper
         self._last_heartbeat_at: float | None = None
 
     def run_once(self) -> RuntimeWorkerResult:

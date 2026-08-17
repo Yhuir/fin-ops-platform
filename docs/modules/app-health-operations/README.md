@@ -46,9 +46,9 @@
 
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - App Status provider 对 `/api/app-health` 使用有界 polling，并在 focus/online 时立即刷新；旧 `/api/app-health/stream` SSE route 已删除。
-- `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、runtime outbox/read model/worker 指标。RabbitMQ 管理接口是可选 transport 观测，不是 read model freshness 事实源；dashboard 默认不阻塞等待 RabbitMQ management API，需显式设置 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 才读取实时队列管理指标。
+- `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、导入历史、请求性能、PostgreSQL runtime outbox 和 worker 指标；不访问 RabbitMQ management API。
 - `/api/operations/app-health/page-audit?page=<page_key>`：18 页统一 admin-only 只读 Audit。普通页面只执行 registry 选定的有限 proof owner；`page=app-health-operations` 是 system owner，在一个 outer `REPEATABLE READ READ ONLY` snapshot 内执行其余 17 页 proof、App Health dashboard database inventory 和 durable runtime/registry证明。该入口只输出 `pass/issues_found`，不刷新、不修复、不写业务数据。
-- System Audit 返回 `database_system_snapshot`、`runtime_observation`、`external_evidence`。数据库面绑定 snapshot id、system audit id、18 页 revision、read model manifest 和 worker registry fingerprint；进程内 request metrics/RabbitMQ 仅为 point-in-time observation。外部面只读取已审计登记的银行/OA/发票/ETC `complete_snapshot/all` manifest，在同一 outer snapshot 内对 canonical item set、关键字段 fingerprint 和 controls 做精确双向 equality。四域全部通过才返回 `proven_as_of_external_evidence`；缺失为 unknown，撤销/过期/不一致为 fail，内部通过不能覆盖外部结论。
+- System Audit 返回 `database_system_snapshot`、`runtime_observation`、`external_evidence`。数据库面绑定 snapshot id、system audit id、18 页 revision 和 worker registry fingerprint；进程内 request metrics 仅为 point-in-time observation。外部面只读取已审计登记的银行/OA/发票/ETC `complete_snapshot/all` manifest，在同一 outer snapshot 内对 canonical item set、关键字段 fingerprint 和 controls 做精确双向 equality。四域全部通过才返回 `proven_as_of_external_evidence`；缺失为 unknown，撤销/过期/不一致为 fail，内部通过不能覆盖外部结论。
 - 进项使用、销项收款和待找发票的旧 AppHealth refresh routes 已删除；调用返回 `404`，不得写 runtime queue。完整性证明只走统一只读 page audit。
 - `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；除 bounded `api_performance` 外还暴露 `http_runtime` active/peak/rejection counters 与 PostgreSQL pool stats，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading；popover 必须显示 read model、worker 和 queue 的整体摘要。
@@ -83,7 +83,7 @@
 | dirty scope/outbox backlog | domain busy/yellow；只统计当前有效记录，已被后续 `done` 或 `fresh` readiness 覆盖的旧 pending/failed 不再进入 backlog/同步中 | 用户看到真实后台刷新，而不是被历史队列噪声误导 |
 | runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 read model、worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 fresh/refreshing/failed、active/working/stale/missing、pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |
-| dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见；operations dashboard 默认只把 RabbitMQ queue metrics 标记 unknown，不让可选管理接口拖慢写后健康探针 |
+| dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/必要 API 依赖异常可见；Worker 不依赖 RabbitMQ/Redis |
 | dashboard 整体构建失败 | dashboard 保留上一份 payload 并显示 stale warning | 运维读侧不中断，但不能作为 fresh 事实 |
 | dashboard 局部指标失败 | 当前 payload 保留其它成功区块，失败区块显示 unknown/warning | inventory、导入历史等独立事实不得被旧缓存冻结 |
 

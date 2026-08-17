@@ -93,12 +93,12 @@ git status --short
 Runtime/ACL profile 的激活顺序固定为：
 
 1. 校验 candidate、active release、env/ACL、storage 和 migration plan；
-2. 进入 maintenance，停止 API、dispatcher 和当前 worker；
+2. 进入 maintenance，停止 API 和当前 worker；
 3. 执行 migration 与 schema check；
 4. 安装当前 worker helper/unit/env，退役 registry 外资产；
 5. 原子切换 `/opt/fin-ops/current`；
 6. 安装并 enable OA sync enqueue timer，但在发布门禁期间保持 stopped；
-7. 启动四个 worker、dispatcher（如启用）和 API；
+7. 启动四个 worker 和 API；
 8. 运行 T+0 与 T+30 release checkpoint；
 9. 写入 root-owned、脱敏且带 SHA-256 的 evidence，验证成功后再启动 OA sync enqueue timer。
 
@@ -112,7 +112,9 @@ schema。它不会删除主数据库或其它业务 schema。
 
 同一次激活还会精确删除旧 Workbench generation timer/service/helper 和已知旧 worker env，并 stop/disable
 未登记 worker。生产运行时只保留 canonical API reads、通用 outbox/attempt/heartbeat、OA sync、import、
-settings maintenance 与 Workbench matching。
+settings maintenance 与 Workbench matching。Migration `0150_remove_rabbitmq_transport.sql` 进一步删除 outbox 上的
+RabbitMQ publish 列、约束与索引；应用专属 dispatcher/topology unit 和 env 会被精确退役，共享服务器上的 broker
+软件不在本应用部署脚本的删除范围内。
 
 一旦 0149 已执行，不允许自动切回依赖旧 schema 的 previous release。后验证失败时保持 maintenance，使用
 当前 release 向前修复；这是避免旧代码重新污染链路的必要限制。
@@ -123,7 +125,7 @@ settings maintenance 与 Workbench matching。
 
 - `/health/ready` 成功且 response contract 完整；
 - worker exact-set、registration 与 heartbeat 正确；
-- PostgreSQL outbox、RabbitMQ publish/DLQ 没有恶化；
+- PostgreSQL outbox backlog/failed/dead-letter 没有恶化；
 - canonical page/system audit 通过；
 - 核心 GET 全部 2xx JSON，p95 <= 1000ms、p99 <= 2000ms；
 - 可逆临时数据库写成功并完成清理；
@@ -146,7 +148,7 @@ scripts/with-production-admin-token.sh \
 ```
 
 不要把 token 粘贴到命令、聊天或日志。生产验证至少保存 release/commit、时间窗、endpoint 样本、
-p50/p95/p99、canonical audit、health、worker、outbox/DLQ 和负向旧事件审计。
+p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 和负向旧事件审计。
 
 受控业务写 smoke 只接受固定 scenario、root-owned `0600` 输入、Admin Token 与 approval ticket；测试数据必须
 明确归工具所有，结束时恢复原状态。不得对任意真实业务记录做“试验性”写入。
@@ -186,7 +188,7 @@ p50/p95/p99、canonical audit、health、worker、outbox/DLQ 和负向旧事件�
 
 1. `systemctl status fin-ops.service` 与 `/health/ready`。
 2. 四个 required worker 的 systemd/heartbeat/registration。
-3. PostgreSQL outbox backlog、failed/dead-lettered 和 RabbitMQ DLQ。
+3. PostgreSQL outbox backlog、failed/dead-lettered。
 4. API request ID 对应的结构化 error/timing。
 5. canonical page/system audit 与 endpoint DB timing/query count。
 6. OA session、role sync 和 Nginx header/cookie forwarding。

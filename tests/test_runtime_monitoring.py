@@ -6,17 +6,6 @@ from unittest.mock import patch
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository, readiness_blockers
 
 
-class FakeRabbitMqMetrics:
-    def summary(self) -> dict[str, object]:
-        return {
-            "rabbitmq_management_configured": True,
-            "rabbitmq_queue_depth": 5,
-            "rabbitmq_unacked_messages": 1,
-            "rabbitmq_consumer_count": 2,
-            "rabbitmq_dlq_count": 0,
-        }
-
-
 class FakeConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
@@ -28,8 +17,6 @@ class FakeConnection:
             return {
                 "queue_backlog": {"pending": 3, "failed": 1},
                 "max_pending_age_seconds": 42.0,
-                "publish_status": {"unpublished": 4, "failed": 2},
-                "max_unpublished_age_seconds": 11.0,
                 "critical_failed_outbox_count": 1,
                 "pending_outbox_events_by_scope": [
                     {
@@ -49,9 +36,8 @@ class FakeConnection:
         if "from job.outbox_events" in normalized and "pending_count" in normalized:
             return {
                 "pending_count": 1,
-                "publishing_count": 0,
+                "processing_count": 0,
                 "failed_count": 0,
-                "publish_failed_count": 0,
                 "oldest_pending_age_seconds": 2.0,
             }
         raise AssertionError(sql)
@@ -112,7 +98,7 @@ def _worker(
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
     def test_ready_health_summary_uses_outbox_and_worker_contract_only(self) -> None:
         connection = FakeConnection()
-        repository = RuntimeMonitoringRepository(connection, rabbitmq_metrics_provider=FakeRabbitMqMetrics())
+        repository = RuntimeMonitoringRepository(connection)
 
         summary = repository.ready_health_summary(stale_after_seconds=300)
         executed_sql = "\n".join(sql for sql, _params in connection.calls).lower()
@@ -121,8 +107,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["failed_jobs"], 1)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
-        self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
-        self.assertEqual(summary["rabbitmq_queue_depth"], 5)
+        self.assertNotIn("rabbitmq_publish_status", summary)
+        self.assertNotIn("rabbitmq_queue_depth", summary)
         self.assertEqual(summary["critical_failed_outbox_count"], 1)
         self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "oa.sync")
         self.assertEqual(summary["missing_required_worker_count"], 0)
@@ -158,7 +144,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         )
 
     def test_ready_health_summary_scopes_required_workers_for_release_preflight(self) -> None:
-        repository = RuntimeMonitoringRepository(FakeConnection(), rabbitmq_metrics_provider=FakeRabbitMqMetrics())
+        repository = RuntimeMonitoringRepository(FakeConnection())
         expected_instances = {"import", "oa-sync"}
 
         with patch.object(repository, "dashboard_worker_metrics", return_value=[]) as worker_metrics:
@@ -175,8 +161,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
 
         self.assertEqual(metric["pending_count"], 1)
         self.assertIn("from job.outbox_events", sql)
-        self.assertIn("status in ('pending', 'failed', 'dead_lettered')", sql)
-        self.assertIn("publish_status in ('publishing', 'failed')", sql)
+        self.assertIn("status in ('pending', 'processing', 'failed', 'dead_lettered')", sql)
+        self.assertNotIn("publish_status", sql)
         self.assertNotIn("read_model", sql)
 
     def test_dashboard_workers_follow_the_four_registered_instances(self) -> None:

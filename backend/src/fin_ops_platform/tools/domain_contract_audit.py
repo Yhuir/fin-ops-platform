@@ -40,18 +40,14 @@ _CONTRACT_COLUMNS = {
     "background_jobs.raw_payload_object": "background_raw_payload_object",
     "outbox_events.attempts_nonnegative": "outbox_attempts_nonnegative",
     "outbox_events.attempt_count_mirror": "outbox_attempt_count_mirror",
-    "outbox_events.publish_attempt_count_nonnegative": "outbox_publish_attempt_count_nonnegative",
     "outbox_events.event_type_nonempty": "outbox_event_type_nonempty",
     "outbox_events.tenant_id_nonempty": "outbox_tenant_id_nonempty",
     "outbox_events.payload_object": "outbox_payload_object",
     "outbox_events.raw_payload_object": "outbox_raw_payload_object",
     "outbox_events.runtime_lock_pair": "outbox_runtime_lock_pair",
     "outbox_events.processing_lock_required": "outbox_processing_lock_required",
-    "outbox_events.publish_lock_pair": "outbox_publish_lock_pair",
-    "outbox_events.publishing_lock_required": "outbox_publishing_lock_required",
     "outbox_events.terminal_processed_at": "outbox_terminal_processed_at",
     "outbox_events.dead_letter_timestamp": "outbox_dead_letter_timestamp",
-    "outbox_events.published_timestamps": "outbox_published_timestamps",
 }
 
 
@@ -165,8 +161,6 @@ outbox_counts as (
             as outbox_attempts_nonnegative,
         count(*) filter (where attempt_count is distinct from attempts)::bigint
             as outbox_attempt_count_mirror,
-        count(*) filter (where publish_attempt_count < 0)::bigint
-            as outbox_publish_attempt_count_nonnegative,
         count(*) filter (where btrim(event_type) = '')::bigint
             as outbox_event_type_nonempty,
         count(*) filter (where btrim(tenant_id) = '')::bigint
@@ -183,24 +177,13 @@ outbox_counts as (
               and (locked_by is null or locked_at is null)
         )::bigint as outbox_processing_lock_required,
         count(*) filter (
-            where (publish_locked_by is null) <> (publish_locked_at is null)
-        )::bigint as outbox_publish_lock_pair,
-        count(*) filter (
-            where publish_status = 'publishing'
-              and (publish_locked_by is null or publish_locked_at is null)
-        )::bigint as outbox_publishing_lock_required,
-        count(*) filter (
             where status in ('done', 'failed', 'dead_lettered')
               and processed_at is null
         )::bigint as outbox_terminal_processed_at,
         count(*) filter (
             where status = 'dead_lettered'
               and dead_lettered_at is null
-        )::bigint as outbox_dead_letter_timestamp,
-        count(*) filter (
-            where publish_status = 'published'
-              and (published_at is null or publish_confirmed_at is null)
-        )::bigint as outbox_published_timestamps
+        )::bigint as outbox_dead_letter_timestamp
     from job.outbox_events
 )
 select *

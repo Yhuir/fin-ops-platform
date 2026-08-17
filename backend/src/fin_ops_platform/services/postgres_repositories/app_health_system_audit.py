@@ -343,7 +343,7 @@ def _worker_runtime_issues(runtime: dict[str, Any]) -> list[AuditIssue]:
 
 def _outbox_runtime_issues(runtime: dict[str, Any]) -> list[AuditIssue]:
     outbox = _dict(runtime.get("outbox"))
-    count_keys = ("pending_count", "publishing_count", "failed_count", "publish_failed_count")
+    count_keys = ("pending_count", "processing_count", "failed_count")
     status = str(outbox.get("status") or "").strip().lower()
     warning_code = str(outbox.get("warning_code") or "").strip()
     if status != "available" or warning_code or any(outbox.get(key) is None for key in count_keys):

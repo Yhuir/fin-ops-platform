@@ -31,13 +31,7 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "missing_required_worker_count": 0,
                 "stale_required_worker_count": 0,
                 "mismatched_required_worker_count": 0,
-                "rabbitmq_publish_status": {"unpublished": 1},
-                "rabbitmq_queue_depth": 5,
-                "rabbitmq_unacked_messages": 1,
-                "rabbitmq_consumer_count": 15,
-                "rabbitmq_dlq_count": 0,
-                "rabbitmq_publish_confirm_latency_ms": {"p50": 2.0, "p95": 9.0, "p99": 15.0},
-                "rabbitmq_publish_confirm_sample_limit": 512,
+                "critical_failed_outbox_count": 1,
                 "worker_metrics": [
                     {
                         "worker_instance": "workbench-matching",
@@ -71,8 +65,8 @@ class PrometheusMetricsTests(unittest.TestCase):
         self.assertIn('finops_runtime_release_consistent{release="main-test"} 1', rendered)
         self.assertIn('finops_outbox_events{status="pending"} 4', rendered)
         self.assertNotIn("finops_read_model", rendered)
-        self.assertIn('finops_rabbitmq_publish_confirm_latency_ms{quantile="0.95"} 9', rendered)
-        self.assertIn("finops_rabbitmq_publish_confirm_sample_limit 512", rendered)
+        self.assertIn("finops_critical_failed_outbox_count 1", rendered)
+        self.assertNotIn("finops_rabbitmq", rendered)
         self.assertIn(
             'finops_worker_heartbeat_lag_seconds{status="available",worker_instance="workbench-matching",worker_kind="workbench-matching"} 2.5',
             rendered,

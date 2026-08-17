@@ -7013,17 +7013,12 @@ class Application:
 
     def _import_processing_backend(self) -> str:
         explicit = str(os.getenv("FIN_OPS_IMPORT_PROCESSING_BACKEND") or "").strip().lower()
-        if explicit:
-            if explicit not in {"postgres", "rabbitmq"}:
-                raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be postgres or rabbitmq.")
-            return explicit
-        queue_settings = getattr(getattr(self, "_runtime_repositories", None), "queue_settings", None)
-        backend = str(getattr(queue_settings, "backend", "") or "").strip().lower()
-        return "rabbitmq" if backend == "rabbitmq" else "postgres"
+        if explicit and explicit != "postgres":
+            raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be postgres.")
+        return "postgres"
 
     def _import_job_processing_enabled(self) -> bool:
-        if self._import_processing_backend() not in {"postgres", "rabbitmq"}:
-            return False
+        self._import_processing_backend()
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         return callable(getattr(queue_repository, "enqueue", None))
 

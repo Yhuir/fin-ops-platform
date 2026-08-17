@@ -6,13 +6,11 @@ import unittest
 
 from fin_ops_platform.services.runtime_worker_registry import (
     RUNTIME_WORKER_REGISTRY,
-    rabbitmq_dispatch_event_types,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
-DISPATCHER_ENV = REPO_ROOT / "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example"
 WORKER_UNIT = REPO_ROOT / "deploy/oa/systemd/fin-ops-worker@.service.example"
 QUEUE_PRUNE = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 
@@ -29,24 +27,12 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             required,
             ["oa-sync", "workbench-matching", "import", "settings-maintenance"],
         )
-        self.assertFalse(
-            any(event_type.endswith(".read_model.refresh") for event_type in rabbitmq_dispatch_event_types())
-        )
-
-    def test_dispatcher_example_contains_only_registry_events(self) -> None:
-        values = {}
-        for raw_line in DISPATCHER_ENV.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, value = line.split("=", 1)
-                values[key] = value
-        configured = tuple(
-            item.strip()
-            for item in values["RABBITMQ_DISPATCH_EVENT_TYPES"].split(",")
-            if item.strip()
-        )
-
-        self.assertEqual(configured, rabbitmq_dispatch_event_types())
+        event_types = {
+            event_type
+            for registration in RUNTIME_WORKER_REGISTRY
+            for event_type in registration.event_types
+        }
+        self.assertFalse(any(event_type.endswith(".read_model.refresh") for event_type in event_types))
 
     def test_worker_unit_uses_registry_registration_contract(self) -> None:
         unit = WORKER_UNIT.read_text(encoding="utf-8")
@@ -54,6 +40,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--worker-instance ${FIN_OPS_WORKER_INSTANCE}", unit)
         self.assertNotIn("FIN_OPS_WORKER_EVENT_TYPES", unit)
         self.assertNotIn("FIN_OPS_WORKER_KIND", unit)
+        self.assertNotIn("RABBITMQ", unit)
 
     def test_activation_retires_unknown_workers_before_ensuring_current_workers(self) -> None:
         script = DEPLOY_CONTROL.read_text(encoding="utf-8")
@@ -80,6 +67,11 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         retired_paths = (
             "deploy/oa/env/fin-ops.worker.workbench-relation.env.example",
             "deploy/oa/env/fin-ops.worker.workbench-relation-rabbitmq.env.example",
+            "deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example",
+            "deploy/oa/env/fin-ops.rabbitmq-topology.env.example",
+            "deploy/oa/env/fin-ops.rabbitmq-worker.env.example",
+            "deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example",
+            "deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example",
             "deploy/oa/bin/finops-prune-workbench-generations.sh",
             "deploy/oa/systemd/finops-prune-workbench-generations.service.example",
             "deploy/oa/systemd/finops-prune-workbench-generations.timer.example",

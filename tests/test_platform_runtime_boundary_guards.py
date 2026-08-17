@@ -1184,10 +1184,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_real_redis_and_rabbitmq_clients_are_confined_to_platform_adapters(self) -> None:
+    def test_real_redis_client_is_confined_and_rabbitmq_client_is_absent(self) -> None:
         allowed_imports = {
             "redis": {"backend/src/fin_ops_platform/services/runtime_redis.py"},
-            "pika": {"backend/src/fin_ops_platform/services/rabbitmq_runtime.py"},
+            "pika": set(),
         }
         violations: list[str] = []
         for path in _python_files(APP_ROOT, SERVICES_ROOT):
@@ -4990,7 +4990,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "worker.py": worker_source,
             "runtime_worker_registry.py": registry_source,
             "file_object_migration.py": file_migration_source,
-            "fin-ops.rabbitmq-dispatcher.env.example": (deploy_env_dir / "fin-ops.rabbitmq-dispatcher.env.example").read_text(encoding="utf-8"),
             "fin-ops.secrets.env.example": (deploy_env_dir / "fin-ops.secrets.env.example").read_text(encoding="utf-8"),
         }
         for name, source in production_sources.items():
@@ -5881,7 +5880,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         allowed_app_sql_files = {
             "backend/src/fin_ops_platform/app/bank_account_balance_backfill.py",
             "backend/src/fin_ops_platform/app/bank_detail_backfill.py",
-            "backend/src/fin_ops_platform/app/rabbitmq_dispatcher.py",
             "backend/src/fin_ops_platform/app/worker.py",
         }
         violations: list[str] = []

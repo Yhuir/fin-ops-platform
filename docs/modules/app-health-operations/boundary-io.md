@@ -4,7 +4,7 @@
 
 ## 职责
 
-- 聚合 session、OA sync、background jobs、四个 required worker、通用 outbox、RabbitMQ 和依赖状态。
+- 聚合 session、OA sync、background jobs、四个 required worker、PostgreSQL 通用 outbox 和依赖状态。
 - 展示 HTTP/DB request timing、import inventory、operation audit。
 - 编排只读 canonical page/system audit。
 - Admin-only；不直接修改 business facts。
@@ -15,7 +15,7 @@
 | --- | --- |
 | Health/dependency state | app health services |
 | Worker registry/heartbeat | runtime worker registry/repository |
-| Queue/RabbitMQ metrics | runtime monitoring repository |
+| PostgreSQL queue metrics | runtime monitoring repository |
 | API/DB timing | request metrics collector |
 | Canonical audit | page audit repositories，一个 caller-owned read-only snapshot |
 
@@ -26,14 +26,14 @@
 - `/api/operations/app-health/page-audit`：page/system integrity proof 与 bounded issue samples。
 - `/health`、`/health/ready`、`/metrics`：liveness/readiness/Prometheus。
 
-输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 显示通用 event types；RabbitMQ metrics
-不可用时只降级 transport block，不能伪造 queue healthy。
+输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 只显示 PostgreSQL 通用 event types，
+缺少必要字段时必须标记 unavailable，不能伪造 queue healthy。
 
 ## 禁止边界
 
 - 不 enqueue 修复，不写业务表，不清 queue/DLQ，不伪造 heartbeat。
 - 不把 dashboard/Audit 作为业务页面事实来源。
-- 不在 `/health/ready` 热路径执行无界 SQL或 RabbitMQ management 重查询。
+- 不在 `/health/ready` 热路径执行无界 SQL 或外部管理接口查询。
 
 ## 验证
 

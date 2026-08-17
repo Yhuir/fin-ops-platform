@@ -16,8 +16,6 @@ from fin_ops_platform.services.operations_dashboard import OperationsDashboardSe
 from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 from fin_ops_platform.tools import (
     health_ready_payload_probe,
     http_slo_probe,
@@ -34,18 +32,11 @@ STANDALONE_WRITE_E2E_REQUIRED_ARGS = ("--scenario", "--apply", "--approval-ticke
 RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "queue_backlog",
     "failed_jobs",
-    "rabbitmq_unpublished_backlog",
-    "rabbitmq_publishing_backlog",
-    "rabbitmq_publish_failed_backlog",
     "missing_required_worker_count",
     "stale_required_worker_count",
     "mismatched_required_worker_count",
     "worker_metrics",
-    "rabbitmq_management_configured",
-    "rabbitmq_queue_depth",
-    "rabbitmq_unacked_messages",
-    "rabbitmq_dlq_count",
-    "rabbitmq_queues",
+    "critical_failed_outbox_count",
 )
 CANDIDATE_AUDIT_BOOTSTRAP_ERRORS = frozenset(
     {
@@ -251,7 +242,7 @@ def run_closure_gate(
             )
         )
     # The canonical snapshot is the final proof after every queue-producing probe
-    # and terminal publish reconciliation has converged.
+    # and durable queue convergence check has completed.
     checks.append(
         _page_canonical_audit_check(
             connection,
@@ -295,17 +286,8 @@ def _runtime_health_check(
 ) -> ClosureCheck:
     deadline = monotonic() + max(0.0, timeout_seconds)
     monitoring_repository = RuntimeMonitoringRepository(connection)
-    queue_repository = RuntimeQueueRepository(connection)
-    reconciled_completed_publish_states = 0
-    clean_samples_after_reconciliation = 0
     while True:
         try:
-            reconciled = queue_repository.reconcile_completed_publish_states()
-            reconciled_completed_publish_states += reconciled
-            if reconciled > 0:
-                clean_samples_after_reconciliation = 0
-            elif reconciled_completed_publish_states > 0:
-                clean_samples_after_reconciliation += 1
             summary = (
                 monitoring_repository.ready_health_summary()
                 if required_worker_instances is None
@@ -317,7 +299,7 @@ def _runtime_health_check(
             return ClosureCheck(
                 name,
                 FAIL,
-                "runtime queue reconciliation or monitoring health summary unavailable.",
+                "Runtime queue or worker monitoring health summary unavailable.",
                 {"error": str(exc) or exc.__class__.__name__},
             )
         missing_fields = [key for key in RUNTIME_HEALTH_REQUIRED_FIELDS if key not in summary]
@@ -343,31 +325,14 @@ def _runtime_health_check(
             summary,
             allow_required_worker_contract_mismatch=required_worker_instances is not None,
         )
-        reconciliation_stable = (
-            reconciled_completed_publish_states == 0
-            or clean_samples_after_reconciliation > 0
-        )
         timed_out = monotonic() >= deadline
-        if not blockers and not reconciliation_stable and not timed_out:
-            sleep(min(max(0.05, poll_interval_seconds), max(0.0, deadline - monotonic())))
-            continue
-        if not blockers and not reconciliation_stable:
-            blockers = {
-                "terminal_publish_reconciliation_not_stable": {
-                    "reconciled_count": reconciled_completed_publish_states,
-                    "clean_samples_after_reconciliation": clean_samples_after_reconciliation,
-                }
-            }
         if not blockers or timed_out:
             return ClosureCheck(
                 name,
                 PASS if not blockers else FAIL,
-                "Runtime queue, worker and RabbitMQ blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
+                "Runtime queue and worker blockers are clear." if not blockers else "Runtime health did not converge before the gate deadline.",
                 {
                     "blockers": blockers,
-                    "reconciled_completed_publish_states": reconciled_completed_publish_states,
-                    "clean_samples_after_reconciliation": clean_samples_after_reconciliation,
-                    "terminal_publish_reconciliation_stable": reconciliation_stable,
                     "required_worker_contract": (
                         "active_release_compatible"
                         if required_worker_instances is not None
@@ -378,17 +343,11 @@ def _runtime_health_check(
                         for key in (
                             "queue_backlog",
                             "failed_jobs",
-                            "rabbitmq_unpublished_backlog",
-                            "rabbitmq_publishing_backlog",
-                            "rabbitmq_publish_failed_backlog",
                             "max_pending_age_seconds",
                             "missing_required_worker_count",
                             "stale_required_worker_count",
                             "mismatched_required_worker_count",
-                            "rabbitmq_queue_depth",
-                            "rabbitmq_unacked_messages",
-                            "rabbitmq_dlq_count",
-                            "rabbitmq_queues",
+                            "critical_failed_outbox_count",
                         )
                         if key in summary
                     },
@@ -753,10 +712,6 @@ def _runtime_blockers(
     allow_required_worker_contract_mismatch: bool = False,
 ) -> dict[str, Any]:
     blockers: dict[str, Any] = {}
-    if summary.get("rabbitmq_management_configured") is not True:
-        blockers["rabbitmq_management_configured"] = summary.get("rabbitmq_management_configured")
-    if summary.get("rabbitmq_metric_error"):
-        blockers["rabbitmq_metric_error"] = summary.get("rabbitmq_metric_error")
     for key in ("missing_required_worker_count", "stale_required_worker_count"):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
@@ -768,37 +723,14 @@ def _runtime_blockers(
             "mismatched_required_worker_count"
         )
     for key in (
-        "rabbitmq_queue_depth",
-        "rabbitmq_unacked_messages",
-        "rabbitmq_dlq_count",
-        "rabbitmq_unpublished_backlog",
-        "rabbitmq_publishing_backlog",
-        "rabbitmq_publish_failed_backlog",
         "failed_jobs",
+        "critical_failed_outbox_count",
     ):
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
     queue_backlog = summary.get("queue_backlog")
     if isinstance(queue_backlog, dict) and any(int(value or 0) > 0 for value in queue_backlog.values()):
         blockers["queue_backlog"] = queue_backlog
-    rabbitmq_queues = summary.get("rabbitmq_queues")
-    if isinstance(rabbitmq_queues, Mapping):
-        expected_event_types = rabbitmq_dispatch_event_types()
-        missing_metrics = [
-            event_type
-            for event_type in expected_event_types
-            if not isinstance(rabbitmq_queues.get(event_type), Mapping)
-        ]
-        without_consumers = [
-            event_type
-            for event_type in expected_event_types
-            if isinstance(rabbitmq_queues.get(event_type), Mapping)
-            and _safe_int(rabbitmq_queues[event_type].get("consumers")) <= 0
-        ]
-        if missing_metrics:
-            blockers["rabbitmq_queue_metrics_missing"] = missing_metrics
-        if without_consumers:
-            blockers["rabbitmq_queues_without_consumers"] = without_consumers
     return blockers
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any, Callable
 
@@ -299,7 +298,7 @@ class OperationsDashboardService:
     def _runtime_performance(self, warnings: list[str]) -> dict[str, Any]:
         return {
             "outbox": self._safe_metric("outbox_metrics_unavailable", warnings, self._runtime_repository.dashboard_outbox_metric),
-            "queues": self._runtime_rows("rabbitmq_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
+            "queues": self._runtime_rows("queue_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
             "workers": self._runtime_rows("worker_metrics_unavailable", warnings, self._runtime_repository.dashboard_worker_metrics),
         }
 
@@ -317,9 +316,8 @@ class OperationsDashboardService:
             warnings.append(warning_code)
             return {
                 "pending_count": None,
-                "publishing_count": None,
+                "processing_count": None,
                 "failed_count": None,
-                "publish_failed_count": None,
                 "oldest_pending_age_seconds": None,
                 "status": "unknown",
                 "warning_code": warning_code,
@@ -391,20 +389,7 @@ def _endpoint_sort_key(row: dict[str, Any]) -> tuple[int, float | str]:
 
 
 def _default_runtime_repository(connection: Any) -> RuntimeMonitoringRepository:
-    if os.getenv("FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS", "").strip().lower() in {"1", "true", "yes", "on"}:
-        return RuntimeMonitoringRepository(connection)
-    return RuntimeMonitoringRepository(
-        connection,
-        rabbitmq_metrics_provider=_DashboardRabbitMqMetricsUnavailable(),
-    )
-
-
-class _DashboardRabbitMqMetricsUnavailable:
-    def summary(self) -> dict[str, Any]:
-        return {
-            "rabbitmq_management_configured": False,
-            "rabbitmq_metric_error": "dashboard_rabbitmq_metrics_skipped",
-        }
+    return RuntimeMonitoringRepository(connection)
 
 
 def _inventory_block(
