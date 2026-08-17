@@ -157,6 +157,7 @@ type CostBrowserProjectRow = {
   amount: string;
   counterparty_name: string;
   payment_account_label: string;
+  oa_applicant?: string;
 };
 
 const importSessionIds: Record<ImportScenario, string> = {
@@ -4859,6 +4860,7 @@ function costTimeRows(
         amount: row.amount,
         counterparty_name: row.counterparty_name,
         payment_account_label: row.payment_account_label,
+        oa_applicant: row.oa_applicant ?? "浏览器成本申请人",
         remark: "浏览器成本统计明细",
       })),
     )
@@ -9087,9 +9089,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, {
         version: 1,
         bank_auto_tag_rules_version: 8,
-        default_selection_applied: true,
-        selected_tag_codes: ["fee", "__uncategorized__"],
-        effective_selected_tag_codes: ["fee", "__uncategorized__"],
+        display_name: "",
+        default_selection_applied: false,
+        selected_tag_codes: [],
+        effective_selected_tag_codes: [],
         inactive_selected_tag_codes: [],
         active_tags: [
           {

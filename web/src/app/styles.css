@@ -19645,6 +19645,18 @@ body.column-layout-dragging {
   justify-content: flex-end;
 }
 
+.cost-view-scope-heading .business-period-picker--segmented {
+  flex: 0 0 auto;
+}
+
+.cost-view-scope-heading .business-period-picker--segmented .business-period-trigger {
+  min-width: 154px;
+}
+
+.cost-view-scope-heading .cost-view-search-form {
+  flex: 1 1 280px;
+}
+
 .cost-table-section > .cost-view-scope-heading {
   border: 0;
   border-bottom: 1px solid var(--fp-border-subtle);
@@ -20390,6 +20402,23 @@ body.column-layout-dragging {
   .cost-analysis-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .cost-view-scope-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .cost-view-scope-heading .cost-section-heading-actions {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .cost-view-scope-heading .cost-view-search-form {
+    width: 100%;
+    flex-basis: 100%;
   }
 
   .cost-page-header-main,

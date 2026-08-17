@@ -203,7 +203,11 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
     expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*justify-content:\s*flex-end/s);
-    expect(css).toMatch(/\.cost-view-scope-heading\s*{[^}]*flex-wrap:\s*nowrap[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.cost-view-scope-heading\s*{[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.cost-view-scope-heading \.business-period-picker--segmented\s*{[^}]*flex:\s*0 0 auto/s);
+    expect(css).toMatch(/\.cost-view-scope-heading \.business-period-picker--segmented \.business-period-trigger\s*{[^}]*min-width:\s*154px/s);
+    expect(css).toMatch(/@media \(max-width:\s*1024px\)\s*{[\s\S]*?\.cost-view-scope-heading\s*{[^}]*flex-wrap:\s*wrap/s);
+    expect(css).toMatch(/@media \(max-width:\s*1024px\)\s*{[\s\S]*?\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*width:\s*100%[^}]*flex-wrap:\s*wrap/s);
     expect(css).toMatch(/\.cost-table-section > \.cost-table-shell\s*{[^}]*border:\s*0[^}]*border-radius:\s*0/s);
     expect(css).not.toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
     expect(pageSource).toContain("lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]");

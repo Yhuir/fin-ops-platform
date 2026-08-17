@@ -11,7 +11,7 @@
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
 | OA 归一化 | `tests/test_mongo_oa_adapter.py` | 支付申请精确读取可配置 `category`、日常报销明细精确读取 `purposeType`、表单字段互不覆盖、空/未知值不伪造“其他” |
 | Settings | `tests/test_app_settings_service.py` | 无 OA 项目名/标签默认空、选择标签必须命名、schema v3 迁移、CAS、候选校验、标签归档不静默改写选择 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` | 首次加载、五视图、`按费用类型`、成本明细、行级详情类型、OA 原额/比例/差额、无 OA 抽屉编辑校验/空候选/保存、局部 loading/error/retry、范围切换、搜索、自动分页和导出 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 首次加载、五视图、`按费用类型`、成本明细、行级详情类型、OA 原额/比例/差额、无 OA 抽屉编辑校验/空候选/保存、局部 loading/error/retry、范围切换、搜索、自动分页、导出，以及范围选择器在桌面和窄内容区不压缩、不截断、不横向溢出 |
 
 ## 候选发布门禁
 
