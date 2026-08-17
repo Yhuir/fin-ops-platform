@@ -17,7 +17,7 @@
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical accounts、casefold/overlap、005/full/read/denied、permission-present 006、no-op/version、严格三角色与补偿 |
+| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical accounts、casefold/overlap、005/full/read/denied、permission-present 006、no-op/version、严格三角色与补偿；成本统计无 OA 设置默认空、命名校验、schema v3、CAS 与标签归档保留 |
 | 2. Service/repository | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`：ACL critical section、generic-preserve-ACL、durable audit、commit recovery、OA target/compensation |
 | 3. API contract | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_job.py`：direct URL/API 403、generic 400、dedicated admin-only、409/502/503 shape |
 | 4. Read model/cache/worker | 适用（负向/共享） | 唯一 inventory owner `tests/test_permissions_write_entry_inventory.py` + `tests/test_settings_data_reset_job.py`：每次 evaluator 一次 provider、generic save 零 OA、ACL no-op 早于 OA/commit、零 cache/outbox/dirty/read-model path，并锁定现有两个 read models/六个 workers |
@@ -28,6 +28,7 @@
 ## 必须保留的负向断言
 
 - `/api/workbench/settings` 不能写 `bank_transaction_tags`；银行自动标签只归银行明细 API。
+- Settings owner 不得自行推断无 OA 流水；成本统计 route 必须传入 canonical 实际候选。自动标签归档不得静默删除成本统计的历史选择。
 - pending invoice rule 保存不能恢复 `pending_invoice_rules_changed` 页面 fan-out。
 - settings service/route 不直接 SQL 写 dirty scope/outbox，不调用 Workbench page builder。
 - reset job payload、audit、日志和 error 不包含密码。

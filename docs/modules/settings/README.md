@@ -47,6 +47,7 @@
 - 写入合同：专用 PUT 使用独立 `access_control_version` / `expected_version`、PostgreSQL CAS 和同事务 durable audit；semantic no-op 零 PostgreSQL/audit/OA I/O。真实变化严格投影三个专用 OA 角色，OA target、PostgreSQL commit 和补偿按明确的 502/503 状态收敛。
 - 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 附件发票 promotion 模式、OA 发票抵扣申请人。
 - 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
+- 成本统计无 OA 范围：`cost_statistics_tag_selection` 只保存用户命名的虚拟项目和选中标签 code，schema v3 默认两者为空；候选资格和逐笔无 OA 判定由成本统计 owner 从 canonical 银行/OA 关系计算。自动标签归档不得静默删除已保存选择。
 - OA 申请人凭据：独立凭据事实源，只允许 admin 维护，普通 settings payload 不能包含密码、密文或 token。
 - 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、
   保留必要事实、记录 job progress，并确保 canonical 页面下一次 GET 读取重置后的事实。

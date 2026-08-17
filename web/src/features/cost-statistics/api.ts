@@ -141,6 +141,8 @@ type ApiCostBankTransactionDetail = {
     bank_tag_primary_label?: string | null;
     bank_tag_sub_label?: string | null;
     bank_tag_label_path?: string[] | null;
+    project_name?: string | null;
+    expense_type?: string | null;
   };
 };
 
@@ -161,20 +163,29 @@ type ApiCostAllocationDetail = {
     counterparty_name: string;
     payment_account_label: string;
     oa_applicant: string;
+    oa_original_amount: string;
+    oa_allocation_weight: string;
+    bank_event_amount: string;
   };
   payment_evidence: Array<{
     transaction_id: string;
     trade_time: string;
     amount: string;
+    direction: string;
     counterparty_name: string;
     payment_account_label: string;
     remark: string;
+    bank_tag_code: string;
+    bank_tag_label: string;
   }>;
   reconciliation: {
     relation_case_id: string;
     oa_allocation_total: string;
     bank_outflow_total: string;
+    paid_wrong_refund_total: string;
+    net_cash_cost: string;
     difference: string;
+    cash_payment_ratio: string;
     status: "balanced" | "mismatch";
   };
 };
@@ -205,6 +216,7 @@ type ApiCostStatisticsTagRuleTag = {
 type ApiCostStatisticsTagRules = {
   version: number;
   bank_auto_tag_rules_version: number;
+  display_name?: string | null;
   default_selection_applied?: boolean | null;
   selected_tag_codes?: string[] | null;
   effective_selected_tag_codes?: string[] | null;
@@ -300,6 +312,7 @@ function mapTagRules(payload: ApiCostStatisticsTagRules): CostStatisticsTagRules
   return {
     version: Number(payload.version || 1),
     bankAutoTagRulesVersion: Number(payload.bank_auto_tag_rules_version || 1),
+    displayName: optionalString(payload.display_name) ?? "",
     defaultSelectionApplied: Boolean(payload.default_selection_applied),
     selectedTagCodes: stringList(payload.selected_tag_codes) ?? [],
     effectiveSelectedTagCodes: stringList(payload.effective_selected_tag_codes) ?? stringList(payload.selected_tag_codes) ?? [],
@@ -433,6 +446,7 @@ export async function saveCostStatisticsTagRules(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       expected_version: request.expectedVersion,
+      display_name: request.displayName,
       selected_tag_codes: request.selectedTagCodes,
     }),
   });
@@ -474,6 +488,8 @@ export async function fetchCostEntryDetail(
         counterpartyName: payload.bank_transaction.counterparty_name,
         paymentAccountLabel: payload.bank_transaction.payment_account_label,
         remark: payload.bank_transaction.remark,
+        projectName: optionalString(payload.bank_transaction.project_name),
+        expenseType: optionalString(payload.bank_transaction.expense_type),
         ...bankTagFields(payload.bank_transaction),
       },
     };
@@ -496,20 +512,29 @@ export async function fetchCostEntryDetail(
       counterpartyName: allocation.counterparty_name,
       paymentAccountLabel: allocation.payment_account_label,
       oaApplicant: allocation.oa_applicant,
+      oaOriginalAmount: allocation.oa_original_amount,
+      oaAllocationWeight: allocation.oa_allocation_weight,
+      bankEventAmount: allocation.bank_event_amount,
     },
     paymentEvidence: payload.payment_evidence.map((item) => ({
       transactionId: item.transaction_id,
       tradeTime: item.trade_time,
       amount: item.amount,
+      direction: item.direction,
       counterpartyName: item.counterparty_name,
       paymentAccountLabel: item.payment_account_label,
       remark: item.remark,
+      bankTagCode: item.bank_tag_code,
+      bankTagLabel: item.bank_tag_label,
     })),
     reconciliation: {
       relationCaseId: payload.reconciliation.relation_case_id,
       oaAllocationTotal: payload.reconciliation.oa_allocation_total,
       bankOutflowTotal: payload.reconciliation.bank_outflow_total,
+      paidWrongRefundTotal: payload.reconciliation.paid_wrong_refund_total,
+      netCashCost: payload.reconciliation.net_cash_cost,
       difference: payload.reconciliation.difference,
+      cashPaymentRatio: payload.reconciliation.cash_payment_ratio,
       status: payload.reconciliation.status,
     },
   };

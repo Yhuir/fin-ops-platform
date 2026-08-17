@@ -149,9 +149,15 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail["kind"], "oa_allocation")
         self.assertEqual(detail["allocation"]["project_name"], "云南溯源科技")
         self.assertEqual(detail["allocation"]["amount"], "1250.00")
+        self.assertEqual(detail["allocation"]["oa_original_amount"], "1250.00")
+        self.assertEqual(detail["allocation"]["oa_allocation_weight"], "100.00%")
+        self.assertEqual(detail["allocation"]["bank_event_amount"], "1250.00")
         self.assertEqual(detail["allocation"]["oa_applicant"], "刘际涛")
         self.assertEqual(detail["payment_evidence"][0]["transaction_id"], self.bank_id)
+        self.assertEqual(detail["payment_evidence"][0]["direction"], "支出")
         self.assertEqual(detail["reconciliation"]["relation_case_id"], "CASE-COST-DIRECT-001")
+        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1250.00")
+        self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
 
     def test_transaction_detail_loads_only_the_requested_scope(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
@@ -193,11 +199,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             f"/api/cost-statistics/bank-transactions/{self.bank_id}"
             "?scope=2026-03&view=project&project_scope=all"
         )
-        self.assertEqual(status, 400)
-        self.assertEqual(
-            payload["error"],
-            "invalid_cost_statistics_bank_transaction_request",
-        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["kind"], "bank_transaction")
 
     def test_duplicate_oa_allocation_across_active_relations_returns_conflict(
         self,
@@ -244,8 +247,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             "/api/cost-statistics/explorer?scope=2026-03&view=time"
         )
         self.assertEqual(time_status, 200)
-        self.assertEqual(time_payload["row_count"], 1)
-        self.assertEqual(time_payload["rows"][0]["transaction_id"], self.bank_id)
+        self.assertEqual(time_payload["row_count"], 0)
+        self.assertEqual(time_payload["rows"], [])
 
     def test_daily_reimbursement_items_drive_views_detail_and_export(self) -> None:
         daily_oa = replace(
@@ -365,8 +368,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             "/api/cost-statistics/explorer?scope=2026-03&view=time"
         )
         self.assertEqual(time_status, 200)
-        self.assertEqual(time_payload["row_count"], 1)
-        self.assertEqual(time_payload["rows"][0]["transaction_id"], self.bank_id)
+        self.assertEqual(time_payload["row_count"], 0)
+        self.assertEqual(time_payload["rows"], [])
 
     def test_export_preview_and_workbook_use_canonical_snapshot(self) -> None:
         status, preview = self._json(
@@ -390,8 +393,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             response.headers["Content-Type"],
         )
         workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
-        self.assertIn("OA成本归集明细", workbook.sheetnames)
-        detail_sheet = workbook["OA成本归集明细"]
+        self.assertIn("成本明细", workbook.sheetnames)
+        detail_sheet = workbook["成本明细"]
         self.assertEqual(detail_sheet["D1"].value, "申请/报销人")
         self.assertEqual(detail_sheet["D2"].value, "刘际涛")
 
@@ -490,6 +493,74 @@ class CostStatisticsApiTests(unittest.TestCase):
                 status, payload = self._json(path)
                 self.assertEqual(status, 400)
                 self.assertEqual(payload["error"], error_code)
+
+    def test_no_oa_scope_defaults_empty_and_includes_only_unpaired_rows_after_save(self) -> None:
+        preview = self.app._import_service.preview_import(  # noqa: SLF001
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="cost-statistics-no-oa.json",
+            imported_by="cost-statistics-test",
+            rows=[
+                {
+                    "account_no": "62228888",
+                    "txn_date": "2026-03-11",
+                    "trade_time": "2026-03-11 08:00:00",
+                    "counterparty_name": "银行",
+                    "debit_amount": "8.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "COST-NO-OA-001",
+                    "summary": "手续费",
+                    "remark": "手续费",
+                }
+            ],
+        )
+        self.app._import_service.confirm_import(preview.id)  # noqa: SLF001
+        unpaired_bank_id = self.app._import_service.list_transactions()[-1].id  # noqa: SLF001
+
+        status, rules = self._json("/api/cost-statistics/tag-rules")
+        self.assertEqual(status, 200)
+        self.assertEqual(rules["display_name"], "")
+        self.assertEqual(rules["selected_tag_codes"], [])
+        self.assertEqual(len(rules["active_tags"]), 1)
+        candidate_code = rules["active_tags"][0]["code"]
+        self.assertEqual(rules["active_tags"][0]["label"], "手续费")
+
+        response = self.app.handle_request(
+            "PUT",
+            "/api/cost-statistics/tag-rules",
+            body=json.dumps(
+                {
+                    "expected_version": rules["version"],
+                    "display_name": "云南溯源无 OA 分类",
+                    "selected_tag_codes": [candidate_code],
+                },
+                ensure_ascii=False,
+            ),
+        )
+        self.assertEqual(response.status_code, 200)
+        saved = json.loads(response.body)
+        self.assertEqual(saved["display_name"], "云南溯源无 OA 分类")
+
+        status, project = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_scope=all&project_name=云南溯源无%20OA%20分类"
+            "&expense_type=无%20OA%20分类"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(project["row_count"], 1)
+        self.assertEqual(project["rows"][0]["transaction_id"], unpaired_bank_id)
+        self.assertEqual(project["rows"][0]["row_kind"], "bank_transaction")
+        self.assertEqual(project["rows"][0]["amount"], "8.00")
+        self.assertEqual(project["summary"]["total_amount"], "1258.00")
+
+        status, time_page = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=all"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {row["transaction_id"] for row in time_page["rows"]},
+            {self.bank_id, unpaired_bank_id},
+        )
+        self.assertEqual(time_page["summary"]["total_amount"], "1258.00")
 
     def test_local_direct_read_stays_within_regression_budget(self) -> None:
         samples: list[float] = []

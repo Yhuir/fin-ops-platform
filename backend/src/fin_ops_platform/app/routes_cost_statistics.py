@@ -136,11 +136,19 @@ class CostStatisticsApiRoutes:
         if error is not None:
             return error
         service = self._settings_service()
-        return self._json_response(
-            HTTPStatus.OK,
+        try:
+            candidates = self._query_service.get_no_oa_tag_candidates()
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
+            return self._integrity_error_response(exc)
+        payload = _merge_no_oa_tag_candidates(
             service.get_cost_statistics_tag_selection_payload(
                 can_save=bool(session is None or session.can_mutate_data),
             ),
+            candidates,
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            payload,
         )
 
     def handle_update_tag_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
@@ -152,10 +160,26 @@ class CostStatisticsApiRoutes:
             return body_error
         service = self._settings_service()
         try:
+            current = service.get_cost_statistics_tag_selection_payload(can_save=True)
+            candidates = self._query_service.get_no_oa_tag_candidates()
+            allowed_tag_codes = {
+                str(tag.get("code") or "").strip()
+                for tag in candidates
+                if str(tag.get("code") or "").strip()
+            }
+            allowed_tag_codes.update(
+                str(code).strip()
+                for code in list(current.get("selected_tag_codes") or [])
+                if str(code).strip()
+            )
             result = service.update_cost_statistics_tag_selection(
                 payload,
                 actor_id=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
+                allowed_tag_codes=allowed_tag_codes,
             )
+            result = _merge_no_oa_tag_candidates(result, candidates)
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
+            return self._integrity_error_response(exc)
         except AppSettingsValidationError as exc:
             status = (
                 HTTPStatus.CONFLICT
@@ -350,12 +374,12 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"time", "bank_tag"}:
+        if normalized_view not in {"time", "bank_tag", "project", "bank", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_bank_transaction_request",
-                    "message": "view must be time or bank_tag.",
+                    "message": "view must be time, bank_tag, project, bank, or expense_type.",
                 },
             )
         try:
@@ -492,6 +516,46 @@ def _explorer_entry_count(payload: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def _merge_no_oa_tag_candidates(
+    payload: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result = dict(payload)
+    definitions = {
+        str(tag.get("code") or ""): dict(tag)
+        for tag in list(result.get("active_tags") or [])
+        if isinstance(tag, dict) and str(tag.get("code") or "")
+    }
+    candidate_codes = {
+        str(tag.get("code") or "")
+        for tag in candidates
+        if str(tag.get("code") or "")
+    }
+    selected_codes = [
+        str(code)
+        for code in list(result.get("selected_tag_codes") or [])
+        if str(code)
+    ]
+    unavailable_codes = [
+        code for code in selected_codes if code not in candidate_codes
+    ]
+    result["active_tags"] = [
+        *candidates,
+        *[
+            {
+                **definitions.get(
+                    code,
+                    {"code": code, "label": code, "path": [code]},
+                ),
+                "status": "unavailable",
+            }
+            for code in unavailable_codes
+        ],
+    ]
+    result["inactive_selected_tag_codes"] = unavailable_codes
+    return result
 
 
 def _parse_optional_bool_default_true(value: str | None) -> bool:

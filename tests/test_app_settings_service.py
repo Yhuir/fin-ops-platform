@@ -16,7 +16,6 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsPersistenceError,
     AppSettingsValidationError,
     BankAutoTagRulesValidationError,
-    COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
 )
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
@@ -603,7 +602,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
         self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
 
-    def test_cost_statistics_tag_selection_defaults_to_active_income_expense_tags_and_uncategorized(self) -> None:
+    def test_cost_statistics_tag_selection_defaults_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -616,10 +615,9 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
 
-            self.assertTrue(selection["default_selection_applied"])
-            self.assertIn("fee", selection["selected_tag_codes"])
-            self.assertIn(COST_STATISTICS_UNCATEGORIZED_TAG_CODE, selection["selected_tag_codes"])
-            self.assertIn("income_refund", selection["selected_tag_codes"])
+            self.assertFalse(selection["default_selection_applied"])
+            self.assertEqual(selection["display_name"], "")
+            self.assertEqual(selection["selected_tag_codes"], [])
             self.assertEqual(selection["inactive_selected_tag_codes"], [])
 
             saved = app._app_settings_service.update_cost_statistics_tag_selection(
@@ -632,6 +630,18 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             self.assertFalse(saved["default_selection_applied"])
             self.assertEqual(saved["selected_tag_codes"], [])
+            with self.assertRaises(AppSettingsValidationError) as name_context:
+                app._app_settings_service.update_cost_statistics_tag_selection(
+                    {
+                        "expected_version": saved["version"],
+                        "selected_tag_codes": ["fee"],
+                    },
+                    actor_id="cost-owner",
+                )
+            self.assertEqual(
+                name_context.exception.error_code,
+                "cost_statistics_virtual_project_name_required",
+            )
             with self.assertRaises(AppSettingsValidationError) as context:
                 app._app_settings_service.update_cost_statistics_tag_selection(
                     {
@@ -651,6 +661,8 @@ class AppSettingsServiceTests(unittest.TestCase):
                 },
                 "cost_statistics_tag_selection": {
                     "version": 2,
+                    "selection_schema_version": 3,
+                    "display_name": "无 OA 项目",
                     "selected_tag_codes": ["fee"],
                 },
             }
@@ -660,7 +672,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(payload["effective_selected_tag_codes"], ["fee"])
         self.assertFalse(payload["can_save"])
 
-    def test_cost_statistics_tag_selection_migrates_legacy_explicit_selection_with_income_tags(self) -> None:
+    def test_cost_statistics_tag_selection_resets_legacy_selection_to_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -681,8 +693,9 @@ class AppSettingsServiceTests(unittest.TestCase):
             selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
 
             self.assertEqual(selection["version"], 5)
-            self.assertEqual(selection["selection_schema_version"], 2)
-            self.assertEqual(selection["selected_tag_codes"], ["fee", "income_refund"])
+            self.assertEqual(selection["selection_schema_version"], 3)
+            self.assertEqual(selection["display_name"], "")
+            self.assertEqual(selection["selected_tag_codes"], [])
 
     def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
         fixture = json.loads(
@@ -724,6 +737,15 @@ class AppSettingsServiceTests(unittest.TestCase):
                 {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
                 actor_id="settings-owner",
             )
+            cost_selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
+            app._app_settings_service.update_cost_statistics_tag_selection(
+                {
+                    "expected_version": cost_selection["version"],
+                    "display_name": "云南溯源无 OA 分类",
+                    "selected_tag_codes": ["salary"],
+                },
+                actor_id="settings-owner",
+            )
             bank_flow_rules = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
             app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
                 {
@@ -757,6 +779,14 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(
             settings["no_oa_bank_batch_tag_selection"]["version"],
             3,
+        )
+        self.assertEqual(
+            settings["cost_statistics_tag_selection"]["selected_tag_codes"],
+            ["salary"],
+        )
+        self.assertEqual(
+            settings["cost_statistics_tag_selection"]["display_name"],
+            "云南溯源无 OA 分类",
         )
         self.assertNotIn("selected_tag_codes", settings["bank_flow_rule_batch_tag_rules"])
         self.assertNotIn("salary", settings["bank_flow_rule_batch_tag_rules"]["requirements_by_tag_code"])

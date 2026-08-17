@@ -1,4 +1,4 @@
-import { Button, Checkbox } from "@heroui/react";
+import { Button, Checkbox, Input } from "@heroui/react";
 
 import AppDrawer from "../common/AppDrawer";
 import type { CostStatisticsTagRuleTag, CostStatisticsTagRules } from "../../features/cost-statistics/types";
@@ -12,12 +12,14 @@ type TagGroup = {
 type CostStatisticsTagRulesDrawerProps = {
   open: boolean;
   rules: CostStatisticsTagRules | null;
+  displayName: string;
   selectedCodes: string[];
   loading: boolean;
   saving: boolean;
   interactionLocked: boolean;
   error: string | null;
   canSave: boolean;
+  onDisplayNameChange: (value: string) => void;
   onToggleCode: (code: string) => void;
   onToggleGroup: (codes: string[], checked: boolean) => void;
   onClose: () => void;
@@ -47,12 +49,14 @@ function tagLeafLabel(tag: CostStatisticsTagRuleTag) {
 export default function CostStatisticsTagRulesDrawer({
   open,
   rules,
+  displayName,
   selectedCodes,
   loading,
   saving,
   interactionLocked,
   error,
   canSave,
+  onDisplayNameChange,
   onToggleCode,
   onToggleGroup,
   onClose,
@@ -82,7 +86,7 @@ export default function CostStatisticsTagRulesDrawer({
             </Button>
             <Button
               className="cost-drawer-primary-button"
-              isDisabled={!rules || loading || saving || interactionLocked || !canSave}
+              isDisabled={!rules || loading || saving || interactionLocked || !canSave || (selectedCodes.length > 0 && !displayName.trim())}
               isPending={saving}
               onPress={onSave}
               size="sm"
@@ -95,15 +99,30 @@ export default function CostStatisticsTagRulesDrawer({
       )}
       onClose={onClose}
       open={open}
-      title="成本统计标签规则"
+      title="无 OA 成本范围"
       width={460}
     >
       <div className="cost-tag-rules-body" inert={interactionLocked ? true : undefined}>
         {loading ? <div className="cost-tag-rules-state">正在加载标签规则...</div> : null}
         {error ? <div className="cost-tag-rules-state error">{error}</div> : null}
         {!loading && rules ? (
-          <div className="cost-tag-rules-list" role="group" aria-label="成本统计标签选择">
-            {groups.map((group) => {
+          <>
+            <div className="cost-tag-rules-intro">
+              这里只列出当前确实存在无 OA 关系的支出流水标签。纳入时仍逐笔判断；同一标签下已有 OA 关系的流水不会进入虚拟项目。
+            </div>
+            <Input
+              aria-label="无 OA 虚拟项目名称"
+              className="cost-tag-rules-name"
+              disabled={saving || interactionLocked}
+              maxLength={80}
+              onChange={(event) => onDisplayNameChange(event.currentTarget.value)}
+              placeholder="由用户填写，例如：云南溯源无 OA 分类"
+              value={displayName}
+            />
+            <div className="cost-tag-rules-list" role="group" aria-label="无 OA 成本标签选择">
+              {groups.length === 0 ? (
+                <div className="cost-tag-rules-state">当前没有带标签的无 OA 支出流水。</div>
+              ) : groups.map((group) => {
               const codes = group.tags.map((tag) => tag.code);
               const checkedCount = codes.filter((code) => selectedSet.has(code)).length;
               const checked = checkedCount === codes.length && codes.length > 0;
@@ -137,8 +156,9 @@ export default function CostStatisticsTagRulesDrawer({
                   </div>
                 </section>
               );
-            })}
-          </div>
+              })}
+            </div>
+          </>
         ) : null}
       </div>
     </AppDrawer>

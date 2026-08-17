@@ -39,6 +39,7 @@
 
 - OA 主系统负责登录态、菜单 iframe、canonical username、信息性 roles/permissions 和原始付款申请/报销/项目数据。
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
+- OA 费用类型按表单精确读取权威字段：支付申请父记录读取 `EtcOAFormFieldMapping.category`（默认 `category`，可由既有环境配置覆盖），日常报销子项只读取 `schedule[].purposeType`。两种表单不得共享模糊候选键或递归扫描同名字段；未知值保持空，不伪造“其他”。
 - `Admin-Token` 只作为身份来源；OA roles/permissions 不授予 APP 访问。固定 `YNSYLP005` 与 Settings canonical ACL 是唯一 APP authority，后端 direct API guard 与前端 `SessionGate` 分别强制执行同一结果。
 - `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、三个专用 role 和 exact 三绑定后，只替换三 role members；历史 non-dedicated binding cleanup 已退休，deployment 稳态只读验证 exact topology。
 - OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；关联台及其它 direct 页面下一次 GET 读取已提交 facts。共享 `workbench_relation` 由其 owner 按独立消费者合同维护，不得恢复 page `workbench` runtime。

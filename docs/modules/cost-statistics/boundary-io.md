@@ -37,20 +37,22 @@ HTTP GET
 - 页面首次访问和浏览器刷新走同一条链。
 - 页面首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务月；用户选择与“全部时间”继续走既有 query/session 合同，不使用硬编码历史月份。
 - 首次 explorer 内容请求发送 `include_statistics=false`，优先返回当前 scope 的表格/分组；内容可用后再以 `page_size=1` 非阻塞读取全局 `statistics`。统计失败不重新锁住已可用内容；手动刷新会重试两条职责分离的读链。
-- `include_statistics=false` 且范围不是 `all` 时，`time|bank_tag` 用 `bank_transactions.txn_month` 下推范围且不读取 OA 配对关系；`project|bank|expense_type` 用 `oa_applications.approved_at` 下推 OA 完成时间范围，再扩展命中 active relation 的全部银行/OA 成员。三种 OA 视图不得用银行流水时间决定期间。
-- 银行流水详情与 OA 归集详情分别把当前 `scope`、`view` 和 `include_statistics=false` 下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。OA 归集详情扩展命中关系成员，银行事实详情跳过 OA/关系 I/O。
-- explorer 的 `query` 在 service 中折叠空白、将纯金额归一为无千分位文本并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索域只包含 OA 配对 allocation，`time|bank_tag` 搜索域只包含 canonical 银行事实；输出金额同样使用无千分位两位小数。
+- `include_statistics=false` 且范围不是 `all` 时，五个视图都先以 `bank_transactions.txn_month` 下推银行范围，再批量读取这些流水命中的 active relation 及其全部 OA 成员。年/月归属只能使用银行交易日期；不得再按 OA 完成时间筛选，也不得把范围外银行成员带回当前期间。
+- 银行流水详情与 OA 分摊详情分别把当前 `scope`、`view` 和 `include_statistics=false` 下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。所有视图都可能出现银行流水行，详情类型必须读行级 `row_kind`，不得按 view 推断。
+- explorer 的 `query` 在 service 中折叠空白、将纯金额归一为无千分位文本并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索按银行事件拆出的归因行，`time|bank_tag` 搜索同一批未拆分成本事件；输出金额同样使用无千分位两位小数。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
 - 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
-- `CostStatisticsPolicy` 将支付申请当前金额作为一个 OA 归集单元，将日常报销的 canonical `expense_items` 逐项作为归集单元。金额、项目或费用类型缺失时明确排除并返回质量统计；费用类型必须来自 OA 显式枚举或已有确定性文本规则，未知值保持缺失，禁止改写成“其他”。同时禁止回退到流水金额、报销表头、按比例、顺序或子集猜测。
-- OA 成本归集在 policy 边界使用明确完成状态和 `approved_at`；进行中或无完成时间 OA 在聚合前排除，因此 `project / bank / expense_type` 的 summary、facets、rows、allocation detail 和导出使用同一口径。`time / bank_tag` 仍是纯银行事实视图，不受 OA 流程状态影响。
-- 同一 relation 只有一个付款账户时归入该账户；多个账户或账户不明时归入 `混合支付账户`。同一 OA 归集单元出现在多个 active relation 时整次响应报冲突，不能重复计入。
-- `project / bank / expense_type`、allocation detail 和导出共享同一归集结果；关联付款流水只是证据，不作为右栏归集金额。`time / bank_tag` 与 bank transaction detail 共享未拆分银行事实。
+- `CostStatisticsPolicy` 将支付申请整张 OA 原始金额作为一个权重单元，将日常报销 canonical `expense_items` 逐项作为权重单元。项目或正数权重缺失时整组不分摊；费用类型缺失不再排除，而是进入“未填写 OA 费用类型”。权重合计非正只做内部除零保护，不新增产品状态。
+- active relation 中只要有一张 OA 不是明确完成态，整组银行流水从五个视图排除，也不得作为无 OA 流水。全部 OA 完成时，每条支出银行流水独立形成正成本事件；同一关系内明确标记“付错退款”的收入独立形成负成本事件，普通收入忽略。
+- 每个银行事件按关系内 OA 权重比例分摊，使用确定性最大余数法按分闭合；`sum(bank transaction × OA unit) = 当前银行事件金额`。同一银行流水或 OA 单元跨 active relation 重复时整次响应报冲突，不能重复计入。
+- `project / bank / expense_type`、allocation detail 和导出共享逐流水归因结果；每行银行账户来自该条真实流水，不再生成“混合支付账户”。`time / bank_tag` 与 bank transaction detail 共享同一批未拆分成本事件，因此相同 scope/search 下五视图净额必须可对账。
+- OA 分摊详情同时展示 OA 原始金额/权重、当前银行事件原金额，以及关系 OA 总额、银行总支出、“付错退款”、实际现金成本、差额和现金比例；退款冲减只在同一 active 关系内成立。
+- 无 active OA 关系的支出流水只有在虚拟项目名非空且实际标签命中用户选择时才进入成本事件，费用类型固定为“无 OA 分类”。候选标签从当前全历史实际无 OA 支出逐笔计算；执行纳入时再次逐笔排除所有 active OA 关系成员。配置默认空并对全部历史期间生效。
 - `project / bank / expense_type` 统一输出 `oa_applicant`：支付申请取 canonical 申请人，日常报销取 canonical 报销成员；页面和导出标题统一为“申请/报销人”。缺失值保持空字符串，禁止回退为对方户名、“—”或其他伪造内容。`expense_type` 视图同时展示项目名与申请/报销人。
-- `time` 行只映射银行交易时间、对方户名、标签、方向、金额、银行账户和流水摘要，不用 OA 占位值伪装项目或费用类型。
+- `time` 行只映射银行交易时间、对方户名、标签、方向、净成本事件金额、银行账户和流水摘要；OA 分摊字段只在归因详情显示。
 - 主标签和子标签复用同一个“仅支出、混合、仅收入、零金额”排序键；同组再按总金额、笔数和标签名稳定排序。
-- 标签规则保存只修改 App Settings；保存成功后的页面 reload 重新应用最新规则。
+- 现有右上角抽屉只维护无 OA 虚拟项目名和标签选择。保存只修改 App Settings；候选只来自实际无 OA 支出，保存使用 version CAS 与 audit，成功后的页面 reload 重新应用最新规则。自动标签归档不得静默删除该配置；已不可用的选择由抽屉显式显示并允许用户取消。
 - 不产生 `cost_statistics.read_model.refresh`、dirty scope、readiness 或 Cost worker I/O。
 - 两类详情使用全站 `AppDrawer` 作为唯一容器；选择行后先打开抽屉，再按 row kind 发起 bank transaction 或 allocation 单次详情 GET。详情的 loading/error/retry 状态不写入 explorer、导出或页级 loading 状态。
 
@@ -92,7 +94,8 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
 - 用户可观察的首屏合同以 `include_statistics=false` 的 scoped 内容请求计时；全局 statistics 是随后发出的非阻塞辅助请求，必须单独记录延迟，不能冒充首屏成功或失败。
 - 归集计算按 relation 成员和 OA 付款明细线性遍历；repository 批量读取 relation、OA 和流水，不做逐明细 I/O。
-- OA 查询只映射成本 policy 消费的父单字段、明细字段和明细金额，不递归复制附件/发票树；附件仍由其 owner 页面读取，不进入 Cost 请求内存。
+- OA 查询只映射当前范围银行流水命中的 active relation OA，并只读取 policy 消费的父单字段、明细字段和明细金额；不递归复制附件/发票树，附件仍由其 owner 页面读取。
+- 常规 scoped 请求保持有界批量查询，禁止按关系、银行流水或 OA 明细执行 N+1 I/O；候选标签读取只在打开/保存无 OA 抽屉时执行，不进入普通 explorer 热路径。
 - 分页和详情按当前 scope 有界读取；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 查询只对已加载 snapshot 做一次线性文本匹配，不新增 SQL、cache、worker 或逐行 I/O；前端搜索取消过期请求，避免竞态回写。
 - 候选发布必须记录各视图多次请求的 p50/p95/max，并确认无 Cost queue/worker I/O；若生产数据暴露慢查询，只依据实测 SQL 证据单独优化，不预先增加索引或缓存。

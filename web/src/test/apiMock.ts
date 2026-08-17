@@ -4178,6 +4178,8 @@ function buildCostStatisticsBankTransactionPayload(transactionId: string) {
         counterparty_name: transaction.counterparty_name,
         payment_account_label: transaction.payment_account_label,
         remark: transaction.remark,
+        project_name: transaction.project_name,
+        expense_type: transaction.expense_type,
         ...mockBankTagForCostRow({
           transaction_id: transaction.id,
           trade_time: transaction.trade_time,
@@ -4225,20 +4227,29 @@ function buildCostStatisticsAllocationPayload(allocationId: string) {
         counterparty_name: sourceRow.counterparty_name,
         payment_account_label: sourceRow.payment_account_label,
         oa_applicant: transaction.oa_applicant ?? "",
+        oa_original_amount: sourceRow.amount,
+        oa_allocation_weight: "100.00%",
+        bank_event_amount: transaction.amount,
       },
       payment_evidence: [{
         transaction_id: transactionId,
         trade_time: transaction.trade_time,
         amount: transaction.amount,
+        direction: "支出",
         counterparty_name: transaction.counterparty_name,
         payment_account_label: transaction.payment_account_label,
         remark: transaction.remark,
+        bank_tag_code: "project_cost",
+        bank_tag_label: "项目开销",
       }],
       reconciliation: {
         relation_case_id: `relation-${transactionId}`,
         oa_allocation_total: sourceRow.amount,
         bank_outflow_total: transaction.amount,
+        paid_wrong_refund_total: "0.00",
+        net_cash_cost: transaction.amount,
         difference: "0.00",
+        cash_payment_ratio: "100.00%",
         status: "balanced",
       },
     },
@@ -5649,12 +5660,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/cost-statistics/tag-rules": ({ init, jsonBody }) => {
       const selectedCodes = Array.isArray(jsonBody?.selected_tag_codes)
         ? jsonBody.selected_tag_codes.map((code) => String(code))
-        : ["fee", "__uncategorized__"];
+        : [];
       return {
         body: {
           version: init?.method === "PUT" ? 2 : 1,
           bank_auto_tag_rules_version: 8,
-          default_selection_applied: init?.method !== "PUT",
+          display_name: init?.method === "PUT" ? String(jsonBody?.display_name ?? "") : "",
+          default_selection_applied: false,
           selected_tag_codes: selectedCodes,
           effective_selected_tag_codes: selectedCodes,
           inactive_selected_tag_codes: [],
@@ -5665,19 +5677,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               path: ["费用", "材料费"],
               source: "custom",
               status: "active",
-              direction: "any",
+              direction: "expense",
               output_primary_label: "费用",
               output_sub_label: "材料费",
-            },
-            {
-              code: "income_collection",
-              label: "项目回款",
-              path: ["经营收入", "项目回款"],
-              source: "custom",
-              status: "active",
-              direction: "income",
-              output_primary_label: "经营收入",
-              output_sub_label: "项目回款",
             },
             {
               code: "__uncategorized__",
@@ -5685,7 +5687,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               path: ["未分类", "未分类"],
               source: "system",
               status: "active",
-              direction: "any",
+              direction: "expense",
               output_primary_label: "未分类",
               output_sub_label: "未分类",
             },

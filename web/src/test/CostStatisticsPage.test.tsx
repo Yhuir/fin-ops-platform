@@ -364,15 +364,16 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
-    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
-    expect(within(drawer).getAllByText("未分类").length).toBeGreaterThan(0);
-    expect(within(drawer).getByText("收入 · 经营收入")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "无 OA 成本范围" }));
+    const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
+    expect(within(drawer).getByText("支出 · 费用")).toBeInTheDocument();
+    await user.type(within(drawer).getByLabelText("无 OA 虚拟项目名称"), "云南溯源无 OA 分类");
+    await user.click(within(drawer).getByText("材料费"));
 
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "成本统计标签规则" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "无 OA 成本范围" })).not.toBeInTheDocument();
     });
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/operation-barrier/status",
@@ -392,8 +393,8 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
-    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
+    await user.click(screen.getByRole("button", { name: "无 OA 成本范围" }));
+    const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
 
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
   });
@@ -455,8 +456,8 @@ describe("Cost statistics page", () => {
 
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
-    const transactionTable = screen.getByRole("grid", { name: "项目 OA 成本归集明细表" });
-    expectProjectCostTable("项目 OA 成本归集明细表");
+    const transactionTable = screen.getByRole("grid", { name: "项目成本明细表" });
+    expectProjectCostTable("项目成本明细表");
     expect(within(transactionTable).getByRole("columnheader", { name: "申请/报销人" })).toBeInTheDocument();
     expect(within(transactionTable).getByText("张三、李四")).toBeInTheDocument();
     const projectTransactionTrigger = await within(transactionTable).findByRole("button", {
@@ -485,7 +486,7 @@ describe("Cost statistics page", () => {
     expect(within(dialog).queryByText("OA 单号")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("子付款项 ID")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("关系组")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "关联付款流水" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "关系内银行流水" })).toBeInTheDocument();
     expect(within(dialog).getAllByText("云南溯源科技").length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText("设备货款及材料费").length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText(/10000\.00/).length).toBeGreaterThan(0);
@@ -549,7 +550,7 @@ describe("Cost statistics page", () => {
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
-    const transactionLane = screen.getByRole("heading", { name: "OA 成本归集明细" }).closest(".cost-explorer-lane");
+    const transactionLane = screen.getByRole("heading", { name: "成本明细" }).closest(".cost-explorer-lane");
     expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
     expect(expenseLane).toHaveAttribute("aria-busy", "true");
     expect(transactionLane).toHaveAttribute("aria-busy", "true");
@@ -565,7 +566,7 @@ describe("Cost statistics page", () => {
     expect(within(transactionLane as HTMLElement).queryByText(/请先/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
 
-    expect(await screen.findByRole("grid", { name: "项目 OA 成本归集明细表" })).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "项目成本明细表" })).toBeInTheDocument();
   });
 
   test("sends one canonical request per project or scope selection", async () => {
@@ -627,7 +628,7 @@ describe("Cost statistics page", () => {
       expect(expenseLane).not.toBeNull();
       await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
-      const transactionTable = screen.getByRole("grid", { name: "项目 OA 成本归集明细表" });
+      const transactionTable = screen.getByRole("grid", { name: "项目成本明细表" });
       expect(await within(transactionTable).findAllByRole("button", { name: /^查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55/ })).toHaveLength(2);
       expect(within(transactionTable).getByRole("button", { name: "查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55 10000.00" })).toBeInTheDocument();
       expect(within(transactionTable).getByRole("button", { name: "查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55 1250.00" })).toBeInTheDocument();
@@ -681,7 +682,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("radio", { name: "按费用类型" }));
     await waitForCostStatisticsReady();
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
@@ -689,8 +690,8 @@ describe("Cost statistics page", () => {
     expect(within(expenseLane as HTMLElement).getByLabelText("支出 860.00")).toHaveClass("cost-direction-amount--aligned");
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /交通费/ }));
 
-    const transactionTable = screen.getByRole("grid", { name: "按费用类型 OA 成本归集明细表" });
-    expectProjectCostTable("按费用类型 OA 成本归集明细表");
+    const transactionTable = screen.getByRole("grid", { name: "按费用类型成本明细表" });
+    expectProjectCostTable("按费用类型成本明细表");
     expect(within(transactionTable).getByRole("columnheader", { name: "项目名 / 申请/报销人" })).toBeInTheDocument();
     expect(within(transactionTable).getByText("赵六")).toBeInTheDocument();
     const transactionTime = await within(transactionTable).findByText("2026-03-18 17:02:09");
@@ -855,8 +856,8 @@ describe("Cost statistics page", () => {
     expect(within(projectLane as HTMLElement).getByText("100.0%")).toBeInTheDocument();
 
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
-    const transactionTable = screen.getByRole("grid", { name: "银行 OA 成本归集明细表" });
-    expectProjectCostTable("银行 OA 成本归集明细表");
+    const transactionTable = screen.getByRole("grid", { name: "银行成本明细表" });
+    expectProjectCostTable("银行成本明细表");
     expect(within(transactionTable).getByRole("columnheader", { name: "申请/报销人" })).toBeInTheDocument();
     expect(within(transactionTable).getByText("张三、李四")).toBeInTheDocument();
     expect(
@@ -901,9 +902,9 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "查看银行流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
-    await chooseScopeOption(user, "OA费用类型统计时间范围：2026年3月", "2026年");
-    expect(screen.getByRole("button", { name: "OA费用类型统计时间范围：2026年" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按费用类型" }));
+    await chooseScopeOption(user, "费用类型统计时间范围：2026年3月", "2026年");
+    expect(screen.getByRole("button", { name: "费用类型统计时间范围：2026年" })).toBeInTheDocument();
     expect(await screen.findByText("交通费")).toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "按时间" }));
@@ -1215,7 +1216,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("radio", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("radio", { name: "按费用类型" }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
       expect.any(Object),

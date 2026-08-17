@@ -103,11 +103,12 @@ DEFAULT_BATCH_ACCOUNTING_TAG_SELECTION = {
     "selected_tag_codes": [],
 }
 COST_STATISTICS_UNCATEGORIZED_TAG_CODE = "__uncategorized__"
-COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION = 2
+COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION = 3
 DEFAULT_COST_STATISTICS_TAG_SELECTION = {
     "version": 1,
     "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
-    "selected_tag_codes": None,
+    "display_name": "",
+    "selected_tag_codes": [],
 }
 OA_DRAFT_PREFILL_SETTINGS_KEYS = {
     ETC_OA_DRAFT_PREFILL_FAMILY: "etc_oa_draft_prefill",
@@ -651,10 +652,6 @@ class AppSettingsService:
             previous_snapshot["turnover_ledger_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
         )
-        next_cost_statistics_selection, detached_cost_statistics_references = self._detach_cost_statistics_tag_references(
-            previous_snapshot["cost_statistics_tag_selection"],
-            tag_codes=set(normalized["changes"].get("archived_codes") or []),
-        )
         next_batch_accounting_selection, detached_batch_accounting_references = (
             self._detach_turnover_ledger_tag_references(
                 previous_snapshot["batch_accounting_tag_selection"],
@@ -668,7 +665,6 @@ class AppSettingsService:
             and not detached_no_oa_references
             and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
-            and not detached_cost_statistics_references
             and not detached_batch_accounting_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -694,7 +690,6 @@ class AppSettingsService:
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
-        next_snapshot["cost_statistics_tag_selection"] = next_cost_statistics_selection
         next_snapshot["batch_accounting_tag_selection"] = next_batch_accounting_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
@@ -709,7 +704,6 @@ class AppSettingsService:
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
             "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
-            "detached_cost_statistics_tag_references": detached_cost_statistics_references,
             "detached_batch_accounting_tag_references": detached_batch_accounting_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
@@ -755,10 +749,6 @@ class AppSettingsService:
             previous_snapshot["turnover_ledger_tag_selection"],
             tag_codes=archived_codes,
         )
-        next_cost_statistics_selection, detached_cost_statistics_references = self._detach_cost_statistics_tag_references(
-            previous_snapshot["cost_statistics_tag_selection"],
-            tag_codes=archived_codes,
-        )
         next_batch_accounting_selection, detached_batch_accounting_references = (
             self._detach_turnover_ledger_tag_references(
                 previous_snapshot["batch_accounting_tag_selection"],
@@ -772,7 +762,6 @@ class AppSettingsService:
             and not detached_no_oa_references
             and not detached_bank_flow_rule_batch_references
             and not detached_turnover_references
-            and not detached_cost_statistics_references
             and not detached_batch_accounting_references
         ):
             return self.get_bank_auto_tag_rules_payload(can_save=True)
@@ -798,7 +787,6 @@ class AppSettingsService:
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_no_oa_selection
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_bank_flow_rule_batch_tag_rules
         next_snapshot["turnover_ledger_tag_selection"] = next_turnover_selection
-        next_snapshot["cost_statistics_tag_selection"] = next_cost_statistics_selection
         next_snapshot["batch_accounting_tag_selection"] = next_batch_accounting_selection
         saved_snapshot = self._save_and_verify_bank_auto_tag_rules_snapshot(next_snapshot)
         self._snapshot = saved_snapshot
@@ -813,7 +801,6 @@ class AppSettingsService:
             "detached_no_oa_bank_batch_tag_references": detached_no_oa_references,
             "detached_bank_flow_rule_batch_tag_rule_references": detached_bank_flow_rule_batch_references,
             "detached_turnover_ledger_tag_references": detached_turnover_references,
-            "detached_cost_statistics_tag_references": detached_cost_statistics_references,
             "detached_batch_accounting_tag_references": detached_batch_accounting_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
@@ -1421,6 +1408,7 @@ class AppSettingsService:
         payload: dict[str, Any],
         *,
         actor_id: str,
+        allowed_tag_codes: set[str] | None = None,
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         current = self._snapshot["cost_statistics_tag_selection"]
@@ -1436,10 +1424,12 @@ class AppSettingsService:
             {
                 "version": int(current.get("version") or 1) + 1,
                 "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
+                "display_name": payload.get("display_name"),
                 "selected_tag_codes": payload.get("selected_tag_codes"),
             },
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             validate=True,
+            allowed_tag_codes=allowed_tag_codes,
         )
         next_snapshot = dict(self._snapshot)
         next_snapshot["cost_statistics_tag_selection"] = next_selection
@@ -1453,15 +1443,13 @@ class AppSettingsService:
                 "old_version": int(current.get("version") or 1),
                 "new_version": int(next_selection.get("version") or 1),
                 "old_selected_tag_codes": (
-                    None
-                    if current.get("selected_tag_codes") is None
-                    else list(current.get("selected_tag_codes") or [])
+                    list(current.get("selected_tag_codes") or [])
                 ),
                 "new_selected_tag_codes": (
-                    None
-                    if next_selection.get("selected_tag_codes") is None
-                    else list(next_selection.get("selected_tag_codes") or [])
+                    list(next_selection.get("selected_tag_codes") or [])
                 ),
+                "old_display_name": str(current.get("display_name") or ""),
+                "new_display_name": str(next_selection.get("display_name") or ""),
             }
         )
         return self.get_cost_statistics_tag_selection_payload(can_save=True)
@@ -2464,6 +2452,7 @@ class AppSettingsService:
         *,
         bank_transaction_tags: dict[str, Any],
         validate: bool,
+        allowed_tag_codes: set[str] | None = None,
     ) -> dict[str, Any]:
         raw_payload = value if isinstance(value, dict) else {}
         version = BankTransactionCategoryService._normalize_version(
@@ -2474,18 +2463,28 @@ class AppSettingsService:
         selection_schema_version = BankTransactionCategoryService._normalize_version(
             raw_payload.get("selection_schema_version", 1)
         )
-        active_tags = AppSettingsService._cost_statistics_active_tag_definitions(bank_transaction_tags)
-        active_codes = {
-            str(tag.get("code") or "").strip()
-            for tag in active_tags
-            if str(tag.get("code") or "").strip()
-        }
-        if raw_payload.get("selected_tag_codes") is None:
+        if selection_schema_version < COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION:
             return {
-                "version": version,
+                "version": version + 1,
                 "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
-                "selected_tag_codes": None,
+                "display_name": "",
+                "selected_tag_codes": [],
             }
+        display_name = str(raw_payload.get("display_name") or "").strip()
+        active_tags = AppSettingsService._cost_statistics_active_tag_definitions(bank_transaction_tags)
+        active_codes = (
+            {
+                str(code).strip()
+                for code in allowed_tag_codes
+                if str(code).strip()
+            }
+            if allowed_tag_codes is not None
+            else {
+                str(tag.get("code") or "").strip()
+                for tag in active_tags
+                if str(tag.get("code") or "").strip()
+            }
+        )
         selected_tag_codes: list[str] = []
         seen: set[str] = set()
         for item in list(raw_payload.get("selected_tag_codes") or []):
@@ -2498,21 +2497,22 @@ class AppSettingsService:
                         "unknown_cost_statistics_tag",
                         f"Unknown bank transaction tag code in cost statistics selection: {tag_code}",
                     )
+                selected_tag_codes.append(tag_code)
+                seen.add(tag_code)
                 continue
             seen.add(tag_code)
             selected_tag_codes.append(tag_code)
-        if selection_schema_version < COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION:
-            for tag in active_tags:
-                direction = str(tag.get("direction") or "any").strip().lower()
-                tag_code = str(tag.get("code") or "").strip()
-                if direction not in {"income", "in", "收入", "收款", "credit"} or not tag_code or tag_code in seen:
-                    continue
-                seen.add(tag_code)
-                selected_tag_codes.append(tag_code)
-            version += 1
+        if selected_tag_codes and not display_name:
+            if validate:
+                raise AppSettingsValidationError(
+                    "cost_statistics_virtual_project_name_required",
+                    "Virtual project name is required when no-OA tags are selected.",
+                )
+            selected_tag_codes = []
         return {
             "version": version,
             "selection_schema_version": COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION,
+            "display_name": display_name,
             "selected_tag_codes": selected_tag_codes,
         }
 
@@ -2525,33 +2525,17 @@ class AppSettingsService:
         active_tags = AppSettingsService._cost_statistics_active_tag_definitions(bank_transaction_tags)
         active_codes = [str(tag.get("code") or "").strip() for tag in active_tags if str(tag.get("code") or "").strip()]
         active_code_set = set(active_codes)
-        raw_selected = payload.get("selected_tag_codes")
-        default_selection_applied = raw_selected is None
-        selected = (
-            list(active_codes)
-            if default_selection_applied
-            else [
-                str(tag_code)
-                for tag_code in list(raw_selected or [])
-                if str(tag_code) in active_code_set
-            ]
-        )
-        inactive_selected = (
-            []
-            if default_selection_applied
-            else [
-                str(tag_code)
-                for tag_code in list(raw_selected or [])
-                if str(tag_code) and str(tag_code) not in active_code_set
-            ]
-        )
+        raw_selected = list(payload.get("selected_tag_codes") or [])
+        selected = [str(tag_code) for tag_code in raw_selected if str(tag_code)]
+        inactive_selected = [tag_code for tag_code in selected if tag_code not in active_code_set]
         return {
             "version": int(payload.get("version") or 1),
             "selection_schema_version": int(
                 payload.get("selection_schema_version") or COST_STATISTICS_TAG_SELECTION_SCHEMA_VERSION
             ),
             "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
-            "default_selection_applied": default_selection_applied,
+            "display_name": str(payload.get("display_name") or ""),
+            "default_selection_applied": False,
             "selected_tag_codes": selected,
             "effective_selected_tag_codes": selected,
             "inactive_selected_tag_codes": inactive_selected,
@@ -3005,9 +2989,6 @@ class AppSettingsService:
                 "detached_turnover_ledger_tag_references": list(
                     event.get("detached_turnover_ledger_tag_references") or []
                 ),
-                "detached_cost_statistics_tag_references": list(
-                    event.get("detached_cost_statistics_tag_references") or []
-                ),
                 "detached_batch_accounting_tag_references": list(
                     event.get("detached_batch_accounting_tag_references") or []
                 ),
@@ -3129,6 +3110,8 @@ class AppSettingsService:
                 "new_version": int(event.get("new_version") or 0),
                 "old_selected_tag_codes": event.get("old_selected_tag_codes"),
                 "new_selected_tag_codes": event.get("new_selected_tag_codes"),
+                "old_display_name": str(event.get("old_display_name") or ""),
+                "new_display_name": str(event.get("new_display_name") or ""),
             },
         )
 
@@ -3279,45 +3262,6 @@ class AppSettingsService:
     ) -> tuple[dict[str, Any], list[dict[str, str]]]:
         normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
         raw_payload = value if isinstance(value, dict) else {}
-        selected: list[str] = []
-        detached: list[dict[str, str]] = []
-        seen: set[str] = set()
-        for item in list(raw_payload.get("selected_tag_codes") or []):
-            tag_code = str(item or "").strip()
-            if not tag_code or tag_code in seen:
-                continue
-            seen.add(tag_code)
-            if tag_code in normalized_codes:
-                detached.append({"tag_code": tag_code})
-                continue
-            selected.append(tag_code)
-        current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
-        next_version = current_version + 1 if detached else current_version
-        return {
-            **dict(raw_payload),
-            "version": next_version,
-            "selected_tag_codes": selected,
-        }, detached
-
-    @staticmethod
-    def _detach_cost_statistics_tag_references(
-        value: Any,
-        *,
-        tag_codes: set[str],
-    ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-        normalized_codes = {
-            str(code or "").strip()
-            for code in tag_codes
-            if str(code or "").strip() and str(code or "").strip() != COST_STATISTICS_UNCATEGORIZED_TAG_CODE
-        }
-        raw_payload = value if isinstance(value, dict) else {}
-        if raw_payload.get("selected_tag_codes") is None:
-            current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
-            return {
-                **dict(raw_payload),
-                "version": current_version,
-                "selected_tag_codes": None,
-            }, []
         selected: list[str] = []
         detached: list[dict[str, str]] = []
         seen: set[str] = set()

@@ -1013,6 +1013,67 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(payment.expense_type, "房屋使用费（户租、水电、维修、车位、屋业等）")
         self.assertEqual(payment.detail_fields["费用类型"], "房屋使用费（户租、水电、维修、车位、屋业等）")
 
+    def test_payment_request_reads_explicit_category_without_using_expense_claim_field(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-category",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-08-18",
+                            "userName": "测试人员",
+                            "amount": "332",
+                            "beneficiary": "测试供应商",
+                            "cause": "无法从文本可靠推断的付款",
+                            "projectName": "project-1",
+                            "category": "s4",
+                            "purposeType": "s5",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[{"_id": "project-1", "data": {"name": "测试项目"}}],
+        )
+
+        payment = adapter.list_application_records("2026-08")[0]
+
+        self.assertEqual(payment.expense_type, "交通费")
+
+    def test_payment_request_uses_configured_expense_type_field(self) -> None:
+        adapter = StubMongoOAAdapter(
+            settings=MongoOASettings(
+                host="127.0.0.1",
+                database="form_data_db",
+                payment_expense_type_field="customCategory",
+            ),
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-custom-category",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-08-18",
+                            "userName": "测试人员",
+                            "amount": "128",
+                            "beneficiary": "测试供应商",
+                            "cause": "无法从文本可靠推断的付款",
+                            "projectName": "project-1",
+                            "category": "s5",
+                            "customCategory": "s4",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[{"_id": "project-1", "data": {"name": "测试项目"}}],
+        )
+
+        payment = adapter.list_application_records("2026-08")[0]
+
+        self.assertEqual(payment.expense_type, "交通费")
+
     def test_expense_claim_maps_oa_expense_type_enum_code_without_fallback(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={

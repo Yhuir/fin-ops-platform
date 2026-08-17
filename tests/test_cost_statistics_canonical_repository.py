@@ -120,17 +120,17 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot()
 
         self.assertEqual(connection.transaction_count, 1)
-        self.assertEqual(resolver_class.call_count, 0)
+        self.assertEqual(resolver_class.call_count, 1)
         self.assertEqual(
             connection.snapshot_transaction.executed,
             ["set transaction isolation level repeatable read read only"],
         )
         sql = "\n".join(connection.snapshot_transaction.fetched)
         self.assertIn("from app.app_settings", sql)
-        self.assertIn("from app.oa_applications", sql)
-        self.assertNotIn("from app.bank_transactions", sql)
-        self.assertNotIn("from app.bank_transaction_categories", sql)
-        self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertIn("from app.bank_transactions", sql)
+        self.assertIn("from app.bank_transaction_categories", sql)
+        self.assertIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertNotIn("from app.oa_applications", sql)
         self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("read_model.", sql)
         self.assertNotIn("job.", sql)
@@ -153,7 +153,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("from app.oa_applications", sql)
 
-    def test_scoped_oa_view_uses_bounded_six_query_snapshot(self) -> None:
+    def test_scoped_cost_view_uses_bounded_seven_query_bank_date_snapshot(self) -> None:
         connection = _PopulatedCostConnection()
 
         snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
@@ -164,14 +164,15 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(connection.transaction_count, 1)
-        self.assertLessEqual(len(connection.snapshot_transaction.fetched), 6)
+        self.assertLessEqual(len(connection.snapshot_transaction.fetched), 7)
         sql = "\n".join(connection.snapshot_transaction.fetched)
-        self.assertIn("approved_at >= %s::date and approved_at < %s::date", sql)
-        self.assertNotIn("from app.bank_transaction_categories", sql)
-        self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertIn("txn_month >= %s and txn_month < %s", sql)
+        self.assertNotIn("approved_at >= %s::date and approved_at < %s::date", sql)
+        self.assertIn("from app.bank_transaction_categories", sql)
+        self.assertIn("from app.bank_transaction_category_confirmations", sql)
         self.assertEqual(len(snapshot["cost_groups"]), 1)
 
-    def test_scoped_cost_view_keeps_cross_month_members_of_matching_relation(self) -> None:
+    def test_scoped_cost_view_keeps_only_bank_rows_in_requested_period(self) -> None:
         bank_rows = [
             {
                 "id": "bank-march",
@@ -219,10 +220,47 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
 
         self.assertEqual(
             {row["id"] for row in snapshot["bank_rows"]},
-            {"bank-march", "bank-april"},
+            {"bank-march"},
         )
         self.assertEqual(len(snapshot["cost_groups"]), 1)
+        self.assertEqual(
+            {row["id"] for row in snapshot["cost_groups"][0]["bank_rows"]},
+            {"bank-march"},
+        )
         self.assertEqual(snapshot["available_years"], ["2026"])
+
+    def test_active_relation_with_unavailable_oa_still_protects_bank_from_no_oa(self) -> None:
+        repository = LocalCostStatisticsCanonicalRepository(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank-protected",
+                    "amount": "8.00",
+                    "txn_direction": "outflow",
+                    "trade_time": "2026-03-20 10:00:00",
+                }
+            ],
+            relations_provider=lambda: [
+                {
+                    "case_id": "case-protected",
+                    "status": "active",
+                    "row_ids": ["oa-unavailable", "bank-protected"],
+                    "row_types": ["oa", "bank"],
+                }
+            ],
+            oa_rows_by_ids_provider=lambda _ids: [],
+            settings_provider=lambda: {},
+            category_provider=_CategoryProvider(),
+        )
+
+        snapshot = repository.load_snapshot(
+            scope_kind="all",
+            scope_value=None,
+            view="project",
+            include_statistics=False,
+        )
+
+        self.assertEqual(snapshot["cost_groups"], [])
+        self.assertEqual(snapshot["oa_related_bank_ids"], ["bank-protected"])
 
     def test_snapshot_preserves_canonical_oa_expense_item_fields(self) -> None:
         expense_items = [

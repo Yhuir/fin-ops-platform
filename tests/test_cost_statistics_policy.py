@@ -9,7 +9,7 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
-    def test_daily_reimbursement_uses_child_amounts_and_oa_completion_month(self) -> None:
+    def test_daily_reimbursement_allocates_each_bank_event_by_oa_weight_and_bank_date(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -32,53 +32,47 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
         rows = policy.serialized_cost_rows
-        self.assertEqual({row["amount"] for row in rows}, {"240.00", "710.00", "65.00"})
+        self.assertEqual({row["amount"] for row in rows}, {"248.28", "734.48", "67.24"})
         dali = next(row for row in rows if row["project_name"] == "大理卷烟厂余热综合利用项目")
-        self.assertEqual(dali["amount"], "710.00")
-        self.assertEqual(dali["month"], "2026-07")
+        self.assertEqual(dali["month"], "2026-08")
         self.assertEqual(dali["oa_completed_at"], "2026-07-23 18:00:00")
-        self.assertEqual(dali["linked_bank_transaction_count"], 1)
-        self.assertNotIn("transaction_id", dali)
+        self.assertEqual(dali["payment_account_label"], "建设银行 8106")
         detail = policy.allocation(
-            allocation_id="oa:oa-exp-1:item:item-2",
+            allocation_id="bank:bank-1050:oa:oa-exp-1:item:item-2",
             scope_kind="month",
-            scope_value="2026-07",
+            scope_value="2026-08",
         )
         self.assertIsNotNone(detail)
         assert detail is not None
-        self.assertEqual(detail["amount"], "710.00")
-        self.assertEqual(detail["payment_evidence"][0]["amount"], "1050.00")
-        self.assertEqual(detail["reconciliation"]["oa_allocation_total"], "1015.00")
-        self.assertEqual(detail["reconciliation"]["difference"], "-35.00")
+        self.assertEqual(detail["amount"], "734.48")
+        self.assertEqual(detail["oa_original_amount"], "710.00")
+        self.assertEqual(detail["oa_allocation_weight"], "69.95%")
+        self.assertEqual(detail["bank_event_amount"], "1050.00")
+        self.assertEqual(detail["reconciliation"]["difference"], "35.00")
+        self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "103.45%")
 
-    def test_payment_application_keeps_oa_amount_when_bank_amount_differs(self) -> None:
+    def test_payment_application_allocates_bank_amount_by_oa_weight(self) -> None:
         policy = self._policy(
             [
                 self._group(
                     oa_rows=[
                         self._oa("oa-4360", amount="4360.00", project_name="大理项目"),
-                        self._oa("oa-5450", amount="5450.00", project_name="大理项目"),
+                        self._oa("oa-5450", amount="5450.00", project_name="玉溪项目"),
                     ],
-                    bank_rows=[self._bank("bank-9810", "9810.00")],
+                    bank_rows=[self._bank("bank-10000", "10000.00")],
                 )
             ]
         )
 
         self.assertEqual(
             {(row["allocation_id"], row["amount"]) for row in policy.serialized_cost_rows},
-            {("oa:oa-4360", "4360.00"), ("oa:oa-5450", "5450.00")},
+            {
+                ("bank:bank-10000:oa:oa-4360", "4444.44"),
+                ("bank:bank-10000:oa:oa-5450", "5555.56"),
+            },
         )
-        detail = policy.allocation(
-            allocation_id="oa:oa-4360",
-            scope_kind="all",
-            scope_value=None,
-        )
-        assert detail is not None
-        self.assertEqual(detail["amount"], "4360.00")
-        self.assertEqual(detail["payment_evidence"][0]["amount"], "9810.00")
-        self.assertEqual(detail["reconciliation"]["status"], "balanced")
 
-    def test_three_oa_two_bank_uses_each_oa_amount_without_proportional_allocation(self) -> None:
+    def test_two_bank_events_keep_real_accounts_and_allocate_independently(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -95,48 +89,42 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual([row["amount"] for row in reversed(policy.serialized_cost_rows)], ["100.00", "200.00", "300.00"])
-        self.assertTrue(all(row["payment_account_label"] == "混合支付账户" for row in policy.serialized_cost_rows))
-        detail = policy.allocation(allocation_id="oa:oa-2", scope_kind="all", scope_value=None)
-        assert detail is not None
-        self.assertEqual(detail["amount"], "200.00")
-        self.assertEqual(len(detail["payment_evidence"]), 2)
-        self.assertEqual(detail["reconciliation"]["oa_allocation_total"], "600.00")
-        self.assertEqual(detail["reconciliation"]["bank_outflow_total"], "600.00")
-
-    def test_same_payment_account_is_assigned_to_every_oa_unit(self) -> None:
-        policy = self._policy(
-            [
-                self._group(
-                    oa_rows=[self._oa("oa-1", amount="300.00")],
-                    bank_rows=[
-                        self._bank("bank-1", "100.00"),
-                        self._bank("bank-2", "200.00"),
-                    ],
-                )
-            ]
+        self.assertEqual(len(policy.serialized_cost_rows), 6)
+        self.assertEqual(
+            {row["payment_account_label"] for row in policy.serialized_cost_rows},
+            {"建行 1111", "民生 2222"},
         )
-        self.assertEqual(policy.serialized_cost_rows[0]["payment_account_label"], "建设银行 8106")
+        detail = policy.allocation(
+            allocation_id="bank:bank-1:oa:oa-2",
+            scope_kind="all",
+            scope_value=None,
+        )
+        assert detail is not None
+        self.assertEqual(detail["amount"], "83.33")
+        self.assertEqual(detail["bank_event_amount"], "250.00")
+        self.assertEqual(len(detail["payment_evidence"]), 2)
 
-    def test_only_explicit_completed_oa_with_completion_time_is_eligible(self) -> None:
+    def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
         policy = self._policy(
             [
                 self._group(
                     oa_rows=[
                         self._oa("oa-ok", amount="100.00"),
-                        self._oa("oa-empty", amount="200.00", workflow_status=""),
-                        self._oa("oa-progress", amount="300.00", workflow_status="processing"),
-                        self._oa("oa-no-time", amount="400.00", completed_at=""),
+                        self._oa("oa-progress", amount="300.00", workflow_status="processing", completed_at=""),
                     ],
-                    bank_rows=[self._bank("bank-1", "1000.00")],
+                    bank_rows=[self._bank("bank-1", "400.00")],
                 )
             ]
         )
 
-        self.assertEqual([row["oa_id"] for row in policy.serialized_cost_rows], ["oa-ok"])
-        self.assertEqual(policy.allocation_quality["excluded_allocation_count"], 3)
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.bank_flow_rows, [])
+        self.assertEqual(
+            policy.allocation_quality["excluded_by_reason"],
+            [{"reason": "incomplete_oa_relation", "count": 1}],
+        )
 
-    def test_invalid_daily_items_are_excluded_without_parent_fallback(self) -> None:
+    def test_invalid_daily_item_excludes_entire_relation_without_parent_fallback(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -157,10 +145,17 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual([(row["project_name"], row["amount"]) for row in policy.serialized_cost_rows], [("项目A", "40.00")])
+        self.assertEqual(policy.serialized_cost_rows, [])
         self.assertEqual(policy.allocation_quality["excluded_by_reason"], [{"reason": "missing_project", "count": 1}])
 
-    def test_daily_reimbursement_without_items_is_visible_exclusion(self) -> None:
+    def test_zero_oa_total_is_internal_guard_only(self) -> None:
+        policy = self._policy(
+            [self._group(oa_rows=[self._oa("oa-1", amount="0")], bank_rows=[self._bank("bank-1", "100.00")])]
+        )
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.bank_flow_rows, [])
+
+    def test_daily_reimbursement_without_items_is_excluded(self) -> None:
         policy = self._policy(
             [self._group(oa_rows=[self._oa("oa-exp", apply_type="日常报销", expense_items=[])], bank_rows=[self._bank("bank-1", "100.00")])]
         )
@@ -202,63 +197,135 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         with self.assertRaises(CostStatisticsAllocationConflictError):
             _ = policy.serialized_cost_rows
 
-    def test_income_does_not_reduce_oa_cost_or_appear_as_payment_evidence(self) -> None:
-        income = self._bank("bank-income", "35.00", direction="inflow")
+    def test_only_paid_wrong_refund_in_same_relation_reduces_cost(self) -> None:
         policy = self._policy(
-            [self._group(oa_rows=[self._oa("oa-1", amount="100.00")], bank_rows=[self._bank("bank-out", "100.00"), income])]
+            [
+                self._group(
+                    oa_rows=[self._oa("oa-1", amount="1015.00")],
+                    bank_rows=[
+                        self._bank("bank-out", "1050.00"),
+                        self._bank("bank-refund", "35.00", direction="inflow", tag_code="refund-code", tag_label="付错退款"),
+                        self._bank("bank-income", "20.00", direction="inflow", tag_code="interest", tag_label="利息"),
+                    ],
+                )
+            ],
+            settings={},
         )
-        self.assertEqual(policy.serialized_cost_rows[0]["amount"], "100.00")
-        detail = policy.allocation(allocation_id="oa:oa-1", scope_kind="all", scope_value=None)
-        assert detail is not None
-        self.assertEqual([row["transaction_id"] for row in detail["payment_evidence"]], ["bank-out"])
 
-    def test_oa_scope_uses_completion_time_while_bank_scope_uses_trade_time(self) -> None:
+        self.assertEqual(
+            {(row["transaction_id"], row["amount"], row["direction"]) for row in policy.serialized_cost_rows},
+            {("bank-out", "1050.00", "支出"), ("bank-refund", "-35.00", "收入")},
+        )
+        self.assertEqual(policy.explorer_page(
+            scope_kind="all", scope_value=None, view="project",
+            filters={"project_name": "项目A", "expense_type": "设备采购"},
+            cursor_values=None, page_size=50,
+        )["summary"]["total_amount"], "1015.00")
+        detail = policy.allocation(allocation_id="bank:bank-out:oa:oa-1", scope_kind="all", scope_value=None)
+        assert detail is not None
+        self.assertEqual(detail["reconciliation"]["paid_wrong_refund_total"], "35.00")
+        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1015.00")
+        self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
+        self.assertEqual(
+            [row["transaction_id"] for row in detail["payment_evidence"]],
+            ["bank-out", "bank-refund"],
+        )
+
+    def test_all_five_views_use_bank_trade_date_and_reconcile(self) -> None:
         policy = self._policy(
             [self._group(oa_rows=[self._oa("oa-1", completed_at="2026-05-25 09:00:00")], bank_rows=[self._bank("bank-1", "100.00", trade_time="2026-06-01 09:00:00")])]
         )
-        self.assertEqual(
-            policy.explorer_page(
-                scope_kind="month", scope_value="2026-05", view="project",
-                filters={"project_name": "项目A", "expense_type": "设备采购"},
-                cursor_values=None, page_size=50,
-            )["row_count"],
-            1,
-        )
-        self.assertEqual(
-            policy.explorer_page(
-                scope_kind="month", scope_value="2026-05", view="time", filters={},
-                cursor_values=None, page_size=50,
-            )["row_count"],
-            0,
-        )
-        self.assertEqual(
-            policy.explorer_page(
-                scope_kind="month", scope_value="2026-06", view="time", filters={},
-                cursor_values=None, page_size=50,
-            )["row_count"],
-            1,
+        totals = []
+        view_filters = {
+            "project": {"project_name": "项目A", "expense_type": "设备采购"},
+            "bank": {"payment_account_label": "建设银行 8106", "project_name": "项目A"},
+            "expense_type": {"expense_type": "设备采购"},
+            "bank_tag": {"bank_tag_primary_label": "未标记", "bank_tag_sub_label": "未标记"},
+            "time": {},
+        }
+        for view, filters in view_filters.items():
+            may = policy.explorer_page(scope_kind="month", scope_value="2026-05", view=view, filters=filters, cursor_values=None, page_size=50)
+            june = policy.explorer_page(scope_kind="month", scope_value="2026-06", view=view, filters=filters, cursor_values=None, page_size=50)
+            self.assertEqual(may["summary"]["total_amount"], "0.00")
+            totals.append(june["summary"]["total_amount"])
+        self.assertEqual(totals, ["100.00"] * 5)
+
+    def test_selected_no_oa_tag_adds_only_unpaired_outflows_to_virtual_project(self) -> None:
+        paired = self._bank("paired", "100.00", tag_code="paired-only", tag_label="已配对专用标签")
+        unpaired = self._bank("unpaired", "8.00", tag_code="fee", tag_label="手续费")
+        unselected = self._bank("unselected", "5.00", tag_code="salary", tag_label="工资")
+        income = self._bank("income", "1.00", direction="inflow", tag_code="fee", tag_label="手续费")
+        settings = self._settings(tags=[("fee", "手续费"), ("salary", "工资")], display_name="云南溯源无 OA 分类", selected=["fee"])
+        policy = self._policy(
+            [self._group(oa_rows=[self._oa("oa-1", amount="100.00")], bank_rows=[paired])],
+            bank_rows=[paired, unpaired, unselected, income],
+            settings=settings,
         )
 
-    def test_active_project_scope_filters_each_allocation_unit(self) -> None:
+        no_oa_rows = [row for row in policy.serialized_cost_rows if row["row_kind"] == "bank_transaction"]
+        self.assertEqual(len(no_oa_rows), 1)
+        self.assertEqual(no_oa_rows[0]["transaction_id"], "unpaired")
+        self.assertEqual(no_oa_rows[0]["project_name"], "云南溯源无 OA 分类")
+        self.assertEqual(no_oa_rows[0]["expense_type"], "无 OA 分类")
+        self.assertEqual({row["transaction_id"] for row in policy.bank_flow_rows}, {"paired", "unpaired"})
+
+    def test_no_oa_defaults_empty_and_candidates_are_current_unpaired_outflow_tags(self) -> None:
+        paired = self._bank("paired", "100.00", tag_code="paired-only", tag_label="已配对专用标签")
+        unpaired = self._bank("unpaired", "8.00", tag_code="fee", tag_label="手续费")
+        income = self._bank("income", "1.00", direction="inflow", tag_code="refund", tag_label="付错退款")
+        policy = self._policy(
+            [self._group(oa_rows=[self._oa("oa-1")], bank_rows=[paired, income])],
+            bank_rows=[paired, unpaired, income],
+            settings=self._settings(
+                tags=[
+                    ("paired-only", "已配对专用标签"),
+                    ("fee", "手续费"),
+                    ("refund", "付错退款"),
+                ]
+            ),
+        )
+        self.assertEqual({row["transaction_id"] for row in policy.serialized_cost_rows}, {"paired", "income"})
+        self.assertEqual([row["code"] for row in policy.no_oa_tag_candidates()], ["fee"])
+
+    def test_any_active_oa_relation_protects_bank_row_from_no_oa_even_without_allocation_group(self) -> None:
+        bank_row = self._bank("protected", "8.00", tag_code="fee", tag_label="手续费")
+        policy = self._policy(
+            [],
+            bank_rows=[bank_row],
+            oa_related_bank_ids=["protected"],
+            settings=self._settings(
+                tags=[("fee", "手续费")],
+                display_name="云南溯源无 OA 分类",
+                selected=["fee"],
+            ),
+        )
+
+        self.assertEqual(policy.no_oa_tag_candidates(), [])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.bank_flow_rows, [])
+
+    def test_missing_oa_expense_type_uses_truthful_bucket(self) -> None:
+        policy = self._policy(
+            [self._group(oa_rows=[self._oa("oa-1", expense_type="")], bank_rows=[self._bank("bank-1", "100.00")])]
+        )
+        self.assertEqual(policy.serialized_cost_rows[0]["expense_type"], "未填写 OA 费用类型")
+        self.assertEqual(policy.allocation_quality["excluded_allocation_count"], 0)
+
+    def test_active_project_scope_filters_each_bank_allocation_and_all_views_reconcile(self) -> None:
         policy = self._policy(
             [self._group(oa_rows=[self._oa("oa-a", project_name="已完成项目"), self._oa("oa-b", project_name="进行中项目")], bank_rows=[self._bank("bank-1", "200.00")])],
             settings={"projects": {"completed": [{"id": "P-1", "project_name": "已完成项目"}]}},
             project_scope="active",
         )
-        self.assertEqual([row["project_name"] for row in policy.serialized_cost_rows], ["进行中项目"])
-
-    def test_bank_view_remains_bank_transaction_shaped(self) -> None:
-        policy = self._policy([], bank_rows=[self._bank("bank-1", "100.00")])
-        row = policy.bank_flow_rows[0]
-        self.assertEqual(row["row_kind"], "bank_transaction")
-        self.assertEqual(row["entry_id"], "bank-1")
-        self.assertEqual(row["trade_time"], "2026-05-18 10:00:00")
+        self.assertEqual([(row["project_name"], row["amount"]) for row in policy.serialized_cost_rows], [("进行中项目", "100.00")])
+        self.assertEqual(policy.bank_flow_rows[0]["amount"], "100.00")
 
     @staticmethod
     def _policy(
         groups: list[dict[str, object]],
         *,
         bank_rows: list[dict[str, object]] | None = None,
+        oa_related_bank_ids: list[str] | None = None,
         settings: dict[str, object] | None = None,
         project_scope: str = "all",
     ) -> CostStatisticsPolicy:
@@ -275,11 +342,52 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 "settings": settings or {},
                 "bank_rows": snapshot_bank_rows,
                 "cost_groups": groups,
+                "oa_related_bank_ids": list(oa_related_bank_ids or []),
                 "active_relation_count": len(groups),
                 "available_years": ["2026"],
             },
             project_scope=project_scope,
         )
+
+    @staticmethod
+    def _settings(
+        *,
+        tags: list[tuple[str, str]],
+        display_name: str = "",
+        selected: list[str] | None = None,
+    ) -> dict[str, object]:
+        definitions = [
+            {
+                "code": code,
+                "label": label,
+                "path": [label],
+                "source": "custom",
+                "status": "active",
+                "output_primary_label": label,
+                "output_sub_label": label,
+                "direction": "any",
+                "account_scope": {"type": "any", "values": []},
+                "rules": {
+                    "match_fields": ["all_text"],
+                    "contains_any": [label],
+                    "contains_all": [],
+                    "exact_any": [],
+                    "regex_any": [],
+                    "none_of": [],
+                },
+                "rule_code": code,
+            }
+            for code, label in tags
+        ]
+        return {
+            "bank_transaction_tags": {"version": 1, "definitions": definitions},
+            "cost_statistics_tag_selection": {
+                "version": 1,
+                "selection_schema_version": 3,
+                "display_name": display_name,
+                "selected_tag_codes": list(selected or []),
+            },
+        }
 
     @staticmethod
     def _group(
@@ -335,6 +443,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         direction: str = "outflow",
         account_no: str = "8106",
         account_label: str = "建设银行 8106",
+        tag_code: str = "",
+        tag_label: str = "",
     ) -> dict[str, object]:
         return {
             "id": bank_id,
@@ -346,6 +456,11 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             "payment_account_label": account_label,
             "counterparty_name": "供应商",
             "remark": "货款",
+            "bank_tag_code": tag_code,
+            "bank_tag_label": tag_label,
+            "bank_tag_primary_label": tag_label,
+            "bank_tag_sub_label": tag_label,
+            "bank_tag_label_path": [tag_label] if tag_label else [],
         }
 
 

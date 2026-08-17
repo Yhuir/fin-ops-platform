@@ -164,8 +164,6 @@ class CostStatisticsQueryService:
             scope
         )
         normalized_view, _filters = self._normalize_page_query(view, {})
-        if normalized_view not in {"time", "bank_tag"}:
-            raise ValueError("bank transaction detail requires time or bank_tag view")
         normalized_transaction_id = str(transaction_id or "").strip()
         if not normalized_transaction_id:
             raise KeyError(transaction_id)
@@ -216,6 +214,8 @@ class CostStatisticsQueryService:
                 "bank_tag_label_path": (
                     list(label_path) if isinstance(label_path, list) else []
                 ),
+                "project_name": str(row.get("project_name") or ""),
+                "expense_type": str(row.get("expense_type") or ""),
             },
         }
 
@@ -269,6 +269,9 @@ class CostStatisticsQueryService:
                     "counterparty_name",
                     "payment_account_label",
                     "oa_applicant",
+                    "oa_original_amount",
+                    "oa_allocation_weight",
+                    "bank_event_amount",
                 )
             },
             "payment_evidence": [
@@ -278,6 +281,18 @@ class CostStatisticsQueryService:
             ],
             "reconciliation": dict(row.get("reconciliation") or {}),
         }
+
+    def get_no_oa_tag_candidates(self) -> list[dict[str, Any]]:
+        policy = CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(
+                scope_kind="all",
+                scope_value=None,
+                view="project",
+                include_statistics=False,
+            ),
+            project_scope="all",
+        )
+        return policy.no_oa_tag_candidates()
 
     def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
         project_scope = self._normalize_project_scope(
@@ -1120,7 +1135,7 @@ class CostStatisticsQueryService:
         sheet_names = ["导出说明", "项目汇总", "按费用类型汇总"]
         if include_expense_content_summary:
             sheet_names.append("按费用内容汇总")
-        sheet_names.append("OA成本归集明细")
+        sheet_names.append("成本明细")
         if include_oa_details:
             sheet_names.append("OA关联明细")
         if include_invoice_details:
@@ -1166,7 +1181,7 @@ class CostStatisticsQueryService:
                 ("统计范围", scope_label),
                 ("月份列表", month),
                 ("数据口径", "统一事实源只读一致性快照"),
-                ("导出结构", "项目汇总、费用类型汇总、OA成本归集明细"),
+                ("导出结构", "项目汇总、费用类型汇总、成本明细"),
             ],
         )
         summary_sheet = workbook.create_sheet("项目汇总")
@@ -1176,7 +1191,7 @@ class CostStatisticsQueryService:
             if include_expense_content_summary
             else None
         )
-        detail_sheet = workbook.create_sheet("OA成本归集明细")
+        detail_sheet = workbook.create_sheet("成本明细")
         detail_headers = [
             "OA完成时间",
             "归集单元ID",
@@ -1290,7 +1305,7 @@ class CostStatisticsQueryService:
                 ("项目名称", project_name),
                 ("统计期间", scope_label),
                 ("总支出金额", _plain_money(total_amount)),
-                ("OA归集单元数", len(entries)),
+                ("成本明细数", len(entries)),
                 ("费用类型数", len(type_buckets)),
                 ("已关联OA笔数", len({entry["oa_id"] for entry in entries if entry["oa_id"]})),
                 ("已关联发票笔数", 0),

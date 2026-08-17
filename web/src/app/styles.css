@@ -19115,6 +19115,17 @@ body.column-layout-dragging {
   color: #b42318;
 }
 
+.cost-tag-rules-intro {
+  margin-bottom: 12px;
+  color: var(--fp-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cost-tag-rules-name {
+  margin-bottom: 14px;
+}
+
 .cost-tag-rules-list {
   display: grid;
   gap: 10px;

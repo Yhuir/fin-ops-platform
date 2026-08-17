@@ -1,5 +1,14 @@
 # OA 集成 实施记录
 
+## 2026-08-18 - 支付申请费用类型表单字段隔离
+
+- 目标：修复支付申请的权威 `category` 在 OA 归一化中被遗漏，造成成本统计中 115 个 OA 归集单元缺少费用类型的问题。
+- 根因：旧共享候选键在修复日常报销 `purposeType` 时被收敛为单一字段，使支付申请和日常报销错误共用一套读取合同；支付申请生成端仍写入 `EtcOAFormFieldMapping.category`。
+- 关键决策：支付申请精确读取可配置 category 字段，日常报销子项精确读取 `purposeType`；删除共享候选键和递归同名字段扫描，不在成本层、detail fields 或申请事由上增加兜底。
+- 数据闭环：projection 版本提升为 `2026-08-18-form-specific-expense-type-v8`，由既有 durable OA sync 幂等重投历史数据；不直接更新主数据库投影行，不新增 schema、worker 或 read model。
+- 验收：发布前只读审计 115 条源字段的标准值/空值/非法值；发布后恢复量必须等于修前标准值数量，空/非法残余继续保持缺失，不以无证据强制归零。
+- 测试：`tests/test_mongo_oa_adapter.py` 覆盖支付申请 category、环境自定义字段、日常报销 purposeType 和表单字段互不污染；projection/sync 回归保护版本化幂等重投。
+
 ## 2026-08-11 - OA 删除与自动匹配并发闭环
 
 - 目标：补齐权威快照正确删除 OA 后，已经在事务外读取的自动匹配 plan 仍可能重新创建失效 relation 的并发窗口。

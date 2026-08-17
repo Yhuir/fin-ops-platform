@@ -1,5 +1,11 @@
 # 设置 实施记录
 
+## 2026-08-18 - 成本统计无 OA 设置收敛
+
+- `cost_statistics_tag_selection` 升级为 schema v3，只保存虚拟项目名和标签 code，默认空；旧默认全选/收入标签自动加入语义一次性重置为空。
+- 实际候选和逐笔无 OA 判断仍归成本统计 owner，Settings 只接收 route 提供的 allowed codes，执行名称校验、version CAS、持久化和 audit。
+- 删除自动标签归档时静默 detach 成本选择的旧链；不可用选择保持可见，由用户显式取消。没有新增设置页 section、数据库字段、worker、read model 或跨页面 fan-out。
+
 ## 2026-08-01 - 数据重置执行边界迁入 durable worker
 
 - Settings API 只负责 admin/OA 密码复核、创建 BackgroundJob 和投递 `settings.data_reset.requested`；密码不进入 job、outbox、日志或 result。

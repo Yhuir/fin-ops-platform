@@ -402,6 +402,7 @@ export default function CostStatisticsPage() {
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
   const [isTagRulesDrawerOpen, setIsTagRulesDrawerOpen] = useState(false);
   const [tagRules, setTagRules] = useState<CostStatisticsTagRules | null>(null);
+  const [tagRuleDraftName, setTagRuleDraftName] = useState("");
   const [tagRuleDraftCodes, setTagRuleDraftCodes] = useState<string[]>([]);
   const [isTagRulesLoading, setIsTagRulesLoading] = useState(false);
   const [isTagRulesSaving, setIsTagRulesSaving] = useState(false);
@@ -697,6 +698,7 @@ export default function CostStatisticsPage() {
         const payload = await fetchCostStatisticsTagRules(controller.signal);
         if (!controller.signal.aborted) {
           setTagRules(payload);
+          setTagRuleDraftName(payload.displayName);
           setTagRuleDraftCodes(payload.effectiveSelectedTagCodes);
         }
       } catch (caught) {
@@ -723,9 +725,11 @@ export default function CostStatisticsPage() {
     try {
       const result = await saveCostStatisticsTagRules({
         expectedVersion: tagRules.version,
+        displayName: tagRuleDraftName.trim(),
         selectedTagCodes: tagRuleDraftCodes,
       });
       setTagRules(result);
+      setTagRuleDraftName(result.displayName);
       setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
       setDomainRefreshNonce((current) => current + 1);
       setIsTagRulesDrawerOpen(false);
@@ -737,6 +741,7 @@ export default function CostStatisticsPage() {
   }, [
     invalidateExportReferenceData,
     isTagRulesSaving,
+    tagRuleDraftName,
     tagRuleDraftCodes,
     tagRules,
   ]);
@@ -1502,7 +1507,7 @@ export default function CostStatisticsPage() {
         identityColumn,
         {
           key: "amount",
-          header: isBankFactView ? "金额" : "归集金额",
+          header: "成本金额",
           width: 180,
           cellClassName: "cost-table-cell-money",
           render: (row) => ({
@@ -1525,7 +1530,9 @@ export default function CostStatisticsPage() {
     ?? selectedExpenseEntryId
     ?? selectedBankTagEntryId;
   const activeRowKind: CostExplorerEntryRow["rowKind"] | null = activeEntryId
-    ? viewMode === "time" || viewMode === "bankTag" ? "bank_transaction" : "oa_allocation"
+    ? explorerData?.rows.find((row) => row.entryId === activeEntryId)?.rowKind
+      ?? entryDetail?.kind
+      ?? null
     : null;
   const costViewSearch = (
     <QuerySearch
@@ -1571,7 +1578,7 @@ export default function CostStatisticsPage() {
           { label: "项目", value: visibleStatistics?.projectCount, unit: "个" },
           { label: "费用类型", value: visibleStatistics?.expenseTypeCount, unit: "类" },
           { label: "银行标签", value: visibleStatistics?.bankTagCount, unit: "个" },
-          { label: "OA 成本归集单元", value: visibleStatistics?.costTransactionCount, unit: "条" },
+          { label: "成本明细", value: visibleStatistics?.costTransactionCount, unit: "条" },
         ]}
       />
       {canAdminAccess ? (
@@ -1615,7 +1622,7 @@ export default function CostStatisticsPage() {
             >
               <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
               <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
-              <ToggleButton className="cost-view-tab" id="expenseType">按OA费用类型</ToggleButton>
+              <ToggleButton className="cost-view-tab" id="expenseType">按费用类型</ToggleButton>
               <ToggleButton className="cost-view-tab" id="bankTag"><ToggleButtonGroup.Separator />按标签</ToggleButton>
               <ToggleButton className="cost-view-tab" id="time"><ToggleButtonGroup.Separator />按时间</ToggleButton>
             </ToggleButtonGroup>
@@ -1647,7 +1654,7 @@ export default function CostStatisticsPage() {
             size="sm"
             variant="secondary"
           >
-            成本统计标签规则
+            无 OA 成本范围
           </Button>
           <Button
             className="cost-page-action"
@@ -1707,11 +1714,6 @@ export default function CostStatisticsPage() {
             ) : null}
         {explorerData ? (
           <>
-            {viewMode !== "time" && viewMode !== "bankTag" && (explorerData.allocationQuality?.excludedAllocationCount ?? 0) > 0 ? (
-              <div className="action-feedback warning" role="status">
-                有 {explorerData.allocationQuality?.excludedAllocationCount} 条 OA 归集单元因项目、费用类型、金额或身份字段不完整而未计入；系统未用流水金额或 OA 表头兜底。
-              </div>
-            ) : null}
             {viewMode === "time" ? (
               <div className="cost-analysis-layout time-layout cost-time-workspace">
                 <aside className="cost-time-filter-rail">
@@ -1827,20 +1829,20 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>OA 成本归集明细</h2>
+                      <h2>成本明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedProjectName && selectedProjectExpenseType ? (
                       <CostStatisticsTable
-                        ariaLabel="项目 OA 成本归集明细表"
+                        ariaLabel="项目成本明细表"
                         columns={entryColumns}
                         rows={selectedProjectTransactionRows}
                         getRowKey={getCostEntryRowRenderKey}
                         onRowClick={(row) => void openEntryDetail(row, "project")}
                         getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该费用类型下暂无 OA 成本归集。"
+                        emptyLabel="该费用类型下暂无成本明细。"
                         {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择项目和费用类型</div>}
@@ -1920,20 +1922,20 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>OA 成本归集明细</h2>
+                      <h2>成本明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedBankAccountLabel && selectedBankProjectName ? (
                       <CostStatisticsTable
-                        ariaLabel="银行 OA 成本归集明细表"
+                        ariaLabel="银行成本明细表"
                         columns={entryColumns}
                         rows={selectedBankProjectRows}
                         getRowKey={getCostEntryRowRenderKey}
                         onRowClick={(row) => void openEntryDetail(row, "bank")}
                         getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该项目下暂无 OA 成本归集。"
+                        emptyLabel="该项目下暂无成本明细。"
                         {...autoLoadTableProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
@@ -1947,12 +1949,12 @@ export default function CostStatisticsPage() {
               <div className="cost-analysis-layout explorer-layout expense-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
-                    <h2>按OA费用类型统计</h2>
+                    <h2>按费用类型统计</h2>
                     <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <BusinessPeriodPicker
-                      ariaLabel="OA费用类型统计时间范围"
+                      ariaLabel="费用类型统计时间范围"
                       onChange={(selection) => updateScopeSelection("expenseType", selection)}
                       selection={{ mode: expenseTypeScopeMode, year: expenseTypeScopeYear, month: expenseTypeScopeMonth }}
                       years={availableScopeYears}
@@ -1990,23 +1992,23 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>OA 成本归集明细</h2>
+                      <h2>成本明细</h2>
                       <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
                     ) : selectedExpenseType ? (
                       <CostStatisticsTable
-                        ariaLabel="按费用类型 OA 成本归集明细表"
+                        ariaLabel="按费用类型成本明细表"
                         columns={entryColumns}
                         rows={selectedExpenseTypeRows}
                         getRowKey={getCostEntryRowRenderKey}
                         onRowClick={(row) => void openEntryDetail(row, "expenseType")}
                         getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该费用类型下暂无 OA 成本归集。"
+                        emptyLabel="该费用类型下暂无成本明细。"
                         {...autoLoadTableProps}
                       />
-                    ) : <div className="cost-explorer-empty">选择费用类型查看 OA 成本归集</div>}
+                    ) : <div className="cost-explorer-empty">选择费用类型查看成本明细</div>}
                   </section>
                 </div>
                 )}
@@ -2148,10 +2150,12 @@ export default function CostStatisticsPage() {
 
       <CostStatisticsTagRulesDrawer
         canSave={canMutateData && !interactionLocked && (tagRules?.canSave ?? true)}
+        displayName={tagRuleDraftName}
         error={tagRulesError}
         interactionLocked={interactionLocked}
         loading={isTagRulesLoading}
         onClose={closeTagRulesDrawer}
+        onDisplayNameChange={setTagRuleDraftName}
         onSave={() => void saveTagRules()}
         onToggleCode={toggleTagRuleCode}
         onToggleGroup={toggleTagRuleGroup}

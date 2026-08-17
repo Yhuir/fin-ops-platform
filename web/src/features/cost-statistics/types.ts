@@ -144,6 +144,8 @@ export type CostBankTransactionDetail = {
     bankTagPrimaryLabel?: string;
     bankTagSubLabel?: string;
     bankTagLabelPath?: string[];
+    projectName?: string;
+    expenseType?: string;
   };
 };
 
@@ -164,20 +166,29 @@ export type CostAllocationDetail = {
     counterpartyName: string;
     paymentAccountLabel: string;
     oaApplicant: string;
+    oaOriginalAmount: string;
+    oaAllocationWeight: string;
+    bankEventAmount: string;
   };
   paymentEvidence: Array<{
     transactionId: string;
     tradeTime: string;
     amount: string;
+    direction: string;
     counterpartyName: string;
     paymentAccountLabel: string;
     remark: string;
+    bankTagCode: string;
+    bankTagLabel: string;
   }>;
   reconciliation: {
     relationCaseId: string;
     oaAllocationTotal: string;
     bankOutflowTotal: string;
+    paidWrongRefundTotal: string;
+    netCashCost: string;
     difference: string;
+    cashPaymentRatio: string;
     status: "balanced" | "mismatch";
   };
 };
@@ -217,6 +228,7 @@ export type CostStatisticsTagRuleTag = {
 export type CostStatisticsTagRules = {
   version: number;
   bankAutoTagRulesVersion: number;
+  displayName: string;
   defaultSelectionApplied: boolean;
   selectedTagCodes: string[];
   effectiveSelectedTagCodes: string[];
@@ -227,5 +239,6 @@ export type CostStatisticsTagRules = {
 
 export type SaveCostStatisticsTagRulesRequest = {
   expectedVersion: number;
+  displayName: string;
   selectedTagCodes: string[];
 };

@@ -22,6 +22,8 @@ function costDetailSections(detail: CostEntryDetail) {
         { label: "银行账户", value: transaction.paymentAccountLabel },
         { label: "摘要", value: transaction.expenseContent },
         { label: "备注", value: transaction.remark },
+        { label: "归属项目", value: transaction.projectName },
+        { label: "费用类型", value: transaction.expenseType },
       ],
     }]);
   }
@@ -30,7 +32,10 @@ function costDetailSections(detail: CostEntryDetail) {
   const sections: EntityDetailSection[] = [{
     title: "基本信息",
     fields: [
-      { label: "金额", value: formatCostAmount(allocation.amount) },
+      { label: "本笔流水分摊成本", value: formatCostAmount(allocation.amount) },
+      { label: "OA 原始金额", value: formatCostAmount(allocation.oaOriginalAmount) },
+      { label: "OA 金额占比", value: allocation.oaAllocationWeight },
+      { label: "本笔银行流水原始金额", value: formatCostAmount(allocation.bankEventAmount) },
       { label: "审批完成时间", value: allocation.oaCompletedAt },
       { label: "项目名称", value: allocation.projectName },
       { label: "费用类型", value: allocation.expenseType },
@@ -43,19 +48,24 @@ function costDetailSections(detail: CostEntryDetail) {
   }, {
     title: "金额核对",
     fields: [
-      { label: "OA归集合计", value: formatCostAmount(detail.reconciliation.oaAllocationTotal) },
-      { label: "关联付款流水合计", value: formatCostAmount(detail.reconciliation.bankOutflowTotal) },
-      { label: "差异", value: formatCostAmount(detail.reconciliation.difference) },
+      { label: "OA 原始金额合计", value: formatCostAmount(detail.reconciliation.oaAllocationTotal) },
+      { label: "支出流水原额", value: formatCostAmount(detail.reconciliation.bankOutflowTotal) },
+      { label: "付错退款", value: formatCostAmount(detail.reconciliation.paidWrongRefundTotal) },
+      { label: "实际现金成本", value: formatCostAmount(detail.reconciliation.netCashCost) },
+      { label: "实际成本与 OA 差额", value: formatCostAmount(detail.reconciliation.difference) },
+      { label: "实际成本 / OA", value: detail.reconciliation.cashPaymentRatio },
       { label: "状态", value: detail.reconciliation.status === "balanced" ? "金额一致" : "金额不一致" },
     ],
   }];
   detail.paymentEvidence.forEach((evidence, index) => {
     sections.push({
-      title: detail.paymentEvidence.length > 1 ? `银行流水 ${index + 1}` : "关联付款流水",
+      title: detail.paymentEvidence.length > 1 ? `关系内银行流水 ${index + 1}` : "关系内银行流水",
       fields: [
         { label: "交易时间", value: evidence.tradeTime },
+        { label: "收支方向", value: evidence.direction },
         { label: "对方户名", value: evidence.counterpartyName },
-        { label: "支出金额", value: formatCostAmount(evidence.amount) },
+        { label: evidence.direction === "收入" ? "收入金额" : "支出金额", value: formatCostAmount(evidence.amount) },
+        { label: "流水标签", value: evidence.bankTagLabel },
         { label: "银行账户", value: evidence.paymentAccountLabel },
         { label: "备注", value: evidence.remark },
       ],

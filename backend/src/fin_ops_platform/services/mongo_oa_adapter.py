@@ -68,8 +68,6 @@ ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
 )
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
-EXPENSE_TYPE_CANDIDATE_KEYS = ("purposeType",)
-
 STANDARD_EXPENSE_TYPES = tuple(label for _code, label in OA_APPLICATION_TYPE_OPTIONS)
 
 STANDARD_EXPENSE_TYPE_BY_CODE = dict(OA_APPLICATION_TYPE_OPTIONS)
@@ -106,6 +104,7 @@ class MongoOASettings:
     auth_source: str = "admin"
     collection: str = "form_data"
     payment_request_form_id: str = "2"
+    payment_expense_type_field: str = "category"
     expense_claim_form_id: str = "32"
     project_form_id: str = "17"
     request_timeout_ms: int = 5000
@@ -166,6 +165,14 @@ def load_mongo_oa_settings(data_dir: Path | None = None) -> MongoOASettings | No
         auth_source=str(pick("FIN_OPS_OA_MONGO_AUTH_SOURCE", "auth_source", "admin")),
         collection=str(pick("FIN_OPS_OA_MONGO_COLLECTION", "collection", "form_data")),
         payment_request_form_id=str(pick("FIN_OPS_OA_PAYMENT_FORM_ID", "payment_request_form_id", "2")),
+        payment_expense_type_field=str(
+            pick(
+                "FIN_OPS_OA_PAYMENT_EXPENSE_TYPE_FIELD",
+                "payment_expense_type_field",
+                os.getenv("FIN_OPS_ETC_OA_FIELD_CATEGORY", "category"),
+            )
+        ).strip()
+        or "category",
         expense_claim_form_id=str(pick("FIN_OPS_OA_EXPENSE_FORM_ID", "expense_claim_form_id", "32")),
         project_form_id=str(pick("FIN_OPS_OA_PROJECT_FORM_ID", "project_form_id", "17")),
         request_timeout_ms=int(pick("FIN_OPS_OA_MONGO_TIMEOUT_MS", "request_timeout_ms", 5000)),
@@ -824,7 +831,11 @@ class MongoOAAdapter(OAAdapter):
         project_name = project_names.get(project_id, project_id or "--")
         real_project_names = self._unique_real_project_names([project_name])
         external_id = self._payment_external_id(data, document)
-        expense_type = self._resolve_expense_type(data, reason)
+        expense_type = self._resolve_expense_type(
+            data,
+            reason,
+            field_name=self._settings.payment_expense_type_field,
+        )
         expense_content = reason
         etc_metadata = detect_etc_batch_metadata(data)
         workflow_status = self.canonical_process_status(data)
@@ -913,7 +924,7 @@ class MongoOAAdapter(OAAdapter):
             fee_content = self._first_text(item, "feeContent")
             fee_description = self._first_text(item, "detailCostStatement")
             reason = fee_content or fee_description or self._first_text(data, "notes")
-            expense_type = self._resolve_expense_type(item, reason)
+            expense_type = self._resolve_expense_type(item, reason, field_name="purposeType")
             expense_content = reason
             project_id = self._first_text(item, "detailProjectName") or self._first_text(data, "projectName")
             project_name = project_names.get(project_id, project_id or "--")
@@ -2668,22 +2679,16 @@ class MongoOAAdapter(OAAdapter):
                 return clean_string(value)
         return ""
 
-    def _resolve_expense_type(self, *sources: Any) -> str:
-        payloads = [source for source in sources if isinstance(source, dict)]
-        texts = [clean_string(source) for source in sources if isinstance(source, str) and clean_string(source)]
-
-        for payload in payloads:
-            direct = self._canonical_expense_type(self._first_text(payload, *EXPENSE_TYPE_CANDIDATE_KEYS))
-            if direct:
-                return direct
-
-        fuzzy_candidates = {self._normalize_key(key) for key in EXPENSE_TYPE_CANDIDATE_KEYS}
-        for payload in payloads:
-            matched = self._canonical_expense_type(self._find_text_by_normalized_keys(payload, fuzzy_candidates))
-            if matched:
-                return matched
-
-        return self._infer_expense_type(*texts)
+    def _resolve_expense_type(
+        self,
+        payload: dict[str, Any],
+        *fallback_texts: str,
+        field_name: str,
+    ) -> str:
+        direct = self._canonical_expense_type(self._first_text(payload, field_name))
+        if direct:
+            return direct
+        return self._infer_expense_type(*fallback_texts)
 
     def _canonical_expense_type(self, value: Any) -> str:
         text = clean_string(value)
@@ -2693,23 +2698,6 @@ class MongoOAAdapter(OAAdapter):
         if by_code:
             return by_code
         return STANDARD_EXPENSE_TYPE_BY_NORMALIZED_KEY.get(self._normalize_key(text), "")
-
-    def _find_text_by_normalized_keys(self, value: Any, normalized_keys: set[str]) -> str:
-        if isinstance(value, dict):
-            for key, nested_value in value.items():
-                if self._normalize_key(key) in normalized_keys:
-                    text = clean_string(nested_value)
-                    if text:
-                        return text
-                nested_match = self._find_text_by_normalized_keys(nested_value, normalized_keys)
-                if nested_match:
-                    return nested_match
-        elif isinstance(value, list):
-            for item in value:
-                nested_match = self._find_text_by_normalized_keys(item, normalized_keys)
-                if nested_match:
-                    return nested_match
-        return ""
 
     def _infer_expense_type(self, *texts: str) -> str:
         combined = " ".join(texts).strip().lower()

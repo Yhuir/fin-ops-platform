@@ -49,66 +49,30 @@ class PostgresCostStatisticsCanonicalRepository:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
             scoped = not include_statistics and scope_kind != "all"
-            if view in {"time", "bank_tag"}:
-                bank_rows = _postgres_bank_rows(
-                    transaction,
-                    settings=settings,
-                    scope_kind=scope_kind if scoped else "all",
-                    scope_value=scope_value if scoped else None,
-                )
-                available_years = (
-                    _postgres_bank_available_years(transaction)
-                    if scoped
-                    else _bank_available_years(bank_rows)
-                )
-                category_provider = _postgres_category_provider(
-                    transaction,
-                    settings=settings,
-                    transaction_ids=(
-                        _bank_row_ids(bank_rows) if scoped else None
-                    ),
-                )
-                _apply_bank_tags(bank_rows, category_provider=category_provider)
-                return _build_snapshot(
-                    settings=settings,
-                    bank_rows=bank_rows,
-                    oa_rows=[],
-                    relations=[],
-                    available_years=available_years,
-                )
-
-            scoped_oa_rows = _postgres_oa_rows(
+            bank_rows = _postgres_bank_rows(
                 transaction,
                 scope_kind=scope_kind if scoped else "all",
                 scope_value=scope_value if scoped else None,
+                settings=settings,
             )
             available_years = (
-                _postgres_oa_available_years(transaction)
+                _postgres_bank_available_years(transaction)
                 if scoped
-                else _oa_available_years(scoped_oa_rows)
+                else _bank_available_years(bank_rows)
             )
-            if not scoped_oa_rows:
-                return _build_snapshot(
-                    settings=settings,
-                    bank_rows=[],
-                    oa_rows=[],
-                    relations=[],
-                    available_years=available_years,
-                )
+            bank_ids = _bank_row_ids(bank_rows)
+            category_provider = _postgres_category_provider(
+                transaction,
+                settings=settings,
+                transaction_ids=bank_ids if scoped else None,
+            )
+            _apply_bank_tags(bank_rows, category_provider=category_provider)
             relations = _postgres_relations(
                 transaction,
-                oa_row_ids=_oa_row_ids(scoped_oa_rows),
+                bank_row_ids=bank_ids,
             )
             relation_oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = _postgres_oa_rows(transaction, oa_ids=relation_oa_ids)
-            bank_rows = _postgres_bank_rows(
-                transaction,
-                settings=settings,
-                transaction_ids=_relation_member_ids(
-                    relations,
-                    {"bank", "bank_transaction"},
-                ),
-            )
             return _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
@@ -173,59 +137,33 @@ class LocalCostStatisticsCanonicalRepository:
             if isinstance(relation, dict)
             and str(relation.get("status") or "active").strip().lower() == "active"
         ]
-        if view in {"time", "bank_tag"}:
-            _apply_bank_tags(scoped_bank_rows, category_provider=self._category_provider)
-            return _build_snapshot(
-                settings=settings,
-                bank_rows=scoped_bank_rows,
-                oa_rows=[],
-                relations=[],
-                available_years=bank_available_years,
-            )
-        all_oa_ids = _relation_member_ids(all_relations, {"oa"})
-        all_oa_rows = [
-            _object_payload(row)
-            for row in self._oa_rows_by_ids_provider(all_oa_ids)
-        ]
-        eligible_oa_rows = [
-            row
-            for row in all_oa_rows
-            if _is_explicit_completed_oa(row)
-            and _oa_row_in_scope(
-                row,
-                scope_kind=scope_kind if not include_statistics else "all",
-                scope_value=scope_value if not include_statistics else None,
-            )
-        ]
-        scoped_oa_ids = set(_oa_row_ids(eligible_oa_rows))
+        _apply_bank_tags(scoped_bank_rows, category_provider=self._category_provider)
+        scoped_bank_ids = set(_bank_row_ids(scoped_bank_rows))
         relations = [
             relation
             for relation in all_relations
-            if scoped_oa_ids.intersection(
-                _relation_member_ids([relation], {"oa"})
+            if scoped_bank_ids.intersection(
+                _relation_member_ids([relation], {"bank", "bank_transaction"})
             )
+            and _relation_member_ids([relation], {"oa"})
         ]
-        relation_oa_ids = set(_relation_member_ids(relations, {"oa"}))
+        relation_oa_ids = _relation_member_ids(relations, {"oa"})
+        all_oa_rows = [
+            _object_payload(row)
+            for row in self._oa_rows_by_ids_provider(relation_oa_ids)
+        ]
+        relation_oa_id_set = set(relation_oa_ids)
         oa_rows = [
-            row for row in all_oa_rows if _text(row.get("id") or row.get("row_id")) in relation_oa_ids
-        ]
-        relation_bank_ids = set(
-            _relation_member_ids(relations, {"bank", "bank_transaction"})
-        )
-        bank_rows = [
             row
-            for row in all_bank_rows
-            if _text(row.get("id") or row.get("transaction_id") or row.get("row_id"))
-            in relation_bank_ids
+            for row in all_oa_rows
+            if _text(row.get("id") or row.get("row_id")) in relation_oa_id_set
         ]
         return _build_snapshot(
             settings=settings,
-            bank_rows=bank_rows,
+            bank_rows=scoped_bank_rows,
             oa_rows=oa_rows,
             relations=relations,
-            available_years=_oa_available_years(
-                [row for row in all_oa_rows if _is_explicit_completed_oa(row)]
-            ),
+            available_years=bank_available_years,
         )
 
 
@@ -254,24 +192,6 @@ def _postgres_bank_available_years(connection: Any) -> list[str]:
               and txn_month is not null
             order by year desc
             """
-        )
-        if row.get("year") is not None
-    ]
-
-
-def _postgres_oa_available_years(connection: Any) -> list[str]:
-    return [
-        str(int(row["year"]))
-        for row in connection.fetch_all(
-            """
-            select distinct extract(year from approved_at)::int as year
-            from app.oa_applications
-            where approved_at is not null
-              and form_type = any(%s::text[])
-              and workflow_status = any(%s::text[])
-            order by year desc
-            """,
-            (list(OA_COST_FORM_TYPES), sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)),
         )
         if row.get("year") is not None
     ]
@@ -483,20 +403,22 @@ def _postgres_category_provider(
 def _postgres_relations(
     connection: Any,
     *,
-    oa_row_ids: list[str] | None = None,
+    bank_row_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    if bank_row_ids is not None and not bank_row_ids:
+        return []
     filter_sql = ""
     params: tuple[Any, ...] = ()
-    if oa_row_ids is not None:
+    if bank_row_ids is not None:
         filter_sql = """
           and exists (
               select 1
               from unnest(row_ids, row_types) as member(row_id, row_type)
-              where member.row_type = 'oa'
+              where member.row_type in ('bank', 'bank_transaction')
                 and member.row_id = any(%s::text[])
           )
         """
-        params = (oa_row_ids,)
+        params = (bank_row_ids,)
     rows = connection.fetch_all(
         f"""
         select
@@ -557,29 +479,21 @@ def _postgres_oa_rows(
     connection: Any,
     *,
     oa_ids: list[str] | None = None,
-    scope_kind: str = "all",
-    scope_value: str | None = None,
 ) -> list[dict[str, Any]]:
     if oa_ids is not None and not oa_ids:
         return []
-    filter_sql, filter_params = _oa_row_filter(
-        oa_ids=oa_ids,
-        scope_kind=scope_kind,
-        scope_value=scope_value,
-    )
+    filter_sql = "and row_id = any(%s::text[])" if oa_ids is not None else ""
+    filter_params: tuple[Any, ...] = (oa_ids,) if oa_ids is not None else ()
     rows = connection.fetch_all(
         f"""
         select row_id, form_type, workflow_status, approved_at, normalized_payload
         from app.oa_applications
-        where approved_at is not null
-          and form_type = any(%s::text[])
-          and workflow_status = any(%s::text[])
+        where form_type = any(%s::text[])
           {filter_sql}
         order by row_id
         """,
         (
             list(OA_COST_FORM_TYPES),
-            sorted(COMPLETED_WORKFLOW_STATUS_ALIASES),
             *filter_params,
         ),
     )
@@ -596,33 +510,6 @@ def _postgres_oa_rows(
             )
         )
     ]
-
-
-def _oa_row_filter(
-    *,
-    oa_ids: list[str] | None,
-    scope_kind: str,
-    scope_value: str | None,
-) -> tuple[str, tuple[Any, ...]]:
-    clauses: list[str] = []
-    params: list[Any] = []
-    if oa_ids is not None:
-        clauses.append("and row_id = any(%s::text[])")
-        params.append(oa_ids)
-    if scope_kind == "all":
-        return "\n".join(clauses), tuple(params)
-    if scope_kind == "year" and scope_value and len(scope_value) == 4:
-        start = date(int(scope_value), 1, 1)
-        end = date(int(scope_value) + 1, 1, 1)
-    elif scope_kind == "month" and scope_value:
-        year, month = (int(value) for value in scope_value.split("-", 1))
-        start = date(year, month, 1)
-        end = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
-    else:
-        raise ValueError("scope must be all, year, or month")
-    clauses.append("and approved_at >= %s::date and approved_at < %s::date")
-    params.extend((start, end))
-    return "\n".join(clauses), tuple(params)
 
 
 def _cost_oa_payload(
@@ -716,6 +603,7 @@ def _build_snapshot(
         if _text(row.get("id") or row.get("row_id"))
     }
     groups: list[dict[str, Any]] = []
+    oa_related_bank_ids: set[str] = set()
     for relation in relations:
         row_ids = [
             _text(value)
@@ -731,12 +619,18 @@ def _build_snapshot(
             )
         oa_members: list[dict[str, Any]] = []
         bank_members: list[dict[str, Any]] = []
+        relation_has_oa = any(
+            index < len(row_types) and _text(row_types[index]).lower() == "oa"
+            for index in range(len(row_ids))
+        )
         for index, row_id in enumerate(row_ids):
             row_type = row_types[index]
             if row_type == "oa" and row_id in oa_by_id:
                 oa_members.append(oa_by_id[row_id])
             elif row_type in {"bank", "bank_transaction"} and row_id in banks_by_id:
                 bank_members.append(banks_by_id[row_id])
+                if relation_has_oa:
+                    oa_related_bank_ids.add(row_id)
         if oa_members and bank_members:
             groups.append(
                 {
@@ -755,6 +649,7 @@ def _build_snapshot(
         "settings": settings,
         "bank_rows": list(banks_by_id.values()),
         "cost_groups": groups,
+        "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": len(relations),
         "available_years": list(available_years or []),
     }
@@ -924,19 +819,6 @@ def _bank_available_years(bank_rows: list[dict[str, Any]]) -> list[str]:
     )
 
 
-def _oa_available_years(oa_rows: list[dict[str, Any]]) -> list[str]:
-    return sorted(
-        {
-            completed_at[:4]
-            for row in oa_rows
-            if (completed_at := _date_text(row.get("completed_at")))
-            and len(completed_at) >= 4
-            and completed_at[:4].isdigit()
-        },
-        reverse=True,
-    )
-
-
 def _oa_row_ids(oa_rows: list[dict[str, Any]]) -> list[str]:
     return [
         row_id
@@ -951,22 +833,6 @@ def _is_explicit_completed_oa(row: dict[str, Any]) -> bool:
         and _text(row.get("apply_type")) in OA_COST_FORM_TYPES
         and _text(row.get("workflow_status")) in COMPLETED_WORKFLOW_STATUS_ALIASES
     )
-
-
-def _oa_row_in_scope(
-    row: dict[str, Any],
-    *,
-    scope_kind: str,
-    scope_value: str | None,
-) -> bool:
-    if scope_kind == "all":
-        return True
-    completed_at = _date_text(row.get("completed_at"))
-    if scope_kind == "year":
-        return bool(scope_value and completed_at[:4] == scope_value)
-    if scope_kind == "month":
-        return bool(scope_value and completed_at[:7] == scope_value)
-    raise ValueError("scope must be all, year, or month")
 
 
 def _object_payload(value: Any) -> dict[str, Any]:

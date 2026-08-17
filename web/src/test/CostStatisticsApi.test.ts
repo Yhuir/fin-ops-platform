@@ -216,6 +216,7 @@ describe("Cost statistics export API", () => {
         return new Response(JSON.stringify({
           version: 2,
           bank_auto_tag_rules_version: 8,
+          display_name: "云南溯源无 OA 分类",
           default_selection_applied: false,
           selected_tag_codes: ["fee"],
           effective_selected_tag_codes: ["fee"],
@@ -235,9 +236,10 @@ describe("Cost statistics export API", () => {
       return new Response(JSON.stringify({
         version: 1,
         bank_auto_tag_rules_version: 8,
-        default_selection_applied: true,
-        selected_tag_codes: ["fee", "__uncategorized__"],
-        effective_selected_tag_codes: ["fee", "__uncategorized__"],
+        display_name: "",
+        default_selection_applied: false,
+        selected_tag_codes: [],
+        effective_selected_tag_codes: [],
         inactive_selected_tag_codes: [],
         active_tags: [
           {
@@ -262,6 +264,7 @@ describe("Cost statistics export API", () => {
     const rules = await fetchCostStatisticsTagRules();
     const saved = await saveCostStatisticsTagRules({
       expectedVersion: rules.version,
+      displayName: "云南溯源无 OA 分类",
       selectedTagCodes: ["fee"],
     });
 
@@ -273,6 +276,7 @@ describe("Cost statistics export API", () => {
         method: "PUT",
         body: JSON.stringify({
           expected_version: 1,
+          display_name: "云南溯源无 OA 分类",
           selected_tag_codes: ["fee"],
         }),
       }),

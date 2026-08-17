@@ -84,17 +84,17 @@
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
 - `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
 - `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
-- `project|bank|expense_type` 只搜索 OA 配对 allocation；`time|bank_tag` 只搜索 canonical 银行事实。`time` 行返回真实银行对手方、标签和摘要，不用 OA 占位项目/费用类型。
+- 五个 view 使用同一组按银行交易日期归属的 signed cost events；`project|bank|expense_type` 搜索 `bank_transaction × OA_unit` 归因行和无 OA 银行行，`time|bank_tag` 搜索同一事件集合的未拆分银行行。相同 scope 的根层 `summary.total_amount` 应一致。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
 `GET /api/cost-statistics/bank-transactions/{transaction_id}`
 
-- 只服务 `time|bank_tag`，返回未拆分的 canonical 银行流水详情。必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
+- 服务五个 view 中 `row_kind=bank_transaction` 的行，返回当前成本事件对应的 canonical 银行流水详情；无 OA 行可包含虚拟项目名和“无 OA 分类”。必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
-- 只服务 `project|bank|expense_type`，返回一个 OA 成本归集单元、同一正式关系组内的关联付款流水和关系组金额校验。支付申请单元金额取该 OA 当前金额；日常报销单元金额取对应子付款项当前金额。
+- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回一个 `bank_transaction × OA_unit` 分摊、同一正式关系组的付款/付错退款证据和金额核对。字段包括 OA 原始金额、OA 权重比例、当前银行事件原金额、银行总支出、付错退款、实际现金成本、差额和现金比例。
 - 两个详情接口都从同一 canonical snapshot 计算，按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
@@ -105,7 +105,8 @@
 `GET|PUT /api/cost-statistics/tag-rules`
 
 - 写 owner 仍为 `AppSettingsService`，保持 version conflict、权限与 audit 合同。
-- 保存不触发 Cost read-model refresh；前端保存成功后重新 GET，下一次 canonical snapshot 应用最新规则。
+- GET 的候选仅来自当前全历史实际无 active OA 关系的支出流水标签；配置 `display_name` 和 `selected_tag_codes` 默认空。PUT 选择标签时名称必填，只允许保存当前候选或已保存但已不可用的 code。
+- 保存不触发 Cost read-model refresh；前端保存成功后重新 GET，下一次 canonical snapshot 对全部历史期间逐笔应用规则。
 
 ## Workbench 设置 API
 
