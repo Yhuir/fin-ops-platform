@@ -1,6 +1,6 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-08-14
+日期：2026-08-18
 
 ## 模块化状态
 
@@ -46,8 +46,9 @@
 | rows + summary + optional statistics | 前端页面 | 每次请求使用同一显式 `REPEATABLE READ / READ ONLY` snapshot；默认返回全期间 statistics，`include_statistics=false` 返回 `statistics=null` |
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
-| relation/object detail | 前端抽屉 | active canonical relations；`kind=bank|invoice|oa` 只控制响应分区 |
+| relation/object detail | 前端抽屉 | active canonical relations；统一只返回 `title/subtitle?/detail_available/sections` 公开合同，`kind=bank|invoice|oa` 只控制响应分区；禁止返回 relation case、raw payload、内部 form id 或重复 summary 容器 |
 | OA 栏状态 | 前端 | 使用 HeroUI 原生 chip 显示申请类型与“已完成/进行中”；移除 OA “已配对” chip，relation status 不替代 workflow status |
+| 发票栏 | 前端 | 有发票号码/日期即表达已有发票关系，不再重复显示“已配对” chip |
 | invoice candidates | 前端选择已有发票抽屉 | 服务端过滤、排序、分页；固定两次 SELECT；返回 candidate/bank relation status 与关联流水数 |
 | loading/empty/error | 前端可观察状态 | loading、合法空集、错误可区分；没有 refreshing/stale UI 或轮询 |
 
@@ -67,8 +68,9 @@
 ## 统一详情展示合同
 
 - OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，禁止页面私有打印版、统计概况或嵌套卡片。
-- 单条和多条使用同一公开字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复分区，不输出关系数量、是否多条或内部关系元数据。
+- 单条和多条使用同一公开字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复分区，不输出关系数量、是否多条或内部关系元数据。relation detail 在一次只读 snapshot 中集合读取成员，不能复用 rows 全页统计查询或逐成员补查。
 - 仅展示 canonical 详情 API 实际返回且已登记为用户可见的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。发票币种等非事实字段不得用默认值补造。
+- OA 单号只来自 completed OA projection 的 `workflow_no`（权威 `detail_fields.OA单号`）或进行中 admission 的真实 workflow/form number；`expense_claim`、`payment_request` 仅是内部表单类型，绝不能作为 OA 单号展示。
 - 抽屉打开后按需执行一个有界详情 GET，不按成员 N+1；所有详情时间统一为 `Asia/Shanghai` 的无时区后缀格式。
 
 ## 文件范围

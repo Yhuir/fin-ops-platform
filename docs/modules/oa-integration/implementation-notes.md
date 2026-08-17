@@ -1,5 +1,13 @@
 # OA 集成 实施记录
 
+## 2026-08-18 - OA 流程单号投影
+
+- 目标：让下游详情读取真实 OA 流程单号，禁止以内部 `form_id`/表单类型代替。
+- 根因：Mongo adapter 已将 completed OA 的权威流程号归一到 `detail_fields.OA单号`，但 PostgreSQL projection 仍写入始终为空的 `record.case_id`。
+- 关键决策：projection 精确读取 `detail_fields.OA单号` 写 `workflow_no`，占位符和缺失值保持空；不猜测、不从 row id 或 form type 兜底。
+- 数据闭环：projection 版本提升为 `2026-08-18-workflow-number-v9`，复用现有 durable OA sync 幂等重投；不新增 schema、worker、read model 或直接数据库修补。
+- 测试：覆盖真实号码写入、缺失号码不使用内部 identity，以及待找发票下游详情合同。
+
 ## 2026-08-18 - 支付申请费用类型表单字段隔离
 
 - 目标：修复支付申请的权威 `category` 在 OA 归一化中被遗漏，造成成本统计中 115 个 OA 归集单元缺少费用类型的问题。

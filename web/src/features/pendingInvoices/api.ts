@@ -29,6 +29,7 @@ import type {
   PendingInvoiceOaSummary,
   PendingInvoiceRelationDetail,
   PendingInvoiceRelationDetailKind,
+  PendingInvoiceRelationTransactionSummary,
   PendingInvoiceRuleGroup,
   PendingInvoiceRulesPayload,
   PendingInvoiceRow,
@@ -251,39 +252,6 @@ type ApiPendingInvoiceRulesPayload = {
   cash_income?: unknown[] | null;
 };
 
-type ApiRelationDetail = {
-  transaction_summary?: Partial<{
-    id: string | null;
-    counterparty_name: string | null;
-    trade_time: string | null;
-    debit_amount: string | null;
-    amount: string | null;
-  }> | null;
-  related_invoices?: ApiInvoiceSummary[] | null;
-  invoice_summaries?: ApiInvoiceSummary[] | null;
-  related_oa?: ApiOaSummary[] | null;
-  oa_summaries?: ApiOaSummary[] | null;
-  relation_case_ids?: unknown[] | null;
-  payment_rows?: Array<Partial<{
-    id: string | null;
-    trade_time: string | null;
-    counterparty_name: string | null;
-    debit_amount: string | null;
-    amount: string | null;
-    relation_case_id: string | null;
-    relationCaseId: string | null;
-    relation_status: string | null;
-    relationStatus: string | null;
-    relation_source: string | null;
-    relationSource: string | null;
-  }>> | null;
-  paid_total?: string | null;
-  invoice_total?: string | null;
-  remaining_amount?: string | null;
-  difference_amount?: string | null;
-  available_actions?: unknown[] | null;
-};
-
 type ApiDetailPayload = {
   title?: string | null;
   subtitle?: string | null;
@@ -294,6 +262,14 @@ type ApiDetailPayload = {
     fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
   }> | null;
 } & Record<string, unknown>;
+
+type ApiTransactionSummary = Partial<{
+  id: string | null;
+  counterparty_name: string | null;
+  trade_time: string | null;
+  debit_amount: string | null;
+  amount: string | null;
+}>;
 
 type ApiCandidatesResponse = {
   transaction_ids?: unknown[] | null;
@@ -322,8 +298,8 @@ type ApiAttachPreview = {
   preview_id?: string | null;
   request_key?: string | null;
   can_confirm?: boolean | null;
-  transaction_summary?: ApiRelationDetail["transaction_summary"];
-  transaction_summaries?: ApiRelationDetail["transaction_summary"][] | null;
+  transaction_summary?: ApiTransactionSummary;
+  transaction_summaries?: ApiTransactionSummary[] | null;
   invoice_summary?: ApiInvoiceSummary | null;
   invoice_summaries?: ApiInvoiceSummary[] | null;
   selection_summary?: Partial<{
@@ -875,34 +851,6 @@ export async function savePendingInvoiceRules(
   return mapRulesPayload(response);
 }
 
-function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDetail {
-  return {
-    transactionSummary: {
-      id: stringValue(payload.transaction_summary?.id),
-      counterpartyName: stringValue(payload.transaction_summary?.counterparty_name),
-      tradeTime: displayDateTime(payload.transaction_summary?.trade_time),
-      debitAmount: stringValue(payload.transaction_summary?.debit_amount, stringValue(payload.transaction_summary?.amount)),
-    },
-    relatedInvoices: (payload.related_invoices ?? payload.invoice_summaries ?? []).map(mapInvoice).filter(hasInvoiceIdentity),
-    relatedOa: (payload.related_oa ?? payload.oa_summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant || item.projectName),
-    relationCaseIds: stringList(payload.relation_case_ids),
-    paymentRows: (payload.payment_rows ?? []).map((row) => ({
-      id: stringValue(row.id),
-      tradeTime: displayDateTime(row.trade_time),
-      counterpartyName: stringValue(row.counterparty_name),
-      debitAmount: stringValue(row.debit_amount, stringValue(row.amount)),
-      relationCaseId: stringValue(row.relation_case_id, stringValue(row.relationCaseId)),
-      relationStatus: formalRelationStatus(row.relation_status ?? row.relationStatus),
-      relationSource: stringValue(row.relation_source, stringValue(row.relationSource)),
-    })),
-    paidTotal: stringValue(payload.paid_total),
-    invoiceTotal: stringValue(payload.invoice_total),
-    remainingAmount: stringValue(payload.remaining_amount),
-    differenceAmount: stringValue(payload.difference_amount),
-    availableActions: stringList(payload.available_actions),
-  };
-}
-
 export async function fetchPendingInvoiceRelationDetail(
   transactionId: string,
   direction: PendingInvoiceDirection = "expense",
@@ -914,11 +862,11 @@ export async function fetchPendingInvoiceRelationDetail(
   if (kind !== "all") {
     params.set("kind", kind);
   }
-  const payload = await requestJson<ApiRelationDetail>(
+  const payload = await requestJson<ApiDetailPayload>(
     `/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/relation-detail?${params.toString()}`,
     { method: "GET", signal },
   );
-  return mapRelationDetail(payload);
+  return mapDetailPayload(payload, "关系详情");
 }
 
 function detailPath(target: PendingInvoiceObjectDetailTarget) {
@@ -931,7 +879,7 @@ function detailPath(target: PendingInvoiceObjectDetailTarget) {
   return `/api/pending-invoices/oa/${encodeURIComponent(target.id)}/detail`;
 }
 
-function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetailTarget): PendingInvoiceObjectDetail {
+function mapDetailPayload(payload: ApiDetailPayload, fallbackTitle: string): PendingInvoiceObjectDetail {
   const sections: PendingInvoiceDetailSection[] = (payload.sections ?? []).map((section) => ({
     title: stringValue(section.title, "详情"),
     fields: (section.fields ?? []).map((field) => ({
@@ -940,7 +888,7 @@ function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetail
     })).filter((field) => field.label),
   }));
   return {
-    title: stringValue(payload.title, target.id),
+    title: stringValue(payload.title, fallbackTitle),
     subtitle: stringValue(payload.subtitle),
     detailAvailable: payload.detail_available !== false,
     unavailableReason: stringValue(payload.unavailable_reason),
@@ -948,9 +896,18 @@ function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetail
   };
 }
 
+function mapTransactionSummary(payload?: ApiTransactionSummary | null): PendingInvoiceRelationTransactionSummary {
+  return {
+    id: stringValue(payload?.id),
+    counterpartyName: stringValue(payload?.counterparty_name),
+    tradeTime: displayDateTime(payload?.trade_time),
+    debitAmount: stringValue(payload?.debit_amount, stringValue(payload?.amount)),
+  };
+}
+
 export async function fetchPendingInvoiceObjectDetail(target: PendingInvoiceObjectDetailTarget, signal?: AbortSignal): Promise<PendingInvoiceObjectDetail> {
   const payload = await requestJson<ApiDetailPayload>(detailPath(target), { method: "GET", signal });
-  return mapDetail(payload, target);
+  return mapDetailPayload(payload, target.id);
 }
 
 function mapPendingInvoiceCandidatesResponse(
@@ -1101,7 +1058,7 @@ export async function previewAttachExistingInvoice(request: AttachExistingInvoic
     previewId: stringValue(payload.preview_id),
     requestKey: stringValue(payload.request_key),
     canConfirm: payload.can_confirm === true,
-    transactionSummary: mapRelationDetail({ transaction_summary: payload.transaction_summary }).transactionSummary,
+    transactionSummary: mapTransactionSummary(payload.transaction_summary),
     invoiceSummary: mapInvoice(payload.invoice_summary),
     paymentImpact: mapAttachPaymentImpact(payload.payment_impact),
     affectedMonths: stringList(payload.affected_months),
@@ -1128,7 +1085,7 @@ export async function previewAttachExistingInvoices(request: AttachExistingInvoi
     previewId: stringValue(payload.preview_id),
     requestKey: stringValue(payload.request_key),
     canConfirm: payload.can_confirm === true,
-    transactionSummaries: (payload.transaction_summaries ?? []).map((summary) => mapRelationDetail({ transaction_summary: summary }).transactionSummary),
+    transactionSummaries: (payload.transaction_summaries ?? []).map(mapTransactionSummary),
     invoiceSummaries: (payload.invoice_summaries ?? []).map(mapInvoice),
     selectionSummary: {
       transactionCount: numberValue(payload.selection_summary?.transaction_count),

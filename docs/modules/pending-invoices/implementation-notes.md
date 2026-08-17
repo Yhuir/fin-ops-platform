@@ -1,5 +1,14 @@
 # 待找发票 实施记录
 
+## 2026-08-18 - 详情事实合同与真实 OA 单号
+
+- 目标：修复 OA 详情把技术表单类型 `expense_claim/payment_request` 显示为 OA 单号的问题，统一流水、发票、OA 抽屉字段，并移除发票栏冗余“已配对” chip。
+- 根因：completed OA projection 没有把 adapter 已归一化的 `detail_fields.OA单号` 写入 `workflow_no`；待找发票页面随后使用 `form_id` 兜底，导致内部表单类型泄漏。多关系详情还复用了完整 rows 查询和旧 summary DTO。
+- 关键决策：OA projection 只从权威 `detail_fields.OA单号` 写 `workflow_no`；待找发票取消 `form_id` 兜底。三个 object detail 与 relation detail 统一输出公开 `sections`，按 bank/invoice/OA 明确白名单组装字段；删除前端旧 relation summary 结构和推导分区。
+- 性能：relation detail 改为一次 `REPEATABLE READ / READ ONLY`、集合式有界查询，不运行列表 statistics/filter 分类，也不按成员 N+1；未新增缓存、read model、worker、表或索引。
+- 数据闭环：OA projection 版本提升为 `2026-08-18-workflow-number-v9`，沿用 durable OA sync 幂等重投历史 completed OA；不直接修改主数据库、不创建备份。
+- 测试：projection 写入/缺失边界、SQL 固定查询预算、API 公开合同、前端真实 OA 单号/技术值隔离/冗余 chip 删除均有定向覆盖；真实 PostgreSQL SQL 和生产浏览器由发布后 smoke 验证。
+
 ## 2026-08-16 - OA、流水与发票详情统一公开字段视图
 
 - 三类详情继续通过共享 HeroUI `AppDrawer` 打开，统一为 800px 紧凑分区 label/value 排版；删除嵌套表格、大卡片和页面私有详情渲染分支。

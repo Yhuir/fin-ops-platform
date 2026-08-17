@@ -30,7 +30,11 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
         relation_tone="warn",
         workflow_status="completed",
         completed_at=f"{month}-05 16:30:00+08:00",
-        detail_fields={"申请日期": f"{month}-02", "审批完成时间": f"{month}-05 16:30:00+08:00"},
+        detail_fields={
+            "OA单号": row_id.removeprefix("oa-pay-").removeprefix("oa-exp-"),
+            "申请日期": f"{month}-02",
+            "审批完成时间": f"{month}-05 16:30:00+08:00",
+        },
     )
 
 
@@ -257,7 +261,21 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(attachment_inserts), 2)
         self.assertIsNone(item_insert[0][4])
         app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
+        self.assertEqual(app_insert[0][4], "structured")
         self.assertEqual(app_insert[0][6], "completed")
+
+    def test_postgres_oa_projection_repository_does_not_use_internal_identity_as_workflow_number(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        record = oa_record(row_id="oa-exp-technical-only")
+        record.detail_fields.pop("OA单号")
+        connection = OAProjectionWriteConnection()
+
+        PostgresOAProjectionRepository(connection).upsert_application_records([record], scope_key="2026-05")
+
+        app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
+        self.assertIsNone(app_insert[0][4])
+        self.assertEqual(app_insert[0][1], "expense_claim")
         self.assertEqual(app_insert[0][9], "2026-05-05 16:30:00+08:00")
 
     def test_postgres_oa_projection_repository_does_not_rewrite_identical_records(self) -> None:

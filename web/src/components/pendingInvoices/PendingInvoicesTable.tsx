@@ -108,18 +108,6 @@ function uniqueCounterpartyLabel(row: PendingInvoiceRow) {
   return names.join("、") || row.bankTransaction.counterpartyName || "-";
 }
 
-function RelationStatusChip({ status }: { status?: string }) {
-  if (!status) {
-    return null;
-  }
-  const paired = status.trim().toLowerCase() === "linked";
-  return (
-    <span className={`pending-invoices-tag pending-invoices-tag--${paired ? "linked" : "unlinked"}`}>
-      {paired ? "已配对" : "未配对"}
-    </span>
-  );
-}
-
 function severityTone(severity: PendingInvoiceStatusSeverity): FinanceTone {
   switch (severity) {
     case "success":
@@ -695,7 +683,6 @@ function PendingInvoiceTableRow({
             secondary={(
               <span className="pending-invoices-inline-row">
                 <span>{primaryInvoice.issueDate || "-"}</span>
-                <RelationStatusChip status={primaryInvoice.relationStatus} />
                 <DetailButton
                   label={`发票详情 ${invoiceNumberLabel}`}
                   onClick={() => onOpenObjectDetail({ kind: "invoice", id: primaryInvoice.id, rowId: row.id })}

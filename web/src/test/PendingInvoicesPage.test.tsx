@@ -635,25 +635,62 @@ function installPendingInvoiceFetch(options: {
     }
     if (url.pathname === "/api/pending-invoices/rows/txn-invoice-not-paid/relation-detail") {
       return new Response(JSON.stringify({
-        transaction_summary: { id: "txn-invoice-not-paid", counterparty_name: "分期供应商", trade_time: "2026-05-03", debit_amount: "1200.00" },
-        related_invoices: [
-          { id: "inv-001", digital_invoice_no: "DIG-001", seller_name: "分期供应商", total_with_tax: "2000.00" },
-          { id: "inv-002", digital_invoice_no: "DIG-002", seller_name: "分期供应商二号", total_with_tax: "800.00" },
+        title: "关系详情",
+        detail_available: true,
+        sections: [
+          {
+            title: "银行流水 1",
+            fields: [
+              { label: "交易时间", value: "2026-05-03" },
+              { label: "对方户名", value: "分期供应商" },
+              { label: "支出金额", value: "1200.00" },
+            ],
+          },
+          {
+            title: "银行流水 2",
+            fields: [
+              { label: "交易时间", value: "2026-04-20" },
+              { label: "对方户名", value: "分期供应商" },
+              { label: "支出金额", value: "300.00" },
+            ],
+          },
+          {
+            title: "发票 1",
+            fields: [
+              { label: "发票号码", value: "DIG-001" },
+              { label: "销方名称", value: "分期供应商" },
+              { label: "价税合计", value: "2000.00" },
+            ],
+          },
+          {
+            title: "发票 2",
+            fields: [
+              { label: "发票号码", value: "DIG-002" },
+              { label: "销方名称", value: "分期供应商二号" },
+              { label: "价税合计", value: "800.00" },
+            ],
+          },
+          {
+            title: "OA 1 · 支付申请",
+            fields: [
+              { label: "OA单号", value: "2047" },
+              { label: "申请人", value: "李四" },
+              { label: "OA类型", value: "支付申请" },
+              { label: "项目名称", value: "建设项目" },
+              { label: "流程状态", value: "进行中" },
+            ],
+          },
+          {
+            title: "OA 2 · 日常报销",
+            fields: [
+              { label: "OA单号", value: "2048" },
+              { label: "申请人", value: "王五" },
+              { label: "OA类型", value: "日常报销" },
+              { label: "项目名称", value: "建设项目二期" },
+              { label: "流程状态", value: "已完成" },
+            ],
+          },
         ],
-        related_oa: [
-          { id: "oa-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中", relation_case_id: "case-001" },
-          { id: "oa-002", applicant: "王五", application_type: "报销", project_name: "建设项目二期", status: "已完成", relation_case_id: "case-old" },
-        ],
-        relation_case_ids: ["case-001", "case-old"],
-        payment_rows: [
-          { id: "txn-invoice-not-paid", trade_time: "2026-05-03", counterparty_name: "分期供应商", debit_amount: "1200.00", relation_case_id: "case-001" },
-          { id: "txn-old-payment", trade_time: "2026-04-20", counterparty_name: "分期供应商", debit_amount: "300.00", relation_case_id: "case-old" },
-        ],
-        paid_total: "1500.00",
-        invoice_total: "2000.00",
-        remaining_amount: "500.00",
-        difference_amount: "-500.00",
-        available_actions: ["attach_existing_invoice"],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/invoices/inv-001/detail") {
@@ -1104,6 +1141,9 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText("2800.00")).toBeInTheDocument();
     expect(within(page).getByText("已付 1500.00")).toBeInTheDocument();
     expect(within(page).getByText("待付 1300.00")).toBeInTheDocument();
+    const invoicedRow = within(page).getByRole("row", { name: /分期供应商/ });
+    expect(within(invoicedRow).getByRole("button", { name: "查看全部发票关系" })).toBeInTheDocument();
+    expect(within(invoicedRow).queryByText("已配对")).not.toBeInTheDocument();
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
     expect(request.searchParams.get("direction")).toBe("expense");
@@ -1311,11 +1351,12 @@ describe("Pending invoices page", () => {
 
     await user.click(within(page).getByRole("button", { name: "查看全部 OA 关系" }));
     const oaRelationDrawer = await screen.findByRole("dialog", { name: "OA详情" });
-    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 1" })).toBeInTheDocument();
-    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 2" })).toBeInTheDocument();
+    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 1 · 支付申请" })).toBeInTheDocument();
+    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 2 · 日常报销" })).toBeInTheDocument();
+    expect(within(oaRelationDrawer).getByText("2047")).toBeInTheDocument();
     expect(screen.getByText("王五")).toBeInTheDocument();
     expect(screen.getByText("建设项目二期")).toBeInTheDocument();
-    expect(screen.queryByText("case-old")).not.toBeInTheDocument();
+    expect(within(oaRelationDrawer).queryByText(/expense_claim|payment_request|case-old/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
     expect(pendingInvoiceRelationRequests(fetchMock).map((url) => url.searchParams.get("kind"))).toEqual(["invoice", "bank", "oa"]);
 

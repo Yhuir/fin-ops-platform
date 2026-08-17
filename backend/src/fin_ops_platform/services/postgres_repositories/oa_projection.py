@@ -19,7 +19,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
     reconcile_oa_attachment_cache_identity_sources,
 )
 
-OA_PROJECTION_SYNC_VERSION = "2026-08-18-form-specific-expense-type-v8"
+OA_PROJECTION_SYNC_VERSION = "2026-08-18-workflow-number-v9"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",
@@ -170,7 +170,7 @@ class PostgresOAProjectionRepository:
                         self._form_id_for_record(record),
                         record.id,
                         record.apply_type,
-                        record.case_id,
+                        self._workflow_no_for_record(record),
                         record.section,
                         text(record.workflow_status),
                         record.applicant,
@@ -944,6 +944,11 @@ class PostgresOAProjectionRepository:
         if row_id.startswith("oa-exp-"):
             return "expense_claim"
         return str(record.apply_type or "oa_application")
+
+    @staticmethod
+    def _workflow_no_for_record(record: OAApplicationRecord) -> str | None:
+        value = text((record.detail_fields or {}).get("OA单号"))
+        return value if value and value != "—" else None
 
     @classmethod
     def _records_from_rows(cls, rows: list[dict[str, Any]]) -> list[OAApplicationRecord]:

@@ -426,23 +426,33 @@ describe("pending invoices and tag settings API mapping", () => {
       }
       if (url.pathname === "/api/pending-invoices/rows/txn_001/relation-detail") {
         return new Response(JSON.stringify({
-          transaction_summary: { id: "txn_001", counterparty_name: "云南供应商", trade_time: "2026-05-02", debit_amount: "1200.00" },
-          related_invoices: [{ id: "inv_001", digital_invoice_no: "DIG-001", seller_name: "云南供应商", total_with_tax: "2000.00", relation_status: "candidate" }],
-          related_oa: [
-            { id: "oa_001", applicant: "杨丽萍", application_type: "支付申请", project_name: "云南溯源项目", relation_case_id: "case_001", detail_available: true, relation_status: "candidate" },
-            { id: "oa_002", applicant: "刘晓宇", application_type: "日常报销", project_name: "云南溯源项目二期", relation_case_id: "case_002", detail_available: true },
+          title: "关系详情",
+          detail_available: true,
+          sections: [
+            {
+              title: "银行流水",
+              fields: [
+                { label: "交易时间", value: "2026-05-02" },
+                { label: "支出金额", value: "1200.00" },
+              ],
+            },
+            {
+              title: "OA 1 · 支付申请",
+              fields: [
+                { label: "OA单号", value: "2047" },
+                { label: "申请人", value: "杨丽萍" },
+                { label: "OA类型", value: "支付申请" },
+              ],
+            },
+            {
+              title: "OA 2 · 日常报销",
+              fields: [
+                { label: "OA单号", value: "2048" },
+                { label: "申请人", value: "刘晓宇" },
+                { label: "OA类型", value: "日常报销" },
+              ],
+            },
           ],
-          oa_summaries: [
-            { id: "oa_001", applicant: "杨丽萍", application_type: "支付申请", project_name: "云南溯源项目", relation_case_id: "case_001", detail_available: true },
-            { id: "oa_002", applicant: "刘晓宇", application_type: "日常报销", project_name: "云南溯源项目二期", relation_case_id: "case_002", detail_available: true },
-          ],
-          relation_case_ids: ["case_001", "case_002"],
-          payment_rows: [{ id: "txn_001", trade_time: "2026-05-02", debit_amount: "1200.00", relation_case_id: "case_001", relation_status: "candidate" }],
-          paid_total: "1200.00",
-          invoice_total: "2000.00",
-          remaining_amount: "800.00",
-          difference_amount: "-800.00",
-          available_actions: ["attach_existing_invoice"],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/pending-invoices/invoices/inv_001/detail") {
@@ -555,17 +565,16 @@ describe("pending invoices and tag settings API mapping", () => {
 
     const relation = await api().fetchPendingInvoiceRelationDetail("txn_001");
     expect(relation).toMatchObject({
-      paidTotal: "1200.00",
-      invoiceTotal: "2000.00",
-      availableActions: ["attach_existing_invoice"],
-      relatedOa: [
-        { id: "oa_001", applicant: "杨丽萍", applicationType: "支付申请", projectName: "云南溯源项目", relationStatus: "unlinked" },
-        { id: "oa_002", applicant: "刘晓宇", applicationType: "日常报销", projectName: "云南溯源项目二期" },
+      title: "关系详情",
+      detailAvailable: true,
+      sections: [
+        { title: "银行流水" },
+        { title: "OA 1 · 支付申请" },
+        { title: "OA 2 · 日常报销" },
       ],
-      relationCaseIds: ["case_001", "case_002"],
     });
-    expect(relation.relatedInvoices[0]).toMatchObject({ id: "inv_001", relationStatus: "unlinked" });
-    expect(relation.paymentRows[0]).toMatchObject({ id: "txn_001", relationStatus: "unlinked" });
+    expect(JSON.stringify(relation)).toContain('"OA单号","value":"2047"');
+    expect(JSON.stringify(relation)).not.toContain("expense_claim");
 
     const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });
     expect(detail).toMatchObject({ title: "DIG-001", sections: [{ title: "发票字段" }] });

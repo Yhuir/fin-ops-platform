@@ -11,6 +11,8 @@
   不读取 `pending_invoice`、`bank_detail`、`workbench_relation` 或 `search` projection。
 - 支出/收入状态、规则优先级、多 OA/流水/发票聚合、候选发票和导出业务口径保持不变。
 - OA summary 覆盖 completed/in-progress workflow status；OA 栏显示 HeroUI workflow chip且不再显示 OA “已配对” chip。
+- OA 详情只显示真实 `workflow_no`，禁止把 `expense_claim/payment_request` 当 OA 单号；关系详情固定一次有界 snapshot 查询，object/relation detail 只返回公开 `sections` 合同。
+- 进项发票号码/开票日期栏不重复显示“已配对” chip。
 - rules、attach-existing、income status 等 command 保留权限、CAS、idempotency、audit 与
   冲突校验；成功后页面执行一次 normal GET。
 - API/frontend 没有 read-model status/source/scope/job/barrier、202、polling 或 fallback。

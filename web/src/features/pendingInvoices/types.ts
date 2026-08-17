@@ -329,30 +329,11 @@ export type PendingInvoiceFilterOptionsResponse = {
   fields: PendingInvoiceFilterField[];
 };
 
-export type PendingInvoiceRelationDetail = {
-  transactionSummary: {
-    id: string;
-    counterpartyName: string;
-    tradeTime: string;
-    debitAmount: string;
-  };
-  relatedInvoices: PendingInvoiceSummary[];
-  relatedOa: PendingInvoiceOaSummary[];
-  relationCaseIds: string[];
-  paymentRows: Array<{
-    id: string;
-    tradeTime: string;
-    counterpartyName: string;
-    debitAmount: string;
-    relationCaseId: string;
-    relationStatus: string;
-    relationSource: string;
-  }>;
-  paidTotal: string;
-  invoiceTotal: string;
-  remainingAmount: string;
-  differenceAmount: string;
-  availableActions: string[];
+export type PendingInvoiceRelationTransactionSummary = {
+  id: string;
+  counterpartyName: string;
+  tradeTime: string;
+  debitAmount: string;
 };
 
 export type PendingInvoiceObjectDetailTarget = {
@@ -378,6 +359,8 @@ export type PendingInvoiceObjectDetail = {
   unavailableReason: string;
   sections: PendingInvoiceDetailSection[];
 };
+
+export type PendingInvoiceRelationDetail = PendingInvoiceObjectDetail;
 
 export type PendingInvoiceCandidateStatus = "available" | "already_related" | "conflict" | (string & {});
 export type PendingInvoiceCandidateBankRelationStatus = "unlinked" | "linked" | "already_selected" | "conflict" | (string & {});
@@ -448,7 +431,7 @@ export type AttachExistingInvoicePreview = {
   previewId: string;
   requestKey: string;
   canConfirm: boolean;
-  transactionSummary: PendingInvoiceRelationDetail["transactionSummary"];
+  transactionSummary: PendingInvoiceRelationTransactionSummary;
   invoiceSummary: PendingInvoiceSummary;
   paymentImpact: {
     paidTotalBefore: string;
@@ -473,7 +456,7 @@ export type AttachExistingInvoicesPreview = {
   previewId: string;
   requestKey: string;
   canConfirm: boolean;
-  transactionSummaries: PendingInvoiceRelationDetail["transactionSummary"][];
+  transactionSummaries: PendingInvoiceRelationTransactionSummary[];
   invoiceSummaries: PendingInvoiceSummary[];
   selectionSummary: AttachExistingInvoicesSelectionSummary;
   paymentImpact: AttachExistingInvoicePreview["paymentImpact"];

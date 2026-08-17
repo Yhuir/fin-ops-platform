@@ -9,6 +9,7 @@ from fin_ops_platform.services.pending_invoice_canonical_query import (
     INVOICE_DETAIL_SQL,
     OA_DETAIL_SQL,
     PAGE_QUERY_SQL,
+    RELATION_DETAIL_SQL,
     PendingInvoiceCanonicalQueryService,
     PostgresPendingInvoiceCanonicalRepository,
     _rule_required_fields,
@@ -72,6 +73,14 @@ class _PageRepository:
             "selected_total": "0.00",
         }
         self.candidate_request: dict[str, object] = {}
+        self.relation_payload: dict[str, object] = {
+            "bank_rows": [],
+            "invoice_rows": [],
+            "oa_rows": [],
+        }
+        self.bank_detail_payload: dict[str, object] | None = None
+        self.invoice_detail_payload: dict[str, object] | None = None
+        self.oa_detail_payload: dict[str, object] | None = None
 
     def query(
         self,
@@ -87,17 +96,38 @@ class _PageRepository:
         self.candidate_request = dict(request)
         return dict(self.candidate_payload)
 
-    def bank_transaction_detail(self, _object_id: str) -> None:
-        return None
+    def bank_transaction_detail(self, _object_id: str) -> dict[str, object] | None:
+        return dict(self.bank_detail_payload) if self.bank_detail_payload is not None else None
 
-    def invoice_detail(self, _object_id: str) -> None:
-        return None
+    def invoice_detail(self, _object_id: str) -> dict[str, object] | None:
+        return dict(self.invoice_detail_payload) if self.invoice_detail_payload is not None else None
 
-    def oa_detail(self, _object_id: str) -> None:
-        return None
+    def oa_detail(self, _object_id: str) -> dict[str, object] | None:
+        return dict(self.oa_detail_payload) if self.oa_detail_payload is not None else None
+
+    def relation_detail(self, _object_id: str, *, direction: str, kind: str) -> dict[str, object]:
+        del direction, kind
+        return dict(self.relation_payload)
 
 
 class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
+    def test_relation_detail_uses_one_bounded_snapshot_query_without_technical_oa_number_fallback(self) -> None:
+        connection = _RecordingConnection({"bank_rows": [], "invoice_rows": [], "oa_rows": []})
+        repository = PostgresPendingInvoiceCanonicalRepository(connection)
+
+        payload = repository.relation_detail("bank-1", direction="expense", kind="oa")
+
+        commands = connection.transaction_state.commands
+        self.assertEqual(commands[0][0], "set transaction isolation level repeatable read read only")
+        selects = [sql for sql, _params in commands if sql.lstrip().lower().startswith(("select", "with"))]
+        self.assertEqual(len(selects), 1)
+        self.assertIsNotNone(payload)
+        self.assertIn("join app.bank_transactions", RELATION_DETAIL_SQL)
+        self.assertIn("join app.invoices", RELATION_DETAIL_SQL)
+        self.assertIn("join app.oa_applications", RELATION_DETAIL_SQL)
+        self.assertIn("join app.oa_pending_payment_admissions", RELATION_DETAIL_SQL)
+        self.assertNotIn("coalesce(oa.workflow_no, oa.form_id", PAGE_QUERY_SQL)
+
     def test_uses_one_read_only_repeatable_read_snapshot_and_fixed_query_count(self) -> None:
         connection = _RecordingConnection()
         service = PendingInvoiceCanonicalQueryService(
@@ -531,6 +561,99 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         with self.assertRaises(PendingInvoiceError) as raised:
             service.oa_detail("candidate:123")
         self.assertEqual(raised.exception.error_code, "invalid_oa_detail_id")
+
+    def test_relation_detail_uses_public_sections_and_never_exposes_form_type_as_oa_number(self) -> None:
+        repository = _PageRepository()
+        repository.relation_payload = {
+            "bank_rows": [
+                {
+                    "id": "bank-1",
+                    "txn_direction": "outflow",
+                    "amount": "332",
+                    "trade_time": "2026-08-03T11:19:55+08:00",
+                    "counterparty_name": "供应商",
+                }
+            ],
+            "invoice_rows": [],
+            "oa_rows": [
+                {
+                    "row_id": "oa-exp-2047",
+                    "workflow_no": "2047",
+                    "form_type": "expense_claim",
+                    "applicant": "樊祖芳",
+                    "workflow_status": "completed",
+                    "project_name": "大理余热项目",
+                    "amount": "332",
+                    "detail_fields": {"费用类型": "交通费"},
+                },
+                {
+                    "row_id": "oa-exp-broken",
+                    "workflow_no": "expense_claim",
+                    "form_type": "expense_claim",
+                    "applicant": "樊祖芳",
+                    "workflow_status": "completed",
+                },
+            ],
+        }
+        service = PendingInvoiceCanonicalQueryService(repository=repository)
+
+        payload = service.relation_detail("bank-1", direction="expense", kind="all")
+
+        self.assertEqual([section["title"] for section in payload["sections"]], ["银行流水", "OA 1", "OA 2"])
+        serialized = json.dumps(payload, ensure_ascii=False)
+        self.assertIn('"OA单号", "value": "2047"', serialized)
+        self.assertIn('"OA类型", "value": "日常报销"', serialized)
+        self.assertNotIn('"OA单号", "value": "expense_claim"', serialized)
+        self.assertNotIn("relation_case", serialized)
+
+    def test_object_details_publish_only_named_business_fields(self) -> None:
+        repository = _PageRepository()
+        repository.bank_detail_payload = {
+            "id": "bank-1",
+            "txn_direction": "outflow",
+            "amount": "332",
+            "trade_time": "2026-08-03T11:19:55+08:00",
+            "counterparty_name": "供应商",
+            "account_no": "8106",
+        }
+        repository.invoice_detail_payload = {
+            "id": "invoice-1",
+            "invoice_type": "input",
+            "digital_invoice_no": "26534000000097888906",
+            "issue_date": "2026-07-15",
+            "seller_name": "供应商",
+            "total_with_tax": "332",
+        }
+        repository.oa_detail_payload = {
+            "oa_id": "oa-exp-2047",
+            "workflow_no": "2047",
+            "application_type": "expense_claim",
+            "applicant": "樊祖芳",
+            "status": "completed",
+            "project_name": "大理余热项目",
+            "amount": "332",
+            "detail_fields": {"费用类型": "交通费", "OA单号": "2047"},
+        }
+        service = PendingInvoiceCanonicalQueryService(repository=repository)
+
+        bank = service.bank_transaction_detail("bank-1")
+        invoice = service.invoice_detail("invoice-1")
+        oa = service.oa_detail("oa-exp-2047")
+
+        self.assertEqual(bank["sections"][0]["title"], "支出流水")
+        self.assertIn({"label": "账号", "value": "8106"}, bank["sections"][0]["fields"])
+        self.assertEqual(invoice["sections"][0]["title"], "进项发票")
+        self.assertIn(
+            {"label": "数电发票号码", "value": "26534000000097888906"},
+            invoice["sections"][0]["fields"],
+        )
+        self.assertIn({"label": "OA单号", "value": "2047"}, oa["sections"][0]["fields"])
+        self.assertIn({"label": "OA类型", "value": "日常报销"}, oa["sections"][0]["fields"])
+        for payload in (bank, invoice, oa):
+            serialized = json.dumps(payload, ensure_ascii=False)
+            self.assertNotIn('"id"', serialized)
+            self.assertNotIn("raw_payload", serialized)
+            self.assertNotIn("relation_case", serialized)
 
 
 if __name__ == "__main__":
