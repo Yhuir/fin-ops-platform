@@ -2497,7 +2497,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_FILTER_OPTION_ANOMALY_STATE_CTES},
+            {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select
@@ -3117,7 +3117,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_ANOMALY_STATE_CTES},
+            {_FILTER_OPTION_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key

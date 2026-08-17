@@ -116,6 +116,7 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     assert [row["detail_key"] for row in hydrated_descriptors] == ["bank-2"]
     assert "exact_totals" in connection.sql
     assert "exact_row_counts" in connection.sql
+    assert "filter_option_anomaly_groups" not in connection.sql
     assert "offset" not in connection.sql.lower()
     assert "limit %s" in connection.sql.lower()
     decoded = decode_workbench_page_cursor(
@@ -698,6 +699,29 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
         "project:大理项目",
         "project:曲靖项目",
     }
+
+
+def test_plain_filter_options_also_narrow_anomalies_to_the_target_pane() -> None:
+    connection = _QueryConnection(
+        [{"facet_value": "云南供应商", "facet_label": "云南供应商"}]
+    )
+
+    payload = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )._filter_options(
+        scope_key="all",
+        zone="unpaired",
+        pane="bank",
+        facet="column",
+        column="counterparty",
+    )
+
+    assert payload["options"] == [
+        {"value": "云南供应商", "label": "云南供应商", "missing": False}
+    ]
+    assert "from filter_option_anomaly_groups groups" in connection.sql
+    assert connection.params[4] == "bank"
 
 
 def test_project_and_expense_type_share_one_oa_expense_item() -> None:
