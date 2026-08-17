@@ -69,6 +69,7 @@ ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
+    "category",
     "feeType",
     "expenseType",
     "costType",

@@ -19,7 +19,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
     reconcile_oa_attachment_cache_identity_sources,
 )
 
-OA_PROJECTION_SYNC_VERSION = "2026-08-17-expense-type-enum-v5"
+OA_PROJECTION_SYNC_VERSION = "2026-08-17-expense-category-enum-v6"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",

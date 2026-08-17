@@ -1032,7 +1032,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                                     "row_index": 0,
                                     "detailProjectName": "dali-project",
                                     "detailReimbursementAmount": "144.99",
-                                    "feeType": "s4",
+                                    "category": "s4",
                                     "feeContent": "大理出差返回昆明车费",
                                     "detailReimbursementDate": "2026-06-08",
                                 }
