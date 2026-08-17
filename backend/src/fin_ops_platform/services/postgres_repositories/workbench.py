@@ -869,7 +869,11 @@ class PostgresWorkbenchRepository:
         scope_key: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         normalized_scope_key = str(scope_key or "").strip()
-        scope_clause = "and scope_month = %s::date" if normalized_scope_key and normalized_scope_key != "all" else ""
+        scope_clause = (
+            "and (scope_month = %s::date or scope_month is null)"
+            if normalized_scope_key and normalized_scope_key != "all"
+            else ""
+        )
         params: tuple[Any, ...] = (WORKBENCH_ANOMALY_REVIEW_SCENARIO,)
         if scope_clause:
             params = (*params, month_start(normalized_scope_key))
@@ -964,6 +968,7 @@ class PostgresWorkbenchRepository:
             current = connection.fetch_one(
                 """
                 select id::text as id, status, resolution, version, created_by, created_at,
+                       scope_month::text as scope_month,
                        raw_payload#>'{normalized_payload,reviewed_item_fingerprints}'
                            as reviewed_item_fingerprints,
                        raw_payload#>'{normalized_payload,review_classification_codes}'
@@ -977,8 +982,13 @@ class PostgresWorkbenchRepository:
             )
             current_resolution = text((current or {}).get("resolution"))
             current_version = int_value((current or {}).get("version"), 0)
+            normalized_scope_month = month_start(normalized_scope_key)
+            current_scope_month = (
+                (current or {}).get("scope_month") if current else None
+            )
             changed = (
                 current_resolution != normalized_decision
+                or current_scope_month != normalized_scope_month
                 or text((current or {}).get("note")) != normalized_note
                 or sorted(text_list((current or {}).get("reviewed_item_fingerprints")))
                 != normalized_reviewed_items
@@ -1030,7 +1040,7 @@ class PostgresWorkbenchRepository:
                     normalized_decision,
                     next_version,
                     WORKBENCH_ANOMALY_REVIEW_SCENARIO,
-                    month_start(normalized_scope_key),
+                    normalized_scope_month,
                     normalized_actor_id,
                     normalized_actor_id,
                     jsonb({"normalized_payload": normalized_payload}),

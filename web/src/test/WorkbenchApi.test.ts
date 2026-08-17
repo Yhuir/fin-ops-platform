@@ -362,7 +362,7 @@ describe("workbench api bank amount mapping", () => {
       code: "internal_server_error",
       requestId: "req-500-audit",
     });
-    expect(error.message).toBe("关联台服务暂时不可用，请稍后重试。 · requestId req-500-audit");
+    expect(error.message).toBe("关联台服务暂时不可用，请稍后重试。");
     expect(error.message).not.toContain("INTERNAL ENGLISH SENTINEL");
   });
 
@@ -372,6 +372,8 @@ describe("workbench api bank amount mapping", () => {
     ["workbench_row_not_found", 404, "所选关联台记录已不可用，请刷新后重新选择。"],
     ["workbench_row_detail_invariant_broken", 503, "关联台详情数据不完整，请稍后重试或联系管理员。"],
     ["workbench_detail_unavailable", 503, "关联台详情暂时不可用，请稍后重试。"],
+    ["workbench_anomaly_changed", 409, "异常内容已变化，请刷新后重新审阅。"],
+    ["workbench_anomaly_review_blocked", 409, "该关系仍有未解决的配对条件，不能进入已配对。"],
     ["relation_preview_rows_missing", 400, "关联预览无效，请刷新后重新选择。"],
     ["relation_preview_rows_ambiguous", 409, "所选关联台记录内容不一致，请刷新后重试。"],
     ["unknown_auth_error", 401, "登录状态已失效，请重新登录。"],
@@ -1096,6 +1098,7 @@ describe("workbench api bank amount mapping", () => {
       month: "all",
       zone: "paired",
       groupId: "case:CASE-1",
+      detailKey: "case:CASE-1",
       fingerprint: "a".repeat(64),
       decision: "accept_paired",
       reviewedItemFingerprints: ["b".repeat(64)],
@@ -1110,6 +1113,7 @@ describe("workbench api bank amount mapping", () => {
           month: "all",
           zone: "paired",
           group_id: "case:CASE-1",
+          detail_key: "case:CASE-1",
           fingerprint: "a".repeat(64),
           decision: "accept_paired",
           reviewed_item_fingerprints: ["b".repeat(64)],

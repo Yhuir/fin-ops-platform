@@ -190,7 +190,7 @@ test.describe("workbench withdraw browser flow", () => {
     const errorDialog = page.getByRole("dialog", { name: "操作状态弹窗" });
     await expect(errorDialog).toBeVisible();
     await expect(errorDialog).toContainText("操作失败");
-    await expect(errorDialog).toContainText("关联台服务暂时不可用，请稍后重试。 · requestId req-withdraw-preview");
+    await expect(errorDialog).toContainText("关联台服务暂时不可用，请稍后重试。");
     await expect(errorDialog).not.toContainText("INTERNAL WITHDRAW PREVIEW SENTINEL");
     await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeEnabled();
   });

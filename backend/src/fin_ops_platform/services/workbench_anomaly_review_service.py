@@ -14,7 +14,9 @@ WORKBENCH_NO_ANOMALY_REVIEW_CLASSIFICATION = "no_anomaly"
 
 
 class WorkbenchAnomalyReviewConflict(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "workbench_anomaly_changed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class WorkbenchAnomalyReviewService:
@@ -26,6 +28,7 @@ class WorkbenchAnomalyReviewService:
         scope_key = str(payload.get("month") or "").strip()
         zone = str(payload.get("zone") or "").strip()
         group_id = str(payload.get("group_id") or "").strip()
+        detail_key = str(payload.get("detail_key") or "").strip()
         fingerprint = str(payload.get("fingerprint") or "").strip().lower()
         decision = str(payload.get("decision") or "").strip()
         note = str(payload.get("note") or "").strip()
@@ -54,6 +57,7 @@ class WorkbenchAnomalyReviewService:
             scope_key=scope_key,
             zone=zone,
             group_id=group_id,
+            detail_key=detail_key or None,
         )
         group = detail.get("group") if isinstance(detail, dict) else None
         if not isinstance(group, dict) and isinstance(detail, dict):
@@ -111,21 +115,28 @@ class WorkbenchAnomalyReviewService:
             ]
             if other_blockers:
                 raise WorkbenchAnomalyReviewConflict(
-                    "该关系仍有未解决的配对条件，不能强制进入已配对。"
+                    "该关系仍有未解决的配对条件，不能强制进入已配对。",
+                    code="workbench_anomaly_review_blocked",
                 )
 
-        group_scope = str(
+        source_scope = str(
             (detail.get("source_scope_key") if isinstance(detail, dict) else None)
             or group.get("source_scope_key")
             or group.get("scope_month")
             or group.get("month")
-            or self._group_row_scope(group)
-            or group.get("scope_key")
-            or scope_key
+            or ""
         ).strip()
-        decision_scope_key = group_scope[:7] if len(group_scope) >= 7 else scope_key
-        if decision_scope_key == "all":
-            raise WorkbenchAnomalyReviewConflict("异常缺少所属月份，请刷新后重试。")
+        row_scopes = self._group_row_scopes(group)
+        if source_scope:
+            decision_scope_key = self._normalize_scope_key(source_scope)
+        elif len(row_scopes) == 1:
+            decision_scope_key = next(iter(row_scopes))
+        elif len(row_scopes) > 1:
+            decision_scope_key = "all"
+        else:
+            decision_scope_key = self._normalize_scope_key(
+                str(group.get("scope_key") or scope_key).strip()
+            )
         result = self._decision_repository.set_workbench_anomaly_review_decision(
             fingerprint=fingerprint,
             group_id=group_id,
@@ -139,14 +150,16 @@ class WorkbenchAnomalyReviewService:
         return {**result, "affected_scope_keys": [decision_scope_key]}
 
     @staticmethod
-    def _group_row_scope(group: dict[str, object]) -> str:
-        scopes = {
-            str(
-                row.get("source_scope_key")
-                or row.get("scope_month")
-                or row.get("month")
-                or ""
-            ).strip()[:7]
+    def _group_row_scopes(group: dict[str, object]) -> set[str]:
+        return {
+            WorkbenchAnomalyReviewService._normalize_scope_key(
+                str(
+                    row.get("source_scope_key")
+                    or row.get("scope_month")
+                    or row.get("month")
+                    or ""
+                ).strip()
+            )
             for pane in ("oa", "bank", "invoice")
             for row in list(group.get(f"{pane}_rows") or [])
             if isinstance(row, dict)
@@ -157,7 +170,21 @@ class WorkbenchAnomalyReviewService:
                 or ""
             ).strip()
         }
-        return next(iter(scopes)) if len(scopes) == 1 else ""
+
+    @staticmethod
+    def _normalize_scope_key(scope_key: str) -> str:
+        if scope_key == "all":
+            return "all"
+        normalized = scope_key[:7]
+        if (
+            len(normalized) != 7
+            or normalized[4] != "-"
+            or not normalized[:4].isdigit()
+            or not normalized[5:].isdigit()
+            or not 1 <= int(normalized[5:]) <= 12
+        ):
+            raise ValueError("异常所属月份无效，请刷新后重试。")
+        return normalized
 
 
 __all__ = [

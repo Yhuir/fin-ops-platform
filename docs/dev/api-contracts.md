@@ -469,7 +469,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
-`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,fingerprint,decision,reviewed_item_fingerprints,review_classification_codes,note?}`；`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。存在金额 item 时人工分类必须非空，可从三种金额差异中多选，或单独选择 `no_anomaly`；纯附件异常不得提交金额分类。系统检测 code 与人工分类分别保存。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。旧 amount-mismatch ignore/restore routes 返回 404。
+`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,detail_key?,fingerprint,decision,reviewed_item_fingerprints,review_classification_codes,note?}`；`detail_key` 在列表返回时原样回传，用于同一 `group_id` 的精确详情定位。`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。存在金额 item 时人工分类必须非空，可从三种金额差异中多选，或单独选择 `no_anomaly`；纯附件异常不得提交金额分类。系统检测 code 与人工分类分别保存。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。单月关系把决定绑定到该月；同一关系成员跨月时绑定全局作用域，使各月份视图读取同一决定。旧 amount-mismatch ignore/restore routes 返回 404。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 

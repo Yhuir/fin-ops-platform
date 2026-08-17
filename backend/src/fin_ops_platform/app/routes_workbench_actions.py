@@ -36,7 +36,7 @@ class WorkbenchActionApiRoutes:
             result = self._anomaly_review_service.review(payload, actor_id=actor_id)
         except WorkbenchAnomalyReviewConflict as error:
             return HTTPStatus.CONFLICT, {
-                "error": "workbench_anomaly_changed",
+                "error": error.code,
                 "message": str(error),
             }
         except ValueError as error:

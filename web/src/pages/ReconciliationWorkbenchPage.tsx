@@ -2124,13 +2124,16 @@ export default function ReconciliationWorkbenchPage() {
           month: WORKBENCH_VIEW_MONTH,
           zone: group.groupType,
           groupId: group.id,
+          detailKey: group.detailKey,
           fingerprint: group.workbenchAnomaly!.fingerprint,
           decision,
           reviewedItemFingerprints,
           reviewClassificationCodes,
         });
         setMessage("异常处理已写入，正在重新读取关联台...");
-        if (!await rereadWorkbenchAfterCommit()) {
+        try {
+          await rereadWorkbenchAfterCommit();
+        } catch {
           throw new Error("异常处理已写入，但关联台重新读取失败；请勿重复提交，稍后刷新确认。");
         }
         const nextBucket = decision === "accept_paired" ? "paired" : "unpaired";

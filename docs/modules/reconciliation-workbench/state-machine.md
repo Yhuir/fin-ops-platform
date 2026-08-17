@@ -102,6 +102,8 @@ row detail GET 是纯读操作：按 typed identity 窄查 latest committed cano
 
 该状态机改变关联台的有效展示分区，但不修改 `app.workbench_pair_relations.status=active`、成员或 canonical 金额。下游页面仍消费同一正式关系，避免异常审阅污染已支付、成本和发票归属。金额异常提交前必须从 `OA流水金额不一致`、`OA发票金额不一致`、`流水发票金额不一致`、`无异常` 中选择一个或多个；`无异常` 与三种差异互斥。审阅只持久化 fingerprint-bound 决定、人工分类与 audit。
 
+异常决定的作用域取当前 canonical 组的成员月份：成员都在同一月时写入单月决定；同一关系跨多个自然月时写入全局决定并在各月视图复用。不得因为页面使用 `month=all` 或成员跨月而拒绝审阅，也不得拆成多个相互冲突的月度决定。
+
 只有当前 direct canonical descriptor 计算出的 `workbench_anomaly` 进入状态机；金额 item 必须是具体的三种 pair code，禁止恢复泛化“金额不一致”。系统检测 code 与人工 `review_classification_codes[]` 是不同事实：用户可以纠正分类，但不能覆盖或删除原始检测证据。历史 ignore/restore、WEX/row-ignore 不得改变分区、成员、抽屉或计数。
 
 未配对工具栏不提供第二套人工异常入口；右上统一入口显示 `未配对异常 n | 已配对异常 m`。

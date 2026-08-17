@@ -1666,3 +1666,11 @@
 - 审计兼容：历史 exception/WEX/ignore 事实不删除，操作历史语义映射继续可读；运行时分区、自动异常检测和 `/api/workbench/exceptions/review` 人工审阅保持唯一现行链路。
 - 合同与性能：invoice `available_actions` 收敛为 `detail`（可正式关联时另有 `confirm_link`）；bank 非异常业务动作不变。删除旧分支减少 DTO、事件 handler 和测试 mock，不增加 SQL、API round-trip、数据库 migration、read model、worker、cache 或依赖。
 - 验证：前端覆盖发票详情存在、三点菜单和“忽略”缺失、自动异常审阅与关系动作回归；后端覆盖旧入口 `404`、当前审阅接口、action contract、rollback/case/query/facade 边界。
+
+## 2026-08-17 - 跨月异常审阅与提交后重读修复
+
+- 根因：异常抽屉固定从全时段视图审阅，旧 service 又要求把决定压缩到唯一月份；一条关系同时包含不同月份的 OA/流水时会以“数据已变化”拒绝。列表详情的 `detail_key` 也没有随 review POST 回传，冲突类型统一映射为 stale，前端在写成功后的 direct reread 抛错时没有进入专用提示分支。
+- 收口：列表返回的可选 `detail_key` 原样传到 canonical group detail repository；单月关系继续写月度决定，跨月关系使用数据库既有的 `scope_month is null` 全局决定，同一 fingerprint 只保留一条权威记录。月度读取同时接受该月决定和全局决定，月度旧决定可原子提升为全局决定。
+- 错误与重试：后端区分内容漂移和仍有 blocker；用户提示不显示 request id，诊断 ID 仍保留在错误对象。review POST 成功但 canonical reread 失败时明确提示“已写入、请勿重复提交”，避免重复 mutation。
+- 边界与性能：复用现有 repository、全局 scope schema、direct reread 与异常 bucket，不新增 migration、表、索引、worker、read model、cache、依赖或第二条链路；查询只把月度过滤扩展为 `scope_month = 月份 OR scope_month IS NULL`。
+- 验证：后端覆盖 detail key、跨月 scope、月度到全局提升、幂等和稳定错误码；前端覆盖请求合同、无 request id 用户文案及 post-commit reread 失败不重复写。完整 backend/frontend/lint/docs/build 回归后发布，并以生产只读 HTTP SLO 与 runtime closure gate 验证。

@@ -9926,8 +9926,15 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       await delay(200);
       const body = parseJsonBody(request.postData()) as {
         decision?: string;
+        detail_key?: string;
         review_classification_codes?: string[];
       };
+      if (!body.detail_key) {
+        return json(route, {
+          error: "invalid_workbench_anomaly_review_request",
+          message: "detail_key is required",
+        }, 400);
+      }
       const decision = body.decision;
       workbenchAmountMismatchDecision = decision === "accept_paired"
         ? "accept_paired"

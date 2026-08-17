@@ -737,7 +737,7 @@ describe("Workbench row selection and detail drawer", () => {
     const errorDialog = await screen.findByRole("dialog", { name: "操作状态弹窗" });
     expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
     expect(
-      within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。 · requestId req-preview-safe"),
+      within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
     await user.click(within(errorDialog).getByRole("button", { name: "确定" }));
@@ -1522,6 +1522,49 @@ describe("Workbench row selection and detail drawer", () => {
     expect(initialReadCount).toBe(3);
   }, 8_000);
 
+  test("anomaly review does not repeat the write when the committed-state reread fails", async () => {
+    const user = userEvent.setup();
+    let reviewCommitted = false;
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "unpaired",
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/exceptions/review") {
+        reviewCommitted = true;
+        return Promise.resolve(jsonResponse({
+          success: true,
+          affected_scope_keys: ["all"],
+        }));
+      }
+      if (reviewCommitted && isWorkbenchInitialRequest(input)) {
+        return Promise.resolve(jsonResponse({ error: "internal_server_error" }, 503));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await user.click(within(drawer).getByRole("button", { name: /人工金额判断/ }));
+    await user.click(screen.getByRole("option", { name: "OA发票金额不一致" }));
+    await user.keyboard("{Escape}");
+    await user.click(within(drawer).getByRole("button", { name: "留在未配对" }));
+
+    const errorDialog = await screen.findByRole("dialog", { name: "全局操作进度" });
+    expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
+    expect(within(errorDialog).getByText(
+      "异常处理已写入，但关联台重新读取失败；请勿重复提交，稍后刷新确认。",
+    )).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      fetchPath(input) === "/api/workbench/exceptions/review"
+    ))).toHaveLength(1);
+  });
+
   test("keeping an anomaly unpaired rereads the canonical page and refreshes the same bucket once", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
@@ -1563,6 +1606,12 @@ describe("Workbench row selection and detail drawer", () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
       fetchPath(input) === "/api/workbench/exceptions/review"
     ))).toHaveLength(1));
+    const reviewRequest = fetchMock.mock.calls.find(([input]) => (
+      fetchPath(input) === "/api/workbench/exceptions/review"
+    ));
+    expect(JSON.parse(String(reviewRequest?.[1]?.body ?? "{}"))).toMatchObject({
+      detail_key: expect.any(String),
+    });
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(
       initialCombinedReads + 1,
     ));

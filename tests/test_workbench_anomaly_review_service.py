@@ -15,11 +15,19 @@ from fin_ops_platform.services.postgres_repositories.workbench import (
 
 
 class GroupRepository:
-    def __init__(self, group: dict[str, object]) -> None:
+    def __init__(
+        self,
+        group: dict[str, object],
+        *,
+        source_scope_key: str = "2026-05",
+    ) -> None:
         self.group = group
+        self.source_scope_key = source_scope_key
+        self.calls: list[dict[str, object]] = []
 
-    def get_workbench_group_detail(self, **_kwargs: object) -> dict[str, object]:
-        return {"group": self.group, "source_scope_key": "2026-05"}
+    def get_workbench_group_detail(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(kwargs)
+        return {"group": self.group, "source_scope_key": self.source_scope_key}
 
 
 class DecisionRepository:
@@ -51,14 +59,20 @@ def anomaly_group(*, blockers: list[str] | None = None) -> dict[str, object]:
     }
 
 
-def service(group: dict[str, object]) -> tuple[WorkbenchAnomalyReviewService, DecisionRepository]:
+def service(
+    group: dict[str, object],
+    *,
+    source_scope_key: str = "2026-05",
+) -> tuple[WorkbenchAnomalyReviewService, DecisionRepository, GroupRepository]:
     decisions = DecisionRepository()
+    groups = GroupRepository(group, source_scope_key=source_scope_key)
     return (
         WorkbenchAnomalyReviewService(
-            group_repository=GroupRepository(group),
+            group_repository=groups,
             decision_repository=decisions,
         ),
         decisions,
+        groups,
     )
 
 
@@ -78,7 +92,7 @@ def payload(decision: str = "accept_paired") -> dict[str, object]:
 
 
 def test_review_requires_every_current_anomaly_item() -> None:
-    target, decisions = service(anomaly_group())
+    target, decisions, _groups = service(anomaly_group())
     request = payload()
     request["reviewed_item_fingerprints"] = ["b" * 64]
 
@@ -89,11 +103,17 @@ def test_review_requires_every_current_anomaly_item() -> None:
 
 
 def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> None:
-    target, decisions = service(anomaly_group())
+    target, decisions, groups = service(anomaly_group())
 
     result = target.review(payload(), actor_id="reviewer")
 
     assert result["affected_scope_keys"] == ["2026-05"]
+    assert groups.calls == [{
+        "scope_key": "2026-05",
+        "zone": "unpaired",
+        "group_id": "case:CASE-1",
+        "detail_key": None,
+    }]
     assert decisions.calls == [{
         "fingerprint": "a" * 64,
         "group_id": "case:CASE-1",
@@ -110,7 +130,7 @@ def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> N
 
 
 def test_accept_paired_cannot_bypass_other_relation_blockers() -> None:
-    target, decisions = service(
+    target, decisions, _groups = service(
         anomaly_group(blockers=["anomaly_review_required", "missing_invoice"])
     )
 
@@ -121,7 +141,7 @@ def test_accept_paired_cannot_bypass_other_relation_blockers() -> None:
 
 
 def test_keep_unpaired_is_valid_even_when_other_blockers_exist() -> None:
-    target, decisions = service(
+    target, decisions, _groups = service(
         anomaly_group(blockers=["anomaly_review_required", "missing_invoice"])
     )
 
@@ -135,7 +155,7 @@ def test_legacy_paired_amount_anomaly_can_be_withdrawn_without_a_classification(
     anomaly = group["workbench_anomaly"]
     assert isinstance(anomaly, dict)
     anomaly["review_decision"] = "accept_paired"
-    target, decisions = service(group)
+    target, decisions, _groups = service(group)
     request = payload("keep_unpaired")
     request["zone"] = "paired"
     request["review_classification_codes"] = []
@@ -147,7 +167,7 @@ def test_legacy_paired_amount_anomaly_can_be_withdrawn_without_a_classification(
 
 
 def test_review_rejects_stale_fingerprint() -> None:
-    target, decisions = service(anomaly_group())
+    target, decisions, _groups = service(anomaly_group())
     request = payload()
     request["fingerprint"] = "d" * 64
 
@@ -158,7 +178,7 @@ def test_review_rejects_stale_fingerprint() -> None:
 
 
 def test_review_requires_one_manual_amount_classification_and_keeps_no_anomaly_exclusive() -> None:
-    target, decisions = service(anomaly_group())
+    target, decisions, _groups = service(anomaly_group())
     request = payload()
     request["review_classification_codes"] = []
 
@@ -176,7 +196,7 @@ def test_review_requires_one_manual_amount_classification_and_keeps_no_anomaly_e
 
 
 def test_review_route_returns_stable_bad_request_contract() -> None:
-    target, _decisions = service(anomaly_group())
+    target, _decisions, _groups = service(anomaly_group())
     routes = WorkbenchActionApiRoutes(
         write_facade_provider=lambda: object(),
         anomaly_review_service=target,
@@ -189,6 +209,40 @@ def test_review_route_returns_stable_bad_request_contract() -> None:
     assert int(status) == 400
     assert result["error"] == "invalid_workbench_anomaly_review_request"
     assert "每一项" in str(result["message"])
+
+
+def test_review_forwards_detail_key_and_persists_cross_month_decision_globally() -> None:
+    group = anomaly_group()
+    group["oa_rows"] = [{"source_scope_key": "2026-06"}]
+    group["bank_rows"] = [
+        {"source_scope_key": "2026-06"},
+        {"source_scope_key": "2026-04"},
+    ]
+    target, decisions, groups = service(group, source_scope_key="")
+    request = payload("keep_unpaired")
+    request["month"] = "all"
+    request["detail_key"] = "singleton:oa:OA-1"
+
+    result = target.review(request, actor_id="reviewer")
+
+    assert groups.calls[0]["detail_key"] == "singleton:oa:OA-1"
+    assert decisions.calls[0]["scope_key"] == "all"
+    assert result["affected_scope_keys"] == ["all"]
+
+
+def test_review_route_returns_specific_blocker_conflict_code() -> None:
+    target, _decisions, _groups = service(
+        anomaly_group(blockers=["anomaly_review_required", "missing_invoice"])
+    )
+    routes = WorkbenchActionApiRoutes(
+        write_facade_provider=lambda: object(),
+        anomaly_review_service=target,
+    )
+
+    status, result = routes.review_anomaly(payload(), actor_id="reviewer")
+
+    assert int(status) == 409
+    assert result["error"] == "workbench_anomaly_review_blocked"
 
 
 class ReadRecordingConnection:
@@ -243,7 +297,7 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
         "reviewed_at": "2026-08-15T08:00:00+08:00",
     }
     read_sql, read_params = review_connection.fetch_all_calls[0]
-    assert "scope_month = %s::date" in read_sql
+    assert "(scope_month = %s::date or scope_month is null)" in read_sql
     assert "row_number() over" in read_sql
     assert read_params == ("workbench_anomaly_review", "2026-05-01")
 
@@ -271,6 +325,7 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
     unchanged_connection = WriteRecordingConnection({
         "resolution": "accept_paired",
         "version": 1,
+        "scope_month": "2026-05-01",
         "note": "已核对",
         "reviewed_item_fingerprints": ["b" * 64],
         "review_classification_codes": ["oa_bank_amount_mismatch"],
@@ -289,3 +344,35 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
     )
     assert unchanged["changed"] is False
     assert unchanged_connection.execute_calls == []
+
+
+def test_repository_promotes_an_existing_monthly_decision_to_global_scope() -> None:
+    connection = WriteRecordingConnection({
+        "resolution": "accept_paired",
+        "version": 1,
+        "scope_month": "2026-05-01",
+        "note": "已核对",
+        "reviewed_item_fingerprints": ["b" * 64],
+        "review_classification_codes": ["oa_bank_amount_mismatch"],
+    })
+
+    result = PostgresWorkbenchRepository(
+        connection
+    ).set_workbench_anomaly_review_decision(
+        fingerprint="a" * 64,
+        group_id="case:CASE-1",
+        scope_key="all",
+        actor_id="reviewer",
+        decision="accept_paired",
+        note="已核对",
+        review_classification_codes=["oa_bank_amount_mismatch"],
+        reviewed_item_fingerprints=["b" * 64],
+    )
+
+    assert result["changed"] is True
+    decision_write = next(
+        params
+        for sql, params in connection.execute_calls
+        if "insert into app.workbench_exception_cases(" in sql
+    )
+    assert decision_write[4] is None
