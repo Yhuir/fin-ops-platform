@@ -1234,7 +1234,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
             [(row["flow_direction"], row["flow_amount"]) for row in flow_rows],
             [("income", "200000.00"), ("income", "100000.00"), ("expense", "300000.00")],
         )
-        self.assertEqual([row["loan_days"] for row in flow_rows], [28, 28, None])
+        self.assertEqual([row["loan_days"] for row in flow_rows], [60, 60, None])
         repayment_flow_rows = [
             row
             for row in flow_rows
@@ -1295,7 +1295,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(second_lot["loan_days"], 60)
         self.assertEqual(second_lot["accrued_interest"], "1972.60")
 
-        self.assertEqual([row["loan_days"] for row in group["flow_rows"]], [28, 60, None])
+        self.assertEqual([row["loan_days"] for row in group["flow_rows"]], [60, 60, None])
 
     def test_relation_detail_rebuilds_dynamic_relation_and_returns_json_safe_rows(self) -> None:
         ledger_service, _relation_service, _category_service = self._service()

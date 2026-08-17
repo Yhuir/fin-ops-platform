@@ -768,17 +768,11 @@ class TurnoverLedgerService:
         ]
         borrow_direction, repayment_direction = self._money_directions(business_type)
         lot_ids_by_bank_row_id: dict[str, list[str]] = {}
-        loan_days_by_principal_row_id: dict[str, int | None] = {}
         for lot in allocation_lots:
             lot_id = str(lot.get("lot_id") or "").strip()
             if not lot_id:
                 continue
             principal_bank_row_id = str(lot.get("principal_bank_row_id") or "").strip()
-            if principal_bank_row_id:
-                raw_loan_days = lot.get("loan_days")
-                loan_days_by_principal_row_id[principal_bank_row_id] = (
-                    int(raw_loan_days) if raw_loan_days is not None else None
-                )
             for bank_row_id in [
                 principal_bank_row_id,
                 *list(lot.get("settlement_bank_row_ids") or []),
@@ -835,7 +829,7 @@ class TurnoverLedgerService:
                     "summary_text": self._summary_text([bank_row]),
                     "repayment_remark": self._summary_text([bank_row]) if flow_side == "settlement" else "",
                     "loan_days": (
-                        loan_days_by_principal_row_id.get(bank_row_id)
+                        self._grouped_loan_days(borrow_date=transaction_date, repayment_date=None)
                         if flow_side == "principal"
                         else None
                     ),
