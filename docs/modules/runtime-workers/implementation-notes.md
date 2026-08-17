@@ -5,7 +5,7 @@
 - required instance 保持精确四个：`oa-sync`、`workbench-matching`、`import`、`settings-maintenance`；长任务仍留在后台 Worker，不塞回 API，也不引入 Celery、Kafka 或 Temporal。
 - 删除 RabbitMQ dispatcher/consumer/topology、Python dependency、应用专属 systemd/env 和 staging preflight；Worker 直接在 PostgreSQL durable queue/domain table 上 claim、retry、complete。部署仅精确退役应用资产，不卸载服务器共享 broker。
 - 删除 Worker 对 Redis 的初始化和环境依赖；Redis 若由 API 用于会话或有界缓存，不进入 Worker 任务链路。
-- migration `0150_remove_rabbitmq_transport.sql` forward-only 删除 outbox 的 RabbitMQ 发布列、索引和约束，不删除主数据库或 canonical business rows。
+- 不在本次运行时切换中物理删除历史 outbox RabbitMQ 列：上一版本的 queue/monitoring 仍引用这些字段，绑定删列会破坏发布回滚。字段只作为短期 schema 兼容面保留，当前代码不再读写；物理清理晚于回滚窗口并单独执行。
 - 旧 RabbitMQ 章节保留为历史实施记录，不代表当前运行时合同；当前事实以本条、`README.md`、`boundary-io.md`、`state-machine.md` 和运维文档为准。
 
 ## 2026-08-01 - API 启动副作用迁出与 Settings reset durable worker

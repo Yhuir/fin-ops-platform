@@ -35,4 +35,4 @@ pending -> processing -> done
 
 ## 发布与恢复
 
-Deploy 先停止/禁用 registry 外实例和已知 RabbitMQ 遗留 unit/env，再确认 4 个 required workers heartbeat、通用 outbox/领域队列的 PostgreSQL backlog/dead-letter 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope；migration `0150_remove_rabbitmq_transport.sql` forward-only 删除 outbox 的 RabbitMQ 发布列、索引和约束。生效后不回滚到依赖旧 schema 的 release，只能向前修复。
+Deploy 先停止/禁用 registry 外实例和已知 RabbitMQ 遗留 unit/env，再确认 4 个 required workers heartbeat、通用 outbox/领域队列的 PostgreSQL backlog/dead-letter 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope。历史 outbox RabbitMQ 列只在上一版本回滚窗口内作为 schema 兼容面保留；当前 API、Worker、监控和部署链路均不读写这些列。物理删列必须晚于回滚窗口并作为独立 schema maintenance 执行，不能与本次运行时切换绑定。

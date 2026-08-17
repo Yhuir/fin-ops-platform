@@ -112,9 +112,10 @@ schema。它不会删除主数据库或其它业务 schema。
 
 同一次激活还会精确删除旧 Workbench generation timer/service/helper 和已知旧 worker env，并 stop/disable
 未登记 worker。生产运行时只保留 canonical API reads、通用 outbox/attempt/heartbeat、OA sync、import、
-settings maintenance 与 Workbench matching。Migration `0150_remove_rabbitmq_transport.sql` 进一步删除 outbox 上的
-RabbitMQ publish 列、约束与索引；应用专属 dispatcher/topology unit 和 env 会被精确退役，共享服务器上的 broker
-软件不在本应用部署脚本的删除范围内。
+settings maintenance 与 Workbench matching。应用专属 dispatcher/topology unit 和 env 会被精确退役，共享服务器上的
+broker 软件不在本应用部署脚本的删除范围内。历史 outbox RabbitMQ 列暂时只作为上一版本回滚兼容面保留；当前
+API、Worker、监控和部署链路均不读写这些列，不再存在 RabbitMQ 双传输。物理删列必须在上一版本回滚窗口结束后
+作为独立 schema maintenance 执行，不能与运行时切换绑定。
 
 一旦 0149 已执行，不允许自动切回依赖旧 schema 的 previous release。后验证失败时保持 maintenance，使用
 当前 release 向前修复；这是避免旧代码重新污染链路的必要限制。
