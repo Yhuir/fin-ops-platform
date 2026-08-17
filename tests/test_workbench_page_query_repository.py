@@ -364,6 +364,8 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "'source_identity_aliases'" in connection.sql
     assert "'Mongo文档ID'" in connection.sql
     assert "oa.normalized_payload->'detail_fields'->>'Mongo文档ID'" in connection.sql
+    assert "oa.normalized_payload->>'expense_type'" in connection.sql
+    assert "admission.source_payload->>'expense_type'" in connection.sql
 
 
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:

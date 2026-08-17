@@ -239,7 +239,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 'oa-source-direct', 'payment_request', '付款申请', 'oa-direct-1',
                 'active', 'completed', '张三', '2026-07-21', '2026-07-01',
                 '直接查询项目', 100, 'CNY',
-                '{"id":"oa-direct-1","month":"2026-07","section":"unpaired","applicant":"张三","project_name":"直接查询项目","amount":"100","workflow_status":"completed"}'::jsonb,
+                '{"id":"oa-direct-1","month":"2026-07","section":"unpaired","applicant":"张三","project_name":"直接查询项目","expense_type":"交通费","amount":"100","workflow_status":"completed"}'::jsonb,
                 '{}'::jsonb
             )
             """
@@ -297,6 +297,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(initial["summary"]["unpaired_count"], 5)
         self.assertEqual(initial["paired"]["total"], 0)
         self.assertEqual(initial["unpaired"]["total"], 5)
+        initial_oa_rows = [
+            row
+            for zone in ("paired", "unpaired")
+            for group in initial[zone]["groups"]
+            for row in list(group.get("oa_rows") or [])
+        ]
+        self.assertEqual(initial_oa_rows[0]["expense_type"], "交通费")
         initial_bank_rows = [
             row
             for zone in ("paired", "unpaired")
@@ -403,7 +410,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 'default', '2026-07', 'oa-pending-with-time', 'in_progress', '胡琦',
                 '大理卷烟厂余热综合利用项目', '大理卷烟厂余热综合利用项目', 175,
                 'signature:oa-pending-with-time',
-                '{"detail_fields":{"申请日期":"2026-07-17 09:08:07"},"apply_type":"日常报销"}'::jsonb,
+                '{"detail_fields":{"申请日期":"2026-07-17 09:08:07"},"apply_type":"日常报销","expense_type":"交通费"}'::jsonb,
                 '{}'::jsonb
             )
             """
@@ -418,6 +425,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(pending_row["apply_time"], "2026-07-17 09:08:07")
         self.assertEqual(pending_row["application_date"], "2026-07-17")
+        self.assertEqual(pending_row["expense_type"], "交通费")
 
         searched = self.repository.get_workbench_groups_page(
             scope_key="2026-07",

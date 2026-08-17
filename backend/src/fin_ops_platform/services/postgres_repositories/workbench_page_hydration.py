@@ -409,6 +409,10 @@ class PostgresWorkbenchPageHydrationRepository:
                             oa.normalized_payload->>'apply_type',
                             oa.normalized_payload#>>'{detail_fields,申请类型}'
                         ),
+                        'expense_type', nullif(
+                            btrim(oa.normalized_payload->>'expense_type'),
+                            ''
+                        ),
                         'counterparty_name', coalesce(
                             oa.normalized_payload->>'counterparty_name',
                             oa.normalized_payload#>>'{detail_fields,往来单位}'
@@ -505,6 +509,10 @@ class PostgresWorkbenchPageHydrationRepository:
                             admission.source_payload->>'apply_type',
                             admission.source_payload->>'application_type',
                             admission.source_payload->>'form_type'
+                        ),
+                        'expense_type', nullif(
+                            btrim(admission.source_payload->>'expense_type'),
+                            ''
                         ),
                         'counterparty_name', admission.source_payload->>'counterparty_name',
                         'amount', admission.amount::text,
