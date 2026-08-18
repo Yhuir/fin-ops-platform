@@ -357,10 +357,20 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertNotIn("self._bank_transaction_effective_category_provider.bulk_get_for_rows(", source)
         self.assertIn("effective_category_provider=self._bank_transaction_tag_reader()", source)
 
-    def test_runtime_worker_handlers_use_canonical_effective_category_provider(self) -> None:
+    def test_runtime_worker_handlers_use_canonical_effective_category_projection(self) -> None:
         source = Path("backend/src/fin_ops_platform/services/runtime_worker_handlers.py").read_text(encoding="utf-8")
+        fact_repository_source = Path(
+            "backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("BankTransactionEffectiveCategoryProvider", source)
+        self.assertIn("PostgresWorkbenchFormalRelationFactRepository", source)
+        self.assertNotIn("BankTransactionEffectiveCategoryProvider", source)
+        self.assertNotIn("bank_category_provider=", source)
+        self.assertIn("load_bank_effective_categories_by_ids", fact_repository_source)
+        self.assertIn(
+            "PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(",
+            fact_repository_source,
+        )
         self.assertNotIn("BankTransactionTagReadFacade", source)
         self.assertNotIn("SearchService()", source)
         self.assertNotIn("_runtime_search_service", source)

@@ -97,9 +97,17 @@ class PostgresBankTransactionCategoryRepository:
     def load_snapshot(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
             """
-            select coalesce(legacy_transaction_id, bank_transaction_id::text) as key, raw_payload
-            from app.bank_transaction_categories
-            where status = 'active'
+            select
+                coalesce(
+                    bank.legacy_mongo_id,
+                    category.legacy_transaction_id,
+                    category.bank_transaction_id::text
+                ) as key,
+                category.raw_payload
+            from app.bank_transaction_categories category
+            left join app.bank_transactions bank
+              on bank.id = category.bank_transaction_id
+            where category.status = 'active'
             order by key
             """
         )
@@ -108,11 +116,23 @@ class PostgresBankTransactionCategoryRepository:
         )
         confirmation_rows = self._connection.fetch_all(
             """
-            select coalesce(legacy_transaction_id, bank_transaction_id::text) as key,
-                   category_code, candidate_category_codes, rule_version, version,
-                   confirmed_by, confirmed_at, raw_payload
-            from app.bank_transaction_category_confirmations
-            where status = 'active'
+            select
+                coalesce(
+                    bank.legacy_mongo_id,
+                    confirmation.legacy_transaction_id,
+                    confirmation.bank_transaction_id::text
+                ) as key,
+                confirmation.category_code,
+                confirmation.candidate_category_codes,
+                confirmation.rule_version,
+                confirmation.version,
+                confirmation.confirmed_by,
+                confirmation.confirmed_at,
+                confirmation.raw_payload
+            from app.bank_transaction_category_confirmations confirmation
+            left join app.bank_transactions bank
+              on bank.id = confirmation.bank_transaction_id
+            where confirmation.status = 'active'
             order by key
             """
         )

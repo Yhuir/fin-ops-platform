@@ -146,7 +146,6 @@ class WorkbenchMatchingOrchestrator:
         relation_uow: Any,
         relation_command_factory: Callable[[Any], WorkbenchRelationCommandService] | None = None,
         source_versions_provider: Callable[[], dict[str, object]] | None = None,
-        bank_category_provider: Any,
         bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]],
         search_limits: FormalRelationSearchLimits | None = None,
         logger: logging.Logger | None = None,
@@ -156,7 +155,6 @@ class WorkbenchMatchingOrchestrator:
         self._relation_uow = relation_uow
         self._relation_command_factory = relation_command_factory or self._default_relation_command
         self._source_versions_provider = source_versions_provider
-        self._bank_category_provider = bank_category_provider
         self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
         self._search_limits = search_limits or FormalRelationSearchLimits()
         self._logger = logger or LOGGER
@@ -304,9 +302,9 @@ class WorkbenchMatchingOrchestrator:
         )
         if not bank_row_ids:
             return {}
-        canonical_rows = self._fact_repository.load_bank_rows_by_ids(bank_row_ids)
         rows_by_id = dict(
-            self._bank_category_provider.bulk_get_for_rows(canonical_rows) or {}
+            self._fact_repository.load_bank_effective_categories_by_ids(bank_row_ids)
+            or {}
         )
         if set(bank_row_ids) - set(rows_by_id):
             raise RuntimeError("canonical_bank_category_rows_missing")

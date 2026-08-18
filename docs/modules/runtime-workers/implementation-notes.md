@@ -1,5 +1,10 @@
 # Runtime Worker 实施记录
 
+## 2026-08-18 - Matching 分类读取移除启动快照
+
+- `workbench-matching` worker 不再在启动时从 category snapshot 构建 Python effective-category provider。
+- 计划涉及的银行分类由 formal-relation fact repository 按 ID 批量读取当前 canonical SQL projection；worker 数量、registry、queue、lease、retry、heartbeat 和部署资产均不变。
+
 ## 2026-08-17 - 生产 per-worker env 退役迁移闭环
 
 - 目标：修复 runtime 已移除 RabbitMQ 后，生产已有 `oa-sync`/`import` per-worker env 仍以

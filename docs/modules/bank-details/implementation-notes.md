@@ -1,5 +1,12 @@
 # 银行明细 实施记录
 
+## 2026-08-18 - 分类投影跨页一致性闭环
+
+- 成本统计与 Workbench matching 复用 Bank Details owner 的有界 canonical SQL 分类投影，不再分别维护 Python 有效分类算法。
+- PostgreSQL category snapshot 读取通过 `app.bank_transactions` 将 canonical UUID 绑定解析成公开流水 ID，同时保留 legacy-only 历史记录；不回填、不双写、不修改分类写合同。
+- Workbench matching 的分类读取收口到 fact repository；worker/orchestrator 删除 category provider 依赖，避免旧 snapshot 和当前人工确认、规则或内部转账语义漂移。
+- 本次不改变银行明细 API、分类写权限、CAS、审计或 relation closure 写合同。
+
 ## 2026-08-10 - 时间筛选控件收敛
 
 - 删除银行明细私有日期面板及旧 CSS，复用共享 HeroUI“全部 + 年/月”控件；`BankDateFilter` 到 canonical query 的转换、导出与 direct-read I/O 不变。

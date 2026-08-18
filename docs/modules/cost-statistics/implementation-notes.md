@@ -1,5 +1,12 @@
 # 成本统计实施决策
 
+## 2026-08-18：成本统计复用银行规范分类投影
+
+- 生产 PostgreSQL 路径删除成本专属 `_postgres_category_provider`、分类/确认表重复装载和 Python 自动重分类。
+- `PostgresCostStatisticsCanonicalRepository` 在原有 `REPEATABLE READ READ ONLY` 快照内，对当前银行流水 ID 一次调用银行分类 owner 的 `effective_category_projection_rows(...)`；`time|bank_tag` 仍不读取 OA/关系，三种归因视图仍只扩展命中关系的完整成员。
+- canonical-only confirmation 通过规范分类 SQL 的 UUID/legacy identity 连接解析为公开流水 ID；人工确认不再错误落入“未标记”，内部转账也不再由成本模块维护第二套算法。
+- API shape、五视图人口和金额口径不变；空银行集合跳过分类查询，不新增 cache、read model、worker、migration 或 fallback。
+
 ## 2026-08-18：五视图统一银行成本事件与无 OA 范围
 
 - 五个视图统一消费银行成本事件并按银行交易日期筛选。已完成 OA 关系中的支出为正成本；同一 active 关系中明确标记“付错退款”的收入为负成本；普通收入不进入成本统计。

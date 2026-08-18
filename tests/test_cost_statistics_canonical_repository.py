@@ -48,6 +48,17 @@ class _PopulatedCostSnapshotTransaction(_SnapshotTransaction):
     def fetch_all(self, sql: str, _params: tuple = ()):
         normalized = " ".join(sql.lower().split())
         self.fetched.append(normalized)
+        if "select row_id, effective_category_code" in normalized:
+            return [
+                {
+                    "row_id": "bank-1",
+                    "effective_category_code": "salary",
+                    "effective_category_label": "工资",
+                    "effective_category_primary_label": "薪资社保福利",
+                    "effective_category_sub_label": "工资",
+                    "effective_category_source": "manual_confirmation",
+                }
+            ]
         if "select distinct extract(year from approved_at)" in normalized:
             return [{"year": 2026}]
         if "from app.oa_applications" in normalized:
@@ -128,8 +139,8 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         sql = "\n".join(connection.snapshot_transaction.fetched)
         self.assertIn("from app.app_settings", sql)
         self.assertIn("from app.bank_transactions", sql)
-        self.assertIn("from app.bank_transaction_categories", sql)
-        self.assertIn("from app.bank_transaction_category_confirmations", sql)
+        self.assertNotIn("from app.bank_transaction_categories", sql)
+        self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
         self.assertNotIn("from app.oa_applications", sql)
         self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("read_model.", sql)
@@ -171,6 +182,12 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("from app.bank_transaction_categories", sql)
         self.assertIn("from app.bank_transaction_category_confirmations", sql)
         self.assertEqual(len(snapshot["cost_groups"]), 1)
+        self.assertEqual(snapshot["bank_rows"][0]["bank_tag_code"], "salary")
+        self.assertEqual(
+            snapshot["bank_rows"][0]["bank_tag_primary_label"],
+            "薪资社保福利",
+        )
+        self.assertEqual(snapshot["bank_rows"][0]["bank_tag_sub_label"], "工资")
 
     def test_scoped_cost_view_keeps_only_bank_rows_in_requested_period(self) -> None:
         bank_rows = [

@@ -21,6 +21,11 @@
 - `app.bank_transaction_category_confirmations`
 - `app.app_settings`
 
+银行有效标签不在成本模块内重新计算。Canonical repository 对本次银行流水 ID 一次批量调用
+`PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(...)`，复用银行分类 owner 的
+同一 SQL 分类器和 legacy/canonical identity 语义；成本模块只把返回的 code/主标签/子标签映射到成本事实行。
+禁止恢复成本专属 Python category provider 或 SQL 失败后的旧分类 fallback。
+
 正式配对关系只认 `app.workbench_pair_relations.status = 'active'`。成本页面不复制关联关系，也不读取 Workbench 或银行明细页面的 read model。
 
 ## 请求闭环
@@ -96,6 +101,7 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 归集计算按 relation 成员和 OA 付款明细线性遍历；repository 批量读取 relation、OA 和流水，不做逐明细 I/O。
 - OA 查询只映射当前范围银行流水命中的 active relation OA，并只读取 policy 消费的父单字段、明细字段和明细金额；不递归复制附件/发票树，附件仍由其 owner 页面读取。
 - 常规 scoped 请求保持有界批量查询，禁止按关系、银行流水或 OA 明细执行 N+1 I/O；两个规则候选的全历史读取只在打开/保存对应抽屉时执行，不进入普通 explorer 热路径。`time|bank_tag` 请求必须跳过 OA 与 relation 查询。
+- 有银行流水时只执行一次有界有效分类投影；空银行集合不查询分类/确认表。投影必须携带内部转账所需的有界上下文，不能退回逐行或全量 Python 分类。
 - 分页和详情按当前 scope 有界读取；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 查询只对已加载 snapshot 做一次线性文本匹配，不新增 SQL、cache、worker 或逐行 I/O；前端搜索取消过期请求，避免竞态回写。
 - 候选发布必须记录各视图多次请求的 p50/p95/max，并确认无 Cost queue/worker I/O；若生产数据暴露慢查询，只依据实测 SQL 证据单独优化，不预先增加索引或缓存。

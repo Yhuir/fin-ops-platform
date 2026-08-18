@@ -25,4 +25,5 @@
 - 任意新 `*.read_model.refresh`、旧 registration/env/systemd/timer、operation barrier 或页面 refresh polling 均失败。
 - 任意 RabbitMQ dispatcher/consumer/topology/env/systemd 或 Worker Redis dependency 回归均失败。
 - import/OA sync 不写 full-state snapshot 或旧 page fan-out。
+- workbench-matching 不得恢复启动时 category snapshot + Python effective-category provider；计划银行分类必须走 fact repository 的有界 canonical projection。
 - deploy 不恢复旧 schema/worker，也不删除主数据库。

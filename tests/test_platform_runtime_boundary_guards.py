@@ -2306,8 +2306,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_cost_statistics_direct_canonical_boundary_has_no_legacy_read_model_path(self) -> None:
         repository_path = SERVICES_ROOT / "cost_statistics_canonical_repository.py"
+        bank_details_query_path = SERVICES_ROOT / "bank_details_canonical_query.py"
         query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
         repository_source = repository_path.read_text(encoding="utf-8")
+        bank_details_query_source = bank_details_query_path.read_text(encoding="utf-8")
         query_source = query_path.read_text(encoding="utf-8")
         runtime_sources = "\n".join(
             path.read_text(encoding="utf-8")
@@ -2324,11 +2326,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "app.bank_transactions",
             "app.oa_applications",
             "app.workbench_pair_relations",
-            "app.bank_transaction_categories",
-            "app.bank_transaction_category_confirmations",
             "app.app_settings",
         ):
             self.assertIn(table, repository_source)
+        self.assertIn(
+            "PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(",
+            repository_source,
+        )
+        for canonical_category_table in (
+            "app.bank_transaction_categories",
+            "app.bank_transaction_category_confirmations",
+        ):
+            self.assertIn(canonical_category_table, bank_details_query_source)
+            self.assertNotIn(canonical_category_table, repository_source)
+        for retired_category_path in (
+            "BankTransactionEffectiveCategoryProvider",
+            "_postgres_category_provider",
+        ):
+            self.assertNotIn(retired_category_path, repository_source)
         self.assertIn("normalized_payload", repository_source)
         self.assertIn("COMPLETED_WORKFLOW_STATUS_ALIASES", repository_source)
         self.assertIn("approved_at", repository_source)

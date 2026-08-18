@@ -5,6 +5,9 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Literal
 
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
@@ -256,7 +259,10 @@ class PostgresWorkbenchFormalRelationFactRepository:
             source_versions=versions,
         )
 
-    def load_bank_rows_by_ids(self, transaction_ids: list[str]) -> list[dict[str, Any]]:
+    def load_bank_effective_categories_by_ids(
+        self,
+        transaction_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
         normalized_ids = sorted(
             {
                 str(transaction_id or "").strip()
@@ -265,26 +271,14 @@ class PostgresWorkbenchFormalRelationFactRepository:
             }
         )
         if not normalized_ids:
-            return []
-        return self._connection.fetch_all(
-            """
-            select
-                coalesce(legacy_mongo_id, id::text) as id,
-                amount,
-                signed_amount,
-                txn_direction,
-                counterparty_name_raw,
-                normalized_counterparty_name,
-                summary,
-                remark,
-                bank_text_fields,
-                raw_payload
-            from app.bank_transactions
-            where status <> 'deleted'
-              and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
-            order by coalesce(legacy_mongo_id, id::text)
-            """,
-            (normalized_ids,),
+            return {}
+        settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(
+            self._connection
+        )
+        return PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+            self._connection,
+            settings=settings,
+            transaction_ids=normalized_ids,
         )
 
     def load_etc_batch_link_candidates(self, scope_months: list[str]) -> list[dict[str, Any]]:

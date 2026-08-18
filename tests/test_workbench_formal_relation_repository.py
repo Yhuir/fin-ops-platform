@@ -28,6 +28,7 @@ class FakeConnection:
         etc_batch_link_rows: list[dict[str, object]] | None = None,
         etc_validation_rows: list[dict[str, object]] | None = None,
         etc_owner_rows: list[dict[str, object]] | None = None,
+        category_projection_rows: list[dict[str, object]] | None = None,
     ) -> None:
         self.oa_rows = list(oa_rows or [])
         self.bank_rows = list(bank_rows or [])
@@ -40,7 +41,19 @@ class FakeConnection:
         self.etc_batch_link_rows = list(etc_batch_link_rows or [])
         self.etc_validation_rows = list(etc_validation_rows or [])
         self.etc_owner_rows = list(etc_owner_rows or [])
+        self.category_projection_rows = list(category_projection_rows or [])
         self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(
+        self,
+        sql: str,
+        params: tuple[object, ...] = (),
+    ) -> dict[str, object] | None:
+        normalized = " ".join(sql.split())
+        self.queries.append((normalized, tuple(params)))
+        if "from app.app_settings" in normalized:
+            return {"settings_payload": {}}
+        raise AssertionError(f"unexpected SQL: {normalized}")
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.split())
@@ -53,6 +66,8 @@ class FakeConnection:
             return list(self.etc_owner_rows)
         if "with submitted_batches as" in normalized:
             return list(self.etc_batch_link_rows)
+        if "select row_id, effective_category_code" in normalized:
+            return list(self.category_projection_rows)
         if "from app.workbench_pair_relations" in normalized:
             return list(self.active_rows)
         if "from app.workbench_pair_relation_history" in normalized:
@@ -157,6 +172,32 @@ def invoice_row(
 
 
 class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
+    def test_bank_categories_use_one_bounded_canonical_projection(self) -> None:
+        connection = FakeConnection(
+            category_projection_rows=[
+                {
+                    "row_id": "bank-1",
+                    "effective_category_code": "salary",
+                    "effective_category_label": "工资",
+                    "effective_category_primary_label": "薪资社保福利",
+                    "effective_category_sub_label": "工资",
+                    "effective_category_source": "manual_confirmation",
+                }
+            ]
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(
+            connection
+        ).load_bank_effective_categories_by_ids(["bank-1", "bank-1"])
+
+        self.assertEqual(result["bank-1"]["effective_category_code"], "salary")
+        classifier_query = next(
+            (sql, params)
+            for sql, params in connection.queries
+            if "select row_id, effective_category_code" in sql
+        )
+        self.assertEqual(classifier_query[1][-1], ["bank-1"])
+
     def test_exact_etc_candidate_query_is_bounded_and_preserves_ambiguity_evidence(self) -> None:
         connection = FakeConnection(
             etc_batch_link_rows=[

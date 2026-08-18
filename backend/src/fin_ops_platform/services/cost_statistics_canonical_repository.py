@@ -7,14 +7,8 @@ from decimal import Decimal
 from typing import Any, Callable, Iterator
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
-from fin_ops_platform.services.bank_transaction_auto_category_service import (
-    BankTransactionAutoCategoryService,
-)
-from fin_ops_platform.services.bank_transaction_category_service import (
-    BankTransactionCategoryService,
-)
-from fin_ops_platform.services.bank_transaction_effective_category_provider import (
-    BankTransactionEffectiveCategoryProvider,
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
 )
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.postgres_repositories.common import row_payload
@@ -62,12 +56,17 @@ class PostgresCostStatisticsCanonicalRepository:
             )
             bank_ids = _bank_row_ids(bank_rows)
             if view in {"time", "bank_tag"}:
-                category_provider = _postgres_category_provider(
-                    transaction,
-                    settings=settings,
-                    transaction_ids=bank_ids if scoped else None,
+                categories_by_transaction_id = (
+                    PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                        transaction,
+                        settings=settings,
+                        transaction_ids=bank_ids,
+                    )
                 )
-                _apply_bank_tags(bank_rows, category_provider=category_provider)
+                _apply_bank_category_projection(
+                    bank_rows,
+                    categories_by_transaction_id=categories_by_transaction_id,
+                )
                 return _build_snapshot(
                     settings=settings,
                     bank_rows=bank_rows,
@@ -95,16 +94,21 @@ class PostgresCostStatisticsCanonicalRepository:
             category_ids = list(
                 dict.fromkeys([*bank_ids, *_bank_row_ids(relation_bank_rows)])
             )
-            category_provider = _postgres_category_provider(
-                transaction,
-                settings=settings,
-                transaction_ids=category_ids if scoped else None,
+            categories_by_transaction_id = (
+                PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=category_ids,
+                )
             )
-            _apply_bank_tags(bank_rows, category_provider=category_provider)
+            _apply_bank_category_projection(
+                bank_rows,
+                categories_by_transaction_id=categories_by_transaction_id,
+            )
             if relation_bank_rows is not bank_rows:
-                _apply_bank_tags(
+                _apply_bank_category_projection(
                     relation_bank_rows,
-                    category_provider=category_provider,
+                    categories_by_transaction_id=categories_by_transaction_id,
                 )
             relation_oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = _postgres_oa_rows(transaction, oa_ids=relation_oa_ids)
@@ -328,131 +332,6 @@ def _postgres_bank_rows(
             )
         )
     ]
-
-
-def _postgres_category_provider(
-    connection: Any,
-    *,
-    settings: dict[str, Any],
-    transaction_ids: list[str] | None = None,
-) -> BankTransactionEffectiveCategoryProvider:
-    categories: dict[str, dict[str, Any]] = {}
-    filter_sql = ""
-    params: tuple[Any, ...] = ()
-    if transaction_ids is not None:
-        filter_sql = (
-            "and (legacy_transaction_id = any(%s::text[]) "
-            "or bank_transaction_id::text = any(%s::text[]))"
-        )
-        params = (transaction_ids, transaction_ids)
-    for row in connection.fetch_all(
-        f"""
-        select
-            coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
-            category,
-            source,
-            version,
-            updated_by,
-            updated_at,
-            raw_payload
-        from app.bank_transaction_categories
-        where status = 'active'
-          {filter_sql}
-        order by updated_at, id
-        """,
-        params,
-    ):
-        transaction_id = _text(row.get("transaction_id"))
-        if not transaction_id:
-            continue
-        payload = row_payload(row, "raw_payload")
-        normalized = dict(payload) if isinstance(payload, dict) else {}
-        normalized.update(
-            {
-                "transaction_id": transaction_id,
-                "category_code": _text(
-                    normalized.get("category_code")
-                    or normalized.get("category")
-                    or row.get("category")
-                ),
-                "source": _text(normalized.get("source") or row.get("source")),
-                "version": int(normalized.get("version") or row.get("version") or 1),
-                "updated_by": _text(
-                    normalized.get("updated_by") or row.get("updated_by")
-                ),
-                "updated_at": _date_text(
-                    normalized.get("updated_at") or row.get("updated_at")
-                ),
-            }
-        )
-        categories[transaction_id] = normalized
-    for row in connection.fetch_all(
-        f"""
-        select
-            coalesce(legacy_transaction_id, bank_transaction_id::text) as transaction_id,
-            category_code,
-            candidate_category_codes,
-            rule_version,
-            version,
-            confirmed_by,
-            confirmed_at,
-            raw_payload
-        from app.bank_transaction_category_confirmations
-        where status = 'active'
-          {filter_sql}
-        order by confirmed_at, id
-        """,
-        params,
-    ):
-        transaction_id = _text(row.get("transaction_id"))
-        category_code = _text(row.get("category_code"))
-        if not transaction_id or not category_code:
-            continue
-        payload = row_payload(row, "raw_payload")
-        normalized = dict(payload) if isinstance(payload, dict) else {}
-        normalized.update(
-            {
-                "transaction_id": transaction_id,
-                "category_code": category_code,
-                "source": "auto_confirmation",
-                "version": int(normalized.get("version") or row.get("version") or 1),
-                "updated_by": _text(
-                    normalized.get("updated_by") or row.get("confirmed_by")
-                ),
-                "updated_at": _date_text(
-                    normalized.get("updated_at") or row.get("confirmed_at")
-                ),
-                "candidate_category_codes": [
-                    _text(value)
-                    for value in list(
-                        row.get("candidate_category_codes")
-                        or normalized.get("candidate_category_codes")
-                        or []
-                    )
-                    if _text(value)
-                ],
-                "rule_version": _text(
-                    row.get("rule_version") or normalized.get("rule_version")
-                ),
-            }
-        )
-        categories[transaction_id] = normalized
-    tag_dictionary = (
-        settings.get("bank_transaction_tags")
-        if isinstance(settings.get("bank_transaction_tags"), dict)
-        else {}
-    )
-    category_service = BankTransactionCategoryService(
-        categories=categories,
-        tag_dictionary=tag_dictionary,
-    )
-    auto_category_service = BankTransactionAutoCategoryService(
-        category_service=category_service,
-    )
-    return BankTransactionEffectiveCategoryProvider(
-        category_service=category_service,
-        auto_category_service=auto_category_service,
-    )
 
 
 def _postgres_relations(
@@ -734,6 +613,22 @@ def _apply_bank_tags(
             row.get("id") or row.get("transaction_id") or row.get("row_id")
         )
         row.update(bank_tag_context_from_row(categories.get(transaction_id) or {}))
+
+
+def _apply_bank_category_projection(
+    bank_rows: list[dict[str, Any]],
+    *,
+    categories_by_transaction_id: dict[str, dict[str, Any]],
+) -> None:
+    for row in bank_rows:
+        transaction_id = _text(
+            row.get("id") or row.get("transaction_id") or row.get("row_id")
+        )
+        row.update(
+            bank_tag_context_from_row(
+                categories_by_transaction_id.get(transaction_id) or {}
+            )
+        )
 
 
 def _bank_row_from_object(

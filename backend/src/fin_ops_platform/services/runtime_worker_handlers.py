@@ -17,9 +17,6 @@ from fin_ops_platform.services.bank_relation_requirement_recalculation import (
 )
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_transaction_effective_category_provider import (
-    BankTransactionEffectiveCategoryProvider,
-)
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
@@ -320,15 +317,6 @@ class WorkbenchMatchingWorkerFactory:
         state_store = self._state_store()
         matching_queue_repository = getattr(state_store, "workbench_matching_queue_repository", None)
         app_settings_service = _WorkbenchMatchingSettingsReader(state_store)
-        category_service = BankTransactionCategoryService.from_snapshot(
-            state_store.load_bank_transaction_categories()
-        )
-        category_provider = BankTransactionEffectiveCategoryProvider(
-            category_service=category_service,
-            auto_category_service=BankTransactionAutoCategoryService(
-                category_service=category_service
-            ),
-        )
         relation_uow = WorkbenchWriteUnitOfWork(
             connection=self._connection,
             repository_factory=self._workbench_uow_repository_factory,
@@ -355,7 +343,6 @@ class WorkbenchMatchingWorkerFactory:
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=relation_uow,
                 source_versions_provider=source_versions_provider,
-                bank_category_provider=category_provider,
                 bank_flow_rule_tag_rules_payload=(
                     app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
                 ),

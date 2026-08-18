@@ -17,6 +17,72 @@ BANK_TRANSACTION_UUID = "11111111-1111-1111-1111-111111111111"
 CATEGORY_UUID = "22222222-2222-2222-2222-222222222222"
 
 
+class CategorySnapshotConnection:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def fetch_all(
+        self,
+        sql: str,
+        _params: tuple[object, ...] = (),
+    ) -> list[dict[str, object]]:
+        normalized_sql = " ".join(sql.lower().split())
+        self.queries.append(normalized_sql)
+        if "from app.bank_transaction_categories category" in normalized_sql:
+            return [
+                {
+                    "key": "txn_imported_public_1",
+                    "raw_payload": {
+                        "transaction_id": BANK_TRANSACTION_UUID,
+                        "category_code": "fee",
+                        "source": "manual",
+                    },
+                }
+            ]
+        if "from app.bank_transaction_category_events" in normalized_sql:
+            return []
+        if "from app.bank_transaction_category_confirmations confirmation" in normalized_sql:
+            return [
+                {
+                    "key": "txn_imported_public_1",
+                    "category_code": "salary",
+                    "candidate_category_codes": ["salary"],
+                    "rule_version": "rules:7",
+                    "version": 4,
+                    "confirmed_by": "finance-user",
+                    "confirmed_at": "2026-08-12 12:40:47",
+                    "raw_payload": {"transaction_id": BANK_TRANSACTION_UUID},
+                }
+            ]
+        if "from app.bank_transaction_category_confirmations order by" in normalized_sql:
+            return []
+        raise AssertionError(f"unexpected fetch_all SQL: {normalized_sql}")
+
+
+def test_snapshot_resolves_canonical_only_category_facts_to_public_bank_identity() -> None:
+    connection = CategorySnapshotConnection()
+
+    snapshot = PostgresBankTransactionCategoryRepository(connection).load_snapshot()
+
+    category = snapshot["categories"]["txn_imported_public_1"]
+    assert category["transaction_id"] == "txn_imported_public_1"
+    assert category["category_code"] == "salary"
+    assert category["source"] == "auto_confirmation"
+    assert BANK_TRANSACTION_UUID not in snapshot["categories"]
+    category_sql = next(
+        sql
+        for sql in connection.queries
+        if "from app.bank_transaction_categories category" in sql
+    )
+    confirmation_sql = next(
+        sql
+        for sql in connection.queries
+        if "from app.bank_transaction_category_confirmations confirmation" in sql
+    )
+    assert "left join app.bank_transactions bank" in category_sql
+    assert "left join app.bank_transactions bank" in confirmation_sql
+
+
 class ManualClearTransaction:
     def __init__(self, *, active: bool = True) -> None:
         self.active = active

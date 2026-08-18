@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-08-18 - Matching 银行分类收口到 canonical projection
+
+- `WorkbenchMatchingOrchestrator` 不再接收 `BankTransactionEffectiveCategoryProvider`，只消费 fact repository 返回的银行有效分类投影。
+- `PostgresWorkbenchFormalRelationFactRepository` 对计划涉及的银行 IDs 批量复用 Bank Details owner 的 canonical SQL 分类器；缺失任一目标行时继续在 relation UoW 之前 fail closed。
+- matching worker 删除 category snapshot/provider 组装，避免 worker 启动时快照与当前人工确认、规则或内部转账语义漂移；relation command、history、幂等和 outbox 合同不变。
+
 ## 2026-08-07 - 银行标签变更重冻结既有关系 requirement
 
 银行分类写不再只更新 category fact。Bank Details 与 Turnover 统一通过一个窄 closure service，在同一 PostgreSQL 事务内复用 canonical classifier、当前 settings policy snapshot 和正式 relation command/repository，更新受影响 active 普通 relation 的 frozen tags/requirements 并追加 history；数据库提交后才发布 changed-case 进程镜像。无变化/无关系短路，ETC 与批量账务排除，且不新增 dirty/outbox、worker、页面通知或 read-time fallback。

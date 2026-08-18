@@ -19,6 +19,7 @@
 
 - Event worker 只从 PostgreSQL durable queue claim；不经过第二套 broker/wakeup transport。
 - Matching worker 只读写其领域 dirty-scope repository，不使用通用 projection scope。
+- Matching worker 的银行有效分类由 formal-relation fact repository 对计划 IDs 一次批量读取 canonical SQL 分类投影；worker 不装载 category snapshot，不组装 Python effective-category provider。
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
 
