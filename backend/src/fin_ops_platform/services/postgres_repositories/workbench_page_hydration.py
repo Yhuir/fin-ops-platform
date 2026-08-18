@@ -15,6 +15,7 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 )
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
+    serialize_value,
     text_list,
     without_keys,
 )
@@ -173,7 +174,10 @@ class PostgresWorkbenchPageHydrationRepository:
             for descriptor in descriptors
             if str(descriptor.get("group_kind") or "") == "relation"
         }
-        relations = self._load_relations(relation_case_ids, connection=connection)
+        relations, decisions = self._load_relations(
+            relation_case_ids,
+            connection=connection,
+        )
         typed_row_ids: dict[str, set[str]] = {
             "oa": set(),
             "bank": set(),
@@ -242,6 +246,7 @@ class PostgresWorkbenchPageHydrationRepository:
             scope_key=scope_key,
             rows_by_typed_id=rows_by_typed_id,
             relations=relations,
+            anomaly_review_decisions=decisions,
         )
         grouped_groups = [
             group
@@ -927,11 +932,7 @@ class PostgresWorkbenchPageHydrationRepository:
                     'decision'::text as record_kind,
                     null::text as row_type,
                     null::text as row_id,
-                    regexp_replace(
-                        decision.raw_payload#>>'{normalized_payload,group_id}',
-                        '^case:',
-                        ''
-                    ) as case_id,
+                    regexp_replace(decision.group_id, '^case:', '') as case_id,
                     null::text as external_batch_id,
                     jsonb_build_object(
                         'fingerprint', decision.fingerprint,
@@ -961,7 +962,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         exception.updated_at,
                         exception.raw_payload,
                         row_number() over (
-                            partition by exception.raw_payload#>>'{normalized_payload,fingerprint}'
+                            partition by exception.raw_payload#>>'{normalized_payload,group_id}'
                             order by exception.updated_at desc,
                                      exception.version desc,
                                      exception.case_id desc
@@ -973,7 +974,11 @@ class PostgresWorkbenchPageHydrationRepository:
                           from requested_relations requested
                       )
                 ) decision
+                join app.workbench_pair_relations relation
+                  on relation.status = 'active'
+                 and relation.case_id = regexp_replace(decision.group_id, '^case:', '')
                 where decision.decision_rank = 1
+                  and decision.updated_at >= relation.updated_at
             ),
             etc_source_rows as materialized (
                 select
@@ -1386,15 +1391,42 @@ class PostgresWorkbenchPageHydrationRepository:
         case_ids: set[str],
         *,
         connection: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         if not case_ids:
-            return []
+            return [], {}
         rows = connection.fetch_all(
             """
             select relation.case_id, relation.relation_mode, relation.month_scope,
                    relation.row_ids, relation.row_types, relation.amount_check,
-                   relation.special_metadata, relation.raw_payload
+                   relation.special_metadata, relation.raw_payload,
+                   relation.updated_at as relation_updated_at,
+                   decision.fingerprint as decision_fingerprint,
+                   decision.resolution as decision_resolution,
+                   decision.updated_by as decision_updated_by,
+                   decision.updated_at as decision_updated_at,
+                   decision.raw_payload#>'{normalized_payload,reviewed_item_fingerprints}'
+                       as reviewed_item_fingerprints,
+                   decision.raw_payload#>'{normalized_payload,review_classification_codes}'
+                       as review_classification_codes,
+                   decision.raw_payload#>>'{normalized_payload,note}' as decision_note
             from app.workbench_pair_relations relation
+            left join lateral (
+                select
+                    exception.raw_payload#>>'{normalized_payload,fingerprint}'
+                        as fingerprint,
+                    exception.resolution,
+                    exception.updated_by,
+                    exception.updated_at,
+                    exception.raw_payload
+                from app.workbench_exception_cases exception
+                where exception.scenario = 'workbench_anomaly_review'
+                  and exception.raw_payload#>>'{normalized_payload,group_id}'
+                      = 'case:' || relation.case_id
+                order by exception.updated_at desc,
+                         exception.version desc,
+                         exception.case_id desc
+                limit 1
+            ) decision on true
             where relation.status = 'active'
               and relation.case_id = any(%s::text[])
             order by relation.case_id
@@ -1402,6 +1434,7 @@ class PostgresWorkbenchPageHydrationRepository:
             (sorted(case_ids),),
         )
         relations: list[dict[str, Any]] = []
+        decisions: dict[str, dict[str, Any]] = {}
         for row in rows:
             payload = row_payload(row, "raw_payload")
             payload = payload if isinstance(payload, dict) else {}
@@ -1420,7 +1453,30 @@ class PostgresWorkbenchPageHydrationRepository:
                     "special_metadata": row_payload(row, "special_metadata") or {},
                 }
             )
-        return relations
+            fingerprint = str(row.get("decision_fingerprint") or "").strip()
+            resolution = str(row.get("decision_resolution") or "").strip()
+            reviewed_at = row.get("decision_updated_at")
+            relation_updated_at = row.get("relation_updated_at")
+            if (
+                fingerprint
+                and resolution in {"accept_paired", "keep_unpaired"}
+                and reviewed_at is not None
+                and relation_updated_at is not None
+                and reviewed_at >= relation_updated_at
+            ):
+                decisions[fingerprint] = {
+                    "decision": resolution,
+                    "reviewed_item_fingerprints": text_list(
+                        row.get("reviewed_item_fingerprints")
+                    ),
+                    "review_classification_codes": text_list(
+                        row.get("review_classification_codes")
+                    ),
+                    "note": str(row.get("decision_note") or ""),
+                    "reviewed_by": str(row.get("decision_updated_by") or ""),
+                    "reviewed_at": serialize_value(reviewed_at),
+                }
+        return relations, decisions
 
     @staticmethod
     def group_rows(group: dict[str, Any]) -> list[dict[str, Any]]:

@@ -505,6 +505,7 @@ def test_page_grouping_preserves_cross_pane_same_textual_id() -> None:
         scope_key="2026-07",
         rows_by_typed_id=rows,
         relations=[relation],
+        anomaly_review_decisions={},
     )
 
     groups = [

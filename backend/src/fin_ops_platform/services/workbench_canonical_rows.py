@@ -28,7 +28,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAWorkflowRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
@@ -130,7 +129,7 @@ class WorkbenchCanonicalRowsBuilder:
         rows_by_typed_id: dict[tuple[str, str], dict[str, Any]],
         relations: list[dict[str, Any]],
         page_overrides: dict[tuple[str, str], dict[str, Any]] | None = None,
-        anomaly_review_decisions: dict[str, dict[str, Any]] | None = None,
+        anomaly_review_decisions: dict[str, dict[str, Any]],
         page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Apply canonical Workbench domain policies to one selected page batch."""
@@ -1081,7 +1080,7 @@ class WorkbenchCanonicalRowsBuilder:
         relations: list[dict[str, Any]],
         *,
         overrides_applied: bool = False,
-        anomaly_review_decisions: dict[str, dict[str, Any]] | None = None,
+        anomaly_review_decisions: dict[str, dict[str, Any]],
         page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
@@ -1208,13 +1207,7 @@ class WorkbenchCanonicalRowsBuilder:
             month,
             rows_by_id=working_rows_by_id,
             active_relations=relations,
-            anomaly_review_decisions=(
-                anomaly_review_decisions
-                if anomaly_review_decisions is not None
-                else PostgresWorkbenchRepository(
-                    self._connection
-                ).load_workbench_anomaly_review_decisions(scope_key=month)
-            ),
+            anomaly_review_decisions=anomaly_review_decisions,
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["oa_attachment_invoice_parser_version"] = attachment_invoice_cache_parser_version()

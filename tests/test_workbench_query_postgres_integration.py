@@ -669,6 +669,83 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             anomaly["fingerprint"],
         )
 
+        PostgresWorkbenchRepository(
+            self.raw_connection
+        ).set_workbench_anomaly_review_decision(
+            fingerprint=str(anomaly["fingerprint"]),
+            group_id=str(mismatched_group["group_id"]),
+            scope_key="2026-07",
+            actor_id="test-suite",
+            decision="accept_paired",
+            note="production-shape regression",
+            review_classification_codes=[
+                str(item["code"]) for item in anomaly["items"]
+            ],
+            reviewed_item_fingerprints=[
+                str(item["fingerprint"]) for item in anomaly["items"]
+            ],
+        )
+
+        accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        accepted_group = next(
+            group
+            for group in accepted["paired"]["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        self.assertEqual(
+            accepted_group["workbench_anomaly"]["review_decision"],
+            "accept_paired",
+        )
+        summary_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="paired",
+            exception_bucket="paired",
+            detail_level="summary",
+        )
+        full_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="paired",
+            exception_bucket="paired",
+            detail_level="full",
+        )
+        summary_group = next(
+            group
+            for group in summary_page["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        full_group = next(
+            group
+            for group in full_page["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        detail = self.repository.get_workbench_group_detail(
+            scope_key="2026-07",
+            zone="paired",
+            group_id=str(accepted_group["group_id"]),
+            detail_key=str(accepted_group["detail_key"]),
+        )
+        self.assertEqual(summary_group["zone"], "paired")
+        self.assertEqual(full_group["zone"], "paired")
+        self.assertEqual(detail["group"]["zone"], "paired")
+
+        self.raw_connection.execute(
+            """
+            update app.workbench_pair_relations
+            set updated_at = now() + interval '1 second'
+            where case_id = 'CASE-SHARED-36'
+            """
+        )
+        stale = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        stale_group = next(
+            group
+            for group in stale["unpaired"]["groups"]
+            if group.get("detail_key") == "CASE-SHARED-36"
+        )
+        self.assertNotEqual(
+            stale_group["workbench_anomaly"].get("review_decision"),
+            "accept_paired",
+        )
+
     def test_summary_hydration_does_not_transport_large_unused_source_payloads(self) -> None:
         sentinel = "summary-hot-path-unused-" + ("x" * 200_000)
         self.raw_connection.execute(

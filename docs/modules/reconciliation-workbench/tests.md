@@ -1,6 +1,12 @@
 # 关联台测试与验证
 
-日期：2026-08-16
+日期：2026-08-18
+
+## 2026-08-18 异常审阅决定与 direct candidate fingerprint 一致性
+
+- Repository/SQL：生产形态 PostgreSQL fixture 保护 OA 费用项对发票金额异常的 fingerprint 与 Python `WorkbenchAmountCheckService` 完全一致；`accept_paired` 后 initial、groups summary/full 与 group detail 必须同时进入 paired，不能触发 candidate/hydration zone disagreement。
+- Hydration/performance：compact 与 full/detail 都按 relation group 选最新决定并执行相同 relation freshness；full/detail 只读取当前可见 relation 的决定，删除 `WorkbenchCanonicalRowsBuilder` 对 month/all 全范围异常决定的隐式 fallback，不增加 SQL statement budget、read model、cache、worker、schema 或跨页面 I/O。
+- Regression：旧 fingerprint 在 relation 输入更新时间变化后继续失效；zone 一致性 fail-fast 保留，不以吞错、强制改区或兼容分支掩盖 SQL/Python 漂移。
 
 ## 2026-08-16 异常抽屉紧凑布局回归
 

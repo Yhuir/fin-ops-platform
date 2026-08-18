@@ -1540,6 +1540,7 @@ component_anomaly_items as materialized (
                 ), ''),
                 'UTF8'
             ) || decode('00', 'hex') ||
+            decode('00', 'hex') ||
             convert_to(
                 coalesce(to_char(
                     invoice.invoice_total,
