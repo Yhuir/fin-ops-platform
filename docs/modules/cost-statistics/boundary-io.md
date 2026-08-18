@@ -44,17 +44,17 @@ HTTP GET
 - 页面首次访问和浏览器刷新走同一条链。
 - 页面首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务月；用户选择与“全部时间”继续走既有 query/session 合同，不使用硬编码历史月份。
 - 首次 explorer 内容请求发送 `include_statistics=false`，优先返回当前 scope 的表格/分组；内容可用后再以 `page_size=1` 非阻塞读取全局 `statistics`。统计失败不重新锁住已可用内容；手动刷新会重试两条职责分离的读链。
-- `include_statistics=false` 且范围不是 `all` 时，五个视图都先以 `bank_transactions.txn_month` 下推银行范围。`time|bank_tag` 到此直接读取原始银行事实，不查询 OA/关系；三种归因视图再批量读取范围内流水命中的 active relation，并扩展这些关系的全部银行/OA 成员作为完整资格与退款证据，最终只输出交易日期落在请求范围内的事件。年/月归属只能使用银行交易日期。
+- `include_statistics=false` 且范围不是 `all` 时，五个视图都先以 `bank_transactions.txn_month` 下推银行范围。`time|bank_tag` 到此直接读取原始银行事实，不查询 OA/关系；三种归因视图再批量读取范围内流水命中的 active relation，并扩展这些关系的全部银行/OA 成员作为完整资格与退款证据，最终只输出真实支出流水日期落在请求范围内的归因行。跨月退款回溯冲减原支出流水所在月，不在退款月份生成负成本行；原始视图仍按退款真实日期展示收入。
 - 银行流水详情与 OA 分摊详情分别把当前 `scope`、`view` 和 `include_statistics=false` 下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。所有视图都可能出现银行流水行，详情类型必须读行级 `row_kind`，不得按 view 推断。
 - explorer 的 `query` 在 service 中折叠空白、将纯金额归一为无千分位文本并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索银行事件拆出的归因行，`time|bank_tag` 搜索独立标签规则过滤后的原始银行事实；输出金额统一使用无千分位两位小数。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
 - 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - `CostStatisticsPolicy` 将支付申请整张 OA 原始金额作为一个权重单元，将日常报销 canonical `expense_items` 逐项作为权重单元。项目或正数权重缺失时整组不分摊；费用类型缺失不再排除，而是进入“未填写 OA 费用类型”。权重合计非正只做内部除零保护，不新增产品状态。
-- active relation 中只要有一张 OA 不是明确完成态，整组银行流水从三种归因视图排除，也不得作为无 OA 流水；原始 `time|bank_tag` 仍展示这些银行事实。关系声明的 OA 成员没有被 canonical snapshot 完整加载时同样整组 fail closed，且银行成员继续受 OA 保护。全部 OA 完成时，每条支出银行流水独立形成正成本事件；同一关系内明确标记“付错退款”的收入独立形成负成本事件，普通收入不进入归因视图。
-- 每个银行事件按关系内 OA 权重比例分摊，使用确定性最大余数法按分闭合；`sum(bank transaction × OA unit) = 当前银行事件金额`。同一银行流水或 OA 单元跨 active relation 重复时整次响应报冲突，不能重复计入。
+- active relation 中只要有一张 OA 不是明确完成态，整组银行流水从三种归因视图排除，也不得作为无 OA 流水；原始 `time|bank_tag` 仍展示这些银行事实。关系声明的 OA 成员没有被 canonical snapshot 完整加载时同样整组 fail closed，且银行成员继续受 OA 保护。全部 OA 完成时，关系净支出 `N = 支出合计 B - 同关系明确“付错退款”R`；普通收入不进入净额，退款不生成独立归因行。
+- 先按真实支出原额权重把 `N` 分到各支出流水，再按 OA 原额权重分到 OA 单元，两级都使用确定性最大余数法按分闭合；`sum(outflow bank transaction × OA unit) = N`。无退款时该算法等价于原逐支出流水分摊；同一银行流水或 OA 单元跨 active relation 重复时整次响应报冲突，不能重复计入。
 - `project / bank / expense_type`、allocation detail 和归因导出共享逐流水归因结果；每行银行账户来自该条真实流水，不再生成“混合支付账户”。`time / bank_tag` 与 bank transaction detail 共享独立原始银行事实集合。三种归因视图彼此可对账，两个原始银行视图彼此可对账；两个集合的总额不要求相等。
-- OA 分摊详情同时展示 OA 原始金额/权重、当前银行事件原金额，以及关系 OA 总额、银行总支出、“付错退款”、实际现金成本、差额和现金比例；退款冲减只在同一 active 关系内成立。
+- OA 分摊详情同时展示 OA 原始金额/权重、本笔支出流水原额，以及关系 OA 总额、银行总支出、负数“付错退款”、关系净支出、差额和现金比例；退款冲减只在同一 active 关系内成立，API 证据金额保持正数加方向，前端成本抽屉负责按负数展示退款。
 - 无 active OA 关系的支出流水只有在其标签被分配给有效虚拟项目时才进入成本事件，费用类型固定为“无 OA 分类”。候选标签从当前全历史实际无 OA 支出逐笔计算；执行纳入时再次逐笔排除所有 active OA 关系成员。配置默认 `projects=[]` 并对全部历史期间生效；项目 ID、名称和 tag→project 单一归属由服务端校验。
 - `project / bank / expense_type` 统一输出 `oa_applicant`：支付申请取 canonical 申请人，日常报销取 canonical 报销成员；页面和导出标题统一为“申请/报销人”。缺失值保持空字符串，禁止回退为对方户名、“—”或其他伪造内容。`expense_type` 视图同时展示项目名与申请/报销人。
 - `time` 行只映射银行交易时间、对方户名、标签、真实方向和原始银行金额、银行账户与流水摘要；OA 分摊字段只在归因详情显示。

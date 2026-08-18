@@ -32,10 +32,10 @@ function costDetailSections(detail: CostEntryDetail) {
   const sections: EntityDetailSection[] = [{
     title: "基本信息",
     fields: [
-      { label: "本笔流水分摊成本", value: formatCostAmount(allocation.amount) },
+      { label: "本项净成本", value: formatCostAmount(allocation.amount) },
       { label: "OA 原始金额", value: formatCostAmount(allocation.oaOriginalAmount) },
       { label: "OA 金额占比", value: allocation.oaAllocationWeight },
-      { label: "本笔银行流水原始金额", value: formatCostAmount(allocation.bankEventAmount) },
+      { label: "本笔支出流水原额", value: formatCostAmount(allocation.bankEventAmount) },
       { label: "审批完成时间", value: allocation.oaCompletedAt },
       { label: "项目名称", value: allocation.projectName },
       { label: "费用类型", value: allocation.expenseType },
@@ -50,10 +50,10 @@ function costDetailSections(detail: CostEntryDetail) {
     fields: [
       { label: "OA 原始金额合计", value: formatCostAmount(detail.reconciliation.oaAllocationTotal) },
       { label: "支出流水原额", value: formatCostAmount(detail.reconciliation.bankOutflowTotal) },
-      { label: "付错退款", value: formatCostAmount(detail.reconciliation.paidWrongRefundTotal) },
-      { label: "实际现金成本", value: formatCostAmount(detail.reconciliation.netCashCost) },
-      { label: "实际成本与 OA 差额", value: formatCostAmount(detail.reconciliation.difference) },
-      { label: "实际成本 / OA", value: detail.reconciliation.cashPaymentRatio },
+      { label: "付错退款", value: formatCostReduction(detail.reconciliation.paidWrongRefundTotal) },
+      { label: "关系净支出", value: formatCostAmount(detail.reconciliation.netCashCost) },
+      { label: "净支出与 OA 差额", value: formatCostAmount(detail.reconciliation.difference) },
+      { label: "净支出 / OA", value: detail.reconciliation.cashPaymentRatio },
       { label: "状态", value: detail.reconciliation.status === "balanced" ? "金额一致" : "金额不一致" },
     ],
   }];
@@ -64,7 +64,12 @@ function costDetailSections(detail: CostEntryDetail) {
         { label: "交易时间", value: evidence.tradeTime },
         { label: "收支方向", value: evidence.direction },
         { label: "对方户名", value: evidence.counterpartyName },
-        { label: evidence.direction === "收入" ? "收入金额" : "支出金额", value: formatCostAmount(evidence.amount) },
+        {
+          label: evidence.direction === "收入" ? "付错退款金额" : "支出金额",
+          value: evidence.direction === "收入"
+            ? formatCostReduction(evidence.amount)
+            : formatCostAmount(evidence.amount),
+        },
         { label: "流水标签", value: evidence.bankTagLabel },
         { label: "银行账户", value: evidence.paymentAccountLabel },
         { label: "备注", value: evidence.remark },
@@ -72,4 +77,13 @@ function costDetailSections(detail: CostEntryDetail) {
     });
   });
   return preparePublicDetailSections(sections);
+}
+
+function formatCostReduction(value: string): string {
+  const normalized = value.trim().replace(/,/g, "");
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(normalized)) {
+    return formatCostAmount(value);
+  }
+  const unsigned = normalized.replace(/^[+-]/, "");
+  return formatCostAmount(/^0+(?:\.0+)?$/.test(unsigned) ? "0" : `-${unsigned}`);
 }

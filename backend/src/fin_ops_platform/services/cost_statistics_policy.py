@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from functools import cached_property
 import re
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from functools import cached_property
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import (
-    AppSettingsService,
     COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
+    AppSettingsService,
 )
 from fin_ops_platform.services.bank_settings import bank_accounts_from_settings_payload
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
-
 
 ZERO = Decimal("0.00")
 MONEY_QUANTUM = Decimal("0.01")
@@ -648,11 +647,7 @@ def _cost_entries(
             "cash_payment_ratio": _ratio(net_cash_cost, oa_total),
             "status": "balanced" if difference == ZERO else "mismatch",
         }
-        signed_bank_events = [
-            *((row, _outflow_amount(row) or ZERO) for row in outflows),
-            *((row, -(_inflow_amount(row) or ZERO)) for row in refunds),
-        ]
-        for bank_row, signed_amount in signed_bank_events:
+        for bank_row in [*outflows, *refunds]:
             transaction_id = _bank_transaction_id(bank_row)
             if not transaction_id:
                 continue
@@ -663,19 +658,38 @@ def _cost_entries(
                     f"{existing_event_owner}, {relation_case_id}"
                 )
             event_owners[transaction_id] = relation_case_id
-            allocations = _proportional_allocations(
-                signed_amount,
-                contexts,
-                oa_total=oa_total,
+
+        net_outflow_amounts = _proportional_amounts(
+            net_cash_cost,
+            [
+                (_bank_transaction_id(row), _outflow_amount(row) or ZERO)
+                for row in outflows
+            ],
+        )
+        oa_weights = [
+            (_allocation_id(context), context["allocation_amount"])
+            for context in contexts
+        ]
+        for bank_row, net_outflow_amount in zip(
+            outflows,
+            net_outflow_amounts,
+            strict=True,
+        ):
+            allocated_amounts = _proportional_amounts(
+                net_outflow_amount,
+                oa_weights,
             )
-            included_allocations = allocations
             included_event_amount = sum(
-                (amount for _context, amount in included_allocations),
+                allocated_amounts,
                 start=ZERO,
             ).quantize(MONEY_QUANTUM)
             if included_event_amount == ZERO:
                 continue
-            for context, allocated_amount in included_allocations:
+            for context, allocated_amount in zip(
+                contexts,
+                allocated_amounts,
+                strict=True,
+            ):
                 entries.append(
                     _allocation_entry(
                         context,
@@ -803,35 +817,38 @@ def _no_oa_entry(
     }
 
 
-def _proportional_allocations(
+def _proportional_amounts(
     total: Decimal,
-    contexts: list[dict[str, Any]],
-    *,
-    oa_total: Decimal,
-) -> list[tuple[dict[str, Any], Decimal]]:
+    weighted_amounts: list[tuple[str, Decimal]],
+) -> list[Decimal]:
+    if not weighted_amounts:
+        return []
+    weight_total = sum(
+        (weight for _key, weight in weighted_amounts),
+        start=ZERO,
+    ).quantize(MONEY_QUANTUM)
+    if weight_total <= ZERO:
+        return [ZERO for _item in weighted_amounts]
     sign = Decimal("-1") if total < ZERO else Decimal("1")
     absolute_total = abs(total).quantize(MONEY_QUANTUM)
     raw_amounts = [
-        absolute_total * context["allocation_amount"] / oa_total
-        for context in contexts
+        absolute_total * weight / weight_total
+        for _key, weight in weighted_amounts
     ]
     rounded = [amount.quantize(MONEY_QUANTUM, rounding=ROUND_DOWN) for amount in raw_amounts]
     remaining_cents = int(
         ((absolute_total - sum(rounded, start=ZERO)) / MONEY_QUANTUM).to_integral_value()
     )
     order = sorted(
-        range(len(contexts)),
+        range(len(weighted_amounts)),
         key=lambda index: (
             -(raw_amounts[index] - rounded[index]),
-            _allocation_id(contexts[index]),
+            weighted_amounts[index][0],
         ),
     )
     for index in order[:remaining_cents]:
         rounded[index] += MONEY_QUANTUM
-    return [
-        (context, (rounded[index] * sign).quantize(MONEY_QUANTUM))
-        for index, context in enumerate(contexts)
-    ]
+    return [(amount * sign).quantize(MONEY_QUANTUM) for amount in rounded]
 
 
 def _paid_wrong_refund_tag_codes(settings: dict[str, Any]) -> set[str]:

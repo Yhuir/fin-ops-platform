@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.services.cost_statistics_policy import (
     CostStatisticsAllocationConflictError,
@@ -9,7 +10,7 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
-    def test_daily_reimbursement_allocates_each_bank_event_by_oa_weight_and_bank_date(self) -> None:
+    def test_daily_reimbursement_allocates_relation_net_cost_by_oa_weight_and_bank_date(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -26,13 +27,24 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                             ],
                         )
                     ],
-                    bank_rows=[self._bank("bank-1050", "1050.00", trade_time="2026-08-01 15:58:31")],
+                    bank_rows=[
+                        self._bank("bank-1050", "1050.00", trade_time="2026-08-01 15:58:31"),
+                        self._bank(
+                            "bank-refund-35",
+                            "35.00",
+                            direction="inflow",
+                            tag_code="refund-code",
+                            tag_label="付错退款",
+                            trade_time="2026-08-01 16:22:04",
+                        ),
+                    ],
                 )
             ]
         )
 
         rows = policy.serialized_cost_rows
-        self.assertEqual({row["amount"] for row in rows}, {"248.28", "734.48", "67.24"})
+        self.assertEqual({row["amount"] for row in rows}, {"240.00", "710.00", "65.00"})
+        self.assertEqual({row["transaction_id"] for row in rows}, {"bank-1050"})
         dali = next(row for row in rows if row["project_name"] == "大理卷烟厂余热综合利用项目")
         self.assertEqual(dali["month"], "2026-08")
         self.assertEqual(dali["oa_completed_at"], "2026-07-23 18:00:00")
@@ -44,12 +56,18 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertIsNotNone(detail)
         assert detail is not None
-        self.assertEqual(detail["amount"], "734.48")
+        self.assertEqual(detail["amount"], "710.00")
         self.assertEqual(detail["oa_original_amount"], "710.00")
         self.assertEqual(detail["oa_allocation_weight"], "69.95%")
         self.assertEqual(detail["bank_event_amount"], "1050.00")
-        self.assertEqual(detail["reconciliation"]["difference"], "35.00")
-        self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "103.45%")
+        self.assertEqual(detail["reconciliation"]["paid_wrong_refund_total"], "35.00")
+        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1015.00")
+        self.assertEqual(detail["reconciliation"]["difference"], "0.00")
+        self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
+        self.assertEqual(
+            [row["transaction_id"] for row in detail["payment_evidence"]],
+            ["bank-1050", "bank-refund-35"],
+        )
 
     def test_payment_application_allocates_bank_amount_by_oa_weight(self) -> None:
         policy = self._policy(
@@ -72,7 +90,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             },
         )
 
-    def test_two_bank_events_keep_real_accounts_and_allocate_independently(self) -> None:
+    def test_two_bank_events_keep_real_accounts_after_relation_net_cost_allocation(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -84,6 +102,13 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     bank_rows=[
                         self._bank("bank-1", "250.00", account_no="1111", account_label="建行 1111"),
                         self._bank("bank-2", "350.00", account_no="2222", account_label="民生 2222"),
+                        self._bank(
+                            "bank-refund",
+                            "60.00",
+                            direction="inflow",
+                            tag_code="refund-code",
+                            tag_label="付错退款",
+                        ),
                     ],
                 )
             ]
@@ -100,9 +125,47 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             scope_value=None,
         )
         assert detail is not None
-        self.assertEqual(detail["amount"], "83.33")
+        self.assertEqual(detail["amount"], "75.00")
         self.assertEqual(detail["bank_event_amount"], "250.00")
-        self.assertEqual(len(detail["payment_evidence"]), 2)
+        self.assertEqual(len(detail["payment_evidence"]), 3)
+        self.assertEqual(
+            sum((Decimal(row["amount"]) for row in policy.serialized_cost_rows), start=Decimal("0")),
+            Decimal("540.00"),
+        )
+
+    def test_mismatched_oa_total_scales_item_cost_by_net_cost_over_oa_total(self) -> None:
+        policy = self._policy(
+            [
+                self._group(
+                    oa_rows=[
+                        self._oa(
+                            "oa-exp-1",
+                            apply_type="日常报销",
+                            amount="1200.00",
+                            expense_items=[
+                                self._item("lodging", "大理项目", "住宿费", "710.00"),
+                                self._item("other", "大理项目", "其他", "490.00"),
+                            ],
+                        )
+                    ],
+                    bank_rows=[
+                        self._bank("bank-out", "1050.00"),
+                        self._bank(
+                            "bank-refund",
+                            "35.00",
+                            direction="inflow",
+                            tag_code="refund-code",
+                            tag_label="付错退款",
+                        ),
+                    ],
+                )
+            ]
+        )
+
+        self.assertEqual(
+            {(row["expense_type"], row["amount"]) for row in policy.serialized_cost_rows},
+            {("住宿费", "600.54"), ("其他", "414.46")},
+        )
 
     def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
         policy = self._policy(
@@ -214,7 +277,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(
             {(row["transaction_id"], row["amount"], row["direction"]) for row in policy.serialized_cost_rows},
-            {("bank-out", "1050.00", "支出"), ("bank-refund", "-35.00", "收入")},
+            {("bank-out", "1015.00", "支出")},
         )
         self.assertEqual(policy.explorer_page(
             scope_kind="all", scope_value=None, view="project",
@@ -230,8 +293,16 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             [row["transaction_id"] for row in detail["payment_evidence"]],
             ["bank-out", "bank-refund"],
         )
+        self.assertEqual(
+            {(row["transaction_id"], row["direction"], row["amount"]) for row in policy.bank_flow_rows},
+            {
+                ("bank-out", "支出", "1050.00"),
+                ("bank-refund", "收入", "35.00"),
+                ("bank-income", "收入", "20.00"),
+            },
+        )
 
-    def test_cross_month_paid_wrong_refund_is_visible_in_its_bank_month(self) -> None:
+    def test_cross_month_paid_wrong_refund_reduces_original_outflow_month(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -276,9 +347,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             page_size=50,
         )
 
-        self.assertEqual(august["summary"]["total_amount"], "1050.00")
-        self.assertEqual(september["summary"]["total_amount"], "-35.00")
-        self.assertEqual(september["primary_facets"][0]["total_amount"], "-35.00")
+        self.assertEqual(august["summary"]["total_amount"], "1015.00")
+        self.assertEqual(september["summary"]["total_amount"], "0.00")
+        self.assertEqual(september["primary_facets"], [])
         self.assertEqual(all_time["summary"]["total_amount"], "1015.00")
 
     def test_two_view_populations_use_bank_trade_date_and_reconcile_within_each_population(self) -> None:
@@ -347,7 +418,10 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 ]
             ),
         )
-        self.assertEqual({row["transaction_id"] for row in policy.serialized_cost_rows}, {"paired", "income"})
+        self.assertEqual(
+            {(row["transaction_id"], row["amount"]) for row in policy.serialized_cost_rows},
+            {("paired", "99.00")},
+        )
         self.assertEqual([row["code"] for row in policy.no_oa_tag_candidates()], ["fee"])
 
     def test_any_active_oa_relation_protects_bank_row_from_no_oa_even_without_allocation_group(self) -> None:

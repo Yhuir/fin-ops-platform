@@ -5,14 +5,14 @@ import unittest
 from dataclasses import replace
 from time import monotonic
 
-from openpyxl import load_workbook
-
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_adapter import (
     InMemoryOAAdapter,
     OAApplicationRecord,
 )
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from openpyxl import load_workbook
+
 from tests.app_test_support import build_local_state_application
 
 
@@ -158,6 +158,77 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail["reconciliation"]["relation_case_id"], "CASE-COST-DIRECT-001")
         self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1250.00")
         self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
+
+    def test_paid_wrong_refund_reduces_attribution_without_creating_refund_row(self) -> None:
+        repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
+        snapshot = repository.load_snapshot()
+        group = snapshot["cost_groups"][0]
+        source_bank = dict(group["bank_rows"][0])
+        refund = {
+            **source_bank,
+            "id": "bank-refund-35",
+            "transaction_id": "bank-refund-35",
+            "trade_time": "2026-03-10 21:32:00",
+            "txn_direction": "inflow",
+            "direction": "收入",
+            "debit_amount": "",
+            "credit_amount": "35.00",
+            "amount": "35.00",
+            "cost_amount_decimal": "35.00",
+            "summary": "付错退款",
+            "remark": "退报销多转款",
+            "bank_tag_code": "paid-wrong-refund",
+            "bank_tag_label": "付错退款",
+            "bank_tag_primary_label": "付错退款",
+            "bank_tag_sub_label": "付错退款",
+            "bank_tag_label_path": ["付错退款"],
+        }
+        snapshot = {
+            **snapshot,
+            "bank_rows": [*snapshot["bank_rows"], refund],
+            "cost_groups": [
+                {
+                    **group,
+                    "bank_rows": [*group["bank_rows"], refund],
+                }
+            ],
+        }
+        repository.load_snapshot = lambda **_kwargs: snapshot
+
+        status, project = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_name=云南溯源科技"
+            "&expense_type=设备货款及材料费"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(project["row_count"], 1)
+        self.assertEqual(project["rows"][0]["transaction_id"], self.bank_id)
+        self.assertEqual(project["rows"][0]["amount"], "1215.00")
+
+        allocation_id = project["rows"][0]["allocation_id"]
+        status, detail = self._json(
+            f"/api/cost-statistics/allocations/{allocation_id}"
+            "?scope=2026-03&view=project"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(detail["allocation"]["amount"], "1215.00")
+        self.assertEqual(
+            [(row["transaction_id"], row["direction"], row["amount"]) for row in detail["payment_evidence"]],
+            [(self.bank_id, "支出", "1250.00"), ("bank-refund-35", "收入", "35.00")],
+        )
+        self.assertEqual(detail["reconciliation"]["paid_wrong_refund_total"], "35.00")
+        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1215.00")
+
+        status, time_page = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(time_page["summary"]["expense_amount"], "1250.00")
+        self.assertEqual(time_page["summary"]["income_amount"], "35.00")
+        self.assertEqual(
+            {row["transaction_id"] for row in time_page["rows"]},
+            {self.bank_id, "bank-refund-35"},
+        )
 
     def test_transaction_detail_loads_only_the_requested_scope(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001

@@ -9,8 +9,8 @@
 | `COST-E2E-005` | covered | `web/src/test/CostStatisticsPage.test.tsx` |
 | `COST-E2E-006` | covered | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/deploy 回归 |
 | `COST-E2E-007` | local-covered / production-measure | 本地 API budget 测试；发布后记录生产多次请求分布 |
-| `COST-E2E-008` | covered | `tests/test_cost_statistics_policy.py` 的逐银行事件比例分摊、最大余数按分闭合与详情合同；`tests/test_cost_statistics_api.py` |
-| `COST-E2E-009` | covered | `tests/test_cost_statistics_policy.py` 的同关系付错退款与普通收入隔离；`tests/test_cost_statistics_api.py` 的 reconciliation contract |
+| `COST-E2E-008` | covered | `tests/test_cost_statistics_policy.py` 的关系净支出两级比例、多支出多账户、最大余数按分闭合、OA mismatch 方向与详情合同；`tests/test_cost_statistics_api.py` |
+| `COST-E2E-009` | covered | `tests/test_cost_statistics_policy.py` 的同关系付错退款/普通收入隔离、无退款归因行与原始流水不变；`tests/test_cost_statistics_api.py` 的 explorer/detail contract；`web/src/test/CostEntryDetailPanel.test.tsx` 的负数退款证据 |
 | `COST-E2E-010` | covered | `tests/test_cost_statistics_policy.py` 的进行中关系只从归因集合排除与银行日期；`tests/test_cost_statistics_api.py` 的原始流水/归因集合隔离 |
 | `COST-E2E-011` | covered | `tests/test_cost_statistics_policy.py` 的零权重保护与 duplicate ownership；`tests/test_cost_statistics_api.py` 的冲突合同 |
 | `COST-E2E-012` | covered | `tests/test_cost_statistics_api.py` 的真实候选、默认空、多项目保存、互斥校验及同标签有/无 OA 逐笔隔离；`tests/test_app_settings_service.py`；前端抽屉组件测试 |

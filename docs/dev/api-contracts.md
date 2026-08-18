@@ -84,7 +84,7 @@
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
 - `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
 - `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
-- `project|bank|expense_type` 使用 `bank_transaction × OA_unit` 归因行和无 OA 银行行；`time|bank_tag` 使用独立规则过滤后的原始 canonical 银行流水。全部视图按银行交易日期归属。三种归因视图相互对账，两个原始银行视图相互对账；五个 view 的根层总额不要求一致。
+- `project|bank|expense_type` 使用真实支出 `bank_transaction × OA_unit` 净归因行和无 OA 银行行；`time|bank_tag` 使用独立规则过滤后的原始 canonical 银行流水。归因行按支出交易日期归属，跨月“付错退款”回溯冲减原支出月且不独立成行。三种归因视图相互对账，两个原始银行视图相互对账；五个 view 的根层总额不要求一致。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
@@ -94,7 +94,7 @@
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
-- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回一个 `bank_transaction × OA_unit` 分摊、同一正式关系组的付款/付错退款证据和金额核对。字段包括 OA 原始金额、OA 权重比例、当前银行事件原金额、银行总支出、付错退款、实际现金成本、差额和现金比例。
+- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回一个真实支出 `bank_transaction × OA_unit` 净分摊、同一正式关系组的付款/付错退款证据和金额核对。关系先计算 `净支出 = 支出合计 - 付错退款`，再按支出原额与 OA 原额两级比例分配；退款不产生 allocation ID。字段包括 OA 原始金额、OA 权重比例、本笔支出流水原额、银行总支出、付错退款、关系净支出、差额和现金比例。证据中的退款 `amount` 保持正数并以 `direction=收入` 表意，成本详情 UI 显示为负数。
 - 两个详情接口都从同一 canonical snapshot 计算，按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
