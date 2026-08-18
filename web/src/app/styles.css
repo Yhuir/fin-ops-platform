@@ -13448,6 +13448,8 @@ body.column-layout-dragging {
   z-index: 1600;
   width: min(260px, calc(100vw - 24px));
   padding: 8px;
+  overflow: clip;
+  overflow-anchor: none;
   border: 1px solid #d8e1eb;
   border-radius: 10px;
   background: #ffffff;
@@ -13460,8 +13462,10 @@ body.column-layout-dragging {
 
 .column-filter-dialog {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 6px;
   min-height: 0;
+  overflow: clip;
 }
 
 .column-filter-search-group {
@@ -13480,13 +13484,16 @@ body.column-layout-dragging {
 .column-filter-option-list {
   display: grid;
   gap: 1px;
-  flex: 1;
   min-height: 0;
   max-height: 260px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .column-filter-popover label.column-filter-option {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;

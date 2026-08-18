@@ -1674,3 +1674,10 @@
 - 错误与重试：后端区分内容漂移和仍有 blocker；用户提示不显示 request id，诊断 ID 仍保留在错误对象。review POST 成功但 canonical reread 失败时明确提示“已写入、请勿重复提交”，避免重复 mutation。
 - 边界与性能：复用现有 repository、全局 scope schema、direct reread 与异常 bucket，不新增 migration、表、索引、worker、read model、cache、依赖或第二条链路；查询只把月度过滤扩展为 `scope_month = 月份 OR scope_month IS NULL`。
 - 验证：后端覆盖 detail key、跨月 scope、月度到全局提升、幂等和稳定错误码；前端覆盖请求合同、无 request id 用户文案及 post-commit reread 失败不重复写。完整 backend/frontend/lint/docs/build 回归后发布，并以生产只读 HTTP SLO 与 runtime closure gate 验证。
+
+## 2026-08-18 - 列筛选菜单焦点与滚动边界修复
+
+- 根因：HeroUI Checkbox 的原生 input 由 VisuallyHidden 绝对定位；旧 `.column-filter-option` 没有建立定位上下文，长列表底部 input 的真实焦点坐标落到 Popover 可视区域之外。勾选时浏览器为错误焦点坐标滚动 document，造成整页位移。
+- 收口：每个筛选项建立局部定位上下文，Popover/Dialog 裁剪内部溢出，只有选项列表拥有纵向滚动并阻断滚动链；删除 Grid 子项中无效的 `flex: 1` 和宽泛 `overflow: auto`。不使用 `window.scrollTo`、全局 scroll listener、第二套菜单或自制 Checkbox。
+- 边界：筛选值、API、候选分组、zone query 和 HeroUI 交互合同均不改变；样式限定为关联台 `.column-filter-*`，不污染其它页面或全局 App Shell。无数据库、read model、worker、cache 或依赖变化。
+- 验证：Chromium 大数据 E2E 覆盖申请人、项目名称和流水金额三个菜单的内部滚轮、鼠标勾选、Tab/空格选择、查询完成后 document/三栏位置保持及无页面导航；组件测试保护勾选后菜单保持打开。

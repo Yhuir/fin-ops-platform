@@ -44,5 +44,6 @@ describe("Workbench grouped column filter menu", () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith([
       "project:2024年-2027年玉溪卷烟厂动力车间供配电、复烤二车间能源系统维护项目",
     ]));
+    expect(screen.getByRole("dialog", { name: "筛选 项目名称" })).toBeInTheDocument();
   });
 });

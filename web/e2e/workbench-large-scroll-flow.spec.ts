@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "./fixtures/strictTest";
+import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
@@ -42,6 +42,107 @@ async function scrollPaneHorizontally(scrollbar: Locator) {
   });
   expect(scrollState.scrollWidth).toBeGreaterThanOrEqual(scrollState.clientWidth);
   return scrollState.scrollLeft;
+}
+
+async function readFilterScrollState(page: Page, zone: Locator, optionList: Locator) {
+  return {
+    documentScrollY: await page.evaluate(() => window.scrollY),
+    gridScrollTop: await zone.locator(".candidate-grid-body").evaluate((element) => element.scrollTop),
+    optionListScrollTop: await optionList.evaluate((element) => element.scrollTop),
+  };
+}
+
+async function selectDeepFilterOptionWithPointerWithoutPageShift({
+  page,
+  zone,
+  dialog,
+}: {
+  page: Page;
+  zone: Locator;
+  dialog: Locator;
+}) {
+  const optionList = dialog.locator(".column-filter-option-list");
+  const optionLabels = dialog.locator("label.column-filter-option");
+  const option = optionLabels.nth(Math.max(0, await optionLabels.count() - 2));
+  const optionControl = option.getByRole("checkbox");
+  const before = await readFilterScrollState(page, zone, optionList);
+  const optionListBox = await optionList.boundingBox();
+  expect(optionListBox).not.toBeNull();
+  const viewport = page.viewportSize();
+  await page.mouse.move(
+    optionListBox!.x + optionListBox!.width / 2,
+    Math.min(optionListBox!.y + Math.min(80, optionListBox!.height / 2), (viewport?.height ?? 900) - 2),
+  );
+  await page.mouse.wheel(0, 180);
+  const afterWheel = await readFilterScrollState(page, zone, optionList);
+  expect(Math.abs(afterWheel.documentScrollY - before.documentScrollY)).toBeLessThanOrEqual(1);
+  expect(afterWheel.gridScrollTop).toBe(before.gridScrollTop);
+  expect(afterWheel.optionListScrollTop).toBeGreaterThan(0);
+  await optionList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect.poll(() => option.evaluate((element) => {
+    const list = element.closest(".column-filter-option-list");
+    if (!(list instanceof HTMLElement)) return false;
+    const optionRect = element.getBoundingClientRect();
+    const listRect = list.getBoundingClientRect();
+    return optionRect.top >= listRect.top && optionRect.bottom <= listRect.bottom;
+  })).toBe(true);
+  const afterReveal = await readFilterScrollState(page, zone, optionList);
+  expect(Math.abs(afterReveal.documentScrollY - before.documentScrollY)).toBeLessThanOrEqual(1);
+  expect(afterReveal.gridScrollTop).toBe(before.gridScrollTop);
+  expect(afterReveal.optionListScrollTop).toBeGreaterThan(0);
+
+  const groupsResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET"
+      && url.pathname === "/api/workbench/groups"
+      && url.searchParams.get("zone") === "unpaired";
+  });
+  await option.click();
+  await groupsResponse;
+  await expect(optionControl).toBeChecked();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(before.documentScrollY, 0);
+  const afterSelection = await readFilterScrollState(page, zone, optionList);
+  expect(afterSelection.gridScrollTop).toBe(before.gridScrollTop);
+  expect(afterSelection.optionListScrollTop).toBeGreaterThan(0);
+}
+
+async function selectFilterOptionWithKeyboardWithoutPageShift({
+  page,
+  zone,
+  dialog,
+}: {
+  page: Page;
+  zone: Locator;
+  dialog: Locator;
+}) {
+  const optionList = dialog.locator(".column-filter-option-list");
+  const options = dialog.getByRole("checkbox");
+  const before = await readFilterScrollState(page, zone, optionList);
+  await options.first().focus();
+  for (let index = 0; index < 20; index += 1) {
+    await page.keyboard.press("Tab");
+  }
+  const afterFocus = await readFilterScrollState(page, zone, optionList);
+  expect(Math.abs(afterFocus.documentScrollY - before.documentScrollY)).toBeLessThanOrEqual(1);
+  expect(afterFocus.gridScrollTop).toBe(before.gridScrollTop);
+  expect(afterFocus.optionListScrollTop).toBeGreaterThan(0);
+
+  const groupsResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET"
+      && url.pathname === "/api/workbench/groups"
+      && url.searchParams.get("zone") === "unpaired";
+  });
+  await page.keyboard.press("Space");
+  await groupsResponse;
+  await expect(dialog.locator('input[type="checkbox"]:checked')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(before.documentScrollY, 0);
+  const afterSelection = await readFilterScrollState(page, zone, optionList);
+  expect(afterSelection.gridScrollTop).toBe(before.gridScrollTop);
+  expect(afterSelection.optionListScrollTop).toBeGreaterThan(0);
 }
 
 test.describe("workbench large dataset browser flow", () => {
@@ -99,6 +200,43 @@ test.describe("workbench large dataset browser flow", () => {
     expect(geometry.minHeight).toBeGreaterThanOrEqual(27.5);
     expect(geometry.maxHeight).toBeGreaterThan(36);
     expect(geometry.overlaps).toBe(false);
+  });
+
+  test("keeps deep mouse and keyboard filter selection inside the popover scroll boundary", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchLargeDataset: true,
+    });
+    await page.goto("/");
+
+    const zone = page.getByTestId("zone-unpaired");
+    await zone.getByRole("button", { name: "筛选 申请人" }).click();
+    await selectDeepFilterOptionWithPointerWithoutPageShift({
+      page,
+      zone,
+      dialog: page.getByRole("dialog", { name: "筛选 申请人" }),
+    });
+    await page.keyboard.press("Escape");
+
+    await zone.getByRole("button", { name: "筛选 项目名称" }).click();
+    await selectFilterOptionWithKeyboardWithoutPageShift({
+      page,
+      zone,
+      dialog: page.getByRole("dialog", { name: "筛选 项目名称" }),
+    });
+    await page.keyboard.press("Escape");
+
+    await zone.getByRole("button", { name: "筛选 金额" }).click();
+    await selectDeepFilterOptionWithPointerWithoutPageShift({
+      page,
+      zone,
+      dialog: page.getByRole("dialog", { name: "筛选 金额" }),
+    });
+    await page.keyboard.press("Escape");
+
+    expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(1);
+    await expect(zone.getByRole("button", { name: "筛选 金额" })).toBeVisible();
   });
 
   test("keeps narrow-screen overflow inside the workbench panes", async ({ page }) => {
