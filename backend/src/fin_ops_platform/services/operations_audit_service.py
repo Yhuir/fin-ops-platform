@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from fin_ops_platform.services.operation_history_evidence import normalize_operation_evidence
 from fin_ops_platform.services.operation_history_semantics import semantics_from_audit_row
 from fin_ops_platform.services.page_audit_registry import page_audit_registration
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
@@ -119,10 +120,21 @@ class OperationsAuditService:
             (event for event in reversed(events) if event.get("event_type") == "operation.completed"),
             None,
         )
+        completed_payload = completed.get("payload") if isinstance(completed, dict) else {}
+        completed_metadata = (
+            completed_payload.get("metadata")
+            if isinstance(completed_payload, dict) and isinstance(completed_payload.get("metadata"), dict)
+            else {}
+        )
+        stored_evidence = completed_metadata.get("evidence") if isinstance(completed_metadata, dict) else None
         request_id = self._text(latest.get("request_id"))
         histories = (
             self._repository.list_workbench_relation_history_for_request(request_id)
-            if request_id and latest.get("page_key") == "reconciliation-workbench"
+            if (
+                not isinstance(stored_evidence, dict)
+                and request_id
+                and latest.get("page_key") == "reconciliation-workbench"
+            )
             else []
         )
         operation = self._operation_summary(
@@ -134,7 +146,15 @@ class OperationsAuditService:
                 "outcome": completed.get("outcome") if completed else latest.get("outcome"),
             }
         )
-        operation["items"] = self._workbench_items(histories, action_code=operation["action_code"])
+        detail = (
+            normalize_operation_evidence(stored_evidence)
+            if isinstance(stored_evidence, dict)
+            else self._workbench_relation_detail(histories, action_code=operation["action_code"])
+        )
+        detail["legacy_evidence_missing"] = not any(
+            detail.get(key) for key in ("target", "artifacts", "records", "changes", "failure")
+        )
+        operation["detail"] = detail
         operation["reason"] = self._text(latest.get("reason"))
         return operation
 
@@ -235,12 +255,12 @@ class OperationsAuditService:
         )
 
     @classmethod
-    def _workbench_items(
+    def _workbench_relation_detail(
         cls,
         histories: list[dict[str, Any]],
         *,
         action_code: str,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         affected_members: set[tuple[str, str]] = set()
         for history in histories:
             raw = history.get("raw_payload") if isinstance(history.get("raw_payload"), dict) else {}
@@ -298,22 +318,25 @@ class OperationsAuditService:
             "已配对" if action_code in paired_actions else "未配对" if action_code in unpaired_actions else ""
         )
         order = {row_type: index for index, row_type in enumerate(labels)}
-        return [
+        records = [
             {
-                "item_key": f"type-{row_type}",
-                "type": labels.get(row_type, "业务记录"),
+                "record_key": f"type-{row_type}",
+                "kind": row_type,
                 "title": f"{count} 条{labels.get(row_type, '业务记录')}",
-                "secondary": f"本次操作涉及 {count} 条{labels.get(row_type, '业务记录')}",
-                "amount": None,
-                "date": None,
-                "before_status": before_status,
-                "after_status": after_status,
+                "fields": [{"label": "涉及数量", "value": str(count)}],
             }
-            for row_type, count in sorted(
-                counts.items(),
-                key=lambda item: (order.get(item[0], len(order)), item[0]),
-            )
+            for row_type, count in sorted(counts.items(), key=lambda item: (order.get(item[0], len(order)), item[0]))
         ]
+        return normalize_operation_evidence(
+            {
+                "records": records,
+                "changes": (
+                    [{"label": "关联状态", "before": before_status, "after": after_status}]
+                    if before_status or after_status
+                    else []
+                ),
+            }
+        )
 
     @staticmethod
     def _relation_history_payloads(value: object) -> list[dict[str, Any]]:

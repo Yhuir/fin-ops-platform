@@ -81,6 +81,13 @@ class WorkbenchInvoiceSupplementService:
                 "invalid_manual_invoice_supplement_session",
                 "仅允许关联手工录入发票批次。",
             )
+        invoice_evidence_rows = [
+            {
+                "record_key": item.id,
+                "normalized": dict(item.normalized_rows[0]) if item.normalized_rows else {},
+            }
+            for item in session.files
+        ]
 
         runtime_relation_commands = self._relation_command_service_factory(None)
         pair_snapshot = runtime_relation_commands.runtime_snapshot()
@@ -179,6 +186,7 @@ class WorkbenchInvoiceSupplementService:
                 "case_id": case_id,
                 "invoice_row_ids": invoice_ids,
                 "file_ids": file_ids,
+                "invoice_evidence_rows": invoice_evidence_rows,
                 "relation": relation_result.get("relation"),
             }
         except Exception:

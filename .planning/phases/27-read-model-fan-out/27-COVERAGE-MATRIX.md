@@ -123,6 +123,7 @@
 | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | input usage | `mixed` | preview read-like；draft/batch/status/revoke writes | preview zero mutation；writes only exact current scope |
 | `web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx` | input usage | `writable` | `saveInputInvoiceUsagePaymentStatusRules` | rule version save；access-time semantic proof |
 | `web/src/components/imports/ManualInvoiceEntryDrawer.tsx` | invoice import | `mixed` | recognize/preview are read-like; `confirmImportFiles` uses the existing explicit import batch | read-export hides the opener；full access validates and confirms through the unified invoice pool only |
+| `web/src/components/operations/OperationHistoryDetailDrawer.tsx` | operation history | `read-only` | none | immutable audit evidence and authenticated artifact preview only；不得 mutation、dirty 或 fan-out |
 | `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx` | output collection | `read-only` | none | canonical invoice/bank/formal-relation detail read only |
 | `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer.tsx` | output collection | `read-only` | none | export read only；不得 dirty |
 | `web/src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx` | pending invoice | `read-only` | none | freshness-gated detail read only |

@@ -1,14 +1,47 @@
-import { apiRequestJson } from "../apiClient";
+import { apiFetch, apiRequestJson } from "../apiClient";
 
-export type OperationHistoryItem = {
-  item_key: string;
-  type: string;
+export type OperationHistoryField = {
+  label: string;
+  value: string;
+};
+
+export type OperationHistoryTarget = {
+  kind: string;
   title: string;
-  secondary?: string | null;
-  amount?: string | number | null;
-  date?: string | null;
-  before_status?: string | null;
-  after_status?: string | null;
+  fields: OperationHistoryField[];
+};
+
+export type OperationHistoryArtifact = {
+  artifact_key: string;
+  kind: "file";
+  title: string;
+  media_type?: string | null;
+  size_bytes?: number | null;
+  preview_url?: string | null;
+  availability: "available" | "deleted" | "not_saved";
+};
+
+export type OperationHistoryRecord = {
+  record_key: string;
+  kind: string;
+  title: string;
+  fields: OperationHistoryField[];
+};
+
+export type OperationHistoryChange = {
+  label: string;
+  before?: string | null;
+  after?: string | null;
+};
+
+export type OperationHistoryDetail = {
+  schema_version: number;
+  target?: OperationHistoryTarget | null;
+  artifacts: OperationHistoryArtifact[];
+  records: OperationHistoryRecord[];
+  changes: OperationHistoryChange[];
+  failure?: { code?: string | null; message: string } | null;
+  legacy_evidence_missing: boolean;
 };
 
 export type OperationHistoryOperation = {
@@ -27,7 +60,7 @@ export type OperationHistoryOperation = {
   occurred_at: string;
   outcome: string;
   reason?: string | null;
-  items?: OperationHistoryItem[];
+  detail?: OperationHistoryDetail;
 };
 
 export type OperationHistoryActor = {
@@ -74,4 +107,12 @@ export async function fetchOperationHistoryDetail(operationKey: string, signal?:
     `/api/operations/history/${encodeURIComponent(operationKey)}`,
     { method: "GET", signal },
   );
+}
+
+export async function fetchOperationArtifact(previewUrl: string, signal?: AbortSignal) {
+  const response = await apiFetch(previewUrl, { method: "GET", signal });
+  if (!response.ok) {
+    throw new Error("凭证预览加载失败，请稍后重试。");
+  }
+  return response.blob();
 }

@@ -3,13 +3,13 @@ from __future__ import annotations
 import hashlib
 import unittest
 
+from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
+    PostgresWorkbenchOaSupportingDocumentRepository,
+)
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
     WorkbenchOaSupportingDocumentError,
     WorkbenchOaSupportingDocumentService,
-)
-from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
-    PostgresWorkbenchOaSupportingDocumentRepository,
 )
 
 
@@ -111,10 +111,12 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         _document, content = self.service.content("document-1")
         self.assertEqual(content, b"%PDF-1.7\ncontent")
 
-        self.service.delete("document-1", actor_id="finance-user")
+        deleted = self.service.delete("document-1", actor_id="finance-user")
 
         self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0"), [])
         self.assertEqual(len(self.store.deleted), 1)
+        self.assertEqual(deleted["file_name"], "凭证.pdf")
+        self.assertEqual(deleted["relation_case_id"], "CASE-1")
 
     def test_rejects_extension_signature_mismatch_before_storage(self) -> None:
         with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "文件内容与扩展名不一致"):

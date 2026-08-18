@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from copy import deepcopy
-import unittest
 
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -148,6 +148,11 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         invoices = self.imports.list_invoices()
         self.assertEqual(len(invoices), 2)
         self.assertEqual(result["invoice_row_ids"], [invoice.id for invoice in invoices])
+        self.assertEqual(
+            [row["normalized"]["digital_invoice_no"] for row in result["invoice_evidence_rows"]],
+            ["26117000001052654674", "26117000001052654675"],
+        )
+        self.assertEqual(result["invoice_evidence_rows"][0]["normalized"]["seller_name"], "云南供应商有限公司")
         self.assertEqual(self.connection.transaction_count, 1)
         self.assertEqual(len(self.persisted), 1)
         self.assertEqual(self.relation_commands.restores, [])

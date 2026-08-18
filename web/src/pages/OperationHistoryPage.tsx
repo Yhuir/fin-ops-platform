@@ -1,8 +1,7 @@
 import { Button, Chip, Input, ListBox, SearchField, Select } from "@heroui/react";
-import { ArrowRight, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import AppDrawer from "../components/common/AppDrawer";
 import {
   FinanceTable,
   FinanceTableBody,
@@ -13,6 +12,7 @@ import {
 } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import OperationHistoryDetailDrawer from "../components/operations/OperationHistoryDetailDrawer";
 import { pageKeyForLabel, pageLabelForKey } from "../app/pageRegistry";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -49,14 +49,6 @@ function outcomeView(outcome: string) {
   return { color: "warning" as const, label: "进行中" };
 }
 
-function formatAmount(value?: string | number | null) {
-  if (value === null || value === undefined || value === "") return "—";
-  const amount = Number(value);
-  return Number.isFinite(amount)
-    ? amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : String(value);
-}
-
 export default function OperationHistoryPage() {
   const { active, activationGeneration } = useOptionalPageActivation("operation-history");
   const { canAdminAccess } = useSessionPermissions();
@@ -69,6 +61,8 @@ export default function OperationHistoryPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OperationHistoryOperation | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const listRequest = useRef<AbortController | null>(null);
   const detailRequest = useRef<AbortController | null>(null);
 
@@ -127,17 +121,25 @@ export default function OperationHistoryPage() {
     const controller = new AbortController();
     detailRequest.current = controller;
     setSelected(operation);
+    setDetailLoading(true);
+    setDetailError(null);
     try {
       const detail = await fetchOperationHistoryDetail(operation.operation_key, controller.signal);
       if (detailRequest.current === controller) setSelected(detail.operation);
-    } catch {
-      // The logical operation row remains useful if the detail request is interrupted.
+    } catch (detailLoadError) {
+      if (!controller.signal.aborted && detailRequest.current === controller) {
+        setDetailError(detailLoadError instanceof Error ? detailLoadError.message : "操作证据加载失败。");
+      }
+    } finally {
+      if (detailRequest.current === controller) setDetailLoading(false);
     }
   };
 
   const closeDetail = () => {
     detailRequest.current?.abort();
     setSelected(null);
+    setDetailLoading(false);
+    setDetailError(null);
   };
 
   return (
@@ -233,55 +235,12 @@ export default function OperationHistoryPage() {
 
       {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
 
-      <AppDrawer open={selected !== null} title="操作详情" width={760} onClose={closeDetail}>
-        {selected ? (
-          <div className="operation-history-detail">
-            <div className="operation-history-detail__summary">
-              <div>
-                <span>具体操作</span>
-                <strong>{selected.action_label}</strong>
-                <p>{selected.action_description}</p>
-              </div>
-              <Chip color={outcomeView(selected.outcome).color} size="sm">{outcomeView(selected.outcome).label}</Chip>
-            </div>
-            <dl className="operation-history-detail__metadata">
-              <div><dt>操作人</dt><dd>{actorLabel(selected)}</dd></div>
-              <div><dt>页面</dt><dd>{pageLabelForKey(selected.page_key)}</dd></div>
-              <div><dt>影响对象</dt><dd>{selected.object_label || "业务记录"}</dd></div>
-              <div><dt>处理结果</dt><dd>{outcomeView(selected.outcome).label}</dd></div>
-              <div><dt>开始时间</dt><dd>{formatTime(selected.started_at)}</dd></div>
-              <div><dt>完成时间</dt><dd>{formatTime(selected.completed_at)}</dd></div>
-            </dl>
-            <section>
-              <h3>涉及记录</h3>
-              {selected.items?.length ? (
-                <FinanceTable ariaLabel="操作明细" minWidth={680}>
-                  <FinanceTableHeader>
-                    <FinanceTableColumn id="type" columnRole="status" isRowHeader>类型</FinanceTableColumn>
-                    <FinanceTableColumn id="item" columnRole="description">内容</FinanceTableColumn>
-                    <FinanceTableColumn id="amount" columnRole="amount">金额</FinanceTableColumn>
-                    <FinanceTableColumn id="change" columnRole="status">状态变化</FinanceTableColumn>
-                  </FinanceTableHeader>
-                  <FinanceTableBody items={selected.items}>
-                    {(item) => (
-                      <FinanceTableRow id={item.item_key} textValue={`${item.type}${item.title}`}>
-                        <FinanceTableCell columnRole="status">{item.type}</FinanceTableCell>
-                        <FinanceTableCell columnRole="description"><span className="operation-history-item-title">{item.title}</span>{item.secondary ? <span className="operation-history-item-secondary">{item.secondary}</span> : null}</FinanceTableCell>
-                        <FinanceTableCell columnRole="amount">{formatAmount(item.amount)}</FinanceTableCell>
-                        <FinanceTableCell columnRole="status">
-                          {item.before_status && item.after_status ? (
-                            <span className="operation-history-status-change">{item.before_status}<ArrowRight aria-hidden="true" size={14} />{item.after_status}</span>
-                          ) : "—"}
-                        </FinanceTableCell>
-                      </FinanceTableRow>
-                    )}
-                  </FinanceTableBody>
-                </FinanceTable>
-              ) : <p className="operation-history-empty-detail">这条历史记录未保存可展示的对象明细。</p>}
-            </section>
-          </div>
-        ) : null}
-      </AppDrawer>
+      <OperationHistoryDetailDrawer
+        error={detailError}
+        loading={detailLoading}
+        operation={selected}
+        onClose={closeDetail}
+      />
     </PageScaffold>
   );
 }

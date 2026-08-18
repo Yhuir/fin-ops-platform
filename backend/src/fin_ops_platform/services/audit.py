@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from fin_ops_platform.domain.models import AuditLog
@@ -20,8 +20,14 @@ _SENSITIVE_AUDIT_KEYS = {
 
 
 class AuditTrailService:
-    def __init__(self, repository: Any | None = None) -> None:
+    def __init__(
+        self,
+        repository: Any | None = None,
+        *,
+        request_id_provider: Callable[[], str | None] | None = None,
+    ) -> None:
         self._repository = repository
+        self._request_id_provider = request_id_provider
         self._entries: list[AuditLog] = []
 
     @property
@@ -40,6 +46,14 @@ class AuditTrailService:
         metadata: dict[str, Any] | None = None,
     ) -> AuditLog:
         sanitized_metadata = without_keys(serialize_value(metadata or {}), _SENSITIVE_AUDIT_KEYS)
+        if (
+            isinstance(sanitized_metadata, dict)
+            and not sanitized_metadata.get("request_id")
+            and self._request_id_provider is not None
+        ):
+            request_id = str(self._request_id_provider() or "").strip()
+            if request_id:
+                sanitized_metadata["request_id"] = request_id
         created_at = sanitized_metadata.get("created_at") if isinstance(sanitized_metadata, dict) else None
         entry_id = str(uuid4())
         if self._repository is not None:

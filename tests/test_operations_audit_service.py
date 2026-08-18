@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import unittest
+from datetime import UTC, datetime
 
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 
@@ -183,21 +183,12 @@ class OperationsAuditServiceTests(unittest.TestCase):
         self.assertEqual(operation["action_code"], "workbench.relation.confirm")
         self.assertEqual(operation["object_label"], "关联关系")
         self.assertEqual(operation["actor_name"], "刘汉金")
+        self.assertEqual(operation["detail"]["records"][0]["title"], "1 条OA")
         self.assertEqual(
-            operation["items"],
-            [
-                {
-                    "item_key": "type-oa",
-                    "type": "OA",
-                    "title": "1 条OA",
-                    "secondary": "本次操作涉及 1 条OA",
-                    "amount": None,
-                    "date": None,
-                    "before_status": "未配对",
-                    "after_status": "已配对",
-                }
-            ],
+            operation["detail"]["changes"],
+            [{"label": "关联状态", "before": "未配对", "after": "已配对"}],
         )
+        self.assertFalse(operation["detail"]["legacy_evidence_missing"])
         for internal_field in ("event_id", "request_id", "trace_id", "object_id"):
             self.assertNotIn(internal_field, operation)
         self.assertNotIn("oa-internal", str(operation))
@@ -241,10 +232,60 @@ class OperationsAuditServiceTests(unittest.TestCase):
 
         assert operation is not None
         self.assertEqual(
-            [(item["type"], item["title"]) for item in operation["items"]],
-            [("银行流水", "1 条银行流水"), ("发票", "1 条发票")],
+            [(item["kind"], item["title"]) for item in operation["detail"]["records"]],
+            [("bank", "1 条银行流水"), ("invoice", "1 条发票")],
         )
         self.assertNotIn("same-id", str(operation))
+
+    def test_returns_stored_file_evidence_without_requerying_mutable_business_rows(self) -> None:
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 8, 19, 1, 0, tzinfo=UTC)
+        repository.events_by_key["request:upload-1"] = [
+            {
+                "event_type": "operation.completed",
+                "request_id": "upload-1",
+                "action": "workbench.oa_invoice.document_upload",
+                "page_key": "reconciliation-workbench",
+                "occurred_at": occurred_at,
+                "outcome": "success",
+                "payload": {
+                    "metadata": {
+                        "action_code": "workbench.oa_invoice.document_upload",
+                        "action_label": "上传 OA 补充凭证",
+                        "object_label": "OA 补充凭证",
+                        "description": "上传并关联补充凭证。",
+                        "evidence": {
+                            "schema_version": 1,
+                            "target": {
+                                "kind": "oa_expense_item_relation",
+                                "title": "关联关系 CASE-1",
+                                "fields": [{"label": "OA 子付款项", "value": "oa-1:item:0"}],
+                            },
+                            "artifacts": [{
+                                "artifact_key": "document-1",
+                                "kind": "file",
+                                "title": "凭证.png",
+                                "media_type": "image/png",
+                                "size_bytes": 128,
+                                "preview_url": "/api/workbench/oa-invoice-supplements/documents/document-1/content",
+                                "availability": "available",
+                            }],
+                            "records": [],
+                            "changes": [{"label": "补充凭证", "before": "未上传", "after": "已关联 1 个文件"}],
+                            "failure": None,
+                        },
+                    }
+                },
+            }
+        ]
+
+        operation = OperationsAuditService(repository).get_operation_history("request:upload-1")
+
+        assert operation is not None
+        self.assertEqual(operation["detail"]["target"]["title"], "关联关系 CASE-1")
+        self.assertEqual(operation["detail"]["artifacts"][0]["title"], "凭证.png")
+        self.assertFalse(operation["detail"]["legacy_evidence_missing"])
+        self.assertEqual([name for name, _kwargs in repository.calls], ["detail"])
 
     def test_projects_legacy_http_action_to_stable_user_semantics(self) -> None:
         repository = FakeOperationsAuditRepository()

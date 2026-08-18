@@ -1,5 +1,5 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.services.audit import AuditTrailService
 
@@ -64,6 +64,20 @@ class AuditTrailServiceTests(unittest.TestCase):
         metadata = payload["metadata"]
         self.assertNotIn("password", metadata)
         self.assertEqual(metadata["nested"], {"kept": "value"})
+
+    def test_record_action_inherits_request_id_for_nested_domain_events(self) -> None:
+        repository = FakeAuditRepository()
+        service = AuditTrailService(repository, request_id_provider=lambda: "request-123")
+
+        service.record_action(
+            actor_id="YNSYLP005",
+            action="bank_detail_category_manually_assigned",
+            entity_type="bank_transaction",
+            entity_id="bank-1",
+        )
+
+        self.assertEqual(repository.events[0]["request_id"], "request-123")
+        self.assertEqual(repository.events[0]["payload"]["metadata"]["request_id"], "request-123")
 
 
 if __name__ == "__main__":

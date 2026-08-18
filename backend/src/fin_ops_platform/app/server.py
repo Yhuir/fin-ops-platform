@@ -256,6 +256,13 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendin
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
+from fin_ops_platform.services.operation_history_evidence import (
+    attempted_supporting_document_artifacts,
+    build_operation_evidence,
+    manual_invoice_record,
+    supporting_document_artifact,
+    workbench_oa_target,
+)
 from fin_ops_platform.services.operation_history_semantics import operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
@@ -476,6 +483,16 @@ _REQUEST_AUDIT_ACTOR: ContextVar[tuple[str, str, str]] = ContextVar(
     "request_audit_actor",
     default=("", "", ""),
 )
+_REQUEST_AUDIT_REQUEST_ID: ContextVar[str | None] = ContextVar(
+    "request_audit_request_id",
+    default=None,
+)
+_REQUEST_AUDIT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
+    "request_audit_evidence",
+    default=None,
+)
+
+
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -846,7 +863,8 @@ class Application:
             else oa_adapter
         )
         self._audit_service = AuditTrailService(
-            getattr(self._runtime_repositories, "operations_audit_repository", None)
+            getattr(self._runtime_repositories, "operations_audit_repository", None),
+            request_id_provider=_REQUEST_AUDIT_REQUEST_ID.get,
         )
         self._reconciliation_service = ManualReconciliationService(
             self._import_service,
@@ -1427,6 +1445,8 @@ class Application:
         response: Response | None = None
         request_error: Exception | None = None
         actor_token = _REQUEST_AUDIT_ACTOR.set(("", "", ""))
+        request_id_token = _REQUEST_AUDIT_REQUEST_ID.set(effective_request_id)
+        evidence_token = _REQUEST_AUDIT_EVIDENCE.set(None)
         with request_database_timing() as database_timing:
             try:
                 response = self._handle_request_untracked(
@@ -1462,6 +1482,7 @@ class Application:
                                 "request_id": effective_request_id,
                                 **semantics.audit_metadata(),
                                 "status_code": status_code,
+                                "evidence": _REQUEST_AUDIT_EVIDENCE.get(),
                             },
                         )
                     except Exception as exc:
@@ -1478,6 +1499,8 @@ class Application:
                             flush=True,
                         )
                 _REQUEST_AUDIT_ACTOR.reset(actor_token)
+                _REQUEST_AUDIT_REQUEST_ID.reset(request_id_token)
+                _REQUEST_AUDIT_EVIDENCE.reset(evidence_token)
                 self._api_performance_recorder.record_request(
                     method=method,
                     route_path=route_path,
@@ -7283,7 +7306,19 @@ class Application:
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    failure_code="invalid_manual_invoice_supplement",
+                    failure_message="请求内容不是有效的发票录入数据，未写入发票池。",
+                )
+            )
             return error
+        target = workbench_oa_target(
+            case_id=str(payload.get("case_id") or ""),
+            oa_row_id=str(payload.get("oa_row_id") or ""),
+            expense_item_id=str(payload.get("expense_item_id") or ""),
+        )
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target=target))
         try:
             result = self._workbench_invoice_supplement_service().attach_manual_invoices(
                 ManualInvoiceSupplementCommand(
@@ -7297,25 +7332,80 @@ class Application:
                 )
             )
         except WorkbenchInvoiceSupplementError as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    failure_code=exc.error,
+                    failure_message=exc.message,
+                )
+            )
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {"error": exc.error, "message": exc.message},
             )
         except WorkbenchRelationCommandError as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    failure_code=exc.error_code,
+                    failure_message=exc.message,
+                )
+            )
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {"error": exc.error_code, "message": exc.message, **dict(exc.payload or {})},
             )
         except (KeyError, PermissionError, ValueError) as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    failure_code="invalid_manual_invoice_supplement",
+                    failure_message=str(exc),
+                )
+            )
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_manual_invoice_supplement", "message": str(exc)},
             )
         except RuntimeError as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    failure_code="manual_invoice_supplement_unavailable",
+                    failure_message=str(exc),
+                )
+            )
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {"error": "manual_invoice_supplement_unavailable", "message": str(exc)},
             )
+        invoice_evidence_rows = list(result.pop("invoice_evidence_rows", []))
+        invoice_summaries = [
+            manual_invoice_record(
+                dict(item.get("normalized") or {}),
+                record_key=str(item.get("record_key") or ""),
+            )
+            for item in invoice_evidence_rows
+            if isinstance(item, dict)
+        ]
+        resolved_target = workbench_oa_target(
+            case_id=str(result.get("case_id") or payload.get("case_id") or ""),
+            oa_row_id=str(payload.get("oa_row_id") or ""),
+            expense_item_id=str(payload.get("expense_item_id") or ""),
+        )
+        _REQUEST_AUDIT_EVIDENCE.set(
+            build_operation_evidence(
+                target=resolved_target,
+                records=invoice_summaries,
+                changes=[
+                    {
+                        "label": "发票处理",
+                        "before": "尚未录入",
+                        "after": f"{len(invoice_summaries)} 张已录入发票池并关联",
+                    }
+                ],
+            )
+        )
         return self._json_response(HTTPStatus.OK, result)
 
     def _workbench_oa_supporting_document_service(self) -> WorkbenchOaSupportingDocumentService:
@@ -7338,12 +7428,30 @@ class Application:
     ) -> Response:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    failure_code="invalid_supporting_document_upload",
+                    failure_message="上传请求格式无效，文件未保存。",
+                )
+            )
             return error
+        case_id = str((fields.get("case_id") or [""])[0] or "")
+        oa_row_id = str((fields.get("oa_row_id") or [""])[0] or "")
+        expense_item_id = str((fields.get("expense_item_id") or [""])[0] or "")
+        target = workbench_oa_target(
+            case_id=case_id,
+            oa_row_id=oa_row_id,
+            expense_item_id=expense_item_id,
+        )
+        attempted_artifacts = attempted_supporting_document_artifacts(files)
+        _REQUEST_AUDIT_EVIDENCE.set(
+            build_operation_evidence(target=target, artifacts=attempted_artifacts)
+        )
         try:
             documents = self._workbench_oa_supporting_document_service().upload(
-                relation_case_id=str((fields.get("case_id") or [""])[0] or ""),
-                oa_row_id=str((fields.get("oa_row_id") or [""])[0] or ""),
-                expense_item_id=str((fields.get("expense_item_id") or [""])[0] or ""),
+                relation_case_id=case_id,
+                oa_row_id=oa_row_id,
+                expense_item_id=expense_item_id,
                 actor_id=actor_id,
                 uploads=[
                     SupportingDocumentUpload(file_name=file.file_name, content=file.content)
@@ -7351,8 +7459,24 @@ class Application:
                 ],
             )
         except WorkbenchOaSupportingDocumentError as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    artifacts=attempted_artifacts,
+                    failure_code=exc.error,
+                    failure_message=exc.message,
+                )
+            )
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error, "message": exc.message})
         except RuntimeError:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=target,
+                    artifacts=attempted_artifacts,
+                    failure_code="supporting_document_unavailable",
+                    failure_message="文件存储暂时不可用，上传未保存。请稍后重试。",
+                )
+            )
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
@@ -7360,6 +7484,19 @@ class Application:
                     "message": "文件存储暂时不可用，上传未保存。请稍后重试。",
                 },
             )
+        _REQUEST_AUDIT_EVIDENCE.set(
+            build_operation_evidence(
+                target=target,
+                artifacts=[supporting_document_artifact(document) for document in documents],
+                changes=[
+                    {
+                        "label": "补充凭证",
+                        "before": "未上传",
+                        "after": f"已关联 {len(documents)} 个文件",
+                    }
+                ],
+            )
+        )
         return self._json_response(HTTPStatus.CREATED, {"documents": documents})
 
     def _handle_workbench_supporting_document_list(self, query: dict[str, list[str]]) -> Response:
@@ -7392,9 +7529,26 @@ class Application:
 
     def _handle_workbench_supporting_document_delete(self, document_id: str, *, actor_id: str) -> Response:
         try:
-            self._workbench_oa_supporting_document_service().delete(document_id, actor_id=actor_id)
+            document = self._workbench_oa_supporting_document_service().delete(document_id, actor_id=actor_id)
         except WorkbenchOaSupportingDocumentError as exc:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    failure_code=exc.error,
+                    failure_message=exc.message,
+                )
+            )
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": exc.error, "message": exc.message})
+        _REQUEST_AUDIT_EVIDENCE.set(
+            build_operation_evidence(
+                target=workbench_oa_target(
+                    case_id=str(document.get("relation_case_id") or ""),
+                    oa_row_id=str(document.get("oa_row_id") or ""),
+                    expense_item_id=str(document.get("expense_item_id") or ""),
+                ),
+                artifacts=[supporting_document_artifact(document, availability="deleted")],
+                changes=[{"label": "补充凭证", "before": "可预览", "after": "已删除"}],
+            )
+        )
         return self._json_response(HTTPStatus.OK, {"status": "deleted", "document_id": document_id})
 
     def _handle_import_file_preview(

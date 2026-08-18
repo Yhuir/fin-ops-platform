@@ -5,6 +5,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from fin_ops_platform.services.audit import AuditTrailService
+
 from tests.app_test_support import build_local_state_application
 
 
@@ -34,12 +36,29 @@ def _multipart_document() -> tuple[bytes, dict[str, str]]:
 
 
 class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
+    class _AuditRepository:
+        def __init__(self) -> None:
+            self.events: list[dict] = []
+
+        def append_operation_event(self, event: dict) -> dict[str, str]:
+            self.events.append(event)
+            return {"id": f"00000000-0000-4000-8000-{len(self.events):012d}"}
+
     def test_manual_batch_endpoint_forwards_exact_oa_relation_target(self) -> None:
         app = build_local_state_application()
+        audit_repository = self._AuditRepository()
+        app._audit_service = AuditTrailService(audit_repository)
         service = SimpleNamespace(attach_manual_invoices=Mock(return_value={
             "status": "confirmed",
             "case_id": "CASE-1",
             "invoice_row_ids": ["invoice-1", "invoice-2"],
+            "invoice_evidence_rows": [{
+                "record_key": "file-1",
+                "normalized": {
+                    "digital_invoice_no": "26117000001052654674",
+                    "seller_name": "云南供应商有限公司",
+                },
+            }],
         }))
 
         with patch.object(app, "_workbench_invoice_supplement_service", return_value=service):
@@ -61,21 +80,28 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         self.assertEqual(command.file_ids, ("file-1", "file-2"))
         self.assertEqual(command.oa_row_id, "oa-1")
         self.assertEqual(command.expense_item_id, "oa-1:item:0")
+        completed = next(event for event in audit_repository.events if event["event_type"] == "operation.completed")
+        evidence = completed["payload"]["metadata"]["evidence"]
+        self.assertEqual(evidence["records"][0]["title"], "26117000001052654674")
+        self.assertEqual(evidence["target"]["title"], "关联关系 CASE-1")
 
     def test_document_endpoints_upload_list_preview_and_delete(self) -> None:
         app = build_local_state_application()
         document = {
             "id": "document-1",
+            "relation_case_id": "CASE-1",
             "oa_row_id": "oa-1",
             "expense_item_id": "oa-1:item:0",
             "file_name": "voucher.pdf",
             "content_type": "application/pdf",
+            "size_bytes": 16,
+            "content_url": "/api/workbench/oa-invoice-supplements/documents/document-1/content",
         }
         service = SimpleNamespace(
             upload=Mock(return_value=[document]),
             list=Mock(return_value=[document]),
             content=Mock(return_value=({"content_type": "application/pdf", "original_filename": "voucher.pdf"}, b"%PDF-1.7")),
-            delete=Mock(return_value=None),
+            delete=Mock(return_value=document),
         )
         body, headers = _multipart_document()
 
@@ -113,6 +139,45 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         self.assertEqual(content.headers["Content-Type"], "application/pdf")
         self.assertEqual(deleted.status_code, 200)
         service.delete.assert_called_once()
+
+    def test_document_upload_persists_target_file_and_preview_evidence(self) -> None:
+        app = build_local_state_application()
+        audit_repository = self._AuditRepository()
+        app._audit_service = AuditTrailService(audit_repository)
+        document = {
+            "id": "document-1",
+            "relation_case_id": "CASE-1",
+            "oa_row_id": "oa-1",
+            "expense_item_id": "oa-1:item:0",
+            "file_name": "voucher.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 16,
+            "content_url": "/api/workbench/oa-invoice-supplements/documents/document-1/content",
+        }
+        body, headers = _multipart_document()
+
+        with patch.object(
+            app,
+            "_workbench_oa_supporting_document_service",
+            return_value=SimpleNamespace(upload=Mock(return_value=[document])),
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/oa-invoice-supplements/documents",
+                body=body,
+                headers=headers,
+            )
+
+        self.assertEqual(response.status_code, 201)
+        completed = next(event for event in audit_repository.events if event["event_type"] == "operation.completed")
+        evidence = completed["payload"]["metadata"]["evidence"]
+        self.assertEqual(evidence["target"]["title"], "关联关系 CASE-1")
+        self.assertEqual(evidence["artifacts"][0]["title"], "voucher.pdf")
+        self.assertEqual(
+            evidence["artifacts"][0]["preview_url"],
+            "/api/workbench/oa-invoice-supplements/documents/document-1/content",
+        )
+        self.assertEqual(evidence["failure"], None)
 
 
 if __name__ == "__main__":

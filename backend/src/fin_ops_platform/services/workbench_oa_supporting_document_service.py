@@ -148,7 +148,7 @@ class WorkbenchOaSupportingDocumentService:
         )
         return document, content
 
-    def delete(self, document_id: str, *, actor_id: str) -> None:
+    def delete(self, document_id: str, *, actor_id: str) -> dict[str, Any]:
         document = self._repository.get_active(str(document_id or "").strip())
         if document is None:
             raise WorkbenchOaSupportingDocumentError(
@@ -164,6 +164,7 @@ class WorkbenchOaSupportingDocumentService:
         self._file_store.delete_workbench_oa_supporting_document(
             str(document.get("storage_uri") or "")
         )
+        return self._present(document)
 
     @staticmethod
     def _validate_upload(
