@@ -412,6 +412,13 @@ def test_page_hydration_enforces_fixed_statement_budget(monkeypatch: pytest.Monk
         def __init__(self, *, connection: Any, **_kwargs: Any) -> None:
             self.connection = connection
 
+        def load_page_etc_summaries(
+            self,
+            _relations: object,
+            **_kwargs: object,
+        ) -> dict[str, dict[str, Any]]:
+            return {}
+
         def load_page_rows(
             self, _typed_row_ids: object, **_kwargs: object
         ) -> dict[tuple[str, str], dict[str, Any]]:
@@ -441,7 +448,7 @@ def test_page_hydration_enforces_fixed_statement_budget(monkeypatch: pytest.Monk
         )
 
 
-def test_page_etc_summary_loader_reuses_preloaded_rows_and_batches_missing_relations() -> None:
+def test_page_etc_summary_loader_batches_explicit_and_relation_identities() -> None:
     class _EmptyConnection:
         pass
 
@@ -463,19 +470,12 @@ def test_page_etc_summary_loader_reuses_preloaded_rows_and_batches_missing_relat
     result = builder.load_page_etc_summaries(
         [
             {"special_metadata": {"external_etc_batch_id": "ETC-A"}},
-            {"special_metadata": {"external_etc_batch_id": "ETC-B"}},
         ],
-        preloaded={
-            "ETC-A": {
-                "id": "etc-summary-ETC-A",
-                "type": "invoice",
-                "etc_batch_id": "ETC-A",
-            }
-        },
+        required_external_batch_ids={"ETC-B"},
     )
 
-    assert requested == [{"ETC-B"}]
-    assert set(result) == {"ETC-A", "ETC-B"}
+    assert requested == [{"ETC-A", "ETC-B"}]
+    assert set(result) == {"ETC-B"}
 
 
 def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
@@ -505,22 +505,23 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
         def __init__(self, **_kwargs: Any) -> None:
             pass
 
-        def load_page_rows(
-            self,
-            _typed_row_ids: object,
-            **_kwargs: object,
-        ) -> dict[tuple[str, str], dict[str, Any]]:
-            return {("oa", "oa-1"): dict(oa_row)}
-
         def load_page_etc_summaries(
             self,
             relations: list[dict[str, Any]],
             *,
-            preloaded: dict[str, dict[str, Any]],
+            required_external_batch_ids: set[str],
         ) -> dict[str, dict[str, Any]]:
             captured["relations"] = relations
-            captured["preloaded"] = preloaded
+            captured["required_external_batch_ids"] = required_external_batch_ids
             return {"ETC-1": dict(etc_summary)}
+
+        def load_page_rows(
+            self,
+            _typed_row_ids: object,
+            **kwargs: object,
+        ) -> dict[tuple[str, str], dict[str, Any]]:
+            captured["row_etc_summaries"] = kwargs.get("page_etc_summaries")
+            return {("oa", "oa-1"): dict(oa_row)}
 
         def build_page_groups(self, **kwargs: Any) -> dict[str, Any]:
             captured["page_etc_summaries"] = kwargs.get("page_etc_summaries")
@@ -564,7 +565,8 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
 
     assert groups[0]["group_id"] == "case:CASE-ETC"
     assert captured["relations"] == [relation]
-    assert captured["preloaded"] == {}
+    assert captured["required_external_batch_ids"] == set()
+    assert captured["row_etc_summaries"] == {"ETC-1": etc_summary}
     assert captured["page_etc_summaries"] == {"ETC-1": etc_summary}
 
 

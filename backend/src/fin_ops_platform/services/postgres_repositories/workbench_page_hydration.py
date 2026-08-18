@@ -221,26 +221,19 @@ class PostgresWorkbenchPageHydrationRepository:
             connection=connection,
             bank_account_resolver=self._bank_account_resolver(settings),
         )
+        page_etc_summaries = builder.load_page_etc_summaries(
+            relations,
+            required_external_batch_ids=set(etc_summary_external_ids.values()),
+        )
         rows_by_typed_id = builder.load_page_rows(
             typed_row_ids,
             etc_summary_external_ids=etc_summary_external_ids,
+            page_etc_summaries=page_etc_summaries,
         )
         self._enrich_bank_category_projection(
             rows_by_typed_id,
             connection=connection,
             settings=settings,
-        )
-        preloaded_page_etc_summaries = {
-            external_batch_id: row
-            for row_id, external_batch_id in etc_summary_external_ids.items()
-            if isinstance(
-                (row := rows_by_typed_id.get(("invoice", row_id))),
-                dict,
-            )
-        }
-        page_etc_summaries = builder.load_page_etc_summaries(
-            relations,
-            preloaded=preloaded_page_etc_summaries,
         )
         expected_typed_ids = {
             (row_type, row_id)

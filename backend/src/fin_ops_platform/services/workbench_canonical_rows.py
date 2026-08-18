@@ -91,6 +91,7 @@ class WorkbenchCanonicalRowsBuilder:
         typed_row_ids: dict[str, set[str]],
         *,
         etc_summary_external_ids: dict[str, str] | None = None,
+        page_etc_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> dict[tuple[str, str], dict[str, Any]]:
         """Batch-hydrate only the typed canonical ids selected for one page."""
 
@@ -106,6 +107,7 @@ class WorkbenchCanonicalRowsBuilder:
             *self._etc_invoice_summary_rows_by_ids(
                 etc_summary_ids,
                 external_ids_by_row_id=etc_summary_external_ids,
+                preloaded_summaries=page_etc_summaries,
             ),
         ]
         result: dict[tuple[str, str], dict[str, Any]] = {}
@@ -221,6 +223,7 @@ class WorkbenchCanonicalRowsBuilder:
         row_ids: set[str],
         *,
         external_ids_by_row_id: dict[str, str] | None = None,
+        preloaded_summaries: dict[str, dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         external_ids_by_row_id = dict(external_ids_by_row_id or {})
         external_batch_ids = {
@@ -237,7 +240,11 @@ class WorkbenchCanonicalRowsBuilder:
             raise ValueError("ETC summary hydration requires an explicit external batch identity.")
         if not external_batch_ids:
             return []
-        rows = self._etc_invoice_summary_rows_for_page(external_batch_ids)
+        rows = (
+            dict(preloaded_summaries)
+            if preloaded_summaries is not None
+            else self._etc_invoice_summary_rows_for_page(external_batch_ids)
+        )
         hydrated: list[dict[str, Any]] = []
         for row_id, external_batch_id in sorted(external_ids_by_row_id.items()):
             row = rows.get(external_batch_id)
@@ -250,26 +257,25 @@ class WorkbenchCanonicalRowsBuilder:
         self,
         relations: list[dict[str, Any]],
         *,
-        preloaded: dict[str, dict[str, Any]] | None = None,
+        required_external_batch_ids: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Load missing ETC summaries for a selected relation page in one query."""
+        """Load every ETC summary needed by a selected page in one query."""
 
-        summaries = {
-            str(external_batch_id).strip(): dict(row)
-            for external_batch_id, row in dict(preloaded or {}).items()
-            if str(external_batch_id).strip() and isinstance(row, dict)
+        external_batch_ids = {
+            str(external_batch_id).strip()
+            for external_batch_id in set(required_external_batch_ids or set())
+            if str(external_batch_id).strip()
         }
-        missing_external_batch_ids = {
+        external_batch_ids.update({
             external_batch_id
             for relation in relations
             if (external_batch_id := self._relation_external_etc_batch_id(relation))
-            and external_batch_id not in summaries
-        }
-        if missing_external_batch_ids:
-            summaries.update(
-                self._etc_invoice_summary_rows_for_page(missing_external_batch_ids)
-            )
-        return summaries
+        })
+        return (
+            self._etc_invoice_summary_rows_for_page(external_batch_ids)
+            if external_batch_ids
+            else {}
+        )
 
     def _etc_invoice_summary_rows_for_page(
         self,
