@@ -850,11 +850,14 @@ function mapWorkbenchAnomaly(
     return undefined;
   }
   const fingerprint = String(value.fingerprint ?? "").trim();
-  const reviewDecision = value.review_decision === "accept_paired"
+  const reviewDecision: WorkbenchAnomaly["reviewDecision"] = value.review_decision === "accept_paired"
     ? "accept_paired"
     : value.review_decision === "keep_unpaired"
       ? "keep_unpaired"
       : "pending";
+  const reviewNote = toDisplayValue(value.review_note, "");
+  const reviewedBy = toDisplayValue(value.reviewed_by, "");
+  const reviewedAt = toDisplayValue(value.reviewed_at, "") || undefined;
   const items = (Array.isArray(value.items) ? value.items : []).flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
@@ -891,6 +894,10 @@ function mapWorkbenchAnomaly(
       displayScope: toDisplayValue(item.display_scope, "group") as WorkbenchAnomalyItem["displayScope"],
       displayPane: toDisplayValue(item.display_pane, "oa") as WorkbenchAnomalyItem["displayPane"],
       displayRowId: toDisplayValue(item.display_row_id, "") || undefined,
+      reviewDecision,
+      reviewNote,
+      reviewedBy,
+      reviewedAt,
     }];
   });
   if (!fingerprint || items.length === 0) {
@@ -909,9 +916,9 @@ function mapWorkbenchAnomaly(
         || code === "no_anomaly"
       ),
     ),
-    reviewNote: toDisplayValue(value.review_note, ""),
-    reviewedBy: toDisplayValue(value.reviewed_by, ""),
-    reviewedAt: toDisplayValue(value.reviewed_at, "") || undefined,
+    reviewNote,
+    reviewedBy,
+    reviewedAt,
     items,
   };
 }

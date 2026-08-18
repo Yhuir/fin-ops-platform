@@ -83,6 +83,10 @@ export type WorkbenchAnomalyItem = {
   displayScope: "row" | "expense_item" | "group" | (string & {});
   displayPane: WorkbenchRecordType;
   displayRowId?: string;
+  reviewDecision?: "pending" | "accept_paired" | "keep_unpaired";
+  reviewNote?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 };
 
 export type WorkbenchAnomalyReviewClassificationCode =

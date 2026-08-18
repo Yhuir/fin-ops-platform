@@ -58,8 +58,8 @@ canonical fact repositories
 
 ## 关联台异常合同
 
-- 系统按当前方向分别比较 OA—流水、OA—发票、流水—发票；付款关系的银行侧使用同一 relation 内支出减退款收入的净额。日常报销的 OA—发票按归一后的 `source_expense_item_ids[]` 连通分量去重计算；历史附件 ID 只有在 OA parent + row index 唯一时才映射到当前 canonical 子付款项。金额完整且不等时只输出三种具体差异之一或多项；附件异常继续区分缺失、解析失败和待归属。
-- 任何当前异常默认把完整 active relation 留在 `unpaired`。金额异常必须先在多选下拉中人工选择三种具体差异或互斥的“无异常”，再选择 `accept_paired` 或 `keep_unpaired`；附件异常继续逐项审阅。只有无其他完整性 blocker 时前者才允许进入 `paired`。决定后的 chip 使用人工分类，“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对；系统检测证据仍保留用于审计。
+- 系统按当前方向分别比较 OA—流水、OA—发票、流水—发票；普通付款关系的银行侧使用同一 relation 内支出减退款收入的净额。已由外部往来款模块确认且 `relation_mode=turnover_manual_closure` 的零差额收支闭环，OA 金额只与闭环的付款本金侧比较，不把同额归还收入再次抵减为零；缺少该 canonical mode 的普通关系不得按备注或金额形态猜测豁免。日常报销的 OA—发票按归一后的 `source_expense_item_ids[]` 连通分量去重计算；历史附件 ID 只有在 OA parent + row index 唯一时才映射到当前 canonical 子付款项。金额完整且不等时只输出三种具体差异之一或多项；附件异常继续区分缺失、解析失败和待归属。
+- 任何当前异常默认把完整 active relation 留在 `unpaired`。金额异常必须先在多选下拉中人工选择三种具体差异或互斥的“无异常”，再选择 `accept_paired` 或 `keep_unpaired`；附件异常继续逐项审阅。只有无其他完整性 blocker 时前者才允许进入 `paired`。`accept_paired` 后保留原异常文本并统一显示为 `已接受：<异常>`，明确这是人工接受风险而非异常消失或事实已修正；“撤回”写入 `keep_unpaired` 并同步把主表关系移回未配对。系统检测证据、审阅人和审阅时间仍保留用于 tooltip 与审计。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧金额 ignore/restore API、service 和前端动作已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
 - 异常抽屉宽度固定为 `min(1740px, 96vw)`。折叠态只显示 OA、流水、发票三栏金额/数量摘要和异常数量；展开后先复用只读 `RelationGroupGrid` 展示完整三栏证据，再在独立审阅区显示全部 chip、HeroUI 审阅复选框、人工金额判断和决定按钮。窄视口只允许三栏明细区局部横向滚动，抽屉和审阅控件不得溢出视口；不得恢复折叠行右侧的并排操作栏或原生 HTML 表单控件。
@@ -73,7 +73,7 @@ canonical fact repositories
 - 单条银行流水/非 OA 来源发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。普通父 OA 下有两条或以上银行流水时，只有所有流水都带 canonical `sourceOaId`、当前显示包含完整组成且流水按分合计等于该 OA，才共享一个复合行轨；OA 只渲染一次，流水在轨内等分。显式 `sourceOaId` / `sourceExpenseItemIds[]` 优先；API 映射必须优先 canonical `source_oa_id` / `source_oa_row_id`，历史 `derived_from_oa_id` 只作兜底，不能覆盖 canonical ownership。OA 附件发票的同行只消费顶层 canonical `source_expense_item_ids[]`，原始 `source_links[]` 只作审计证据；OA 附件缺少 canonical 子付款项来源时进入独立待归属残余带，禁止按金额兜底。显式费用子项 ownership 不以金额相等为前提。其他来源缺少显式 ownership 时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
 - 同一费用子项下的所有显式绑定附件发票共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。即使合计金额不等，也保持同行并由异常 chip 表达差异。筛选后缺少任一组成发票时不建立部分复合同行。
 - 缺少 canonical ownership、合计不等、显示组成不完整的父 OA 级一对多，以及多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，都不建立同行；无显式来源的 2～6 条金额即使合计相等也不做组合推断。已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
-- 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属附件发票留在独立残余展示带且不得进入父摘要。缺失附件发票的展示位只显示原因明确的异常 chip，不得再叠加历史 `未识别附件` 来源标签。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
+- 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属附件发票留在独立残余展示带且不得进入父摘要。缺失附件发票的展示位只显示原因明确的异常 chip，不得再叠加历史 `未识别附件` 来源标签。空发票栏中的“OA发票附件未解析 + 录入发票”使用一个跨整栏的 HeroUI 状态操作区，不渲染或保留占位横杠；按钮权限不足时保持禁用并解释原因。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
 - 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 
 ## 不变量

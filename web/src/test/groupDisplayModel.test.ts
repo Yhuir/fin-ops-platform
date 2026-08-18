@@ -590,9 +590,10 @@ describe("groupDisplayModel time filter", () => {
     expect(invoiceRows?.[0]).toMatchObject({
       displayOnly: true,
       label: "OA发票附件未解析",
-      externalUrl: "/oa/#/normal/32?formId=32",
+      tableValues: {},
       workbenchAnomalies: [missingAnomaly],
     });
+    expect(invoiceRows?.[0].externalUrl).toBeUndefined();
     expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
   });
 

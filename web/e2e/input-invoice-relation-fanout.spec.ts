@@ -225,11 +225,11 @@ test.describe("input invoice usage relation browser fan-out", () => {
       actionType: "click",
     }, async (mark) => {
       await linkedExpenseType.click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "项目 OA 成本归集明细表" })).toContainText("智能工厂设备尾款"));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "项目成本明细表" })).toContainText("智能工厂设备尾款"));
     });
-    const projectRows = page.getByRole("grid", { name: "项目 OA 成本归集明细表" });
+    const projectRows = page.getByRole("grid", { name: "项目成本明细表" });
     await expect(projectRows).toContainText("智能工厂设备尾款");
-    await expect(projectRows).toContainText("智能工厂设备商");
+    await expect(projectRows).toContainText("浏览器成本申请人");
     await expectNoUnexpectedSuccessUiErrors(page);
 
     expect(browserErrors).toEqual([]);

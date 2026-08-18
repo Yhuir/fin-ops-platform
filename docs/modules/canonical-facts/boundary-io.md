@@ -54,6 +54,7 @@
 - 外部源如 OA Mongo、Excel/PDF/ZIP 不是 app 内部 canonical facts；app 只保存导入或投影后的受控事实。
 - OA 附件解析 cache 不是正式发票池。只有 `OAAttachmentInvoicePromotionService` 可按强发票身份和显式 OA/expense-item/attachment source context 调用 canonical invoice repository；同批身份一次查询、批量保存，重复输入不得刷新 `app.invoices.updated_at`。20 位纯数字 `invoice_no` 与显式 `digital_invoice_no` 使用同一强身份。service 必须先按强身份批量加载既有发票，repository 读取时完整恢复 normalized payload 中参与附件 merge 的发票字段，并只按既有 canonical `legacy_mongo_id` 更新；`source_unique_key` 唯一索引继续阻止并发或漏加载产生重复事实，但禁止用一个新 persistence object 对 strong-key conflict 做全字段覆盖。
 - `0134_restore_invoice_import_provenance.sql` 只修复同时存在 OA 附件来源、正式 import row 证据、但缺失对应 `manual_invoice_import` source-link 的发票；从 batch/row 事实恢复全部来源边、owner batch、`人工导入` tag 与 normalized payload，一次审计、重复执行零写。它不扫描或修改没有该精确交集的发票。
+- Workbench 历史手工选票缺失 OA 子付款项来源边时，只能通过 `import_audit_repair_ops` 的 invoice expense-item link repair：显式限定发票、case、OA、expense item 和总额，dry-run/execute 指纹一致后在单事务中以旧 `source_links` CAS 追加来源边并写操作审计。该工具不修改金额、relation membership、发票池 identity 或其它发票，不是业务写链路的 fallback。
 - `0103_etc_reconciliation_task_timestamps.sql` 是 ETC owner 的一次性确定性 payload backfill：只把 `app.etc_reconciliation_tasks` 同行 typed `created_at/updated_at` 复制到缺失的 normalized payload 字段，不改变状态、版本、scope、typed 时间或任何下游 read model/queue 事实。
 - `0129`、`0130` 先以 `NOT VALID` 保护 canonical outbox/fact/relation/job 的新写入；只读领域合同审计归零后，`0131` 仅把历史 background job 的退休月份标记 `all` 归一化为空或保留的真实 `YYYY-MM`，同步其 normalized raw payload，并验证全部 28 个约束。该迁移不修改业务金额、关系状态或页面 read model。
 

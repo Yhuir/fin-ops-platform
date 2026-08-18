@@ -388,6 +388,46 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(identities(payload["paired"]["groups"]), set())
         self.assertEqual(identities([group]), {("bank", "bank-in"), ("bank", "bank-out")})
 
+    def test_turnover_manual_closure_uses_payment_leg_instead_of_zero_net(self) -> None:
+        rows = {
+            "oa-240000": {
+                "id": "oa-240000",
+                "type": "oa",
+                "object_identity_key": "oa-240000",
+                "amount": "240000.00",
+                "apply_type": "支付申请",
+            },
+            "bank-in": {
+                "id": "bank-in",
+                "type": "bank",
+                "object_identity_key": "bank-in",
+                "credit_amount": "240000.00",
+            },
+            "bank-out": {
+                "id": "bank-out",
+                "type": "bank",
+                "object_identity_key": "bank-out",
+                "debit_amount": "240000.00",
+            },
+        }
+        relation = {
+            "case_id": "turnover:closure-240000",
+            "row_ids": list(rows),
+            "row_types": ["oa", "bank", "bank"],
+            "status": "active",
+            "relation_mode": "turnover_manual_closure",
+            "special_metadata": {"requires_oa": True, "requires_invoice": False},
+            "amount_check": {},
+        }
+
+        payload = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        group = payload["paired"]["groups"][0]
+        self.assertNotIn("workbench_anomaly", group)
+        self.assertEqual(group["amount_check"]["status"], "matched")
+        self.assertEqual(group["amount_check"]["bank_total"], "240000.00")
+        self.assertEqual(group["amount_check"]["bank_net_total"], "0.00")
+
     def test_in_progress_oa_keeps_materially_complete_case_unpaired_until_same_oa_completes(self) -> None:
         rows = {
             "oa-progress": {
@@ -892,6 +932,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(
             accepted_group["workbench_anomaly"]["review_decision"],
             "accept_paired",
+        )
+        self.assertEqual(
+            {item["display_label"] for item in accepted_group["workbench_anomaly"]["items"]},
+            {"已接受：OA发票金额不一致", "已接受：流水发票金额不一致"},
         )
 
     def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:

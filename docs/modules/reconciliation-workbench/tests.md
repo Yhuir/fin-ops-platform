@@ -1,6 +1,13 @@
 # 关联台测试与验证
 
-日期：2026-08-18
+日期：2026-08-19
+
+## 2026-08-19 外部往来闭环、已接受异常与历史来源修复
+
+- Business core：`tests/test_workbench_amount_check_service.py` 保护 `turnover_manual_closure` 的 240000 收入 + 240000 支出闭环以付款本金侧和 OA 240000 比较且不误报，同时真实本金差异继续生成异常；普通付款关系仍使用支出减退款收入的净额。
+- Service/repository：`tests/test_workbench_relation_grouping.py` 保护 relation mode 传入统一金额判断，`accept_paired` chip 固定为 `已接受：<原异常>`；`test_invoice_expense_item_link_repair_service.py` 与 `test_postgres_repositories_core.py` 保护历史发票来源修复的精确 identity/总额、冲突拒绝、幂等、rollback manifest 和旧 `source_links` CAS。
+- Tool/audit：`test_import_audit_repair_ops.py` 保护 dry-run 零写；生产执行必须使用 dry-run 指纹、serializable transaction、advisory lock、operator/reason 和 `ops.operation_events` 审计，禁止直接 SQL 或页面 fallback。
+- Frontend：`WorkbenchApi.test.ts` 保护审阅元数据映射，`RelationGroupGrid.test.tsx` 与 `groupDisplayModel.test.ts` 保护“未解析 + 录入发票”跨整栏 HeroUI 状态操作区且无占位横杠；其它页面 API、read model、worker、cache 和依赖均不变。
 
 ## 2026-08-18 异常审阅决定与 direct candidate fingerprint 一致性
 

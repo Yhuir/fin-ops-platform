@@ -171,6 +171,50 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
             )
         )
 
+    def test_turnover_manual_closure_compares_oa_with_same_direction_bank_leg(self) -> None:
+        rows = {
+            "oa": [{**self._oa_row("240000"), "id": "oa-240000"}],
+            "bank": [
+                {**self._bank_row("240000"), "id": "bank-payment-240000"},
+                {**self._bank_income_row("240000"), "id": "bank-income-240000"},
+            ],
+            "invoice": [],
+        }
+
+        result = self.service.check(rows, relation_mode="turnover_manual_closure")
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["bank_total"], "240000.00")
+        self.assertEqual(result["bank_gross_total"], "240000.00")
+        self.assertEqual(result["bank_contra_total"], "240000.00")
+        self.assertEqual(result["bank_net_total"], "0.00")
+        self.assertIsNone(
+            self.service.workbench_anomaly(
+                rows,
+                relation_id="CASE-TURNOVER-240000",
+                relation_mode="turnover_manual_closure",
+            )
+        )
+
+    def test_turnover_manual_closure_still_reports_real_oa_bank_difference(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{**self._oa_row("230000"), "id": "oa-230000"}],
+                "bank": [
+                    {**self._bank_row("240000"), "id": "bank-payment-240000"},
+                    {**self._bank_income_row("240000"), "id": "bank-income-240000"},
+                ],
+                "invoice": [],
+            },
+            relation_id="CASE-TURNOVER-MISMATCH",
+            relation_mode="turnover_manual_closure",
+        )
+
+        assert anomaly is not None
+        mismatch = next(item for item in anomaly["items"] if item["code"] == "oa_bank_amount_mismatch")
+        self.assertEqual(mismatch["oa_total"], "230000.00")
+        self.assertEqual(mismatch["bank_total"], "240000.00")
+
     def test_oa_reconciliation_amount_overrides_header_amount_for_preview_check(self) -> None:
         result = self.service.check(
             {

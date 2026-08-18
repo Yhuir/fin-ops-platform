@@ -186,6 +186,7 @@ class WorkbenchRelationGroupingService:
     ) -> dict[str, Any]:
         case_id = str(relation["case_id"])
         special_metadata = relation.get("special_metadata")
+        relation_mode = str(relation.get("relation_mode") or "manual_confirmed").strip() or "manual_confirmed"
         completion = evaluate_bank_relation_completion(
             row_types=[str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]],
             oa_workflow_statuses=[
@@ -194,7 +195,7 @@ class WorkbenchRelationGroupingService:
                 if str(rows_by_id[row_id]["type"]) == "oa"
             ],
             special_metadata=special_metadata if isinstance(special_metadata, dict) else None,
-            relation_mode=str(relation.get("relation_mode") or ""),
+            relation_mode=relation_mode,
             amount_check=(
                 relation.get("amount_check")
                 if isinstance(relation.get("amount_check"), dict)
@@ -218,12 +219,15 @@ class WorkbenchRelationGroupingService:
             else None
         )
         if relation_amount_check is not None:
-            relation_amount_check.update(amount_check_service.check(rows_by_type))
+            relation_amount_check.update(
+                amount_check_service.check(rows_by_type, relation_mode=relation_mode)
+            )
             for row in rows:
                 row["relation_amount_check"] = deepcopy(relation_amount_check)
         anomaly = amount_check_service.workbench_anomaly(
             rows_by_type,
             relation_id=case_id,
+            relation_mode=relation_mode,
         )
         review = (
             anomaly_review_decisions.get(str(anomaly.get("fingerprint")))
@@ -256,7 +260,6 @@ class WorkbenchRelationGroupingService:
             rows=rows,
         )
         group["completion"] = completion
-        relation_mode = str(relation.get("relation_mode") or "manual_confirmed").strip() or "manual_confirmed"
         group["relation_mode"] = relation_mode
         group["case_id"] = case_id
         group["can_withdraw"] = True
@@ -272,7 +275,11 @@ class WorkbenchRelationGroupingService:
             anomaly["reviewed_by"] = str((review or {}).get("reviewed_by") or "") if isinstance(review, dict) else ""
             anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
             for item in anomaly["items"]:
-                item["display_label"] = item["label"]
+                item["display_label"] = (
+                    f"已接受：{item['label']}"
+                    if accepted
+                    else item["label"]
+                )
             group["workbench_anomaly"] = anomaly
         if relation_amount_check is not None:
             group["amount_check"] = relation_amount_check

@@ -26,6 +26,10 @@ from fin_ops_platform.services.import_audit_repair_service import (
     public_failed_import_recovery_report,
     public_repair_report,
 )
+from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
+    build_invoice_expense_item_link_repair_plan,
+    public_invoice_expense_item_link_repair_report,
+)
 from fin_ops_platform.services.invoice_header_fact_repair_service import (
     INVOICE_HEADER_REPAIR_FACTS,
     build_invoice_header_fact_repair_plan,
@@ -54,6 +58,7 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     discover_failed_import_job_recovery_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
+    load_invoice_expense_item_link_repair_snapshot,
     load_invoice_header_fact_repair_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
@@ -156,6 +161,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-bank-audit-contract", action="store_true")
     parser.add_argument("--repair-invoice-header-source-sha256")
     parser.add_argument("--expected-invoice-header-repair-count", type=int)
+    parser.add_argument("--repair-invoice-expense-link-id", action="append", default=[])
+    parser.add_argument("--repair-invoice-expense-link-case-id")
+    parser.add_argument("--repair-invoice-expense-link-oa-row-id")
+    parser.add_argument("--repair-invoice-expense-link-item-id")
+    parser.add_argument("--expected-invoice-expense-link-total")
+    parser.add_argument("--reason")
     parser.add_argument("--expected-bank-audit-file-object-link-count", type=int)
     parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
@@ -186,6 +197,20 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     bank_repair_requested = bool(args.repair_bank_source)
     bank_audit_repair_requested = bool(args.repair_bank_audit_contract)
     invoice_header_repair_requested = bool(args.repair_invoice_header_source_sha256)
+    invoice_expense_link_repair_requested = bool(args.repair_invoice_expense_link_id)
+    specialized_repair_count = sum(
+        bool(value)
+        for value in (
+            recovery_requested,
+            discovery_requested,
+            bank_repair_requested,
+            bank_audit_repair_requested,
+            invoice_header_repair_requested,
+            invoice_expense_link_repair_requested,
+        )
+    )
+    if specialized_repair_count > 1:
+        raise SystemExit("Specialized import repair modes cannot be combined.")
     if discovery_requested and args.execute:
         raise SystemExit("Failed import recovery discovery is read-only and requires --dry-run")
     if recovery_requested and not all(recovery_values):
@@ -196,6 +221,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         or bank_repair_requested
         or bank_audit_repair_requested
         or invoice_header_repair_requested
+        or invoice_expense_link_repair_requested
     ) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
@@ -223,6 +249,32 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     if not invoice_header_repair_requested and args.expected_invoice_header_repair_count is not None:
         raise SystemExit(
             "Invoice header fact repair count requires --repair-invoice-header-source-sha256"
+        )
+    invoice_expense_link_values = (
+        args.repair_invoice_expense_link_case_id,
+        args.repair_invoice_expense_link_oa_row_id,
+        args.repair_invoice_expense_link_item_id,
+        args.expected_invoice_expense_link_total,
+        args.operator_id,
+        args.reason,
+    )
+    if invoice_expense_link_repair_requested and not all(invoice_expense_link_values):
+        raise SystemExit(
+            "Invoice expense-item link repair requires case, OA row, expense item, "
+            "expected total, operator, and reason."
+        )
+    if not invoice_expense_link_repair_requested and any(
+        value is not None
+        for value in (
+            args.repair_invoice_expense_link_case_id,
+            args.repair_invoice_expense_link_oa_row_id,
+            args.repair_invoice_expense_link_item_id,
+            args.expected_invoice_expense_link_total,
+            args.reason,
+        )
+    ):
+        raise SystemExit(
+            "Invoice expense-item link repair values require --repair-invoice-expense-link-id."
         )
     bank_audit_expectations = (
         args.expected_bank_audit_file_object_link_count,
@@ -279,6 +331,86 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "--cleanup-related-bank-duplicates"
         )
     connection = PostgresConnection(PostgresSettings.from_env())
+    if invoice_expense_link_repair_requested:
+        plan_kwargs = {
+            "invoice_ids": args.repair_invoice_expense_link_id,
+            "case_id": args.repair_invoice_expense_link_case_id,
+            "oa_row_id": args.repair_invoice_expense_link_oa_row_id,
+            "expense_item_id": args.repair_invoice_expense_link_item_id,
+            "expected_total": args.expected_invoice_expense_link_total,
+        }
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_invoice_expense_item_link_repair_plan(
+                load_invoice_expense_item_link_repair_snapshot(
+                    transaction,
+                    invoice_ids=args.repair_invoice_expense_link_id,
+                ),
+                **plan_kwargs,
+            )
+        if args.dry_run:
+            report = public_invoice_expense_item_link_repair_report(
+                plan,
+                mode="dry_run",
+                written=False,
+            )
+        else:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError(
+                    "Invoice expense-item links changed after dry-run; rerun dry-run."
+                )
+            with connection.transaction() as transaction:
+                transaction.execute("set transaction isolation level serializable")
+                transaction.fetch_one(
+                    "select pg_advisory_xact_lock("
+                    "hashtext('fin_ops_invoice_expense_item_link_repair'))"
+                )
+                locked_plan = build_invoice_expense_item_link_repair_plan(
+                    load_invoice_expense_item_link_repair_snapshot(
+                        transaction,
+                        invoice_ids=args.repair_invoice_expense_link_id,
+                    ),
+                    **plan_kwargs,
+                )
+                if locked_plan["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError(
+                        "Invoice expense-item links changed while acquiring the write lock."
+                    )
+                completion = PostgresCoreRepository(
+                    transaction
+                ).repair_invoice_expense_item_links(
+                    transaction,
+                    list(locked_plan["updates"]),
+                    operator_id=args.operator_id,
+                    reason=args.reason,
+                )
+                AuditTrailService(
+                    PostgresOperationsAuditRepository(transaction)
+                ).record_action(
+                    actor_id=args.operator_id,
+                    action="invoice_expense_item_link_repair",
+                    entity_type="workbench_relation",
+                    entity_id=locked_plan["case_id"],
+                    metadata={
+                        "event_type": "operation.completed",
+                        "page_key": "reconciliation_workbench",
+                        "operation_location": "import_audit_repair_ops",
+                        "reason": args.reason,
+                        "outcome": "success",
+                        **completion,
+                    },
+                )
+            report = public_invoice_expense_item_link_repair_report(
+                locked_plan,
+                mode="execute",
+                written=True,
+                completion=completion,
+            )
+        print(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str),
+            file=stdout,
+        )
+        return 0
     if invoice_header_repair_requested:
         invoice_numbers = [fact["digital_invoice_no"] for fact in INVOICE_HEADER_REPAIR_FACTS]
         plan_kwargs = {

@@ -1202,6 +1202,9 @@ describe("Workbench candidate grouping layout", () => {
     );
     expect(within(missingInvoiceItem).getByText("OA发票附件未解析")).toBeInTheDocument();
     expect(within(missingInvoiceItem).getByRole("button", { name: "录入发票" })).toBeInTheDocument();
+    const invoiceStatusCell = missingInvoiceItem.querySelector(".workbench-invoice-status-cell");
+    expect(invoiceStatusCell).toBeInTheDocument();
+    expect(within(invoiceStatusCell as HTMLElement).queryByText("—")).not.toBeInTheDocument();
     expect(within(missingInvoiceItem).queryByText("未识别附件")).not.toBeInTheDocument();
 
     const invoiceItem = screen.getByTestId(

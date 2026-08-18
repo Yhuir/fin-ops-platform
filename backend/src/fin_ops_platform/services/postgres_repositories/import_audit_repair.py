@@ -6,6 +6,23 @@ from typing import Any
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 
 
+def load_invoice_expense_item_link_repair_snapshot(
+    connection: Any,
+    *,
+    invoice_ids: list[str],
+) -> list[dict[str, Any]]:
+    return connection.fetch_all(
+        """
+        select coalesce(legacy_mongo_id, id::text) as invoice_id,
+               digital_invoice_no, total_with_tax, source_links
+        from app.invoices
+        where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+        order by coalesce(legacy_mongo_id, id::text)
+        """,
+        (invoice_ids,),
+    )
+
+
 def load_invoice_header_fact_repair_snapshot(
     connection: Any,
     *,

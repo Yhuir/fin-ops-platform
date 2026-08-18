@@ -1951,6 +1951,66 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         load_snapshot.assert_called_once()
         apply_repair.assert_not_called()
 
+    def test_cli_invoice_expense_item_link_repair_dry_run_is_read_only(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        snapshot = [
+            {
+                "invoice_id": "invoice-1",
+                "digital_invoice_no": "26537000000000000001",
+                "total_with_tax": "2038.02",
+                "source_links": [],
+            }
+        ]
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_invoice_expense_item_link_repair_snapshot",
+                return_value=snapshot,
+            ) as load_snapshot,
+            patch.object(
+                import_audit_repair_ops.PostgresCoreRepository,
+                "repair_invoice_expense_item_links",
+            ) as apply_repair,
+        ):
+            result = import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--repair-invoice-expense-link-id",
+                    "invoice-1",
+                    "--repair-invoice-expense-link-case-id",
+                    "CASE-AUTO-0102",
+                    "--repair-invoice-expense-link-oa-row-id",
+                    "oa-exp-1992",
+                    "--repair-invoice-expense-link-item-id",
+                    "oa-exp-1992:item:0:cceb2198c025",
+                    "--expected-invoice-expense-link-total",
+                    "2038.02",
+                    "--operator-id",
+                    "YNSYLP007",
+                    "--reason",
+                    "修复历史发票与 OA 子付款项来源关系",
+                ],
+                stdout=output,
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(report["operation"], "invoice_expense_item_link_repair")
+        self.assertEqual(report["update_count"], 1)
+        load_snapshot.assert_called_once()
+        apply_repair.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

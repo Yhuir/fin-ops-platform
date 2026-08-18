@@ -1050,6 +1050,44 @@ class PostgresCoreRepository:
                 )
         return {"written_invoice_count": len(updates)}
 
+    def repair_invoice_expense_item_links(
+        self,
+        connection: Any,
+        updates: list[dict[str, Any]],
+        *,
+        operator_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if updates:
+            connection.execute(
+                "select set_config('fin_ops.correction_reason', %s, true)",
+                (reason,),
+            )
+            connection.execute(
+                "select set_config('fin_ops.actor_id', %s, true)",
+                (operator_id,),
+            )
+        for update in updates:
+            affected = connection.execute(
+                """
+                update app.invoices
+                set source_links = %s,
+                    updated_at = now()
+                where coalesce(legacy_mongo_id, id::text) = %s
+                  and coalesce(source_links, '[]'::jsonb) = %s::jsonb
+                """,
+                (
+                    _jsonb(update["source_links"]),
+                    update["invoice_id"],
+                    _jsonb(update["before_source_links"]),
+                ),
+            )
+            if affected != 1:
+                raise RuntimeError(
+                    f"Invoice {update['invoice_id']} changed after the repair plan was built."
+                )
+        return {"written_invoice_count": len(updates)}
+
     def repair_submitted_etc_invoice_overlap(
         self,
         *,

@@ -18,6 +18,7 @@ class WorkbenchAmountCheckService:
         rows_by_type: dict[str, list[dict[str, Any]]],
         *,
         relation_id: str,
+        relation_mode: str = "",
     ) -> dict[str, Any] | None:
         oa_rows = list(rows_by_type.get("oa") or [])
         bank_rows = list(rows_by_type.get("bank") or [])
@@ -33,7 +34,8 @@ class WorkbenchAmountCheckService:
         has_expense_items = items is not None
         items = items or []
         amount_check = self.check(
-            {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows}
+            {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
+            relation_mode=relation_mode,
         )
         totals = {
             "oa": self._decimal(amount_check.get("oa_total")),
@@ -449,7 +451,12 @@ class WorkbenchAmountCheckService:
             "unknown_direction_row_ids": unknown_direction_row_ids,
         }
 
-    def check(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    def check(
+        self,
+        rows_by_type: dict[str, list[dict[str, Any]]],
+        *,
+        relation_mode: str = "",
+    ) -> dict[str, Any]:
         normalized_rows = {
             "oa": list(rows_by_type.get("oa") or []),
             "bank": list(rows_by_type.get("bank") or []),
@@ -462,7 +469,10 @@ class WorkbenchAmountCheckService:
         )
         totals = {
             "oa_total": self._sum_amounts(normalized_rows["oa"]),
-            "bank_total": bank_totals["net"],
+            "bank_total": self._bank_comparison_total(
+                bank_totals,
+                relation_mode=relation_mode,
+            ),
             "invoice_total": self._pane_total_for_direction(normalized_rows["invoice"], direction),
         }
         directions = self._directions(normalized_rows)
@@ -500,6 +510,24 @@ class WorkbenchAmountCheckService:
             "mismatch_fields": mismatch_fields,
             "requires_note": requires_note,
         }
+
+    @staticmethod
+    def _bank_comparison_total(
+        bank_totals: dict[str, Decimal | None],
+        *,
+        relation_mode: str,
+    ) -> Decimal | None:
+        gross = bank_totals["gross"]
+        contra = bank_totals["contra"]
+        if (
+            str(relation_mode or "").strip() == "turnover_manual_closure"
+            and gross is not None
+            and contra is not None
+            and gross > ZERO
+            and gross == contra
+        ):
+            return gross
+        return bank_totals["net"]
 
     def _check_direction(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> tuple[str, bool]:
         non_bank_directions = {

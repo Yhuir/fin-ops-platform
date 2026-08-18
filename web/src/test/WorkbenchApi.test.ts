@@ -196,10 +196,13 @@ describe("workbench api bank amount mapping", () => {
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 review_decision: "accept_paired",
                 reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+                review_note: "财务已核对",
+                reviewed_by: "reviewer",
+                reviewed_at: "2026-08-19 01:00:00+08",
                 items: [{
                   code: "oa_invoice_amount_mismatch",
                   label: "OA发票金额不一致",
-                  display_label: "OA发票金额不一致",
+                  display_label: "已接受：OA发票金额不一致",
                   fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   comparison_unit_id: "case:CASE-1",
                   oa_total: "100.00",
@@ -842,10 +845,13 @@ describe("workbench api bank amount mapping", () => {
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 review_decision: "accept_paired",
                 reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+                review_note: "财务已核对",
+                reviewed_by: "reviewer",
+                reviewed_at: "2026-08-19 01:00:00+08",
                 items: [{
                   code: "oa_invoice_amount_mismatch",
                   label: "OA发票金额不一致",
-                  display_label: "OA发票金额不一致",
+                  display_label: "已接受：OA发票金额不一致",
                   fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                   comparison_unit_id: "oa-paired:item:1",
                   source_oa_ids: ["oa-paired"],
@@ -983,7 +989,14 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa[0].relationAmountCheck).toEqual(group.amountCheck);
     expect(group.rows.bank[0].relationAmountCheck).toEqual(group.amountCheck);
     expect(group.rows.invoice[0].relationAmountCheck).toEqual(group.amountCheck);
-    expect(group.rows.invoice[0].workbenchAnomalies?.[0]).toMatchObject({ displayLabel: "OA发票金额不一致", amountDelta: "1.00" });
+    expect(group.rows.invoice[0].workbenchAnomalies?.[0]).toMatchObject({
+      displayLabel: "已接受：OA发票金额不一致",
+      amountDelta: "1.00",
+      reviewDecision: "accept_paired",
+      reviewNote: "财务已核对",
+      reviewedBy: "reviewer",
+      reviewedAt: "2026-08-19 01:00:00+08",
+    });
   });
 
   test("serializes workbench group page SQL query controls", async () => {
