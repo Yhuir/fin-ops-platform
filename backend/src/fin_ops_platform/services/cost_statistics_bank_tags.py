@@ -8,6 +8,14 @@ UNTAGGED_BANK_TAG_LABEL = "未标记"
 
 def bank_tag_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
     code = _text(row.get("bank_tag_code") or row.get("effective_category_code") or row.get("category_code"))
+    if not code:
+        return {
+            "bank_tag_code": "",
+            "bank_tag_label": UNTAGGED_BANK_TAG_LABEL,
+            "bank_tag_primary_label": UNTAGGED_BANK_TAG_LABEL,
+            "bank_tag_sub_label": UNTAGGED_BANK_TAG_LABEL,
+            "bank_tag_label_path": [UNTAGGED_BANK_TAG_LABEL],
+        }
     label = _text(row.get("bank_tag_label") or row.get("effective_category_label") or row.get("category_label"))
     primary = _text(
         row.get("bank_tag_primary_label")

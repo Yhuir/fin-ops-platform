@@ -5,6 +5,7 @@
 - 生产 PostgreSQL 路径删除成本专属 `_postgres_category_provider`、分类/确认表重复装载和 Python 自动重分类。
 - `PostgresCostStatisticsCanonicalRepository` 在原有 `REPEATABLE READ READ ONLY` 快照内，对当前银行流水 ID 一次调用银行分类 owner 的 `effective_category_projection_rows(...)`；`time|bank_tag` 仍不读取 OA/关系，三种归因视图仍只扩展命中关系的完整成员。
 - canonical-only confirmation 通过规范分类 SQL 的 UUID/legacy identity 连接解析为公开流水 ID；人工确认不再错误落入“未标记”，内部转账也不再由成本模块维护第二套算法。
+- 自动识别和人工覆盖的 `internal_transfer` 统一形成一个“内部往来款”主/子标签；无 effective code 的外部往来候选即使携带展示文案也继续归入“未标记”。
 - API shape、五视图人口和金额口径不变；空银行集合跳过分类查询，不新增 cache、read model、worker、migration 或 fallback。
 
 ## 2026-08-18：五视图统一银行成本事件与无 OA 范围

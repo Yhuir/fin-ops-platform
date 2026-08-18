@@ -25,6 +25,8 @@
 `PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(...)`，复用银行分类 owner 的
 同一 SQL 分类器和 legacy/canonical identity 语义；成本模块只把返回的 code/主标签/子标签映射到成本事实行。
 禁止恢复成本专属 Python category provider 或 SQL 失败后的旧分类 fallback。
+正式成本标签以 effective category code 为存在性边界；只有候选文案、但没有 effective code 的
+`needs_confirmation` / `unmatched` 行必须归入“未标记”，候选标签不得污染正式标签分组。
 
 正式配对关系只认 `app.workbench_pair_relations.status = 'active'`。成本页面不复制关联关系，也不读取 Workbench 或银行明细页面的 read model。
 
