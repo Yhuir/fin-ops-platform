@@ -278,7 +278,9 @@ def test_set_based_anomaly_query_uses_turnover_principal_for_exact_closure() -> 
     assert "totals.relation_mode = 'turnover_manual_closure'" in sql
     assert "totals.bank_gross_total = totals.bank_contra_total" in sql
     assert "then totals.bank_gross_total" in sql
-    assert "else totals.bank_net_total" in sql
+    assert "else totals.bank_gross_total - totals.bank_contra_total" in sql
+    assert sql.count("member.bank_direction = direction.direction") == 1
+    assert sql.count("member.bank_direction <> direction.direction") == 1
 
 
 def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases() -> None:

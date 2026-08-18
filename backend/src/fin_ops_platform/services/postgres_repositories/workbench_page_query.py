@@ -1715,24 +1715,6 @@ relation_pane_totals as materialized (
                 where member.row_type = 'bank' and member.bank_direction is not null
             ) = 0 then
                 sum(member.bank_amount) filter (where member.row_type = 'bank')
-            else
-                coalesce(sum(member.bank_amount) filter (
-                    where member.row_type = 'bank'
-                      and member.bank_direction = direction.direction
-                ), 0)
-                - coalesce(sum(member.bank_amount) filter (
-                    where member.row_type = 'bank'
-                      and member.bank_direction in ('payment', 'receipt')
-                      and member.bank_direction <> direction.direction
-                ), 0)
-        end, 2) as bank_net_total,
-        round(case
-            when direction.direction is null then
-                sum(member.bank_amount) filter (where member.row_type = 'bank')
-            when count(*) filter (
-                where member.row_type = 'bank' and member.bank_direction is not null
-            ) = 0 then
-                sum(member.bank_amount) filter (where member.row_type = 'bank')
             else coalesce(sum(member.bank_amount) filter (
                 where member.row_type = 'bank'
                   and member.bank_direction = direction.direction
@@ -1789,7 +1771,7 @@ relation_comparison_totals as materialized (
              and totals.bank_gross_total > 0
              and totals.bank_gross_total = totals.bank_contra_total
                 then totals.bank_gross_total
-            else totals.bank_net_total
+            else totals.bank_gross_total - totals.bank_contra_total
         end as bank_total
     from relation_pane_totals totals
 ),
